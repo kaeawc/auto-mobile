@@ -125,7 +125,8 @@ frames **only** across messages with the same `deviceId`.
   "timestamp": 1737942000123,
   "data": { "hierarchy": { "…": "ViewHierarchyResult with element bounds" } },
   "hierarchyDiff": { "…": "optional per-frame diff summary" },
-  "captureSequence": 42
+  "captureSequence": 42,
+  "coordinateSpace": "px"
 }
 ```
 
@@ -141,7 +142,8 @@ field is **absent** and a control client must fail closed for that frame.
   "screenshotBase64": "<PNG bytes, base64>",
   "screenWidth": 1080,
   "screenHeight": 2340,
-  "captureSequence": 42
+  "captureSequence": 42,
+  "coordinateSpace": "px"
 }
 ```
 
@@ -150,6 +152,56 @@ field is **absent** and a control client must fail closed for that frame.
 
 (The stream also pushes `navigation_update`, `performance_update`, and `storage_update`; a control
 client ignores them.)
+
+### Coordinates: one unit, no platform knowledge required
+
+Both messages declare the unit of their geometry with `coordinateSpace`. `"px"` means **canonical
+physical pixels** in the current device orientation — the element `bounds`, the
+`screenWidth`/`screenHeight`, and the screenshot's own pixels are all that one unit, on **both**
+platforms. That is the whole contract:
+
+- **Reading.** Take `bounds` and `screenWidth`/`screenHeight` as pixels. Nothing to convert, nothing
+  to look up, no platform branch. Because both sides are the same unit, the frame's dimensions and
+  the mapping bounds are comparable **exactly** — see the geometry rule in
+  [Client Frame Snapshot](client-frame-snapshot.md#coordinate-space-canonical-pixels).
+- **Writing.** Send `input/tap` and `input/swipe` coordinates in those same pixels. The daemon does
+  any runner-specific conversion itself (it divides by the runner-reported `nativeScale` for the iOS
+  XCUITest runner, exactly and without rounding; Android runners already take pixels).
+- **Do not outlive the declaration.** That conversion uses the runner's *current* metadata, so a
+  coordinate mapped against a frame whose space has since changed would be converted as the wrong
+  unit. Bind the declared space to the snapshot and stop acting through a **retained** frame the
+  moment an incoming message declares a different one — see
+  [Client Frame Snapshot](client-frame-snapshot.md#coordinate-space-canonical-pixels).
+
+The daemon stamps `"px"` only when the runner supplied complete scale metadata
+([#4548](https://github.com/kaeawc/auto-mobile/issues/4548),
+[#4549](https://github.com/kaeawc/auto-mobile/issues/4549)).
+
+**Legacy fallback — when the field is absent.** An older runner supplies no scale metadata, so the
+daemon leaves its geometry alone and stamps nothing. In that state iOS `bounds` are logical points
+while the screenshot is pixels, and `input/*` coordinates are passed through untouched (the client
+was already working in points). A client in this state must:
+
+- **not** assume pixels — an absent field is not a `"px"` field;
+- **not** compare the frame's absolute dimensions against the mapping bounds — compare aspect ratios
+  with a tolerance instead;
+- otherwise behave identically. The mapping formulas in
+  [Screen Control Mapping](screen-control-mapping.md#viewport--device-mapping) are ratio-based and
+  work unchanged in either space.
+
+A simple client may support only the `"px"` path and treat a frame with no `coordinateSpace` as
+unavailable for control; that fails closed, which is always safe.
+
+**An unrecognized value is not the legacy fallback.** If a message declares a `coordinateSpace` this
+client does not implement — some future value — you **must** treat that frame as **unsupported** and
+fail closed, not fold it into the absent/point-space path. The two states carry different amounts of
+knowledge: *absent* means "a daemon whose geometry and `input/*` units I know exactly", while
+*declared something else* means "a daemon newer than me, whose bounds I cannot interpret and whose
+input endpoints may expect a unit I do not know". Degrading the second into the first would forward
+coordinates whose meaning is unknown, to real hardware. Surface it as a version mismatch — the
+reference client blocks with a distinct `UnsupportedCoordinateSpace` reason and tells the user to
+update — rather than as a transient condition that will resolve itself. Keeping the two distinct is
+also what lets the retained-frame rule below notice a transition *into* an unknown space.
 
 ### Pairing and the active device
 
@@ -180,7 +232,10 @@ Subscribe to the daemon observation stream (wire protocol below:
 - the displayed pixels and their real dimensions,
 - the element hierarchy with its `bounds`,
 - the shared **capture identity** — a screenshot and a hierarchy belong to the same snapshot only
-  when `screenshot.captureSequence == hierarchy.captureSequence`.
+  when `screenshot.captureSequence == hierarchy.captureSequence`,
+- the declared **coordinate space** of both messages, which decides whether the snapshot's geometry
+  check is the exact one or the legacy aspect-only one
+  ([Coordinates](#coordinates-one-unit-no-platform-knowledge-required)).
 
 Control is available **only when a snapshot exists**. If any
 [availability rule](client-frame-snapshot.md#availability-rules) fails — no device selected, stream
@@ -197,7 +252,8 @@ time** — see [Pairing is identity](client-frame-snapshot.md#pairing-is-identit
 When the user clicks the mirror, map the viewport pixel to a device coordinate with the formulas
 in [Viewport → device mapping](screen-control-mapping.md#viewport--device-mapping). The device
 coordinate space is the snapshot's `deviceWidth`/`deviceHeight`, **not** whatever your view last
-rendered. Key rules:
+rendered, and its unit is whatever the frame declared — canonical pixels for a `"px"` frame. Key
+rules:
 
 - A single width-based ratio scales both axes (the frame is aspect-fitted).
 - The mapping **never clamps**; it returns the raw coordinate plus an `inBounds` flag.
@@ -215,8 +271,12 @@ executes whatever it is handed, so convergence on one policy is what keeps clien
 
 - **Tap** — an in-bounds click → one [`input/tap`](unix-socket-api.md#inputtap) at the mapped
   coordinate.
-- **Drag → swipe** — a drag is a swipe only if it travels **≥ 24 device coordinates** (measured
-  after the end is clamped). Below that, send **nothing** — not a swipe and *not* a tap. Map both
+- **Drag → swipe** — a drag is a swipe only if it travels far enough to be deliberate: **≥ 36
+  device coordinates** on a `coordinateSpace: "px"` frame, **≥ 24** on a legacy one (the threshold
+  is a physical distance, so its number depends on the frame's unit; the pixel value is a
+  conservative floor covering `nativeScale` up to 3.5× — see
+  [Drag-to-swipe policy](screen-control-mapping.md#threshold)), measured after the end is
+  clamped. Below that, send **nothing** — not a swipe and *not* a tap. Map both
   endpoints through the **one** snapshot pinned when the drag began. A drag that *started*
   off-screen is dropped; a drag that *ended* off-screen is clamped to the last addressable pixel.
   Use a fixed **300 ms** duration, not the pointer velocity. Full rules:
@@ -232,7 +292,8 @@ executes whatever it is handed, so convergence on one policy is what keeps clien
 
 ### 4. Forward over the socket
 
-Send the corresponding `input/*` request. See
+Send the corresponding `input/*` request, with the coordinate exactly as the mapping produced it —
+no unit conversion, on either platform. See
 [Copy-paste raw socket examples](unix-socket-api.md#copy-paste-raw-socket-examples) for
 one-liners you can pipe straight into the socket. The device id must come from the snapshot the
 input was mapped through, never from a device selection resolved at send time.

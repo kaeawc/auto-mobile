@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.connection.isConnected
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import dev.jasonpearson.automobile.desktop.domain.KeyValueType
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -316,6 +317,7 @@ class ObservationStreamClient {
             packageName = packageName,
             diff = response.hierarchyDiff,
             captureSequence = response.captureSequence,
+            coordinateSpace = CoordinateSpace.fromWire(response.coordinateSpace),
             rotation = response.rotation,
           )
         _hierarchyUpdates.emit(update)
@@ -342,6 +344,7 @@ class ObservationStreamClient {
             screenshotByteLength = response.screenshotByteLength,
             screenshotBase64Length = response.screenshotBase64Length,
             captureSequence = response.captureSequence,
+            coordinateSpace = CoordinateSpace.fromWire(response.coordinateSpace),
             rotation = response.rotation,
           )
         _screenshotUpdates.emit(update)
@@ -576,6 +579,13 @@ data class StreamResponse(
    * reports geometry derived from that hierarchy. Null on daemons that predate it.
    */
   val captureSequence: Long? = null,
+  /**
+   * Declared coordinate space of this message's geometry — `"px"` for canonical physical pixels
+   * (issue #4549). Absent on a legacy frame. Kept as the raw wire [String] here so an unknown
+   * future value round-trips through deserialization instead of failing the whole message; it is
+   * narrowed to the typed [CoordinateSpace] (unknown -> null -> legacy) at the emit boundary.
+   */
+  val coordinateSpace: String? = null,
   /** Device display rotation for this captured frame. */
   val rotation: Int? = null,
 )
@@ -661,6 +671,11 @@ data class HierarchyStreamUpdate(
   val diff: HierarchyDiffSummary? = null,
   /** Shared capture identity; see [StreamResponse.captureSequence]. */
   val captureSequence: Long? = null,
+  /**
+   * Declared coordinate space of this update's element `bounds`; see
+   * [StreamResponse.coordinateSpace]. Null means the daemon declared none (legacy point-space).
+   */
+  val coordinateSpace: CoordinateSpace? = null,
   /** Device display rotation for this captured hierarchy. */
   val rotation: Int? = null,
 )
@@ -682,6 +697,11 @@ data class ScreenshotStreamUpdate(
   val screenshotBase64Length: Int? = null,
   /** Shared capture identity; see [StreamResponse.captureSequence]. */
   val captureSequence: Long? = null,
+  /**
+   * Declared coordinate space of this frame's [screenWidth]/[screenHeight]; see
+   * [StreamResponse.coordinateSpace]. Null means the daemon declared none (legacy point-space).
+   */
+  val coordinateSpace: CoordinateSpace? = null,
   /** Device display rotation for this captured screenshot. */
   val rotation: Int? = null,
 )

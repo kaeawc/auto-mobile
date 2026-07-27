@@ -1,9 +1,11 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import app.cash.turbine.test
+import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
 
@@ -104,6 +106,88 @@ class ObservationStreamClientTest {
       assertEquals(1200, update.screenshotByteLength)
       assertEquals(1600, update.screenshotBase64Length)
       assertEquals(1, update.rotation)
+    }
+  }
+
+  @Test
+  fun `narrows the declared coordinate space on both geometry-bearing messages`() = runTest {
+    // Issue #4550: the declaration reaches the client typed, per message, on the screenshot AND on
+    // the hierarchy — the control policy compares dimensions exactly only when both agree.
+    val client = ObservationStreamClient()
+
+    client.screenshotUpdates.test {
+      client.handleMessage(
+        """
+        {
+          "type": "screenshot_update",
+          "deviceId": "emulator-5554",
+          "timestamp": 1001,
+          "screenshotBase64": "aW1hZ2U=",
+          "screenWidth": 1170,
+          "screenHeight": 2532,
+          "coordinateSpace": "px"
+        }
+        """
+          .trimIndent()
+      )
+      assertEquals(CoordinateSpace.Pixels, awaitItem().coordinateSpace)
+    }
+
+    client.hierarchyUpdates.test {
+      client.handleMessage(
+        """
+        {
+          "type": "hierarchy_update",
+          "deviceId": "emulator-5554",
+          "timestamp": 2000,
+          "data": { "packageName": "com.example" },
+          "coordinateSpace": "px"
+        }
+        """
+          .trimIndent()
+      )
+      assertEquals(CoordinateSpace.Pixels, awaitItem().coordinateSpace)
+    }
+  }
+
+  @Test
+  fun `an absent space is legacy while an unknown one is surfaced as unrecognized`() = runTest {
+    // A pre-#4548 runner declares nothing (legacy point-space). A future daemon may declare a space
+    // this client does not know — which must be kept DISTINCT from absent, so control can fail
+    // closed on it, and must not fail the whole message.
+    val client = ObservationStreamClient()
+
+    client.screenshotUpdates.test {
+      client.handleMessage(
+        """
+        {
+          "type": "screenshot_update",
+          "deviceId": "emulator-5554",
+          "timestamp": 1001,
+          "screenshotBase64": "aW1hZ2U=",
+          "screenWidth": 100,
+          "screenHeight": 200
+        }
+        """
+          .trimIndent()
+      )
+      assertNull(awaitItem().coordinateSpace)
+
+      client.handleMessage(
+        """
+        {
+          "type": "screenshot_update",
+          "deviceId": "emulator-5554",
+          "timestamp": 1002,
+          "screenshotBase64": "aW1hZ2U=",
+          "screenWidth": 100,
+          "screenHeight": 200,
+          "coordinateSpace": "dp"
+        }
+        """
+          .trimIndent()
+      )
+      assertEquals(CoordinateSpace.Unrecognized("dp"), awaitItem().coordinateSpace)
     }
   }
 

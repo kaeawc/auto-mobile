@@ -20,6 +20,9 @@ import { readFileSync } from "fs";
 import {
   COORDINATE_KOTLIN_TEST_PATH,
   DEVICE_TO_VIEWPORT_FIELDS,
+  fixtureNativeScales,
+  loadDragPolicyThresholdConstants,
+  parseDragPolicyThresholdConstants,
   diffNumericRows,
   FIT_SCALE_FIELDS,
   FIT_TO_VIEWPORT_FIELDS,
@@ -276,5 +279,69 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
         expect(row.deviceWidth).toBeGreaterThan(row.frameWidthPx);
       }
     }
+  });
+
+  describe("canonical-pixel swipe threshold is sized against THIS fixture (#4550)", function() {
+    // The client's drag threshold is a PHYSICAL distance, so under canonical pixels its numeric
+    // value depends on nativeScale — which the observation stream does not publish (#4582). Until
+    // it does, `MIN_SWIPE_DISTANCE_PX` is a conservative floor whose coverage is bounded by
+    // `MAX_COVERED_NATIVE_SCALE`. That bound is only meaningful if it tracks the scales we actually
+    // carry, so it is derived from this fixture rather than restated next to it: adding a scale row
+    // here forces a threshold review instead of silently leaving the constant under-sized.
+    const constants = loadDragPolicyThresholdConstants();
+    const scales = fixtureNativeScales(canonical);
+
+    test("MAX_COVERED_NATIVE_SCALE equals the fixture's largest device scale", function() {
+      expect(constants.maxCoveredNativeScale).toBe(Math.max(...scales));
+    });
+
+    test("MIN_SWIPE_DISTANCE_PX clears the iOS touch slop at every fixture scale", function() {
+      for (const scale of scales) {
+        const effectivePoints = constants.minSwipeDistancePx / scale;
+        expect(`${scale}:${effectivePoints > constants.iosTouchSlopPoints}`).toBe(`${scale}:true`);
+      }
+    });
+
+    test("the parser reads the EXECUTABLE declaration, not a commented-out decoy", function() {
+      // The guard has to isolate what it claims. An unanchored match would take the stale value out
+      // of the comment and keep every assertion above green while production shipped the other one.
+      // Uses synthetic source text — the shipped Kotlin is never edited.
+      const decoyed = [
+        "public object DeviceDragGesturePolicy {",
+        "  // Historical value, kept for context:",
+        "  // public const val MIN_SWIPE_DISTANCE_PX: Int = 999",
+        "  /* public const val MAX_COVERED_NATIVE_SCALE: Double = 99.0 */",
+        "  public const val MIN_SWIPE_DISTANCE_PX: Int = 36",
+        "  public const val MAX_COVERED_NATIVE_SCALE: Double = 3.5",
+        "  public const val IOS_TOUCH_SLOP_POINTS: Double = 10.0 // trailing note",
+        "}",
+      ].join("\n");
+
+      const parsed = parseDragPolicyThresholdConstants(decoyed);
+      expect(parsed.minSwipeDistancePx).toBe(36);
+      expect(parsed.maxCoveredNativeScale).toBe(3.5);
+      expect(parsed.iosTouchSlopPoints).toBe(10);
+    });
+
+    test("a missing constant fails loudly instead of silently defaulting", function() {
+      // A renamed or deleted constant must break the guard, not let it assert against a fallback
+      // nobody ships.
+      expect(() => parseDragPolicyThresholdConstants("public object Empty {}")).toThrow(
+        /could not find executable "const val MIN_SWIPE_DISTANCE_PX"/,
+      );
+      expect(() =>
+        parseDragPolicyThresholdConstants(
+          "  public const val MIN_SWIPE_DISTANCE_PX: Int = 36\n" +
+            "  public const val MAX_COVERED_NATIVE_SCALE: Double = 3.5\n",
+        ),
+      ).toThrow(/IOS_TOUCH_SLOP_POINTS/);
+    });
+
+    test("the bound is a floor, not a guarantee: beyond it the threshold under-shoots", function() {
+      // Pins the honest framing. `readScreenScaleMetadata` accepts any finite positive scale, so a
+      // device above the bound divides the constant back below the slop — which is what #4582 fixes.
+      const beyond = constants.maxCoveredNativeScale * 2;
+      expect(constants.minSwipeDistancePx / beyond > constants.iosTouchSlopPoints).toBe(false);
+    });
   });
 });

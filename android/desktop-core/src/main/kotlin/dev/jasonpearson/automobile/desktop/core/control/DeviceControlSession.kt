@@ -1,6 +1,10 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
@@ -43,8 +47,12 @@ import kotlinx.coroutines.withContext
  * - **Track** the post-input refresh policy ([PostInputRefreshTracker]).
  * - **Reset** all of the above coherently when the control context changes.
  *
- * Compose-free and unit-testable: the daemon client, the clock, the UI context and the IO
- * dispatcher are all injected, so tests drive it with fakes and no real device, socket or timer.
+ * Unit-testable: the daemon client, the clock, the UI context and the IO dispatcher are all
+ * injected, so tests drive it with fakes and no real device, socket or timer. The decision LOGIC is
+ * Compose-free — it lives in [DeviceControlPolicy] in `desktop-domain` — but the two snapshot
+ * properties below are deliberately Compose-observable state, because an invalidation that the view
+ * cannot see is not an invalidation (issue #4550; see [interactionSnapshot]). Snapshot state reads
+ * and writes work outside a composition, so tests are unaffected.
  *
  * @param scope the coroutine scope the single dispatch consumer runs in (cancelled with the host).
  * @param clientProvider mints a daemon client per action; the consumer closes it after dispatch.
@@ -83,6 +91,57 @@ class DeviceControlSession(
 
   private val dispatcher = DeviceControlInputDispatcher(scope) { command -> execute(command) }
 
+  /**
+   * Remembers the last [CoordinateSpace] observed at one point in the pipeline and reports whether
+   * a new observation differs from it (issue #4550).
+   *
+   * [seen] distinguishes "declared nothing" from "not observed yet": both are a null space, but
+   * only the former can be flipped AWAY from, so the first observation must be a baseline rather
+   * than a transition. [forget] restores that state for a new control context.
+   */
+  private class SpaceTracker {
+    private var seen: Boolean = false
+    private var last: CoordinateSpace? = null
+
+    /** Records [space] and returns whether it DIFFERS from the previously recorded one. */
+    fun observe(space: CoordinateSpace?): Boolean {
+      val flipped = seen && space != last
+      seen = true
+      last = space
+      return flipped
+    }
+
+    /**
+     * Whether [space] still agrees with what was last recorded. Nothing observed yet agrees with
+     * everything — there is no declaration to contradict, so this must not reject.
+     */
+    fun matches(space: CoordinateSpace?): Boolean = !seen || space == last
+
+    fun forget() {
+      seen = false
+      last = null
+    }
+  }
+
+  // The declaration seen at STREAM RECEIPT — the earliest point in the pipeline, ahead of hierarchy
+  // parsing and the layout state's debounce. This is the one that matters (see
+  // [onObservationSpaceDeclared]).
+  private val streamSpace = SpaceTracker()
+
+  // Newest capture identity whose coordinate space has been observed at receipt, so a late frame
+  // carrying an older binding cannot roll the tracked space backward (see
+  // [onObservationSpaceDeclared]).
+  private var lastObservedSpaceCapture: Long? = null
+
+  // Newest device rotation any source has proven, for the dispatch-time gate. Null until one is
+  // observed, which is why a session that has seen no rotation accepts every snapshot.
+  private var lastProvenRotation: Int? = null
+
+  // Backstop trackers on the frame FACTS, for updates that never came through the stream collectors
+  // (see [resetOnCoordinateSpaceTransition]).
+  private val screenshotFactSpace = SpaceTracker()
+  private val hierarchyFactSpace = SpaceTracker()
+
   /** The post-input refresh state a client should be rendering; see [PostInputRefreshTracker]. */
   val refreshState: PostInputRefreshState
     get() = refreshTracker.state
@@ -99,8 +158,10 @@ class DeviceControlSession(
    * [PostInputRefreshTracker] bounds how long that can last.
    *
    * Updated by [evaluate]; null before the first snapshot and after [reset].
+   *
+   * Compose-OBSERVABLE (issue #4550). See [interactionSnapshot] for why that matters.
    */
-  var renderSnapshot: DeviceFrameSnapshot? = null
+  var renderSnapshot by mutableStateOf<DeviceFrameSnapshot?>(null)
     private set
 
   /**
@@ -118,8 +179,17 @@ class DeviceControlSession(
    * The retention is still bounded by everything that already bounds it: [reset] clears it, and a
    * wait that times out releases it (see [evaluate]), after which this falls back to the live
    * decision and drops to inspector mode.
+   *
+   * **Compose-observable, deliberately** (issue #4550). Most writes here happen during a
+   * composition pass that some other state change already triggered, so a plain field would look
+   * like it worked. [onObservationSpaceDeclared] is the exception that proves it does not: it fires
+   * from a stream collector with no other state change to ride on, and a plain field would leave
+   * the view holding the retired frame — and happily mapping clicks through it — until the next
+   * recomposition, which for the hierarchy path is the ~100 ms debounce. That is precisely the
+   * window the receipt-time hook exists to close, so the invalidation has to be visible to Compose
+   * or the early detection buys nothing.
    */
-  var interactionSnapshot: DeviceFrameSnapshot? = null
+  var interactionSnapshot by mutableStateOf<DeviceFrameSnapshot?>(null)
     private set
 
   /**
@@ -131,6 +201,11 @@ class DeviceControlSession(
    */
   fun evaluate(inputs: DeviceControlInputs): DeviceControlDecision {
     val now = nowMs()
+    resetOnCoordinateSpaceTransition(inputs)
+    // Newest PROVEN rotation, kept so dispatch can reject a snapshot the device has since rotated
+    // away from (issue #4502 + #4550). Only recorded — the retirement decisions themselves stay
+    // where each fix put them.
+    inputs.newestProvenRotation()?.let { lastProvenRotation = it }
     val decision = DeviceControlPolicy.evaluate(inputs, now)
     val live = decision.snapshotOrNull
     if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
@@ -154,7 +229,7 @@ class DeviceControlSession(
     // stale content could stay actionable indefinitely.
     interactionSnapshot =
       if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
-        retainedIfStillFresh(decision, inputs, now)
+        retainedIfStillActionable(decision, inputs, now)
       } else {
         live
       }
@@ -162,16 +237,25 @@ class DeviceControlSession(
   }
 
   /**
-   * The retained frame, or null once it is no longer fresh enough to act on.
+   * The retained frame, or null once it is no longer safe to act through.
    *
-   * Three independent signals retire it, because any can be the first to notice: the live decision
-   * reporting [DeviceControlBlockReason.StaleFrame] (the sources stopped producing), the live
-   * decision reporting [DeviceControlBlockReason.RotationMismatch] (the displayed bounds are no
-   * longer safe to map through), a valid incoming source rotation differing from the retained
-   * snapshot (a partial rotation update can otherwise be unpaired), and the retained frame's own
-   * age (nothing new has arrived to make the live decision say anything).
+   * Four independent signals retire it, because any one can be the first to notice:
+   * - the live decision reporting [DeviceControlBlockReason.StaleFrame] (the sources stopped
+   *   producing),
+   * - the live decision reporting [DeviceControlBlockReason.RotationMismatch] (the displayed bounds
+   *   are no longer safe to map through) — issue #4502,
+   * - a valid incoming source rotation differing from the retained snapshot, since a partial
+   *   rotation update can otherwise be unpaired (issue #4502), and
+   * - the retained frame's own age (nothing new has arrived to make the live decision say
+   *   anything).
+   *
+   * A **coordinate-space transition** (issue #4550) is deliberately NOT one of them: it is a change
+   * of control *context* rather than a property of this one frame, so it is handled one layer up by
+   * [resetOnCoordinateSpaceTransition] / [onObservationSpaceDeclared], which also drain the queued
+   * backlog. Rotation and coordinate space are complementary gates — a frame is actionable only
+   * when both are current — and neither subsumes the other.
    */
-  private fun retainedIfStillFresh(
+  private fun retainedIfStillActionable(
     decision: DeviceControlDecision,
     inputs: DeviceControlInputs,
     nowMs: Long,
@@ -187,6 +271,102 @@ class DeviceControlSession(
   }
 
   /**
+   * BACKSTOP for a [CoordinateSpace] change that reaches the frame facts without having passed
+   * through [onObservationSpaceDeclared] (issue #4550).
+   *
+   * The primary detection is at stream receipt, which is strictly earlier than this and is the only
+   * point early enough to beat the debounce. This check earns its place because not every fact
+   * update comes from a stream message:
+   * [dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState] is also written by
+   * programmatic paths (an initial hierarchy fetch, a manual refresh) that carry their own
+   * declaration and never reach the collectors. A frame installed that way could otherwise
+   * re-establish a space the stream had already moved off, with no reset.
+   *
+   * Both paths funnel into the same reset, so this is one mechanism observed at two points, not two
+   * mechanisms. Each source is tracked independently because either can be the first to change, and
+   * a source not seen yet is a baseline rather than a transition.
+   *
+   * Scope note: receipt-time detection plus this backstop close the windows the client can observe.
+   * The residual sub-dispatch race — metadata flipping after a command has already left the queue —
+   * cannot be closed from the client at all; it needs the input endpoints to accept a
+   * caller-declared space, which is a wire change and deliberately out of scope here.
+   */
+  private fun resetOnCoordinateSpaceTransition(inputs: DeviceControlInputs) {
+    val screenshotFlipped =
+      inputs.screenshot?.let { screenshotFactSpace.observe(it.coordinateSpace) }
+    val hierarchyFlipped = inputs.hierarchy?.let { hierarchyFactSpace.observe(it.coordinateSpace) }
+    // The trackers already hold the new space, so this reset must NOT forget them — otherwise the
+    // very next evaluate would re-establish a baseline and could see the same flip twice.
+    if (screenshotFlipped == true || hierarchyFlipped == true) resetPreservingSpaceBaseline()
+  }
+
+  /**
+   * Note the [CoordinateSpace] a stream message declared, AT RECEIPT, and invalidate the control
+   * context if it changed (issue #4550).
+   *
+   * Call this the moment a `hierarchy_update` or `screenshot_update` is observed — before the
+   * hierarchy is parsed and before the layout state's debounce. That timing is the whole point. The
+   * daemon starts converting input coordinates under the new scale metadata as soon as it publishes
+   * the new declaration, while the client's frame facts do not catch up until the debounce fires
+   * (~100 ms later, and the parse before it is off-thread). A tap in that window would be mapped in
+   * the OLD unit and converted as the new one — landing in the wrong physical place, silently.
+   * Detecting the change downstream, from the facts, is by construction too late for exactly that
+   * window.
+   *
+   * Routes through the same [reset] every other control-context change uses, so a flip drains the
+   * queued backlog and drops the retention rather than only stopping future clicks.
+   *
+   * **The tracker only ever advances**, ordered by [captureSequence]. A screenshot deliberately
+   * keeps the coordinate space bound when its capture was REQUESTED (issue #4549's
+   * bind-at-initiation, so a mid-flight metadata change cannot relabel the frame), which means a
+   * screenshot can arrive AFTER a newer hierarchy while still carrying the older declaration.
+   * Observing that unconditionally would roll the session's notion of "current" backward to a space
+   * the device has already left — this hook fighting the very binding that makes the frame
+   * trustworthy — and, before the debounce, would leave the dispatch gate accepting old-space
+   * snapshots and rejecting new-space ones. So an observation that is PROVABLY older than one
+   * already seen is ignored outright: it neither records nor resets.
+   *
+   * `captureSequence` is the ordering signal because it is already bound to each frame and is
+   * monotonic per device (issue #3348) — no new clock, no third notion of "current". It is absent
+   * only on frames the policy already refuses to pair, and on those there is nothing to order
+   * against, so they are observed as before. The hierarchy path is unaffected: the daemon assigns
+   * the id on every hierarchy push, so a hierarchy's id is always the newest at the time it is sent
+   * and can never be rejected here.
+   */
+  fun onObservationSpaceDeclared(coordinateSpace: CoordinateSpace?, captureSequence: Long?) {
+    val lastSeen = lastObservedSpaceCapture
+    if (captureSequence != null && lastSeen != null && captureSequence <= lastSeen) return
+    if (captureSequence != null) lastObservedSpaceCapture = captureSequence
+    if (streamSpace.observe(coordinateSpace)) resetPreservingSpaceBaseline()
+  }
+
+  /**
+   * Whether [snapshot]'s coordinates can still be sent to the device: its declared
+   * [CoordinateSpace] AND its capture rotation are both the ones the device is currently reporting
+   * (issues #4550, #4502).
+   *
+   * Defence in depth, at the last possible moment. [onObservationSpaceDeclared] retires the
+   * interaction snapshot as soon as the flip is observed, and that state is Compose-observable so
+   * the view drops it promptly. Neither closes the gap for a click ALREADY in flight: a pointer
+   * event captured the snapshot before the flip and reaches dispatch after it, and the view cannot
+   * un-capture it. This is where that click stops.
+   *
+   * Only the coordinate-bearing actions consult it. [key] and its siblings carry no coordinate —
+   * they use the snapshot solely for its device id, which a space change does not invalidate — so
+   * rejecting them here would drop keystrokes for a reason that does not apply to them.
+   *
+   * Both properties are checked because both can invalidate a coordinate independently: a space
+   * flip changes the UNIT the numbers are in, a rotation changes the AXES they are measured on, and
+   * a frame is dispatchable only when both are current. Each reuses the value its own fix already
+   * records — the stream space tracker and the newest proven rotation — rather than introducing a
+   * third notion of "current". A session that has observed neither accepts everything: there is
+   * nothing to contradict.
+   */
+  private fun coordinatesAreStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
+    streamSpace.matches(snapshot.coordinateSpace) &&
+      lastProvenRotation.let { it == null || it == snapshot.rotation }
+
+  /**
    * A source can arrive before it pairs with its counterpart during a rotation. That unpaired
    * source still proves the device no longer has [retainedRotation], so retain display pixels if
    * useful but never retain their old coordinate mapping for a second input.
@@ -194,6 +374,12 @@ class DeviceControlSession(
   private fun DeviceControlInputs.hasProvenRotationDifferentFrom(retainedRotation: Int): Boolean =
     listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation).any {
       it in 0..3 && it != retainedRotation
+    }
+
+  /** The newest rotation any source has PROVEN (a value in `0..3`), or null if none has yet. */
+  private fun DeviceControlInputs.newestProvenRotation(): Int? =
+    listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation).lastOrNull {
+      it in 0..3
     }
 
   /**
@@ -211,6 +397,7 @@ class DeviceControlSession(
     // "success" that parks the client in AwaitingSnapshot for the full refresh timeout waiting for
     // a device change that was never requested.
     if (!point.inBounds) return false
+    if (!coordinatesAreStillDispatchable(snapshot)) return false
     return enqueue { client, platformName, token ->
       DeviceControlInputCommand.Tap(
         point = point,
@@ -238,12 +425,16 @@ class DeviceControlSession(
    * the bounded queue is full, in which case an overload error has already been published.
    */
   fun swipe(snapshot: DeviceFrameSnapshot, start: DevicePoint, end: DevicePoint): Boolean {
+    if (!coordinatesAreStillDispatchable(snapshot)) return false
     val decision =
       DeviceDragGesturePolicy.evaluate(
         start = start,
         end = end,
         deviceWidth = snapshot.deviceWidth,
         deviceHeight = snapshot.deviceHeight,
+        // The threshold is a PHYSICAL distance, so its numeric value depends on the unit these
+        // endpoints are in. Read from the clicked snapshot, never from current stream state.
+        coordinateSpace = snapshot.coordinateSpace,
       )
     // Ignored is not a failure: it means the gesture was never a swipe. Nothing is sent, nothing is
     // surfaced, and the refresh tracker is left alone.
@@ -361,14 +552,33 @@ class DeviceControlSession(
   /**
    * Coherently reset the control context. Call at every point that invalidates the rendered frame
    * identity — device change, transport/mode change, observation-stream disconnect, live layout
-   * open/close.
+   * open/close, and a coordinate-space transition ([resetOnCoordinateSpaceTransition], which calls
+   * this itself).
    *
    * Drops the queued backlog (closing each captured client, so a stalled/aged action cannot fire in
    * the new context), advances the error token so a late failure from a pre-reset attempt is no
-   * longer current, clears any shown banner, and drops a pending post-input refresh wait so an
-   * action dispatched in the previous context cannot settle one in the new one.
+   * longer current, clears any shown banner, drops a pending post-input refresh wait so an action
+   * dispatched in the previous context cannot settle one in the new one, and forgets the observed
+   * coordinate spaces so the next frame is a baseline rather than a transition.
    */
   fun reset() {
+    resetPreservingSpaceBaseline()
+    streamSpace.forget()
+    screenshotFactSpace.forget()
+    hierarchyFactSpace.forget()
+    lastObservedSpaceCapture = null
+    lastProvenRotation = null
+  }
+
+  /**
+   * Everything [reset] does except forgetting the observed coordinate spaces.
+   *
+   * Used by the space-transition paths, which have already recorded the NEW space as their
+   * baseline: forgetting it there would make the next observation re-establish a baseline and could
+   * report the same flip twice. Every other caller wants the full [reset] — a new device or a
+   * reconnected stream must not be compared against the previous context's space.
+   */
+  private fun resetPreservingSpaceBaseline() {
     dispatcher.reset()
     errorToken.incrementAndGet()
     refreshTracker.reset()

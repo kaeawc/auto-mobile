@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
+import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesturePolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragRejection
@@ -104,6 +105,116 @@ class DeviceDragGesturePolicyTest {
       )
 
     assertEquals(DeviceDragDecision.Ignored(DeviceDragRejection.NoAddressableScreen), decision)
+  }
+
+  @Test
+  fun `the canonical-pixel threshold is pinned from both sides`() {
+    // Issue #4550: the threshold is a PHYSICAL distance, and canonical pixels changed the unit it
+    // is measured in. Pin the px value from both directions, exactly as the legacy one is.
+    val pxThreshold = DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE_PX
+
+    assertEquals(
+      DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
+      DeviceDragGesturePolicy.evaluate(
+        at(100, 200),
+        at(100, 200 + pxThreshold - 1),
+        width,
+        height,
+        CoordinateSpace.Pixels,
+      ),
+      "one pixel below the bar sends nothing",
+    )
+    assertIs<DeviceDragDecision.Swipe>(
+      DeviceDragGesturePolicy.evaluate(
+        at(100, 200),
+        at(100, 200 + pxThreshold),
+        width,
+        height,
+        CoordinateSpace.Pixels,
+      ),
+      "exactly at the bar swipes",
+    )
+  }
+
+  @Test
+  fun `a drag that is a swipe in point space is not one on a canonical-pixel frame`() {
+    // The regression canonical pixels introduced, stated as one comparison: the SAME 24-unit
+    // movement. In the legacy point space that is 24 logical points — above both platforms' touch
+    // slop. On a px frame it is 24 physical pixels, which the daemon divides by nativeScale before
+    // dispatch: 8 logical points on a 3x device, BELOW the ~10-point iOS slop, so the device would
+    // read it as a tap rather than a drag.
+    val start = at(100, 200)
+    val end = at(100, 200 + 24)
+
+    assertIs<DeviceDragDecision.Swipe>(
+      DeviceDragGesturePolicy.evaluate(start, end, width, height, coordinateSpace = null),
+      "the legacy path keeps its 24-unit behavior exactly",
+    )
+    assertEquals(
+      DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
+      DeviceDragGesturePolicy.evaluate(start, end, width, height, CoordinateSpace.Pixels),
+    )
+    // A movement scaled up for the pixel space is a swipe again.
+    assertIs<DeviceDragDecision.Swipe>(
+      DeviceDragGesturePolicy.evaluate(
+        start,
+        at(100, 200 + 72),
+        width,
+        height,
+        CoordinateSpace.Pixels,
+      )
+    )
+  }
+
+  @Test
+  fun `the canonical-pixel threshold clears iOS touch slop at every covered scale`() {
+    // The arithmetic the constant is chosen for, asserted rather than left in a comment. The daemon
+    // divides an incoming pixel coordinate by nativeScale before dispatch, so the threshold has to
+    // survive that division at every scale this project carries.
+    //
+    // Only the BOUND is checked here, and that is sufficient rather than lazy: threshold / scale is
+    // strictly decreasing in scale, so clearing the slop at the largest covered scale clears it at
+    // every smaller one. The bound itself is tied to the fixture mechanically — the parity suite
+    // (`coordinateMappingGoldenVectorParity.test.ts`) asserts MAX_COVERED_NATIVE_SCALE equals the
+    // largest scale in coordinate-mapping-golden-vectors.json, parsed from THIS source's constant.
+    // Enumerating the fixture's scales here as well would be a hand-copy that goes stale silently,
+    // which is the failure this pair of tests exists to prevent.
+    val slop = DeviceDragGesturePolicy.IOS_TOUCH_SLOP_POINTS
+    val threshold = DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE_PX
+    val bound = DeviceDragGesturePolicy.MAX_COVERED_NATIVE_SCALE
+
+    // The assertion that would have caught the previous 32px value: 32 / 3.5 is 9.14 points, below
+    // the slop, even though the fixture already carried a 3.5x row.
+    assertEquals(
+      true,
+      threshold / bound > slop,
+      "$threshold px at the ${bound}x bound is ${threshold / bound} points, below the ~${slop}pt slop",
+    )
+    // And the bound is a real ceiling, not a universal claim: readScreenScaleMetadata accepts any
+    // finite positive scale, and beyond the bound this constant under-shoots. That is what #4582
+    // exists to fix, and pinning it here stops the docs from drifting back to "worst case".
+    assertEquals(
+      false,
+      threshold / (bound * 2) > slop,
+      "a scale beyond the bound is expected to under-shoot — this is a floor, not a guarantee",
+    )
+
+    // And it must not regress the legacy space, which is unchanged.
+    assertEquals(24, DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE)
+    assertEquals(
+      DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE,
+      DeviceDragGesturePolicy.minSwipeDistance(null),
+    )
+    assertEquals(
+      DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE_PX,
+      DeviceDragGesturePolicy.minSwipeDistance(CoordinateSpace.Pixels),
+    )
+    // An unrecognized space never reaches a dispatch (control is blocked), but if a direct caller
+    // asks, the conservative legacy value is the answer — never the smaller of the two by accident.
+    assertEquals(
+      DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE,
+      DeviceDragGesturePolicy.minSwipeDistance(CoordinateSpace.Unrecognized("pt")),
+    )
   }
 
   @Test

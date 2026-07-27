@@ -505,6 +505,7 @@ class DeviceScreenViewKeyboardTest {
       deviceHeight = 2340,
       screenshotData = null,
       hierarchy = null,
+      coordinateSpace = null,
       captureSequence = sequence,
       screenshotSequence = sequence,
       hierarchySequence = sequence,

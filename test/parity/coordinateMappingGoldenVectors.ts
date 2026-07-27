@@ -579,3 +579,104 @@ const SECTION_NUMERIC_FIELDS: Record<(typeof SECTION_NAMES)[number], readonly st
   iosPointToPixel: IOS_POINT_TO_PIXEL_FIELDS,
   scaleReporting: SCALE_REPORTING_FIELDS,
 };
+
+/**
+ * The client drag/swipe policy whose canonical-pixel threshold is sized against the fixture's
+ * scales (issue #4550).
+ */
+export const DRAG_POLICY_KOTLIN_PATH = join(
+  REPO_ROOT,
+  "android",
+  "desktop-domain",
+  "src",
+  "main",
+  "kotlin",
+  "dev",
+  "jasonpearson",
+  "automobile",
+  "desktop",
+  "domain",
+  "DeviceDragGesturePolicy.kt",
+);
+
+/** The canonical-pixel drag-threshold constants parsed out of the Kotlin policy source. */
+export interface DragPolicyThresholdConstants {
+  minSwipeDistancePx: number;
+  maxCoveredNativeScale: number;
+  iosTouchSlopPoints: number;
+}
+
+/**
+ * Strip everything the Kotlin compiler ignores: block comments (KDoc included) and the commented
+ * tail of every line.
+ *
+ * Without this the constant match is satisfied by a COMMENTED-OUT declaration. A stale
+ * `// const val MIN_SWIPE_DISTANCE_PX: Int = 36` left above a real `... = 1` would keep the
+ * fixture-sync and slop assertions green while production used the other value — a guard that
+ * passes while the thing it guards is broken.
+ */
+function executableKotlinSource(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map(line => {
+      const comment = line.indexOf("//");
+      return comment === -1 ? line : line.slice(0, comment);
+    })
+    .join("\n");
+}
+
+function parseKotlinNumericConstant(source: string, name: string): number {
+  // Anchored to the start of a line so only a real declaration matches — belt and braces with the
+  // comment stripping above. `public const val NAME: Int = 36` / `: Double = 3.5`.
+  const match = new RegExp(
+    `^\\s*(?:public\\s+|internal\\s+|private\\s+)?const val ${name}\\s*:\\s*\\w+\\s*=\\s*(-?\\d+(?:\\.\\d+)?)`,
+    "m",
+  ).exec(source);
+  if (!match) {
+    // Loudly, never a silent default: a renamed or deleted constant must fail the guard rather
+    // than let it assert against a fallback nobody ships.
+    throw new Error(`${DRAG_POLICY_KOTLIN_PATH}: could not find executable "const val ${name}"`);
+  }
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) {
+    throw new Error(`${DRAG_POLICY_KOTLIN_PATH}: "${name}" is not a finite number`);
+  }
+  return value;
+}
+
+/**
+ * Parse the drag-threshold constants out of Kotlin SOURCE TEXT.
+ *
+ * Separate from the file read so the parser itself is testable against synthetic sources (a
+ * commented-out decoy, a missing constant) without touching the shipped Kotlin.
+ */
+export function parseDragPolicyThresholdConstants(source: string): DragPolicyThresholdConstants {
+  const executable = executableKotlinSource(source);
+  return {
+    minSwipeDistancePx: parseKotlinNumericConstant(executable, "MIN_SWIPE_DISTANCE_PX"),
+    maxCoveredNativeScale: parseKotlinNumericConstant(executable, "MAX_COVERED_NATIVE_SCALE"),
+    iosTouchSlopPoints: parseKotlinNumericConstant(executable, "IOS_TOUCH_SLOP_POINTS"),
+  };
+}
+
+/**
+ * Read the drag-threshold constants from the Kotlin source, the same way this module already reads
+ * the golden tables — so the assertion below compares the SHIPPED value, not a copy of it.
+ */
+export function loadDragPolicyThresholdConstants(): DragPolicyThresholdConstants {
+  return parseDragPolicyThresholdConstants(readFileSync(DRAG_POLICY_KOTLIN_PATH, "utf8"));
+}
+
+/**
+ * Every device scale the fixture carries, across BOTH sections that express one.
+ *
+ * `iosPointToPixel.scale` uses `0` as the "hierarchy carried no screenScale" sentinel rather than a
+ * real device scale, so it is excluded — it is not a scale a threshold could be sized against.
+ */
+export function fixtureNativeScales(parsed: CoordinateMappingGoldenVectors): number[] {
+  return [
+    ...parsed.scaleReporting.map(row => row.nativeScale),
+    ...parsed.iosPointToPixel.map(row => row.scale).filter(scale => scale > 0),
+  ];
+}

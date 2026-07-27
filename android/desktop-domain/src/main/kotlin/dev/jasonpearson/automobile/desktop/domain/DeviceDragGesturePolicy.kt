@@ -6,7 +6,7 @@ import kotlin.math.hypot
 public enum class DeviceDragRejection {
   /**
    * The drag did not travel far enough to be a deliberate swipe. See
-   * [DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE].
+   * [DeviceDragGesturePolicy.minSwipeDistance].
    */
   BelowThreshold,
 
@@ -55,8 +55,10 @@ public sealed interface DeviceDragDecision {
  *    the end of a list, so an end that lands outside the screen is pinned to the last addressable
  *    pixel (`DevicePoint.clampedTo`, explicitly sanctioned by the mapping contract). The result is
  *    well-formed input, never an off-screen coordinate.
- * 3. **The travelled distance must reach [MIN_SWIPE_DISTANCE].** Measured in DEVICE coordinates,
- *    after clamping, as a straight-line distance between the endpoints.
+ * 3. **The travelled distance must reach the threshold for the frame's coordinate space.** Measured
+ *    in DEVICE coordinates, after clamping, as a straight-line distance between the endpoints. The
+ *    threshold is a physical distance, so its numeric value depends on the unit the frame declares
+ *    — see [minSwipeDistance].
  *
  * Pure: no clock, no Compose, no daemon. `evaluate` is a total function of its arguments.
  */
@@ -71,14 +73,82 @@ public object DeviceDragGesturePolicy {
    * a large device gesture. Device coordinates are the space the daemon acts in, so the threshold
    * means the same thing for every client.
    *
-   * `24` is chosen to sit just above the platforms' own touch slop — Android's `ViewConfiguration`
-   * slop is 8dp, which is ~24px at the ~3x density of a 1080p-class phone, and iOS's is ~10 logical
-   * points — so any swipe forwarded past this bar is one the device itself will interpret as a drag
-   * rather than as a tap. Below it, the client sends **nothing at all**: it does not promote the
-   * gesture to a tap, because actuating an input the user did not ask for is worse than ignoring an
-   * ambiguous one, and the view's own tap detector already covers a click that barely moved.
+   * `24` is chosen to sit just above the platforms' own touch slop **in the legacy point space** —
+   * Android's `ViewConfiguration` slop is 8dp, which is ~24px at the ~3x density of a 1080p-class
+   * phone, and iOS's is ~10 logical points — so any swipe forwarded past this bar is one the device
+   * itself will interpret as a drag rather than as a tap. Below it, the client sends **nothing at
+   * all**: it does not promote the gesture to a tap, because actuating an input the user did not
+   * ask for is worse than ignoring an ambiguous one, and the view's own tap detector already covers
+   * a click that barely moved.
+   *
+   * This constant is the LEGACY (undeclared-space) value. Under canonical pixels the unit changed
+   * out from under it, so a second value applies; see [MIN_SWIPE_DISTANCE_PX] and
+   * [minSwipeDistance].
    */
   public const val MIN_SWIPE_DISTANCE: Int = 24
+
+  /**
+   * Minimum straight-line distance when the frame declares [CoordinateSpace.Pixels] (issue #4550).
+   *
+   * Canonical pixels changed the unit this threshold is measured in, and on iOS that silently
+   * shrank it. The daemon divides an incoming pixel coordinate by the runner's `nativeScale` before
+   * dispatch, so on a 3x device 24 physical pixels reaches the runner as **8 logical points** —
+   * *below* the ~10-point iOS touch slop the legacy value was chosen to clear. Movements the device
+   * then reads as a tap rather than a drag would be forwarded as swipes.
+   *
+   * `36` is a conservative floor covering every `nativeScale` up to and including
+   * [MAX_COVERED_NATIVE_SCALE]. It is chosen from the scales this project actually carries rather
+   * than from a guess: the cross-language golden vectors
+   * (`test/fixtures/coordinate-mapping-golden-vectors.json`) pin `1.0` (Android), `2.0`, `2.608696`
+   * (the Plus-family downsampling panel), `3.0`, `3.144` and `3.5`. Divided out, `36` clears the
+   * ~10-point slop at every one of them — 10.29pt at 3.5x, 11.5pt at 3.144x, 12pt at 3x, 13.8pt at
+   * 2.6x, 18pt at 2x.
+   *
+   * The bound is real, not theoretical. `readScreenScaleMetadata` accepts ANY finite positive
+   * scale, so a runner reporting a scale **above** [MAX_COVERED_NATIVE_SCALE] would divide this
+   * back below the slop and the under-shoot would return. That is precisely why per-frame scaling
+   * matters and is tracked as follow-up, not a reason to pretend the constant is universal.
+   *
+   * The cost, stated rather than glossed: one constant cannot be tight at every scale, so it
+   * over-shoots at the low end — 18 logical points at 2x where ~10 would do, meaning a slightly
+   * longer drag than strictly necessary on those devices. Two mitigations make that acceptable. It
+   * is still well inside the LEGACY point-space bar of 24 points at every covered scale, so no iOS
+   * user is asked for a longer drag than before canonical pixels. And on Android (`nativeScale` 1)
+   * it is a straight raise from 24 to 36 physical pixels — ~12dp at a 3x density, up from ~8dp —
+   * which errs toward *not* sending a gesture the user did not intend, the correct direction for a
+   * threshold whose failure mode is actuating real hardware.
+   *
+   * A single constant rather than `24 * nativeScale` because **the observation stream does not
+   * publish `nativeScale`** — the daemon keeps it internal (issue #4548) and a `"px"` frame's
+   * screenshot dimensions and bounds are equal by construction, so the scale cannot be recovered
+   * client-side either. Scaling exactly would need the daemon to publish it, which is a wire
+   * addition; tracked as follow-up (#4582). Until then this is a conservative floor over the scales
+   * we know of, NOT a value that is correct for every scale the wire permits.
+   */
+  public const val MIN_SWIPE_DISTANCE_PX: Int = 36
+
+  /**
+   * The largest `nativeScale` [MIN_SWIPE_DISTANCE_PX] is chosen to cover.
+   *
+   * The maximum appearing in the cross-language golden vectors. Above this the constant divides
+   * back below the ~10-point iOS touch slop, so a device reporting a larger scale needs the
+   * per-frame scaling tracked in #4582. Recorded as a named value so the bound is testable instead
+   * of living only in prose.
+   */
+  public const val MAX_COVERED_NATIVE_SCALE: Double = 3.5
+
+  /** The iOS touch slop, in logical points, that [MIN_SWIPE_DISTANCE_PX] is sized to clear. */
+  public const val IOS_TOUCH_SLOP_POINTS: Double = 10.0
+
+  /**
+   * The threshold that applies to a frame in [coordinateSpace] — [MIN_SWIPE_DISTANCE_PX] for
+   * canonical pixels, [MIN_SWIPE_DISTANCE] for a legacy frame that declared none.
+   *
+   * Exposed so a client rendering a distance hint, or a third-party port, reads the same rule the
+   * decision uses instead of re-deriving it.
+   */
+  public fun minSwipeDistance(coordinateSpace: CoordinateSpace?): Int =
+    if (coordinateSpace == CoordinateSpace.Pixels) MIN_SWIPE_DISTANCE_PX else MIN_SWIPE_DISTANCE
 
   /**
    * The duration handed to `input/swipe`, in milliseconds.
@@ -99,12 +169,17 @@ public object DeviceDragGesturePolicy {
    * [start] and [end] must both have been mapped through the **same** [DeviceFrameSnapshot], and
    * [deviceWidth]/[deviceHeight] must be that snapshot's mapping bounds — a swipe mapped through
    * two different frames is exactly the mis-scaling the snapshot contract exists to prevent.
+   *
+   * [coordinateSpace] must be that same snapshot's declared space: it selects the threshold, which
+   * is a physical distance expressed in whatever unit the frame uses (see [minSwipeDistance]).
+   * Defaulting to null keeps a caller that has no declaration on the legacy value.
    */
   public fun evaluate(
     start: DevicePoint,
     end: DevicePoint,
     deviceWidth: Int,
     deviceHeight: Int,
+    coordinateSpace: CoordinateSpace? = null,
   ): DeviceDragDecision {
     if (deviceWidth <= 0 || deviceHeight <= 0) {
       return DeviceDragDecision.Ignored(DeviceDragRejection.NoAddressableScreen)
@@ -114,7 +189,7 @@ public object DeviceDragGesturePolicy {
     }
     val clampedEnd = if (end.inBounds) end else end.clampedTo(deviceWidth, deviceHeight)
     val distance = hypot((clampedEnd.x - start.x).toDouble(), (clampedEnd.y - start.y).toDouble())
-    if (distance < MIN_SWIPE_DISTANCE) {
+    if (distance < minSwipeDistance(coordinateSpace)) {
       return DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold)
     }
     return DeviceDragDecision.Swipe(

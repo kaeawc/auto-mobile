@@ -35,6 +35,10 @@ public enum class DeviceFrameSource {
  *   renders, and pulling bytes from newest-independent state would put new pixels on screen against
  *   the retained hierarchy — the half-updated frame this whole mechanism exists to prevent.
  *   Compared by identity, never by content (see [DeviceFrameSnapshot]).
+ * @param coordinateSpace the unit [width]/[height] are expressed in, as the daemon declared it
+ *   (issue #4550). [CoordinateSpace.Pixels] when the message carried `coordinateSpace: "px"`; null
+ *   for a legacy frame that declared nothing. Travels per message rather than per session because
+ *   the declaration is per message: a runner can start reporting scale metadata mid-stream.
  */
 public data class ScreenshotFrameFacts(
   val deviceId: String?,
@@ -44,6 +48,7 @@ public data class ScreenshotFrameFacts(
   val width: Int,
   val height: Int,
   val data: ByteArray?,
+  val coordinateSpace: CoordinateSpace? = null,
   /** Device display rotation reported for this capture; null means legacy/unproven provenance. */
   val rotation: Int? = null,
 ) {
@@ -61,7 +66,8 @@ public data class ScreenshotFrameFacts(
       width == other.width &&
       height == other.height &&
       rotation == other.rotation &&
-      data === other.data
+      data === other.data &&
+      coordinateSpace == other.coordinateSpace
   }
 
   override fun hashCode(): Int {
@@ -73,6 +79,7 @@ public data class ScreenshotFrameFacts(
     result = 31 * result + height
     result = 31 * result + (rotation ?: 0)
     result = 31 * result + System.identityHashCode(data)
+    result = 31 * result + (coordinateSpace?.hashCode() ?: 0)
     return result
   }
 }
@@ -87,6 +94,11 @@ public data class ScreenshotFrameFacts(
  * @param rootWidth hierarchy root bounds width, or 0 when the root has no explicit bounds (the
  *   common Android accessibility-service case).
  * @param rootHeight hierarchy root bounds height, or 0 as above.
+ * @param coordinateSpace the unit this update's element `bounds` (and therefore
+ *   [rootWidth]/[rootHeight]) are expressed in; see
+ *   [ScreenshotFrameFacts.coordinateSpace][ScreenshotFrameFacts]. Only when this AND the paired
+ *   screenshot both declare [CoordinateSpace.Pixels] do the two describe one unit, which is the
+ *   precondition [DeviceControlPolicy] requires before comparing absolute dimensions.
  */
 public data class HierarchyFrameFacts(
   val deviceId: String?,
@@ -96,6 +108,7 @@ public data class HierarchyFrameFacts(
   val hierarchy: ParsedHierarchy?,
   val rootWidth: Int,
   val rootHeight: Int,
+  val coordinateSpace: CoordinateSpace? = null,
   /** Device display rotation reported for this hierarchy capture. */
   val rotation: Int? = null,
 )
@@ -150,6 +163,15 @@ public data class LiveFrameFacts(
  *   renders AND maps through, so a retained snapshot cannot show new pixels against an old tree.
  * @param hierarchy the hierarchy paired into this snapshot; may be null only when the update
  *   carried no parsed tree.
+ * @param coordinateSpace the space the screenshot and the hierarchy AGREED on when this snapshot
+ *   was built (issue #4550) — the unit of [deviceWidth]/[deviceHeight] and of every coordinate
+ *   mapped through them. Bound here for the same reason [captureSequence] is: a snapshot can stay
+ *   clickable after the sources it was built from have moved on (the post-input refresh retains
+ *   it), and the daemon converts an incoming input coordinate using the runner's **current** scale
+ *   metadata. If that metadata appears or disappears while a retained frame is still on screen, a
+ *   coordinate mapped in one space would be converted as though it were in the other and land in
+ *   the wrong physical place. Carrying the space lets the session notice the transition and fail
+ *   closed; see `DeviceControlSession`.
  * @param captureSequence the daemon capture identity the screenshot and hierarchy agreed on.
  * @param rotation the device rotation the contributing sources agreed on when this snapshot was
  *   captured. Retention compares later source observations against this value so a partially
@@ -169,6 +191,7 @@ public data class DeviceFrameSnapshot(
   val deviceHeight: Int,
   val screenshotData: ByteArray?,
   val hierarchy: ParsedHierarchy?,
+  val coordinateSpace: CoordinateSpace?,
   val captureSequence: Long,
   val rotation: Int = 0,
   val screenshotSequence: Long,
@@ -187,6 +210,13 @@ public data class DeviceFrameSnapshot(
   // the generated hashCode would too — consistent, but easy to misread. Spell it out: a snapshot
   // is identified by its provenance, and two snapshots with the same sequences ARE the same
   // snapshot regardless of buffer identity.
+  //
+  // [coordinateSpace] is included alongside that provenance even though it is derived from the same
+  // sources, because it is part of the INPUT-MAPPING contract rather than a rendering detail: two
+  // frames with identical provenance but different spaces carry coordinates that mean different
+  // physical locations, and equality-based state (retention checks, set/map membership, "is this
+  // still the frame I acted through?") must not conflate them. Omitting it would let a legacy frame
+  // silently satisfy an equality check against a pixel-mapped one.
   override fun equals(other: Any?): Boolean {
     if (this === other) return true
     if (other !is DeviceFrameSnapshot) return false
@@ -196,7 +226,8 @@ public data class DeviceFrameSnapshot(
       rotation == other.rotation &&
       screenshotSequence == other.screenshotSequence &&
       hierarchySequence == other.hierarchySequence &&
-      liveFrameSequence == other.liveFrameSequence
+      liveFrameSequence == other.liveFrameSequence &&
+      coordinateSpace == other.coordinateSpace
   }
 
   override fun hashCode(): Int {
@@ -207,6 +238,7 @@ public data class DeviceFrameSnapshot(
     result = 31 * result + screenshotSequence.hashCode()
     result = 31 * result + hierarchySequence.hashCode()
     result = 31 * result + (liveFrameSequence?.hashCode() ?: 0)
+    result = 31 * result + (coordinateSpace?.hashCode() ?: 0)
     return result
   }
 }

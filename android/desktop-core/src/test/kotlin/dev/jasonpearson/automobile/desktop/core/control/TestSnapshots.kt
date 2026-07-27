@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
+import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSource
 
@@ -9,6 +10,7 @@ internal fun testSnapshot(
   sequence: Long = 1L,
   deviceWidth: Int = 1080,
   deviceHeight: Int = 2340,
+  coordinateSpace: CoordinateSpace? = null,
 ): DeviceFrameSnapshot =
   DeviceFrameSnapshot(
     deviceId = deviceId,
@@ -21,6 +23,7 @@ internal fun testSnapshot(
     deviceHeight = deviceHeight,
     screenshotData = null,
     hierarchy = null,
+    coordinateSpace = coordinateSpace,
     captureSequence = sequence,
     screenshotSequence = sequence,
     hierarchySequence = sequence,

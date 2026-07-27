@@ -1014,10 +1014,10 @@ export class UnixSocketServer {
       return;
     }
     const [x, y] = coordinates;
-    if (x < 0 || x > geometry.pixelWidth || y < 0 || y > geometry.pixelHeight) {
+    if (x < 0 || x >= geometry.pixelWidth || y < 0 || y >= geometry.pixelHeight) {
       throw new Error(
         `input/tap coordinates x=${x}, y=${y} are outside device canonical pixel bounds ` +
-        `x: 0..${geometry.pixelWidth}, y: 0..${geometry.pixelHeight}`
+        `x: 0..${geometry.pixelWidth - 1}, y: 0..${geometry.pixelHeight - 1}`
       );
     }
   }

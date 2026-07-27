@@ -103,15 +103,15 @@ describe("UnixSocketServer input/tap", () => {
       platform: "android",
       deviceId: "emulator-5554",
       x: 100,
-      y: 2341,
+      y: 2340,
     });
 
     expect(negative.success).toBe(false);
     expect(negative.error).toContain("x=-1, y=100");
-    expect(negative.error).toContain("x: 0..1080, y: 0..2340");
+    expect(negative.error).toContain("x: 0..1079, y: 0..2339");
     expect(oversized.success).toBe(false);
-    expect(oversized.error).toContain("x=100, y=2341");
-    expect(oversized.error).toContain("x: 0..1080, y: 0..2340");
+    expect(oversized.error).toContain("x=100, y=2340");
+    expect(oversized.error).toContain("x: 0..1079, y: 0..2339");
     expect(requestTapCoordinates).not.toHaveBeenCalled();
   });
 
@@ -272,7 +272,7 @@ describe("UnixSocketServer input/tap", () => {
   test("canonical-pixel iOS tap divides by nativeScale (exact) before dispatch to the points-based runner", async () => {
     // The control client renders a px frame (#4549) and sends the tap in PIXELS; the daemon divides
     // EXACTLY by nativeScale so the XCUITest runner receives (fractional) points and the tap lands
-    // at the same physical location. 1170/3 = 390, 2532/3 = 844.
+    // at the same physical location. 1169/3 = 389.666..., 2531/3 = 843.666....
     const requestTapCoordinates = mock(async () => ({ success: true }));
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
@@ -285,16 +285,16 @@ describe("UnixSocketServer input/tap", () => {
     const response = await sendRequest(socketPath, "input/tap", {
       platform: "ios",
       deviceId: "ios-sim-1",
-      x: 1170,
-      y: 2532,
+      x: 1169,
+      y: 2531,
     });
 
     expect(response.success).toBe(true);
     // The echoed coordinates stay in the client's px space; only the runner dispatch is converted.
-    expect(response.result).toMatchObject({ coordinates: { x: 1170, y: 2532 } });
+    expect(response.result).toMatchObject({ coordinates: { x: 1169, y: 2531 } });
     const [x, y] = requestTapCoordinates.mock.calls[0];
-    expect(x).toBe(390);
-    expect(y).toBe(844);
+    expect(x).toBeCloseTo(1169 / 3, 10);
+    expect(y).toBeCloseTo(2531 / 3, 10);
   });
 
   test("iOS tap rejects coordinates outside bounds learned by the scale probe", async () => {
@@ -316,13 +316,13 @@ describe("UnixSocketServer input/tap", () => {
     const response = await sendRequest(socketPath, "input/tap", {
       platform: "ios",
       deviceId: "ios-sim-1",
-      x: 1171,
+      x: 1170,
       y: 100,
     });
 
     expect(response.success).toBe(false);
-    expect(response.error).toContain("x=1171, y=100");
-    expect(response.error).toContain("x: 0..1170, y: 0..2532");
+    expect(response.error).toContain("x=1170, y=100");
+    expect(response.error).toContain("x: 0..1169, y: 0..2531");
     expect(requestTapCoordinates).not.toHaveBeenCalled();
   });
 

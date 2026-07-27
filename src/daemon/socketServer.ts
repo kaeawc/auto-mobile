@@ -119,7 +119,10 @@ export type McpClientFactory = () => Promise<Client>;
  * what lets a test inject a fake adb instead of shelling out.
  */
 export interface AppendTextInput {
-  appendText(text: string, timeoutMs?: number): Promise<{ success: boolean; error?: string }>;
+  appendText(
+    text: string,
+    timeoutMs?: number
+  ): Promise<{ success: boolean; error?: string; charsSent?: number }>;
 }
 
 export class UnixSocketServer {

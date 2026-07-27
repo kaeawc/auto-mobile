@@ -68,6 +68,23 @@ function shiftedPlan(baseKeyCode: string, supportsKeyCombination: boolean): KeyE
 }
 
 /**
+ * Whether typing `char` as a key event needs `input keycombination` (API 31+).
+ *
+ * Only uppercase letters and shifted symbols require holding SHIFT; lowercase
+ * letters, digits, space and unshifted punctuation map to a plain `keyevent`
+ * regardless of the capability. Callers use this to avoid an API-level probe when
+ * no character in the batch needs the capability (issue #3351): the probe is a
+ * device round trip, and for a lowercase/digit/space/unshifted keystroke it is
+ * pure waste that can even consume the caller's budget and drop the keystroke.
+ *
+ * This is exactly the set of characters for which [buildAsciiKeyEventPlan]'s result
+ * depends on `supportsKeyCombination`; the two must stay in step.
+ */
+export function asciiKeyEventNeedsKeyCombination(char: string): boolean {
+  return /^[A-Z]$/.test(char) || Object.hasOwn(SHIFTED_KEY_CODES, char);
+}
+
+/**
  * Map a single character to a key-event plan.
  *
  * @param char - The character to type (a single-code-unit ASCII character)

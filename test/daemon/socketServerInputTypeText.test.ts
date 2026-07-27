@@ -312,10 +312,12 @@ describe("UnixSocketServer input/typeText", () => {
     server.appendTextFactory = device => createAppendTextInput(device, adb, fakeTimer);
     await server.start();
 
+    // Uppercase "A" needs the `input keycombination` capability, so it takes the
+    // API-level probe path (a lowercase append skips the probe — issue #3351).
     const stalledPromise = sendRequest(socketPath, "input/typeText", {
       platform: "android",
       deviceId: "emulator-5554",
-      text: "a",
+      text: "A",
       mode: "append",
     }, 100);
 
@@ -366,7 +368,10 @@ describe("UnixSocketServer input/typeText", () => {
     };
     await server.start();
 
-    for (const char of ["a", "b", "c"]) {
+    // Uppercase characters need the capability, so each append takes the probe
+    // path; the per-device cache must still collapse them to ONE probe. (Lowercase
+    // would skip the probe entirely — issue #3351 — which is a different test.)
+    for (const char of ["A", "B", "C"]) {
       const response = await sendRequest(socketPath, "input/typeText", {
         platform: "android",
         deviceId: "emulator-5554",
@@ -380,9 +385,9 @@ describe("UnixSocketServer input/typeText", () => {
     expect(factoryCalls).toBe(1);
     expect(adb.probeCalls.length).toBe(1);
     expect(adb.inputCommands()).toEqual([
-      "shell input keyevent KEYCODE_A",
-      "shell input keyevent KEYCODE_B",
-      "shell input keyevent KEYCODE_C",
+      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A",
+      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_B",
+      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_C",
     ]);
   });
 
@@ -407,11 +412,13 @@ describe("UnixSocketServer input/typeText", () => {
     };
     await server.start();
 
+    // Uppercase "A" takes the probe path (lowercase would skip it — issue #3351),
+    // so the eviction's effect on re-probing is observable.
     const append = () =>
       sendRequest(socketPath, "input/typeText", {
         platform: "android",
         deviceId: "emulator-5554",
-        text: "a",
+        text: "A",
         mode: "append",
       }, 1234);
 

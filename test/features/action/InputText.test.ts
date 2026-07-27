@@ -648,6 +648,80 @@ describe("InputText", () => {
     expect(inputCommands(factory)).toEqual([]);
   });
 
+  // Issue #3351 review: the API-level capability is needed ONLY for uppercase/
+  // shifted characters, so a lowercase/digit/space/unshifted append must not probe
+  // `ro.build.version.sdk` at all — the probe is a wasted device round trip that
+  // could even consume the budget and drop the keystroke.
+  test("append does not probe the API level for characters that never need it (cold cache)", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    // Cold cache: no getprop result configured, and the probe must never run.
+    const result = await inputText.appendText("a1 .");
+
+    expect(result.success).toBe(true);
+    const allCommands = factory.getFakeClient().getAllCommands();
+    expect(allCommands.some(command => command.includes("getprop ro.build.version.sdk"))).toBe(false);
+    // The key events still went out — skipping the probe did not skip the typing.
+    expect(inputCommands(factory)).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_1",
+      "shell input keyevent KEYCODE_SPACE",
+      "shell input keyevent KEYCODE_PERIOD",
+    ]);
+  });
+
+  test("append still probes the API level when a character needs the capability (cold cache)", async () => {
+    // The other direction: an uppercase character DOES need `input keycombination`,
+    // so the probe must run — skipping it for the whole batch would be wrong.
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+
+    const result = await inputText.appendText("A");
+
+    expect(result.success).toBe(true);
+    const allCommands = factory.getFakeClient().getAllCommands();
+    expect(allCommands.some(command => command.includes("getprop ro.build.version.sdk"))).toBe(true);
+    expect(inputCommands(factory)).toEqual([
+      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A",
+    ]);
+  });
+
+  // Issue #3351: append is best-effort and char-by-char, so a partial failure must
+  // report how much of `text` landed. A caller retrying the whole string after a
+  // prefix already typed would corrupt the field ("ab" after "a" -> "aab").
+  test("append reports charsSent for a fully successful batch", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+
+    const result = await inputText.appendText("abc");
+
+    expect(result.success).toBe(true);
+    expect(result.charsSent).toBe(3);
+  });
+
+  test("append reports charsSent up to the failing character, not a generic failure", async () => {
+    // "abc": KEYCODE_A lands, KEYCODE_B rejects (device offline mid-batch), so the
+    // field holds "a". The result must say charsSent=1 and KEYCODE_C must never run,
+    // so a caller resumes from text.slice(1) instead of re-appending "abc".
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    factory.getFakeClient().setCommandError(
+      "shell input keyevent KEYCODE_B",
+      new Error("device offline")
+    );
+
+    const result = await inputText.appendText("abc");
+
+    expect(result.success).toBe(false);
+    expect(result.charsSent).toBe(1);
+    expect(result.error).toContain("append key event failed");
+    expect(inputCommands(factory)).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_B",
+    ]);
+  });
+
   // Issue #3351 review: the client forwards every printable ASCII character, but
   // uppercase and shifted symbols need `input keycombination` (API 31+). The client
   // cannot see the API level, so the daemon has to REPORT the failure — the one

@@ -13,6 +13,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
+  asciiKeyEventNeedsKeyCombination,
   buildAsciiKeyEventPlan,
   type KeyEventPlan
 } from "./asciiKeyEvents";
@@ -370,18 +371,23 @@ export class InputText extends BaseVisualChange {
     const remaining = this.createBudget(timeoutMs);
     const planned = await this.planAppendKeyEvents(text, remaining, timeoutMs);
     if (planned.error) {
-      return this.appendFailure(text, planned.error);
+      // Planning failed before any key event was issued, so nothing landed.
+      return this.appendFailure(text, planned.error, 0);
     }
 
-    const typeError = await this.typeAppendKeyEvents(planned.plans, remaining, timeoutMs);
-    if (typeError) {
-      return this.appendFailure(text, typeError);
+    const typed = await this.typeAppendKeyEvents(planned.plans, remaining, timeoutMs);
+    if (typed.error) {
+      // Partial failure: `charsSent` characters already landed on the device. The
+      // caller must retry only `text.slice(charsSent)`, never the whole string.
+      return this.appendFailure(text, typed.error, typed.charsSent);
     }
 
     if (dismissKeyboard) {
       const dismissError = await this.dismissKeyboardAfterAppend();
       if (dismissError) {
-        return this.appendFailure(text, dismissError);
+        // All characters landed; only the post-typing keyboard dismissal failed,
+        // so the full text was sent — a retry must NOT re-append any of it.
+        return this.appendFailure(text, dismissError, typed.charsSent);
       }
     }
 
@@ -393,13 +399,22 @@ export class InputText extends BaseVisualChange {
       success: true,
       text,
       imeAction,
-      method: "append"
+      method: "append",
+      charsSent: typed.charsSent
     };
   }
 
   /**
-   * Map every character of `text` to a key-event plan, charging the API-level probe
-   * against the same budget the typing itself uses.
+   * Map every character of `text` to a key-event plan.
+   *
+   * The API-level capability (`input keycombination`, API 31+) is needed ONLY for
+   * uppercase/shifted characters, so the probe runs once for the whole batch and
+   * ONLY when at least one character needs it (issue #3351). A lowercase / digit /
+   * space / unshifted-punctuation append never probes: the probe is a device round
+   * trip that would be pure waste there — and worse, if it consumed the remaining
+   * budget the typing phase would then report exhaustion and drop a keystroke that
+   * needed no capability at all. When it does probe, the probe is charged against
+   * the same budget the typing uses.
    *
    * Returns an `error` instead of throwing so the caller emits one uniform append
    * failure. Nothing is sent when any character is unmappable: a partial append
@@ -410,13 +425,21 @@ export class InputText extends BaseVisualChange {
     remaining: () => number | undefined,
     timeoutMs: number | undefined
   ): Promise<{ plans: KeyEventPlan[]; error?: string }> {
-    const plans: KeyEventPlan[] = [];
-    for (const char of Array.from(text)) {
+    const chars = Array.from(text);
+    const needsCapability = chars.some(char => asciiKeyEventNeedsKeyCombination(char));
+
+    let supportsKeyCombination = false;
+    if (needsCapability) {
       const budget = remaining();
       if (budget !== undefined && budget <= 0) {
-        return { plans, error: this.appendBudgetExceeded(timeoutMs, "resolving key events") };
+        return { plans: [], error: this.appendBudgetExceeded(timeoutMs, "resolving key events") };
       }
-      const keyEventPlan = await this.getAsciiKeyEventPlan(char, budget);
+      supportsKeyCombination = await this.supportsAndroidInputKeyCombination(budget);
+    }
+
+    const plans: KeyEventPlan[] = [];
+    for (const char of chars) {
+      const keyEventPlan = buildAsciiKeyEventPlan(char, supportsKeyCombination);
       if (!keyEventPlan) {
         return {
           plans,
@@ -432,19 +455,24 @@ export class InputText extends BaseVisualChange {
    * Issue the planned key events, re-reading the remaining budget before each one so
    * a slow device cannot let N subprocesses each consume the full timeout.
    *
-   * Returns an error message, or null on success. An adb rejection becomes a typed
-   * failure rather than a throw: the daemon holds a per-device queue across this call
-   * and needs a prompt, describable answer either way.
+   * Returns how many plans (i.e. leading characters of the append) were sent, plus
+   * an optional error. One plan == one character, executed in order, so `charsSent`
+   * is the length of the prefix that landed on the device — a caller retrying after
+   * a partial failure must re-send only `text.slice(charsSent)`, never the whole
+   * string (issue #3351: re-appending "ab" after "a" landed would produce "aab").
+   * An adb rejection becomes a typed failure rather than a throw: the daemon holds a
+   * per-device queue across this call and needs a prompt, describable answer.
    */
   private async typeAppendKeyEvents(
     plans: KeyEventPlan[],
     remaining: () => number | undefined,
     timeoutMs: number | undefined
-  ): Promise<string | null> {
+  ): Promise<{ charsSent: number; error?: string }> {
+    let charsSent = 0;
     for (const plan of plans) {
       const budget = remaining();
       if (budget !== undefined && budget <= 0) {
-        return this.appendBudgetExceeded(timeoutMs, "typing");
+        return { charsSent, error: this.appendBudgetExceeded(timeoutMs, "typing") };
       }
       try {
         // noRetry: production AdbClient retries a timed-out command up to 4 total
@@ -457,11 +485,12 @@ export class InputText extends BaseVisualChange {
         await this.executeKeyEventPlan(plan, budget, true);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        logger.warn(`[InputText] append key event failed: ${message}`, error);
-        return `append key event failed: ${message}`;
+        logger.warn(`[InputText] append key event failed after ${charsSent} char(s): ${message}`, error);
+        return { charsSent, error: `append key event failed: ${message}` };
       }
+      charsSent += 1;
     }
-    return null;
+    return { charsSent };
   }
 
   /** Returns an error message when the keyboard could not be dismissed, else null. */
@@ -493,8 +522,12 @@ export class InputText extends BaseVisualChange {
     return `append exceeded its ${timeoutMs}ms budget while ${phase}`;
   }
 
-  private appendFailure(text: string, error: string): SendTextResult & { method?: InputTextMode } {
-    return { success: false, text, error, method: "append" };
+  private appendFailure(
+    text: string,
+    error: string,
+    charsSent: number
+  ): SendTextResult & { method?: InputTextMode } {
+    return { success: false, text, error, method: "append", charsSent };
   }
 
   private async executeAndroidEventOnlyTextInput(

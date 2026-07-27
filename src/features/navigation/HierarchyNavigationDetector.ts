@@ -222,6 +222,11 @@ export class HierarchyNavigationDetector {
       .recordHierarchyNavigation({
         fromFingerprint,
         toFingerprint,
+        fingerprintData: JSON.stringify({
+          confidence: newFingerprint.confidence,
+          method: newFingerprint.method,
+          navigationId: newFingerprint.navigationId,
+        }),
         timestamp: newFingerprint.timestamp,
         packageName: newFingerprint.packageName,
       })

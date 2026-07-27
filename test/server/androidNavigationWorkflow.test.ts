@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import type { BootedDevice } from "../../src/models";
 import { Explore } from "../../src/features/navigation/Explore";
+import { TapOnElement } from "../../src/features/action/TapOnElement";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { DefaultPathOptimizer } from "../../src/features/navigation/DefaultPathOptimizer";
 import { NavigationRepository } from "../../src/db/navigationRepository";
@@ -61,8 +62,10 @@ describe("Android navigation graph workflow (#4459)", () => {
           inputSchema?: { properties?: Record<string, { default?: unknown }>; required?: string[] };
         } | undefined;
 
-        expect(tool?.inputSchema?.properties?.platform?.default).toBeUndefined();
-        expect(tool?.inputSchema?.required ?? []).not.toContain("platform");
+        expect(tool).toBeDefined();
+        expect(tool!.inputSchema?.properties?.platform).toBeDefined();
+        expect(tool!.inputSchema?.properties?.platform?.default).toBeUndefined();
+        expect(tool!.inputSchema?.required ?? []).not.toContain("platform");
       }
     } finally {
       await client.close();
@@ -131,8 +134,7 @@ describe("Android navigation graph workflow (#4459)", () => {
         },
       }),
     };
-    (explore as any).performInteraction = async () => {
-      sessionManager.recordToolCall("tapOn", { text: "Settings", action: "tap", platform: "android" });
+    const tapExecuteSpy = spyOn(TapOnElement.prototype, "execute").mockImplementation(async () => {
       await sessionManager.recordNavigationEvent({
         destination: "Settings",
         source: "ANDROID_FIXTURE",
@@ -142,13 +144,18 @@ describe("Android navigation graph workflow (#4459)", () => {
         sequenceNumber: 2,
         applicationId: appId,
       });
-      return true;
-    };
-    const exploration = await explore.execute({
-      maxInteractions: 1,
-      timeoutMs: 5000,
-      packageName: appId,
+      return { success: true } as never;
     });
+    let exploration;
+    try {
+      exploration = await explore.execute({
+        maxInteractions: 1,
+        timeoutMs: 5000,
+        packageName: appId,
+      });
+    } finally {
+      tapExecuteSpy.mockRestore();
+    }
     expect(exploration).toMatchObject({ success: true, interactionsPerformed: 1, screensDiscovered: 1 });
 
     setDebugModeEnabled(true);
@@ -201,6 +208,10 @@ describe("Android navigation graph workflow (#4459)", () => {
       targetScreen: "Settings",
       stepsExecuted: 1,
     });
-    expect(replayedArgs).toMatchObject({ text: "Settings", action: "tap", platform: "android" });
+    expect(replayedArgs).toMatchObject({
+      selector: { elementId: "com.example:id/settings" },
+      action: "tap",
+      platform: "android",
+    });
   });
 });

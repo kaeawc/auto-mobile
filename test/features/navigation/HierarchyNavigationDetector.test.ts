@@ -132,12 +132,7 @@ describe("HierarchyNavigationDetector", () => {
       expect(detector.getPreviousFingerprint()?.hash).toBe(firstFingerprint?.hash);
     });
 
-    test("should call recordHierarchyNavigation on graph manager", async () => {
-      // Note: With the named-nodes-only feature, hierarchy events only create nodes
-      // if there's an active navigation from an SDK event within the correlation window.
-      // Without SDK events, hierarchy navigation is tracked as suggestions (if app has named nodes)
-      // or ignored entirely (if app has no named nodes).
-
+    test("creates fingerprint-labelled graph nodes for hierarchy-only navigation", async () => {
       const hierarchy1 = createHierarchy("Screen A");
       const hierarchy2 = createHierarchy("Screen B");
 
@@ -150,10 +145,10 @@ describe("HierarchyNavigationDetector", () => {
       // Wait for async navigation recording
       await new Promise(resolve => setImmediate(resolve));
 
-      // For apps without SDK events (no named nodes), hierarchy events don't create screens
-      // They are silently ignored until the app has named nodes from SDK integration
-      const screens = await manager.getKnownScreens();
-      expect(screens.length).toBe(0); // No named nodes yet
+      const graph = await manager.exportGraph();
+      expect(graph.nodes).toHaveLength(2);
+      expect(graph.nodes.every(node => node.screenName.startsWith("hierarchy:"))).toBe(true);
+      expect(graph.edges).toHaveLength(1);
 
       // The detector should still track fingerprints internally
       expect(detector.getCurrentFingerprint()).not.toBeNull();
@@ -348,11 +343,11 @@ describe("HierarchyNavigationDetector", () => {
       // Wait for async navigation recording
       await new Promise(resolve => setImmediate(resolve));
 
-      // Without SDK events (named nodes), no screens or edges are created
-      // The detector tracks fingerprints internally, but they aren't recorded
-      // as named nodes in the graph
-      const screens = await manager.getKnownScreens();
-      expect(screens.length).toBe(0);
+      const graph = await manager.exportGraph();
+      expect(graph.nodes).toHaveLength(2);
+      expect(graph.edges).toContainEqual(expect.objectContaining({
+        interaction: expect.objectContaining({ toolName: "tapOn" }),
+      }));
 
       // Tool call should still be recorded in history
       const stats = await manager.getStats();

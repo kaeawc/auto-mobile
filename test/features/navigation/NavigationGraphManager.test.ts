@@ -865,18 +865,39 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
   });
 
   describe("recordHierarchyNavigation", () => {
-    it("should NOT create nodes from hierarchy events alone", async () => {
-      // Record hierarchy navigation without any SDK events
+    it("creates fingerprint-labelled nodes and correlated edges without SDK events", async () => {
+      const now = Date.now();
       await manager.recordHierarchyNavigation({
         fromFingerprint: null,
-        toFingerprint: "abc123def456",
-        timestamp: Date.now(),
+        toFingerprint: "hierarchy-home",
+        timestamp: now,
+        packageName: "com.test.namedapp"
+      });
+      manager.recordToolCall("tapOn", {
+        selector: { text: "Settings" },
+        action: "tap",
+        platform: "android",
+      });
+      await manager.recordHierarchyNavigation({
+        fromFingerprint: "hierarchy-home",
+        toFingerprint: "hierarchy-settings",
+        timestamp: now + 1,
         packageName: "com.test.namedapp"
       });
 
-      // Should have no nodes since app has no named nodes yet
-      const screens = await manager.getKnownScreens();
-      expect(screens).toHaveLength(0);
+      const graph = await manager.exportGraph();
+      expect(graph.nodes.map(node => node.screenName)).toEqual([
+        "hierarchy:hierarchy-home",
+        "hierarchy:hierarchy-settings",
+      ]);
+      expect(graph.edges).toContainEqual(expect.objectContaining({
+        from: "hierarchy:hierarchy-home",
+        to: "hierarchy:hierarchy-settings",
+        interaction: expect.objectContaining({
+          toolName: "tapOn",
+          args: expect.objectContaining({ selector: { text: "Settings" } }),
+        }),
+      }));
     });
 
     it("should correlate fingerprint during active navigation window", async () => {
@@ -1680,10 +1701,10 @@ describe("NavigationGraphManager - shared two-repo transaction helper (#3075)", 
     expect(callSites.length).toBe(1);
   });
 
-  test("both both-repos writers delegate to the shared helper (no inline runInTransaction bind-both)", () => {
-    // The helper name is asserted from the issue's proposed shape; both writers call it.
+  test("all both-repos writers delegate to the shared helper (no inline runInTransaction bind-both)", () => {
+    // The helper name is asserted from the issue's proposed shape; every writer calls it.
     const delegations = managerSource.match(/this\.runBothReposInTransaction[<(]/g) ?? [];
-    expect(delegations.length).toBe(2);
+    expect(delegations.length).toBe(3);
   });
 
   test("guard error message names no specific method (generalized in #3075)", async () => {
@@ -1764,11 +1785,11 @@ describe("NavigationGraphManager - side-effects-outside-fn guard (#3129)", () =>
     "this.currentScreen ="
   ];
 
-  test("the source has exactly two helper callbacks to scan", () => {
-    // Sanity check the extractor tracks the two known call sites; if a third both-repos
+  test("the source has exactly three helper callbacks to scan", () => {
+    // Sanity check the extractor tracks the three known call sites; if another both-repos
     // writer is added, this line surfaces it so its callback is scanned too.
     const bodies = extractRunBothReposCallbackBodies(managerSource);
-    expect(bodies.length).toBe(2);
+    expect(bodies.length).toBe(3);
   });
 
   test("no known side-effect call appears inside any runBothReposInTransaction callback", () => {

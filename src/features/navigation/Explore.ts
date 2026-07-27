@@ -92,6 +92,7 @@ export class Explore extends BaseVisualChange {
   private currentTargetEdge: NavigationEdge | null = null;
   private currentElementConfidence: number = 0;
   private sessionUuid?: string;
+  private failureReason: string | null = null;
 
   // Constants for safety limits
   private static readonly MAX_CONSECUTIVE_BACKS = 5;
@@ -151,6 +152,7 @@ export class Explore extends BaseVisualChange {
       this.stopReason = "";
       this.previousScreen = null;
       this.consecutiveOutOfAppCount = 0;
+      this.failureReason = null;
       this.targetPackageName = options.packageName?.trim() || null;
 
       if (progress) {
@@ -372,6 +374,7 @@ export class Explore extends BaseVisualChange {
     this.stopReason = "";
     this.previousScreen = null;
     this.consecutiveOutOfAppCount = 0;
+    this.failureReason = null;
     this.targetPackageName = options.packageName?.trim() || null;
 
     const warnings: string[] = [];
@@ -720,10 +723,20 @@ export class Explore extends BaseVisualChange {
 
       // Check if element is scrollable - perform swipe instead of tap
       const isScrollable = isTruthy(element.scrollable);
+      const selector = this.getReplaySelector(element);
+      if (!selector) {
+        logger.warn("[Explore] Cannot replay selected element without a text or resource-id selector");
+        return false;
+      }
 
       if (isScrollable) {
         // Perform swipe on scrollable container
         logger.info(`[Explore] Swiping on scrollable container: ${element["resource-id"] || element["class"]}`);
+        this.navigationManager.recordToolCall("swipeOn", {
+          container: selector,
+          direction: "up",
+          platform: this.device.platform,
+        });
         const swipeOn = new SwipeOnElement(this.device, this.adb);
 
         const swipeResult = await swipeOn.execute(
@@ -740,12 +753,16 @@ export class Explore extends BaseVisualChange {
         return swipeResult.success;
       } else {
         // Perform tap interaction
+        this.navigationManager.recordToolCall("tapOn", {
+          selector,
+          action: "tap",
+          platform: this.device.platform,
+        });
         const tapOn = new TapOnElement(this.device, this.adb);
 
         const tapResult = await tapOn.execute(
           {
-            text: element.text,
-            elementId: element["resource-id"],
+            ...selector,
             action: "tap"
           },
           progress,
@@ -761,6 +778,14 @@ export class Explore extends BaseVisualChange {
       logger.warn(`[Explore] Failed to interact with element: ${error}`);
       return false;
     }
+  }
+
+  private getReplaySelector(element: Element): { elementId: string } | { text: string } | null {
+    if (element["resource-id"]) {
+      return { elementId: element["resource-id"] };
+    }
+    const text = element.text || element["content-desc"];
+    return text ? { text } : null;
   }
 
   /**
@@ -802,6 +827,7 @@ export class Explore extends BaseVisualChange {
     } catch (error) {
       logger.warn(`[Explore] Failed to navigate back: ${error}`);
       this.stopReason = `Back-navigation recovery failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.failureReason = this.stopReason;
     }
   }
 
@@ -843,6 +869,7 @@ export class Explore extends BaseVisualChange {
     } catch (error) {
       logger.warn(`[Explore] Failed to reset to home: ${error}`);
       this.stopReason = `Home-screen recovery failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.failureReason = this.stopReason;
     }
   }
 
@@ -885,7 +912,8 @@ export class Explore extends BaseVisualChange {
     }
 
     return {
-      success: true,
+      success: this.failureReason === null,
+      error: this.failureReason ?? undefined,
       cancelled,
       interactionsPerformed: this.interactionCount,
       screensDiscovered,

@@ -1037,6 +1037,10 @@ export class NavigationRepository {
       .selectFrom("navigation_nodes")
       .select(db.fn.countAll<number>().as("count"))
       .where("app_id", "=", appId)
+      // Hierarchy fingerprints are intentionally labelled rather than treated as
+      // SDK-provided screen names. They must not suppress further hierarchy-only
+      // graph discovery for apps without the navigation SDK.
+      .where("screen_name", "not like", "hierarchy:%")
       .executeTakeFirst();
 
     return Number(result?.count || 0) > 0;

@@ -96,6 +96,9 @@ describe("navigation tool session graph selection", () => {
     expect(navigateToSchema.parse({ targetScreen: "Settings" }).platform).toBeUndefined();
     expect(getNavigationGraphSchema.parse({}).platform).toBeUndefined();
     expect(exploreSchema.parse({}).platform).toBeUndefined();
+    expect(navigateToSchema.parse({ targetScreen: "Settings", platform: "ios" }).platform).toBe("ios");
+    expect(getNavigationGraphSchema.parse({ platform: "ios" }).platform).toBe("ios");
+    expect(exploreSchema.parse({ platform: "ios" }).platform).toBe("ios");
 
     const sessionGraph = new FakeNavigationGraphManager();
     const sessionManagerSpy = spyOn(NavigationGraphManager, "getInstanceForSession")

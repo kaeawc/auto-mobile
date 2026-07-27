@@ -1049,13 +1049,11 @@ describe("AndroidCtrlProxyClient", function() {
           await testTimer.advanceTimersByTimeAsync(1);
         }
 
-        // With named-nodes-only feature, hierarchy updates alone don't create screens
-        // They only update screens when there's an active SDK navigation event
-        // or when the fingerprint is already correlated to a named node.
-        // The app ID is still set from the package name.
+        // A non-SDK app seeds the graph with a fingerprint-labelled node. The
+        // prefix preserves the distinction from an authoritative SDK screen name.
         expect(navManager.getCurrentAppId()).toBe("com.google.android.deskclock");
-        // Without SDK events (named nodes), currentScreen remains null
-        expect(navManager.getCurrentScreen()).toBeNull();
+        expect(navManager.getCurrentScreen()).toStartWith("hierarchy:");
+        expect((await navManager.exportGraph()).nodes).toHaveLength(1);
       } finally {
         await testClient.close();
         await navHarness.dispose();

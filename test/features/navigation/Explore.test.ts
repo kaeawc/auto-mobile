@@ -74,7 +74,8 @@ describe("Explore", () => {
           return "Home button pressed";
         }
         return "";
-      }
+      },
+      isScreenOn: async () => true,
     } as AdbClient;
 
     // Create mock ObserveScreen that cycles through different screens
@@ -368,7 +369,8 @@ describe("Explore", () => {
             backPresses.push(cmd);
           }
           return "";
-        }
+        },
+        isScreenOn: async () => true,
       } as AdbClient;
 
       explore = new Explore(device, adbWithTracking, fakeTimer, fakeGraph);
@@ -597,7 +599,10 @@ describe("Explore", () => {
         ctrlProxySpy.mockRestore();
       }
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(
+        "Back-navigation recovery failed: Failed to press button: Back navigation was rejected"
+      );
       expect(result.stopReason).toBe(
         "Back-navigation recovery failed: Failed to press button: Back navigation was rejected"
       );

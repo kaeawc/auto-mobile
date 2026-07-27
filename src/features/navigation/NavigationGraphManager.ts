@@ -143,6 +143,14 @@ export class NavigationGraphManager implements NavigationGraphService {
     startTime: number;
   } | null = null;
 
+  /**
+   * Hierarchy fingerprints are useful fallback identities, but unlike SDK events
+   * they do not carry an app-owned screen name. Keep that provenance explicit in
+   * the graph so callers can use the learned route without mistaking it for an
+   * authoritative application screen identifier.
+   */
+  private readonly HIERARCHY_SCREEN_PREFIX = "hierarchy:";
+
   constructor(
     repository?: NavigationRepository,
     testCoverageRepository?: TestCoverageRepository,
@@ -557,11 +565,10 @@ export class NavigationGraphManager implements NavigationGraphService {
 
   /**
    * Record a navigation event detected from view hierarchy changes.
-   * This does NOT create new nodes - it only:
-   * 1. Updates existing nodes if fingerprint is already correlated
-   * 2. Correlates fingerprint if within active navigation window
-   * 3. Creates a suggestion if app has named nodes but fingerprint is uncorrelated
-   * 4. Does nothing if app has no named nodes (SDK not integrated)
+   * This records hierarchy-derived nodes only for apps that have no SDK-named
+   * nodes yet. Their names retain the `hierarchy:` prefix because fingerprints
+   * are approximate identities. Once an app has SDK-named nodes, uncorrelated
+   * hierarchy changes remain suggestions for deliberate promotion.
    */
   public async recordHierarchyNavigation(event: HierarchyNavigationEvent): Promise<void> {
     // Auto-set current app from package name if provided
@@ -577,6 +584,10 @@ export class NavigationGraphManager implements NavigationGraphService {
     const fingerprintHash = event.toFingerprint;
     const fingerprintData = event.fingerprintData || JSON.stringify({ hash: fingerprintHash });
     const timestamp = event.timestamp;
+
+    const sourceNode = event.fromFingerprint
+      ? await this.repository.getNodeByFingerprint(this.currentAppId, event.fromFingerprint)
+      : undefined;
 
     // Case 1: Check if fingerprint is already correlated to a named node (scoped to this app)
     const existingNode = await this.repository.getNodeByFingerprint(this.currentAppId, fingerprintHash);
@@ -661,11 +672,76 @@ export class NavigationGraphManager implements NavigationGraphService {
       return;
     }
 
-    // Case 4: App has no named nodes - do nothing
-    // This app doesn't have SDK integration yet, so we don't track hierarchy-only navigation
-    logger.debug(
-      `[NAVIGATION_GRAPH] Ignoring hierarchy navigation - app has no named nodes`
-    );
+    // Case 4: No SDK-named nodes yet. Persist a fingerprint-labelled node and an
+    // edge so `explore` can build a replayable graph for non-integrated
+    // applications.
+    if (!hasNamedNodes) {
+      await this.recordHierarchyOnlyNavigation(
+        fingerprintHash,
+        fingerprintData,
+        timestamp,
+        sourceNode
+      );
+      return;
+    }
+  }
+
+  private async recordHierarchyOnlyNavigation(
+    fingerprintHash: string,
+    fingerprintData: string,
+    timestamp: number,
+    sourceNode: DBNavigationNode | undefined
+  ): Promise<void> {
+    const appId = this.currentAppId;
+    if (!appId) {
+      return;
+    }
+    const screenName = `${this.HIERARCHY_SCREEN_PREFIX}${fingerprintHash}`;
+    const previousScreen = sourceNode?.screen_name ?? this.currentScreen;
+    const interaction = this.findCorrelatedToolCall(timestamp);
+
+    const node = await this.runBothReposInTransaction(async (repository, testCoverageRepository) => {
+      const createdNode = await repository.getOrCreateNode(appId, screenName, timestamp);
+      await repository.getOrCreateFingerprint(
+        appId,
+        createdNode.id,
+        fingerprintHash,
+        fingerprintData,
+        timestamp
+      );
+
+      if (this.activeTestSession) {
+        await testCoverageRepository.recordNodeVisit(
+          this.activeTestSession.id,
+          createdNode.id,
+          timestamp
+        );
+      }
+
+      if (previousScreen && previousScreen !== screenName) {
+        const edge = await repository.createEdge(
+          appId,
+          previousScreen,
+          screenName,
+          interaction?.toolName ?? null,
+          interaction?.args ?? null,
+          timestamp
+        );
+        if (this.activeTestSession) {
+          await testCoverageRepository.recordEdgeTraversal(
+            this.activeTestSession.id,
+            edge.id,
+            timestamp
+          );
+        }
+      }
+
+      await repository.touchApp(appId);
+      return createdNode;
+    });
+
+    this.currentScreen = node.screen_name;
+    this.notifyGraphUpdated();
   }
 
   /**

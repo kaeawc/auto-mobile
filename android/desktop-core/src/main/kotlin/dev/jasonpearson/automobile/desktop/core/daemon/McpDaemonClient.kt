@@ -517,14 +517,14 @@ class McpDaemonClient(
   /**
    * Reads the daemon's additive capability list before the desktop sends `mode: "append"`.
    *
-   * An older daemon answers this query with its normal unsupported-method envelope. That specific
-   * response is a capability miss rather than a transport error: the caller receives
-   * [UNSUPPORTED_APPEND_MODE_ERROR] and never emits the destructive replace request. Other probe
-   * failures, including version mismatches, are preserved. Successful responses are shared only
-   * while the Unix socket's file identity is unchanged, so the per-action facade clients in the
-   * control queue reuse one probe without trusting a daemon restarted at the same pathname. An
-   * unsupported older daemon is deliberately not cached so restarting it lets the next keystroke
-   * discover the upgraded capability.
+   * An older daemon answers this query with its normal unsupported-method envelope. That leaves
+   * append support unknown, so the client attempts the non-destructive append request and
+   * translates only its exact unsupported-parameter response. Other probe failures, including
+   * version mismatches, are preserved. Successful responses are shared only while the Unix socket's
+   * file identity is unchanged, so the per-action facade clients in the control queue reuse one
+   * probe without trusting a daemon restarted at the same pathname. An unsupported older daemon is
+   * deliberately not cached so restarting it lets the next keystroke discover the upgraded
+   * capability.
    */
   private fun inputTypeTextAppendSupportError(): String? {
     val identity = socketIdentity()
@@ -532,6 +532,7 @@ class McpDaemonClient(
       if (identity == null) {
         when (val probe = queryDaemonCapabilities(null)) {
           is DaemonCapabilitiesProbe.Available -> probe.capabilities
+          DaemonCapabilitiesProbe.Legacy -> return null
           is DaemonCapabilitiesProbe.Failure -> return probe.error
         }
       } else {
@@ -539,6 +540,7 @@ class McpDaemonClient(
           ?: sharedDaemonCapabilities[identity]
           ?: when (val probe = queryDaemonCapabilities(identity)) {
             is DaemonCapabilitiesProbe.Available -> probe.capabilities
+            DaemonCapabilitiesProbe.Legacy -> return null
             is DaemonCapabilitiesProbe.Failure -> return probe.error
           }
       }
@@ -549,13 +551,8 @@ class McpDaemonClient(
   private fun queryDaemonCapabilities(identity: SocketIdentity?): DaemonCapabilitiesProbe {
     val response = sendRequest(DAEMON_CAPABILITIES_METHOD)
     if (!response.success) {
-      return DaemonCapabilitiesProbe.Failure(
-        if (response.error == OLD_DAEMON_CAPABILITIES_ERROR) {
-          UNSUPPORTED_APPEND_MODE_ERROR
-        } else {
-          response.error ?: "Daemon capability probe failed."
-        }
-      )
+      if (response.error == OLD_DAEMON_CAPABILITIES_ERROR) return DaemonCapabilitiesProbe.Legacy
+      return DaemonCapabilitiesProbe.Failure(response.error ?: "Daemon capability probe failed.")
     }
     if (response.result == null) {
       return DaemonCapabilitiesProbe.Failure("Daemon capability probe returned no result.")
@@ -800,6 +797,8 @@ private data class CachedDaemonCapabilities(
 
 private sealed interface DaemonCapabilitiesProbe {
   data class Available(val capabilities: Set<String>) : DaemonCapabilitiesProbe
+
+  data object Legacy : DaemonCapabilitiesProbe
 
   data class Failure(val error: String) : DaemonCapabilitiesProbe
 }

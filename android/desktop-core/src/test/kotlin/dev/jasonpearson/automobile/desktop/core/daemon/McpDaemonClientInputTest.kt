@@ -244,22 +244,59 @@ class McpDaemonClientInputTest {
   }
 
   @Test
-  fun `append mode stops before input when an older daemon has no capabilities endpoint`() {
-    TestDaemonSocket(error = "Unsupported daemon method: daemon/capabilities").use { server ->
-      val result =
-        McpDaemonClient(socketPathValue = server.socketPath.toString())
-          .inputTypeText(
-            text = "a",
-            append = true,
+  fun `append mode falls back to the append request when an older daemon has no capabilities endpoint`() {
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(error = "Unsupported daemon method: daemon/capabilities"),
+            SocketResponse(resultJson = """{ "action": "input/typeText", "success": true }"""),
           )
-
-      assertEquals("daemon/capabilities", server.awaitRequest().method)
-      assertEquals(false, result.success)
-      assertEquals(
-        "The connected daemon does not support input/typeText mode:append. Restart or update the daemon before typing into the device.",
-        result.error,
       )
-    }
+      .use { server ->
+        val result =
+          McpDaemonClient(socketPathValue = server.socketPath.toString())
+            .inputTypeText(
+              text = "a",
+              append = true,
+            )
+
+        assertEquals("daemon/capabilities", server.awaitRequest().method)
+        assertEquals(
+          listOf("daemon/capabilities", "input/typeText"),
+          server.awaitRequests().map { it.method },
+        )
+        assertEquals(JsonPrimitive("append"), server.awaitRequests()[1].params["mode"])
+        assertEquals(true, result.success)
+      }
+  }
+
+  @Test
+  fun `append mode reports an unsupported parameter after a legacy capability probe`() {
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(error = "Unsupported daemon method: daemon/capabilities"),
+            SocketResponse(error = "input/typeText unsupported params: mode"),
+          )
+      )
+      .use { server ->
+        val result =
+          McpDaemonClient(socketPathValue = server.socketPath.toString())
+            .inputTypeText(
+              text = "a",
+              append = true,
+            )
+
+        assertEquals(
+          listOf("daemon/capabilities", "input/typeText"),
+          server.awaitRequests().map { it.method },
+        )
+        assertEquals(false, result.success)
+        assertEquals(
+          "The connected daemon does not support input/typeText mode:append. Restart or update the daemon before typing into the device.",
+          result.error,
+        )
+      }
   }
 
   @Test

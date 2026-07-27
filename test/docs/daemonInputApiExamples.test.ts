@@ -198,7 +198,11 @@ describe("daemon input API consumer docs", () => {
     expect(unixSocketApi).toContain("### `daemon/capabilities`");
     expect(unixSocketApi).toContain('"input/typeText.mode:append"');
     expect(unixSocketApi).toContain("remains subject to the normal socket version");
-    expect(unixSocketApi).toContain("build-identity mismatch is a handshake error, not an absent capability");
+    expect(unixSocketApi).toContain(
+      "subject to the normal socket version and build-identity handshake; clients must surface a mismatch",
+    );
+    expect(unixSocketApi).toContain("that leaves append support unknown");
+    expect(unixSocketApi).toContain("translate only the exact `input/typeText unsupported params: mode` response");
     expect(unixSocketApi).toContain("Unsupported daemon method: daemon/capabilities");
   });
 

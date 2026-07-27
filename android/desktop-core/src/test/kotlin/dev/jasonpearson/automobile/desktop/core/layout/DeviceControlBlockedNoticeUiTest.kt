@@ -46,10 +46,14 @@ class DeviceControlBlockedNoticeUiTest {
     }
     val text = deviceControlBlockReasonText(DeviceControlBlockReason.StaleFrame)!!
 
-    mainClock.advanceTimeBy(holdMs / 2)
+    // Exact boundary: absent through holdMs - 1, present at exactly holdMs. ignoreFrameDuration
+    // keeps advanceTimeBy from rounding up to a frame multiple, which would overshoot the bound.
+    mainClock.advanceTimeBy(holdMs - 1, ignoreFrameDuration = true)
     onNodeWithText(text).assertDoesNotExist()
 
-    mainClock.advanceTimeBy(holdMs)
+    mainClock.advanceTimeBy(1, ignoreFrameDuration = true)
+    mainClock
+      .advanceTimeByFrame() // dispatch the resumed hold coroutine; the deadline already passed
     onNodeWithText(text).assertIsDisplayed()
   }
 
@@ -63,12 +67,19 @@ class DeviceControlBlockedNoticeUiTest {
 
     mainClock.advanceTimeBy(holdMs / 2)
     reason = DeviceControlBlockReason.UnpairedHierarchy
-    mainClock.advanceTimeBy(holdMs / 2 + 1)
-    // Neither reason held for the full window yet: the first was replaced, the second is young.
+    // Pump one frame so the recomposition applies and the restarted hold anchors HERE — with a
+    // frozen clock, recomposition waits for a frame, and letting it happen inside the next
+    // advance would shift the anchor and blur the exact boundary below.
+    mainClock.advanceTimeByFrame()
+
+    mainClock.advanceTimeBy(holdMs - 1, ignoreFrameDuration = true)
+    // Neither reason held for the full window yet: the first was replaced, the second is 1ms shy.
     onNodeWithText(staleText).assertDoesNotExist()
     onNodeWithText(unpairedText).assertDoesNotExist()
 
-    mainClock.advanceTimeBy(holdMs)
+    mainClock.advanceTimeBy(1, ignoreFrameDuration = true)
+    mainClock
+      .advanceTimeByFrame() // dispatch the resumed hold coroutine; the deadline already passed
     onNodeWithText(unpairedText).assertIsDisplayed()
   }
 
@@ -85,13 +96,17 @@ class DeviceControlBlockedNoticeUiTest {
       onNodeWithText(staleText).assertIsDisplayed()
 
       // The replacement must not inherit the shown reason's completed hold: only text the hold
-      // effect committed is rendered, so the new reason waits out its own full hold.
+      // effect committed is rendered, so the new reason waits out its own full, exact hold.
       reason = DeviceControlBlockReason.UnpairedHierarchy
-      mainClock.advanceTimeBy(holdMs / 2)
+      mainClock.advanceTimeByFrame() // apply the recomposition so the fresh hold anchors here
+
+      mainClock.advanceTimeBy(holdMs - 1, ignoreFrameDuration = true)
       onNodeWithText(staleText).assertDoesNotExist()
       onNodeWithText(unpairedText).assertDoesNotExist()
 
-      mainClock.advanceTimeBy(holdMs)
+      mainClock.advanceTimeBy(1, ignoreFrameDuration = true)
+      mainClock
+        .advanceTimeByFrame() // dispatch the resumed hold coroutine; the deadline already passed
       onNodeWithText(unpairedText).assertIsDisplayed()
     }
 

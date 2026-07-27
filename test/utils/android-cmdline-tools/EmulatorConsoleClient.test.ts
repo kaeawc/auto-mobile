@@ -122,3 +122,105 @@ describe("RealEmulatorConsoleClient", () => {
     await expect(client.smsSend("5551234567", "hi")).rejects.toThrow(/ECONNREFUSED/);
   });
 });
+
+import { EventEmitter } from "node:events";
+import type * as net from "node:net";
+import { NetEmulatorConsoleTransport } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
+
+/**
+ * Minimal EventEmitter-backed stand-in for net.Socket. There is no real fake
+ * socket in the repo, so a bare emitter with the surface the transport touches
+ * (setEncoding/write/destroy/removeAllListeners) is the only way to drive the
+ * wire protocol without opening a real TCP connection.
+ */
+class FakeSocket extends EventEmitter {
+  public written: string[] = [];
+  public destroyed = false;
+  setEncoding(): this { return this; }
+  write(data: string): boolean { this.written.push(data); return true; }
+  destroy(): this { this.destroyed = true; return this; }
+}
+
+describe("NetEmulatorConsoleTransport wire protocol", () => {
+  function makeTransport(socket: FakeSocket, timer: FakeTimer): NetEmulatorConsoleTransport {
+    return new NetEmulatorConsoleTransport(
+      () => socket as unknown as net.Socket,
+      5000,
+      timer
+    );
+  }
+
+  test("sends the auth line, each command, and a trailing quit on connect", async () => {
+    const socket = new FakeSocket();
+    const transport = makeTransport(socket, new FakeTimer());
+
+    const pending = transport.execute("localhost", 5554, "s3cr3t", ["gsm call 5551234567"]);
+    socket.emit("connect");
+    socket.emit("data", "OK\n");
+    socket.emit("close");
+
+    await pending;
+    expect(socket.written).toEqual(["auth s3cr3t\ngsm call 5551234567\nquit\n"]);
+  });
+
+  test("omits the auth line when no token is provided", async () => {
+    const socket = new FakeSocket();
+    const transport = makeTransport(socket, new FakeTimer());
+
+    const pending = transport.execute("localhost", 5554, null, ["sms send 5551234567 hi"]);
+    socket.emit("connect");
+    socket.emit("close");
+
+    await pending;
+    expect(socket.written).toEqual(["sms send 5551234567 hi\nquit\n"]);
+  });
+
+  test("resolves with the aggregated server output when the socket closes", async () => {
+    const socket = new FakeSocket();
+    const transport = makeTransport(socket, new FakeTimer());
+
+    const pending = transport.execute("localhost", 5554, null, ["gsm hold"]);
+    socket.emit("connect");
+    socket.emit("data", "Android Console\n");
+    socket.emit("data", "OK\n");
+    socket.emit("close");
+
+    expect(await pending).toBe("Android Console\nOK\n");
+  });
+
+  test("rejects with an actionable timeout when the connection never settles", async () => {
+    const socket = new FakeSocket();
+    const timer = new FakeTimer();
+    const transport = makeTransport(socket, timer);
+
+    const pending = transport.execute("localhost", 5554, null, ["gsm hold"]);
+    // No connect/close: only the timer fires.
+    timer.advanceTime(5000);
+
+    await expect(pending).rejects.toThrow(/timed out after 5000ms/);
+    expect(socket.destroyed).toBe(true);
+  });
+
+  test("rejects when the socket errors before settling", async () => {
+    const socket = new FakeSocket();
+    const transport = makeTransport(socket, new FakeTimer());
+
+    const pending = transport.execute("localhost", 5554, null, ["gsm hold"]);
+    socket.emit("error", new Error("ECONNREFUSED"));
+
+    await expect(pending).rejects.toThrow(/failed: ECONNREFUSED/);
+  });
+
+  test("settles once: a later close does not override the first error settle", async () => {
+    const socket = new FakeSocket();
+    const transport = makeTransport(socket, new FakeTimer());
+
+    const pending = transport.execute("localhost", 5554, null, ["gsm hold"]);
+    socket.emit("error", new Error("ECONNRESET"));
+    // A stray close after the error settle must not flip the rejection into a resolve.
+    socket.emit("close");
+
+    await expect(pending).rejects.toThrow(/failed: ECONNRESET/);
+  });
+});

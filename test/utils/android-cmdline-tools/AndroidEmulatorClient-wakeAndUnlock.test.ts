@@ -99,17 +99,21 @@ describe("AndroidEmulatorClient wakeAndUnlock", () => {
     expect(fakeAdb.wasCommandExecuted("wm dismiss-keyguard")).toBe(false);
   });
 
-  test("handles errors gracefully without throwing", async () => {
+  test("a failed wake keyevent aborts before wm dismiss-keyguard (single-try)", async () => {
+    // REWRITE-1: the previous test asserted only that the boot wrapper swallows
+    // the error ("does not throw"), which passes for any behavior. The load-
+    // bearing property is that the wake and the unlock share one try: a thrown
+    // KEYCODE_WAKEUP short-circuits, so `wm dismiss-keyguard` is never sent. The
+    // positive control above ("wakes device and dismisses a swipe keyguard when
+    // device is Asleep") proves dismiss-keyguard DOES run on the happy path.
     fakeAdb.setScreenState(false, "Asleep");
-    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
-    fakeAdb.executeCommand = async (command: string) => {
-      if (command.includes("KEYCODE_WAKEUP")) {
-        throw new Error("Simulated ADB error");
-      }
-      return originalExecuteCommand(command);
-    };
+    fakeAdb.setDeviceLockSequence([LOCKED_SWIPE, UNLOCKED]);
+    fakeAdb.setCommandError("KEYCODE_WAKEUP", new Error("Simulated ADB error"));
 
+    // The boot wrapper still swallows the failure (the device is usable)...
     await expect(runWakeAndUnlock()).resolves.toBeUndefined();
+    // ...but the keyguard dismissal is never attempted once the wake threw.
+    expect(fakeAdb.wasCommandExecuted("wm dismiss-keyguard")).toBe(false);
   });
 
   test("treats unknown wakefulness as not-awake and still wakes the device", async () => {

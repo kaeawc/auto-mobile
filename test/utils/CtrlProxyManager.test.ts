@@ -109,12 +109,14 @@ describe("CtrlProxyManager", function() {
       expect(result).toBe(false);
     });
 
-    test("should return false when ADB command fails", async function() {
-      // FakeAdbExecutor doesn't throw by default, so we set it to return empty
-      fakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "",
-        stderr: "Error"
-      });
+    test("should return false when the ADB command throws", async function() {
+      // ADD-10: exercise the catch path for real. Setting stderr on a resolved
+      // response never entered the catch (isInstalled reads stdout only), so it
+      // could not distinguish "return false" from any other catch behavior.
+      fakeAdb.setCommandError(
+        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        new Error("adb: device offline")
+      );
 
       const result = await accessibilityServiceClient.isInstalled();
       expect(result).toBe(false);
@@ -166,7 +168,13 @@ describe("CtrlProxyManager", function() {
 
       const result = await accessibilityServiceClient.isAvailable();
       expect(result).toBe(true);
-      expect(fakeAdb.getExecutedCommands().length).toBeGreaterThanOrEqual(2);
+      // REWRITE-2: assert the exact command set, not merely "at least two ran".
+      // isAvailable resolves installed + enabled, so exactly these two commands
+      // must be issued; a count check could not catch a wrong probe command.
+      expect(fakeAdb.getExecutedCommands().sort()).toEqual([
+        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        "shell settings get secure enabled_accessibility_services",
+      ].sort());
     });
 
     test("should return false when service is installed but not enabled", async function() {
@@ -734,7 +742,14 @@ describe("CtrlProxyManager", function() {
         AndroidCtrlProxyManager.prefetchApk();
         expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
         expect(failedDestination).not.toBeNull();
-        await expect(fs.stat(path.dirname(failedDestination!))).rejects.toThrow();
+        // REWRITE-3: a bare rejects.toThrow() passes for ANY stat error. Pin the
+        // reason to ENOENT to prove the partial prefetch dir was actually removed
+        // (not, say, an EACCES that would also "throw").
+        const statError = await fs.stat(path.dirname(failedDestination!)).then(
+          () => null,
+          (error: NodeJS.ErrnoException) => error
+        );
+        expect(statError?.code).toBe("ENOENT");
 
         AndroidCtrlProxyManager.prefetchApk();
         const retriedPath = await AndroidCtrlProxyManager.getPrefetchedApkPath();
@@ -2025,6 +2040,63 @@ describe("CtrlProxyManager", function() {
 
       expect(fakeAdb.wasCommandExecuted("shell settings put secure accessibility_enabled 0")).toBe(true);
     });
+
+    // PARAM-9: the split(":")/filter/join surgery has two shapes the start/middle/
+    // end/last-service tests never exercise — a trailing separator and a duplicated
+    // entry. Assert the whole put command array for each.
+    const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
+    const otherService = "com.example.other/com.example.other.Service";
+
+    function stubToggleSupported(): void {
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", { stdout: "29", stderr: "" });
+    }
+
+    function enabledServicesPutCommands(): string[] {
+      return fakeAdb.getExecutedCommands()
+        .filter(command => command.includes("put secure enabled_accessibility_services"));
+    }
+
+    test("preserves a trailing separator left by another surviving service", async function() {
+      // "other:ours:" -> split ["other","ours",""] -> filter ["other",""] -> "other:"
+      stubToggleSupported();
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: `${otherService}:${serviceComponent}:`,
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse(`shell settings put secure enabled_accessibility_services "${otherService}:"`, {
+        stdout: "",
+        stderr: ""
+      });
+
+      await accessibilityServiceClient.disableViaSettings();
+
+      expect(enabledServicesPutCommands()).toEqual([
+        `shell settings put secure enabled_accessibility_services "${otherService}:"`,
+      ]);
+      // Another service survives, so the global toggle stays on.
+      expect(fakeAdb.wasCommandExecuted("shell settings put secure accessibility_enabled 0")).toBe(false);
+    });
+
+    test("removes every duplicate of our service in one pass", async function() {
+      // "ours:other:ours" -> split -> filter drops BOTH ours -> "other"
+      stubToggleSupported();
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: `${serviceComponent}:${otherService}:${serviceComponent}`,
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse(`shell settings put secure enabled_accessibility_services "${otherService}"`, {
+        stdout: "",
+        stderr: ""
+      });
+
+      await accessibilityServiceClient.disableViaSettings();
+
+      expect(enabledServicesPutCommands()).toEqual([
+        `shell settings put secure enabled_accessibility_services "${otherService}"`,
+      ]);
+      expect(fakeAdb.wasCommandExecuted("shell settings put secure accessibility_enabled 0")).toBe(false);
+    });
   });
 
   // Issue #4192: every path that mutates accessibility state must also invalidate the
@@ -2151,6 +2223,127 @@ describe("CtrlProxyManager", function() {
         });
       }
     });
+  });
+
+  // ADD-4: work-profile (per-user) enable/disable must target `--user <id>`; a
+  // dropped `--user` writes to user 0 and leaves the work profile broken.
+  describe("per-user accessibility writes", function() {
+    const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
+
+    function stubSettingsToggleSupported(): void {
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", { stdout: "29", stderr: "" });
+    }
+
+    test("enableForUser writes the service and the global toggle scoped to the target user", async function() {
+      stubSettingsToggleSupported();
+      fakeAdb.setCommandResponse("shell settings --user 10 get secure enabled_accessibility_services", {
+        stdout: "null",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse(`shell settings --user 10 put secure enabled_accessibility_services "${serviceComponent}"`, {
+        stdout: "",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("shell settings --user 10 put secure accessibility_enabled 1", {
+        stdout: "",
+        stderr: ""
+      });
+
+      await accessibilityServiceClient.enableForUser(10);
+
+      expect(fakeAdb.wasCommandExecuted(`shell settings --user 10 put secure enabled_accessibility_services "${serviceComponent}"`)).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings --user 10 put secure accessibility_enabled 1")).toBe(true);
+      // A user-0 write would mean the `--user 10` scope was dropped.
+      expect(fakeAdb.wasCommandExecuted(`shell settings put secure enabled_accessibility_services "${serviceComponent}"`)).toBe(false);
+    });
+
+    test("enableForUser appends to the target user's existing services without overwriting them", async function() {
+      const existing = "com.example.other/com.example.other.Service";
+      stubSettingsToggleSupported();
+      fakeAdb.setCommandResponse("shell settings --user 10 get secure enabled_accessibility_services", {
+        stdout: existing,
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse(`shell settings --user 10 put secure enabled_accessibility_services "${existing}:${serviceComponent}"`, {
+        stdout: "",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("shell settings --user 10 put secure accessibility_enabled 1", {
+        stdout: "",
+        stderr: ""
+      });
+
+      await accessibilityServiceClient.enableForUser(10);
+
+      expect(fakeAdb.wasCommandExecuted(`shell settings --user 10 put secure enabled_accessibility_services "${existing}:${serviceComponent}"`)).toBe(true);
+    });
+
+    test("isEnabledForUser reads the target user's service list", async function() {
+      fakeAdb.setCommandResponse("shell settings --user 10 get secure enabled_accessibility_services", {
+        stdout: serviceComponent,
+        stderr: ""
+      });
+
+      expect(await accessibilityServiceClient.isEnabledForUser(10)).toBe(true);
+    });
+
+    test("isEnabledForUser reports disabled when the target user's list omits the service", async function() {
+      fakeAdb.setCommandResponse("shell settings --user 10 get secure enabled_accessibility_services", {
+        stdout: "com.example.other/com.example.other.Service",
+        stderr: ""
+      });
+
+      expect(await accessibilityServiceClient.isEnabledForUser(10)).toBe(false);
+    });
+  });
+
+  // Rank 6 / item 6: each enable/disable/enableForUser catch categorizes the
+  // failure into one of four diagnoses. Without coverage, permission/offline/
+  // timeout all collapse into the generic message.
+  describe("enable/disable failure diagnoses", function() {
+    function stubSettingsToggleSupported(): void {
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
+      fakeAdb.setCommandResponse("shell getprop ro.build.version.sdk", { stdout: "29", stderr: "" });
+    }
+
+    type Diagnosis = { trigger: string; expected: string };
+    const diagnoses: Diagnosis[] = [
+      { trigger: "permission denied", expected: "Permission denied while" },
+      { trigger: "device is offline", expected: "Device connection lost while" },
+      { trigger: "operation timed out", expected: "Timeout while" },
+      { trigger: "something unexpected happened", expected: "Failed to" },
+    ];
+
+    type Method = { name: string; readCommand: string; run: () => Promise<unknown> };
+    const methods: Method[] = [
+      {
+        name: "enableViaSettings",
+        readCommand: "shell settings get secure enabled_accessibility_services",
+        run: () => accessibilityServiceClient.enableViaSettings(),
+      },
+      {
+        name: "disableViaSettings",
+        readCommand: "shell settings get secure enabled_accessibility_services",
+        run: () => accessibilityServiceClient.disableViaSettings(),
+      },
+      {
+        name: "enableForUser",
+        readCommand: "shell settings --user 10 get secure enabled_accessibility_services",
+        run: () => accessibilityServiceClient.enableForUser(10),
+      },
+    ];
+
+    for (const method of methods) {
+      for (const diagnosis of diagnoses) {
+        test(`${method.name} maps "${diagnosis.trigger}" to a "${diagnosis.expected}" diagnosis`, async function() {
+          stubSettingsToggleSupported();
+          fakeAdb.setCommandError(method.readCommand, new Error(diagnosis.trigger));
+
+          await expect(method.run()).rejects.toThrow(diagnosis.expected);
+        });
+      }
+    }
   });
 
   describe("sweepStalePrefetchDirsOnStartup", function() {

@@ -9,6 +9,23 @@ import { ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import { Readable } from "stream";
 
+/**
+ * REWRITE-5: await a promise that MUST reject, returning its Error. Replaces the
+ * `try { await p; expect(true).toBe(false); } catch (e) { expect(e.message)... }`
+ * sentinel, whose "should not reach here" assertion is itself thrown INSIDE the
+ * try and then swallowed by the same catch — so on a non-throwing regression the
+ * catch re-checks the assertion-error message and fails with a misleading
+ * "expected 'corrupt'" instead of "the call did not reject". This fails loudly.
+ */
+async function expectRejection(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+  throw new Error("Expected the operation to reject, but it resolved");
+}
+
 class TestAdbClientFactory implements AdbClientFactory {
   constructor(private readonly fakeExecutor: FakeAdbExecutor) {}
 
@@ -110,63 +127,88 @@ describe("AndroidEmulatorClient detectCorruptImage", () => {
     client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
   });
 
-  test("detects qcow2 corrupt image", () => {
-    const output = `qcow2: Image is corrupt; cannot be opened read/write
-WARNING | QEMU main loop exits abnormally with code 1`;
+  // PARAM-8: pin the observable outcome across every branch, including the
+  // case-sensitivity boundary. The qcow2: and generic-disk-error branches match
+  // case-insensitively (/i), but the QEMU-abnormal-exit branch uses plain
+  // String.includes("qcow2")/("corrupt") — so an UPPERCASE "QCOW2 METADATA
+  // ERROR" in QEMU context is NOT detected. The contrast between the lowercase
+  // and uppercase QEMU rows is the proof of that inconsistency.
+  type Row = { name: string; output: string; isCorrupt: boolean; messageContains?: string };
+  const rows: Row[] = [
+    {
+      name: "qcow2: corruption (lowercase) via the case-insensitive branch",
+      output: "qcow2: Image is corrupt; cannot be opened read/write\nWARNING | QEMU main loop exits abnormally with code 1",
+      isCorrupt: true,
+      messageContains: "Disk image is corrupt",
+    },
+    {
+      name: "qcow2: corruption still matches when the header is UPPERCASE (branch is /i)",
+      output: "QCOW2: Image is CORRUPT; cannot be opened read/write",
+      isCorrupt: true,
+      messageContains: "Disk image is corrupt",
+    },
+    {
+      name: "generic 'cannot open disk image'",
+      output: "cannot open disk image /path/to/some.img",
+      isCorrupt: true,
+      messageContains: "Disk image error",
+    },
+    {
+      name: "corrupt disk image variant",
+      output: "disk image userdata-qemu.img is corrupt",
+      isCorrupt: true,
+      messageContains: "Disk image error",
+    },
+    {
+      name: "QEMU abnormal exit with lowercase qcow2 context",
+      output: "some stuff\nqcow2 header invalid\nWARNING | QEMU main loop exits abnormally with code 1",
+      isCorrupt: true,
+      messageContains: "QEMU exited abnormally",
+    },
+    {
+      name: "QEMU abnormal exit with lowercase 'qcow2 metadata error' IS detected",
+      output: "qcow2 metadata error\nWARNING | QEMU main loop exits abnormally with code 1",
+      isCorrupt: true,
+      messageContains: "QEMU exited abnormally",
+    },
+    {
+      // ★ Case boundary: identical to the row above except the marker is
+      // UPPERCASE. The QEMU branch's case-sensitive includes() misses it, so it
+      // is NOT flagged corrupt — the documented inconsistency with the /i branches.
+      name: "QEMU abnormal exit with UPPERCASE 'QCOW2 METADATA ERROR' is NOT detected (case-sensitive branch)",
+      output: "QCOW2 METADATA ERROR\nWARNING | QEMU main loop exits abnormally with code 1",
+      isCorrupt: false,
+    },
+    {
+      name: "normal boot output",
+      output: "INFO | emuDirName: Pixel_9_Pro\nHax is enabled\nDetected GPU type: host",
+      isCorrupt: false,
+    },
+    {
+      name: "empty output",
+      output: "",
+      isCorrupt: false,
+    },
+    {
+      name: "QEMU abnormal exit without any corruption context",
+      output: "WARNING | QEMU main loop exits abnormally with code 1",
+      isCorrupt: false,
+    },
+  ];
 
-    const result = client.detectCorruptImage(output);
-    expect(result.isCorrupt).toBe(true);
-    expect(result.message).toContain("corrupt");
-    expect(result.suggestion).toContain("userdata");
-  });
+  for (const row of rows) {
+    test(`detectCorruptImage: ${row.name}`, () => {
+      const result = client.detectCorruptImage(row.output);
 
-  test("detects generic disk image open failure", () => {
-    const output = "cannot open disk image /path/to/some.img";
-
-    const result = client.detectCorruptImage(output);
-    expect(result.isCorrupt).toBe(true);
-    expect(result.message).toContain("Disk image error");
-  });
-
-  test("detects corrupt disk image variant", () => {
-    const output = "disk image userdata-qemu.img is corrupt";
-
-    const result = client.detectCorruptImage(output);
-    expect(result.isCorrupt).toBe(true);
-    expect(result.message).toContain("Disk image error");
-  });
-
-  test("detects QEMU abnormal exit with corruption context", () => {
-    const output = `some stuff
-qcow2 header invalid
-WARNING | QEMU main loop exits abnormally with code 1`;
-
-    const result = client.detectCorruptImage(output);
-    expect(result.isCorrupt).toBe(true);
-    expect(result.message).toContain("QEMU exited abnormally");
-  });
-
-  test("returns false for normal output", () => {
-    const output = `INFO | emuDirName: Pixel_9_Pro
-Hax is enabled
-Detected GPU type: host`;
-
-    const result = client.detectCorruptImage(output);
-    expect(result.isCorrupt).toBe(false);
-    expect(result.message).toBeUndefined();
-  });
-
-  test("returns false for empty output", () => {
-    const result = client.detectCorruptImage("");
-    expect(result.isCorrupt).toBe(false);
-  });
-
-  test("returns false for QEMU abnormal exit without corruption context", () => {
-    const output = "WARNING | QEMU main loop exits abnormally with code 1";
-
-    const result = client.detectCorruptImage(output);
-    expect(result.isCorrupt).toBe(false);
-  });
+      expect(result.isCorrupt).toBe(row.isCorrupt);
+      if (row.isCorrupt) {
+        expect(result.message).toContain(row.messageContains as string);
+        expect(result.suggestion).toBeDefined();
+      } else {
+        expect(result.message).toBeUndefined();
+      }
+    });
+  }
 });
 
 describe("AndroidEmulatorClient startEmulator corrupt image integration", () => {
@@ -213,14 +255,10 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
     skipEmulatorPathDetection(client);
 
-    try {
-      await client.startEmulator("Pixel_9_Pro");
-      expect(true).toBe(false); // Should not reach here
-    } catch (error: any) {
-      expect(error.message).toContain("corrupt");
-      expect(error.message).toContain("Suggestion");
-      expect(error.message).toContain("userdata");
-    }
+    const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
+    expect(error.message).toContain("corrupt");
+    expect(error.message).toContain("Suggestion");
+    expect(error.message).toContain("userdata");
   });
 
   test("returns null (not a fabricated handle) when the spawn exits with 'Running multiple emulators with the same AVD'", async () => {
@@ -275,12 +313,8 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
     skipEmulatorPathDetection(client);
 
-    try {
-      await client.startEmulator("Pixel_9_Pro");
-      expect(true).toBe(false);
-    } catch (error: any) {
-      expect(error.message).toContain("exited with code: 1");
-    }
+    const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
+    expect(error.message).toContain("exited with code: 1");
   });
 
   test("uses spawned process output deviceId to target readiness when AVD name is unavailable", async () => {
@@ -366,13 +400,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       fakeChild.emit("exit", 1);
     });
 
-    try {
-      await client.waitForEmulatorReady("Pixel_9_Pro", 60000, fakeChild);
-      expect(true).toBe(false); // Should not reach here
-    } catch (error: any) {
-      expect(error.message).toContain("corrupt");
-      expect(error.message).toContain("Suggestion");
-    }
+    const error = await expectRejection(client.waitForEmulatorReady("Pixel_9_Pro", 60000, fakeChild));
+    expect(error.message).toContain("corrupt");
+    expect(error.message).toContain("Suggestion");
   });
 
   test("throws with exit code when child process exits non-zero without known pattern", async () => {
@@ -394,12 +424,8 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       fakeChild.emit("exit", 1);
     });
 
-    try {
-      await client.waitForEmulatorReady("Pixel_9_Pro", 60000, fakeChild);
-      expect(true).toBe(false);
-    } catch (error: any) {
-      expect(error.message).toContain("exited with code 1");
-    }
+    const error = await expectRejection(client.waitForEmulatorReady("Pixel_9_Pro", 60000, fakeChild));
+    expect(error.message).toContain("exited with code 1");
   });
 
   test("works normally without child process (backward compatible)", async () => {
@@ -415,12 +441,8 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     skipEmulatorPathDetection(client);
 
     // Without child process, should just timeout normally
-    try {
-      await client.waitForEmulatorReady("Pixel_9_Pro", 100);
-      expect(true).toBe(false);
-    } catch (error: any) {
-      expect(error.message).toContain("failed to become ready within 100ms");
-    }
+    const error = await expectRejection(client.waitForEmulatorReady("Pixel_9_Pro", 100));
+    expect(error.message).toContain("failed to become ready within 100ms");
   });
 
   test("waits for Android boot-complete signals before reporting readiness", async () => {
@@ -488,17 +510,10 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
     skipEmulatorPathDetection(client);
 
-    try {
-      await client.waitForEmulatorReady(
-        "am-api33-ga-arm64",
-        100,
-        null,
-        "emulator-5556",
-      );
-      expect(true).toBe(false);
-    } catch (error: any) {
-      expect(error.message).toContain("failed to become ready within 100ms");
-    }
+    const error = await expectRejection(
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, null, "emulator-5556")
+    );
+    expect(error.message).toContain("failed to become ready within 100ms");
     expect(scopedFactory.commandLog.some(command => command.startsWith("emulator-5556:get-state"))).toBe(false);
   });
 

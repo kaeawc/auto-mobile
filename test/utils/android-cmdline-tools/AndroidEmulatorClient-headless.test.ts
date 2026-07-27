@@ -12,6 +12,21 @@ import { ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import { Readable } from "stream";
 
+/**
+ * REWRITE-5: await a promise that MUST reject, returning its Error. Replaces the
+ * `try { await p; expect(true).toBe(false); } catch (e) {...}` sentinel whose
+ * failure assertion is swallowed by its own catch and re-checked against a
+ * misleading message; this fails loudly and clearly when the promise resolves.
+ */
+async function expectRejection(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+  throw new Error("Expected the operation to reject, but it resolved");
+}
+
 class TestAdbClientFactory implements AdbClientFactory {
   constructor(private readonly fakeExecutor: FakeAdbExecutor) {}
 
@@ -96,7 +111,12 @@ describe("AndroidEmulatorClient detectDisplayError", () => {
     const output = 'Info: Could not load the Qt platform plugin "xcb" in "" even though it was found.';
     const result = client.detectDisplayError(output);
     expect(result.isDisplayError).toBe(true);
-    expect(result.message).toBeDefined();
+    // REWRITE-4: pin the exact surfaced message, not merely that one exists.
+    // toBeDefined() passes for any string, so it could not catch a message that
+    // regressed to the opaque "exited with code: null" this branch exists to avoid.
+    expect(result.message).toBe(
+      "Emulator could not connect to a display (Qt 'xcb' platform plugin failed to load)"
+    );
   });
 
   test("returns false for normal startup output", () => {
@@ -233,9 +253,10 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     skipEmulatorPathDetection(client);
 
     try {
-      await client.startEmulator("Pixel_9_Pro");
-      expect(true).toBe(false); // should not reach here
-    } catch (error: any) {
+      // REWRITE-5: expectRejection fails loudly if startEmulator resolves,
+      // instead of a `expect(true).toBe(false)` sentinel that the catch swallows
+      // and re-reports against a misleading assertion-error message.
+      const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
       expect(error.message).toContain("display");
       expect(error.message).toContain("AUTOMOBILE_EMULATOR_HEADLESS");
       expect(error.message).not.toBe("Emulator process exited with code: null");

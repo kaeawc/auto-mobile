@@ -29,26 +29,21 @@ describe("Android Command Line Tools - Detection", () => {
   });
 
   describe("ANDROID_TOOLS registry", () => {
-    test("should contain all expected tools", () => {
-      expect(ANDROID_TOOLS).toHaveProperty("apkanalyzer");
-      expect(ANDROID_TOOLS).toHaveProperty("avdmanager");
-      expect(ANDROID_TOOLS).toHaveProperty("sdkmanager");
-      expect(ANDROID_TOOLS).toHaveProperty("lint");
-      expect(ANDROID_TOOLS).toHaveProperty("screenshot2");
-      expect(ANDROID_TOOLS).toHaveProperty("d8");
-      expect(ANDROID_TOOLS).toHaveProperty("r8");
-      expect(ANDROID_TOOLS).toHaveProperty("resourceshrinker");
-      expect(ANDROID_TOOLS).toHaveProperty("retrace");
-      expect(ANDROID_TOOLS).toHaveProperty("profgen");
-    });
-
-    test("should have valid tool descriptions", () => {
-      Object.values(ANDROID_TOOLS).forEach((tool: any) => {
-        expect(typeof tool.name).toBe("string");
-        expect(tool.name.length).toBeGreaterThan(0);
-        expect(typeof tool.description).toBe("string");
-        expect(tool.description.length).toBeGreaterThan(0);
-      });
+    test("registers exactly the expected tool ids", () => {
+      // D-7: pin the whole key set. Per-key toHaveProperty could not catch an
+      // added or removed tool; an exact set does.
+      expect(Object.keys(ANDROID_TOOLS).sort()).toEqual([
+        "apkanalyzer",
+        "avdmanager",
+        "d8",
+        "lint",
+        "profgen",
+        "r8",
+        "resourceshrinker",
+        "retrace",
+        "screenshot2",
+        "sdkmanager",
+      ]);
     });
   });
 

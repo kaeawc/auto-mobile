@@ -19,6 +19,9 @@ export class FakeFileDownloader implements FileDownloader {
     this.downloadedUrls.push(url);
     this.downloadedDestinations.push(destination);
     await fs.mkdir(path.dirname(destination), { recursive: true });
+    if (signal?.aborted) {
+      throw new Error(`Download aborted while writing: ${url}`);
+    }
     await fs.writeFile(destination, this.payload);
     this.lastWrittenPath = destination;
   }

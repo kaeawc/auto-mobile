@@ -44,6 +44,19 @@ export const runFileDownloaderContract = (
         .rejects.toThrow(/aborted/i);
       expect(await fs.stat(destination).catch(() => undefined)).toBeUndefined();
     });
+
+    test("rejects a download aborted after it starts without writing a destination", async function() {
+      const controller = new AbortController();
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-download-contract-"));
+      const destination = path.join(tempDir, "payload.txt");
+      const download = makeDownloader(Buffer.from("payload"))
+        .download("https://example.invalid/payload", destination, controller.signal);
+
+      controller.abort();
+
+      await expect(download).rejects.toThrow(/aborted/i);
+      expect(await fs.stat(destination).catch(() => undefined)).toBeUndefined();
+    });
   });
 };
 

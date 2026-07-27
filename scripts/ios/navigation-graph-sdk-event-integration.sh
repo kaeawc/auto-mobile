@@ -71,9 +71,16 @@ curl --fail --silent --show-error --max-time 5 \
   --data "${batch}" \
   "http://127.0.0.1:${ctrl_proxy_port}/sdk-events" >/dev/null
 
-# CtrlProxy polls its SDK endpoint every two seconds after the warm-up observe.
+# Refresh the connected CtrlProxy client after injection. `getNavigationGraph`
+# reads the daemon's persisted graph but does not itself drain `/sdk-events`, so
+# relying on its background poll leaves a race on a busy Simulator runner.
 # Query through the public, daemon-backed tool until the batched events appear.
 for attempt in 1 2 3 4 5; do
+  if ! auto-mobile --debug --cli observe --platform ios --deviceId "${device_id}" >/dev/null; then
+    echo "observe refresh attempt ${attempt} failed; retrying in 2s..." >&2
+    sleep 2
+    continue
+  fi
   if ! graph="$(auto-mobile --debug --cli getNavigationGraph --platform ios --deviceId "${device_id}")"; then
     echo "getNavigationGraph attempt ${attempt} failed; retrying in 2s..." >&2
     sleep 2

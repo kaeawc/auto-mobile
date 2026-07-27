@@ -225,7 +225,13 @@ public protocol GesturePerforming {
 
 extension GesturePerforming {
     public func getScreenshotCapture() throws -> ScreenshotCapture {
-        ScreenshotCapture(data: try getScreenshot(), rotation: getDisplayRotation())
+        let rotationBeforeCapture = getDisplayRotation()
+        let data = try getScreenshot()
+        let rotationAfterCapture = getDisplayRotation()
+        return ScreenshotCapture(
+            data: data,
+            rotation: rotationBeforeCapture == rotationAfterCapture ? rotationAfterCapture : nil
+        )
     }
 
     public func getDisplayRotation() -> Int? {

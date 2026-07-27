@@ -2349,7 +2349,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       if (rotationBeforeExtraction == rotationAfterExtraction) rotationAfterExtraction else null
     // The ADB EXTRACT_HIERARCHY route must carry the #4548 scale metadata too (this route does not
     // add the other device metadata, but the daemon retains scale metadata off any route).
-    val hierarchyWithScaleMetadata = withScaleMetadata(hierarchy?.copy(rotation = rotation), screenDimensions)
+    val hierarchyWithScaleMetadata =
+      withScaleMetadata(hierarchy?.copy(rotation = rotation), screenDimensions)
     if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
       extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
     }

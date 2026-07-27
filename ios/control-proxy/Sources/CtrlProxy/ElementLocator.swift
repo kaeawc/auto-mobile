@@ -534,7 +534,7 @@ public class ElementLocator: ElementLocating {
             // alerts like permission dialogs.
             let (snapshot, keyboardFocusFrame, screenMetrics) = try perfProvider.track("snapshot") {
                 try runOnMainThread {
-                    let rotationBeforeSnapshot = DeviceRotation.current()
+                    let rotationBeforeSnapshot = DeviceRotation.captureSample()
                     let freshApp = XCUIApplication(bundleIdentifier: bundleId)
                     let snap = try freshApp.snapshot()
 
@@ -544,9 +544,12 @@ public class ElementLocator: ElementLocating {
                         .matching(NSPredicate(format: "hasKeyboardFocus == true"))
                         .firstMatch
                     let focusFrame: CGRect? = focused.exists ? focused.frame : nil
-                    let rotationAfterSnapshot = DeviceRotation.current()
+                    let rotationAfterSnapshot = DeviceRotation.captureSample()
                     let bounds = UIScreen.main.bounds
-                    let rotation = rotationBeforeSnapshot == rotationAfterSnapshot ? rotationAfterSnapshot : nil
+                    let rotation = DeviceRotation.stableRotation(
+                        between: rotationBeforeSnapshot,
+                        and: rotationAfterSnapshot
+                    )
 
                     return (
                         snap,
@@ -662,6 +665,7 @@ public class ElementLocator: ElementLocating {
             let rotationAfterHierarchyCapture = try runOnMainThread { DeviceRotation.current() }
             let hierarchyRotation: Int?
             if screenMetrics.rotation == systemAlertCapture.rotation,
+               screenMetrics.rotation == currentScreenMetrics.rotation,
                screenMetrics.rotation == rotationAfterHierarchyCapture
             {
                 hierarchyRotation = screenMetrics.rotation
@@ -752,15 +756,24 @@ public class ElementLocator: ElementLocating {
         ) throws -> (alerts: [UIElementInfo], rotation: Int?) {
             let capture: (alertSnapshots: [XCUIElementSnapshot], rotation: Int?) =
                 try runOnMainThread {
-                    let rotationBeforeSnapshot = DeviceRotation.current()
+                    let rotationBeforeSnapshot = DeviceRotation.captureSample()
                     let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
                     guard let snapshot = try? freshSpringboard.snapshot() else {
-                        return ([], rotationBeforeSnapshot)
+                        let rotationAfterSnapshot = DeviceRotation.captureSample()
+                        return (
+                            [],
+                            DeviceRotation.stableRotation(
+                                between: rotationBeforeSnapshot,
+                                and: rotationAfterSnapshot
+                            )
+                        )
                     }
                     let alertSnapshots = self.collectAlertElements(from: snapshot)
-                    let rotationAfterSnapshot = DeviceRotation.current()
-                    let rotation =
-                        rotationBeforeSnapshot == rotationAfterSnapshot ? rotationAfterSnapshot : nil
+                    let rotationAfterSnapshot = DeviceRotation.captureSample()
+                    let rotation = DeviceRotation.stableRotation(
+                        between: rotationBeforeSnapshot,
+                        and: rotationAfterSnapshot
+                    )
                     return (alertSnapshots, rotation)
                 }
 

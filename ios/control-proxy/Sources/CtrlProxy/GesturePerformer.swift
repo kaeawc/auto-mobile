@@ -12,6 +12,43 @@ import ObjCExceptionCatcher
 /// See `Logging.swift` for the log-level contract shared across CtrlProxy.
 private let gestureLog = Logger(subsystem: ctrlProxyLogSubsystem, category: "GesturePerformer")
 
+/// The orientation and its monotonic device-orientation-change generation at a capture boundary.
+/// Equal endpoint orientations with different generations represent an A→B→A transition.
+struct RotationCaptureSample: Equatable {
+    let rotation: Int?
+    let generation: UInt64
+
+    static func stableRotation(
+        between before: RotationCaptureSample,
+        and after: RotationCaptureSample
+    ) -> Int? {
+        before.rotation == after.rotation && before.generation == after.generation
+            ? after.rotation
+            : nil
+    }
+}
+
+/// Tracks device-orientation notifications independently of capture endpoint samples.
+///
+/// The counter intentionally advances for every notification: even an A→B→A cycle must make
+/// in-flight hierarchy and screenshot geometry untrusted, though their endpoint rotations match.
+final class RotationChangeGeneration {
+    private let lock = NSLock()
+    private var generation: UInt64 = 0
+
+    func captureSample(rotation: Int?) -> RotationCaptureSample {
+        lock.lock()
+        defer { lock.unlock() }
+        return RotationCaptureSample(rotation: rotation, generation: generation)
+    }
+
+    func recordOrientationChange() {
+        lock.lock()
+        generation &+= 1
+        lock.unlock()
+    }
+}
+
 /// Maps platform orientation observations to the rotation epoch shared by hierarchy and screenshot
 /// frames. A value is intentionally absent when the platform cannot identify an interface rotation.
 enum DeviceRotation {
@@ -26,8 +63,32 @@ enum DeviceRotation {
     }
 
     #if canImport(XCTest) && os(iOS)
+        private static let changeGeneration = RotationChangeGeneration()
+        private static let orientationChangeObserver: NSObjectProtocol = {
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            return NotificationCenter.default.addObserver(
+                forName: UIDevice.orientationDidChangeNotification,
+                object: UIDevice.current,
+                queue: nil
+            ) { _ in
+                changeGeneration.recordOrientationChange()
+            }
+        }()
+
         static func current() -> Int? {
             fromInterfaceOrientation(currentInterfaceOrientation(fallback: .unknown))
+        }
+
+        static func captureSample() -> RotationCaptureSample {
+            _ = orientationChangeObserver
+            return changeGeneration.captureSample(rotation: current())
+        }
+
+        static func stableRotation(
+            between before: RotationCaptureSample,
+            and after: RotationCaptureSample
+        ) -> Int? {
+            RotationCaptureSample.stableRotation(between: before, and: after)
         }
 
         static func fromInterfaceOrientation(_ orientation: UIInterfaceOrientation) -> Int? {
@@ -952,10 +1013,13 @@ public class GesturePerformer: GesturePerforming {
             }
 
             return try runOnMainThread {
-                let rotationBeforeCapture = DeviceRotation.current()
+                let rotationBeforeCapture = DeviceRotation.captureSample()
                 let screenshot = app.screenshot()
-                let rotationAfterCapture = DeviceRotation.current()
-                let rotation = rotationBeforeCapture == rotationAfterCapture ? rotationAfterCapture : nil
+                let rotationAfterCapture = DeviceRotation.captureSample()
+                let rotation = DeviceRotation.stableRotation(
+                    between: rotationBeforeCapture,
+                    and: rotationAfterCapture
+                )
                 return ScreenshotCapture(data: screenshot.pngRepresentation, rotation: rotation)
             }
         }

@@ -173,6 +173,35 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getCurrentFrameContext("emulator-5554")).toBeUndefined();
     });
 
+    it("does not let a completed explicit observation replace a newer live frame context", async () => {
+      let resolveObservation: ((observations: RequestedObservation[]) => void) | undefined;
+      server.setOnObservationRequested(() => new Promise(resolve => {
+        resolveObservation = resolve;
+      }));
+      const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
+
+      const request = server.processLineForTest(socket, JSON.stringify({
+        id: "obs-race",
+        command: "request_observation",
+        deviceId: "emulator-5554",
+      }));
+      await Promise.resolve();
+      expect(resolveObservation).toBeDefined();
+
+      server.pushHierarchyUpdate(
+        "emulator-5554",
+        requestedObservation("emulator-5554", "frame-B").observation.viewHierarchy!,
+        "frame-B"
+      );
+      resolveObservation!([requestedObservation("emulator-5554", "frame-A")]);
+      await request;
+
+      expect(server.getCurrentFrameContext("emulator-5554")).toBe("frame-B");
+      expect(socket.getWrittenMessages<{ type: string }>().filter(message =>
+        message.type === "hierarchy_update"
+      )).toHaveLength(1);
+    });
+
     it("returns error when no observation callback is configured", async () => {
       const socket = new FakeSocket();
 

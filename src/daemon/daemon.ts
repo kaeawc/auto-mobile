@@ -929,7 +929,12 @@ export class Daemon {
       getLatestHierarchy: (...args) => client.getLatestHierarchy(...args),
       requestHierarchySyncWithoutObservationStreamPush: async (...args) => {
         const result = await client.requestHierarchySyncWithoutObservationStreamPush(...args);
-        return result ? { hierarchy: result.hierarchy } : null;
+        return result
+          ? {
+            hierarchy: result.hierarchy,
+            ...(result.frameContext === undefined ? {} : { frameContext: result.frameContext }),
+          }
+          : null;
       },
       convertToViewHierarchyResult: hierarchy =>
         client.convertToViewHierarchyResult(hierarchy as never),

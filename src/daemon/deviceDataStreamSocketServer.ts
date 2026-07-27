@@ -282,6 +282,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   /** Most recent device-authored identity received for each device. Kept even when no IDE is
    * subscribed: daemon-side input validation must not depend on an inspector being open. */
   private readonly currentFrameContexts = new Map<string, string>();
+  /** Incremented for every hierarchy accepted from a device, including contextless frames. */
+  private readonly frameContextGenerations = new Map<string, number>();
 
   getCurrentFrameContext(deviceId: string): string | undefined {
     return this.currentFrameContexts.get(deviceId);
@@ -352,6 +354,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * Push a hierarchy update to all subscribers interested in this device.
    */
   pushHierarchyUpdate(deviceId: string, hierarchy: ViewHierarchyResult, frameContext?: string): number | null {
+    this.frameContextGenerations.set(
+      deviceId,
+      (this.frameContextGenerations.get(deviceId) ?? 0) + 1
+    );
     if (frameContext !== undefined) {
       this.currentFrameContexts.set(deviceId, frameContext);
     } else {
@@ -897,6 +903,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
 
     try {
+      const frameContextGenerationsAtStart = new Map(this.frameContextGenerations);
       const observations = await this.requestObservationWithTimeout({
         deviceId: request.deviceId ?? null,
         requestId: request.id,
@@ -914,6 +921,15 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         const hierarchy = observation.viewHierarchy;
         if (!hierarchy) {
           failures.push(this.describeMissingHierarchy(deviceId, observation));
+          continue;
+        }
+        if (
+          (this.frameContextGenerations.get(deviceId) ?? 0)
+          !== (frameContextGenerationsAtStart.get(deviceId) ?? 0)
+        ) {
+          logger.debug(
+            `[DeviceDataStream] Skipped stale explicit observation for ${deviceId}; a newer hierarchy arrived`
+          );
           continue;
         }
         this.pushHierarchyUpdate(deviceId, hierarchy, hierarchy.frameContext);

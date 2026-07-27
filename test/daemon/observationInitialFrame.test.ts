@@ -600,6 +600,33 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     });
   });
 
+  it("forwards the synchronous iOS hierarchy context when the initial cache is empty", async () => {
+    const streamServer = new FakeObservationStreamServer();
+    const iosClient = new FakeIosInitialFrameClient(
+      true,
+      null,
+      {
+        updatedAt: 789,
+        packageName: "com.example",
+        screenWidth: 390,
+        screenHeight: 844,
+        screenScale: 3,
+        hierarchy: { text: "Cold start" },
+        frameContext: "ios-sync",
+      } as any
+    );
+
+    await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
+      streamServer,
+      androidClientFactory: () => {
+        throw new Error("unexpected Android client");
+      },
+      iosClientFactory: () => iosClient,
+    });
+
+    expect(streamServer.hierarchyUpdates[0].frameContext).toBe("ios-sync");
+  });
+
   it("does not seed iOS subscribers from stale cached hierarchy", async () => {
     const streamServer = new FakeObservationStreamServer();
     const iosClient = new FakeIosInitialFrameClient(

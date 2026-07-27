@@ -943,6 +943,7 @@ fun AutoMobileContent(
             // resolution change can never supply the bounds a tap is mapped through — however few
             // milliseconds behind it is (issue #3348).
             captureSequence = update.captureSequence,
+            captureRotation = update.rotation,
           )
         }
       }
@@ -982,6 +983,7 @@ fun AutoMobileContent(
           generation = generation,
           // Pairs by equality against the hierarchy's id; see the hierarchy collector above.
           captureSequence = update.captureSequence,
+          rotation = update.rotation,
         )
       }
     }
@@ -1644,6 +1646,7 @@ fun AutoMobileContent(
                       receivedAtMs = frame.receivedAtMs,
                       width = frame.bitmap.width,
                       height = frame.bitmap.height,
+                      rotation = frame.rotation,
                     )
                   },
               )

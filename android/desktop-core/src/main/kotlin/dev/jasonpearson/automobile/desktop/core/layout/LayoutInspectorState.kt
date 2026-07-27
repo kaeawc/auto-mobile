@@ -98,6 +98,10 @@ class LayoutInspectorState(
   var renderedDeviceId by mutableStateOf<String?>(null)
     private set
 
+  /** Device rotation reported when the currently rendered screenshot was captured. */
+  var renderedScreenshotRotation by mutableStateOf<Int?>(null)
+    private set
+
   // Device id the currently applied hierarchy came from (issue #3347). Distinct from
   // [renderedDeviceId] because clicks are mapped using the hierarchy root bounds, and the hierarchy
   // stream is debounced (~100ms) independently of the screenshot: right after a device switch the
@@ -256,6 +260,7 @@ class LayoutInspectorState(
     deviceId: String? = null,
     generation: Long? = null,
     captureSequence: Long? = null,
+    rotation: Int? = null,
   ) {
     if (generation != null && generation != this.generation) return
     screenshotData = data
@@ -267,6 +272,7 @@ class LayoutInspectorState(
     screenshotFormat = format
     screenshotCaptureSource = captureSource
     renderedDeviceId = deviceId
+    renderedScreenshotRotation = rotation
     screenshotFacts =
       ScreenshotFrameFacts(
         deviceId = deviceId,
@@ -278,6 +284,7 @@ class LayoutInspectorState(
         // Pair the pixels into the facts, so a snapshot built from them owns the frame it
         // describes and a retained snapshot can render its own bytes (issue #3348).
         data = data,
+        rotation = rotation,
       )
   }
 
@@ -291,6 +298,7 @@ class LayoutInspectorState(
     newRotation: Int = 0,
     deviceId: String? = null,
     captureSequence: Long? = null,
+    captureRotation: Int? = null,
   ) {
     // Cancel any queued debounced update so a stale, later-firing job can't overwrite this
     // immediate
@@ -298,7 +306,7 @@ class LayoutInspectorState(
     debounceJob?.cancel()
     val parsed = buildParsedHierarchy(newHierarchy).copy(rotation = newRotation)
     val changedIds = computeChangedElements(currentElementMap, parsed.elementMap)
-    applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, captureSequence)
+    applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, captureSequence, captureRotation)
   }
 
   /**
@@ -315,6 +323,7 @@ class LayoutInspectorState(
     deviceId: String? = null,
     generation: Long? = null,
     captureSequence: Long? = null,
+    captureRotation: Int? = null,
   ) {
     debounceJob?.cancel()
     debounceJob = debounceScope.launch {
@@ -322,7 +331,7 @@ class LayoutInspectorState(
       // Drop a debounced job whose generation was superseded while it waited (device change,
       // invalidation, or disconnect) so it can't restore stale hierarchy identity/bounds.
       if (generation != null && generation != this@LayoutInspectorState.generation) return@launch
-      applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, captureSequence)
+      applyHierarchyUpdateImmediate(parsed, changedIds, deviceId, captureSequence, captureRotation)
     }
   }
 
@@ -336,6 +345,7 @@ class LayoutInspectorState(
     changedIds: Set<String>,
     deviceId: String? = null,
     captureSequence: Long? = null,
+    captureRotation: Int? = null,
   ) {
     changedElementIds = changedIds
     currentParsedHierarchy = parsed
@@ -353,6 +363,7 @@ class LayoutInspectorState(
         // renderer does.
         rootWidth = parsed.root.bounds.width.takeIf { it > 0 } ?: 0,
         rootHeight = parsed.root.bounds.height.takeIf { it > 0 } ?: 0,
+        rotation = captureRotation,
       )
 
     // Clear selection if the selected element no longer exists — O(1) map check
@@ -389,6 +400,7 @@ class LayoutInspectorState(
     debounceJob?.cancel()
     advanceGeneration()
     renderedDeviceId = null
+    renderedScreenshotRotation = null
     renderedHierarchyDeviceId = null
     // Drop the provenance too: with no facts there is no snapshot, so device control fails closed
     // to inspector mode (issue #3348) while the frame itself stays visible for inspection.
@@ -461,6 +473,7 @@ class LayoutInspectorState(
     screenshotFormat = null
     screenshotCaptureSource = null
     renderedDeviceId = null
+    renderedScreenshotRotation = null
     renderedHierarchyDeviceId = null
     screenshotFacts = null
     hierarchyFacts = null

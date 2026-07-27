@@ -949,6 +949,8 @@ public struct ViewHierarchy: Codable {
     public let pixelWidth: Int?
     /// Physical screenshot pixel height: `round(screenHeight * nativeScale)` (#4548).
     public let pixelHeight: Int?
+    /// Device display rotation captured with this hierarchy: Android-compatible 0...3.
+    public let rotation: Int?
     public let systemInsets: EdgeInsetsInfo?
     public let insets: ObservationInsetsInfo
     public let error: String?
@@ -966,6 +968,7 @@ public struct ViewHierarchy: Codable {
         nativeScale: Float? = nil,
         pixelWidth: Int? = nil,
         pixelHeight: Int? = nil,
+        rotation: Int? = nil,
         systemInsets: EdgeInsetsInfo? = nil,
         insets: ObservationInsetsInfo = .unavailable,
         error: String? = nil,
@@ -982,6 +985,7 @@ public struct ViewHierarchy: Codable {
         self.nativeScale = nativeScale
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
+        self.rotation = rotation
         self.systemInsets = systemInsets
         self.insets = insets
         self.error = error
@@ -1203,13 +1207,23 @@ public struct ScreenshotResponse: Codable {
     public let data: String // Base64 encoded
     public let frameContext: String?
 
-    public init(requestId: String?, data: String, format: String = "png", frameContext: String? = nil) {
+    /// Display rotation at screenshot capture: Android-compatible 0..3, nil when unavailable.
+    public let rotation: Int?
+
+    public init(
+        requestId: String?,
+        data: String,
+        format: String = "png",
+        rotation: Int? = nil,
+        frameContext: String? = nil
+    ) {
         type = "screenshot"
         timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.format = format
         self.data = data
         self.frameContext = frameContext
+        self.rotation = rotation
     }
 }
 

@@ -94,6 +94,8 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
   screenshotBase64?: string;
   screenWidth?: number;
   screenHeight?: number;
+  /** Device display rotation captured with this hierarchy or screenshot frame. */
+  rotation?: number;
   navigationGraph?: NavigationGraphStreamData;
   performanceData?: PerformanceStreamData;
   storageEvent?: StorageChangedEvent;
@@ -187,6 +189,8 @@ interface PushScreenshotOptions {
    */
   coordinateSpace?: CoordinateSpace;
   frameContext?: string;
+  /** Device rotation reported by the platform when this screenshot was captured. */
+  rotation?: number;
 }
 
 /**
@@ -399,6 +403,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       captureSequence,
       ...(scaleMetadata ? { coordinateSpace: COORDINATE_SPACE_PX } : {}),
       frameContext,
+      rotation: hierarchy.rotation,
     };
 
     const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
@@ -459,6 +464,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       captureSequence: claimMatchesPixels ? options.captureSequence : undefined,
       ...(options.coordinateSpace ? { coordinateSpace: options.coordinateSpace } : {}),
       frameContext: options.frameContext,
+      rotation: options.rotation,
       screenshotMimeType,
       screenshotFormat,
       screenshotCaptureSource,

@@ -119,6 +119,14 @@ final class ForegroundTracker {
 /// Locates elements using XCUITest APIs and returns Android-compatible format
 /// Applies filtering similar to Android's ViewHierarchyExtractor to reduce hierarchy size
 public class ElementLocator: ElementLocating {
+    private struct ScreenMetrics {
+        let scale: Float
+        let nativeScale: Float
+        let fallbackWidth: Int
+        let fallbackHeight: Int
+        let rotation: Int?
+    }
+
     // MARK: - Filtering Constants
 
     /// Maximum depth to traverse (prevent infinite recursion)
@@ -524,19 +532,32 @@ public class ElementLocator: ElementLocating {
             // IMPORTANT: Create a FRESH XCUIApplication instance for each snapshot to avoid
             // stale accessibility cache. Cached instances may not reflect system-presented
             // alerts like permission dialogs.
-            let (snapshot, keyboardFocusFrame) = try perfProvider.track("snapshot") {
+            let (snapshot, keyboardFocusFrame, screenMetrics) = try perfProvider.track("snapshot") {
                 try runOnMainThread {
-                    let freshApp = XCUIApplication(bundleIdentifier: bundleId)
-                    let snap = try freshApp.snapshot()
+                    let capture = try DeviceRotation.capture {
+                        let freshApp = XCUIApplication(bundleIdentifier: bundleId)
+                        let snap = try freshApp.snapshot()
 
-                    // Query keyboard focus via predicate — snapshot.hasFocus reflects
-                    // UIKit focus (tvOS/iPad), not keyboard input focus on iPhone.
-                    let focused = freshApp.descendants(matching: .any)
-                        .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                        .firstMatch
-                    let focusFrame: CGRect? = focused.exists ? focused.frame : nil
+                        // Query keyboard focus via predicate — snapshot.hasFocus reflects
+                        // UIKit focus (tvOS/iPad), not keyboard input focus on iPhone.
+                        let focused = freshApp.descendants(matching: .any)
+                            .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                            .firstMatch
+                        let focusFrame: CGRect? = focused.exists ? focused.frame : nil
+                        return (snap, focusFrame, UIScreen.main.bounds)
+                    }
 
-                    return (snap, focusFrame)
+                    return (
+                        capture.value.0,
+                        capture.value.1,
+                        ScreenMetrics(
+                            scale: Float(UIScreen.main.scale),
+                            nativeScale: Float(UIScreen.main.nativeScale),
+                            fallbackWidth: Int(capture.value.2.width),
+                            fallbackHeight: Int(capture.value.2.height),
+                            rotation: capture.rotation
+                        )
+                    )
                 }
             }
 
@@ -585,16 +606,16 @@ public class ElementLocator: ElementLocating {
             // 1. Alerts in the app's own snapshot tree (permission dialogs presented within the app)
             // 2. Alerts in SpringBoard's tree (system dialogs managed by SpringBoard)
             // System permission dialogs may appear in either location depending on iOS version.
-            let systemAlerts = try perfProvider.track("systemAlerts") {
+            let systemAlertCapture = try perfProvider.track("systemAlerts") {
                 try getSystemAlerts(appSnapshot: snapshot, keyboardFocusFrame: keyboardFocusFrame)
             }
 
             // If there are system alerts, include them in the hierarchy
             let finalHierarchy: UIElementInfo
-            if !systemAlerts.isEmpty {
+            if !systemAlertCapture.alerts.isEmpty {
                 // Create a wrapper that contains both the app hierarchy and alerts
                 var children = rootElement.node ?? []
-                children.append(contentsOf: systemAlerts)
+                children.append(contentsOf: systemAlertCapture.alerts)
                 finalHierarchy = UIElementInfo(
                     text: rootElement.text,
                     resourceId: rootElement.resourceId,
@@ -622,22 +643,40 @@ public class ElementLocator: ElementLocating {
             // Display Zoom changes nativeScale while scale stays put, and
             // XCUIScreenshot.pngRepresentation renders at native scale (#4548). screenScale
             // (UIScreen.scale) is still reported unchanged for backward compatibility.
-            let (screenScale, nativeScale, fallbackWidth, fallbackHeight): (Float, Float, Int, Int) =
-                try runOnMainThread {
-                    let scale = Float(UIScreen.main.scale)
-                    let native = Float(UIScreen.main.nativeScale)
-                    let bounds = UIScreen.main.bounds
-                    return (scale, native, Int(bounds.width), Int(bounds.height))
-                }
+            let currentScreenMetrics: ScreenMetrics = try runOnMainThread {
+                let scale = Float(UIScreen.main.scale)
+                let nativeScale = Float(UIScreen.main.nativeScale)
+                let bounds = UIScreen.main.bounds
+                return ScreenMetrics(
+                    scale: scale,
+                    nativeScale: nativeScale,
+                    fallbackWidth: Int(bounds.width),
+                    fallbackHeight: Int(bounds.height),
+                    rotation: DeviceRotation.current()
+                )
+            }
+            // SpringBoard contributes alert bounds through a second XCUI snapshot. Require its
+            // capture-time orientation and the final sample to agree with the app snapshot; this
+            // makes a rotation anywhere across either hierarchy-producing IPC fail closed.
+            let rotationAfterHierarchyCapture = try runOnMainThread { DeviceRotation.current() }
+            let hierarchyRotation: Int?
+            if screenMetrics.rotation == systemAlertCapture.rotation,
+               screenMetrics.rotation == currentScreenMetrics.rotation,
+               screenMetrics.rotation == rotationAfterHierarchyCapture
+            {
+                hierarchyRotation = screenMetrics.rotation
+            } else {
+                hierarchyRotation = nil
+            }
             let (screenWidth, screenHeight) = ElementLocator.resolveScreenDimensions(
                 rootBounds: finalHierarchy.bounds,
-                fallbackWidth: fallbackWidth,
-                fallbackHeight: fallbackHeight
+                fallbackWidth: currentScreenMetrics.fallbackWidth,
+                fallbackHeight: currentScreenMetrics.fallbackHeight
             )
             let pixelDimensions = ElementLocator.computePixelDimensions(
                 pointWidth: screenWidth,
                 pointHeight: screenHeight,
-                nativeScale: Double(nativeScale)
+                nativeScale: Double(currentScreenMetrics.nativeScale)
             )
 
             return ViewHierarchy(
@@ -645,12 +684,13 @@ public class ElementLocator: ElementLocating {
                 hierarchy: finalHierarchy,
                 windowInfo: windowInfo,
                 windows: [windowInfo],
-                screenScale: screenScale,
+                screenScale: currentScreenMetrics.scale,
                 screenWidth: screenWidth,
                 screenHeight: screenHeight,
-                nativeScale: pixelDimensions == nil ? nil : nativeScale,
+                nativeScale: pixelDimensions == nil ? nil : currentScreenMetrics.nativeScale,
                 pixelWidth: pixelDimensions?.pixelWidth,
                 pixelHeight: pixelDimensions?.pixelHeight,
+                rotation: hierarchyRotation,
                 fallbackToSpringboard: tracker.didFallbackToSpringboard ? true : nil
             )
         }
@@ -662,14 +702,17 @@ public class ElementLocator: ElementLocating {
         /// Alert elements are extracted separately from the main hierarchy tree to ensure
         /// they are always visible as top-level children and never lost to optimization.
         /// Deduplicates by alert label text to avoid showing the same alert twice.
-        private func getSystemAlerts(appSnapshot: XCUIElementSnapshot, keyboardFocusFrame: CGRect? = nil) throws -> [UIElementInfo] {
+        private func getSystemAlerts(
+            appSnapshot: XCUIElementSnapshot,
+            keyboardFocusFrame: CGRect? = nil
+        ) throws -> (alerts: [UIElementInfo], rotation: Int?) {
             // Check for alerts in the app's own snapshot tree
             let appAlerts = collectAlertElements(from: appSnapshot).map { snapshot in
                 buildElementInfoFromSnapshot(snapshot, depth: 0, screenBounds: snapshot.frame, keyboardFocusFrame: keyboardFocusFrame)
             }
 
             // Also check SpringBoard for alerts not in the app's tree
-            let springboardAlerts = try getAlertsFromSpringboard(keyboardFocusFrame: keyboardFocusFrame)
+            let springboardCapture = try getAlertsFromSpringboard(keyboardFocusFrame: keyboardFocusFrame)
 
             // Deduplicate by alert label text
             var seenLabels: Set<String> = []
@@ -683,7 +726,7 @@ public class ElementLocator: ElementLocating {
                 }
             }
 
-            for alert in springboardAlerts {
+            for alert in springboardCapture.alerts {
                 let label = alert.text ?? ""
                 if !seenLabels.contains(label) {
                     seenLabels.insert(label)
@@ -693,25 +736,33 @@ public class ElementLocator: ElementLocating {
 
             if !combined.isEmpty {
                 print(
-                    "[ElementLocator] Found \(combined.count) system alert(s): appAlerts=\(appAlerts.count), springboardAlerts=\(springboardAlerts.count)"
+                    "[ElementLocator] Found \(combined.count) system alert(s): appAlerts=\(appAlerts.count), springboardAlerts=\(springboardCapture.alerts.count)"
                 )
             }
 
-            return combined
+            return (combined, springboardCapture.rotation)
         }
 
         /// Get alerts from a fresh springboard snapshot.
         /// Uses single snapshot() + tree traversal instead of .alerts query which can hang
         /// indefinitely on system permission dialogs, blocking the main thread.
         /// IMPORTANT: Creates a new XCUIApplication each call to avoid stale cached state.
-        private func getAlertsFromSpringboard(keyboardFocusFrame: CGRect? = nil) throws -> [UIElementInfo] {
-            let alertSnapshots: [XCUIElementSnapshot] = try runOnMainThread {
-                let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-                guard let snapshot = try? freshSpringboard.snapshot() else { return [] }
-                return self.collectAlertElements(from: snapshot)
-            }
+        private func getAlertsFromSpringboard(
+            keyboardFocusFrame: CGRect? = nil
+        ) throws -> (alerts: [UIElementInfo], rotation: Int?) {
+            let capture: (alertSnapshots: [XCUIElementSnapshot], rotation: Int?) =
+                try runOnMainThread {
+                    let capture = DeviceRotation.capture { () -> [XCUIElementSnapshot] in
+                        let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                        guard let snapshot = try? freshSpringboard.snapshot() else {
+                            return []
+                        }
+                        return self.collectAlertElements(from: snapshot)
+                    }
+                    return (alertSnapshots: capture.value, rotation: capture.rotation)
+                }
 
-            return alertSnapshots.map { snapshot in
+            let alerts = capture.alertSnapshots.map { snapshot in
                 buildElementInfoFromSnapshot(
                     snapshot,
                     depth: 0,
@@ -719,6 +770,7 @@ public class ElementLocator: ElementLocating {
                     keyboardFocusFrame: keyboardFocusFrame
                 )
             }
+            return (alerts, capture.rotation)
         }
 
         /// Recursively collect alert-type element snapshots from a snapshot tree.

@@ -154,7 +154,7 @@ class DeviceControlSession(
     // stale content could stay actionable indefinitely.
     interactionSnapshot =
       if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
-        retainedIfStillFresh(decision, now)
+        retainedIfStillFresh(decision, inputs, now)
       } else {
         live
       }
@@ -164,20 +164,37 @@ class DeviceControlSession(
   /**
    * The retained frame, or null once it is no longer fresh enough to act on.
    *
-   * Two independent signals retire it, because either alone can be the first to notice: the live
-   * decision reporting [DeviceControlBlockReason.StaleFrame] (the sources stopped producing), and
-   * the retained frame's own age (nothing new has arrived to make the live decision say anything).
+   * Three independent signals retire it, because any can be the first to notice: the live decision
+   * reporting [DeviceControlBlockReason.StaleFrame] (the sources stopped producing), the live
+   * decision reporting [DeviceControlBlockReason.RotationMismatch] (the displayed bounds are no
+   * longer safe to map through), a valid incoming source rotation differing from the retained
+   * snapshot (a partial rotation update can otherwise be unpaired), and the retained frame's own
+   * age (nothing new has arrived to make the live decision say anything).
    */
   private fun retainedIfStillFresh(
     decision: DeviceControlDecision,
+    inputs: DeviceControlInputs,
     nowMs: Long,
   ): DeviceFrameSnapshot? {
     val retained = renderSnapshot ?: return null
-    val blockedForStaleness =
-      (decision as? DeviceControlDecision.Blocked)?.reason == DeviceControlBlockReason.StaleFrame
-    if (blockedForStaleness) return null
+    when ((decision as? DeviceControlDecision.Blocked)?.reason) {
+      DeviceControlBlockReason.StaleFrame,
+      DeviceControlBlockReason.RotationMismatch -> return null
+      else -> Unit
+    }
+    if (inputs.hasProvenRotationDifferentFrom(retained.rotation)) return null
     return retained.takeIf { DeviceControlPolicy.isSnapshotFresh(it, nowMs) }
   }
+
+  /**
+   * A source can arrive before it pairs with its counterpart during a rotation. That unpaired
+   * source still proves the device no longer has [retainedRotation], so retain display pixels if
+   * useful but never retain their old coordinate mapping for a second input.
+   */
+  private fun DeviceControlInputs.hasProvenRotationDifferentFrom(retainedRotation: Int): Boolean =
+    listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation).any {
+      it in 0..3 && it != retainedRotation
+    }
 
   /**
    * Enqueue a tap on [snapshot] at the mapped device coordinate [point], in click order.

@@ -278,6 +278,7 @@ export class CtrlProxyHierarchy {
       // three keys are spread only when the whole tuple is complete-finite-positive, and omitted
       // entirely otherwise — so payloads from pre-#4548 runners stay byte-identical.
       ...screenScaleMetadataSpread(hierarchy),
+      rotation: hierarchy.rotation,
       systemInsets: hierarchy.systemInsets,
       insets: hierarchy.insets,
     };

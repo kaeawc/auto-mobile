@@ -577,8 +577,8 @@ describe("DeviceDataStreamSocketServer", () => {
   };
 
   describe("hierarchy diff annotation", () => {
-    const frame = (text: string) =>
-      ({ hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } } }) as any;
+    const frame = (text: string, rotation: number = 0) =>
+      ({ hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } }, rotation }) as any;
 
     it("reports no baseline and annotates nothing on the first frame", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
@@ -630,13 +630,15 @@ describe("DeviceDataStreamSocketServer", () => {
       // match the geometry the capture client claimed for it.
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
-      const first = server.pushHierarchyUpdate("device-1", frame("a"));
+      const first = server.pushHierarchyUpdate("device-1", frame("a", 0));
       server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340, {}, {
         captureSequence: first ?? undefined,
+        rotation: 0,
       });
-      const second = server.pushHierarchyUpdate("device-1", frame("b"));
+      const second = server.pushHierarchyUpdate("device-1", frame("b", 1));
       server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 720, 1560, {}, {
         captureSequence: second ?? undefined,
+        rotation: 1,
       });
 
       const [h1, s1, h2, s2] = socket
@@ -647,6 +649,10 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(s1.captureSequence).toBe(1);
       expect(h2.captureSequence).toBe(2);
       expect(s2.captureSequence).toBe(2);
+      expect(h1.rotation).toBe(0);
+      expect(s1.rotation).toBe(0);
+      expect(h2.rotation).toBe(1);
+      expect(s2.rotation).toBe(1);
     });
 
     it("omits the capture identity when fresh pixels outran the hierarchy that claimed the geometry", () => {

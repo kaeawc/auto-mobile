@@ -69,6 +69,7 @@
 		AF0C3A37F5AD66261DF7ED24 /* MainThreadRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B8E0FBA4D04484920DA1D03 /* MainThreadRunner.swift */; };
 		B33435D31AF41A6C03499842 /* WebSocketServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC68B1D8C55DA187332B555E /* WebSocketServerTests.swift */; };
 		B55A16F80CE62B998CEBC6E0 /* PerformanceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */; };
+		BD4056F11836FEAB9B99D1AC /* RotationChangeGenerationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0033E307147A024BE2F74149 /* RotationChangeGenerationTests.swift */; };
 		BD627F44D1B9F2D3976AA0EC /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D81453AD074F2A392251CFC3 /* Models.swift */; };
 		BD7D2FF024054ED74F17958D /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D81453AD074F2A392251CFC3 /* Models.swift */; };
 		C1398B388B401E28BC727863 /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA97A6C3A1240A055D9876C /* OSLogReader.swift */; };
@@ -177,6 +178,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0033E307147A024BE2F74149 /* RotationChangeGenerationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotationChangeGenerationTests.swift; sourceTree = "<group>"; };
 		009A6B01284035997298367F /* CtrlProxyUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CtrlProxyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncer.swift; sourceTree = "<group>"; };
 		043D2CA5107B76077BA6301C /* SdkHierarchyCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyCache.swift; sourceTree = "<group>"; };
@@ -303,6 +305,7 @@
 				6FC3D01763F51CE349F7E923 /* PinchFallbackTests.swift */,
 				4EE070E3D058AF5F67D2E1F3 /* PinchGeometryTests.swift */,
 				A158ADBA8E3301E9FF181598 /* RequestSnapshotWireParityTests.swift */,
+				0033E307147A024BE2F74149 /* RotationChangeGenerationTests.swift */,
 				5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */,
 				EA84FDE08DAFEAD66F399887 /* TypedRequestDecodeTests.swift */,
 				AC68B1D8C55DA187332B555E /* WebSocketServerTests.swift */,
@@ -646,6 +649,7 @@
 				F428A1892AAF5D4F83AD4C1B /* PinchFallbackTests.swift in Sources */,
 				74B1E8F78E9FF807417ABC2D /* PinchGeometryTests.swift in Sources */,
 				1E92C9DDBA24968595494BA3 /* RequestSnapshotWireParityTests.swift in Sources */,
+				BD4056F11836FEAB9B99D1AC /* RotationChangeGenerationTests.swift in Sources */,
 				2ABF683DE1AD6578F8EAF168 /* SdkHierarchyCacheTests.swift in Sources */,
 				0F29D59ABFB52692F62B434F /* TypedRequestDecodeTests.swift in Sources */,
 				B33435D31AF41A6C03499842 /* WebSocketServerTests.swift in Sources */,

@@ -14,7 +14,7 @@ interface ParsedDeviceVersion {
 }
 
 function parseDeviceVersion(version: string): ParsedDeviceVersion | null {
-  const match = /^(\d+(?:\.\d+)*)(?:-QPR(\d+))?$/i.exec(version);
+  const match = /^(\d+(?:\.\d+)*)(?:-QPR(\d+))?$/i.exec(version.trim());
   if (!match) {
     return null;
   }

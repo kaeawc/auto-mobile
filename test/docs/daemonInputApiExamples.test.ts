@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { RELEASE_CHECKSUM_REGISTRY } from "../../src/constants/release";
 
 const repoRoot = join(import.meta.dir, "../..");
+const defaultReleaseVersion = RELEASE_CHECKSUM_REGISTRY[0].version;
 
 async function readRepoFile(relativePath: string): Promise<string> {
   return readFile(join(repoRoot, relativePath), "utf-8");
@@ -71,6 +73,7 @@ describe("daemon input API consumer docs", () => {
         x: 240,
         y: 640,
         duration: 50,
+        frameContext: "android-generation-42",
       },
       "input/swipe": {
         platform: "android",
@@ -80,22 +83,26 @@ describe("daemon input API consumer docs", () => {
         endX: 520,
         endY: 500,
         durationMs: 350,
+        frameContext: "android-generation-42",
       },
       "input/pressButton": {
         platform: "android",
         deviceId: "emulator-5554",
         button: "back",
+        frameContext: "android-generation-42",
       },
       "input/typeText": {
         platform: "android",
         deviceId: "emulator-5554",
         text: "hello from socket",
         submit: false,
+        frameContext: "android-generation-42",
       },
       "input/key": {
         platform: "android",
         deviceId: "emulator-5554",
         key: "enter",
+        frameContext: "android-generation-42",
       },
     };
     const expectedResultByMethod: Record<ImplementedInputMethod, Record<string, unknown>> = {
@@ -151,6 +158,48 @@ describe("daemon input API consumer docs", () => {
         result: expectedResultByMethod[method],
       });
     }
+  });
+
+  test("documents frame-context pairing, echoing, and recovery for third-party screen control", async () => {
+    const clientGuide = await readRepoFile("docs/design-docs/mcp/daemon/client-screen-control.md");
+    const snapshotGuide = await readRepoFile("docs/design-docs/mcp/daemon/client-frame-snapshot.md");
+    const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
+
+    expect(clientGuide).toContain('"frameContext": "android-generation-42"');
+    expect(clientGuide).toContain(
+      "`screenshot.frameContext == hierarchy.frameContext`, with both values non-null",
+    );
+    expect(clientGuide).toContain("opaque `frameContext` on every request");
+    expect(clientGuide).toContain("stale-context rejection");
+    expect(clientGuide).toContain("wait for a newly paired snapshot before");
+    expect(clientGuide).toContain("runner that does not publish `frameContext` cannot produce a controllable");
+    expect(clientGuide).toContain(
+      `default \`${defaultReleaseVersion}\` CtrlProxy artifacts predate \`frameContext\``,
+    );
+    expect(clientGuide).toContain("does not yet implement `frameContext` pairing or echoing");
+    expect(clientGuide).toContain("[#4596](https://github.com/kaeawc/auto-mobile/issues/4596)");
+    expect(clientGuide).toContain("having the gesture guarantee");
+    expect(snapshotGuide).toContain(
+      `default \`${defaultReleaseVersion}\` CtrlProxy artifacts predate this protocol`,
+    );
+    expect(snapshotGuide).toContain("Legacy desktop implementation");
+    expect(snapshotGuide).toContain("does not pair or echo `frameContext`");
+    expect(snapshotGuide).toMatch(/not a reference implementation for\s+this protocol/);
+    expect(snapshotGuide).toMatch(
+      /`input\/tap` and `input\/swipe`, the\s+daemon rejects a stale echoed context/,
+    );
+    expect(snapshotGuide).toContain("[#4586](https://github.com/kaeawc/auto-mobile/issues/4586)");
+    expect(unixSocketApi).toContain("`frameContext` | `string` | No |");
+    expect(unixSocketApi).toContain(
+      `default \`${defaultReleaseVersion}\` CtrlProxy artifacts are legacy`,
+    );
+    expect(unixSocketApi).toContain("device-boundary guarantee currently applies to `input/tap` and `input/swipe`");
+    expect(unixSocketApi).toMatch(/"duration": 50,\r?\n    "frameContext": "android-generation-42"/);
+    expect(unixSocketApi).toMatch(/"durationMs": 350,\r?\n    "frameContext": "android-generation-42"/);
+    expect(unixSocketApi).toMatch(/"button": "back",\r?\n    "frameContext": "android-generation-42"/);
+    expect(unixSocketApi).toMatch(/"submit": false,\r?\n    "frameContext": "android-generation-42"/);
+    expect(unixSocketApi).toMatch(/"mode": "append",\r?\n    "frameContext": "android-generation-42"/);
+    expect(unixSocketApi).toMatch(/"key": "enter",\r?\n    "frameContext": "android-generation-42"/);
   });
 
   test("frames direct input as input methods and tools/call as fallback", async () => {

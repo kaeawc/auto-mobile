@@ -11,8 +11,7 @@ New to screen control? Start at the
 becomes a device coordinate. This document specifies the other half a control
 client needs: **which frame that mapping is allowed to run against**, and **what
 the client shows after it forwards an input**. Both are written so a third-party
-daemon client can follow them without reading any Compose code; the desktop
-inspector is the reference implementation.
+daemon client can follow them without reading any Compose code.
 
 ## Why a snapshot
 
@@ -196,12 +195,17 @@ carry screen A's identity and pair with screen A's hierarchy. No client-side
 signal distinguishes this: the dimensions are identical, and the client has no
 visibility into what was on screen at capture time.
 
-Current CtrlProxy runners report an opaque `frameContext` with each hierarchy and
-with a screenshot only when it can prove the hierarchy stayed unchanged across
-pixel capture. A control client requires matching, non-null contexts alongside
-`captureSequence`, then echoes that exact value on `input/*`. The daemon rejects
-a stale or unavailable echo before executing the request. The token is opaque,
-device-specific, and must never be synthesized or compared across reconnects.
+A CtrlProxy runner that supports frame context reports an opaque `frameContext`
+with each hierarchy and with a screenshot only when it can prove the hierarchy
+stayed unchanged across pixel capture. A control client requires matching,
+non-null contexts alongside `captureSequence`, then echoes that exact value on
+`input/*`. The daemon rejects a stale or unavailable echo before executing the
+request. The token is opaque, device-specific, and must never be synthesized or
+compared across reconnects.
+
+The default `0.0.46` CtrlProxy artifacts predate this protocol. A client must
+treat those artifacts as legacy and remain in inspector mode until its runner
+publishes `frameContext`.
 
 The identity source is monotonic for the daemon process's lifetime and is never
 reset, so an id cannot be reused after a device reconnect and collide with a
@@ -317,7 +321,12 @@ Deterministic in every case:
   current: a selected element id that no longer exists in the new hierarchy is
   dropped, which is the pre-existing inspector behavior.
 
-## Reference implementation
+## Legacy desktop implementation
+
+The desktop inspector below implements the earlier capture-sequence policy, but
+does not pair or echo `frameContext`. It is not a reference implementation for
+this protocol until [#4596](https://github.com/kaeawc/auto-mobile/issues/4596)
+lands.
 
 | Concern | Type | Module |
 | --- | --- | --- |
@@ -334,8 +343,7 @@ fakes and no device, socket or real timer.
 
 ## Scope note
 
-This is the **client-side** consolidation. The durable cross-client fix — echoing
-frame identity on `input/*` so the *daemon* rejects stale-context input, which
-protects third-party clients that will not reimplement these rules — is tracked
-separately under [#4505](https://github.com/kaeawc/auto-mobile/issues/4505) and
-[#1099](https://github.com/kaeawc/auto-mobile/issues/1099).
+This is the **client-side** consolidation. For `input/tap` and `input/swipe`, the
+daemon rejects a stale echoed context for every client, including one that does
+not reimplement this policy. Device-boundary validation for the remaining input
+methods is tracked separately under [#4586](https://github.com/kaeawc/auto-mobile/issues/4586).

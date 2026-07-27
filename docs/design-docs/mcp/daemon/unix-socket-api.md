@@ -375,24 +375,28 @@ The examples below send one newline-delimited JSON request over the Unix socket.
 They use the default socket path; replace `platform`, `deviceId`, and coordinates
 with values from your device discovery flow. The short `nc -w` timeout keeps
 these one-shot examples from staying attached to the daemon's long-lived socket
-after the response frame is printed.
+after the response frame is printed. A screen-control client must replace
+`android-generation-42` with the opaque `frameContext` from its paired screenshot
+and hierarchy; it is illustrative and cannot be reused for another frame.
+These `frameContext` examples require a runner that publishes the field; the
+default `0.0.46` CtrlProxy artifacts are legacy and cannot supply one.
 
 ```bash
 export AUTOMOBILE_DAEMON_SOCKET_PATH="${AUTOMOBILE_DAEMON_SOCKET_PATH:-/tmp/auto-mobile-daemon-$(id -u).sock}"
 
-printf '%s\n' '{"id":"tap-1","type":"mcp_request","method":"input/tap","params":{"platform":"android","deviceId":"emulator-5554","x":240,"y":640,"duration":50}}' \
+printf '%s\n' '{"id":"tap-1","type":"mcp_request","method":"input/tap","params":{"platform":"android","deviceId":"emulator-5554","x":240,"y":640,"duration":50,"frameContext":"android-generation-42"}}' \
   | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
 
-printf '%s\n' '{"id":"swipe-1","type":"mcp_request","method":"input/swipe","params":{"platform":"android","deviceId":"emulator-5554","startX":520,"startY":1700,"endX":520,"endY":500,"durationMs":350}}' \
+printf '%s\n' '{"id":"swipe-1","type":"mcp_request","method":"input/swipe","params":{"platform":"android","deviceId":"emulator-5554","startX":520,"startY":1700,"endX":520,"endY":500,"durationMs":350,"frameContext":"android-generation-42"}}' \
   | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
 
-printf '%s\n' '{"id":"button-1","type":"mcp_request","method":"input/pressButton","params":{"platform":"android","deviceId":"emulator-5554","button":"back"}}' \
+printf '%s\n' '{"id":"button-1","type":"mcp_request","method":"input/pressButton","params":{"platform":"android","deviceId":"emulator-5554","button":"back","frameContext":"android-generation-42"}}' \
   | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
 
-printf '%s\n' '{"id":"type-1","type":"mcp_request","method":"input/typeText","params":{"platform":"android","deviceId":"emulator-5554","text":"hello from socket","submit":false}}' \
+printf '%s\n' '{"id":"type-1","type":"mcp_request","method":"input/typeText","params":{"platform":"android","deviceId":"emulator-5554","text":"hello from socket","submit":false,"frameContext":"android-generation-42"}}' \
   | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
 
-printf '%s\n' '{"id":"key-1","type":"mcp_request","method":"input/key","params":{"platform":"android","deviceId":"emulator-5554","key":"enter"}}' \
+printf '%s\n' '{"id":"key-1","type":"mcp_request","method":"input/key","params":{"platform":"android","deviceId":"emulator-5554","key":"enter","frameContext":"android-generation-42"}}' \
   | nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"
 ```
 
@@ -424,9 +428,19 @@ a screenshot; if the UI changes during capture, the screenshot intentionally has
 client must not invent one. This protects same-size navigation as well as rotations and resolution
 changes.
 
+The device-boundary guarantee currently applies to `input/tap` and `input/swipe`. `input/typeText`,
+`input/pressButton`, and `input/key` receive the daemon's latest-observation check only; a UI
+transition before a replacement hierarchy reaches the daemon can still execute those non-gesture
+requests. Android's remaining device-boundary work is tracked in
+[#4586](https://github.com/kaeawc/auto-mobile/issues/4586).
+
 The value is opaque, device-specific, and must only be echoed unchanged. It is not a timestamp,
 not portable across devices or runner restarts, and a client must fail closed when the screenshot
 and hierarchy contexts are absent or unequal.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `frameContext` | `string` | No | Opaque context from the paired screenshot and hierarchy. Screen-control clients echo it on every `input/*` request; generic callers without a rendered frame omit it. |
 
 ### `input/tap`
 
@@ -455,7 +469,8 @@ the current device orientation.
     "deviceId": "emulator-5554",
     "x": 240,
     "y": 640,
-    "duration": 50
+    "duration": 50,
+    "frameContext": "android-generation-42"
   }
 }
 ```
@@ -504,7 +519,8 @@ duration.
     "startY": 1700,
     "endX": 520,
     "endY": 500,
-    "durationMs": 350
+    "durationMs": 350,
+    "frameContext": "android-generation-42"
   }
 }
 ```
@@ -544,7 +560,9 @@ Presses a device or navigation button.
   "method": "input/pressButton",
   "params": {
     "platform": "android",
-    "button": "back"
+    "deviceId": "emulator-5554",
+    "button": "back",
+    "frameContext": "android-generation-42"
   }
 }
 ```
@@ -566,12 +584,12 @@ Presses a device or navigation button.
 Examples for supported Android navigation and hardware actions:
 
 ```json
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "back" } }
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "home" } }
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "app_switch" } }
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "power" } }
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "volume_up" } }
-{ "method": "input/pressButton", "params": { "platform": "android", "button": "volume_down" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "back", "frameContext": "android-generation-42" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "home", "frameContext": "android-generation-42" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "app_switch", "frameContext": "android-generation-42" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "power", "frameContext": "android-generation-42" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "volume_up", "frameContext": "android-generation-42" } }
+{ "method": "input/pressButton", "params": { "platform": "android", "deviceId": "emulator-5554", "button": "volume_down", "frameContext": "android-generation-42" } }
 ```
 
 `app_switch` is the socket API name for the app switcher and maps to the MCP
@@ -678,7 +696,8 @@ but it does not make a timed-out key event atomic.
     "platform": "ios",
     "deviceId": "A1B2C3D4-0000-0000-0000-000000000000",
     "text": "hello",
-    "submit": false
+    "submit": false,
+    "frameContext": "android-generation-42"
   }
 }
 ```
@@ -694,7 +713,8 @@ but it does not make a timed-out key event atomic.
     "platform": "ios",
     "deviceId": "A1B2C3D4-0000-0000-0000-000000000000",
     "text": "a",
-    "mode": "append"
+    "mode": "append",
+    "frameContext": "android-generation-42"
   }
 }
 ```
@@ -753,7 +773,8 @@ Supported key names:
   "params": {
     "platform": "android",
     "deviceId": "emulator-5554",
-    "key": "enter"
+    "key": "enter",
+    "frameContext": "android-generation-42"
   }
 }
 ```

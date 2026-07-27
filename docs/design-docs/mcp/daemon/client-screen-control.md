@@ -13,14 +13,14 @@ The contract is deliberately published rather than kept as private UI detail, be
 **desktop app is not the only consumer**: any client that speaks the daemon's Unix-socket
 `input/*` protocol can implement the same control surface. Everything a third-party author needs
 is on this page or in the documents it links; **you do not need to read any Compose or
-Kotlin source to implement a correct client.** The desktop inspector is merely the reference
-implementation.
+Kotlin source to implement a correct client.** The desktop app is a consumer, but it is not yet a
+conforming `frameContext` reference implementation.
 
 ## What talks to the daemon (and what does not)
 
 | Consumer | Uses screen control? |
 | --- | --- |
-| Desktop app (`android/desktop-app`) | **Yes** — the reference control client. |
+| Desktop app (`android/desktop-app`) | **Yes** — legacy frame-context integration; see [#4596](https://github.com/kaeawc/auto-mobile/issues/4596). |
 | Third-party daemon clients | **Yes** — the audience for this document. |
 | IntelliJ / Android Studio plugin (`android/ide-plugin`) | **No — inspector only.** |
 
@@ -116,7 +116,8 @@ never answers pings is disconnected in that window — even while it is happily 
 Every push carries a `type`, the `deviceId` it belongs to, and a display-only `timestamp`. Pair
 frames **only** across messages with the same `deviceId`.
 
-**`hierarchy_update`** — the element tree. Carries a `captureSequence` on **every** message.
+**`hierarchy_update`** — the element tree. Carries a `captureSequence` and, on current
+CtrlProxy runners, a device-authored `frameContext`.
 
 ```json
 {
@@ -126,6 +127,7 @@ frames **only** across messages with the same `deviceId`.
   "data": { "hierarchy": { "…": "ViewHierarchyResult with element bounds" } },
   "hierarchyDiff": { "…": "optional per-frame diff summary" },
   "captureSequence": 42,
+  "frameContext": "android-generation-42",
   "coordinateSpace": "px"
 }
 ```
@@ -143,6 +145,7 @@ field is **absent** and a control client must fail closed for that frame.
   "screenWidth": 1080,
   "screenHeight": 2340,
   "captureSequence": 42,
+  "frameContext": "android-generation-42"
   "coordinateSpace": "px"
 }
 ```
@@ -205,19 +208,33 @@ also what lets the retained-frame rule below notice a transition *into* an unkno
 
 ### Pairing and the active device
 
-- **Pair on `captureSequence`, never on `timestamp`.** A screenshot and a hierarchy describe the
-  same captured device state only when their `captureSequence` values are **equal**. `timestamp` is
+- **Pair on both identities, never on `timestamp`.** A screenshot and a hierarchy describe the
+  same captured device state only when their `captureSequence` values are **equal** and
+  `screenshot.frameContext == hierarchy.frameContext`, with both values non-null. `timestamp` is
   display-only and mixes two clocks (a hierarchy's is the device wall clock, a screenshot's is the
   daemon's), so it must not gate pairing. `captureSequence` is monotonic and never reset for the
-  daemon process lifetime, so an id cannot be reused across a device reconnect. A `screenshot_update`
-  with **no** `captureSequence` cannot be paired — fail closed. The full rationale and the rest of
-  the availability rules are in [Client Frame Snapshot](client-frame-snapshot.md).
+  daemon process lifetime, so an id cannot be reused across a device reconnect. A
+  `screenshot_update` with no `captureSequence` or with a missing/mismatched `frameContext` cannot
+  be paired — fail closed. The full rationale and the rest of the availability rules are in
+  [Client Frame Snapshot](client-frame-snapshot.md).
+- **Legacy runners:** a runner that does not publish `frameContext` cannot produce a controllable
+  snapshot. Keep its mirror in inspector mode rather than omitting `frameContext` from an input
+  request and guessing. The optional field remains compatible with generic, non-screen-control
+  socket clients that do not have an observation snapshot.
+- **Release availability:** the default `0.0.46` CtrlProxy artifacts predate `frameContext`
+  support. Use runners built from a revision that publishes the field before enabling this control
+  flow; otherwise treat the runner as legacy and keep the mirror in inspector mode.
 - **Active device:** every message's `deviceId` identifies its device. Subscribe with the selected
   device's id (rather than the all-devices `null`) so you only receive its frames, and still confirm
   each message's `deviceId` matches the selection before pairing — a lingering frame from a
   previously-selected device must not pair with the new one.
 
 ## Implementing a client, end to end
+
+This is the protocol contract for a third-party screen-control client. The bundled desktop client
+does not yet implement `frameContext` pairing or echoing, so it is not a conforming reference for
+this flow; its integration is tracked in [#4596](https://github.com/kaeawc/auto-mobile/issues/4596).
+Treat its current control behavior as legacy.
 
 A control client is a loop: assemble a frame, map an input against it, forward it, wait for the
 picture to catch up. Do these in order.
@@ -233,6 +250,8 @@ Subscribe to the daemon observation stream (wire protocol below:
 - the element hierarchy with its `bounds`,
 - the shared **capture identity** — a screenshot and a hierarchy belong to the same snapshot only
   when `screenshot.captureSequence == hierarchy.captureSequence`,
+- the device **frame identity** — `screenshot.frameContext == hierarchy.frameContext`, with both
+  values non-null.
 - the declared **coordinate space** of both messages, which decides whether the snapshot's geometry
   check is the exact one or the legacy aspect-only one
   ([Coordinates](#coordinates-one-unit-no-platform-knowledge-required)).
@@ -240,8 +259,8 @@ Subscribe to the daemon observation stream (wire protocol below:
 Control is available **only when a snapshot exists**. If any
 [availability rule](client-frame-snapshot.md#availability-rules) fails — no device selected, stream
 disconnected, screenshot older than 5 s, screenshot and hierarchy capture identities disagree, no
-`captureSequence` stamped at all — the client must **fail closed** to inspector behavior and
-forward nothing. There is no partial control state.
+`captureSequence` stamped at all, or missing/mismatched `frameContext` — the client must **fail
+closed** to inspector behavior and forward nothing. There is no partial control state.
 
 This is the load-bearing safety rule of the whole feature: mapping a click through a stale or
 mismatched frame taps the wrong pixel on real hardware. Pairing is **identity, never elapsed
@@ -296,7 +315,17 @@ Send the corresponding `input/*` request, with the coordinate exactly as the map
 no unit conversion, on either platform. See
 [Copy-paste raw socket examples](unix-socket-api.md#copy-paste-raw-socket-examples) for
 one-liners you can pipe straight into the socket. The device id must come from the snapshot the
-input was mapped through, never from a device selection resolved at send time.
+input was mapped through, never from a device selection resolved at send time. Echo that exact
+opaque `frameContext` on every request (`input/tap`, `input/swipe`, `input/pressButton`,
+`input/typeText`, and `input/key`); do not generate it, substitute a newer value, or carry it
+across a reconnect.
+
+The echo gives every endpoint the daemon's latest-observation freshness check. `input/tap` and
+`input/swipe` additionally carry the token to CtrlProxy for device-boundary validation. Text,
+button, and key input do not yet have that final runner check, so a transition between the last
+hierarchy update and execution can still pass the daemon gate; do not describe those endpoints as
+having the gesture guarantee. Android's remaining device-boundary work is tracked in
+[#4586](https://github.com/kaeawc/auto-mobile/issues/4586).
 
 Forward all inputs through **one ordered, bounded queue** so a tap-then-swipe-then-type sequence
 reaches the device in the order the user made it. If the queue is full (a stalled daemon), surface
@@ -311,6 +340,11 @@ call.** Hold the pre-input snapshot on screen (still clickable) until a snapshot
 greater capture identity arrives, or a 3 s timeout releases it. A failed or ignored input changes
 nothing on the device, so it clears nothing. Full state machine:
 [Post-input refresh policy](client-frame-snapshot.md#post-input-refresh-policy).
+
+A stale-context rejection means the device changed after the client assembled its snapshot. Surface
+the daemon error, keep the displayed snapshot intact, and wait for a newly paired snapshot before
+allowing an intentional retry. Do not retry the original request automatically: its coordinates and
+the user's intended target may no longer describe the current screen.
 
 ## User feedback
 
@@ -387,7 +421,6 @@ tracked back to [#1099](https://github.com/kaeawc/auto-mobile/issues/1099):
 | Issue | Deferred item |
 | --- | --- |
 | [#4502](https://github.com/kaeawc/auto-mobile/issues/4502) | Close the same-device rotation window in the client control-tap gate. |
-| [#4505](https://github.com/kaeawc/auto-mobile/issues/4505) | Daemon-side frame-context validation so the *daemon* rejects stale-context input (protects clients that will not reimplement the client-side snapshot rules). |
 | [#4533](https://github.com/kaeawc/auto-mobile/issues/4533) | Bound `ensureAdbPath` discovery so a cold cache cannot wedge the per-device input queue. |
 | [#4534](https://github.com/kaeawc/auto-mobile/issues/4534) | Evict the append cache on rapid same-serial device reuse (needs a device-connect signal). |
 | [#4535](https://github.com/kaeawc/auto-mobile/issues/4535) | Optional daemon capability signal for newer input params (e.g. `input/typeText mode:append`). |

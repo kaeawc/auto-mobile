@@ -26,7 +26,6 @@ import android.view.Display
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
-import java.util.concurrent.atomic.AtomicLong
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.InteractionElement
@@ -85,6 +84,7 @@ import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
@@ -346,7 +346,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ComponentName(this, AutoMobileDeviceAdminReceiver::class.java)
   }
   @Volatile private var lastWindowClassName: String? = null
-  /** Changes immediately on a native UI event; capture and input share this device-owned context. */
+  /**
+   * Changes immediately on a native UI event; capture and input share this device-owned context.
+   */
   private val frameContext = AtomicLong(0)
 
   @Volatile private var isRecording: Boolean = false
@@ -1173,7 +1175,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) = performSwipe(requestId, x1, y1, x2, y2, duration)
 
   override fun requestSwipe(
-    requestId: String?, x1: Double, y1: Double, x2: Double, y2: Double, duration: Long, frameContext: String?,
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+    frameContext: String?,
   ) {
     if (rejectStaleFrameContext(requestId, frameContext, "swipe")) return
     performSwipe(requestId, x1, y1, x2, y2, duration)
@@ -1182,7 +1190,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
     performTapCoordinates(requestId, x, y, duration)
 
-  override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long, frameContext: String?) {
+  override fun requestTapCoordinates(
+    requestId: String?,
+    x: Double,
+    y: Double,
+    duration: Long,
+    frameContext: String?,
+  ) {
     if (rejectStaleFrameContext(requestId, frameContext, "tap")) return
     performTapCoordinates(requestId, x, y, duration)
   }
@@ -1209,15 +1223,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) = performDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
 
   override fun requestDrag(
-    requestId: String?, x1: Double, y1: Double, x2: Double, y2: Double, pressDurationMs: Long,
-    dragDurationMs: Long, holdDurationMs: Long, frameContext: String?,
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    pressDurationMs: Long,
+    dragDurationMs: Long,
+    holdDurationMs: Long,
+    frameContext: String?,
   ) {
     if (rejectStaleFrameContext(requestId, frameContext, "drag")) return
     performDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
   }
 
-  /** Rejects an input that was mapped through a screen state the service has since observed change. */
-  private fun rejectStaleFrameContext(requestId: String?, expected: String?, action: String): Boolean {
+  /**
+   * Rejects an input that was mapped through a screen state the service has since observed change.
+   */
+  private fun rejectStaleFrameContext(
+    requestId: String?,
+    expected: String?,
+    action: String,
+  ): Boolean {
     if (expected == null || expected == frameContext.get().toString()) return false
     val error = "Stale frame context for input/$action; observe a fresh frame before retrying"
     launchRequestScope(requestId) {

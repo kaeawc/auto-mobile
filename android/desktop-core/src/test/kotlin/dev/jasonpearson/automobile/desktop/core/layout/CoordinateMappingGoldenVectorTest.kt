@@ -103,6 +103,9 @@ class CoordinateMappingGoldenVectorTest {
       DeviceToViewportVector(7, 9, 540f, 1170f, 1f, 10f, 20f, 0, 2340, 17f, 29f),
       // iOS 3x point-space inverse; changes under #4549.
       DeviceToViewportVector(195, 422, 390f, 844f, 1f, 0f, 0f, 390, 844, 195f, 422f),
+      // Width-derived-ratio invariant (inverse): aspect-MISMATCHED frame (width ratio 0.5,
+      // height ratio 0.25). Pins BOTH axes scale by frameWidthPx/deviceWidth (height y = 100).
+      DeviceToViewportVector(200, 400, 500f, 500f, 1f, 0f, 0f, 1000, 2000, 100f, 200f),
     )
 
   private data class FitToViewportVector(

@@ -37,6 +37,7 @@ import {
   referenceIosPointToPixel,
   referenceViewportToDevice,
   SCREENSHOT_ROTATION_FIELDS,
+  validateCoordinateMappingVectors,
   VIEWPORT_TO_DEVICE_FIELDS,
 } from "./coordinateMappingGoldenVectors";
 
@@ -119,6 +120,26 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
         diffs.some(d => d.includes("row 0 field offsetX") && d.includes("missing or non-numeric")),
       ).toBe(true);
     }
+  });
+
+  test("AC2: daemon-only sections are strictly validated at load time", function() {
+    // The Kotlin-backed sections get a second layer via diffNumericRows, but geometryPairing and
+    // iosPointToPixel are consumed directly by the daemon tests, where JS coercion hides
+    // corruption: `"375" * 2 === 750`, so a string-typed pointWidth would pass BOTH the reference
+    // recalculation and the real daemon path. The loader must reject it with the location named.
+    const corrupted = structuredClone(canonical);
+    (corrupted.iosPointToPixel[0] as Record<string, unknown>).pointWidth = "375";
+    expect(() => validateCoordinateMappingVectors(corrupted, "fixture.json")).toThrow(
+      /fixture\.json: section iosPointToPixel row 0 field pointWidth: missing or non-numeric value \("375"\)/,
+    );
+    // A deleted expected field in a daemon-only section must also fail (no silent unmatch).
+    const missing = structuredClone(canonical);
+    delete (missing.geometryPairing[2] as Partial<(typeof missing.geometryPairing)[number]>).expectedMatch;
+    expect(() => validateCoordinateMappingVectors(missing, "fixture.json")).toThrow(
+      /section geometryPairing row 2 field expectedMatch/,
+    );
+    // And the shipped fixture passes (already exercised by loadCoordinateMappingVectors above).
+    expect(() => validateCoordinateMappingVectors(canonical, "fixture.json")).not.toThrow();
   });
 
   test("the Kotlin runtime golden loops still drive the real mapper", function() {

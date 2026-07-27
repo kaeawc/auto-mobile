@@ -147,6 +147,12 @@
       "deviceX": 195, "deviceY": 422, "frameWidthPx": 390, "frameHeightPx": 844, "scale": 1,
       "offsetX": 0, "offsetY": 0, "deviceWidth": 390, "deviceHeight": 844,
       "expectedX": 195, "expectedY": 422
+    },
+    {
+      "comment": "width-derived-ratio invariant (inverse): deliberately aspect-MISMATCHED frame (500x500 frame, 1000x2000 device; width ratio 0.5, height ratio 0.25). Not a realistic aspect-fitted frame — it pins the documented rule that BOTH axes scale by frameWidthPx/deviceWidth: a height-derived y would give 100, not 200.",
+      "deviceX": 200, "deviceY": 400, "frameWidthPx": 500, "frameHeightPx": 500, "scale": 1,
+      "offsetX": 0, "offsetY": 0, "deviceWidth": 1000, "deviceHeight": 2000,
+      "expectedX": 100, "expectedY": 200
     }
   ],
   "fitToViewport": [

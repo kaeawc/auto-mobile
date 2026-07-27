@@ -150,14 +150,43 @@ export function loadCoordinateMappingVectors(): CoordinateMappingGoldenVectors {
   const parsed = JSON.parse(
     readFileSync(COORDINATE_CANONICAL_JSON_PATH, "utf8"),
   ) as CoordinateMappingGoldenVectors;
+  validateCoordinateMappingVectors(parsed, COORDINATE_CANONICAL_JSON_PATH);
+  return parsed;
+}
+
+/**
+ * Strict structural validation of the canonical fixture, applied at LOAD time so every consumer
+ * (Kotlin parity, daemon geometry-pairing, daemon point->pixel) fails closed on a malformed file.
+ *
+ * The Kotlin-backed sections are additionally guarded by `diffNumericRows`, but the daemon-only
+ * sections (`geometryPairing`, `iosPointToPixel`) are consumed directly, where JS coercion would
+ * hide corruption: `"375" * 2` is `750`, so a string-typed `pointWidth` passes BOTH the reference
+ * recalculation and the real daemon path. Every declared numeric field must therefore be a raw,
+ * finite `number` — a missing field (`undefined`) or a coercible impostor (`"375"`, `null`,
+ * `false`) fails with the section, row, and field named. This also guarantees no expected field
+ * is silently unmatched by a typo'd key: the canonical field list drives the check, not the row.
+ */
+export function validateCoordinateMappingVectors(
+  parsed: CoordinateMappingGoldenVectors,
+  source: string = COORDINATE_CANONICAL_JSON_PATH,
+): void {
   for (const section of SECTION_NAMES) {
     if (!Array.isArray(parsed[section]) || parsed[section].length === 0) {
-      throw new Error(
-        `${COORDINATE_CANONICAL_JSON_PATH}: missing non-empty "${section}" array`,
-      );
+      throw new Error(`${source}: missing non-empty "${section}" array`);
     }
+    const fields = SECTION_NUMERIC_FIELDS[section];
+    parsed[section].forEach((row, index) => {
+      for (const field of fields) {
+        const value = (row as Record<string, unknown>)[field];
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          throw new Error(
+            `${source}: section ${section} row ${index} field ${field}: ` +
+              `missing or non-numeric value (${JSON.stringify(value)})`,
+          );
+        }
+      }
+    });
   }
-  return parsed;
 }
 
 /** Chunk a flat number sequence into fixed-width rows, failing closed on misalignment. */
@@ -449,3 +478,30 @@ export const SCREENSHOT_ROTATION_FIELDS = [
   "rootHeight",
   "expected",
 ] as const;
+
+export const GEOMETRY_PAIRING_FIELDS = [
+  "measuredWidth",
+  "measuredHeight",
+  "claimedWidth",
+  "claimedHeight",
+  "expectedMatch",
+] as const;
+
+export const IOS_POINT_TO_PIXEL_FIELDS = [
+  "pointWidth",
+  "pointHeight",
+  "scale",
+  "expectedPixelWidth",
+  "expectedPixelHeight",
+] as const;
+
+/** Per-section canonical numeric field lists driving the load-time strict validation. */
+const SECTION_NUMERIC_FIELDS: Record<(typeof SECTION_NAMES)[number], readonly string[]> = {
+  viewportToDevice: VIEWPORT_TO_DEVICE_FIELDS,
+  deviceToViewport: DEVICE_TO_VIEWPORT_FIELDS,
+  fitToViewport: FIT_TO_VIEWPORT_FIELDS,
+  fitScale: FIT_SCALE_FIELDS,
+  screenshotRotation: SCREENSHOT_ROTATION_FIELDS,
+  geometryPairing: GEOMETRY_PAIRING_FIELDS,
+  iosPointToPixel: IOS_POINT_TO_PIXEL_FIELDS,
+};

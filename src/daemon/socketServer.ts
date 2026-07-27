@@ -1211,29 +1211,40 @@ export class UnixSocketServer {
         ? { success: true, charsSent: appendCharsSent }
         : { success: true };
     }
-    const imeResult = await this.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs);
-    return appendCharsSent !== undefined
-      ? { ...imeResult, charsSent: appendCharsSent }
-      : imeResult;
+    return await this.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs, appendCharsSent);
   }
 
   private async runImeActionWithinBudget(
     client: Pick<DeviceService, "requestImeAction">,
     imeAction: ImeAction,
     deadline: number,
-    totalTimeoutMs: number
-  ): Promise<{ success: boolean; error?: string }> {
+    totalTimeoutMs: number,
+    appendCharsSent?: number
+  ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
+    const withAppendProgress = (result: { success: boolean; error?: string }) =>
+      appendCharsSent !== undefined ? { ...result, charsSent: appendCharsSent } : result;
     const remainingTimeoutMs = deadline - this.timer.now();
     if (remainingTimeoutMs <= 0) {
       // Defensive: in practice the outer Promise.race timeout fires first, so
       // this path is only reached if set-text spends the entire budget before
       // the submit action starts.
-      return {
+      return withAppendProgress({
         success: false,
         error: `input/typeText exceeded ${totalTimeoutMs}ms budget before submit`,
+      });
+    }
+    try {
+      return withAppendProgress(await client.requestImeAction(imeAction, remainingTimeoutMs));
+    } catch (error) {
+      if (appendCharsSent === undefined) {
+        throw error;
+      }
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        charsSent: appendCharsSent,
       };
     }
-    return await client.requestImeAction(imeAction, remainingTimeoutMs);
   }
 
   private async runInputOperationWithTimeout<T>(

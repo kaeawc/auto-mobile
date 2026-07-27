@@ -306,6 +306,36 @@ describe("UnixSocketServer input/typeText", () => {
     expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
   });
 
+  test("append reports full progress when submit throws after all text lands", async () => {
+    const requestImeAction = mock(async () => {
+      throw new Error("CtrlProxy send failed");
+    });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server.appendTextFactory = () => ({
+      appendText: async () => ({ success: true, charsSent: 2 }),
+    });
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "ab",
+      mode: "append",
+      submit: true,
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      error: "CtrlProxy send failed",
+      charsSent: 2,
+    });
+    expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
+  });
+
   test("append preserves full progress when submit reaches the shared deadline", async () => {
     const requestImeAction = mock(
       () =>

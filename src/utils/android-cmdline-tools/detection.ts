@@ -2,6 +2,38 @@ import { join, dirname } from "path";
 import { logger } from "../logger";
 import { SystemDetection, DefaultSystemDetection } from "../system/SystemDetection";
 
+/**
+ * Signals that a caller-owned deadline expired while this module was probing
+ * the host. Discovery normally treats missing commands as a negative result;
+ * a deadline expiry must instead reach that caller unchanged.
+ */
+export class AndroidToolsDetectionTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AndroidToolsDetectionTimeoutError";
+  }
+}
+
+/** Preserves caller cancellation through discovery's normal miss handling. */
+export class AndroidToolsDetectionAbortError extends Error {
+  constructor(readonly abortError: Error) {
+    super(abortError.message);
+    this.name = "AndroidToolsDetectionAbortError";
+  }
+}
+
+function isAndroidToolsDetectionControlError(
+  error: unknown
+): error is AndroidToolsDetectionTimeoutError | AndroidToolsDetectionAbortError {
+  return error instanceof AndroidToolsDetectionTimeoutError || error instanceof AndroidToolsDetectionAbortError;
+}
+
+function rethrowAndroidToolsDetectionControlError(error: unknown): void {
+  if (isAndroidToolsDetectionControlError(error)) {
+    throw error;
+  }
+}
+
 export type AndroidToolsSource = "homebrew" | "android_home" | "android_sdk_root" | "path" | "manual" | "typical";
 
 export interface AndroidToolsLocation {
@@ -175,6 +207,27 @@ export function getHomebrewAndroidToolsPath(systemDetection = createDefaultSyste
   return null;
 }
 
+async function getHomebrewAndroidToolsPathAsync(
+  systemDetection: SystemDetection
+): Promise<string | null> {
+  if (systemDetection.getCurrentPlatform() !== "darwin") {
+    return null;
+  }
+
+  const homebrewPaths = [
+    "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
+    "/usr/local/share/android-commandlinetools/cmdline-tools/latest"
+  ];
+
+  for (const homebrewPath of homebrewPaths) {
+    if (await systemDetection.fileExists(homebrewPath)) {
+      return homebrewPath;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Get Android SDK path from environment variables
  */
@@ -193,6 +246,22 @@ export function getAndroidSdkFromEnvironment(systemDetection = createDefaultSyst
   return null;
 }
 
+async function getAndroidSdkFromEnvironmentAsync(
+  systemDetection: SystemDetection
+): Promise<string | null> {
+  const androidHome = systemDetection.getEnvVar("ANDROID_HOME");
+  if (androidHome && await systemDetection.fileExists(androidHome)) {
+    return androidHome;
+  }
+
+  const androidSdkRoot = systemDetection.getEnvVar("ANDROID_SDK_ROOT");
+  if (androidSdkRoot && await systemDetection.fileExists(androidSdkRoot)) {
+    return androidSdkRoot;
+  }
+
+  return null;
+}
+
 /**
  * Check if a tool is available in the system PATH
  */
@@ -202,6 +271,7 @@ export async function isToolInPath(toolName: string, systemDetection = createDef
     await systemDetection.executeCommand(command, [toolName]);
     return true;
   } catch (error) {
+    rethrowAndroidToolsDetectionControlError(error);
     // which/where exits non-zero when the tool isn't on PATH; that's a normal "not found", not a fault.
     logger.debug(`src/utils/android-cmdline-tools/detection.ts fallback failed: ${error}`, error);
     return false;
@@ -218,6 +288,7 @@ export async function getToolPathFromPath(toolName: string, systemDetection = cr
     const path = result.stdout.trim().split("\n")[0]; // Take first result if multiple
     return path || null;
   } catch (error) {
+    rethrowAndroidToolsDetectionControlError(error);
     // which/where exits non-zero when the tool isn't on PATH; null tells the caller to keep searching.
     logger.debug(`src/utils/android-cmdline-tools/detection.ts fallback failed: ${error}`, error);
     return null;
@@ -253,16 +324,41 @@ export function getAvailableToolsInDirectory(toolsDir: string, systemDetection =
   return availableTools;
 }
 
+async function getAvailableToolsInDirectoryAsync(
+  toolsDir: string,
+  systemDetection: SystemDetection
+): Promise<string[]> {
+  if (!await systemDetection.fileExists(toolsDir)) {
+    return [];
+  }
+
+  const availableTools: string[] = [];
+  const binDir = join(toolsDir, "bin");
+  if (!await systemDetection.fileExists(binDir)) {
+    return [];
+  }
+
+  for (const toolName of Object.keys(ANDROID_TOOLS)) {
+    const toolPath = join(binDir, toolName);
+    const toolPathWithExt = join(binDir, `${toolName}.bat`);
+    if (await systemDetection.fileExists(toolPath) || await systemDetection.fileExists(toolPathWithExt)) {
+      availableTools.push(toolName);
+    }
+  }
+
+  return availableTools;
+}
+
 /**
  * Detect Android command line tools installation from Homebrew (macOS only)
  */
 export async function detectHomebrewAndroidTools(systemDetection = createDefaultSystemDetection()): Promise<AndroidToolsLocation | null> {
-  const homebrewPath = getHomebrewAndroidToolsPath(systemDetection);
+  const homebrewPath = await getHomebrewAndroidToolsPathAsync(systemDetection);
   if (!homebrewPath) {
     return null;
   }
 
-  const availableTools = getAvailableToolsInDirectory(homebrewPath, systemDetection);
+  const availableTools = await getAvailableToolsInDirectoryAsync(homebrewPath, systemDetection);
   if (availableTools.length === 0) {
     return null;
   }
@@ -282,10 +378,10 @@ export async function detectAndroidSdkTools(systemDetection = createDefaultSyste
   logger.debug("Looking for Android SDK tools");
 
   // Check environment variables
-  const sdkPath = getAndroidSdkFromEnvironment(systemDetection);
+  const sdkPath = await getAndroidSdkFromEnvironmentAsync(systemDetection);
   if (sdkPath) {
     const cmdlineToolsPath = join(sdkPath, "cmdline-tools", "latest");
-    const availableTools = getAvailableToolsInDirectory(cmdlineToolsPath, systemDetection);
+    const availableTools = await getAvailableToolsInDirectoryAsync(cmdlineToolsPath, systemDetection);
 
     if (availableTools.length > 0) {
       const source = systemDetection.getEnvVar("ANDROID_HOME") ? "android_home" : "android_sdk_root";
@@ -310,7 +406,7 @@ export async function detectAndroidSdkTools(systemDetection = createDefaultSyste
     }
 
     const cmdlineToolsPath = join(sdkPath, "cmdline-tools", "latest");
-    const availableTools = getAvailableToolsInDirectory(cmdlineToolsPath, systemDetection);
+    const availableTools = await getAvailableToolsInDirectoryAsync(cmdlineToolsPath, systemDetection);
 
     if (availableTools.length > 0) {
       locations.push({
@@ -388,6 +484,7 @@ export async function detectAndroidCommandLineTools(systemDetection = createDefa
       logger.debug(`Found Homebrew Android tools at: ${homebrewLocation.path}`);
     }
   } catch (error) {
+    rethrowAndroidToolsDetectionControlError(error);
     logger.warn(`Error detecting Homebrew Android tools: ${(error as Error).message}`);
   }
 
@@ -399,6 +496,7 @@ export async function detectAndroidCommandLineTools(systemDetection = createDefa
       logger.debug(`Found Android SDK tools at: ${location.path} (source: ${location.source})`);
     }
   } catch (error) {
+    rethrowAndroidToolsDetectionControlError(error);
     logger.warn(`Error detecting Android SDK tools: ${(error as Error).message}`);
   }
 
@@ -410,6 +508,7 @@ export async function detectAndroidCommandLineTools(systemDetection = createDefa
       logger.debug(`Found Android tools in PATH: ${pathLocation.available_tools.join(", ")}`);
     }
   } catch (error) {
+    rethrowAndroidToolsDetectionControlError(error);
     logger.warn(`Error detecting Android tools in PATH: ${(error as Error).message}`);
   }
 

@@ -2,7 +2,12 @@ import { execFile, spawn, type ChildProcess } from "child_process";
 import { promisify } from "util";
 import { logger } from "../logger";
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../models";
-import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
+import {
+  AndroidToolsDetectionAbortError,
+  AndroidToolsDetectionTimeoutError,
+  detectAndroidCommandLineTools,
+  getBestAndroidToolsLocation,
+} from "./detection";
 import {
   AdbExecutor,
   type AdbExecuteOptions,
@@ -16,6 +21,7 @@ import { TTLCache } from "../cache/Cache";
 import { Timer, defaultTimer } from "../SystemTimer";
 import { wrapCommandError } from "../CommandError";
 import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHealth";
+import { DefaultSystemDetection, type SystemDetection } from "../system/SystemDetection";
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
@@ -129,7 +135,8 @@ export class AdbClient implements AdbExecutor {
     execAsyncFn: ((command: string, maxBuffer?: number) => Promise<ExecResult>) | ExecFileAsync | null = null,
     spawnFn: typeof spawn | null = null,
     retryExecutor: RetryExecutor = defaultRetryExecutor,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    private readonly systemDetectionFactory: () => SystemDetection = () => new DefaultSystemDetection()
   ) {
     this.device = device;
     // Test mode if: custom execAsync provided OR global test mode flag is set
@@ -194,35 +201,40 @@ export class AdbClient implements AdbExecutor {
   /**
    * Get the ADB path asynchronously via detection
    */
-  private async getAdbPath(): Promise<string> {
+  private async getAdbPath(timeoutMs?: number, signal?: AbortSignal): Promise<string> {
+    const deadlineMs = timeoutMs === undefined ? undefined : this.timer.now() + timeoutMs;
     // 1. Try environment variables first (fastest path)
     const envPath = this.getFallbackAdbPath();
     if (envPath !== "adb") {
       // We got a path from environment variables, verify it exists
       try {
-        await this.execAsync(envPath, ["version"]);
+        await this.executeAdbPathProbe(envPath, ["version"], deadlineMs, signal);
         logger.debug(`Using ADB from environment: ${envPath}`);
         return envPath;
-      } catch {
+      } catch (error) {
+        this.throwIfAdbPathTimeout(error, signal);
         logger.debug(`ADB path from environment not working: ${envPath}`);
       }
     }
 
     // 2. Try to find via `which adb` (works in CI environments where adb is in PATH)
     try {
-      const whichResult = await this.execAsync("which", ["adb"]);
+      const whichResult = await this.executeAdbPathProbe("which", ["adb"], deadlineMs, signal);
       const adbFromPath = whichResult.stdout.trim();
       if (adbFromPath) {
         logger.debug(`Found ADB via which: ${adbFromPath}`);
         return adbFromPath;
       }
-    } catch {
+    } catch (error) {
+      this.throwIfAdbPathTimeout(error, signal);
       logger.debug("ADB not found via 'which adb'");
     }
 
     // 3. Try Android command line tools detection (slower, more comprehensive)
     try {
-      const locations = await detectAndroidCommandLineTools();
+      const locations = await detectAndroidCommandLineTools(
+        this.createDeadlineBoundSystemDetection(deadlineMs, signal)
+      );
       const bestLocation = getBestAndroidToolsLocation(locations);
 
       if (bestLocation) {
@@ -238,12 +250,129 @@ export class AdbClient implements AdbExecutor {
         return `${sdkRoot}/platform-tools/adb`;
       }
     } catch (error) {
+      if (error instanceof AndroidToolsDetectionTimeoutError) {
+        throw new AdbCommandTimeoutError(error.message);
+      }
+      if (error instanceof AndroidToolsDetectionAbortError) {
+        throw error.abortError;
+      }
       logger.debug(`Failed to detect ADB path via Android tools detection: ${error}`);
     }
 
     // 4. Final fallback - just use "adb" and hope it's in PATH
     logger.debug("Using fallback ADB path: adb");
     return "adb";
+  }
+
+  private async executeAdbPathProbe(
+    file: string,
+    args: string[],
+    deadlineMs: number | undefined,
+    signal?: AbortSignal
+  ): Promise<ExecResult> {
+    const timeoutMs = deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
+    if (timeoutMs !== undefined && timeoutMs <= 0) {
+      throw new AdbCommandTimeoutError(`Command timed out before ADB path discovery: ${file} ${args.join(" ")}`);
+    }
+    return this.execWithSignal(file, args, undefined, timeoutMs, signal);
+  }
+
+  private createDeadlineBoundSystemDetection(
+    deadlineMs: number | undefined,
+    signal?: AbortSignal
+  ): SystemDetection {
+    const defaults = this.systemDetectionFactory();
+    return {
+      getCurrentPlatform: () => defaults.getCurrentPlatform(),
+      getHomeDir: () => defaults.getHomeDir(),
+      getEnvVar: name => defaults.getEnvVar(name),
+      fileExistsSync: path => defaults.fileExistsSync(path),
+      fileExists: path => this.executeDetectionFileProbe(defaults, path, deadlineMs, signal),
+      executeCommand: async (file, args = []) => {
+        try {
+          return await this.executeAdbPathProbe(file, args, deadlineMs, signal);
+        } catch (error) {
+          if (error instanceof AdbCommandTimeoutError) {
+            throw new AndroidToolsDetectionTimeoutError(error.message);
+          }
+          if (signal?.aborted) {
+            throw new AndroidToolsDetectionAbortError(this.getAbortError(signal));
+          }
+          throw error;
+        }
+      },
+    };
+  }
+
+  private async executeDetectionFileProbe(
+    systemDetection: SystemDetection,
+    path: string,
+    deadlineMs: number | undefined,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    if (signal?.aborted) {
+      throw new AndroidToolsDetectionAbortError(this.getAbortError(signal));
+    }
+
+    const timeoutMs = deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
+    if (timeoutMs !== undefined && timeoutMs <= 0) {
+      throw new AndroidToolsDetectionTimeoutError(`Command timed out before ADB path discovery: ${path}`);
+    }
+    if (timeoutMs === undefined && !signal) {
+      return systemDetection.fileExists(path);
+    }
+
+    return new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      const cleanup = () => {
+        if (timeoutHandle) {
+          this.timer.clearTimeout(timeoutHandle);
+        }
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const settle = (callback: () => void) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        callback();
+      };
+      const onAbort = () => settle(() => reject(new AndroidToolsDetectionAbortError(this.getAbortError(signal!))));
+
+      if (timeoutMs !== undefined) {
+        timeoutHandle = this.timer.setTimeout(
+          () => settle(() => reject(new AndroidToolsDetectionTimeoutError(`Command timed out before ADB path discovery: ${path}`))),
+          timeoutMs
+        );
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+      void systemDetection.fileExists(path).then(
+        exists => settle(() => resolve(exists)),
+        error => settle(() => reject(error))
+      );
+    });
+  }
+
+  private throwIfAdbPathTimeout(error: unknown, signal?: AbortSignal): void {
+    if (error instanceof AdbCommandTimeoutError) {
+      throw error;
+    }
+    if (signal?.aborted) {
+      throw this.getAbortError(signal);
+    }
+  }
+
+  private getRemainingTimeoutMs(timeoutMs: number | undefined, startTime: number, command: string): number | undefined {
+    if (timeoutMs === undefined) {
+      return undefined;
+    }
+    const remainingMs = timeoutMs - (this.timer.now() - startTime);
+    if (remainingMs <= 0) {
+      throw new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms before execution: ${command}`);
+    }
+    return remainingMs;
   }
 
   /**
@@ -257,7 +386,7 @@ export class AdbClient implements AdbExecutor {
   /**
    * Ensure ADB path is properly detected and cached
    */
-  private async ensureAdbPath(): Promise<string> {
+  private async ensureAdbPath(timeoutMs?: number, signal?: AbortSignal): Promise<string> {
     // In test mode, skip detection and use fallback (usually "adb")
     if (this.isTestMode) {
       return this.adbPath;
@@ -272,7 +401,7 @@ export class AdbClient implements AdbExecutor {
     }
 
     // Detect and cache the path
-    const detectedPath = await this.getAdbPath();
+    const detectedPath = await this.getAdbPath(timeoutMs, signal);
     cache.set("adbPath", detectedPath);
     this.adbPath = detectedPath;
     return this.adbPath;
@@ -287,9 +416,9 @@ export class AdbClient implements AdbExecutor {
     return [adbPath, ...baseArgs].join(" ");
   }
 
-  async getBaseCommandParts(): Promise<{ adbPath: string; baseArgs: string[] }> {
+  async getBaseCommandParts(timeoutMs?: number, signal?: AbortSignal): Promise<{ adbPath: string; baseArgs: string[] }> {
     const deviceId = this.device?.deviceId;
-    const adbPath = await this.ensureAdbPath();
+    const adbPath = await this.ensureAdbPath(timeoutMs, signal);
     const baseArgs: string[] = [];
 
     if (deviceId) {
@@ -565,11 +694,11 @@ export class AdbClient implements AdbExecutor {
     noRetry?: boolean,
     signal?: AbortSignal
   ): Promise<ExecResult> {
-    const { adbPath, baseArgs } = await this.getBaseCommandParts();
-    const fullArgs = [...baseArgs, ...commandArgs];
-    const command = commandArgs.join(" ");
     const startTime = this.timer.now();
     const resolvedSignal = signal ?? getAbortSignal();
+    const { adbPath, baseArgs } = await this.getBaseCommandParts(timeoutMs, resolvedSignal);
+    const fullArgs = [...baseArgs, ...commandArgs];
+    const command = commandArgs.join(" ");
 
     // Log which device is receiving this command for parallel execution debugging
     const deviceInfo = this.device ? `[DEVICE:${this.device.deviceId}]` : "[NO-DEVICE]";
@@ -578,7 +707,13 @@ export class AdbClient implements AdbExecutor {
     if (noRetry) {
       // No retry - just execute once
       try {
-        const result = await this.execWithSignal(adbPath, fullArgs, maxBuffer, timeoutMs, resolvedSignal);
+        const result = await this.execWithSignal(
+          adbPath,
+          fullArgs,
+          maxBuffer,
+          this.getRemainingTimeoutMs(timeoutMs, startTime, command),
+          resolvedSignal
+        );
         return result;
       } catch (error) {
         if (resolvedSignal?.aborted) {
@@ -602,7 +737,13 @@ export class AdbClient implements AdbExecutor {
         if (resolvedSignal?.aborted) {
           throw this.getAbortError(resolvedSignal);
         }
-        const result = await this.execWithSignal(adbPath, fullArgs, maxBuffer, timeoutMs, resolvedSignal);
+        const result = await this.execWithSignal(
+          adbPath,
+          fullArgs,
+          maxBuffer,
+          this.getRemainingTimeoutMs(timeoutMs, startTime, command),
+          resolvedSignal
+        );
         return result;
       },
       {

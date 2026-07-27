@@ -1145,9 +1145,9 @@ export class UnixSocketServer {
         ? AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory)
         : IOSCtrlProxyClient.getInstance(targetDevice);
 
-    // Append never touches requestSetText: on Android it emits real key events;
-    // on iOS it invokes CtrlProxy's focused-field insert primitive. Both preserve
-    // the current text and caret rather than taking the replace-shaped path.
+    // Append emits real key events on Android. iOS invokes its focused-field insert
+    // primitive, falling back on runners that predate that command to untargeted
+    // requestSetText, which is the same XCUITest typeText-at-caret operation.
     //
     // The budget is threaded in for the same reason the replace path gets it: this
     // runs while the per-device queue is held, and the outer race only *reports* a

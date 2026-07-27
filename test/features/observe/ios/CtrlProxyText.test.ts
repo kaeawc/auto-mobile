@@ -16,14 +16,15 @@ describe("CtrlProxyText requestAppendText", () => {
     await expect(pending).resolves.toEqual({ success: true, totalTimeMs: 1 });
   });
 
-  test("returns the actionable capability error without sending to a stale runner", async () => {
+  test("falls back to focused-field typeText on a runner that predates append", async () => {
     const harness = createIosDelegateHarness({ supportedCommands: ["request_set_text"] });
+    const pending = new CtrlProxyText(harness.context).requestAppendText("a");
+    await flush();
 
-    await expect(new CtrlProxyText(harness.context).requestAppendText("a")).resolves.toEqual({
-      success: false,
-      totalTimeMs: 0,
-      error: "request_append_text is not supported by the connected device service",
-    });
-    expect(harness.sentMessages).toEqual([]);
+    expect(harness.sentMessages).toEqual([
+      expect.objectContaining({ type: "request_set_text", text: "a" }),
+    ]);
+    expect(harness.resolveLast({ success: true, totalTimeMs: 1 })).toBe(true);
+    await expect(pending).resolves.toEqual({ success: true, totalTimeMs: 1 });
   });
 });

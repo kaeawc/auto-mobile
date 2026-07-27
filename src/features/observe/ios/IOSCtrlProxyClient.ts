@@ -359,7 +359,8 @@ function nullWhenAbsent<T>(value: T | null | undefined): T | null {
  * identity used by diagnostics (doctor) and the booted-devices resource to tell a
  * current runner from a stale one. Keep unreleased feature-gated commands out of
  * this list until they are present in the released runner registry. Append input
- * is deliberately included because desktop keyboard forwarding requires it.
+ * deliberately uses request_set_text as a compatibility fallback until its
+ * dedicated command is released.
  */
 export const IOS_RUNNER_FEATURE_COMMANDS = [
   "request_shake",
@@ -368,7 +369,6 @@ export const IOS_RUNNER_FEATURE_COMMANDS = [
   "add_highlight",
   "execute_sql",
   "set_network_mock_rules",
-  "request_append_text",
 ] as const;
 
 /**

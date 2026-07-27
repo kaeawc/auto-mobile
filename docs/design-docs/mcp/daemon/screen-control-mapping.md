@@ -365,8 +365,9 @@ that already encode the shift.
 `ACTION_SET_TEXT`, which *replaces* the focused field's contents. A client sending
 one character per keystroke through it would type `abc` as "a", then "b", then
 "c" — final value `c` — and would wipe any text already in the field on the first
-key. Pass `mode: "append"`, which routes through real key events and adds to the
-field instead. This is a hard requirement, not a tuning knob.
+key. Pass `mode: "append"`, which routes through the platform's non-destructive
+append primitive and adds to the field instead. This is a hard requirement, not a
+tuning knob.
 
 `mode: "append"` is supported on both platforms. Android realizes it with real
 key events; iOS routes it to CtrlProxy's focused-field insert primitive, which

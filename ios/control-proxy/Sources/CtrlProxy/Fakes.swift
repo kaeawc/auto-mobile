@@ -200,6 +200,7 @@ public class FakeGesturePerformer: GesturePerforming {
     private var pinchHistory: [PinchCall] = []
     private var typeTextHistory: [String] = []
     private var appendTextHistory: [String] = []
+    private var focusedFieldText = ""
     private var setTextHistory: [TextCall] = []
     private var clearTextHistory: [String?] = []
     private var selectAllCallCount = 0
@@ -265,6 +266,10 @@ public class FakeGesturePerformer: GesturePerforming {
 
     public func getAppendTextHistory() -> [String] {
         appendTextHistory
+    }
+
+    public func getFocusedFieldText() -> String {
+        focusedFieldText
     }
 
     public func getSetTextHistory() -> [TextCall] {
@@ -357,6 +362,7 @@ public class FakeGesturePerformer: GesturePerforming {
         pinchHistory.removeAll()
         typeTextHistory.removeAll()
         appendTextHistory.removeAll()
+        focusedFieldText = ""
         setTextHistory.removeAll()
         clearTextHistory.removeAll()
         selectAllCallCount = 0
@@ -489,6 +495,7 @@ public class FakeGesturePerformer: GesturePerforming {
     public func appendText(text: String) throws {
         try checkFailure("appendText")
         appendTextHistory.append(text)
+        focusedFieldText += text
     }
 
     public func setText(resourceId: String, text: String) throws {

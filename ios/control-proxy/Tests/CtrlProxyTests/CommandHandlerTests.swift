@@ -704,6 +704,7 @@ final class CommandHandlerTests: XCTestCase {
         }
 
         XCTAssertEqual(fakeGesturePerformer.getAppendTextHistory(), ["a", "b", "c"])
+        XCTAssertEqual(fakeGesturePerformer.getFocusedFieldText(), "abc")
         XCTAssertTrue(fakeGesturePerformer.getSetTextHistory().isEmpty)
     }
 

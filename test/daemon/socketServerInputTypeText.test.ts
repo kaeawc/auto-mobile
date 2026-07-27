@@ -651,16 +651,17 @@ describe("UnixSocketServer input/typeText", () => {
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
     await server.start();
 
-    const responses = await Promise.all(["a", "b", "c"].map(text =>
-      sendRequest(socketPath, "input/typeText", {
+    for (const text of ["a", "b", "c"]) {
+      const response = await sendRequest(socketPath, "input/typeText", {
         platform: "ios",
         deviceId: "ios-sim-1",
         text,
         mode: "append",
-      })
-    ));
+      });
 
-    expect(responses.every(response => response.success)).toBe(true);
+      expect(response.success).toBe(true);
+    }
+
     expect(requestAppendText).toHaveBeenCalledTimes(3);
     expect(requestAppendText.mock.calls.map(([text]) => text)).toEqual(["a", "b", "c"]);
     expect(requestSetText).not.toHaveBeenCalled();

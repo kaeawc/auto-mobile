@@ -26,6 +26,13 @@ export class CtrlProxyText extends SharedTextDelegate {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
   ): Promise<BaseResult> {
+    // Older released runners predate request_append_text, but their untargeted
+    // request_set_text path already uses XCUITest typeText at the focused caret.
+    // It is therefore the same non-destructive append operation for this call.
+    if (this.context.isCommandSupported?.("request_append_text") === false) {
+      return this.requestSetText(text, { timeoutMs, perf });
+    }
+
     return sendCommand<BaseResult>(this.context, {
       idPrefix: "appendText",
       responseType: "append_text",

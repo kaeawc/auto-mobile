@@ -230,9 +230,9 @@ describe("iOS control-proxy — emitted commands are a subset of the runner cont
     expect(unknown).toEqual([]);
   });
 
-  test("IOS_RUNNER_FEATURE_COMMANDS includes the released append input capability", () => {
+  test("IOS_RUNNER_FEATURE_COMMANDS excludes append until the runner release", () => {
     const baselineCommands: readonly string[] = IOS_RUNNER_FEATURE_COMMANDS;
-    expect(baselineCommands).toContain("request_append_text");
+    expect(baselineCommands).not.toContain("request_append_text");
     expect(baselineCommands).not.toContain("set_network_error_simulation");
   });
 });

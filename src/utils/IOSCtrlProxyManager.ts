@@ -388,12 +388,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Starts orphan reaping during daemon initialization while retaining the
    * promise so the first simulator request cannot adopt a runner being reaped.
    */
-  public static startOrphanRunnerReapOnStartup(): Promise<void> {
-    const work = IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup();
-    IOSCtrlProxyManager.startupOrphanRunnerReap = work.catch(error => {
+  public static startOrphanRunnerReapOnStartup(
+    processClient: IOSCtrlProxyProcessClient = new IOSCtrlProxyProcessClient(),
+    timer: Timer = defaultTimer
+  ): Promise<void> {
+    const work = IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(processClient, timer);
+    const completedWork = work.catch(error => {
       logger.debug(`[IOSCtrlProxy] Startup orphan runner sweep failed: ${error}`);
     });
-    return work;
+    IOSCtrlProxyManager.startupOrphanRunnerReap = IOSCtrlProxyManager.completeWithinStartupReapDeadline(
+      completedWork,
+      timer
+    );
+    return IOSCtrlProxyManager.startupOrphanRunnerReap;
   }
 
   /**
@@ -407,7 +414,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const deadline = timer.now() + STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS;
     let pids: number[] = [];
     try {
-      pids = await processClient.findStartupCandidatePids();
+      pids = await processClient.findStartupCandidatePids(deadline);
     } catch (error) {
       logger.debug(`[IOSCtrlProxy] Failed to enumerate CtrlProxy iOS processes during startup sweep: ${error}`);
       return;
@@ -416,36 +423,59 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const reapedRootPids = new Set<number>();
     for (const pid of pids) {
       if (timer.now() >= deadline) {
-        logger.warn(
-          `[IOSCtrlProxy] startup CtrlProxy runner sweep timed out after ${STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS}ms`
-        );
+        IOSCtrlProxyManager.logStartupOrphanRunnerReapDeadline();
         return;
       }
       try {
-        const root = await IOSCtrlProxyManager.findStartupOrphanRunnerRoot(processClient, pid, deadline, timer);
-        if (root.kind === "deadline_exhausted" || timer.now() >= deadline) {
-          logger.warn(
-            `[IOSCtrlProxy] startup CtrlProxy runner sweep timed out after ${STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS}ms`
-          );
+        if (!await IOSCtrlProxyManager.reapStartupOrphanRunnerCandidate(
+          processClient,
+          pid,
+          deadline,
+          timer,
+          reapedRootPids
+        )) {
           return;
         }
-        if (root.kind !== "root" || reapedRootPids.has(root.pid)) {
-          continue;
-        }
-        if (reapedRootPids.size >= MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES) {
-          logger.warn(
-            `[IOSCtrlProxy] startup sweep skipped 1 startup CtrlProxy runner candidate after ` +
-            `reaching the ${MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES}-candidate cap`
-          );
-          return;
-        }
-        reapedRootPids.add(root.pid);
-        logger.info(`[IOSCtrlProxy] Reaping orphaned CtrlProxy iOS process tree rooted at ${root.pid}`);
-        await processClient.terminateProcessTree(root.pid);
       } catch (error) {
         logger.debug(`[IOSCtrlProxy] Failed to reap orphaned CtrlProxy iOS process ${pid}: ${error}`);
+        if (timer.now() >= deadline) {
+          IOSCtrlProxyManager.logStartupOrphanRunnerReapDeadline();
+          return;
+        }
       }
     }
+  }
+
+  private static async reapStartupOrphanRunnerCandidate(
+    processClient: IOSCtrlProxyProcessClient,
+    pid: number,
+    deadline: number,
+    timer: Timer,
+    reapedRootPids: Set<number>
+  ): Promise<boolean> {
+    const root = await IOSCtrlProxyManager.findStartupOrphanRunnerRoot(processClient, pid, deadline, timer);
+    if (root.kind === "deadline_exhausted" || timer.now() >= deadline) {
+      IOSCtrlProxyManager.logStartupOrphanRunnerReapDeadline();
+      return false;
+    }
+    if (root.kind !== "root" || reapedRootPids.has(root.pid)) {
+      return true;
+    }
+    if (reapedRootPids.size >= MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES) {
+      logger.warn(
+        `[IOSCtrlProxy] startup sweep skipped 1 startup CtrlProxy runner candidate after ` +
+        `reaching the ${MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES}-candidate cap`
+      );
+      return false;
+    }
+    reapedRootPids.add(root.pid);
+    logger.info(`[IOSCtrlProxy] Reaping orphaned CtrlProxy iOS process tree rooted at ${root.pid}`);
+    await processClient.terminateProcessTree(root.pid, deadline);
+    if (timer.now() >= deadline) {
+      IOSCtrlProxyManager.logStartupOrphanRunnerReapDeadline();
+      return false;
+    }
+    return true;
   }
 
   private static async findStartupOrphanRunnerRoot(
@@ -454,7 +484,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     deadline: number,
     timer: Timer
   ): Promise<DaemonManagedRunnerTreeRoot> {
-    const processInfo = await processClient.getProcessInfo(pid);
+    const processInfo = await processClient.getProcessInfo(pid, deadline);
     if (!processInfo || !processClient.isCtrlProxyRunnerCommand(processInfo.command)) {
       return { kind: "not_daemon_managed" };
     }
@@ -470,6 +500,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       {
         requireOrphanedRoot: true,
         shouldContinue: () => timer.now() < deadline,
+        deadline,
       }
     );
   }
@@ -1774,7 +1805,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private static async findDaemonManagedRunnerTreeRoot(
     processClient: IOSCtrlProxyProcessClient,
     process: ListeningProcess,
-    options: { requireOrphanedRoot?: boolean; shouldContinue?: () => boolean } = {}
+    options: { requireOrphanedRoot?: boolean; shouldContinue?: () => boolean; deadline?: number } = {}
   ): Promise<DaemonManagedRunnerTreeRoot> {
     if (!IOSCtrlProxyManager.isCtrlProxyRunnerCommand(process.command)) {
       return { kind: "not_daemon_managed" };
@@ -1793,11 +1824,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     while (parentPid !== undefined && parentPid > 1 && !visitedPids.has(parentPid)) {
-      if (options.shouldContinue && !options.shouldContinue()) {
+      if (!IOSCtrlProxyManager.shouldContinueStartupOrphanRunnerTraversal(options)) {
         return { kind: "deadline_exhausted" };
       }
       visitedPids.add(parentPid);
-      const parentInfo = await processClient.getProcessInfo(parentPid);
+      const parentInfo = await processClient.getProcessInfo(parentPid, options.deadline);
       if (!parentInfo) {
         break;
       }
@@ -1826,8 +1857,40 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
-  private static async awaitStartupOrphanRunnerReap(): Promise<void> {
+  public static async awaitStartupOrphanRunnerReap(): Promise<void> {
     await IOSCtrlProxyManager.startupOrphanRunnerReap;
+  }
+
+  private static async completeWithinStartupReapDeadline(work: Promise<void>, timer: Timer): Promise<void> {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        work,
+        new Promise<void>(resolve => {
+          timeout = timer.setTimeout(() => {
+            IOSCtrlProxyManager.logStartupOrphanRunnerReapDeadline();
+            resolve();
+          }, STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS);
+          (timeout as { unref?: () => void }).unref?.();
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        timer.clearTimeout(timeout);
+      }
+    }
+  }
+
+  private static logStartupOrphanRunnerReapDeadline(): void {
+    logger.warn(
+      `[IOSCtrlProxy] startup CtrlProxy runner sweep timed out after ${STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS}ms`
+    );
+  }
+
+  private static shouldContinueStartupOrphanRunnerTraversal(
+    options: { shouldContinue?: () => boolean }
+  ): boolean {
+    return options.shouldContinue?.() ?? true;
   }
 
   private static daemonManagedParentRoot(

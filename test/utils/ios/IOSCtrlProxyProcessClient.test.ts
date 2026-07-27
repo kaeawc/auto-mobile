@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { IOSCtrlProxyProcessClient } from "../../../src/utils/ios/IOSCtrlProxyProcessClient";
+import type { HostCommandExecutor, HostCommandOptions } from "../../../src/utils/HostCommandExecutor";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -8,6 +9,22 @@ function result(stdout = "", stderr = "") {
 }
 
 describe("IOSCtrlProxyProcessClient", () => {
+  test("bounds startup candidate discovery by the supplied deadline", async () => {
+    const timer = new FakeTimer();
+    const options: Array<HostCommandOptions | undefined> = [];
+    const host: HostCommandExecutor = {
+      async executeCommand(_file, _args, commandOptions) {
+        options.push(commandOptions);
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer);
+
+    await client.findStartupCandidatePids(100);
+
+    expect(options).toEqual([{ timeoutMs: 100 }]);
+  });
+
   test("uses argv for PID lookup and preserves device identity validation", async () => {
     const host = new FakeHostCommandExecutor();
     host.setCommandResponse("pgrep -x xcodebuild", result("42\n"));

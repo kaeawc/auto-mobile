@@ -64,11 +64,11 @@ export class IOSCtrlProxyProcessClient {
     return null;
   }
 
-  async findStartupCandidatePids(): Promise<number[]> {
+  async findStartupCandidatePids(deadline?: number): Promise<number[]> {
     // The startup sweep caps inspection, so discover only CtrlProxy-shaped
     // commands before the cap rather than letting unrelated xcodebuild work
     // consume it.
-    return this.findPids("CtrlProxy", false);
+    return this.findPids("CtrlProxy", false, deadline);
   }
 
   async findXcodebuildPids(): Promise<number[]> {
@@ -88,14 +88,18 @@ export class IOSCtrlProxyProcessClient {
     }
   }
 
-  async getProcessInfo(pid: number): Promise<CtrlProxyProcessInfo | null> {
+  async getProcessInfo(pid: number, deadline?: number): Promise<CtrlProxyProcessInfo | null> {
     try {
-      const { stdout } = await this.host.executeCommand("ps", ["-p", String(pid), "-o", "ppid=", "-o", "args="]);
+      const { stdout } = await this.executeCommand(
+        "ps",
+        ["-p", String(pid), "-o", "ppid=", "-o", "args="],
+        deadline
+      );
       const output = stdout.trim();
       if (!output) {
         return null;
       }
-      const environment = await this.getProcessEnvironment(pid);
+      const environment = await this.getProcessEnvironment(pid, deadline);
       const match = output.match(/^(\d+)\s+([\s\S]+)$/);
       return match ? { ppid: Number.parseInt(match[1], 10), command: match[2], environment } : { command: output, environment };
     } catch (error) {
@@ -104,9 +108,9 @@ export class IOSCtrlProxyProcessClient {
     }
   }
 
-  async isRunning(pid: number): Promise<boolean> {
+  async isRunning(pid: number, deadline?: number): Promise<boolean> {
     try {
-      const result = await this.host.executeCommand("kill", ["-0", String(pid)]);
+      const result = await this.executeCommand("kill", ["-0", String(pid)], deadline);
       return !/operation not permitted|permission denied/i.test(result.stderr);
     } catch (error) {
       logger.debug(`[IOSCtrlProxy] Failed to check PID ${pid}: ${error}`);
@@ -123,9 +127,9 @@ export class IOSCtrlProxyProcessClient {
       this.hasDeviceIdentity(`${process.command} ${process.environment ?? ""}`, deviceId);
   }
 
-  async findDescendantProcessIds(rootPid: number): Promise<number[]> {
+  async findDescendantProcessIds(rootPid: number, deadline?: number): Promise<number[]> {
     try {
-      const { stdout } = await this.host.executeCommand("ps", ["-axo", "pid=,ppid="]);
+      const { stdout } = await this.executeCommand("ps", ["-axo", "pid=,ppid="], deadline);
       const children = new Map<number, number[]>();
       for (const line of stdout.trim().split("\n")) {
         const match = line.trim().match(/^(\d+)\s+(\d+)$/);
@@ -151,15 +155,15 @@ export class IOSCtrlProxyProcessClient {
     }
   }
 
-  async terminateProcessTree(pid: number): Promise<void> {
-    const descendants = await this.findDescendantProcessIds(pid);
+  async terminateProcessTree(pid: number, deadline?: number): Promise<void> {
+    const descendants = await this.findDescendantProcessIds(pid, deadline);
     const targets = [...descendants].reverse().concat(pid);
-    await this.signalGroup(pid, "TERM");
-    await this.signalPids(targets, "TERM");
-    if (await this.waitForExit([pid, ...descendants])) {return;}
-    await this.signalGroup(pid, "KILL");
-    await this.signalPids(targets, "KILL");
-    await this.waitForExit([pid, ...descendants]);
+    await this.signalGroup(pid, "TERM", deadline);
+    await this.signalPids(targets, "TERM", deadline);
+    if (await this.waitForExit([pid, ...descendants], deadline)) {return;}
+    await this.signalGroup(pid, "KILL", deadline);
+    await this.signalPids(targets, "KILL", deadline);
+    await this.waitForExit([pid, ...descendants], deadline);
   }
 
   async terminateProcess(pid: number): Promise<void> {
@@ -187,9 +191,9 @@ export class IOSCtrlProxyProcessClient {
     return shape && (process.ppid === 1 || !this.hasExternalXcodebuildIdentity(process.environment ?? ""));
   }
 
-  private async findPids(pattern: string, exact: boolean): Promise<number[]> {
+  private async findPids(pattern: string, exact: boolean, deadline?: number): Promise<number[]> {
     try {
-      const { stdout } = await this.host.executeCommand("pgrep", [exact ? "-x" : "-f", pattern]);
+      const { stdout } = await this.executeCommand("pgrep", [exact ? "-x" : "-f", pattern], deadline);
       return stdout.trim().split("\n").flatMap(line => {
         const pid = Number.parseInt(line, 10);
         return Number.isNaN(pid) ? [] : [pid];
@@ -200,9 +204,13 @@ export class IOSCtrlProxyProcessClient {
     }
   }
 
-  private async getProcessEnvironment(pid: number): Promise<string | undefined> {
+  private async getProcessEnvironment(pid: number, deadline?: number): Promise<string | undefined> {
     try {
-      const { stdout } = await this.host.executeCommand("ps", ["eww", "-p", String(pid), "-o", "command="]);
+      const { stdout } = await this.executeCommand(
+        "ps",
+        ["eww", "-p", String(pid), "-o", "command="],
+        deadline
+      );
       return stdout.trim() || undefined;
     } catch (error) {
       logger.debug(`[IOSCtrlProxy] Failed to inspect environment for PID ${pid}: ${error}`);
@@ -219,36 +227,57 @@ export class IOSCtrlProxyProcessClient {
     return environment.includes("CTRL_PROXY_IOS_PORT=") || environment.includes("AUTOMOBILE_DEVICE_ID=") || environment.includes("SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=");
   }
 
-  private async signalGroup(pid: number, signal: "TERM" | "KILL"): Promise<void> {
+  private async signalGroup(pid: number, signal: "TERM" | "KILL", deadline?: number): Promise<void> {
     try {
-      await this.host.executeCommand("kill", [`-${signal}`, "--", `-${pid}`]);
+      await this.executeCommand("kill", [`-${signal}`, "--", `-${pid}`], deadline);
     } catch (error) {
       logger.debug(`[IOSCtrlProxy] PID ${pid} is not a signalable process group: ${error}`);
     }
   }
 
-  private async signalPids(pids: number[], signal: "TERM" | "KILL"): Promise<void> {
+  private async signalPids(pids: number[], signal: "TERM" | "KILL", deadline?: number): Promise<void> {
     for (const pid of pids) {
       try {
-        await this.host.executeCommand("kill", [`-${signal}`, String(pid)]);
+        await this.executeCommand("kill", [`-${signal}`, String(pid)], deadline);
       } catch (error) {
         logger.debug(`[IOSCtrlProxy] PID ${pid} exited before ${signal}: ${error}`);
       }
     }
   }
 
-  private async waitForExit(pids: number[]): Promise<boolean> {
+  private async waitForExit(pids: number[], deadline?: number): Promise<boolean> {
     for (let attempt = 0; attempt < this.releaseAttempts; attempt++) {
-      if (await this.haveExited(pids)) {return true;}
-      await this.timer.sleep(this.releaseGraceMs);
+      if (await this.haveExited(pids, deadline)) {return true;}
+      const delayMs = this.remainingTimeoutMs(deadline);
+      await this.timer.sleep(delayMs === undefined ? this.releaseGraceMs : Math.min(this.releaseGraceMs, delayMs));
     }
-    return this.haveExited(pids);
+    return this.haveExited(pids, deadline);
   }
 
-  private async haveExited(pids: number[]): Promise<boolean> {
+  private async haveExited(pids: number[], deadline?: number): Promise<boolean> {
     for (const pid of pids) {
-      if (await this.isRunning(pid)) {return false;}
+      if (await this.isRunning(pid, deadline)) {return false;}
     }
     return true;
+  }
+
+  private async executeCommand(
+    file: string,
+    args: string[],
+    deadline?: number
+  ): Promise<Awaited<ReturnType<HostCommandExecutor["executeCommand"]>>> {
+    const timeoutMs = this.remainingTimeoutMs(deadline);
+    return this.host.executeCommand(file, args, timeoutMs === undefined ? undefined : { timeoutMs });
+  }
+
+  private remainingTimeoutMs(deadline: number | undefined): number | undefined {
+    if (deadline === undefined) {
+      return undefined;
+    }
+    const remainingMs = deadline - this.timer.now();
+    if (remainingMs <= 0) {
+      throw new Error("Startup CtrlProxy runner sweep deadline elapsed");
+    }
+    return remainingMs;
   }
 }

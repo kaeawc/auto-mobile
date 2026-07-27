@@ -2542,6 +2542,38 @@ describe("IOSCtrlProxyManager", function() {
       }
     });
 
+    test("startup reaping releases simulator start after its deadline when process cleanup hangs", async function() {
+      const reaping = deferred();
+      const reapSpy = spyOn(
+        IOSCtrlProxyManager,
+        "reapOrphanedRunnerProcessesOnStartup"
+      ).mockImplementation(() => reaping.promise);
+      const fakeExecutor = new FakeProcessExecutor();
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("ok", ""));
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+
+      try {
+        IOSCtrlProxyManager.startOrphanRunnerReapOnStartup(undefined, fakeTimer);
+        const start = manager.start();
+        await Promise.resolve();
+
+        expect(fakeExecutor.wasCommandExecuted("curl -s")).toBe(false);
+        fakeTimer.advanceTime(STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS);
+        await new Promise<void>(resolve => setImmediate(resolve));
+        expect(fakeExecutor.wasCommandExecuted("curl -s")).toBe(true);
+
+        reaping.resolve();
+        await fakeTimer.resolvePromise(start);
+      } finally {
+        reapSpy.mockRestore();
+      }
+    });
+
     test("start() reports the bound PID and command when owned port cleanup cannot free the port", async function() {
       const stuckProcess: FakeListeningProcess = {
         pid: 5555,

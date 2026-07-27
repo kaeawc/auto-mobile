@@ -262,6 +262,7 @@ export function registerDeviceTools() {
 
     perf.startOperation("ensureCtrlProxy");
     try {
+      await IOSCtrlProxyManager.awaitStartupOrphanRunnerReap();
       const manager = IOSCtrlProxyManager.getInstance(device);
       const xcTestClient = IOSCtrlProxyClient.getInstance(device, manager.getServicePort());
 

@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "events";
 import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -36,6 +37,14 @@ function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrl
 
 function stubIOSCtrlProxy(overrides: Partial<IOSCtrlProxy>): IOSCtrlProxy {
   return overrides as unknown as IOSCtrlProxy;
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 function makeReadyWindow(): FakeWindow {
@@ -381,6 +390,56 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
 
     expect(observeCache.wasClearedFor("ios-push-1")).toBe(true);
     expect(observeCache.getClearedDevices()).toEqual(["ios-push-1"]);
+  });
+
+  test("waits for startup reaping before confirming a connected iOS runner is ready", async () => {
+    const reaping = deferred();
+    const reapSpy = spyOn(
+      IOSCtrlProxyManager,
+      "reapOrphanedRunnerProcessesOnStartup"
+    ).mockImplementation(() => reaping.promise);
+    const fakeSimctl = new FakeSimCtlClient();
+    fakeSimctl.setDeviceInfo("ios-push-1", {
+      udid: "ios-push-1",
+      name: "iPhone 15",
+      state: "Booted",
+      isAvailable: true,
+    });
+
+    const iosManager = new FakeIOSCtrlProxyManager();
+    const verifyServiceReady = spyOn(
+      new FakeIOSCtrlProxy(),
+      "verifyServiceReady"
+    ).mockResolvedValue(true);
+    const iosClient = {
+      isConnected: () => true,
+      verifyServiceReady,
+      onPushUpdate: () => () => {},
+    } as unknown as IOSCtrlProxy;
+    const provider = new FakeDeviceClientProvider(
+      fakeAdb,
+      fakeDeviceUtils,
+      fakeSimctl as any,
+      {
+        iosCtrlProxyManager: iosManager,
+        iosCtrlProxyClient: iosClient,
+      }
+    );
+    const manager = DeviceSessionManager.createInstance(provider);
+
+    try {
+      IOSCtrlProxyManager.startOrphanRunnerReapOnStartup();
+      const verify = manager.verifyIosDevice("ios-push-1");
+      await new Promise<void>(resolve => setImmediate(resolve));
+
+      expect(verifyServiceReady).not.toHaveBeenCalled();
+      reaping.resolve();
+      await verify;
+      expect(verifyServiceReady).toHaveBeenCalled();
+    } finally {
+      reapSpy.mockRestore();
+      IOSCtrlProxyManager.resetInstances();
+    }
   });
 });
 

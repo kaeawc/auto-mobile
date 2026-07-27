@@ -78,6 +78,15 @@ export interface XCTestHierarchy {
   screenWidth?: number;
   /** Screen height in iOS points (logical pixels) */
   screenHeight?: number;
+  /**
+   * `UIScreen.nativeScale` — the point->screenshot-pixel ratio (#4548, additive; absent from
+   * pre-#4548 runners). Distinct from `screenScale` (`UIScreen.scale`) under Display Zoom.
+   */
+  nativeScale?: number;
+  /** Physical screenshot pixel width: round(screenWidth * nativeScale) (#4548, additive). */
+  pixelWidth?: number;
+  /** Physical screenshot pixel height: round(screenHeight * nativeScale) (#4548, additive). */
+  pixelHeight?: number;
   systemInsets?: { top: number; right: number; bottom: number; left: number };
   insets?: ObservationInsets;
   error?: string;

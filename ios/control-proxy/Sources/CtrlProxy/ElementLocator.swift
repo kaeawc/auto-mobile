@@ -618,15 +618,26 @@ public class ElementLocator: ElementLocating {
             // The runner's UIScreen.main.bounds can be a stale 320x480 compatibility
             // value (issue #2683), so prefer the foreground app's root frame and only
             // fall back to UIScreen.main.bounds.
-            let (screenScale, fallbackWidth, fallbackHeight): (Float, Int, Int) = try runOnMainThread {
-                let scale = Float(UIScreen.main.scale)
-                let bounds = UIScreen.main.bounds
-                return (scale, Int(bounds.width), Int(bounds.height))
-            }
+            // nativeScale (not scale) is what converts point bounds to screenshot pixels:
+            // Display Zoom changes nativeScale while scale stays put, and
+            // XCUIScreenshot.pngRepresentation renders at native scale (#4548). screenScale
+            // (UIScreen.scale) is still reported unchanged for backward compatibility.
+            let (screenScale, nativeScale, fallbackWidth, fallbackHeight): (Float, Float, Int, Int) =
+                try runOnMainThread {
+                    let scale = Float(UIScreen.main.scale)
+                    let native = Float(UIScreen.main.nativeScale)
+                    let bounds = UIScreen.main.bounds
+                    return (scale, native, Int(bounds.width), Int(bounds.height))
+                }
             let (screenWidth, screenHeight) = ElementLocator.resolveScreenDimensions(
                 rootBounds: finalHierarchy.bounds,
                 fallbackWidth: fallbackWidth,
                 fallbackHeight: fallbackHeight
+            )
+            let pixelDimensions = ElementLocator.computePixelDimensions(
+                pointWidth: screenWidth,
+                pointHeight: screenHeight,
+                nativeScale: Double(nativeScale)
             )
 
             return ViewHierarchy(
@@ -637,6 +648,9 @@ public class ElementLocator: ElementLocating {
                 screenScale: screenScale,
                 screenWidth: screenWidth,
                 screenHeight: screenHeight,
+                nativeScale: pixelDimensions == nil ? nil : nativeScale,
+                pixelWidth: pixelDimensions?.pixelWidth,
+                pixelHeight: pixelDimensions?.pixelHeight,
                 fallbackToSpringboard: tracker.didFallbackToSpringboard ? true : nil
             )
         }
@@ -1412,6 +1426,30 @@ public class ElementLocator: ElementLocating {
             return (bounds.width, bounds.height)
         }
         return (fallbackWidth, fallbackHeight)
+    }
+
+    /// Compute the physical screenshot pixel dimensions for the reported point dimensions.
+    ///
+    /// `nativeScale` must be `UIScreen.nativeScale`, never `UIScreen.scale`: under Display
+    /// Zoom the two differ (e.g. a zoomed iPhone reports scale 3.0 while nativeScale is
+    /// ~3.14, and an iPhone Plus reports scale 3.0 with nativeScale ~2.61), and
+    /// `XCUIScreenshot.pngRepresentation` is rendered at native scale — so only
+    /// `points * nativeScale` matches the actual screenshot pixels (#4548).
+    ///
+    /// Returns nil when any input is degenerate, so the additive wire fields are simply
+    /// omitted rather than carrying values no screenshot can match.
+    static func computePixelDimensions(
+        pointWidth: Int,
+        pointHeight: Int,
+        nativeScale: Double
+    ) -> (pixelWidth: Int, pixelHeight: Int)? {
+        guard pointWidth > 0, pointHeight > 0, nativeScale.isFinite, nativeScale > 0 else {
+            return nil
+        }
+        return (
+            pixelWidth: Int((Double(pointWidth) * nativeScale).rounded()),
+            pixelHeight: Int((Double(pointHeight) * nativeScale).rounded())
+        )
     }
 
     /// Collapse same-type text-input children into their parent.

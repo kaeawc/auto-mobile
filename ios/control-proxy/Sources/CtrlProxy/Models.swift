@@ -921,6 +921,16 @@ public struct ViewHierarchy: Codable {
     public let screenScale: Float?
     public let screenWidth: Int?
     public let screenHeight: Int?
+    /// Ratio between the point-space bounds reported in this hierarchy and the physical
+    /// screenshot pixels (`UIScreen.nativeScale`). Distinct from `screenScale`
+    /// (`UIScreen.scale`): Display Zoom changes `nativeScale` but not `scale`, and
+    /// `XCUIScreenshot.pngRepresentation` is rendered at native scale, so this is the
+    /// value that actually converts reported bounds to screenshot pixels (#4548).
+    public let nativeScale: Float?
+    /// Physical screenshot pixel width: `round(screenWidth * nativeScale)` (#4548).
+    public let pixelWidth: Int?
+    /// Physical screenshot pixel height: `round(screenHeight * nativeScale)` (#4548).
+    public let pixelHeight: Int?
     public let systemInsets: EdgeInsetsInfo?
     public let insets: ObservationInsetsInfo
     public let error: String?
@@ -935,6 +945,9 @@ public struct ViewHierarchy: Codable {
         screenScale: Float? = nil,
         screenWidth: Int? = nil,
         screenHeight: Int? = nil,
+        nativeScale: Float? = nil,
+        pixelWidth: Int? = nil,
+        pixelHeight: Int? = nil,
         systemInsets: EdgeInsetsInfo? = nil,
         insets: ObservationInsetsInfo = .unavailable,
         error: String? = nil,
@@ -948,6 +961,9 @@ public struct ViewHierarchy: Codable {
         self.screenScale = screenScale
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
+        self.nativeScale = nativeScale
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
         self.systemInsets = systemInsets
         self.insets = insets
         self.error = error

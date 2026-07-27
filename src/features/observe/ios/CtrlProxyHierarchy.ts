@@ -6,6 +6,7 @@
  */
 
 import type { ViewHierarchyResult } from "../../../models";
+import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger } from "../../../utils/logger";
@@ -272,6 +273,11 @@ export class CtrlProxyHierarchy {
       // Screen dimensions in iOS points (logical pixels)
       screenWidth: hierarchy.screenWidth,
       screenHeight: hierarchy.screenHeight,
+      // Additive scale metadata (#4548): UIScreen.nativeScale + physical screenshot pixel
+      // dimensions. All-or-nothing via the shared validator (same rule as client retention): the
+      // three keys are spread only when the whole tuple is complete-finite-positive, and omitted
+      // entirely otherwise — so payloads from pre-#4548 runners stay byte-identical.
+      ...screenScaleMetadataSpread(hierarchy),
       systemInsets: hierarchy.systemInsets,
       insets: hierarchy.insets,
     };

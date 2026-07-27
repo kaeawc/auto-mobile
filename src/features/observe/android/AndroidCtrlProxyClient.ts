@@ -24,6 +24,7 @@ import {
   BootedDevice,
   ImeAction,
   ViewHierarchyResult,
+  ScreenScaleMetadata,
   CurrentFocusResult,
   TraversalOrderResult,
   Element,
@@ -31,6 +32,7 @@ import {
   HighlightShape
 } from "../../../models";
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
+import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
@@ -917,6 +919,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Screen geometry derived from hierarchies, carrying whether the daemon has actually seen a
   // hierarchy with that geometry (issue #3348). See TrackedScreenGeometry.
   private readonly screenGeometry = new TrackedScreenGeometry();
+  // Runner-reported scale metadata from the most recent hierarchy (#4548). Android reports
+  // nativeScale 1 with pixel dims equal to its (already-pixel) screen dims. Retained for #4549;
+  // null until a #4548-aware runner reports it. Nothing in current behavior reads it.
+  private reportedScaleMetadata: ScreenScaleMetadata | null = null;
   private hierarchyObservationStreamSuppressions: Set<ObservationStreamSuppression> = new Set();
   // Request ids whose screenshot responses must not be auto-pushed to the
   // observation stream. Scoped per-request so an unrelated in-flight screenshot
@@ -2952,6 +2958,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private updateCachedScreenDimensions(hierarchy: ViewHierarchyResult): void {
+    // Retain the additive #4548 scale metadata alongside — but never instead of — the
+    // window-derived geometry below. Same freshness rule as the tracked geometry: a hierarchy
+    // without the fields (pre-#4548 runner) resets it to null rather than leaving stale values.
+    this.reportedScaleMetadata = readScreenScaleMetadata(hierarchy);
     const windows = hierarchy.windows;
     if (!windows || windows.length === 0) {
       this.screenGeometry.clear();
@@ -2983,6 +2993,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // entry) stops a later push from vouching for dimensions this hierarchy cannot confirm.
       this.screenGeometry.clear();
     }
+  }
+
+  /**
+   * Runner-reported scale metadata from the most recent hierarchy (#4548), or null when the
+   * runner has not reported it (pre-#4548 runner, or no hierarchy yet). Exposed for #4549's
+   * canonical-pixel conversion; nothing in current behavior consumes it.
+   */
+  getScreenScaleMetadata(): ScreenScaleMetadata | null {
+    return this.reportedScaleMetadata;
   }
 
   private getScreenshotBackoffScheduler(): ScreenshotBackoffScheduler {

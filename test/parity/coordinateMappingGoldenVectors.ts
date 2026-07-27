@@ -31,6 +31,15 @@ export const COORDINATE_CANONICAL_JSON_PATH = join(
   "coordinate-mapping-golden-vectors.json",
 );
 
+export const SCALE_REPORTING_SWIFT_TEST_PATH = join(
+  REPO_ROOT,
+  "ios",
+  "control-proxy",
+  "Tests",
+  "CtrlProxyTests",
+  "ElementLocatorTests.swift",
+);
+
 export const COORDINATE_KOTLIN_TEST_PATH = join(
   REPO_ROOT,
   "android",
@@ -126,6 +135,20 @@ export interface IosPointToPixelVector {
   willChangeUnderCanonicalPixels?: boolean;
 }
 
+/**
+ * One runner-side scale-reporting row (#4548, B1): the physical screenshot pixel dimensions a
+ * runner derives from its reported point dimensions and nativeScale
+ * (`ElementLocator.computePixelDimensions` on iOS; the Android runner is the nativeScale=1
+ * identity row — its bounds are already pixels, so it copies dimensions with no math).
+ */
+export interface ScaleReportingVector {
+  pointWidth: number;
+  pointHeight: number;
+  nativeScale: number;
+  expectedPixelWidth: number;
+  expectedPixelHeight: number;
+}
+
 export interface CoordinateMappingGoldenVectors {
   viewportToDevice: ViewportToDeviceVector[];
   deviceToViewport: DeviceToViewportVector[];
@@ -134,6 +157,7 @@ export interface CoordinateMappingGoldenVectors {
   screenshotRotation: ScreenshotRotationVector[];
   geometryPairing: GeometryPairingVector[];
   iosPointToPixel: IosPointToPixelVector[];
+  scaleReporting: ScaleReportingVector[];
 }
 
 const SECTION_NAMES = [
@@ -144,6 +168,7 @@ const SECTION_NAMES = [
   "screenshotRotation",
   "geometryPairing",
   "iosPointToPixel",
+  "scaleReporting",
 ] as const;
 
 export function loadCoordinateMappingVectors(): CoordinateMappingGoldenVectors {
@@ -211,6 +236,31 @@ function parseKotlinSection(marker: string, rowWidth: number): number[][] {
     rowWidth,
     `${COORDINATE_KOTLIN_TEST_PATH} (${marker.trim()})`,
   );
+}
+
+/**
+ * Parse the Swift inline copy of the scaleReporting table out of ElementLocatorTests.swift
+ * (`let scaleReportingVectors: [[Double]] = [...]`) — the pinch-vector mechanism, so a
+ * coordinated one-sided edit of the Swift math and its golden literals fails the parity test.
+ */
+export function parseSwiftScaleReportingTable(): ScaleReportingVector[] {
+  const region = extractNumericTableRegion(
+    SCALE_REPORTING_SWIFT_TEST_PATH,
+    "let scaleReportingVectors: [[Double]] =",
+    "[",
+    "]",
+  );
+  return chunkRows(
+    extractNumbers(region),
+    5,
+    `${SCALE_REPORTING_SWIFT_TEST_PATH} (scaleReportingVectors)`,
+  ).map(row => ({
+    pointWidth: row[0],
+    pointHeight: row[1],
+    nativeScale: row[2],
+    expectedPixelWidth: row[3],
+    expectedPixelHeight: row[4],
+  }));
 }
 
 export function parseKotlinViewportToDeviceTable(): ViewportToDeviceVector[] {
@@ -381,6 +431,21 @@ export function referenceIosPointToPixel(
 }
 
 /**
+ * Mirrors the runners' scale-reporting pixel-dimension derivation (#4548):
+ * `ElementLocator.computePixelDimensions` computes `(point * nativeScale).rounded()` — round half
+ * away from zero, which equals JS `Math.round` for the positive values these dimensions are. The
+ * Android runner is the `nativeScale === 1` identity case (bounds are already pixels).
+ */
+export function referenceScaleReporting(
+  vector: ScaleReportingVector,
+): { pixelWidth: number; pixelHeight: number } {
+  return {
+    pixelWidth: Math.round(vector.pointWidth * vector.nativeScale),
+    pixelHeight: Math.round(vector.pointHeight * vector.nativeScale),
+  };
+}
+
+/**
  * Compare two same-shape numeric row arrays and return human-readable mismatch strings (empty
  * array === identical). This is the drift detector for the Kotlin inline tables: feed it a table
  * with a one-sided edit and it reports exactly which row and field diverged.
@@ -495,6 +560,14 @@ export const IOS_POINT_TO_PIXEL_FIELDS = [
   "expectedPixelHeight",
 ] as const;
 
+export const SCALE_REPORTING_FIELDS = [
+  "pointWidth",
+  "pointHeight",
+  "nativeScale",
+  "expectedPixelWidth",
+  "expectedPixelHeight",
+] as const;
+
 /** Per-section canonical numeric field lists driving the load-time strict validation. */
 const SECTION_NUMERIC_FIELDS: Record<(typeof SECTION_NAMES)[number], readonly string[]> = {
   viewportToDevice: VIEWPORT_TO_DEVICE_FIELDS,
@@ -504,4 +577,5 @@ const SECTION_NUMERIC_FIELDS: Record<(typeof SECTION_NAMES)[number], readonly st
   screenshotRotation: SCREENSHOT_ROTATION_FIELDS,
   geometryPairing: GEOMETRY_PAIRING_FIELDS,
   iosPointToPixel: IOS_POINT_TO_PIXEL_FIELDS,
+  scaleReporting: SCALE_REPORTING_FIELDS,
 };

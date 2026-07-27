@@ -852,6 +852,54 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(tracker.observedBundleIds, ["com.example.app", "com.example.other"])
     }
 
+    // MARK: - Scale reporting pixel dimensions (#4548)
+
+    func testComputePixelDimensionsGoldenVectors() {
+        // Inline copy of the scaleReporting section of
+        // test/fixtures/coordinate-mapping-golden-vectors.json. The parity suite
+        // (test/parity/coordinateMappingGoldenVectorParity.test.ts) parses this literal out
+        // of the source text and verifies it against the canonical JSON, so a one-sided edit
+        // of either side fails there. Keep the table purely numeric (no string literals).
+        //
+        // Rows: pointWidth, pointHeight, nativeScale, expectedPixelWidth, expectedPixelHeight.
+        // Row 2 is the Display Zoom case: nativeScale 3.144 while UIScreen.scale stays 3.0 —
+        // using scale would report 2436 instead of the screenshot's true 2553 pixels.
+        // Row 3 is the iPhone Plus downsampling case: scale 3.0 but nativeScale 2.608696.
+        // Row 5 pins the .5 rounding tie (round half away from zero == JS Math.round here,
+        // all values positive). Row 6 is the Android identity contract (nativeScale 1).
+        let scaleReportingVectors: [[Double]] = [
+            [393, 852, 3.0, 1179, 2556],
+            [375, 812, 3.144, 1179, 2553],
+            [414, 736, 2.608696, 1080, 1920],
+            [320, 568, 2.0, 640, 1136],
+            [375, 811, 3.5, 1313, 2839],
+            [1080, 2340, 1.0, 1080, 2340],
+        ]
+
+        for (index, row) in scaleReportingVectors.enumerated() {
+            let result = ElementLocator.computePixelDimensions(
+                pointWidth: Int(row[0]),
+                pointHeight: Int(row[1]),
+                nativeScale: row[2]
+            )
+            XCTAssertNotNil(result, "row \(index) unexpectedly degenerate")
+            XCTAssertEqual(result?.pixelWidth, Int(row[3]), "row \(index) pixelWidth")
+            XCTAssertEqual(result?.pixelHeight, Int(row[4]), "row \(index) pixelHeight")
+        }
+    }
+
+    func testComputePixelDimensionsRejectsDegenerateInputs() {
+        XCTAssertNil(ElementLocator.computePixelDimensions(pointWidth: 0, pointHeight: 812, nativeScale: 3.0))
+        XCTAssertNil(ElementLocator.computePixelDimensions(pointWidth: 375, pointHeight: 0, nativeScale: 3.0))
+        XCTAssertNil(ElementLocator.computePixelDimensions(pointWidth: 375, pointHeight: 812, nativeScale: 0))
+        XCTAssertNil(ElementLocator.computePixelDimensions(pointWidth: 375, pointHeight: 812, nativeScale: -2.0))
+        XCTAssertNil(ElementLocator.computePixelDimensions(pointWidth: -1, pointHeight: 812, nativeScale: 3.0))
+        XCTAssertNil(
+            ElementLocator.computePixelDimensions(pointWidth: 375, pointHeight: 812, nativeScale: .infinity)
+        )
+        XCTAssertNil(ElementLocator.computePixelDimensions(pointWidth: 375, pointHeight: 812, nativeScale: .nan))
+    }
+
     func testForegroundTrackerConcurrentAccessDoesNotCrash() {
         let tracker = ForegroundTracker()
         DispatchQueue.concurrentPerform(iterations: 2_000) { i in

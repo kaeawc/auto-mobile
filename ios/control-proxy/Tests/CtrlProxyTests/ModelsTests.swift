@@ -42,6 +42,50 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(withChildren.children?.count, 1)
     }
 
+    // MARK: - ViewHierarchy scale reporting (#4548)
+
+    func testViewHierarchyDecodesLegacyPayloadWithoutScaleMetadata() throws {
+        // A hierarchy JSON produced before #4548 carries no nativeScale/pixelWidth/pixelHeight.
+        // Decoding must succeed with the additive fields absent, not fail or invent values.
+        let legacyJson = """
+        {"updatedAt":1,"packageName":"com.test.app","screenScale":3.0,"screenWidth":375,\
+        "screenHeight":812,"insets":{"available":false,"source":"unavailable","units":"unknown"}}
+        """
+        let decoded = try JSONDecoder().decode(ViewHierarchy.self, from: Data(legacyJson.utf8))
+
+        XCTAssertEqual(decoded.screenScale, 3.0)
+        XCTAssertNil(decoded.nativeScale)
+        XCTAssertNil(decoded.pixelWidth)
+        XCTAssertNil(decoded.pixelHeight)
+    }
+
+    func testViewHierarchyEncodesScaleMetadataWhenPresentAndOmitsWhenAbsent() throws {
+        let withMetadata = ViewHierarchy(
+            updatedAt: 1,
+            screenScale: 3.0,
+            screenWidth: 375,
+            screenHeight: 812,
+            nativeScale: 3.144,
+            pixelWidth: 1179,
+            pixelHeight: 2553
+        )
+        let encodedWith = try XCTUnwrap(
+            String(data: JSONEncoder().encode(withMetadata), encoding: .utf8)
+        )
+        XCTAssertTrue(encodedWith.contains("\"nativeScale\""))
+        XCTAssertTrue(encodedWith.contains("\"pixelWidth\":1179"))
+        XCTAssertTrue(encodedWith.contains("\"pixelHeight\":2553"))
+
+        // Absent metadata is OMITTED from the wire (additive contract), never emitted as null.
+        let withoutMetadata = ViewHierarchy(updatedAt: 1, screenWidth: 375, screenHeight: 812)
+        let encodedWithout = try XCTUnwrap(
+            String(data: JSONEncoder().encode(withoutMetadata), encoding: .utf8)
+        )
+        XCTAssertFalse(encodedWithout.contains("nativeScale"))
+        XCTAssertFalse(encodedWithout.contains("pixelWidth"))
+        XCTAssertFalse(encodedWithout.contains("pixelHeight"))
+    }
+
     // MARK: - WebSocketRequest Tests
 
     func testWebSocketRequestDecoding() throws {

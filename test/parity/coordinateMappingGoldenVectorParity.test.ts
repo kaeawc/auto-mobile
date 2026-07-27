@@ -24,6 +24,7 @@ import {
   FIT_SCALE_FIELDS,
   FIT_TO_VIEWPORT_FIELDS,
   loadCoordinateMappingVectors,
+  parseSwiftScaleReportingTable,
   parseKotlinDeviceToViewportTable,
   parseKotlinFitScaleTable,
   parseKotlinFitToViewportTable,
@@ -35,7 +36,10 @@ import {
   referenceFitToViewport,
   referenceGeometryPairing,
   referenceIosPointToPixel,
+  referenceScaleReporting,
   referenceViewportToDevice,
+  SCALE_REPORTING_FIELDS,
+  SCALE_REPORTING_SWIFT_TEST_PATH,
   SCREENSHOT_ROTATION_FIELDS,
   validateCoordinateMappingVectors,
   VIEWPORT_TO_DEVICE_FIELDS,
@@ -48,6 +52,7 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
   const kotlinFitToViewport = parseKotlinFitToViewportTable();
   const kotlinFitScale = parseKotlinFitScaleTable();
   const kotlinScreenshotRotation = parseKotlinScreenshotRotationTable();
+  const swiftScaleReporting = parseSwiftScaleReportingTable();
 
   test("canonical JSON exposes non-trivial tables for every section", function() {
     // Guards against an empty/renamed fixture silently making every parity assertion vacuous.
@@ -58,6 +63,39 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
     expect(canonical.screenshotRotation.length).toBeGreaterThanOrEqual(6);
     expect(canonical.geometryPairing.length).toBeGreaterThanOrEqual(6);
     expect(canonical.iosPointToPixel.length).toBeGreaterThanOrEqual(4);
+    expect(canonical.scaleReporting.length).toBeGreaterThanOrEqual(5);
+  });
+
+  test("B1: Swift scaleReporting literals are verified against the single source (issue #4548)", function() {
+    expect(diffNumericRows(swiftScaleReporting, canonical.scaleReporting, SCALE_REPORTING_FIELDS)).toEqual([]);
+  });
+
+  test("B1: every scaleReporting row's expected pixels are DERIVABLE from its inputs", function() {
+    for (let i = 0; i < canonical.scaleReporting.length; i++) {
+      const row = canonical.scaleReporting[i];
+      const computed = referenceScaleReporting(row);
+      expect(`${i}:${computed.pixelWidth}x${computed.pixelHeight}`)
+        .toBe(`${i}:${row.expectedPixelWidth}x${row.expectedPixelHeight}`);
+    }
+  });
+
+  test("B1: the scaleReporting table pins the scale/nativeScale distinction and the Android identity", function() {
+    // At least one row must have a non-integral nativeScale a scale-based implementation could
+    // not produce (Display Zoom / Plus downsampling), and the Android scale-1 identity row must
+    // be present so both platforms' contracts live in the same table.
+    expect(canonical.scaleReporting.some(row => !Number.isInteger(row.nativeScale))).toBe(true);
+    expect(canonical.scaleReporting.some(row =>
+      row.nativeScale === 1 &&
+      row.expectedPixelWidth === row.pointWidth &&
+      row.expectedPixelHeight === row.pointHeight
+    )).toBe(true);
+  });
+
+  test("B1: the Swift runtime golden loop still drives computePixelDimensions", function() {
+    // Literals <-> JSON parity alone would stay green if the Swift assertion loop were deleted.
+    const swiftSource = readFileSync(SCALE_REPORTING_SWIFT_TEST_PATH, "utf8");
+    expect(swiftSource).toContain("ElementLocator.computePixelDimensions(");
+    expect(swiftSource).toContain("for (index, row) in scaleReportingVectors.enumerated()");
   });
 
   test("AC1: Kotlin viewportToDevice literals are verified against the single source", function() {

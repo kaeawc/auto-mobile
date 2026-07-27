@@ -21,7 +21,9 @@ import {
   ScreenIdentity,
   ImeAction,
   ViewHierarchyResult,
+  ScreenScaleMetadata,
 } from "../../../models";
+import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
@@ -421,6 +423,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Screen geometry derived from hierarchies, carrying whether the daemon has actually seen a
   // hierarchy with that geometry (issue #3348). See TrackedScreenGeometry.
   private readonly screenGeometry = new TrackedScreenGeometry();
+  // Runner-reported scale metadata from the most recent forwarded hierarchy (#4548). Retained for
+  // #4549's canonical-pixel conversion; null until a #4548-aware runner reports it. Nothing in
+  // current behavior reads it — screenGeometry above stays the points * screenScale computation.
+  private reportedScaleMetadata: ScreenScaleMetadata | null = null;
 
   // Connection failure tracking for auto-restart
   private consecutiveConnectionFailures: number = 0;
@@ -1431,6 +1437,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     if (type === "hierarchy_update" && message.data) {
+      // Retain the additive #4548 scale metadata on RECEIPT — the moment the hierarchy first
+      // arrives — independent of whether it is later pushed to the observation stream. The push
+      // is skipped entirely when there is no device-data server, and suppressed for explicit
+      // initial-frame requests, so retaining inside pushHierarchyToObservationStream would leave
+      // getScreenScaleMetadata() null on exactly the paths #4549 must still be able to read.
+      this.retainScaleMetadataFrom(message.data as XCTestHierarchy);
       this.handleHierarchyUpdateForNavigation(message.data, message.perfTiming);
       // Record layout telemetry event using converted hierarchy (same format as observation stream)
       const converted = this.convertToViewHierarchyResult(message.data);
@@ -2173,7 +2185,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * Record the screen geometry described by [source] — the hierarchy about to be forwarded, never
    * whatever happens to be cached (issue #3348).
    */
-  private updateScreenGeometryFrom(source: { screenWidth?: number; screenHeight?: number; screenScale?: number } | null | undefined): void {
+  private updateScreenGeometryFrom(
+    source: {
+      screenWidth?: number;
+      screenHeight?: number;
+      screenScale?: number;
+      nativeScale?: number;
+      pixelWidth?: number;
+      pixelHeight?: number;
+    } | null | undefined
+  ): void {
     const hierarchy = source;
     if (!hierarchy?.screenWidth || !hierarchy.screenHeight) {
       // No usable geometry in this hierarchy. Clearing (rather than keeping the previous entry)
@@ -2191,6 +2212,29 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       Math.round(hierarchy.screenWidth * scale),
       Math.round(hierarchy.screenHeight * scale)
     );
+  }
+
+  /**
+   * Retain the additive #4548 scale metadata from a received hierarchy. Called on RECEIPT (the
+   * first `hierarchy_update` branch) so retention is independent of the observation-stream push,
+   * which is skipped with no device-data server and suppressed for initial-frame requests. Follows
+   * the same freshness rule as the tracked geometry: it always describes THIS hierarchy, so a
+   * hierarchy without complete fields (pre-#4548 runner) resets it to null rather than leaving
+   * stale values behind. `readScreenScaleMetadata` is the single all-or-nothing validator.
+   */
+  private retainScaleMetadataFrom(
+    hierarchy: { nativeScale?: number; pixelWidth?: number; pixelHeight?: number } | null | undefined
+  ): void {
+    this.reportedScaleMetadata = readScreenScaleMetadata(hierarchy);
+  }
+
+  /**
+   * Runner-reported scale metadata from the most recently received hierarchy (#4548), or null
+   * when the runner has not reported it (pre-#4548 runner, or no hierarchy yet). Exposed for
+   * #4549's canonical-pixel conversion; nothing in current behavior consumes it.
+   */
+  getScreenScaleMetadata(): ScreenScaleMetadata | null {
+    return this.reportedScaleMetadata;
   }
 
   /**

@@ -372,19 +372,25 @@ export class FakeTimer implements Timer {
   /**
    * Schedule a callback to be executed repeatedly at a specified interval.
    * In normal mode: fires each time advanceTime() moves past the interval.
-   * In auto-advance mode: fires once at its scheduled fake time (intervals should not repeat in tests).
+   * In auto-advance mode: reschedules itself at each fake interval until cancelled.
    */
   setInterval(callback: () => void, ms: number): NodeJS.Timeout {
     const id = this.nextIntervalId as unknown as NodeJS.Timeout;
     const numericId = this.nextIntervalId;
     this.nextIntervalId++;
     if (this.autoAdvance) {
-      this.enqueueAutoAdvanceTask(() => {
+      const period = ms > 0 ? ms : 1;
+      const scheduleNext = (): void => this.enqueueAutoAdvanceTask(() => {
         if (!this.cancelledIntervalIds.has(numericId)) {
           callback();
+          if (!this.cancelledIntervalIds.has(numericId)) {
+            scheduleNext();
+            return;
+          }
         }
         this.cancelledIntervalIds.delete(numericId);
-      }, ms);
+      }, period);
+      scheduleNext();
       return id;
     }
     this.pendingIntervals.push({

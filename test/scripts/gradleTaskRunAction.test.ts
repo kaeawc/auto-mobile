@@ -32,9 +32,13 @@ describe("gradle-task-run action", () => {
 
     expect(action.runs?.using).toBe("composite");
     for (const [actionName, minimumMajor] of Object.entries(minimumMajorByAction)) {
-      const ref = refs.find(candidate => candidate.startsWith(`${actionName}@`));
-      expect(ref).toBeDefined();
-      expect(majorVersion(ref!)).toBeGreaterThanOrEqual(minimumMajor);
+      const matchingRefs = refs.filter(candidate => candidate.startsWith(`${actionName}@`));
+      expect(matchingRefs.length).toBeGreaterThan(0);
+      for (const ref of matchingRefs) {
+        expect(majorVersion(ref)).toBeGreaterThanOrEqual(minimumMajor);
+      }
     }
+
+    expect(refs.some(ref => ref.startsWith("pplanel/hash-calculator-action@"))).toBe(false);
   });
 });

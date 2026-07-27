@@ -412,15 +412,15 @@ describe("DeviceAppManager", () => {
     expect(commands[installIdx]).toContain("CtrlProxyApp.app");
   });
 
-  test("clearAppDataViaReinstall throws when the installed bundle cannot be resolved", async () => {
+  test("clearAppDataViaReinstall preserves app data when bundle resolution fails", async () => {
+    const temporaryDir = "/tmp/automobile-device-app-manager-test";
+    const commands: Array<{ file: string; args: string[] }> = [];
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
-      // info apps writes no/empty json → bundle entry not found
-      execute: async (_file, args) => {
-        const command = [_file, ...args].join(" ");
-        if (command.includes("device info apps")) {
-          const jsonPath = parseDevicectlJsonOutputPath(command);
-          if (jsonPath) { await fs.writeFile(jsonPath, JSON.stringify({ apps: [] }), "utf-8"); }
+      execute: async (file, args) => {
+        commands.push({ file, args });
+        if (file === "xcrun" && args.slice(0, 4).join(" ") === "devicectl device info apps") {
+          throw new Error("bundle lookup failed");
         }
         return {
           stdout: "", stderr: "",
@@ -429,16 +429,35 @@ describe("DeviceAppManager", () => {
           includes(searchString: string) { return this.stdout.includes(searchString); }
         };
       },
-      readFile: async path => fs.readFile(path, "utf-8"),
-      mkdtemp: async prefix => fs.mkdtemp(prefix),
-      rm: async path => fs.rm(path, { recursive: true, force: true }),
-      readdir: async path => fs.readdir(path),
-      stat: async path => fs.stat(path),
-      tmpdir,
+      readFile: async () => { throw new Error("bundle lookup should fail before reading JSON"); },
+      mkdtemp: async () => temporaryDir,
+      rm: async () => {},
+      readdir: async () => { throw new Error("bundle lookup should fail before copying the app"); },
+      stat: async () => { throw new Error("bundle lookup should fail before copying the app"); },
+      tmpdir: () => "/tmp",
       logger: createFakeLogger()
     });
 
-    await expect(inspector.clearAppDataViaReinstall("device-udid", bundleId)).rejects.toThrow();
+    const error = await inspector.clearAppDataViaReinstall("device-udid", bundleId).then(
+      () => new Error("Expected bundle resolution failure"),
+      error => error
+    );
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as Error).message).toContain(bundleId);
+    expect(commands).toEqual([{
+      file: "xcrun",
+      args: [
+        "devicectl", "device", "info", "apps",
+        "--device", "device-udid",
+        "--bundle-id", bundleId,
+        "--json-output", join(temporaryDir, "apps.json"),
+        "--quiet"
+      ]
+    }]);
+    expect(commands.some(({ file, args }) =>
+      file === "xcrun" && args.slice(0, 4).join(" ") === "devicectl device uninstall app"
+    )).toBe(false);
   });
 
   test("clearAppDataViaReinstall surfaces the install error (not 'could not resolve') when reinstall fails after uninstall", async () => {

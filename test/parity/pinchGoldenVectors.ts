@@ -120,11 +120,46 @@ function extractBalanced(
  *  and trailing type suffixes (`0f` -> `0`, `433.9f` -> `433.9`), which is every form the golden
  *  tables use. Exotic forms the tables never contain (exponent `2e2`, underscore `6_0`, hex
  *  `0x10`) are deliberately NOT parsed specially: they split into extra tokens and trip the
- *  `NUMBERS_PER_ROW` alignment check in `rowsFromNumbers`, which fails closed rather than silently
- *  mis-parsing. */
-function extractNumbers(source: string): number[] {
+ *  per-row alignment check in `rowsFromNumbers` (or a sibling suite's chunker), which fails
+ *  closed rather than silently mis-parsing. Exported for the coordinate-mapping golden-vector
+ *  suite (issue #4547), which reuses this exact parsing pipeline for its own tables. */
+export function extractNumbers(source: string): number[] {
   const matches = source.match(/-?\d+(?:\.\d+)?/g) ?? [];
   return matches.map(Number);
+}
+
+/**
+ * Shared front half of the golden-table parsing pipeline: read a platform test file, strip
+ * comments, carve out the balanced table literal after `assignmentMarker`, and assert it contains
+ * no string literals. Returns the raw table region text; callers extract and chunk the numbers
+ * according to their own row shapes. Extracted so the coordinate-mapping golden-vector suite
+ * (issue #4547) reuses the exact same drift-guard mechanics as the pinch suite.
+ */
+export function extractNumericTableRegion(
+  filePath: string,
+  assignmentMarker: string,
+  open: string,
+  close: string,
+): string {
+  // Strip comments BEFORE the balanced-delimiter scan so a stray `[`/`]`/`(`/`)` inside a comment
+  // between the marker and the literal (or within it) can never mis-terminate the walk.
+  const source = stripComments(readFileSync(filePath, "utf8"));
+  const markerIndex = source.indexOf(assignmentMarker);
+  if (markerIndex < 0) {
+    throw new Error(`marker '${assignmentMarker}' not found in ${filePath}`);
+  }
+  // Start after the marker so a type annotation in the marker (e.g. Swift's `[Vector]`) is not
+  // mistaken for the opening delimiter of the literal.
+  const region = extractBalanced(
+    source,
+    markerIndex + assignmentMarker.length,
+    open,
+    close,
+  );
+  // Fail loudly if a string literal ever appears inside the table region so a digit-bearing label
+  // can never silently corrupt positional number extraction (Item 2, issue #3021).
+  assertNoStringLiterals(region, filePath);
+  return region;
 }
 
 /** Chunk a flat number sequence into golden rows, asserting a clean multiple of the row width. */
@@ -165,24 +200,7 @@ export function parseGoldenTable(
   open: string,
   close: string,
 ): GoldenVector[] {
-  // Strip comments BEFORE the balanced-delimiter scan so a stray `[`/`]`/`(`/`)` inside a comment
-  // between the marker and the literal (or within it) can never mis-terminate the walk.
-  const source = stripComments(readFileSync(filePath, "utf8"));
-  const markerIndex = source.indexOf(assignmentMarker);
-  if (markerIndex < 0) {
-    throw new Error(`marker '${assignmentMarker}' not found in ${filePath}`);
-  }
-  // Start after the marker so a type annotation in the marker (e.g. Swift's `[Vector]`) is not
-  // mistaken for the opening delimiter of the literal.
-  const region = extractBalanced(
-    source,
-    markerIndex + assignmentMarker.length,
-    open,
-    close,
-  );
-  // Item 2 (#3021): fail loudly if a string literal ever appears inside the table region so a
-  // digit-bearing label can never silently corrupt positional number extraction.
-  assertNoStringLiterals(region, filePath);
+  const region = extractNumericTableRegion(filePath, assignmentMarker, open, close);
   const numbers = extractNumbers(region);
   return rowsFromNumbers(numbers, filePath);
 }

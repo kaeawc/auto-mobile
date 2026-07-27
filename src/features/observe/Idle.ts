@@ -31,6 +31,7 @@ export class Idle {
     }
 
     const systemPackages = [
+      "android",
       "com.android.systemui",
       "com.android.launcher",
       "com.android.launcher3",

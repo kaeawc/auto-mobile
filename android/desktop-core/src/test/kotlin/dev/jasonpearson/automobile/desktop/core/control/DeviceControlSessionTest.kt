@@ -598,6 +598,34 @@ class DeviceControlSessionTest {
     scope.cancel()
   }
 
+  @Test
+  fun `rotation mismatch drops retained interaction while awaiting refresh`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    val clicked = paired(captureSequence = 7L, sourceSequence = 10L)
+    assertNotNull(session.evaluate(clicked).snapshotOrNull)
+    val retained = assertNotNull(session.interactionSnapshot)
+
+    session.tap(retained, point)
+    advanceUntilIdle()
+    assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+    // The retained screenshot remains useful for display, but a new hierarchy from a different
+    // rotation makes its coordinate bounds unsafe for another gesture.
+    val mismatchedRotation =
+      clicked.copy(hierarchy = clicked.hierarchy?.copy(sequence = 11L, rotation = 1))
+    val decision = session.evaluate(mismatchedRotation)
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      (decision as DeviceControlDecision.Blocked).reason,
+    )
+    assertEquals(retained, session.renderSnapshot, "the old frame can remain visible")
+    assertNull(session.interactionSnapshot, "a rotation mismatch must drop to Inspector")
+    scope.cancel()
+  }
+
   /** A coherent, freshly-received screenshot+hierarchy pair sharing one capture identity. */
   private fun paired(
     captureSequence: Long,

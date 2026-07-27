@@ -164,18 +164,22 @@ class DeviceControlSession(
   /**
    * The retained frame, or null once it is no longer fresh enough to act on.
    *
-   * Two independent signals retire it, because either alone can be the first to notice: the live
-   * decision reporting [DeviceControlBlockReason.StaleFrame] (the sources stopped producing), and
-   * the retained frame's own age (nothing new has arrived to make the live decision say anything).
+   * Three independent signals retire it, because any can be the first to notice: the live decision
+   * reporting [DeviceControlBlockReason.StaleFrame] (the sources stopped producing), the live
+   * decision reporting [DeviceControlBlockReason.RotationMismatch] (the displayed bounds are no
+   * longer safe to map through), and the retained frame's own age (nothing new has arrived to make
+   * the live decision say anything).
    */
   private fun retainedIfStillFresh(
     decision: DeviceControlDecision,
     nowMs: Long,
   ): DeviceFrameSnapshot? {
     val retained = renderSnapshot ?: return null
-    val blockedForStaleness =
-      (decision as? DeviceControlDecision.Blocked)?.reason == DeviceControlBlockReason.StaleFrame
-    if (blockedForStaleness) return null
+    when ((decision as? DeviceControlDecision.Blocked)?.reason) {
+      DeviceControlBlockReason.StaleFrame,
+      DeviceControlBlockReason.RotationMismatch -> return null
+      else -> Unit
+    }
     return retained.takeIf { DeviceControlPolicy.isSnapshotFresh(it, nowMs) }
   }
 

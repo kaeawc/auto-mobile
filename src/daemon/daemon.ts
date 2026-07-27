@@ -203,7 +203,7 @@ export class Daemon {
       this.deviceSessionRepository,
       undefined,
       (sessionId, _deviceId, releaseReason) => this.cancelAndReleaseSession(sessionId, releaseReason),
-      device => this.socketServer?.evictDeviceInputCache(device.deviceId)
+      deviceId => this.socketServer?.evictDeviceInputCache(deviceId)
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(this.sessionManager, this.devicePool);
@@ -1197,8 +1197,8 @@ export class Daemon {
           // serial does not inherit the previous one's cached API-level capability
           // (issue #3351): an API 31+/pre-31 mismatch mis-handles SHIFT/uppercase.
           // This fires only on a CONFIRMED disappearance; a fast same-serial restart
-          // that never confirms is not caught here (the 5-min idle close is the
-          // backstop until a device-connect signal exists — issue #4534).
+          // that never confirms is handled by the device-ready callback; the 5-min
+          // idle close remains a fallback.
           this.socketServer?.evictDeviceInputCache(deviceId);
           if (this.devicePool.getDevice(deviceId)) {
             deviceCleanupSucceeded = false;

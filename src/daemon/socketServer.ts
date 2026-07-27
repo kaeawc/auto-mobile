@@ -1645,9 +1645,10 @@ export class UnixSocketServer {
    * close. If an emulator is replaced under a reused serial (`emulator-5554`)
    * before then, the next device would inherit the previous one's cached API-level
    * capability — an API 31+ / pre-31 mismatch that mis-handles SHIFT and uppercase.
-   * The device pool calls this as soon as a boot-ready device is added or re-added,
-   * including a rapid same-serial replacement that the disconnect monitor never
-   * observes as absent. The confirmed-disconnect monitor also calls it as a backstop.
+   * The device pool calls this after it adds a device, rediscovers it during a
+   * refresh, or binds it after startDevice. That covers rapid same-serial
+   * replacements that the disconnect monitor never observes as absent. The
+   * confirmed-disconnect monitor also calls it as a backstop.
    * Idempotent; safe for an unknown id.
    */
   evictDeviceInputCache(deviceId: string): void {

@@ -187,7 +187,7 @@ describe("DevicePool", () => {
         undefined,
         undefined,
         undefined,
-        device => connectedDeviceIds.push(device.deviceId)
+        deviceId => connectedDeviceIds.push(deviceId)
       );
       await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
 
@@ -196,6 +196,52 @@ describe("DevicePool", () => {
       expect(connectedDeviceIds).toEqual(["emulator-5554"]);
       expect(devicePool.getTotalDeviceCount()).toBe(1);
       expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
+    });
+
+    test("notifies when refresh rediscovers an existing serial", async () => {
+      const connectedDeviceIds: string[] = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        deviceId => connectedDeviceIds.push(deviceId)
+      );
+      const device = createBootedDevice("emulator-5554");
+      await devicePool.initializeWithDevices([device]);
+      fakeDeviceManager.bootedDevices = [device];
+
+      await devicePool.refreshDevices();
+
+      expect(connectedDeviceIds).toEqual(["emulator-5554"]);
+    });
+
+    test("notifies when start-device binding reuses an existing serial", async () => {
+      const connectedDeviceIds: string[] = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        deviceId => connectedDeviceIds.push(deviceId)
+      );
+      const device = createBootedDevice("emulator-5554");
+      await devicePool.initializeWithDevices([device]);
+      fakeDeviceManager.bootedDevices = [device];
+
+      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+
+      expect(connectedDeviceIds).toEqual(["emulator-5554"]);
     });
   });
 

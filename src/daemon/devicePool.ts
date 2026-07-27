@@ -76,7 +76,7 @@ interface DeviceDisconnectSessionReleaser {
 }
 
 interface DeviceReadyListener {
-  (device: BootedDevice): void;
+  (deviceId: string): void;
 }
 
 /**
@@ -253,6 +253,7 @@ export class DevicePool {
           pooledDevice.platform = device.platform;
           pooledDevice.iosVersion = device.iosVersion;
         }
+        this.notifyDeviceReady(device.deviceId);
       }
       perf.endOperation("poolUpdate");
 
@@ -276,6 +277,14 @@ export class DevicePool {
         logger.error(`Stack trace: ${error.stack}`);
       }
       return 0;
+    }
+  }
+
+  private notifyDeviceReady(deviceId: string): void {
+    try {
+      this.onDeviceReady?.(deviceId);
+    } catch (error) {
+      logger.warn(`[DevicePool] Device-ready listener failed for ${deviceId}: ${error}`);
     }
   }
 
@@ -319,11 +328,7 @@ export class DevicePool {
       logger.info(`Added device ${device.deviceId} to pool`);
     }
 
-    try {
-      this.onDeviceReady?.(device);
-    } catch (error) {
-      logger.warn(`[DevicePool] Device-ready listener failed for ${device.deviceId}: ${error}`);
-    }
+    this.notifyDeviceReady(device.deviceId);
   }
 
   /**
@@ -1397,7 +1402,8 @@ export class DevicePool {
    */
   async bindOrReuseDeviceSession(sessionId: string, deviceId: string, platform: Platform): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
-      if (!this.devices.has(deviceId)) {
+      const alreadyPooled = this.devices.has(deviceId);
+      if (!alreadyPooled) {
         const bootedDevices = await this.deviceManager.getBootedDevices(platform);
         const booted = bootedDevices.find(d => d.deviceId === deviceId);
         if (booted) {
@@ -1416,6 +1422,10 @@ export class DevicePool {
           `Device '${deviceId}' is not available in the device pool. ` +
           "It may have been shut down or disconnected."
         );
+      }
+
+      if (alreadyPooled) {
+        this.notifyDeviceReady(deviceId);
       }
 
       if (device.sessionId) {
@@ -1472,7 +1482,8 @@ export class DevicePool {
     const sessionId = randomUUID();
 
     // Ensure device is in the pool (it may have been freshly booted)
-    if (!this.devices.has(deviceId)) {
+    const alreadyPooled = this.devices.has(deviceId);
+    if (!alreadyPooled) {
       const bootedDevices = await this.deviceManager.getBootedDevices(platform);
       const booted = bootedDevices.find(d => d.deviceId === deviceId);
       if (booted) {
@@ -1507,6 +1518,10 @@ export class DevicePool {
         `  - Use 'startDevice' with deviceId to restart this specific device\n` +
         `  - Use 'listDevices' to see currently available devices`
       );
+    }
+
+    if (alreadyPooled) {
+      this.notifyDeviceReady(deviceId);
     }
 
     device.sessionId = sessionId;

@@ -94,10 +94,17 @@ is disconnected roughly 30 s after connecting — even while it is happily recei
   like every request). No `id` is needed, and the daemon sends **no response** to a pong — it only
   refreshes your subscription's activity timestamp.
 - The ping's `timestamp` is the daemon's clock in epoch milliseconds; it is informational.
-- **Receiving pushed frames does not count as activity.** The daemon deliberately refreshes
-  liveness only on inbound traffic (your `pong`, or the initial `subscribe`), never on its own
-  outbound writes — otherwise the frame stream itself would keep a hung client "alive" forever. A
-  client that consumes `screenshot_update`s but never pongs still times out at 30 s.
+- **Receiving pushed frames does not count as activity.** The daemon deliberately does not refresh
+  liveness on its own successful outbound writes — otherwise the frame stream itself would keep a
+  hung client "alive" forever. A client that consumes `screenshot_update`s but never pongs times
+  out at 30 s. Liveness is refreshed by your `pong`, the initial `subscribe`, and one narrow
+  exception below.
+- **The one exception — backpressure `drain` — is not something to rely on.** If a push overflows
+  the daemon-side socket buffer (the write crosses the high-water mark), the daemon listens for the
+  socket's `drain` event, and that drain — proof the peer actually read the backlog — refreshes the
+  activity timestamp. A slow reader that repeatedly triggers backpressure can therefore incidentally
+  survive past 30 s without ponging. Do **not** design a client around this: a healthy reader never
+  fills the buffer, so no drain events fire, and only pongs keep it alive.
 - Simplest compliant implementation: on any received line with `"type": "ping"`, immediately write
   `{"command":"pong"}\n`. There is no harm in an unsolicited pong; an unknown command, by contrast,
   gets an `error` response.

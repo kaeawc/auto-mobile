@@ -131,4 +131,35 @@ describe("observation stream keepalive doc (client-screen-control.md)", () => {
     server.triggerKeepalive();
     expect(server.getSubscriberCount()).toBe(1);
   });
+
+  test("the documented backpressure-drain exception refreshes liveness without a pong", async () => {
+    // The doc's one exception to "outbound writes are not activity": a write that crosses the
+    // high-water mark arms a drain listener, and the peer's later drain — proof it actually read
+    // the backlog — refreshes lastActivity (PushSubscriptionSocketServer.armDrainListener; also
+    // pinned by PushSubscriptionSocketServer.test.ts's backpressure suite). The doc must describe
+    // it, and the server must still behave that way.
+    const section = await readKeepaliveSection();
+    expect(section).toContain("`drain`");
+
+    const timer = new FakeTimer();
+    const server = new DocPinPushServer(timer);
+    const socket = new FakeSocket();
+    const subscriptionId = server.addSubscriber(socket);
+
+    // Backpressure: every write reports a full buffer, so the keepalive ping's own send arms the
+    // drain listener (checkKeepalive: sendJson -> false -> armDrainListener).
+    socket.write = () => false;
+    timer.advanceTimersByTime(DEFAULT_KEEPALIVE_CONFIG.intervalMs);
+    server.triggerKeepalive();
+
+    // Just short of the reap deadline the peer finally drains — no pong ever sent.
+    timer.advanceTimersByTime(DEFAULT_KEEPALIVE_CONFIG.timeoutMs - DEFAULT_KEEPALIVE_CONFIG.intervalMs - 1_000);
+    socket.emit("drain");
+    expect(server.lastActivityOf(subscriptionId)).toBe(timer.now());
+
+    // The drain-refreshed subscriber survives a sweep past the original deadline.
+    timer.advanceTimersByTime(2_000);
+    server.triggerKeepalive();
+    expect(server.getSubscriberCount()).toBe(1);
+  });
 });

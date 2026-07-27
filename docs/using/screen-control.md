@@ -51,8 +51,11 @@ A few details worth knowing:
   keystrokes forward. Clicking the mirror always re-focuses it.
 - **App/window shortcuts still work.** A shortcut with Ctrl, Alt, or Cmd/Win generally stays with
   the desktop app and is not sent to the device, so your menus and window shortcuts are unaffected.
-  The one exception is character composition — AltGr on Windows/Linux, Option on macOS — which
-  still types the composed character; see the
+  The one exception is character composition — AltGr on Windows/Linux, Option on macOS — but only
+  when it produces a **printable ASCII** character (`U+0020`–`U+007E`): that types on the device. A
+  composed non-ASCII character (`€`, `ß`, an accented letter) is **not** forwarded and stays with
+  the desktop app, the same ASCII-only limit that applies to typing in general (see
+  [#4519](https://github.com/kaeawc/auto-mobile/issues/4519)). See the
   [keyboard forwarding policy](../design-docs/mcp/daemon/screen-control-mapping.md#keyboard-forwarding-policy)
   for the exact rule.
 

@@ -74,6 +74,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.MONOTONIC_NOW_MS
 import dev.jasonpearson.automobile.desktop.core.control.DeviceKeyboardEventTranslator
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
@@ -417,10 +418,15 @@ fun DeviceScreenView(
   // Transient touch-point feedback for a forwarded control-mode tap (issue #3352). A control-mode
   // tap otherwise produces no on-canvas confirmation until the device redraws, so a brief pulse at
   // the tapped device coordinate tells the user the click registered and was forwarded. The fade
-  // math is the pure, unit-tested TouchFeedbackModel; this composable only owns the clock and the
-  // per-frame tick that drives the fade. Inert in inspector mode, so the IDE plugin is unaffected.
-  val touchFeedback = remember { TouchFeedbackModel() }
-  var touchFeedbackNow by remember { mutableStateOf(0L) }
+  // math is the pure, unit-tested TouchFeedbackModel; this composable only owns the per-frame tick
+  // that drives the fade. Inert in inspector mode, so the IDE plugin is unaffected.
+  //
+  // The model ages markers on MONOTONIC_NOW_MS (#3348's monotonic source), NOT the wall clock: a
+  // wall-clock step backward would clamp elapsed to 0 and spin this recompose loop every frame
+  // until real time caught up (a stuck pulse + sustained CPU). The tick below advances on the same
+  // monotonic source so recompose time and aging time agree.
+  val touchFeedback = remember { TouchFeedbackModel(nowMs = MONOTONIC_NOW_MS) }
+  var touchFeedbackTick by remember { mutableStateOf(0L) }
   // Bumped on each recorded pulse so the tick effect (re)launches; the loop exits on its own once
   // nothing is left to fade, so it never spins while the screen is idle.
   var touchFeedbackGeneration by remember { mutableStateOf(0) }
@@ -429,15 +435,16 @@ fun DeviceScreenView(
   }
   LaunchedEffect(touchFeedbackGeneration, controlMode) {
     if (controlMode != DeviceScreenControlMode.Control) return@LaunchedEffect
-    while (touchFeedback.hasActive(System.currentTimeMillis())) {
-      withFrameMillis { touchFeedbackNow = System.currentTimeMillis() }
+    while (touchFeedback.hasActive()) {
+      withFrameMillis { touchFeedbackTick = MONOTONIC_NOW_MS() }
     }
   }
-  // Resolved during composition (a pure read) so the draw closure never mutates state; reading
-  // touchFeedbackNow here is what re-composes the overlay each frame while a pulse is fading.
+  // Resolved during composition (a pure read) so the draw closure never mutates state. Reading
+  // touchFeedbackTick here subscribes the overlay to the per-frame tick so it re-composes while a
+  // pulse is fading; the model resolves the fade against its own monotonic clock, not this value.
   val activeTouchFeedback =
     if (controlMode == DeviceScreenControlMode.Control) {
-      touchFeedback.active(touchFeedbackNow)
+      touchFeedbackTick.let { touchFeedback.active() }
     } else {
       emptyList()
     }
@@ -840,10 +847,9 @@ fun DeviceScreenView(
                         y = point.y,
                         deviceWidth = snapshot.deviceWidth,
                         deviceHeight = snapshot.deviceHeight,
-                        nowMs = System.currentTimeMillis(),
                       )
                       if (forwarded) {
-                        touchFeedbackNow = System.currentTimeMillis()
+                        touchFeedbackTick = MONOTONIC_NOW_MS()
                         touchFeedbackGeneration++
                       }
                     }

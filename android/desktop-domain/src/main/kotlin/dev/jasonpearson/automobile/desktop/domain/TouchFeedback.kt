@@ -47,17 +47,26 @@ public data class ActiveTouchFeedback(val marker: TouchFeedbackMarker, val progr
 
 /**
  * Holds the transient touch-feedback pulses for a mirrored device screen and resolves which are
- * still visible at a given client-clock instant (issue #3352).
+ * still visible right now (issue #3352).
  *
- * Pure and clock-free: every method takes `nowMs`, so the fade transitions are unit-tested with a
- * fed clock and no timer, exactly like the other `desktop-domain` policies. The reads
- * ([active]/[hasActive]) never mutate, so a UI layer may call them during composition or draw; the
- * list only shrinks in [record] (which prunes fully-faded markers first) and [reset].
+ * The clock is **injected and must be monotonic** ([nowMs]) — production passes
+ * `System.nanoTime()`-based millis, the same source #3348 introduced for frame-age aging. Both the
+ * record timestamp and the aging read come from this one clock, so a wall-clock step backward (NTP
+ * correction, manual change, a VM/laptop resume) can neither strand a pulse visible nor spin the
+ * host's recompose loop: monotonic time never regresses, so elapsed only grows and a pulse always
+ * reaches expiry. Injecting it also keeps the fade transitions unit-testable with a fed clock and
+ * no timer, exactly like the other `desktop-domain` policies.
+ *
+ * The reads ([active]/[hasActive]) never mutate, so a UI layer may call them during composition or
+ * draw; the list only shrinks in [record] (which prunes fully-faded markers first) and [reset].
  *
  * Feedback is deliberately capped at [MAX_MARKERS]: rapid tapping cannot grow the list without
  * bound, and the oldest pulse is dropped first since it is closest to fading anyway.
  */
-public class TouchFeedbackModel(private val durationMs: Long = DURATION_MS) {
+public class TouchFeedbackModel(
+  private val durationMs: Long = DURATION_MS,
+  private val nowMs: () -> Long = MONOTONIC_NOW_MS,
+) {
   private val markers = ArrayDeque<TouchFeedbackMarker>()
 
   /**
@@ -72,33 +81,39 @@ public class TouchFeedbackModel(private val durationMs: Long = DURATION_MS) {
     y: Int,
     deviceWidth: Int,
     deviceHeight: Int,
-    nowMs: Long,
   ) {
-    if (forwarded) record(x, y, deviceWidth, deviceHeight, nowMs)
+    if (forwarded) record(x, y, deviceWidth, deviceHeight)
   }
 
   /**
    * Record a forwarded input at device coordinate ([x], [y]) — mapped through a snapshot whose
-   * bounds are [deviceWidth] x [deviceHeight] — as of [nowMs], starting a fresh pulse. Fully-faded
-   * markers are pruned first, and the oldest live one is dropped if this would exceed
-   * [MAX_MARKERS].
+   * bounds are [deviceWidth] x [deviceHeight] — stamped with the monotonic clock, starting a fresh
+   * pulse. Fully-faded markers are pruned first, and the oldest live one is dropped if this would
+   * exceed [MAX_MARKERS].
    */
-  public fun record(x: Int, y: Int, deviceWidth: Int, deviceHeight: Int, nowMs: Long) {
-    markers.removeAll { progress(it, nowMs) >= 1f }
-    markers.addLast(TouchFeedbackMarker(x, y, deviceWidth, deviceHeight, nowMs))
+  public fun record(x: Int, y: Int, deviceWidth: Int, deviceHeight: Int) {
+    val now = nowMs()
+    markers.removeAll { progress(it, now) >= 1f }
+    markers.addLast(TouchFeedbackMarker(x, y, deviceWidth, deviceHeight, now))
     while (markers.size > MAX_MARKERS) {
       markers.removeFirst()
     }
   }
 
-  /** The pulses still visible at [nowMs], each with its resolved [ActiveTouchFeedback.progress]. */
-  public fun active(nowMs: Long): List<ActiveTouchFeedback> = markers.mapNotNull { marker ->
-    val p = progress(marker, nowMs)
-    if (p >= 1f) null else ActiveTouchFeedback(marker, p)
+  /** The pulses still visible now, each with its resolved [ActiveTouchFeedback.progress]. */
+  public fun active(): List<ActiveTouchFeedback> {
+    val now = nowMs()
+    return markers.mapNotNull { marker ->
+      val p = progress(marker, now)
+      if (p >= 1f) null else ActiveTouchFeedback(marker, p)
+    }
   }
 
-  /** Whether any pulse is still visible at [nowMs]; drives whether a UI layer keeps ticking. */
-  public fun hasActive(nowMs: Long): Boolean = markers.any { progress(it, nowMs) < 1f }
+  /** Whether any pulse is still visible now; drives whether a UI layer keeps ticking. */
+  public fun hasActive(): Boolean {
+    val now = nowMs()
+    return markers.any { progress(it, now) < 1f }
+  }
 
   /** Drop every pulse. Called when control mode exits, so a stale pulse never lingers. */
   public fun reset() {
@@ -106,17 +121,25 @@ public class TouchFeedbackModel(private val durationMs: Long = DURATION_MS) {
   }
 
   /**
-   * Fade progress of [marker] at [nowMs]: `0.0` when just recorded, `1.0` once [durationMs] has
-   * elapsed. A non-positive [durationMs] makes every marker immediately expired (feedback off), and
-   * a backwards clock step clamps to `0.0` rather than going negative.
+   * Fade progress of [marker] at [now]: `0.0` when just recorded, `1.0` once [durationMs] has
+   * elapsed. A non-positive [durationMs] makes every marker immediately expired (feedback off).
+   * Elapsed is clamped at `0.0` defensively; a monotonic clock never produces a negative elapsed,
+   * so this only guards a misconfigured (non-monotonic) injected clock.
    */
-  private fun progress(marker: TouchFeedbackMarker, nowMs: Long): Float {
+  private fun progress(marker: TouchFeedbackMarker, now: Long): Float {
     if (durationMs <= 0L) return 1f
-    val elapsed = nowMs - marker.startedAtMs
+    val elapsed = now - marker.startedAtMs
     return (elapsed.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
   }
 
   public companion object {
+    /**
+     * Default monotonic clock: `System.nanoTime()` in milliseconds. Mirrors desktop-core's
+     * `MONOTONIC_NOW_MS` (#3348) so aging never rides the wall clock; unlike `currentTimeMillis()`
+     * it cannot step backward.
+     */
+    public val MONOTONIC_NOW_MS: () -> Long = { System.nanoTime() / 1_000_000L }
+
     /** How long, in milliseconds, a touch pulse stays visible before fully fading. */
     public const val DURATION_MS: Long = 600L
 

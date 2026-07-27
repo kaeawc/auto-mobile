@@ -150,7 +150,7 @@ private fun PointerEvent.isZoomModifierPressed(): Boolean =
 
 /**
  * The one key-event handler for the device screen, which — like the drag gesture — means different
- * things per mode (issue [#3351](https://github.com/kaeawc/auto-mobile/issues/3351)).
+ * things per mode (issue #3351).
  *
  * - **Inspector** — Escape deselects, exactly as before. No daemon input is ever produced from this
  *   mode, which is what keeps the IDE plugin (inspector-only) unchanged.
@@ -195,8 +195,8 @@ private fun handleDeviceScreenKeyEvent(
 }
 
 /**
- * The one pointer-drag gesture for the device screen, which means different things per mode (issue
- * [#3350](https://github.com/kaeawc/auto-mobile/issues/3350)).
+ * The one pointer-drag gesture for the device screen, which means different things per mode
+ * (issue #3350).
  *
  * - **Inspector** — a drag pans the viewport, exactly as before. No daemon input is ever produced
  *   from this mode, which is what keeps the IDE plugin (inspector-only) unchanged.

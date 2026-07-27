@@ -115,8 +115,8 @@ fun ThreePaneShell(
   // Vim mode
   vimModeEnabled: Boolean = false,
   /**
-   * Per-event predicate: will the device-control canvas actually claim this keystroke? (issue
-   * [#3351](https://github.com/kaeawc/auto-mobile/issues/3351)).
+   * Per-event predicate: will the device-control canvas actually claim this keystroke?
+   * (issue #3351).
    *
    * This shell's navigation shortcuts live in a **preview** handler, which by design runs before
    * any focused descendant sees the event. That is right for shell navigation and fatal for

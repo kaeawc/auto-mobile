@@ -299,6 +299,14 @@ matters because the chords a client actually wants to opt in are letter chords
 like Ctrl-S, and an ordinary letter deliberately carries no device key at all, so
 a key-only allowlist could never name one.
 
+Each entry also names the **exact chord-modifier set** it forwards (`ctrl`/`alt`/
+`meta`). This is required, not optional: an entry that matched a character alone
+would forward Ctrl-S **and** Meta-S **and** Alt-S, so opting in one chord would
+silently swallow the host's other shortcuts on the same key. `OfCharacter('s',
+ctrl = true)` therefore forwards Ctrl-S only; Meta-S and Alt-S stay with the host.
+Shift is not part of the match (character comparison is already case-insensitive,
+so Ctrl-S and Ctrl-Shift-S name the same opt-in).
+
 The mechanism matters as much as the rule: a declined keystroke must be left
 **unconsumed** so it continues to the host's own shortcut handling. In the
 reference client the view returns the client's own "did you forward it?" answer

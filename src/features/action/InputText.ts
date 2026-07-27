@@ -329,7 +329,7 @@ export class InputText extends BaseVisualChange {
    *   inside `executeArgsImpl` BEFORE the per-command timeout applies. On a cold or
    *   expired 60s path cache a stalled discovery probe can still wedge the queue —
    *   a property of the shared adb primitive every input path uses, tracked in
-   *   [#4533](https://github.com/kaeawc/auto-mobile/issues/4533), not fixable here.
+   *   #4533, not fixable here.
    */
   async appendText(
     text: string,

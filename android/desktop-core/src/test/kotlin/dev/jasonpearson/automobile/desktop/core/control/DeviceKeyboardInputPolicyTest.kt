@@ -145,7 +145,7 @@ class DeviceKeyboardInputPolicyTest {
             key = DeviceKeyboardKey.Escape,
             modifiers = DeviceKeyModifiers(meta = true),
           ),
-        forwardedChords = setOf(DeviceChordAllowance.OfKey(DeviceKeyboardKey.Escape)),
+        forwardedChords = setOf(DeviceChordAllowance.OfKey(DeviceKeyboardKey.Escape, meta = true)),
       ),
     )
   }
@@ -160,7 +160,7 @@ class DeviceKeyboardInputPolicyTest {
       DeviceKeyboardDecision.TypeText("s"),
       DeviceKeyboardInputPolicy.evaluate(
         stroke = ctrlS,
-        forwardedChords = setOf(DeviceChordAllowance.OfCharacter('s')),
+        forwardedChords = setOf(DeviceChordAllowance.OfCharacter('s', ctrl = true)),
       ),
     )
     // Case-insensitive, so opting "Ctrl-S" in does not require enumerating Ctrl-Shift-S too.
@@ -172,7 +172,7 @@ class DeviceKeyboardInputPolicyTest {
             character = 'S',
             modifiers = DeviceKeyModifiers(ctrl = true, shift = true),
           ),
-        forwardedChords = setOf(DeviceChordAllowance.OfCharacter('s')),
+        forwardedChords = setOf(DeviceChordAllowance.OfCharacter('s', ctrl = true)),
       ),
     )
     // And opting one chord in must not open the gate for every other chord.
@@ -180,9 +180,83 @@ class DeviceKeyboardInputPolicyTest {
       DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
       DeviceKeyboardInputPolicy.evaluate(
         stroke = DeviceKeyStroke(character = 'q', modifiers = DeviceKeyModifiers(ctrl = true)),
-        forwardedChords = setOf(DeviceChordAllowance.OfCharacter('s')),
+        forwardedChords = setOf(DeviceChordAllowance.OfCharacter('s', ctrl = true)),
       ),
     )
+  }
+
+  @Test
+  fun `a character opt-in is scoped to its exact modifier set`() {
+    // The bug this guards: an OfCharacter('s', ctrl) opt-in must forward Ctrl-S ONLY, never the
+    // host's Meta-S (save) or Alt-S (menu) on the same letter. Comparing character alone would
+    // swallow all three.
+    val ctrlSOptIn = setOf(DeviceChordAllowance.OfCharacter('s', ctrl = true))
+    assertEquals(
+      DeviceKeyboardDecision.TypeText("s"),
+      DeviceKeyboardInputPolicy.evaluate(
+        stroke = DeviceKeyStroke(character = 's', modifiers = DeviceKeyModifiers(ctrl = true)),
+        forwardedChords = ctrlSOptIn,
+      ),
+      "Ctrl-S is the opted-in chord and forwards",
+    )
+    listOf(DeviceKeyModifiers(meta = true), DeviceKeyModifiers(alt = true)).forEach { mods ->
+      assertEquals(
+        DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+        DeviceKeyboardInputPolicy.evaluate(
+          stroke = DeviceKeyStroke(character = 's', modifiers = mods),
+          forwardedChords = ctrlSOptIn,
+        ),
+        "$mods-S is a different host shortcut and must NOT be forwarded by a Ctrl-S opt-in",
+      )
+    }
+  }
+
+  @Test
+  fun `a key opt-in is scoped to its exact modifier set`() {
+    // Same scoping for OfKey: opting Meta-Escape in must not forward Ctrl-Escape or Alt-Escape.
+    val metaEscapeOptIn = setOf(DeviceChordAllowance.OfKey(DeviceKeyboardKey.Escape, meta = true))
+    assertEquals(
+      DeviceKeyboardDecision.PressButton("back"),
+      DeviceKeyboardInputPolicy.evaluate(
+        stroke =
+          DeviceKeyStroke(
+            key = DeviceKeyboardKey.Escape,
+            modifiers = DeviceKeyModifiers(meta = true),
+          ),
+        forwardedChords = metaEscapeOptIn,
+      ),
+    )
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      DeviceKeyboardInputPolicy.evaluate(
+        stroke =
+          DeviceKeyStroke(
+            key = DeviceKeyboardKey.Escape,
+            modifiers = DeviceKeyModifiers(ctrl = true),
+          ),
+        forwardedChords = metaEscapeOptIn,
+      ),
+    )
+  }
+
+  @Test
+  fun `opting in nothing forwards no chord`() {
+    // The default: an empty allowlist leaves every chord with the host.
+    listOf(
+        DeviceKeyStroke(character = 's', modifiers = DeviceKeyModifiers(ctrl = true)),
+        DeviceKeyStroke(character = 's', modifiers = DeviceKeyModifiers(meta = true)),
+        DeviceKeyStroke(
+          key = DeviceKeyboardKey.Escape,
+          modifiers = DeviceKeyModifiers(ctrl = true),
+        ),
+      )
+      .forEach { stroke ->
+        assertEquals(
+          DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+          DeviceKeyboardInputPolicy.evaluate(stroke = stroke, forwardedChords = emptySet()),
+          "$stroke",
+        )
+      }
   }
 
   @Test

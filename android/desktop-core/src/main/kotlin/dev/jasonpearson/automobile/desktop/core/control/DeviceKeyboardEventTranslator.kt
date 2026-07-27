@@ -17,8 +17,7 @@ private val IS_MAC = System.getProperty("os.name", "").contains("Mac", ignoreCas
 
 /**
  * Translates a Compose key event into the Compose-free [DeviceKeyStroke] that
- * [dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardInputPolicy] decides on (issue
- * [#3351](https://github.com/kaeawc/auto-mobile/issues/3351)).
+ * [dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardInputPolicy] decides on (issue #3351).
  *
  * This is the only place in the keyboard path that knows about Compose. Keeping the toolkit
  * vocabulary here — rather than in the policy — is what lets a third-party client in another host

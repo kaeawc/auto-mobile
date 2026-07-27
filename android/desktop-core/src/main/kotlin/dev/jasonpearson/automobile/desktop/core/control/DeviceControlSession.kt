@@ -24,16 +24,14 @@ import kotlinx.coroutines.withContext
 /**
  * The one seam client device control runs through (issue #3348).
  *
- * [#3347](https://github.com/kaeawc/auto-mobile/pull/4475) accumulated its safety machinery as
- * separate pieces wired individually into the Compose host: an error-ordering gate, a bounded
- * ordered dispatch queue, a frame-generation guard and a geometry check, each with its own
- * lifecycle call site. Every new input action would have had to re-wire all of it and re-derive its
- * own gates. This type owns them instead, so the Compose layer wires it **once** and later actions
- * add a dispatch method here rather than a new gate up there. Drag/swipe
- * ([#3350](https://github.com/kaeawc/auto-mobile/issues/3350)) did exactly that — [swipe] joins
- * [tap] on the one queue, the one error claim and the one refresh tracker — and
- * keyboard/text/button ([#3351](https://github.com/kaeawc/auto-mobile/issues/3351)) did the same:
- * [key] is one more dispatch method on the same three, not a fourth mechanism.
+ * #3347 accumulated its safety machinery as separate pieces wired individually into the Compose
+ * host: an error-ordering gate, a bounded ordered dispatch queue, a frame-generation guard and a
+ * geometry check, each with its own lifecycle call site. Every new input action would have had to
+ * re-wire all of it and re-derive its own gates. This type owns them instead, so the Compose layer
+ * wires it **once** and later actions add a dispatch method here rather than a new gate up there.
+ * Drag/swipe (#3350) did exactly that — [swipe] joins [tap] on the one queue, the one error claim
+ * and the one refresh tracker — and keyboard/text/button (#3351) did the same: [key] is one more
+ * dispatch method on the same three, not a fourth mechanism.
  *
  * Responsibilities:
  * - **Decide** whether control is available, via the pure [DeviceControlPolicy], and expose the one

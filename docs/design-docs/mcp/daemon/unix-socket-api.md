@@ -576,6 +576,16 @@ Append's semantics and limits:
   `input keycombination` can hold SHIFT. On older devices those characters fail
   with the same actionable error; lowercase, digits and unshifted punctuation
   work on every supported API level.
+- **A daemon predating `mode: "append"` rejects the param.** `mode` is validated
+  against a known set, so a daemon built before this field existed answers with
+  `input/typeText unsupported params: mode` (a `success: false` response). This is
+  surfaced to the caller like any other daemon rejection — the reference client
+  routes it to its error banner — never silently swallowed. The daemon does not
+  negotiate capabilities by build identity; a client that emits `mode: "append"`
+  against an older same-release daemon (e.g. a rebuilt desktop against a still-
+  running daemon) sees this error rather than a silent no-op. Optional capability
+  negotiation is tracked in
+  [#4535](https://github.com/kaeawc/auto-mobile/issues/4535).
 
 **Request**
 

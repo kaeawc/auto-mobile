@@ -77,16 +77,43 @@ public data class DeviceKeyStroke(
  * second one: a client wanting to opt Ctrl-S in cannot name it by [DeviceKeyboardKey], since an
  * ordinary letter deliberately carries no device key at all. Matching on the produced character is
  * the only way to name it.
+ *
+ * Each entry also names the EXACT chord-modifier set it forwards ([ctrl]/[alt]/[meta]), so opting
+ * in `OfCharacter('s', ctrl = true)` forwards Ctrl-S alone and leaves Meta-S and Alt-S — different
+ * host shortcuts on the same character — with the host.
  */
 public sealed interface DeviceChordAllowance {
-  /** Matches a keystroke whose [DeviceKeyStroke.key] is [key]. */
-  public data class OfKey(val key: DeviceKeyboardKey) : DeviceChordAllowance
+  /**
+   * The exact chord-modifier set this allowance forwards. An allowance is scoped to ONE modifier
+   * combination on purpose: opting in Ctrl-S must not also forward Meta-S (macOS save) or Alt-S (a
+   * menu mnemonic), which are different host shortcuts. Matching requires Ctrl, Alt and Meta to
+   * equal these exactly; Shift is deliberately excluded (character matching is case-insensitive, so
+   * Ctrl-S and Ctrl-Shift-S name the same opt-in). Defaults to no modifiers — a value that never
+   * matches a chord (a no-modifier keystroke is not a chord), so a client MUST name the modifiers.
+   */
+  public val ctrl: Boolean
+  public val alt: Boolean
+  public val meta: Boolean
+
+  /** Matches a keystroke whose [DeviceKeyStroke.key] is [key] AND whose chord modifiers match. */
+  public data class OfKey(
+    val key: DeviceKeyboardKey,
+    override val ctrl: Boolean = false,
+    override val alt: Boolean = false,
+    override val meta: Boolean = false,
+  ) : DeviceChordAllowance
 
   /**
-   * Matches a keystroke whose [DeviceKeyStroke.character] is [character], compared
-   * case-insensitively so a client opting in "Ctrl-S" does not have to enumerate Ctrl-Shift-S too.
+   * Matches a keystroke whose [DeviceKeyStroke.character] is [character] (compared
+   * case-insensitively so a client opting in "Ctrl-S" does not have to enumerate Ctrl-Shift-S too)
+   * AND whose chord modifiers match [ctrl]/[alt]/[meta].
    */
-  public data class OfCharacter(val character: Char) : DeviceChordAllowance
+  public data class OfCharacter(
+    val character: Char,
+    override val ctrl: Boolean = false,
+    override val alt: Boolean = false,
+    override val meta: Boolean = false,
+  ) : DeviceChordAllowance
 }
 
 /** Why [DeviceKeyboardInputPolicy] declined to forward a keystroke to the device. */
@@ -151,8 +178,7 @@ public sealed interface DeviceKeyboardDecision {
 }
 
 /**
- * The **client-side** keyboard-forwarding policy for a mirrored device screen (issue
- * [#3351](https://github.com/kaeawc/auto-mobile/issues/3351)).
+ * The **client-side** keyboard-forwarding policy for a mirrored device screen (issue #3351).
  *
  * As with the drag policy, the daemon has no say in any of this: `input/pressButton`,
  * `input/typeText` and `input/key` faithfully execute whatever they are handed, so deciding *which
@@ -248,10 +274,12 @@ public object DeviceKeyboardInputPolicy {
   /**
    * Decide what [stroke] should send.
    *
-   * @param forwardedChordKeys the explicit escape hatch to rule 1: keys listed here forward even
-   *   when a chord modifier is held. Empty by default, because a default that forwarded any chord
-   *   would be wrong for some host. A client that knows its host's keymap — and knows a given chord
-   *   is unclaimed there — opts that key in deliberately.
+   * @param forwardedChords the explicit escape hatch to rule 1: keystrokes matching an entry
+   *   forward even when a chord modifier is held. Empty by default, because a default that
+   *   forwarded any chord would be wrong for some host. A client that knows its host's keymap — and
+   *   knows a given chord is unclaimed there — opts it in deliberately, naming the exact modifier
+   *   set ([DeviceChordAllowance.ctrl]/[DeviceChordAllowance.alt]/[DeviceChordAllowance.meta]) so
+   *   the opt-in cannot leak to a different host shortcut on the same key/character.
    */
   public fun evaluate(
     stroke: DeviceKeyStroke,
@@ -328,6 +356,9 @@ public object DeviceKeyboardInputPolicy {
     // A real accelerator resolves altComposesText=false and stays with the host.
     if (stroke.altComposesText && character != null && isTypable(character)) return true
     return forwardedChords.any { allowance ->
+      // The modifier set must match exactly, so an opt-in for one chord (Ctrl-S) never forwards a
+      // different host shortcut on the same key/char (Meta-S, Alt-S).
+      if (!chordModifiersMatch(stroke.modifiers, allowance)) return@any false
       when (allowance) {
         is DeviceChordAllowance.OfKey -> stroke.key != null && stroke.key == allowance.key
         is DeviceChordAllowance.OfCharacter ->
@@ -335,6 +366,15 @@ public object DeviceKeyboardInputPolicy {
       }
     }
   }
+
+  /** Ctrl/Alt/Meta on the stroke must equal the allowance's; Shift is not part of the match. */
+  private fun chordModifiersMatch(
+    modifiers: DeviceKeyModifiers,
+    allowance: DeviceChordAllowance,
+  ): Boolean =
+    modifiers.ctrl == allowance.ctrl &&
+      modifiers.alt == allowance.alt &&
+      modifiers.meta == allowance.meta
 
   private fun Char.equalsIgnoreCase(other: Char): Boolean =
     this == other || lowercaseChar() == other.lowercaseChar()

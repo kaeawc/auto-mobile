@@ -9,6 +9,7 @@ public class FakeElementLocator: ElementLocating {
     private var hierarchyData: ViewHierarchy?
     private var elements: [String: Any] = [:]
     private var shouldThrow: Error?
+    public var onHierarchyRead: (() -> Void)?
 
     // MARK: - Call History
 
@@ -71,7 +72,7 @@ public class FakeElementLocator: ElementLocating {
             throw error
         }
 
-        return hierarchyData ?? ViewHierarchy(
+        let hierarchy = hierarchyData ?? ViewHierarchy(
             packageName: "com.test.app",
             hierarchy: UIElementInfo(
                 text: "Fake Root",
@@ -80,6 +81,8 @@ public class FakeElementLocator: ElementLocating {
             ),
             windowInfo: WindowInfo(id: 0, type: 1, isActive: true, isFocused: true)
         )
+        onHierarchyRead?()
+        return hierarchy
     }
 
     public func findElement(byResourceId resourceId: String) -> Any? {
@@ -134,6 +137,7 @@ public class FakeGesturePerformer: GesturePerforming {
 
     private var screenshotData: Data?
     private var screenshotCapture: ScreenshotCapture?
+    public var onScreenshot: (() -> Void)?
     private var currentOrientation = "portrait"
     private var failureMap: [String: Error] = [:]
 
@@ -569,12 +573,14 @@ public class FakeGesturePerformer: GesturePerforming {
     public func getScreenshot() throws -> Data {
         try checkFailure("screenshot")
         screenshotCallCount += 1
+        onScreenshot?()
         return screenshotData ?? Data()
     }
 
     public func getScreenshotCapture() throws -> ScreenshotCapture {
         try checkFailure("screenshot")
         screenshotCallCount += 1
+        onScreenshot?()
         return screenshotCapture ?? ScreenshotCapture(
             data: screenshotData ?? Data(),
             rotation: DeviceRotation.fromOrientationName(currentOrientation)

@@ -398,6 +398,29 @@ final class HierarchyDebouncerTests: XCTestCase {
         }
     }
 
+    func testReportsStructuralTransitionBeforeDebouncedBroadcast() {
+        let initial = ViewHierarchy(
+            packageName: "com.test.app",
+            hierarchy: UIElementInfo(text: "A")
+        )
+        let changed = ViewHierarchy(
+            packageName: "com.test.app",
+            hierarchy: UIElementInfo(text: "B")
+        )
+        fakeLocator.setHierarchy(initial)
+        let transitions = Box<[ViewHierarchy]>([])
+        debouncer.setOnTransition { hierarchy in
+            transitions.value.append(hierarchy)
+        }
+
+        debouncer.start()
+        fakeLocator.setHierarchy(changed)
+        fakeTimer.advance(by: 10)
+
+        XCTAssertEqual(transitions.value.count, 1)
+        XCTAssertEqual(transitions.value.first?.hierarchy?.text, "B")
+    }
+
     // MARK: - StructuralHasher Tests
 
     func testHashChangesWhenAlertNodesAdded() {

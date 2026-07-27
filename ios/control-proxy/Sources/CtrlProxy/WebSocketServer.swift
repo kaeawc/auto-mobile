@@ -111,6 +111,7 @@ public class WebSocketServer: WebSocketServing {
     private let commandHandler: CommandHandler
     private let perfProvider: PerfProvider
     private let sdkHierarchyCache: SdkHierarchyCache?
+    private let frameContext: FrameContext
     private let queue = DispatchQueue(label: "com.ctrlproxy.server")
     var onSdkHierarchyUpdated: (() -> Void)?
 
@@ -122,12 +123,14 @@ public class WebSocketServer: WebSocketServing {
         port: UInt16 = 8765,
         commandHandler: CommandHandler,
         perfProvider: PerfProvider = PerfProvider.instance,
-        sdkHierarchyCache: SdkHierarchyCache? = nil
+        sdkHierarchyCache: SdkHierarchyCache? = nil,
+        frameContext: FrameContext = FrameContext()
     ) {
         self.port = port
         self.commandHandler = commandHandler
         self.perfProvider = perfProvider
         self.sdkHierarchyCache = sdkHierarchyCache
+        self.frameContext = frameContext
     }
 
     /// Starts the server
@@ -304,11 +307,12 @@ public class WebSocketServer: WebSocketServing {
 
     /// Broadcast a hierarchy update to all connected clients (push notification)
     public func broadcastHierarchyUpdate(_ hierarchy: ViewHierarchy) {
+        frameContext.recordTransition(to: hierarchy)
         let response = HierarchyUpdateResponse(
             requestId: nil, // No requestId for push updates
             data: hierarchy,
             perfTiming: nil,
-            frameContext: FrameContext.recordHierarchy(hierarchy)
+            frameContext: frameContext.context(for: hierarchy)
         )
 
         do {

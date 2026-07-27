@@ -171,12 +171,12 @@ describe("daemon input API consumer docs", () => {
     expect(clientGuide).toContain("wait for a newly paired snapshot before");
     expect(clientGuide).toContain("runner that does not publish `frameContext` cannot produce a controllable");
     expect(unixSocketApi).toContain("`frameContext` | `string` | No |");
-    expect(unixSocketApi).toContain('"duration": 50,\n    "frameContext": "android-generation-42"');
-    expect(unixSocketApi).toContain('"durationMs": 350,\n    "frameContext": "android-generation-42"');
-    expect(unixSocketApi).toContain('"button": "back",\n    "frameContext": "android-generation-42"');
-    expect(unixSocketApi).toContain('"submit": false,\n    "frameContext": "android-generation-42"');
-    expect(unixSocketApi).toContain('"mode": "append",\n    "frameContext": "android-generation-42"');
-    expect(unixSocketApi).toContain('"key": "enter",\n    "frameContext": "android-generation-42"');
+    expect(unixSocketApi).toMatch(/"duration": 50,\r?\n    "frameContext": "android-generation-42"/);
+    expect(unixSocketApi).toMatch(/"durationMs": 350,\r?\n    "frameContext": "android-generation-42"/);
+    expect(unixSocketApi).toMatch(/"button": "back",\r?\n    "frameContext": "android-generation-42"/);
+    expect(unixSocketApi).toMatch(/"submit": false,\r?\n    "frameContext": "android-generation-42"/);
+    expect(unixSocketApi).toMatch(/"mode": "append",\r?\n    "frameContext": "android-generation-42"/);
+    expect(unixSocketApi).toMatch(/"key": "enter",\r?\n    "frameContext": "android-generation-42"/);
   });
 
   test("frames direct input as input methods and tools/call as fallback", async () => {

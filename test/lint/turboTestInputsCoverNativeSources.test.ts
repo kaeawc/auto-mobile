@@ -49,6 +49,13 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "android/protocol/src/main/kotlin/**",
     // webrtcDeviceCaptureLatency.test.ts mirrors QualityPreset.MEDIUM.fps.
     "android/video-server/src/main/kotlin/**",
+    // pinchGoldenVectorParity.test.ts parses the inline golden tables out of
+    // PinchGeometryTest.kt / PinchGeometryTests.swift (issue #2997).
+    "android/control-proxy/src/test/kotlin/**",
+    "ios/control-proxy/Tests/**",
+    // coordinateMappingGoldenVectorParity.test.ts parses the inline golden
+    // tables out of CoordinateMappingGoldenVectorTest.kt (issue #4547).
+    "android/desktop-core/src/test/kotlin/**",
   ] as const;
 
   interface TurboConfig {
@@ -102,20 +109,37 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
             continue;
           }
           const source = readFileSync(abs, "utf8");
-          for (const match of source.matchAll(/(?<![A-Za-z0-9_.-])(android|ios)\/[A-Za-z0-9._/-]+/g)) {
-            const path = match[0].replace(/\/+$/, "");
-            // SwiftPM's generated output can exist after a local native build
-            // but is never a source input for a TypeScript unit test.
-            if (path.split("/").includes(".build")) {
-              continue;
+          const record = (path: string): void => {
+            // SwiftPM's `.build` and Gradle's `build` outputs can exist after a
+            // local native build but are never source inputs for a TS unit test.
+            const segments = path.split("/");
+            if (segments.includes(".build") || segments.includes("build")) {
+              return;
             }
             if (!existsSync(join(ROOT, path))) {
-              continue;
+              return;
             }
             if (!found.has(path)) {
               found.set(path, new Set());
             }
             found.get(path)!.add(rel);
+          };
+          for (const match of source.matchAll(/(?<![A-Za-z0-9_.-])(android|ios)\/[A-Za-z0-9._/-]+/g)) {
+            record(match[0].replace(/\/+$/, ""));
+          }
+          // ALSO reconstruct `join(..., "android", "desktop-core", ...)`-style
+          // segmented paths: the golden-vector parity guards build their Kotlin/
+          // Swift read targets this way, which the literal regex above cannot
+          // see — exactly how the coordinate-mapping guard's cross-tree read
+          // initially slipped past this lint (issue #4547 follow-up). Single-
+          // segment reconstructions ("ios" alone) are skipped: they are always
+          // temp-dir fixtures or prose, and the bare repo dir is never a read.
+          for (const call of source.matchAll(/\bjoin\(([^)]*)\)/gs)) {
+            const literals = [...call[1].matchAll(/"([^"]+)"/g)].map(m => m[1]);
+            const start = literals.findIndex(l => l === "android" || l === "ios");
+            if (start >= 0 && literals.length - start >= 2) {
+              record(literals.slice(start).join("/"));
+            }
           }
         }
       }

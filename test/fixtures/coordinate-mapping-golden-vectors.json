@@ -194,8 +194,13 @@
       "padding": 32, "expected": 0.3
     },
     {
-      "comment": "mid-range: 736+64=800 padded frame in a 400-wide viewport -> exactly 0.5",
+      "comment": "mid-range: 736+64=800 padded frame in a 400-wide viewport -> exactly 0.5 (WIDTH candidate decisive)",
       "frameWidthPx": 736, "frameHeightPx": 736, "viewportWidth": 400, "viewportHeight": 800,
+      "padding": 32, "expected": 0.5
+    },
+    {
+      "comment": "HEIGHT candidate decisive mid-range: height ratio 400/(736+64)=0.5 binds while the width ratio is 800/(336+64)=2.0 — pins that the height term participates in the min",
+      "frameWidthPx": 336, "frameHeightPx": 736, "viewportWidth": 800, "viewportHeight": 400,
       "padding": 32, "expected": 0.5
     }
   ],
@@ -305,6 +310,12 @@
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 390, "pointHeight": 844, "scale": 0,
       "expectedPixelWidth": 390, "expectedPixelHeight": 844
+    },
+    {
+      "comment": "fractional HEIGHT product isolated: 667*2.5 = 1667.5 rounds half-up to 1668 while the width product (400*2.5=1000) is integral — a height-axis-only rounding regression cannot hide behind the width case",
+      "willChangeUnderCanonicalPixels": true,
+      "pointWidth": 400, "pointHeight": 667, "scale": 2.5,
+      "expectedPixelWidth": 1000, "expectedPixelHeight": 1668
     }
   ]
 }

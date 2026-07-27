@@ -147,8 +147,10 @@ class CoordinateMappingGoldenVectorTest {
       FitScaleVector(300f, 600f, 800f, 1200f, 32f, 1f),
       // Frame far larger than viewport: clamps to the 0.3 floor.
       FitScaleVector(5000f, 5000f, 400f, 400f, 32f, 0.3f),
-      // Mid-range: 736+64=800 padded frame in a 400-wide viewport.
+      // Mid-range: 736+64=800 padded frame in a 400-wide viewport (WIDTH candidate decisive).
       FitScaleVector(736f, 736f, 400f, 800f, 32f, 0.5f),
+      // HEIGHT candidate decisive mid-range: 400/(736+64)=0.5 binds; width candidate is 2.0.
+      FitScaleVector(336f, 736f, 800f, 400f, 32f, 0.5f),
     )
 
   private data class ScreenshotRotationVector(

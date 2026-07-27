@@ -13,6 +13,7 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
+import { loadCoordinateMappingVectors } from "../../../parity/coordinateMappingGoldenVectors";
 import {
   startDeviceDataStreamSocketServer,
   stopDeviceDataStreamSocketServer,
@@ -2800,6 +2801,34 @@ describe("IOSCtrlProxyClient", function() {
       setStaleCache(390, 844, 3);
       (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {} as any);
       expect(geometry.bind()).toBeNull();
+    });
+
+    describe("coordinate-mapping golden vectors: LIVE iOS point->pixel (issue #4547)", function() {
+      // The bootstrap path (observationInitialFrame's getIosScreenshotDimensions) and this LIVE
+      // hierarchy-update path (updateScreenGeometryFrom) are SEPARATE implementations of the same
+      // points * screenScale conversion. Both consume the shared golden vectors independently, so
+      // a #4549 canonical-pixel change (or any drift) in either path fails its own consumer —
+      // green tests on one path can never vouch for the other.
+      const vectors = loadCoordinateMappingVectors().iosPointToPixel;
+
+      for (const [index, vector] of vectors.entries()) {
+        test(`row ${index}: ${vector.pointWidth}x${vector.pointHeight} points at scale ${vector.scale || "absent"} -> ${vector.expectedPixelWidth}x${vector.expectedPixelHeight} pixels`, async function() {
+          await startStreamServer();
+          const geometry = (ctrlProxyClient as any).screenGeometry;
+
+          // scale === 0 encodes "hierarchy carried no screenScale" (the live path defaults to 1).
+          (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
+            screenWidth: vector.pointWidth,
+            screenHeight: vector.pointHeight,
+            ...(vector.scale === 0 ? {} : { screenScale: vector.scale }),
+          });
+
+          const bound = geometry.bind();
+          expect(bound).not.toBeNull();
+          expect(bound.width).toBe(vector.expectedPixelWidth);
+          expect(bound.height).toBe(vector.expectedPixelHeight);
+        });
+      }
     });
   });
 });

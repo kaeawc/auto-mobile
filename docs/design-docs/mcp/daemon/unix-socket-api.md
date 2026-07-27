@@ -587,6 +587,23 @@ Append's semantics and limits:
   negotiation is tracked in
   [#4535](https://github.com/kaeawc/auto-mobile/issues/4535).
 
+**Best-effort, character-by-character — retry the remainder, not the whole
+string.** Append types one key event per character in order, so it is atomic only
+for a **single character**: a one-character append either lands or reports failure
+with nothing typed. A **multi-character** append is best-effort — if it fails
+partway (an adb reject/timeout mid-batch), a leading prefix of `text` has already
+been typed into the field. The failure is reported the same way as any other input
+error (a `success: false` response with a message; the daemon does **not** return a
+structured partial-progress count on the wire — see
+[#4537](https://github.com/kaeawc/auto-mobile/issues/4537)). Therefore a client
+that batches multiple characters into one request **must not blindly retry the
+whole string** on failure — re-sending `"ab"` after `"a"` already landed produces
+`"aab"`. A client that needs per-character atomicity must send **one character per
+`input/typeText` request**, which is exactly what the reference desktop client does
+(one request per keystroke). The in-process primitive already tracks how many
+characters landed (`SendTextResult.charsSent`); surfacing that on a failed wire
+response is deferred to [#4537](https://github.com/kaeawc/auto-mobile/issues/4537).
+
 **Request**
 
 ```json

@@ -42,29 +42,6 @@ public data class DeviceKeyModifiers(
    */
   public val hasChordModifier: Boolean
     get() = ctrl || alt || meta
-
-  /**
-   * Whether this modifier set is one an Alt-family key press takes when it COMPOSES a character
-   * rather than triggering a shortcut — Alt held, Meta not.
-   *
-   * Two toolkits, two shapes, one intent:
-   * - **Ctrl+Alt** is how a great many non-US layouts surface **AltGr** (`@`, `€`, `{`, `\`)
-   *   through AWT/Compose desktop — as Ctrl **and** Alt together rather than a modifier of its own.
-   * - **Alt alone** is how AWT/Compose reports the macOS **Option** key, which likewise composes
-   *   ASCII on many layouts (German Option+L = `@`, Option+5 = `[`). The old Ctrl+Alt-only reading
-   *   missed these, and the device never received them.
-   *
-   * Rejecting either outright — the obvious reading of "Ctrl/Alt/Meta means host chord" — makes
-   * those characters untypable on the layouts and platforms most of the world uses.
-   *
-   * Only ever consulted together with a produced printable character (see
-   * [DeviceKeyboardInputPolicy.evaluate]), which is what keeps a *real* accelerator with the host:
-   * a shortcut chord produces no printable character, so it never takes this branch. **Meta is
-   * excluded** on purpose — macOS `Cmd` and Windows `Meta` shortcuts never compose characters, so
-   * Meta-held is the reliable "this is a shortcut, not typing" signal.
-   */
-  public val composesTextViaAlt: Boolean
-    get() = alt && !meta
 }
 
 /**
@@ -76,11 +53,21 @@ public data class DeviceKeyModifiers(
  *   report control characters here for keys like Enter and Tab; [DeviceKeyboardInputPolicy] filters
  *   those out rather than typing them.
  * @param modifiers the modifiers held at the time.
+ * @param altComposesText the host's platform-resolved verdict that this Alt-family keystroke is
+ *   **composing a character** (AltGr on Windows/Linux, Option on macOS) rather than triggering a
+ *   menu accelerator. The distinction cannot be made from modifiers alone — on Windows/Linux AWT
+ *   reports a printable `keyChar` for a plain `Alt+F` menu accelerator, so `alt && printable` would
+ *   swallow it — so the toolkit adapter that CAN see the platform (the reference client resolves it
+ *   in `DeviceKeyboardEventTranslator`: `!meta && (isMac ? alt : ctrl && alt)`) decides and passes
+ *   the clean boolean in. The policy stays platform-agnostic and only forwards such a keystroke
+ *   when it ALSO produced a typable character. Defaults false: absent a host verdict, an
+ *   Alt-modified keystroke is a host chord, never swallowed.
  */
 public data class DeviceKeyStroke(
   val key: DeviceKeyboardKey? = null,
   val character: Char? = null,
   val modifiers: DeviceKeyModifiers = DeviceKeyModifiers(),
+  val altComposesText: Boolean = false,
 )
 
 /**
@@ -177,10 +164,16 @@ public sealed interface DeviceKeyboardDecision {
  * Four rules, in the order they are applied:
  * 1. **Modifier-bearing chords stay with the host.** Any keystroke with Ctrl, Alt or Meta held is
  *    [DeviceKeyboardRejection.HostChord] unless its key is on the caller's explicit
- *    `forwardedChordKeys` list. This is stated in terms of *modifiers*, not in terms of one host's
- *    keymap, precisely because the host is not knowable from here: the desktop app has its own menu
- *    accelerators, and a third-party host has different ones again. Refusing every chord by default
- *    is the only rule that is correct for all of them.
+ *    `forwardedChordKeys` list, OR the host resolved it as an Alt-family character composition
+ *    ([DeviceKeyStroke.altComposesText]) that produced a typable character. This is stated in terms
+ *    of *modifiers*, not one host's keymap, precisely because the host is not knowable from here:
+ *    the desktop app has its own menu accelerators, and a third-party host has different ones
+ *    again. Refusing every chord by default is the only rule correct for all of them. The one
+ *    exception — composition — is **platform-dependent** (AltGr is Ctrl+Alt on Windows/Linux;
+ *    Option is plain Alt on macOS, where menus use Cmd) and therefore cannot be decided here: the
+ *    toolkit adapter that sees the host OS resolves it and passes the verdict in. Deciding it from
+ *    `alt && printable` would swallow a Windows/Linux `Alt+F` menu accelerator, which reports a
+ *    printable char too.
  * 2. **A device-meaningful key wins over the character it produced.** Enter, Tab and Backspace all
  *    report a control character; sending those as text would put a literal `\n` in a text field.
  *    But a device key with **Shift held is declined**: the daemon's `input/key` transmits no
@@ -328,13 +321,12 @@ public object DeviceKeyboardInputPolicy {
     forwardedChords: Set<DeviceChordAllowance>,
   ): Boolean {
     val character = stroke.character
-    // AltGr (Ctrl+Alt) or macOS Option (Alt alone), and only when it actually produced a typable
-    // ASCII character. A real accelerator — Alt+letter mnemonic, ⌥⌘-combo — produces no such
-    // character (or carries Meta), so it stays with the host. This is the documented tradeoff: a
-    // keystroke that yields a typable character is treated as the user typing it, because "produced
-    // a character" is the only signal available to tell composition from an accelerator.
-    if (stroke.modifiers.composesTextViaAlt && character != null && isTypable(character))
-      return true
+    // An Alt-family composition the HOST resolved (AltGr on Windows/Linux, Option on macOS), and
+    // only when it actually produced a typable ASCII character. The platform decision lives in the
+    // toolkit adapter, not here, precisely because `alt && printable` cannot tell macOS Option
+    // (composes) from a Windows/Linux `Alt+F` menu accelerator (also reports a printable keyChar).
+    // A real accelerator resolves altComposesText=false and stays with the host.
+    if (stroke.altComposesText && character != null && isTypable(character)) return true
     return forwardedChords.any { allowance ->
       when (allowance) {
         is DeviceChordAllowance.OfKey -> stroke.key != null && stroke.key == allowance.key

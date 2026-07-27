@@ -186,58 +186,65 @@ class DeviceKeyboardInputPolicyTest {
   }
 
   @Test
-  fun `AltGr composed characters type instead of being refused as chords`() {
-    // Many non-US layouts produce @, EUR, { via AltGr, which AWT (and so Compose desktop) reports
-    // as Ctrl+Alt. Refusing that shape outright makes those characters untypable on the layouts
-    // most of the world uses.
+  fun `a host-resolved Alt composition with a typable character types`() {
+    // The policy is platform-agnostic: it forwards an Alt-modified keystroke as text ONLY when the
+    // host has resolved it as composition (AltGr on Win/Linux, Option on macOS — decided in
+    // DeviceKeyboardEventTranslator, covered by DeviceKeyboardEventTranslatorTest). Here the flag
+    // is set directly; the character still has to be typable.
     assertEquals(
       DeviceKeyboardDecision.TypeText("@"),
       DeviceKeyboardInputPolicy.evaluate(
         DeviceKeyStroke(
           character = '@',
-          modifiers = DeviceKeyModifiers(ctrl = true, alt = true),
+          modifiers = DeviceKeyModifiers(alt = true),
+          altComposesText = true,
         )
       ),
     )
   }
 
   @Test
-  fun `macOS Option-composed ASCII types instead of being refused as a chord`() {
-    // On macOS the Option key composes ASCII and AWT/Compose reports Alt WITHOUT Ctrl (German
-    // Option+L = @, Option+5 = [). The Ctrl+Alt-only AltGr reading missed these, so the device
-    // never got them. Alt-alone with a produced typable character is composition, not a shortcut.
+  fun `an Alt keystroke the host did NOT resolve as composition stays with the host`() {
+    // The regression guard (AC: host shortcuts are not swallowed). On Windows/Linux a plain Alt+F
+    // menu accelerator reports a printable 'f', but the translator resolves altComposesText=false
+    // there, so the policy must keep it with the host rather than typing 'f' into the device.
     assertEquals(
-      DeviceKeyboardDecision.TypeText("@"),
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
       DeviceKeyboardInputPolicy.evaluate(
-        DeviceKeyStroke(character = '@', modifiers = DeviceKeyModifiers(alt = true))
-      ),
-    )
-    assertEquals(
-      DeviceKeyboardDecision.TypeText("["),
-      DeviceKeyboardInputPolicy.evaluate(
-        DeviceKeyStroke(character = '[', modifiers = DeviceKeyModifiers(alt = true))
+        DeviceKeyStroke(
+          character = 'f',
+          modifiers = DeviceKeyModifiers(alt = true),
+          altComposesText = false,
+        )
       ),
     )
   }
 
   @Test
-  fun `a real Alt or Meta shortcut with no printable character stays with the host`() {
-    // The other direction, and the guard that keeps the Option allowance from being a hole. An
-    // Alt+letter menu mnemonic produces NO character (CHAR_UNDEFINED); a device-key chord likewise.
+  fun `a resolved composition still stays with the host when its character is untypable`() {
+    // A composition of a non-ASCII character (AltGr-EUR) is real, but the daemon's append path
+    // cannot type it. The allowance is scoped to typable ASCII, so this is not an allowed chord and
+    // remains HostChord — never consumed, never swallowed twice.
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      DeviceKeyboardInputPolicy.evaluate(
+        DeviceKeyStroke(
+          character = '€',
+          modifiers = DeviceKeyModifiers(alt = true),
+          altComposesText = true,
+        )
+      ),
+    )
+    // And a resolved composition that produced NO character (a dead key, an accelerator) has
+    // nothing to type, so it stays with the host too.
     assertEquals(
       DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
       DeviceKeyboardInputPolicy.evaluate(
         DeviceKeyStroke(
           key = DeviceKeyboardKey.ArrowLeft,
           modifiers = DeviceKeyModifiers(alt = true),
+          altComposesText = true,
         )
-      ),
-    )
-    // Option+Cmd (Alt+Meta) composing something is still a shortcut, because Meta never composes.
-    assertEquals(
-      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
-      DeviceKeyboardInputPolicy.evaluate(
-        DeviceKeyStroke(character = '@', modifiers = DeviceKeyModifiers(alt = true, meta = true))
       ),
     )
   }

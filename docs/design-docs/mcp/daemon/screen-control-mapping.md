@@ -262,20 +262,35 @@ a capital letter or a shifted symbol is produced, and treating it as one would
 make control mode unable to type half the keyboard.
 
 One documented exception is built in: **Alt-family character composition** — AltGr
-and macOS Option. On many non-US layouts AltGr produces `@`, `€`, `{`, `\`, and
-AWT-derived toolkits (Compose desktop among them) report it as Ctrl **and** Alt
-together; on macOS the Option key composes the same kind of ASCII (German
-Option+L = `@`, Option+5 = `[`) and is reported as **Alt alone**. So an
-**Alt-held (Meta not) keystroke that produced a printable ASCII character** is
-treated as typing, not as a shortcut. A real accelerator — an Alt+letter menu
-mnemonic, a `⌥⌘` combo — produces no such character (or carries Meta), so it still
-stays with the host, which is what keeps the exception from being a hole. **Meta
-held never qualifies**: `Cmd`/`Meta` shortcuts never compose characters, so
-Meta-held is the reliable "this is a shortcut, not typing" signal. The chosen rule
-keys on *"a typable character was produced"* because that is the only signal
-available to tell composition from an accelerator; the rare host where Alt+letter
-both is a mnemonic and reports a printable character would forward, and that is the
-accepted tradeoff.
+and macOS Option — and it is **platform-dependent**, so the host (not the pure
+policy) must resolve it. The rule is:
+
+```
+altComposesText = printable && !meta && ( isMac ? alt : (ctrl && alt) )
+```
+
+- **Windows/Linux:** composition is **AltGr**, which AWT/Compose surfaces as
+  **Ctrl+Alt** (`@`, `€`, `{`, `\`). A *plain* Alt (no Ctrl) is a **menu
+  accelerator** — `Alt+F` opens File — and, crucially, AWT reports a printable
+  `keyChar` for it too. So `alt && printable` cannot tell them apart; treating
+  plain Alt as composition would **swallow the host's menu shortcut** and type the
+  letter into the device instead. Only Ctrl+Alt composes here.
+- **macOS:** composition is the **Option** key, which is plain **Alt** (Option+L =
+  `@`, Option+5 = `[`), and macOS menus use **Cmd/Meta, never Alt** — so plain Alt
+  is safe to treat as composition on macOS only.
+
+**Meta held never qualifies** on any platform: `Cmd`/`Meta` shortcuts never compose
+characters, so Meta-held is the reliable "this is a shortcut, not typing" signal.
+A real accelerator that produces no character (or carries Meta) always stays with
+the host, which keeps the exception from being a hole.
+
+Because the pure policy cannot know the host OS, the toolkit adapter resolves this
+boolean where the platform and AWT masks are visible (the reference client does it
+in `DeviceKeyboardEventTranslator`) and passes it to the policy as
+`DeviceKeyStroke.altComposesText`. The policy then forwards such a keystroke only
+when it also produced a **typable ASCII** character. A porting client on another
+host must make the same platform-aware decision rather than inferring composition
+from `alt && printable`.
 
 A client that knows its own host leaves a particular chord unclaimed may opt it in
 explicitly (`forwardedChords`). The default list is **empty**. Entries match
@@ -472,14 +487,18 @@ nothing.
 
 The keyboard policy is pure too (`DeviceKeyboardInputPolicyTest`), pinning the
 chord rule from **both** sides — every chord modifier must stay with the host,
-and Shift must **not**, or capitals become untypable — plus Alt-family composition
-from both sides (an AltGr Ctrl+Alt character and a macOS Option Alt-alone character
-both type; a real Ctrl+Alt/Alt accelerator with no character, or one carrying Meta,
-does not),
+and Shift must **not**, or capitals become untypable — plus the Alt-composition
+allowance keyed on the host-resolved `altComposesText` flag (a resolved composition
+with a typable character types; one the host did not resolve — a Windows/Linux
+`Alt+F` menu accelerator — stays with the host even though it reports a printable
+char),
 key-over-character precedence, the control-character filter, the character-keyed
 chord allowlist, the platform text gate, and the printable-ASCII range from both
 sides (every character in `U+0020`–`U+007E` forwards; `é`/`€`/CJK are declined and
-left unconsumed). `InputText.test.ts` pins the daemon append mode itself: it
+left unconsumed). `DeviceKeyboardEventTranslatorTest` pins the platform-aware
+resolution of that flag (Ctrl+Alt composes on Windows/Linux and plain Alt does
+not; plain Alt composes on macOS; Meta never does) end-to-end through the policy,
+parameterized by an injected `isMac` so both platforms are deterministic. `InputText.test.ts` pins the daemon append mode itself: it
 issues key events and makes **no** `ACTION_SET_TEXT` call and **no** clear, so N
 single-character calls accumulate; that uppercase fails with an actionable error
 below API 31 and succeeds at 31+; and that every adb round trip is charged against

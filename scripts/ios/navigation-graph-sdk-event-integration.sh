@@ -52,6 +52,14 @@ ctrl_proxy_port="$(jq -er --arg device_id "${device_id}" '
 
 curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null
 
+# `doctor` above may have started the shared CtrlProxy client while it was
+# unbound. Bind it to this graph session before posting events so its SDK-event
+# poller cannot consume them into the global NavigationGraphManager.
+if ! auto-mobile --debug --cli --session-uuid "${session_uuid}" observe --platform ios --deviceId "${device_id}" >/dev/null; then
+  echo "error: could not bind iOS SDK events to navigation graph session" >&2
+  exit 1
+fi
+
 event_payload() {
   local destination="$1"
   jq -cn \

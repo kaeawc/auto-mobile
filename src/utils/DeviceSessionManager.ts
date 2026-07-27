@@ -717,6 +717,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     try {
       const skipCtrlProxyIOSSetup = options?.skipCtrlProxyDownload ?? options?.skipAccessibilityDownload ?? options?.skipAccessibilitySetup;
 
+      await IOSCtrlProxyManager.awaitStartupOrphanRunnerReap();
       const manager = this.provider.getIOSCtrlProxyManager(device);
       const xcTestClient = this.provider.getIOSCtrlProxyClient(device, manager.getServicePort());
 

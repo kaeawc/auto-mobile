@@ -710,6 +710,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   public override async ensureConnected(
     perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<boolean> {
+    // Direct session tools connect here without passing through the manager.
+    await IOSCtrlProxyManager.awaitStartupOrphanRunnerReap();
+
     const connected = await super.ensureConnected(perf);
     if (connected) {
       return true;

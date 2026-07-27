@@ -29,6 +29,9 @@ import {
   DefaultAndroidPrerequisiteDetector
 } from "./android-cmdline-tools/AndroidPrerequisiteDetector";
 
+export const MAX_STALE_PREFETCH_DIRS_PER_STARTUP = 20;
+export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;
+
 /**
  * Android-specific accessibility-service lifecycle, extending the
  * platform-agnostic {@link ProxyManager}.
@@ -424,29 +427,75 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return;
     }
 
+    const candidates = entries.filter(
+      entry => entry.isDirectory() && entry.name.startsWith(AndroidCtrlProxyManager.PREFETCH_DIR_PREFIX)
+    );
     const now = timer.now();
+    const deadline = now + STALE_PREFETCH_SWEEP_DEADLINE_MS;
     let reclaimed = 0;
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !entry.name.startsWith(AndroidCtrlProxyManager.PREFETCH_DIR_PREFIX)) {
-        continue;
+    for (const [index, entry] of candidates.entries()) {
+      if (timer.now() >= deadline) {
+        AndroidCtrlProxyManager.logPrefetchSweepDeadline();
+        return;
       }
       const dir = path.join(tempRoot, entry.name);
-      try {
-        const stats = await fs.stat(dir);
-        if (now - stats.mtimeMs < AndroidCtrlProxyManager.STALE_PREFETCH_MAX_AGE_MS) {
-          continue;
-        }
-        await fs.rm(dir, { recursive: true, force: true });
-        reclaimed++;
-      } catch (error) {
-        // Per-entry best-effort: a concurrent process may remove the same dir,
-        // or it may vanish mid-sweep. Skip it and keep going.
-        logger.debug(`[CTRL_PROXY] Failed to sweep stale prefetch dir ${dir}: ${error}`);
+      const result = await AndroidCtrlProxyManager.reclaimStalePrefetchDir(dir, now, deadline, timer);
+      if (result === "deadline_exhausted") {
+        AndroidCtrlProxyManager.logPrefetchSweepDeadline();
+        return;
+      }
+      if (result !== "reclaimed") {
+        continue;
+      }
+      reclaimed++;
+      if (reclaimed === MAX_STALE_PREFETCH_DIRS_PER_STARTUP) {
+        AndroidCtrlProxyManager.logSkippedPrefetchCandidates(candidates.length - index - 1);
+        break;
       }
     }
 
     if (reclaimed > 0) {
       logger.info(`[CTRL_PROXY] Swept ${reclaimed} stale prefetch dir(s) from ${tempRoot}`);
+    }
+  }
+
+  private static async reclaimStalePrefetchDir(
+    dir: string,
+    now: number,
+    deadline: number,
+    timer: Timer
+  ): Promise<"reclaimed" | "not_stale" | "deadline_exhausted"> {
+    try {
+      const stats = await fs.stat(dir);
+      if (timer.now() >= deadline) {
+        return "deadline_exhausted";
+      }
+      if (now - stats.mtimeMs < AndroidCtrlProxyManager.STALE_PREFETCH_MAX_AGE_MS) {
+        return "not_stale";
+      }
+      await fs.rm(dir, { recursive: true, force: true });
+      return "reclaimed";
+    } catch (error) {
+      // Per-entry best-effort: a concurrent process may remove the same dir,
+      // or it may vanish mid-sweep. Skip it and keep going.
+      logger.debug(`[CTRL_PROXY] Failed to inspect stale prefetch dir ${dir}: ${error}`);
+      return "not_stale";
+    }
+  }
+
+  private static logPrefetchSweepDeadline(): void {
+    logger.warn(
+      `[CTRL_PROXY] Prefetch sweep timed out after ${STALE_PREFETCH_SWEEP_DEADLINE_MS}ms ` +
+      `while inspecting stale prefetch directories`
+    );
+  }
+
+  private static logSkippedPrefetchCandidates(skippedCandidateCount: number): void {
+    if (skippedCandidateCount > 0) {
+      logger.warn(
+        `[CTRL_PROXY] Prefetch sweep skipped ${skippedCandidateCount} uninspected prefetch dir candidate(s) after ` +
+        `reaching the ${MAX_STALE_PREFETCH_DIRS_PER_STARTUP}-directory startup cap`
+      );
     }
   }
 

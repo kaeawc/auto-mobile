@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
 import {
@@ -8,6 +8,15 @@ import {
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
 import type { ServiceManagerFactory, BootedDeviceLister } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { IOSCtrlProxyManager } from "../../../../src/utils/IOSCtrlProxyManager";
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 describe("IOSCtrlProxyClient auto-setup", function() {
   let testDevice: BootedDevice;
@@ -170,6 +179,42 @@ describe("IOSCtrlProxyClient auto-setup", function() {
     expect(fakeManager.wasMethodCalled("setup:force=true")).toBe(false);
 
     await client.close();
+  });
+
+  test("waits for startup reaping before connecting directly to an existing runner", async function() {
+    const reaping = deferred();
+    const reapSpy = spyOn(
+      IOSCtrlProxyManager,
+      "reapOrphanedRunnerProcessesOnStartup"
+    ).mockImplementation(() => reaping.promise);
+    const urls: string[] = [];
+    const client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      serverPort,
+      url => {
+        urls.push(url);
+        return createSuccessWebSocketFactory(fakeTimer)(url);
+      },
+      fakeTimer,
+      createManagerFactory()
+    );
+
+    try {
+      IOSCtrlProxyManager.startOrphanRunnerReapOnStartup();
+      const connecting = client.ensureConnected();
+      await Promise.resolve();
+
+      expect(urls).toEqual([]);
+
+      reaping.resolve();
+      await expect(connecting).resolves.toBe(true);
+      expect(urls).toEqual(["ws://localhost:8765/ws"]);
+    } finally {
+      reaping.resolve();
+      await client.close();
+      reapSpy.mockRestore();
+      IOSCtrlProxyManager.resetInstances();
+    }
   });
 
   test("setup failure handled gracefully", async function() {

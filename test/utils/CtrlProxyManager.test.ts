@@ -1,10 +1,15 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  AndroidCtrlProxyManager,
+  MAX_STALE_PREFETCH_DIRS_PER_STARTUP,
+  STALE_PREFETCH_SWEEP_DEADLINE_MS,
+} from "../../src/utils/CtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { BootedDevice } from "../../src/models";
 import * as fs from "fs/promises";
+import type { Dirent } from "fs";
 import * as path from "path";
 import crypto from "crypto";
 import os from "os";
@@ -13,6 +18,7 @@ import AdmZip from "adm-zip";
 import { FakeAccessibilityDetector } from "../fakes/FakeAccessibilityDetector";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
+import { logger } from "../../src/utils/logger";
 
 describe("CtrlProxyManager", function() {
   let accessibilityServiceClient: AndroidCtrlProxyManager;
@@ -2423,6 +2429,84 @@ describe("CtrlProxyManager", function() {
       await expect(
         AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(missing, sweepTimer)
       ).resolves.toBeUndefined();
+    });
+
+    test("caps stale directory work and warns about the skipped remainder", async function() {
+      const staleDirs = await Promise.all(
+        Array.from(
+          { length: MAX_STALE_PREFETCH_DIRS_PER_STARTUP + 1 },
+          (_, index) => makeAgedDir(`auto-mobile-prefetch-cap-${String(index).padStart(3, "0")}`, 2 * HOUR_MS)
+        )
+      );
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+      try {
+        await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
+
+        const remaining = await Promise.all(staleDirs.map(exists));
+        expect(remaining.filter(Boolean)).toHaveLength(1);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("skipped 1 uninspected prefetch dir candidate")
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("does not let fresh directories consume the stale cleanup cap", async function() {
+      const freshDirs = await Promise.all(
+        Array.from(
+          { length: MAX_STALE_PREFETCH_DIRS_PER_STARTUP },
+          (_, index) => makeAgedDir(`auto-mobile-prefetch-a-fresh-${index}`, 60 * 1000)
+        )
+      );
+      const stale = await makeAgedDir("auto-mobile-prefetch-z-stale", 2 * HOUR_MS);
+      const readdirSpy = spyOn(fs, "readdir").mockResolvedValue(
+        [...freshDirs, stale].map(dir => ({
+          name: path.basename(dir),
+          isDirectory: () => true,
+        })) as unknown as Dirent[]
+      );
+
+      try {
+        await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
+
+        expect(await exists(stale)).toBe(false);
+        await expect(Promise.all(freshDirs.map(exists))).resolves.toEqual(
+          Array(MAX_STALE_PREFETCH_DIRS_PER_STARTUP).fill(true)
+        );
+      } finally {
+        readdirSpy.mockRestore();
+      }
+    });
+
+    test("stops inspection when the stale-prefetch deadline expires", async function() {
+      const first = await makeAgedDir("auto-mobile-prefetch-first", 2 * HOUR_MS);
+      const second = await makeAgedDir("auto-mobile-prefetch-second", 2 * HOUR_MS);
+      const originalStat = fs.stat;
+      let statCount = 0;
+      const statSpy = spyOn(fs, "stat").mockImplementation(async (...args) => {
+        statCount++;
+        if (statCount === 1) {
+          sweepTimer.advanceTime(STALE_PREFETCH_SWEEP_DEADLINE_MS);
+        }
+        return originalStat(...args);
+      });
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+      try {
+        await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
+
+        expect(statCount).toBe(1);
+        expect(await exists(first)).toBe(true);
+        expect(await exists(second)).toBe(true);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("Prefetch sweep timed out")
+        );
+      } finally {
+        warnSpy.mockRestore();
+        statSpy.mockRestore();
+      }
     });
   });
 });

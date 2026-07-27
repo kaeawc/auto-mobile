@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { IOSCtrlProxyProcessClient } from "../../../src/utils/ios/IOSCtrlProxyProcessClient";
+import type { HostCommandExecutor, HostCommandOptions } from "../../../src/utils/HostCommandExecutor";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -8,6 +9,22 @@ function result(stdout = "", stderr = "") {
 }
 
 describe("IOSCtrlProxyProcessClient", () => {
+  test("bounds startup candidate discovery by the supplied deadline", async () => {
+    const timer = new FakeTimer();
+    const options: Array<HostCommandOptions | undefined> = [];
+    const host: HostCommandExecutor = {
+      async executeCommand(_file, _args, commandOptions) {
+        options.push(commandOptions);
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer);
+
+    await client.findStartupCandidatePids(100);
+
+    expect(options).toEqual([{ timeoutMs: 100 }]);
+  });
+
   test("uses argv for PID lookup and preserves device identity validation", async () => {
     const host = new FakeHostCommandExecutor();
     host.setCommandResponse("pgrep -x xcodebuild", result("42\n"));
@@ -46,6 +63,27 @@ describe("IOSCtrlProxyProcessClient", () => {
       "kill -TERM -- -42", "kill -TERM 43", "kill -TERM 42",
       "kill -KILL -- -42", "kill -KILL 43", "kill -KILL 42",
     ]));
+  });
+
+  test("propagates deadline expiry while waiting for a process tree to exit", async () => {
+    const timer = new FakeTimer();
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args) {
+        if (file === "ps") {
+          return result("42 1\n");
+        }
+        if (file === "kill" && args[0] === "-0") {
+          timer.advanceTime(100);
+          throw new Error("kill -0 timed out");
+        }
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer, { releaseAttempts: 1, releaseGraceMs: 1 });
+
+    await expect(client.terminateProcessTree(42, 100)).rejects.toThrow(
+      "Startup CtrlProxy runner sweep deadline elapsed"
+    );
   });
 
   test("treats permission failures as an unavailable PID rather than signaling it", async () => {

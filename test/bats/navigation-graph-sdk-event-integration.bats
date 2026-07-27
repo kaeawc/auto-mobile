@@ -7,6 +7,7 @@ setup() {
   ORIG_PATH="$PATH"
   export GRAPH_ATTEMPTS_FILE="${MOCK_BIN}/graph-attempts"
   export CURL_URL_FILE="${MOCK_BIN}/curl-urls"
+  export SESSION_OBSERVE_FILE="${MOCK_BIN}/session-observe"
 }
 
 teardown() {
@@ -26,7 +27,14 @@ SCRIPT
 
 @test "retries getNavigationGraph after an initial CLI failure" {
   make_mock xcrun 'exit 0'
-  make_mock curl 'printf "%s\\n" "${!#}" >> "$CURL_URL_FILE"'
+  make_mock curl '
+url="${!#}"
+if [[ "$url" == */sdk-events ]] && [[ ! -f "$SESSION_OBSERVE_FILE" ]]; then
+  echo "SDK events were posted before the graph session was bound" >&2
+  exit 1
+fi
+printf "%s\\n" "$url" >> "$CURL_URL_FILE"
+'
   make_mock base64 'cat'
   make_mock sleep 'exit 0'
   make_mock jq '
@@ -43,6 +51,10 @@ exit 0
   make_mock auto-mobile '
 if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
   printf "{\"ios\":{\"checks\":[]}}\\n"
+  exit 0
+fi
+if [ "$1" = "--debug" ] && [ "$2" = "--cli" ] && [ "$3" = "--session-uuid" ] && [ "$5" = "observe" ]; then
+  touch "$SESSION_OBSERVE_FILE"
   exit 0
 fi
 if [ "$1" = "--debug" ] && [ "$2" = "--cli" ] && [ "$3" = "--session-uuid" ] && [ "$5" = "getNavigationGraph" ]; then

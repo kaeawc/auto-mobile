@@ -206,7 +206,7 @@ class DeviceScreenViewControlTest {
             elementMap = mapOf("root" to root),
             controlMode = DeviceScreenControlMode.Control,
             controlSnapshot = current,
-            onControlTap = { _, _ -> },
+            onControlTap = { _, _ -> true },
             onControlSwipe = { s, a, b -> reported = Triple(s, a, b) },
           )
         }
@@ -276,7 +276,10 @@ class DeviceScreenViewControlTest {
             elementMap = mapOf("root" to root),
             controlMode = mode,
             controlSnapshot = snapshot(1080, 2340),
-            onControlTap = { _, point -> probed = point },
+            onControlTap = { _, point ->
+              probed = point
+              true
+            },
           )
         }
       }
@@ -362,7 +365,10 @@ class DeviceScreenViewControlTest {
             elementMap = mapOf("root" to root),
             controlMode = mode,
             controlSnapshot = snapshot(1080, 2340),
-            onControlTap = { _, point -> fineGrained = point },
+            onControlTap = { _, point ->
+              fineGrained = point
+              true
+            },
           )
         }
       }
@@ -462,7 +468,10 @@ class DeviceScreenViewControlTest {
       elementMap = mapOf("root" to root),
       controlMode = mode,
       controlSnapshot = snapshot(1080, 2340, sequence = 42L),
-      onControlTap = { _, point -> onTap(point) },
+      onControlTap = { _, point ->
+        onTap(point)
+        true
+      },
       onControlSwipe = onSwipe,
     )
   }
@@ -508,7 +517,10 @@ class DeviceScreenViewControlTest {
             elementMap = mapOf("root" to root),
             controlMode = DeviceScreenControlMode.Control,
             controlSnapshot = snapshot(deviceWidth, deviceHeight),
-            onControlTap = { _, point -> tap = point },
+            onControlTap = { _, point ->
+              tap = point
+              true
+            },
           )
         }
       }

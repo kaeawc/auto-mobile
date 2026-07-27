@@ -1,8 +1,11 @@
 # Client Screen Control: coordinate mapping contract
 
-<kbd>🚧 In progress</kbd>
+<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
 Part of milestone 28 (Client Screen Control), parent [#1099](https://github.com/kaeawc/auto-mobile/issues/1099).
+New to screen control? Start at the
+[third-party client guide](client-screen-control.md), which ties this document together with the
+`input/*` endpoints, the frame-snapshot rules, and the post-input refresh policy.
 This document specifies how a mirrored device screen converts a **viewport point**
 (a pixel the user clicked/dragged on the rendered canvas) into a **device
 coordinate** suitable for the typed daemon input helpers (`inputTap`,

@@ -1,9 +1,11 @@
 # Client Screen Control: frame snapshots and post-input refresh
 
-<kbd>🚧 In progress</kbd>
+<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
 Part of milestone 28 (Client Screen Control), parent [#1099](https://github.com/kaeawc/auto-mobile/issues/1099).
 Shipped by [#3348](https://github.com/kaeawc/auto-mobile/issues/3348).
+New to screen control? Start at the
+[third-party client guide](client-screen-control.md) for the end-to-end picture.
 
 [Screen Control Mapping](screen-control-mapping.md) specifies how a viewport pixel
 becomes a device coordinate. This document specifies the other half a control

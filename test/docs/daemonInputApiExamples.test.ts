@@ -71,6 +71,7 @@ describe("daemon input API consumer docs", () => {
         x: 240,
         y: 640,
         duration: 50,
+        frameContext: "android-generation-42",
       },
       "input/swipe": {
         platform: "android",
@@ -80,22 +81,26 @@ describe("daemon input API consumer docs", () => {
         endX: 520,
         endY: 500,
         durationMs: 350,
+        frameContext: "android-generation-42",
       },
       "input/pressButton": {
         platform: "android",
         deviceId: "emulator-5554",
         button: "back",
+        frameContext: "android-generation-42",
       },
       "input/typeText": {
         platform: "android",
         deviceId: "emulator-5554",
         text: "hello from socket",
         submit: false,
+        frameContext: "android-generation-42",
       },
       "input/key": {
         platform: "android",
         deviceId: "emulator-5554",
         key: "enter",
+        frameContext: "android-generation-42",
       },
     };
     const expectedResultByMethod: Record<ImplementedInputMethod, Record<string, unknown>> = {
@@ -151,6 +156,21 @@ describe("daemon input API consumer docs", () => {
         result: expectedResultByMethod[method],
       });
     }
+  });
+
+  test("documents frame-context pairing, echoing, and recovery for third-party screen control", async () => {
+    const clientGuide = await readRepoFile("docs/design-docs/mcp/daemon/client-screen-control.md");
+    const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
+
+    expect(clientGuide).toContain('"frameContext": "android-generation-42"');
+    expect(clientGuide).toContain(
+      "`screenshot.frameContext == hierarchy.frameContext`, with both values non-null",
+    );
+    expect(clientGuide).toContain("opaque `frameContext` on every request");
+    expect(clientGuide).toContain("stale-context rejection");
+    expect(clientGuide).toContain("wait for a newly paired snapshot before");
+    expect(clientGuide).toContain("runner that does not publish `frameContext` cannot produce a controllable");
+    expect(unixSocketApi).toContain("`frameContext` | `string` | No |");
   });
 
   test("frames direct input as input methods and tools/call as fallback", async () => {

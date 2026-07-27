@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { InputTextMode } from "../../../src/features/action/InputText";
@@ -487,8 +488,9 @@ describe("InputText", () => {
   });
 
   test("eventOnly rejects after a refreshed hierarchy still lacks a focused editable field", async () => {
-    const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const adb = new FakeAdbExecutor();
+    adb.setDeviceTimestampMs(42);
+    const inputText = new InputText(androidDevice, adb);
     const observeScreen = new FakeObserveScreen();
     const unfocused = {
       viewHierarchy: {
@@ -514,7 +516,7 @@ describe("InputText", () => {
     expect(result.error).toBe("eventOnly requires a focused editable field");
     expect(observeScreen.getExecuteCallCount()).toBe(1);
     expect(observeScreen.getExecuteOptions()[0]?.skipWaitForFresh).toBe(false);
-    expect(inputCommands(factory)).toEqual([]);
+    expect(observeScreen.getExecuteOptions()[0]?.minTimestamp).toBe(42);
   });
 
   test("eventOnly delegates keyboard dismissal to the keyboard closer", async () => {

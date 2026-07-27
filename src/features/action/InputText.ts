@@ -623,7 +623,13 @@ export class InputText extends BaseVisualChange {
       return viewHierarchy;
     }
 
-    const refreshedObserveResult = await this.observeScreen.execute({ skipWaitForFresh: false });
+    const minTimestamp = typeof this.adb.getDeviceTimestampMs === "function"
+      ? await this.adb.getDeviceTimestampMs()
+      : this.timer.now();
+    const refreshedObserveResult = await this.observeScreen.execute({
+      skipWaitForFresh: false,
+      minTimestamp
+    });
     const refreshedViewHierarchy = refreshedObserveResult.viewHierarchy;
     return refreshedViewHierarchy && hasFocusedTextInput(refreshedViewHierarchy)
       ? refreshedViewHierarchy

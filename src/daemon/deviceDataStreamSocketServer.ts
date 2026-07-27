@@ -465,10 +465,6 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       screenshotByteLength,
       screenshotBase64Length,
     };
-    if (options.frameContext !== undefined) {
-      this.currentFrameContexts.set(deviceId, options.frameContext);
-    }
-
     const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
     if (sentCount > 0) {
       logger.debug(`[DeviceDataStream] Pushed screenshot_update to ${sentCount} subscribers (device: ${deviceId})`);

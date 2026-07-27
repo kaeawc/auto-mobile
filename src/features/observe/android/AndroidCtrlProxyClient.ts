@@ -2359,6 +2359,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           data: message.data,
           format: message.format || "jpeg",
           timestamp: message.timestamp,
+          frameContext: message.frameContext,
           ...screenshotPerformanceMetadataFrom(message),
         });
       }
@@ -3034,7 +3035,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         },
         (result: ScreenshotCaptureResult) => {
           if (result.data) {
-            this.pushScreenshotToObservationStream(result.data, result, result.captureBinding);
+            this.pushScreenshotToObservationStream(result.data, result, result.captureBinding, result.frameContext);
           }
         },
         {
@@ -3111,6 +3112,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         data: result.data,
         checksum,
         captureBinding,
+        frameContext: result.frameContext,
         ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, result.format),
         ...screenshotPerformanceMetadataFrom(result),
       };

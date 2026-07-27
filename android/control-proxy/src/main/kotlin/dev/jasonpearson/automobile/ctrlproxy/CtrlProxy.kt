@@ -1574,7 +1574,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             recordInteractionEvent(event, "inputText")
           }
         }
-        AccessibilityEvent.TYPE_VIEW_SCROLLED -> recordDebouncedScroll(event)
+        AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+          frameContext.incrementAndGet()
+          recordDebouncedScroll(event)
+        }
       }
 
       // Delegate to the smart debouncer for content/window changes
@@ -2354,6 +2357,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
+      val contextAtBroadcastStart = frameContext.get()
       val jsonString =
         perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
 
@@ -2370,7 +2374,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           append(
             """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString"""
           )
-          append(""",\"frameContext\":\"${frameContext.get()}\"""")
+          if (contextAtBroadcastStart == frameContext.get()) {
+            append(""","frameContext":"$contextAtBroadcastStart"""")
+          }
           if (perfTiming != null) {
             append(""","perfTiming":$perfTiming""")
           }

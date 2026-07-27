@@ -1025,7 +1025,6 @@ export class UnixSocketServer {
       }
 
       if (args.platform === "android") {
-      if (args.platform === "android") {
         const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
         return args.frameContext === undefined
           ? await client.requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs)

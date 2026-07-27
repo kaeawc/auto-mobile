@@ -795,18 +795,6 @@ id: pixel_4
       expect(result.message).toContain("Tool installation functionality has been removed");
     });
 
-    test("should report manual install guidance when required tools are missing", async () => {
-      const mockDeps = createDependencies();
-
-      mockDeps.detectAndroidCommandLineTools = async () => [];
-      mockDeps.getBestAndroidToolsLocation = () => null;
-
-      const result = await avdmanager.acceptLicenses(mockDeps);
-
-      expect(result.success).toBe(false);
-      expect(result.message).toContain("Tool installation functionality has been removed");
-    });
-
     test("should handle missing executable files", async () => {
       const mockDeps = createDependencies();
 

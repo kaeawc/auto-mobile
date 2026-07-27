@@ -1,35 +1,98 @@
 import { describe, expect, test } from "bun:test";
-import { AndroidUserTargetResolver } from "../../../src/utils/android-cmdline-tools/AndroidUserTargetResolver";
+import { AndroidUserTargetResolver, type ResolvedUserTarget, type UserTargetRequest } from "../../../src/utils/android-cmdline-tools/AndroidUserTargetResolver";
+import type { AndroidUser } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
-describe("AndroidUserTargetResolver", () => {
-  test("preserves an explicit primary user", async () => {
-    const resolver = new AndroidUserTargetResolver(new FakeAdbExecutor());
-    expect(await resolver.resolve({ explicitUserId: 0 })).toEqual({ userId: 0, source: "explicit" });
-  });
+const owner: AndroidUser = { userId: 0, name: "Owner", flags: 0x13, running: true };
+const pausedWork: AndroidUser = { userId: 11, name: "Paused work", flags: 0x30, running: false };
+const work: AndroidUser = { userId: 12, name: "Work", flags: 0x20, running: true };
+const otherWork: AndroidUser = { userId: 13, name: "Other work", flags: 0x30, running: true };
 
-  test("uses the package's foreground user before profile fallback", async () => {
-    const adb = new FakeAdbExecutor();
-    adb.setForegroundApp({ packageName: "com.example.app", userId: 12 });
-    const resolver = new AndroidUserTargetResolver(adb);
-    expect(await resolver.resolve({ packageName: "com.example.app" })).toEqual({ userId: 12, source: "foregroundPackage" });
-  });
+interface ResolveCase {
+  name: string;
+  request: UserTargetRequest;
+  users?: AndroidUser[];
+  foreground?: { packageName: string; userId: number } | null;
+  expected: ResolvedUserTarget;
+}
 
-  test("ignores a running non-managed secondary user", async () => {
-    const adb = new FakeAdbExecutor();
-    adb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }, { userId: 10, name: "Secondary", flags: 0, running: true }]);
-    const resolver = new AndroidUserTargetResolver(adb);
-    expect(await resolver.resolve()).toEqual({ userId: 0, source: "primaryFallback" });
-  });
+const cases: ResolveCase[] = [
+  {
+    name: "uses explicit primary user zero before every other signal",
+    request: { explicitUserId: 0, packageName: "com.example.app" },
+    users: [work],
+    foreground: { packageName: "com.example.app", userId: 12 },
+    expected: { userId: 0, source: "explicit" },
+  },
+  {
+    name: "uses an explicit non-primary user before profile fallback",
+    request: { explicitUserId: 10 },
+    users: [work],
+    expected: { userId: 10, source: "explicit" },
+  },
+  {
+    name: "uses a matching foreground package before a managed profile",
+    request: { packageName: "com.example.app" },
+    users: [work],
+    foreground: { packageName: "com.example.app", userId: 10 },
+    expected: { userId: 10, source: "foregroundPackage" },
+  },
+  {
+    name: "uses a running managed profile when the foreground package differs",
+    request: { packageName: "com.example.app" },
+    users: [work],
+    foreground: { packageName: "com.example.other", userId: 10 },
+    expected: { userId: 12, source: "managedProfile" },
+  },
+  {
+    name: "uses a running managed profile when no foreground package is available",
+    request: { packageName: "com.example.app" },
+    users: [work],
+    foreground: null,
+    expected: { userId: 12, source: "managedProfile" },
+  },
+  {
+    name: "uses a managed profile when no package was requested",
+    request: {},
+    users: [work],
+    expected: { userId: 12, source: "managedProfile" },
+  },
+  {
+    name: "skips a paused managed profile and falls back to the primary user",
+    request: {},
+    users: [owner, pausedWork],
+    expected: { userId: 0, source: "primaryFallback" },
+  },
+  {
+    name: "does not treat a running secondary user as managed",
+    request: {},
+    users: [owner, { userId: 10, name: "Secondary", flags: 0, running: true }],
+    expected: { userId: 0, source: "primaryFallback" },
+  },
+  {
+    name: "selects the first running managed profile in device order",
+    request: {},
+    users: [pausedWork, work, otherWork],
+    expected: { userId: 12, source: "managedProfile" },
+  },
+  {
+    name: "falls back to the primary user when no users are reported",
+    request: {},
+    users: [],
+    expected: { userId: 0, source: "primaryFallback" },
+  },
+];
 
-  test("selects the first running managed profile and ignores paused profiles", async () => {
+describe("AndroidUserTargetResolver.resolve", () => {
+  test.each(cases)("$name", async ({ request, users, foreground, expected }) => {
     const adb = new FakeAdbExecutor();
-    adb.setUsers([
-      { userId: 11, name: "Paused work", flags: 0x30, running: false },
-      { userId: 12, name: "Work", flags: 0x20, running: true },
-      { userId: 13, name: "Other work", flags: 0x30, running: true },
-    ]);
-    const resolver = new AndroidUserTargetResolver(adb);
-    expect(await resolver.resolve()).toEqual({ userId: 12, source: "managedProfile" });
+    if (users) {
+      adb.setUsers(users);
+    }
+    if (foreground !== undefined) {
+      adb.setForegroundApp(foreground);
+    }
+
+    await expect(new AndroidUserTargetResolver(adb).resolve(request)).resolves.toEqual(expected);
   });
 });

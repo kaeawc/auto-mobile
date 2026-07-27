@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import fs from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import type { FileDownloader } from "../../src/utils/FileDownloader";
 
@@ -20,7 +21,7 @@ export const runFileDownloaderContract = (
 
     test("writes the downloaded payload to the requested destination", async function() {
       const payload = Buffer.from("download contract payload");
-      tempDir = await makeScratchTempDir("download-contract-");
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-download-contract-"));
       const destination = path.join(tempDir, "nested", "payload.txt");
       const downloader = makeDownloader(payload);
       const server = await createPayloadServer(payload);
@@ -32,13 +33,18 @@ export const runFileDownloaderContract = (
         await server.close();
       }
     });
-  });
-};
 
-const makeScratchTempDir = async (prefix: string): Promise<string> => {
-  const scratchDir = path.join(process.cwd(), "scratch");
-  await fs.mkdir(scratchDir, { recursive: true });
-  return fs.mkdtemp(path.join(scratchDir, prefix));
+    test("rejects an already-aborted download without writing a destination", async function() {
+      const controller = new AbortController();
+      controller.abort();
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-download-contract-"));
+      const destination = path.join(tempDir, "payload.txt");
+
+      await expect(makeDownloader(Buffer.from("payload")).download("https://example.invalid/payload", destination, controller.signal))
+        .rejects.toThrow(/aborted/i);
+      expect(await fs.stat(destination).catch(() => undefined)).toBeUndefined();
+    });
+  });
 };
 
 const createPayloadServer = async (

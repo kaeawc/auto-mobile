@@ -132,6 +132,48 @@ describe("checkWorkProfileAccessibility", () => {
     expect(result.message).toBe("No work profiles detected");
   });
 
+  test.each([
+    {
+      name: "a running secondary user without the managed-profile flag",
+      users: [
+        { userId: 0, name: "Owner", flags: 0x13, running: true },
+        { userId: 10, name: "Personal secondary", flags: 0x10, running: true },
+      ],
+      expected: { status: "pass", message: "No work profiles detected" },
+    },
+    {
+      name: "a stopped managed profile",
+      users: [
+        { userId: 0, name: "Owner", flags: 0x13, running: true },
+        { userId: 10, name: "Stopped work", flags: 0x30, running: false },
+      ],
+      expected: { status: "pass", message: "No work profiles detected" },
+    },
+  ])("does not warn for $name", async ({ users, expected }) => {
+    fakeAdb.setDevices([{ name: "emulator-5554", platform: "android", deviceId: "emulator-5554" }]);
+    fakeAdb.setUsers(users);
+
+    const result = await checkWorkProfileAccessibility(fakeFactory);
+
+    expect(result).toMatchObject(expected);
+  });
+
+  test("returns the ADB failure cause when profile discovery throws", async () => {
+    fakeAdb.setDevices([{ name: "emulator-5554", platform: "android", deviceId: "emulator-5554" }]);
+    fakeAdb.setUsers([
+      { userId: 0, name: "Owner", flags: 0x13, running: true },
+      { userId: 10, name: "Work profile", flags: 0x30, running: true },
+    ]);
+    fakeAdb.setCommandError("enabled_accessibility_services", new Error("adb server not running"));
+
+    const result = await checkWorkProfileAccessibility(fakeFactory);
+
+    expect(result).toMatchObject({
+      status: "skip",
+      message: "Could not check: adb server not running",
+    });
+  });
+
   test("handles multiple work profiles with mixed accessibility status", async () => {
     const device: BootedDevice = {
       name: "emulator-5554",

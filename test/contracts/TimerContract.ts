@@ -42,9 +42,9 @@ export const runTimerContract = (
 
       timer.setTimeout(() => {
         fired = true;
-      }, capabilities.realTime ? 5 : 10);
+      }, capabilities.realTime ? 1 : 10);
 
-      await timer.sleep(capabilities.realTime ? 20 : 20);
+      await timer.sleep(capabilities.realTime ? 15 : 20);
 
       expect(fired).toBe(true);
     });
@@ -53,10 +53,10 @@ export const runTimerContract = (
       const timer = makeTimer();
       const calls: string[] = [];
 
-      timer.setTimeout(() => calls.push("late"), capabilities.realTime ? 20 : 100);
-      timer.setTimeout(() => calls.push("early"), capabilities.realTime ? 5 : 10);
+      timer.setTimeout(() => calls.push("late"), capabilities.realTime ? 5 : 100);
+      timer.setTimeout(() => calls.push("early"), capabilities.realTime ? 1 : 10);
 
-      await timer.sleep(capabilities.realTime ? 40 : 101);
+      await timer.sleep(capabilities.realTime ? 15 : 101);
 
       expect(calls).toEqual(["early", "late"]);
     });
@@ -67,11 +67,11 @@ export const runTimerContract = (
 
       const handle = timer.setTimeout(() => {
         fired = true;
-      }, capabilities.realTime ? 20 : 10);
+      }, capabilities.realTime ? 5 : 10);
       timer.clearTimeout(handle);
 
       if (capabilities.realTime) {
-        await timer.sleep(30);
+        await timer.sleep(15);
       }
 
       expect(fired).toBe(false);
@@ -86,7 +86,7 @@ export const runTimerContract = (
       }, capabilities.realTime ? 1 : 10);
       timer.clearInterval(handle);
 
-      await timer.sleep(capabilities.realTime ? 10 : 0);
+      await timer.sleep(capabilities.realTime ? 15 : 0);
 
       expect(calls).toBe(0);
     });

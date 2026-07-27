@@ -1,74 +1,67 @@
 import { describe, expect, test } from "bun:test";
-import { ClaudeVisionClient } from "../../src/vision/ClaudeVisionClient";
+import {
+  calculateClaudeCost,
+  parseClaudeResponse,
+  toClaudeVisionFallbackResult,
+} from "../../src/vision/ClaudeVisionClient";
+import type { ClaudeVisionAnalysis } from "../../src/vision/VisionTypes";
 
-const makeClient = () => new ClaudeVisionClient("test-key-not-used");
+const makeResponse = (text: string) => ({ content: [{ type: "text", text }] } as any);
 
-const callCalculateCost = (
-  client: ClaudeVisionClient,
-  inputTokens: number,
-  outputTokens: number
-): number => (client as any).calculateCost(inputTokens, outputTokens);
+const analysis = (overrides: Partial<ClaudeVisionAnalysis> = {}): ClaudeVisionAnalysis => ({
+  elementFound: true,
+  navigationRequired: false,
+  visualDescription: "Login screen",
+  similarElements: [],
+  confidence: 0.9,
+  reasoning: "visible",
+  ...overrides,
+});
 
-const makeResponse = (text: string) =>
-  ({ content: [{ type: "text", text }] } as any);
-
-const callParse = (client: ClaudeVisionClient, response: unknown) =>
-  (client as any).parseClaudeResponse(response);
-
-describe("ClaudeVisionClient.parseClaudeResponse", () => {
-  test("throws a controlled error when JSON inside a code block is malformed", () => {
-    const client = makeClient();
-    const response = makeResponse("```json\n{ \"elementFound\": tr,\n```");
-
-    expect(() => callParse(client, response)).toThrow(
-      /Failed to parse JSON from Claude response/
-    );
+describe("parseClaudeResponse", () => {
+  test.each([
+    ["a malformed fenced JSON response", "```json\n{ \"elementFound\": tr,\n```"],
+    ["a malformed inline JSON response", "here is a result: { not valid json at all }"],
+    ["a prose-only response", "Claude returned only prose, no JSON here."],
+  ])("throws a controlled error for %s", (_name, responseText) => {
+    expect(() => parseClaudeResponse(makeResponse(responseText))).toThrow(/Failed to parse JSON from Claude response/);
   });
 
-  test("throws a controlled error when JSON outside a code block is malformed", () => {
-    const client = makeClient();
-    const response = makeResponse("here is a result: { not valid json at all }");
-
-    expect(() => callParse(client, response)).toThrow(
-      /Failed to parse JSON from Claude response/
-    );
-  });
-
-  test("throws when no JSON match is present in the response", () => {
-    const client = makeClient();
-    const response = makeResponse("Claude returned only prose, no JSON here.");
-
-    expect(() => callParse(client, response)).toThrow(
-      /Failed to parse JSON from Claude response/
-    );
-  });
-
-  test("parses well-formed JSON inside a fenced code block", () => {
-    const client = makeClient();
-    const response = makeResponse(
+  test("returns analysis fields from a well-formed fenced response", () => {
+    const parsed = parseClaudeResponse(makeResponse(
       "```json\n{\"elementFound\": true, \"confidence\": 0.95, \"reasoning\": \"ok\"}\n```"
-    );
+    ));
 
-    const parsed = callParse(client, response);
-
-    expect(parsed.elementFound).toBe(true);
-    expect(parsed.confidence).toBe(0.95);
-    expect(parsed.reasoning).toBe("ok");
+    expect(parsed).toMatchObject({ elementFound: true, confidence: 0.95, reasoning: "ok" });
   });
 });
 
-describe("ClaudeVisionClient.calculateCost", () => {
-  // Sonnet pricing: $3 / Mtok input, $15 / Mtok output.
+describe("calculateClaudeCost", () => {
   test("prices input and output tokens at $3 and $15 per million", () => {
-    const client = makeClient();
-    // 1M input = $3, 1M output = $15 → $18 total.
-    expect(callCalculateCost(client, 1_000_000, 1_000_000)).toBeCloseTo(18.0, 6);
+    expect(calculateClaudeCost(1_000_000, 1_000_000)).toBeCloseTo(18, 6);
+    expect(calculateClaudeCost(500_000, 100_000)).toBeCloseTo(3, 6);
+    expect(calculateClaudeCost(0, 0)).toBe(0);
+  });
+});
+
+describe("toClaudeVisionFallbackResult", () => {
+  test.each([
+    [0.9, "high"],
+    [0.7, "medium"],
+    [0.699, "low"],
+  ] as const)("uses %p as the %s confidence boundary", (confidence, expectedConfidence) => {
+    const result = toClaudeVisionFallbackResult(analysis({ confidence }), 0.01, 12, "/screen.png");
+
+    expect(result.confidence).toBe(expectedConfidence);
   });
 
-  test("is zero for zero tokens and scales linearly", () => {
-    const client = makeClient();
-    expect(callCalculateCost(client, 0, 0)).toBe(0);
-    // 500k input ($1.50) + 100k output ($1.50) = $3.00.
-    expect(callCalculateCost(client, 500_000, 100_000)).toBeCloseTo(3.0, 6);
+  test("defaults an unknown navigation action to tap while preserving its target", () => {
+    const result = toClaudeVisionFallbackResult(analysis({
+      steps: [{ action: "open details", target: "Settings", reasoning: "next screen" }],
+    }), 0.01, 12, "/screen.png");
+
+    expect(result.navigationSteps).toEqual([
+      { action: "tap", target: "Settings", description: "next screen" },
+    ]);
   });
 });

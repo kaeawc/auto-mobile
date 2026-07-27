@@ -804,6 +804,12 @@ export class ToolRegistryClass {
     });
   }
 
+  /** Remove one test-only or dynamically registered tool without disturbing the registry. */
+  unregister(name: string): void {
+    this.invalidateToolDefinitionSchemaCache();
+    this.tools.delete(name);
+  }
+
   // Register a device-aware tool
   registerDeviceAware(
     name: string,

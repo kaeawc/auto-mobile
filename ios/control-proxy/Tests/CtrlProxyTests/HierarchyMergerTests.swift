@@ -785,6 +785,61 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertEqual(result.fallbackToSpringboard, true)
     }
 
+    // MARK: - Scale reporting metadata (#4548)
+
+    func testScaleReportingMetadataPreservedThroughFullMerge() {
+        // Full-merge path: sdk has a root, so HierarchyMerger reconstructs the ViewHierarchy
+        // and must carry the additive scale metadata through (iPhone Plus values: scale 3.0
+        // differs from nativeScale 2.608696, so a scale/nativeScale mix-up fails here).
+        let hierarchy = ViewHierarchy(
+            packageName: "com.test.app",
+            hierarchy: makeElement(),
+            screenScale: 3.0,
+            screenWidth: 414,
+            screenHeight: 736,
+            nativeScale: 2.608696,
+            pixelWidth: 1080,
+            pixelHeight: 1920
+        )
+        let sdk = makeSdkHierarchy(root: makeSdkNode())
+
+        let result = HierarchyMerger.merge(xcuitest: hierarchy, sdk: sdk)
+
+        XCTAssertEqual(result.screenScale, 3.0)
+        XCTAssertEqual(result.nativeScale, 2.608696)
+        XCTAssertEqual(result.pixelWidth, 1080)
+        XCTAssertEqual(result.pixelHeight, 1920)
+    }
+
+    func testScaleReportingMetadataPreservedWhenSdkHasNoRoot() {
+        // Rootless-sdk path: the merger still reconstructs the ViewHierarchy (for insets
+        // enrichment) and must not drop the scale metadata.
+        let hierarchy = ViewHierarchy(
+            packageName: "com.test.app",
+            hierarchy: makeElement(),
+            screenScale: 3.0,
+            screenWidth: 375,
+            screenHeight: 812,
+            nativeScale: 3.144,
+            pixelWidth: 1179,
+            pixelHeight: 2553
+        )
+        let sdk = SdkViewHierarchy(
+            timestamp: 1000,
+            bundleId: "com.test.app",
+            screenScale: 3.0,
+            screenWidth: 375,
+            screenHeight: 812,
+            root: nil
+        )
+
+        let result = HierarchyMerger.merge(xcuitest: hierarchy, sdk: sdk)
+
+        XCTAssertEqual(result.nativeScale, 3.144)
+        XCTAssertEqual(result.pixelWidth, 1179)
+        XCTAssertEqual(result.pixelHeight, 2553)
+    }
+
     // MARK: - Layer-only Nodes (SwiftUI shapes via CALayer)
 
     func testLayerNodeBorderAndLayerFlagSurfaceInExtras() {

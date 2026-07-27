@@ -134,6 +134,16 @@ export interface AccessibilityHierarchy {
   deviceModel?: string;
   /** Whether running on an emulator */
   isEmulator?: boolean;
+  /**
+   * Bounds->screenshot-pixel ratio (#4548, additive; absent from pre-#4548 runners). Android
+   * bounds and screenshots are both physical pixels, so the runner reports exactly 1. The runner
+   * serializes absent optionals as JSON null (`encodeDefaults = true`), hence `| null`.
+   */
+  nativeScale?: number | null;
+  /** Physical screenshot pixel width (== screenWidth on Android) (#4548, additive). */
+  pixelWidth?: number | null;
+  /** Physical screenshot pixel height (== screenHeight on Android) (#4548, additive). */
+  pixelHeight?: number | null;
 }
 
 /**

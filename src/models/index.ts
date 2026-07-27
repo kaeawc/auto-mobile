@@ -92,6 +92,7 @@ export * from "./UninstallAppResult";
 export * from "./ViewHierarchyCache";
 export * from "./ViewHierarchyQueryOptions";
 export * from "./ViewHierarchyResult";
+export * from "./ScreenScaleMetadata";
 export * from "./CtrlProxyReconnectStatus";
 export * from "./Plan";
 export * from "./ExportPlanResult";

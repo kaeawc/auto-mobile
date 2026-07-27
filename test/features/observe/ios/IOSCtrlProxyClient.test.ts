@@ -2803,6 +2803,108 @@ describe("IOSCtrlProxyClient", function() {
       expect(geometry.bind()).toBeNull();
     });
 
+    describe("scale metadata retention (issue #4548)", function() {
+      test("retains runner-reported scale metadata WITHOUT changing the geometry computation", async function() {
+        await startStreamServer();
+        const geometry = (ctrlProxyClient as any).screenGeometry;
+
+        // Display Zoom values chosen so the two computations DISAGREE: the legacy geometry is
+        // points * screenScale (375*3=1125, 812*3=2436) while the runner's reported pixel dims
+        // are points * nativeScale (1179x2553). This PR is retention-only (#4548): the tracked
+        // geometry MUST keep the old screenScale computation — switching it is #4549's job.
+        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
+          screenWidth: 375,
+          screenHeight: 812,
+          screenScale: 3,
+          nativeScale: 3.144,
+          pixelWidth: 1179,
+          pixelHeight: 2553,
+        });
+
+        expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual({
+          nativeScale: 3.144,
+          pixelWidth: 1179,
+          pixelHeight: 2553,
+        });
+        const bound = geometry.bind();
+        expect(bound.width).toBe(1125);
+        expect(bound.height).toBe(2436);
+      });
+
+      test("legacy hierarchy without the fields: metadata is null and geometry is unchanged", async function() {
+        await startStreamServer();
+        const geometry = (ctrlProxyClient as any).screenGeometry;
+
+        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
+          screenWidth: 390,
+          screenHeight: 844,
+          screenScale: 3,
+        });
+
+        expect(ctrlProxyClient.getScreenScaleMetadata()).toBeNull();
+        const bound = geometry.bind();
+        expect(bound.width).toBe(1170);
+        expect(bound.height).toBe(2532);
+      });
+
+      test("a later hierarchy without the fields resets retained metadata to null", async function() {
+        await startStreamServer();
+
+        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
+          screenWidth: 375, screenHeight: 812, screenScale: 3,
+          nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553,
+        });
+        expect(ctrlProxyClient.getScreenScaleMetadata()).not.toBeNull();
+
+        // e.g. the device reconnects to a pre-#4548 runner: stale metadata must not survive.
+        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
+          screenWidth: 375, screenHeight: 812, screenScale: 3,
+        });
+        expect(ctrlProxyClient.getScreenScaleMetadata()).toBeNull();
+      });
+
+      test("partial or degenerate metadata is never retained", async function() {
+        await startStreamServer();
+        const base = { screenWidth: 375, screenHeight: 812, screenScale: 3 };
+        const degenerates = [
+          { nativeScale: 3.144, pixelWidth: 1179 }, // missing pixelHeight
+          { nativeScale: 0, pixelWidth: 1179, pixelHeight: 2553 },
+          { nativeScale: -1, pixelWidth: 1179, pixelHeight: 2553 },
+          { nativeScale: Number.NaN, pixelWidth: 1179, pixelHeight: 2553 },
+          { nativeScale: 3.144, pixelWidth: 0, pixelHeight: 2553 },
+          { nativeScale: 3.144, pixelWidth: 1179, pixelHeight: Number.POSITIVE_INFINITY },
+        ];
+        for (const metadata of degenerates) {
+          (ctrlProxyClient as any).pushHierarchyToObservationStream(
+            { hierarchy: {} } as any,
+            { ...base, ...metadata }
+          );
+          expect(ctrlProxyClient.getScreenScaleMetadata()).toBeNull();
+        }
+      });
+
+      test("golden scaleReporting rows round-trip through retention", async function() {
+        await startStreamServer();
+        const vectors = loadCoordinateMappingVectors().scaleReporting;
+        expect(vectors.length).toBeGreaterThan(0);
+        for (const vector of vectors) {
+          (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
+            screenWidth: vector.pointWidth,
+            screenHeight: vector.pointHeight,
+            screenScale: 3,
+            nativeScale: vector.nativeScale,
+            pixelWidth: vector.expectedPixelWidth,
+            pixelHeight: vector.expectedPixelHeight,
+          });
+          expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual({
+            nativeScale: vector.nativeScale,
+            pixelWidth: vector.expectedPixelWidth,
+            pixelHeight: vector.expectedPixelHeight,
+          });
+        }
+      });
+    });
+
     describe("coordinate-mapping golden vectors: LIVE iOS point->pixel (issue #4547)", function() {
       // The bootstrap path (observationInitialFrame's getIosScreenshotDimensions) and this LIVE
       // hierarchy-update path (updateScreenGeometryFrom) are SEPARATE implementations of the same

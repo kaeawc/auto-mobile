@@ -32,6 +32,13 @@ data class ViewHierarchy(
   val sdkInt: Int? = null, // Android API level (e.g. 34)
   val deviceModel: String? = null, // e.g. "Pixel 8"
   val isEmulator: Boolean? = null, // Whether running on an emulator
+  // Additive scale metadata (#4548): the ratio between the bounds units reported in this
+  // hierarchy and physical screenshot pixels. Android accessibility bounds and screenshots
+  // are BOTH physical pixels, so the truthful value is exactly 1 — reported explicitly so
+  // both platforms carry the same metadata shape (iOS reports UIScreen.nativeScale).
+  val nativeScale: Float? = null,
+  val pixelWidth: Int? = null, // Physical screenshot pixel width (== screenWidth on Android)
+  val pixelHeight: Int? = null, // Physical screenshot pixel height (== screenHeight on Android)
 )
 
 @Serializable

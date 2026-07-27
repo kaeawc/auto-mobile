@@ -272,6 +272,12 @@ export class CtrlProxyHierarchy {
       // Screen dimensions in iOS points (logical pixels)
       screenWidth: hierarchy.screenWidth,
       screenHeight: hierarchy.screenHeight,
+      // Additive scale metadata (#4548): UIScreen.nativeScale + physical screenshot pixel
+      // dimensions. Retained for #4549. The keys are omitted entirely on payloads from
+      // pre-#4548 runners so legacy results stay byte-identical.
+      ...(typeof hierarchy.nativeScale === "number" ? { nativeScale: hierarchy.nativeScale } : {}),
+      ...(typeof hierarchy.pixelWidth === "number" ? { pixelWidth: hierarchy.pixelWidth } : {}),
+      ...(typeof hierarchy.pixelHeight === "number" ? { pixelHeight: hierarchy.pixelHeight } : {}),
       systemInsets: hierarchy.systemInsets,
       insets: hierarchy.insets,
     };

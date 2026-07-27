@@ -633,4 +633,45 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     expect(button.node?.[0]?.$["class"]).toBe("UILabel");
     expect(button.node?.[0]?.$["accessibility-focused"]).toBe("true");
   });
+
+  test("retains the additive #4548 scale metadata reported by the runner", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 375, bottom: 812 },
+    };
+    // Display Zoom values: screenScale (UIScreen.scale) stays 3.0 while nativeScale is 3.144,
+    // so a converter that conflated the two fields would fail this test.
+    const result = subject.convertToViewHierarchyResult({
+      ...makeHierarchy(root),
+      screenScale: 3.0,
+      screenWidth: 375,
+      screenHeight: 812,
+      nativeScale: 3.144,
+      pixelWidth: 1179,
+      pixelHeight: 2553,
+    });
+
+    expect(result.screenScale).toBe(3.0);
+    expect(result.nativeScale).toBe(3.144);
+    expect(result.pixelWidth).toBe(1179);
+    expect(result.pixelHeight).toBe(2553);
+  });
+
+  test("omits the scale metadata keys entirely for a pre-#4548 runner payload", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 375, bottom: 812 },
+    };
+    const result = subject.convertToViewHierarchyResult({
+      ...makeHierarchy(root),
+      screenScale: 3.0,
+      screenWidth: 375,
+      screenHeight: 812,
+    });
+
+    // Byte-identical legacy shape: the keys must be ABSENT, not present-with-undefined.
+    expect("nativeScale" in result).toBe(false);
+    expect("pixelWidth" in result).toBe(false);
+    expect("pixelHeight" in result).toBe(false);
+  });
 });

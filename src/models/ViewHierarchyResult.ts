@@ -43,6 +43,18 @@ export interface ViewHierarchyResult {
   screenHeight?: number;
   /** iOS screen scale factor (e.g., 2.0 for @2x, 3.0 for @3x retina). Converts points to pixels. */
   screenScale?: number;
+  /**
+   * Ratio between this hierarchy's bounds units and physical screenshot pixels (#4548, additive —
+   * absent from pre-#4548 runners). iOS reports `UIScreen.nativeScale` (NOT `scale`: Display Zoom
+   * makes them differ, and screenshots render at native scale); Android bounds are already
+   * physical pixels, so it reports exactly 1. Retained for #4549's canonical-pixel conversion —
+   * NOT consumed by any current behavior.
+   */
+  nativeScale?: number;
+  /** Physical screenshot pixel width reported by the runner (#4548, additive). */
+  pixelWidth?: number;
+  /** Physical screenshot pixel height reported by the runner (#4548, additive). */
+  pixelHeight?: number;
   /** Display rotation: 0=portrait, 1=landscape90, 2=reverse, 3=landscape270 */
   rotation?: number;
   /** System insets (status bar, nav bar, gesture insets) */

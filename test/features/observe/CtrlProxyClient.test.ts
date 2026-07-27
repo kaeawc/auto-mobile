@@ -1342,6 +1342,52 @@ describe("AndroidCtrlProxyClient", function() {
       expect(result.hierarchy.node.clickable).toBe("true");
     });
 
+    test("retains the additive #4548 scale metadata reported by the runner", function() {
+      const result = accessibilityServiceClient.convertToViewHierarchyResult({
+        updatedAt: 1750934583218,
+        packageName: "com.test.app",
+        hierarchy: { text: "root" },
+        screenWidth: 1080,
+        screenHeight: 2340,
+        nativeScale: 1,
+        pixelWidth: 1080,
+        pixelHeight: 2340,
+      } as any);
+
+      expect(result.nativeScale).toBe(1);
+      expect(result.pixelWidth).toBe(1080);
+      expect(result.pixelHeight).toBe(2340);
+    });
+
+    test("omits the scale metadata keys for legacy payloads and for the runner's JSON nulls", function() {
+      const base = {
+        updatedAt: 1750934583218,
+        packageName: "com.test.app",
+        hierarchy: { text: "root" },
+        screenWidth: 1080,
+        screenHeight: 2340,
+      };
+
+      // Pre-#4548 runner: fields absent entirely — the result shape must be byte-identical,
+      // so the keys are ABSENT, not present-with-undefined.
+      const legacy = accessibilityServiceClient.convertToViewHierarchyResult({ ...base } as any);
+      expect("nativeScale" in legacy).toBe(false);
+      expect("pixelWidth" in legacy).toBe(false);
+      expect("pixelHeight" in legacy).toBe(false);
+
+      // The runner serializes absent optionals as JSON null (encodeDefaults=true) when screen
+      // dimensions are unavailable: nulls must be normalized away, never retained.
+      const nulls = accessibilityServiceClient.convertToViewHierarchyResult({
+        ...base,
+        nativeScale: null,
+        pixelWidth: null,
+        pixelHeight: null,
+      } as any);
+      expect("nativeScale" in nulls).toBe(false);
+      expect("pixelWidth" in nulls).toBe(false);
+      expect("pixelHeight" in nulls).toBe(false);
+    });
+
     test("should handle conversion errors gracefully", function() {
       // Create a hierarchy that will cause conversion issues
       const problematicHierarchy = {
@@ -3103,6 +3149,55 @@ describe("AndroidCtrlProxyClient", function() {
       const updates = getScreenshotUpdates(socket);
       expect(updates).toHaveLength(1);
       expect(updates[0].captureSequence).toBeUndefined();
+    });
+  });
+
+  describe("scale metadata retention (issue #4548)", () => {
+    test("retains the runner's scale-1 metadata without changing the window-derived geometry", () => {
+      (accessibilityServiceClient as any).handleHierarchyUpdate({
+        ...hierarchyWithScreenSize(1080, 2340),
+        nativeScale: 1,
+        pixelWidth: 1080,
+        pixelHeight: 2340,
+      });
+
+      expect(accessibilityServiceClient.getScreenScaleMetadata()).toEqual({
+        nativeScale: 1,
+        pixelWidth: 1080,
+        pixelHeight: 2340,
+      });
+      // Retention-only (#4548): the tracked geometry still comes from the window bounds.
+      const geometry = (accessibilityServiceClient as any).screenGeometry;
+      expect(geometry.width).toBe(1080);
+      expect(geometry.height).toBe(2340);
+    });
+
+    test("legacy hierarchy without the fields leaves metadata null and behavior unchanged", () => {
+      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+
+      expect(accessibilityServiceClient.getScreenScaleMetadata()).toBeNull();
+      const geometry = (accessibilityServiceClient as any).screenGeometry;
+      expect(geometry.width).toBe(1080);
+      expect(geometry.height).toBe(2340);
+    });
+
+    test("a later hierarchy without the fields (or with runner nulls) resets metadata", () => {
+      (accessibilityServiceClient as any).handleHierarchyUpdate({
+        ...hierarchyWithScreenSize(1080, 2340),
+        nativeScale: 1,
+        pixelWidth: 1080,
+        pixelHeight: 2340,
+      });
+      expect(accessibilityServiceClient.getScreenScaleMetadata()).not.toBeNull();
+
+      // The runner serializes absent optionals as JSON null when dimensions are unavailable.
+      (accessibilityServiceClient as any).handleHierarchyUpdate({
+        ...hierarchyWithScreenSize(1080, 2340),
+        nativeScale: null,
+        pixelWidth: null,
+        pixelHeight: null,
+      });
+      expect(accessibilityServiceClient.getScreenScaleMetadata()).toBeNull();
     });
   });
 });

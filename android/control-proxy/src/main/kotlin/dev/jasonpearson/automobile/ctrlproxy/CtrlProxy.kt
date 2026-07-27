@@ -2084,6 +2084,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       sdkInt = Build.VERSION.SDK_INT,
       deviceModel = Build.MODEL,
       isEmulator = getIsEmulator(),
+      // Scale metadata (#4548): Android hierarchy bounds and screenshots are both physical
+      // pixels, so the bounds->pixel ratio is exactly 1 and the pixel dimensions equal the
+      // reported screen dimensions. Omitted entirely when dimensions are unavailable.
+      nativeScale = if (screenDimensions != null) 1f else null,
+      pixelWidth = screenDimensions?.width,
+      pixelHeight = screenDimensions?.height,
     )
   }
 

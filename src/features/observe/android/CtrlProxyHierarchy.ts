@@ -542,7 +542,13 @@ export class CtrlProxyHierarchy {
         "density": accessibilityHierarchy.density,
         "sdkInt": accessibilityHierarchy.sdkInt,
         "deviceModel": accessibilityHierarchy.deviceModel,
-        "isEmulator": accessibilityHierarchy.isEmulator
+        "isEmulator": accessibilityHierarchy.isEmulator,
+        // Additive scale metadata (#4548), retained for #4549. The runner serializes absent
+        // optionals as JSON null; omit the keys entirely on legacy/absent payloads so results
+        // from pre-#4548 runners stay byte-identical.
+        ...(typeof accessibilityHierarchy.nativeScale === "number" ? { nativeScale: accessibilityHierarchy.nativeScale } : {}),
+        ...(typeof accessibilityHierarchy.pixelWidth === "number" ? { pixelWidth: accessibilityHierarchy.pixelWidth } : {}),
+        ...(typeof accessibilityHierarchy.pixelHeight === "number" ? { pixelHeight: accessibilityHierarchy.pixelHeight } : {})
       };
 
       const duration = this.context.timer.now() - startTime;

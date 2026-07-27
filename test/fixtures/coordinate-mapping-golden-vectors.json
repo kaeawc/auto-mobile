@@ -13,11 +13,14 @@
     "  pixelsMatchClaimedGeometry pairing from the geometryPairing section, and",
     "  test/daemon/observationInitialFrame.test.ts drives the daemon's iOS point->pixel conversion",
     "  from the iosPointToPixel section, both reading this file directly.",
-    "- Swift: deliberately NO consumer. The iOS runner (ios/control-proxy) performs no",
-    "  viewport<->device mapping; it reports point-space bounds plus screenScale",
-    "  (ElementLocator.swift) and the point->pixel conversion happens daemon-side in TypeScript",
-    "  (IOSCtrlProxyClient.updateScreenGeometryFrom / observationInitialFrame). The runner's only",
-    "  coordinate math, pinch endpoint geometry, is already pinned by pinch-golden-vectors.json.",
+    "- Swift: ONE consumer, the scaleReporting section. Since #4548 the iOS runner derives the",
+    "  physical screenshot pixel dimensions it reports (ElementLocator.computePixelDimensions,",
+    "  points * UIScreen.nativeScale); ElementLocatorTests.swift holds an inline copy of the",
+    "  scaleReporting rows and the parity suite parses it out of the source. The runner still",
+    "  performs no viewport<->device mapping: point-space bounds plus screenScale cross the wire",
+    "  and the point->pixel conversion for geometry pairing happens daemon-side in TypeScript",
+    "  (IOSCtrlProxyClient.updateScreenGeometryFrom / observationInitialFrame). The runner's other",
+    "  coordinate math, pinch endpoint geometry, is pinned by pinch-golden-vectors.json.",
     "",
     "These vectors PIN CURRENT BEHAVIOR. Rows with willChangeUnderCanonicalPixels=true document",
     "iOS point-space cases whose expected values MUST change when #4549 converts hierarchy bounds",
@@ -25,7 +28,14 @@
     "",
     "Booleans are encoded as 0/1 so the Kotlin inline tables stay purely numeric for the positional",
     "source parser. In geometryPairing, measuredWidth=measuredHeight=-1 means an unmeasurable frame.",
-    "In iosPointToPixel, scale=0 means the hierarchy carried no screenScale (daemon defaults to 1)."
+    "In iosPointToPixel, scale=0 means the hierarchy carried no screenScale (daemon defaults to 1).",
+    "",
+    "scaleReporting (#4548, B1) pins the RUNNER-side derivation of the reported physical pixel",
+    "dimensions: pixel = round(point * nativeScale), where nativeScale is UIScreen.nativeScale on",
+    "iOS (NOT UIScreen.scale — Display Zoom makes them differ and screenshots render at native",
+    "scale) and exactly 1 on Android (bounds are already physical pixels). These rows do NOT carry",
+    "willChangeUnderCanonicalPixels: the runner-side derivation is the metadata #4549 consumes and",
+    "must stay stable across that change."
   ],
   "viewportToDevice": [
     {
@@ -369,6 +379,38 @@
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 400, "pointHeight": 667, "scale": 2.5,
       "expectedPixelWidth": 1000, "expectedPixelHeight": 1668
+    }
+  ],
+  "scaleReporting": [
+    {
+      "comment": "standard 3x device: 393x852 points at nativeScale 3.0 -> 1179x2556 pixels (scale == nativeScale here, so this row alone cannot distinguish them)",
+      "pointWidth": 393, "pointHeight": 852, "nativeScale": 3.0,
+      "expectedPixelWidth": 1179, "expectedPixelHeight": 2556
+    },
+    {
+      "comment": "Display Zoom: nativeScale 3.144 while UIScreen.scale stays 3.0 — using scale would report 2436, not the screenshot's true 2553 (812*3.144=2552.928 rounds to 2553)",
+      "pointWidth": 375, "pointHeight": 812, "nativeScale": 3.144,
+      "expectedPixelWidth": 1179, "expectedPixelHeight": 2553
+    },
+    {
+      "comment": "iPhone Plus downsampling panel: scale 3.0 but nativeScale 2.608696 -> the physical 1080x1920",
+      "pointWidth": 414, "pointHeight": 736, "nativeScale": 2.608696,
+      "expectedPixelWidth": 1080, "expectedPixelHeight": 1920
+    },
+    {
+      "comment": "2x device: 320x568 points -> 640x1136 pixels",
+      "pointWidth": 320, "pointHeight": 568, "nativeScale": 2.0,
+      "expectedPixelWidth": 640, "expectedPixelHeight": 1136
+    },
+    {
+      "comment": "rounding tie on both axes: 375*3.5=1312.5 and 811*3.5=2838.5 round half away from zero (== JS Math.round for positive values)",
+      "pointWidth": 375, "pointHeight": 811, "nativeScale": 3.5,
+      "expectedPixelWidth": 1313, "expectedPixelHeight": 2839
+    },
+    {
+      "comment": "Android identity contract: bounds are already physical pixels so the runner reports exactly nativeScale 1 with pixel == screen dims",
+      "pointWidth": 1080, "pointHeight": 2340, "nativeScale": 1.0,
+      "expectedPixelWidth": 1080, "expectedPixelHeight": 2340
     }
   ]
 }

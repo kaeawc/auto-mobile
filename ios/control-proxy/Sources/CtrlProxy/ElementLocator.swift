@@ -553,6 +553,7 @@ public class ElementLocator: ElementLocating {
                         focusFrame,
                         ScreenMetrics(
                             scale: Float(UIScreen.main.scale),
+                            nativeScale: Float(UIScreen.main.nativeScale),
                             fallbackWidth: Int(bounds.width),
                             fallbackHeight: Int(bounds.height),
                             rotation: rotation
@@ -643,7 +644,7 @@ public class ElementLocator: ElementLocating {
             // Display Zoom changes nativeScale while scale stays put, and
             // XCUIScreenshot.pngRepresentation renders at native scale (#4548). screenScale
             // (UIScreen.scale) is still reported unchanged for backward compatibility.
-            let screenMetrics: ScreenMetrics = try runOnMainThread {
+            let currentScreenMetrics: ScreenMetrics = try runOnMainThread {
                 let scale = Float(UIScreen.main.scale)
                 let nativeScale = Float(UIScreen.main.nativeScale)
                 let bounds = UIScreen.main.bounds
@@ -669,13 +670,13 @@ public class ElementLocator: ElementLocating {
             }
             let (screenWidth, screenHeight) = ElementLocator.resolveScreenDimensions(
                 rootBounds: finalHierarchy.bounds,
-                fallbackWidth: screenMetrics.fallbackWidth,
-                fallbackHeight: screenMetrics.fallbackHeight
+                fallbackWidth: currentScreenMetrics.fallbackWidth,
+                fallbackHeight: currentScreenMetrics.fallbackHeight
             )
             let pixelDimensions = ElementLocator.computePixelDimensions(
                 pointWidth: screenWidth,
                 pointHeight: screenHeight,
-                nativeScale: Double(screenMetrics.nativeScale)
+                nativeScale: Double(currentScreenMetrics.nativeScale)
             )
 
             return ViewHierarchy(
@@ -683,10 +684,10 @@ public class ElementLocator: ElementLocating {
                 hierarchy: finalHierarchy,
                 windowInfo: windowInfo,
                 windows: [windowInfo],
-                screenScale: screenMetrics.scale,
+                screenScale: currentScreenMetrics.scale,
                 screenWidth: screenWidth,
                 screenHeight: screenHeight,
-                nativeScale: pixelDimensions == nil ? nil : screenMetrics.nativeScale,
+                nativeScale: pixelDimensions == nil ? nil : currentScreenMetrics.nativeScale,
                 pixelWidth: pixelDimensions?.pixelWidth,
                 pixelHeight: pixelDimensions?.pixelHeight,
                 rotation: hierarchyRotation,

@@ -513,6 +513,7 @@ describe("InputText", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe("eventOnly requires a focused editable field");
     expect(observeScreen.getExecuteCallCount()).toBe(1);
+    expect(observeScreen.getExecuteOptions()[0]?.skipWaitForFresh).toBe(false);
     expect(inputCommands(factory)).toEqual([]);
   });
 

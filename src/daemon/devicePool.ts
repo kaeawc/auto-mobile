@@ -1403,6 +1403,9 @@ export class DevicePool {
   async bindOrReuseDeviceSession(sessionId: string, deviceId: string, platform: Platform): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
       const alreadyPooled = this.devices.has(deviceId);
+      if (alreadyPooled) {
+        this.notifyDeviceReady(deviceId);
+      }
       if (!alreadyPooled) {
         const bootedDevices = await this.deviceManager.getBootedDevices(platform);
         const booted = bootedDevices.find(d => d.deviceId === deviceId);
@@ -1422,10 +1425,6 @@ export class DevicePool {
           `Device '${deviceId}' is not available in the device pool. ` +
           "It may have been shut down or disconnected."
         );
-      }
-
-      if (alreadyPooled) {
-        this.notifyDeviceReady(deviceId);
       }
 
       if (device.sessionId) {
@@ -1483,6 +1482,9 @@ export class DevicePool {
 
     // Ensure device is in the pool (it may have been freshly booted)
     const alreadyPooled = this.devices.has(deviceId);
+    if (alreadyPooled) {
+      this.notifyDeviceReady(deviceId);
+    }
     if (!alreadyPooled) {
       const bootedDevices = await this.deviceManager.getBootedDevices(platform);
       const booted = bootedDevices.find(d => d.deviceId === deviceId);
@@ -1518,10 +1520,6 @@ export class DevicePool {
         `  - Use 'startDevice' with deviceId to restart this specific device\n` +
         `  - Use 'listDevices' to see currently available devices`
       );
-    }
-
-    if (alreadyPooled) {
-      this.notifyDeviceReady(deviceId);
     }
 
     device.sessionId = sessionId;

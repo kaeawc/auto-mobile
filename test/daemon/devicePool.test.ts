@@ -6,7 +6,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { BootedDevice, DeviceInfo, Platform } from "../../src/models";
+import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { MultiPlatformDeviceManager } from "../../src/utils/deviceUtils";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
@@ -72,6 +72,37 @@ describe("DevicePool", () => {
     async getBootedDevicesDetailed(platform: "android" | "ios" | "either") {
       this.detailedBootedCalls++;
       return super.getBootedDevicesDetailed(platform);
+    }
+  }
+
+  class DeferredDiscoveryFakeDeviceManager extends FakeDeviceManager {
+    private readonly discoveryStartedPromise: Promise<void>;
+    private readonly discoveryReleasePromise: Promise<void>;
+    private resolveDiscoveryStarted!: () => void;
+    private resolveDiscoveryRelease!: () => void;
+
+    constructor() {
+      super();
+      this.discoveryStartedPromise = new Promise(resolve => {
+        this.resolveDiscoveryStarted = resolve;
+      });
+      this.discoveryReleasePromise = new Promise(resolve => {
+        this.resolveDiscoveryRelease = resolve;
+      });
+    }
+
+    async getBootedDevicesDetailed(platform: SomePlatform) {
+      this.resolveDiscoveryStarted();
+      await this.discoveryReleasePromise;
+      return await super.getBootedDevicesDetailed(platform);
+    }
+
+    async waitForDiscoveryStart(): Promise<void> {
+      await this.discoveryStartedPromise;
+    }
+
+    releaseDiscovery(): void {
+      this.resolveDiscoveryRelease();
     }
   }
 
@@ -221,14 +252,15 @@ describe("DevicePool", () => {
       expect(connectedDeviceIds).toEqual(["emulator-5554"]);
     });
 
-    test("notifies when start-device binding reuses an existing serial", async () => {
+    test("notifies before binding validates an existing serial", async () => {
       const connectedDeviceIds: string[] = [];
+      const deferredDeviceManager = new DeferredDiscoveryFakeDeviceManager();
       devicePool = new DevicePool(
         sessionManager,
         "test-daemon-session-id",
         fakeTimer,
         fakeAppsRepo,
-        fakeDeviceManager,
+        deferredDeviceManager,
         new DefaultRetryExecutor(fakeTimer),
         undefined,
         undefined,
@@ -237,9 +269,57 @@ describe("DevicePool", () => {
       );
       const device = createBootedDevice("emulator-5554");
       await devicePool.initializeWithDevices([device]);
-      fakeDeviceManager.bootedDevices = [device];
+      deferredDeviceManager.bootedDevices = [device];
 
-      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+      const binding = devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+      await deferredDeviceManager.waitForDiscoveryStart();
+      try {
+        expect(connectedDeviceIds).toEqual(["emulator-5554"]);
+      } finally {
+        deferredDeviceManager.releaseDiscovery();
+        await binding;
+      }
+
+      expect(connectedDeviceIds).toEqual(["emulator-5554"]);
+    });
+
+    test("notifies before autolock validates an existing serial", async () => {
+      const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      const connectedDeviceIds: string[] = [];
+      const deferredDeviceManager = new DeferredDiscoveryFakeDeviceManager();
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        deferredDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        deviceId => connectedDeviceIds.push(deviceId)
+      );
+      const device = createBootedDevice("emulator-5554");
+      await devicePool.initializeWithDevices([device]);
+      deferredDeviceManager.bootedDevices = [device];
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+
+      try {
+        const binding = devicePool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+        await deferredDeviceManager.waitForDiscoveryStart();
+        try {
+          expect(connectedDeviceIds).toEqual(["emulator-5554"]);
+        } finally {
+          deferredDeviceManager.releaseDiscovery();
+          await binding;
+        }
+      } finally {
+        if (originalAutolock === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        }
+      }
 
       expect(connectedDeviceIds).toEqual(["emulator-5554"]);
     });

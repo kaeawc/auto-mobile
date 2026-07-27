@@ -26,42 +26,30 @@ const makeElement = () => ({
 } as any);
 
 describe("TapAnyElement", () => {
-  describe("validation", () => {
-    test("rejects container with both elementId and text", () => {
-      const selector = new FakeElementSelector(makeElement());
-      const tapAny = createTapAnyElement(selector);
-      const error = (tapAny as any).validateOptions({
-        action: "tap",
-        container: { elementId: "com.app:id/list", text: "List" },
-      });
-      expect(error).toContain("container must specify exactly one");
-    });
+  describe("validateOptions", () => {
+    const EXACTLY_ONE = "container must specify exactly one";
 
-    test("accepts no container", () => {
-      const selector = new FakeElementSelector(makeElement());
-      const tapAny = createTapAnyElement(selector);
-      const error = (tapAny as any).validateOptions({ action: "tap" });
-      expect(error).toBeNull();
-    });
-
-    test("accepts container with elementId only", () => {
-      const selector = new FakeElementSelector(makeElement());
-      const tapAny = createTapAnyElement(selector);
-      const error = (tapAny as any).validateOptions({
-        action: "tap",
-        container: { elementId: "com.app:id/list" },
-      });
-      expect(error).toBeNull();
-    });
-
-    test("accepts container with text only", () => {
-      const selector = new FakeElementSelector(makeElement());
-      const tapAny = createTapAnyElement(selector);
-      const error = (tapAny as any).validateOptions({
-        action: "tap",
-        container: { text: "My List" },
-      });
-      expect(error).toBeNull();
+    // A container must resolve to exactly one truthy selector. Zero truthy
+    // selectors ({}, or both empty strings) is an error just like two — an empty
+    // container cannot be located, so it must not pass validation and fall through
+    // to an ambiguous match.
+    test.each<[string, Record<string, unknown> | undefined, string | null]>([
+      ["no container", undefined, null],
+      ["elementId only", { elementId: "com.app:id/list" }, null],
+      ["text only", { text: "My List" }, null],
+      ["empty elementId but real text", { elementId: "", text: "List" }, null],
+      ["real elementId but empty text", { elementId: "com.app:id/list", text: "" }, null],
+      ["both elementId and text", { elementId: "com.app:id/list", text: "List" }, EXACTLY_ONE],
+      ["empty container object", {}, EXACTLY_ONE],
+      ["both selectors empty strings", { elementId: "", text: "" }, EXACTLY_ONE],
+    ])("%s", (_name, container, expected) => {
+      const tapAny = createTapAnyElement(new FakeElementSelector(makeElement()));
+      const error = (tapAny as any).validateOptions({ action: "tap", container });
+      if (expected === null) {
+        expect(error).toBeNull();
+      } else {
+        expect(error).toContain(expected);
+      }
     });
   });
 
@@ -91,7 +79,7 @@ describe("TapAnyElement", () => {
       expect(selector.lastStrategy).toBe("random");
     });
 
-    test("passes scrollableContainer option", () => {
+    test("forwards scrollableContainer=true to the selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapAny = createTapAnyElement(selector);
 
@@ -100,7 +88,19 @@ describe("TapAnyElement", () => {
         { hierarchy: { node: {} } }
       );
 
-      expect(selector.lastStrategy).toBeUndefined();
+      expect(selector.lastScrollableContainer).toBe(true);
+    });
+
+    test("leaves scrollableContainer unset when not requested", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapAny = createTapAnyElement(selector);
+
+      (tapAny as any).findClickableElement(
+        { action: "tap" },
+        { hierarchy: { node: {} } }
+      );
+
+      expect(selector.lastScrollableContainer).toBeUndefined();
     });
 
     test("returns null element when selector returns null", () => {

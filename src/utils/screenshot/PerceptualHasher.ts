@@ -87,6 +87,12 @@ export class PerceptualHasher {
   static getPerceptualSimilarity(hash1: string, hash2: string): number {
     const distance = PerceptualHasher.calculateHammingDistance(hash1, hash2);
     const maxDistance = Math.max(hash1.length, hash2.length);
+    // Two empty hashes (e.g. both screenshots failed to hash) carry no bits to
+    // differ on. Treat them as identical (100%) rather than returning NaN from
+    // the 0/0 division, so failed-vs-failed comparisons are deterministic.
+    if (maxDistance === 0) {
+      return 100;
+    }
     return ((maxDistance - distance) / maxDistance) * 100;
   }
 }

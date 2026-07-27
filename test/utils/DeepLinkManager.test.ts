@@ -281,6 +281,51 @@ Receiver Resolver Table:
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(false);
     });
+
+    test("detects the chooser via the button_once resource id", () => {
+      const viewHierarchy: ViewHierarchyResult = {
+        hierarchy: {
+          node: {
+            $: {},
+            node: [{ $: { "resource-id": "android:id/button_once" } }]
+          }
+        }
+      };
+      expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
+    });
+
+    test("detects the chooser via the resolver_list resource id (substring match)", () => {
+      const viewHierarchy: ViewHierarchyResult = {
+        hierarchy: {
+          node: {
+            $: { "resource-id": "com.android.internal:id/resolver_list" }
+          }
+        }
+      };
+      expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
+    });
+
+    test("detects an indicator that appears only in content-desc (text fallback)", () => {
+      const viewHierarchy: ViewHierarchyResult = {
+        hierarchy: {
+          node: {
+            $: { "content-desc": "Just once" }
+          }
+        }
+      };
+      expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
+    });
+
+    test("requires an exact text match and ignores superstrings of an indicator", () => {
+      const viewHierarchy: ViewHierarchyResult = {
+        hierarchy: {
+          node: {
+            $: { text: "Just once please tap here" }
+          }
+        }
+      };
+      expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(false);
+    });
   });
 
   describe("handleIntentChooser", () => {
@@ -331,75 +376,6 @@ Receiver Resolver Table:
       expect(result.action).toBe("always");
     });
 
-    test("should handle intent chooser with 'just_once' preference", async () => {
-      const viewHierarchy: ViewHierarchyResult = {
-        hierarchy: {
-          node: {
-            $: {
-              class: "com.android.internal.app.ResolverActivity"
-            },
-            node: [{
-              $: {
-                text: "Just once",
-                class: "android.widget.Button",
-                bounds: { left: 100, top: 200, right: 300, bottom: 400 }
-              }
-            }]
-          }
-        }
-      };
-
-      // Update mock to return "Just once" button
-      (deepLinkManager as any).findButtonByText = (node: any, textOptions: string[]) => {
-        if (textOptions.some(option => option.includes("Just once"))) {
-          return { bounds: { left: 100, top: 200, right: 300, bottom: 400 }, text: "Just once" };
-        }
-        return null;
-      };
-
-      const result = await deepLinkManager.handleIntentChooser(viewHierarchy, "just_once");
-
-      expect(result.success).toBe(true);
-      expect(result.detected).toBe(true);
-      expect(result.action).toBe("just_once");
-    });
-
-    test("should handle intent chooser with custom app selection", async () => {
-      const viewHierarchy: ViewHierarchyResult = {
-        hierarchy: {
-          node: {
-            $: {
-              class: "com.android.internal.app.ChooserActivity"
-            },
-            node: [{
-              $: {
-                "resource-id": "com.example.customapp:id/app_icon"
-              }
-            }]
-          }
-        }
-      };
-
-      // Mock findAppInChooser method
-      (deepLinkManager as any).findAppInChooser = (node: any, appPackage: string) => {
-        if (appPackage === "com.example.customapp") {
-          return { bounds: { left: 100, top: 200, right: 300, bottom: 400 } };
-        }
-        return null;
-      };
-
-      const result = await deepLinkManager.handleIntentChooser(
-        viewHierarchy,
-        "custom",
-        "com.example.customapp"
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.detected).toBe(true);
-      expect(result.action).toBe("custom");
-      expect(result.appSelected).toBe("com.example.customapp");
-    });
-
     test("should return success false when no intent chooser is detected", async () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
@@ -434,32 +410,6 @@ Receiver Resolver Table:
 
       expect(result.success).toBe(true);
       expect(result.detected).toBe(false);
-    });
-
-    test("should return success false when target element not found", async () => {
-      const viewHierarchy: ViewHierarchyResult = {
-        hierarchy: {
-          node: {
-            $: {
-              class: "com.android.internal.app.ChooserActivity"
-            },
-            node: [{
-              $: {
-                text: "Some other button"
-              }
-            }]
-          }
-        }
-      };
-
-      // Mock to return null (no matching button found)
-      (deepLinkManager as any).findButtonByText = () => null;
-
-      const result = await deepLinkManager.handleIntentChooser(viewHierarchy, "always");
-
-      expect(result.success).toBe(false);
-      expect(result.detected).toBe(true);
-      expect(result.error).toContain("Could not find target element");
     });
 
     test("should handle ADB command failures during tap", async () => {

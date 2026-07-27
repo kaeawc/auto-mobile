@@ -632,4 +632,47 @@ describe("runAutoMobileChecks", () => {
     expect(imageBackend?.status).toBe("pass");
     expect(imageBackend?.message).toBe("active=sharp; sharp=loaded");
   });
+
+  const androidStubChecks = {
+    ...stubChecks,
+    checkCtrlProxy: async () => ({
+      name: "CtrlProxy",
+      status: "pass" as const,
+      message: "platform=android; device=emulator-5554",
+    }),
+    checkWorkProfileAccessibility: async () => ({
+      name: "Work Profile Accessibility",
+      status: "warn" as const,
+      message: "Work profile detected",
+    }),
+  };
+
+  test("runs the Android CtrlProxy and work-profile checks for an Android run", async () => {
+    const results = await runAutoMobileChecks({ android: true }, androidStubChecks);
+
+    const ctrlProxy = results.find(result => result.name === "CtrlProxy");
+    const workProfile = results.find(result => result.name === "Work Profile Accessibility");
+
+    expect(ctrlProxy?.status).toBe("pass");
+    expect(ctrlProxy?.message).toBe("platform=android; device=emulator-5554");
+    expect(workProfile?.status).toBe("warn");
+    expect(workProfile?.message).toBe("Work profile detected");
+  });
+
+  test("does not run the Android checks during an iOS-only run", async () => {
+    let androidRan = false;
+    const results = await runAutoMobileChecks(
+      { ios: true },
+      {
+        ...androidStubChecks,
+        checkCtrlProxy: async () => {
+          androidRan = true;
+          return { name: "CtrlProxy", status: "pass" as const, message: "should not run" };
+        },
+      }
+    );
+
+    expect(androidRan).toBe(false);
+    expect(results.find(result => result.name === "CtrlProxy")?.status).toBe("skip");
+  });
 });

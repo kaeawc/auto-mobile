@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { GetBackStack } from "../../../src/features/observe/GetBackStack";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { ExecResult, BootedDevice } from "../../../src/models";
 
 describe("GetBackStack", function() {
@@ -27,36 +28,72 @@ describe("GetBackStack", function() {
     getBackStack = new GetBackStack(mockDevice, fakeAdbFactory);
   });
 
-  test("should parse activities from dumpsys output", async function() {
+  test("parses every activity with its task, package and index-derived task-root flag", async function() {
     const result = await getBackStack.execute();
 
-    expect(result).toBeDefined();
-    expect(result.activities).toBeDefined();
-    expect(result.activities.length).toBe(4);
     expect(result.source).toBe("adb");
+    // Launcher task #1 (one Hist #0 row) then playground task #123 (Hist #2, #1, #0).
+    // isTaskRoot is index-derived here (no rootOfTask= lines in this capture):
+    // the "Hist #0" row of each task is the root, the others are not.
+    expect(result.activities).toEqual([
+      {
+        name: "com.android.launcher3.Launcher",
+        taskId: 1,
+        taskAffinity: "com.android.launcher3",
+        isTaskRoot: true
+      },
+      {
+        name: "dev.jasonpearson.automobile.playground.DetailActivity",
+        taskId: 123,
+        taskAffinity: "dev.jasonpearson.automobile.playground",
+        isTaskRoot: false
+      },
+      {
+        name: "dev.jasonpearson.automobile.playground.ListActivity",
+        taskId: 123,
+        taskAffinity: "dev.jasonpearson.automobile.playground",
+        isTaskRoot: false
+      },
+      {
+        name: "dev.jasonpearson.automobile.playground.MainActivity",
+        taskId: 123,
+        taskAffinity: "dev.jasonpearson.automobile.playground",
+        isTaskRoot: true
+      }
+    ]);
   });
 
-  test("should parse task information", async function() {
+  test("parses each task's id, package and activity count", async function() {
     const result = await getBackStack.execute();
 
-    expect(result.tasks).toBeDefined();
-    expect(result.tasks.length).toBeGreaterThan(0);
-    expect(result.tasks[0].id).toBeDefined();
+    expect(result.tasks).toHaveLength(2);
+    expect(result.tasks[0]).toMatchObject({
+      id: 1,
+      packageName: "com.android.launcher3",
+      numActivities: 1
+    });
+    expect(result.tasks[1]).toMatchObject({
+      id: 123,
+      packageName: "dev.jasonpearson.automobile.playground",
+      numActivities: 3
+    });
   });
 
-  test("should calculate back stack depth correctly", async function() {
+  test("computes depth as the poppable count of the current task", async function() {
     const result = await getBackStack.execute();
 
-    expect(result.depth).toBeDefined();
-    expect(result.depth).toBeGreaterThanOrEqual(0);
+    // Current task 123 holds 3 activities, so 2 can still be popped.
+    expect(result.currentTaskId).toBe(123);
+    expect(result.depth).toBe(2);
   });
 
-  test("should identify current activity", async function() {
+  test("identifies the resumed activity as the current activity", async function() {
     const result = await getBackStack.execute();
 
-    expect(result.currentActivity).toBeDefined();
-    expect(result.currentActivity?.name).toBeDefined();
-    expect(result.currentActivity?.taskId).toBeGreaterThan(0);
+    expect(result.currentActivity).toEqual({
+      name: "dev.jasonpearson.automobile.playground.DetailActivity",
+      taskId: 123
+    });
   });
 
   test("should parse topResumedActivity with special characters", async function() {
@@ -82,11 +119,14 @@ ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
     expect(result.currentActivity?.taskId).toBe(42);
   });
 
-  test("should include timestamp", async function() {
+  test("stamps capturedAt from the injected clock", async function() {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_700_000_000_000);
+    getBackStack = new GetBackStack(mockDevice, fakeAdbFactory, timer);
+
     const result = await getBackStack.execute();
 
-    expect(result.capturedAt).toBeDefined();
-    expect(result.capturedAt).toBeGreaterThan(0);
+    expect(result.capturedAt).toBe(1_700_000_000_000);
   });
 
   test("should handle empty back stack", async function() {

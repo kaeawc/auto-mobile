@@ -289,12 +289,10 @@ describe("selectByResourceId — index", () => {
     expect(selector.selectByResourceId(repeated, "app:id/remove", { strategy: "first" }).element?.bounds.top).toBe(20);
   });
 
-  test("index uses hierarchy order even when area sorting would pick a later smaller match", () => {
-    const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
-
-    expect(selector.selectByResourceId(repeated, "app:id/remove", { index: 0 }).element?.bounds.top).toBe(0);
-    expect(selector.selectByResourceId(repeated, "app:id/remove", { index: 1 }).element?.bounds.top).toBe(20);
-  });
+  // (Deleted a duplicate "index uses hierarchy order…" test: its two assertions
+  // were byte-identical to the index rows in "index selects the Nth match and is
+  // out-of-range safe" above — no unique coverage. The selectByText variant below
+  // is retained because it exercises a different selector method.)
 });
 
 describe("selectByText — index", () => {

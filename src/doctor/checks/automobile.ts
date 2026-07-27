@@ -61,6 +61,9 @@ export interface AutoMobileCheckDependencies {
   checkDaemonStatus?: () => Promise<CheckResult>;
   checkDaemonConnectivity?: () => Promise<CheckResult>;
   checkDaemonBuildIdentity?: () => Promise<CheckResult>;
+  /** Android-branch seams so unit tests avoid real CtrlProxy/ADB I/O. */
+  checkCtrlProxy?: () => Promise<CheckResult>;
+  checkWorkProfileAccessibility?: () => Promise<CheckResult>;
 }
 
 export interface ImageBackendDoctorLogger {
@@ -604,8 +607,8 @@ export async function runAutoMobileChecks(
       message: "Skipped for iOS-only doctor run",
     });
   } else {
-    results.push(await checkCtrlProxy());
-    results.push(await checkWorkProfileAccessibility());
+    results.push(await (dependencies.checkCtrlProxy ?? (() => checkCtrlProxy()))());
+    results.push(await (dependencies.checkWorkProfileAccessibility ?? (() => checkWorkProfileAccessibility()))());
   }
 
   return results;

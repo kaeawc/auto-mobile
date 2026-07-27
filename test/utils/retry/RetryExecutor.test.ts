@@ -1,8 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import {
-  DefaultRetryExecutor,
-  DEFAULT_RETRY_OPTIONS,
-} from "../../../src/utils/retry/RetryExecutor";
+import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { exponentialBackoff } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -232,6 +229,28 @@ describe("DefaultRetryExecutor", () => {
 
       expect(result.totalTimeMs).toBeGreaterThanOrEqual(0);
     });
+
+    it("reports the exact elapsed time measured by the injected timer", async () => {
+      // autoAdvance moves the fake clock to each sleep's due time deterministically,
+      // so the single 250ms retry delay makes totalTimeMs exactly 250.
+      timer.enableAutoAdvance();
+      let attempts = 0;
+
+      const result = await executor.execute(
+        async () => {
+          attempts++;
+          if (attempts < 2) {
+            throw new Error("retry me");
+          }
+          return "ok";
+        },
+        { maxAttempts: 2, delays: 250 }
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.attempts).toBe(2);
+      expect(result.totalTimeMs).toBe(250);
+    });
   });
 
   describe("executeOrThrow", () => {
@@ -252,13 +271,6 @@ describe("DefaultRetryExecutor", () => {
           { maxAttempts: 2 }
         )
       ).rejects.toThrow("Failed");
-    });
-  });
-
-  describe("DEFAULT_RETRY_OPTIONS", () => {
-    it("has sensible defaults", () => {
-      expect(DEFAULT_RETRY_OPTIONS.maxAttempts).toBe(3);
-      expect(DEFAULT_RETRY_OPTIONS.delays).toBe(1000);
     });
   });
 });

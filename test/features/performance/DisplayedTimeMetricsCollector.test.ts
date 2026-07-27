@@ -57,4 +57,43 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function() {
     expect(result[0].activityName).toBe("com.example.SplashActivity");
     expect(result[0].displayedTimeMs).toBe(200);
   });
+
+  describe("getPreferredLogcatTag API-level boundary", function() {
+    type ConstructorAdb = ConstructorParameters<typeof DisplayedTimeMetricsCollector>[1];
+    type LogcatTagProbe = { getPreferredLogcatTag(): Promise<string> };
+
+    function collectorForApiLevel(apiLevel: number | null): DisplayedTimeMetricsCollector {
+      const fakeAdb = {
+        executeCommand: async () => ({ stdout: "", stderr: "" }),
+        getAndroidApiLevel: async () => apiLevel,
+      };
+      return new DisplayedTimeMetricsCollector(
+        { deviceId: "test", name: "test", platform: "android" },
+        fakeAdb as unknown as ConstructorAdb
+      );
+    }
+
+    const cases: Array<[string, number | null, string]> = [
+      ["API 28 (below the boundary) uses ActivityManager", 28, "ActivityManager"],
+      ["API 29 (the boundary) switches to ActivityTaskManager", 29, "ActivityTaskManager"],
+      ["API 30 (above the boundary) uses ActivityTaskManager", 30, "ActivityTaskManager"],
+      ["an unknown API level falls back to ActivityManager", null, "ActivityManager"],
+    ];
+
+    test.each(cases)("%s", async function(_name, apiLevel, expected) {
+      const collector = collectorForApiLevel(apiLevel);
+      const tag = await (collector as unknown as LogcatTagProbe).getPreferredLogcatTag();
+      expect(tag).toBe(expected);
+    });
+
+    test("falls back to ActivityManager when the executor cannot report an API level", async function() {
+      const fakeAdb = { executeCommand: async () => ({ stdout: "", stderr: "" }) };
+      const collector = new DisplayedTimeMetricsCollector(
+        { deviceId: "test", name: "test", platform: "android" },
+        fakeAdb as unknown as ConstructorAdb
+      );
+      const tag = await (collector as unknown as LogcatTagProbe).getPreferredLogcatTag();
+      expect(tag).toBe("ActivityManager");
+    });
+  });
 });

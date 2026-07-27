@@ -102,6 +102,56 @@ describe("HybridVideoCaptureBackend - Unit Tests", function() {
     expect(platformBackend.stopCalls.length).toBe(0);
   });
 
+  test("routes Android recording to ffmpeg backend when the opt-in flag is the string \"true\"", async function() {
+    process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE = "true";
+    await backend.start(baseConfig);
+    expect(ffmpegBackend.startCalls.length).toBe(1);
+    expect(platformBackend.startCalls.length).toBe(0);
+  });
+
+  // The opt-in check is case-sensitive: only "1" / "true" enable ffmpeg. An
+  // uppercase "TRUE" must fall through to the default platform backend.
+  test("does NOT treat an uppercase \"TRUE\" opt-in value as enabled", async function() {
+    process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE = "TRUE";
+    await backend.start(baseConfig);
+    expect(platformBackend.startCalls.length).toBe(1);
+    expect(ffmpegBackend.startCalls.length).toBe(0);
+  });
+
+  test("treats an empty opt-in value as disabled and uses the platform backend", async function() {
+    process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE = "";
+    await backend.start(baseConfig);
+    expect(platformBackend.startCalls.length).toBe(1);
+    expect(ffmpegBackend.startCalls.length).toBe(0);
+  });
+
+  test("start rejects when no device is provided", async function() {
+    const configWithoutDevice: VideoCaptureConfig = { ...baseConfig, device: undefined };
+    await expect(backend.start(configWithoutDevice)).rejects.toThrow(
+      "Device is required"
+    );
+  });
+
+  test("stop rejects when the backend handle is missing or not a hybrid handle", async function() {
+    await expect(
+      backend.stop({
+        recordingId: "x",
+        outputPath: "/tmp/x.mp4",
+        startedAt: new Date().toISOString(),
+        backendHandle: undefined,
+      })
+    ).rejects.toThrow("Missing backend handle for hybrid");
+
+    await expect(
+      backend.stop({
+        recordingId: "x",
+        outputPath: "/tmp/x.mp4",
+        startedAt: new Date().toISOString(),
+        backendHandle: { kind: "not-hybrid" } as never,
+      })
+    ).rejects.toThrow("Missing backend handle for hybrid");
+  });
+
   test("routes iOS recording to ffmpeg backend", async function() {
     const iosConfig = {
       ...baseConfig,

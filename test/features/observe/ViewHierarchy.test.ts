@@ -57,18 +57,48 @@ describe("ViewHierarchy", function() {
       expect(viewHierarchy.meetsStringFilterCriteria(propsEmpty)).toBe(false);
     });
 
-    test("should identify boolean filter criteria correctly", function() {
-      const propsClickable = { clickable: "true" };
-      const propsScrollable = { scrollable: "true" };
-      const propsFocused = { focused: "true" };
-      const propsLongClickable = { "long-clickable": "true" };
-      const propsNonBoolean = { text: "Button" };
+    describe("meetsBooleanFilterCriteria", function() {
+      // The matrix pins which flags are interactive and, crucially, the
+      // asymmetry: every flag is matched by the string "true", but only
+      // `selected` is ALSO matched as a JSON boolean `true`. CtrlProxy emits JSON
+      // booleans, so if that `selected === true` branch is dropped, every
+      // selected-only node is silently filtered out (issue #4172 item 13). The
+      // string "TRUE" and numeric 1 must NOT match (case-sensitive, ===).
+      const cases: Array<{ name: string; props: any; expected: boolean }> = [
+        { name: "clickable string true", props: { clickable: "true" }, expected: true },
+        { name: "focusable string true", props: { focusable: "true" }, expected: true },
+        { name: "scrollable string true", props: { scrollable: "true" }, expected: true },
+        { name: "focused string true", props: { focused: "true" }, expected: true },
+        { name: "accessibility-focused string true", props: { "accessibility-focused": "true" }, expected: true },
+        { name: "checkable string true", props: { checkable: "true" }, expected: true },
+        { name: "checked string true", props: { checked: "true" }, expected: true },
+        { name: "selected string true", props: { selected: "true" }, expected: true },
+        { name: "selected JSON boolean true", props: { selected: true }, expected: true },
+        { name: "long-clickable string true", props: { "long-clickable": "true" }, expected: true },
+        { name: "non-empty actions array", props: { actions: ["tap"] }, expected: true },
+        { name: "non-empty extras", props: { extras: { key: "value" } }, expected: true },
+        // Asymmetry guard: only `selected` accepts a JSON boolean.
+        { name: "clickable JSON boolean true is NOT matched", props: { clickable: true }, expected: false },
+        { name: "focused JSON boolean true is NOT matched", props: { focused: true }, expected: false },
+        { name: "checked JSON boolean true is NOT matched", props: { checked: true }, expected: false },
+        // Falsy / non-matching values.
+        { name: "clickable string false", props: { clickable: "false" }, expected: false },
+        { name: "selected string false", props: { selected: "false" }, expected: false },
+        { name: "selected JSON boolean false", props: { selected: false }, expected: false },
+        { name: "uppercase TRUE is not matched (case-sensitive)", props: { clickable: "TRUE" }, expected: false },
+        { name: "numeric 1 is not matched (strict equality)", props: { clickable: 1 }, expected: false },
+        { name: "empty actions array", props: { actions: [] }, expected: false },
+        { name: "actions not an array", props: { actions: "tap" }, expected: false },
+        { name: "empty extras object", props: { extras: {} }, expected: false },
+        { name: "no interactive flags", props: { text: "Button" }, expected: false },
+        { name: "empty props", props: {}, expected: false }
+      ];
 
-      expect(viewHierarchy.meetsBooleanFilterCriteria(propsClickable)).toBe(true);
-      expect(viewHierarchy.meetsBooleanFilterCriteria(propsScrollable)).toBe(true);
-      expect(viewHierarchy.meetsBooleanFilterCriteria(propsFocused)).toBe(true);
-      expect(viewHierarchy.meetsBooleanFilterCriteria(propsLongClickable)).toBe(true);
-      expect(viewHierarchy.meetsBooleanFilterCriteria(propsNonBoolean)).toBe(false);
+      cases.forEach(({ name, props, expected }) => {
+        test(`returns ${expected} for ${name}`, function() {
+          expect(viewHierarchy.meetsBooleanFilterCriteria(props)).toBe(expected);
+        });
+      });
     });
 
     test("should check meets filter criteria correctly", function() {
@@ -192,11 +222,14 @@ describe("ViewHierarchy", function() {
       teardownReadFileMock();
     });
 
-    test("should handle no active window gracefully", async function() {
+    test("returns an error envelope when the accessibility service returns no hierarchy", async function() {
+      // The fixture's getAccessibilityHierarchy resolves to null; nothing here is
+      // about an "active window". A null hierarchy must surface as an error
+      // envelope, not an empty-but-valid hierarchy.
       const result = await viewHierarchy.getAndroidViewHierarchy();
 
-      expect(result).toBeDefined();
-      expect(result.hierarchy).toBeDefined();
+      expect(result.hierarchy).toHaveProperty("error");
+      expect(typeof (result.hierarchy as { error?: unknown }).error).toBe("string");
     });
 
     test("should handle accessibility service errors in getViewHierarchy", async function() {
@@ -456,7 +489,7 @@ describe("ViewHierarchy", function() {
       expect(result).toBe(noHierarchy);
     });
 
-    test("should filter hierarchy with mixed criteria", function() {
+    test("keeps interactive nodes, drops non-criteria nodes, and hoists surviving grandchildren", function() {
       const testHierarchy = {
         hierarchy: {
           $: { class: "android.widget.FrameLayout" },
@@ -476,8 +509,43 @@ describe("ViewHierarchy", function() {
 
       const result = viewHierarchy.filterViewHierarchy(testHierarchy);
 
-      expect(result).toBeDefined();
-      expect(result.hierarchy).toBeDefined();
+      // The enabled-only View is dropped (enabled is not an interactive flag).
+      // The LinearLayout itself fails the criteria, so its surviving child
+      // (resource-id="important_button") is hoisted into the root's child list.
+      // cleanNodeProperties strips class/enabled and keeps only meaningful props.
+      expect(result.hierarchy).toEqual({
+        $: { class: "android.widget.FrameLayout" },
+        node: [
+          { text: "Keep this" },
+          { clickable: "true" },
+          { "resource-id": "important_button" }
+        ]
+      });
+    });
+
+    test("returns an empty child list at the root when every descendant is filtered out", function() {
+      // Regression for issue #4172 item 4 / A3: filterSingleNode's root branch
+      // must overwrite the cloned children even when NOTHING survives, otherwise
+      // the raw (unfiltered) subtree leaks to the model. Here no descendant meets
+      // the criteria, so the root must report an empty child list, not the raw nodes.
+      const testHierarchy = {
+        hierarchy: {
+          $: { class: "android.widget.FrameLayout" },
+          node: [
+            { $: { enabled: "true", class: "android.view.View" } },
+            {
+              $: { class: "android.widget.LinearLayout" },
+              node: { $: { enabled: "false", class: "android.view.View" } }
+            }
+          ]
+        }
+      };
+
+      const result = viewHierarchy.filterViewHierarchy(testHierarchy);
+
+      expect(result.hierarchy.node).toEqual([]);
+      // The raw child props (enabled/class) must not survive anywhere.
+      expect(JSON.stringify(result.hierarchy)).not.toContain("android.view.View");
     });
   });
 
@@ -1053,7 +1121,6 @@ describe("Offscreen Node Filtering", function() {
 
   test("should keep hierarchy size metrics when debug logging is enabled", function() {
     logger.setLogLevel(LogLevel.DEBUG);
-    const stringifySpy = spyOn(JSON, "stringify");
     const debugSpy = spyOn(logger, "debug");
     const hierarchy = {
       hierarchy: {
@@ -1069,11 +1136,11 @@ describe("Offscreen Node Filtering", function() {
     try {
       viewHierarchy.filterOffscreenNodes(hierarchy, 1080, 2400);
 
-      expect(stringifySpy).toHaveBeenCalledTimes(2);
+      // Assert the observable outcome (the emitted debug metric), not the number
+      // of internal JSON.stringify calls (issue #4172 item R6).
       expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("Offscreen filtering reduced hierarchy by"));
     } finally {
       debugSpy.mockRestore();
-      stringifySpy.mockRestore();
     }
   });
 

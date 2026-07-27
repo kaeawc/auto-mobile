@@ -176,6 +176,122 @@ describe("ScreenshotJobTracker", () => {
     expect(job2.jobId).not.toBe(job1.jobId);
   });
 
+  test("reports isLatest and aborted correctly to each job's completion handler", async () => {
+    const completions: Array<{ jobId: string; isLatest: boolean; aborted: boolean }> = [];
+    const onComplete = (c: { jobId: string; isLatest: boolean; aborted: boolean }) => {
+      completions.push({ jobId: c.jobId, isLatest: c.isLatest, aborted: c.aborted });
+    };
+
+    const job1 = ScreenshotJobTracker.startJob(
+      "device-a",
+      signal => new Promise(resolve => {
+        signal.addEventListener("abort", () => {
+          resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+        }, { once: true });
+      }),
+      { onComplete }
+    );
+    // Let job1's runner attach its abort listener before it is superseded.
+    await Promise.resolve();
+
+    const job2 = ScreenshotJobTracker.startJob(
+      "device-a",
+      async () => ({ success: true, path: "latest" }),
+      { onComplete }
+    );
+
+    await Promise.all([job1.promise, job2.promise]);
+
+    const c1 = completions.find(c => c.jobId === job1.jobId)!;
+    const c2 = completions.find(c => c.jobId === job2.jobId)!;
+    // The superseded job is no longer latest and was aborted; its result must
+    // not be allowed to overwrite the session cache.
+    expect(c1.isLatest).toBe(false);
+    expect(c1.aborted).toBe(true);
+    expect(c2.isLatest).toBe(true);
+    expect(c2.aborted).toBe(false);
+  });
+
+  test("swallows a throwing completion handler and still resolves the job", async () => {
+    const job = ScreenshotJobTracker.startJob(
+      "device-b",
+      async () => ({ success: true, path: "ok" }),
+      {
+        onComplete: () => {
+          throw new Error("handler boom");
+        }
+      }
+    );
+
+    const result = await job.promise;
+    // A throwing onComplete must be logged and swallowed, not turned into a
+    // rejected job promise.
+    expect(result.success).toBe(true);
+    expect(result.path).toBe("ok");
+  });
+
+  test("aborts a job whose parent signal is already aborted", async () => {
+    const parent = new AbortController();
+    parent.abort();
+
+    let runnerSawAbort = false;
+    const job = ScreenshotJobTracker.startJob(
+      "device-c",
+      async signal => {
+        runnerSawAbort = signal.aborted;
+        return signal.aborted
+          ? { success: false, error: OPERATION_CANCELLED_MESSAGE }
+          : { success: true };
+      },
+      { parentSignal: parent.signal }
+    );
+
+    const result = await job.promise;
+    expect(job.signal.aborted).toBe(true);
+    expect(runnerSawAbort).toBe(true);
+    expect(result.success).toBe(false);
+  });
+
+  test("removes its abort listener from the long-lived parent signal once the job settles", async () => {
+    const listeners = new Set<EventListenerOrEventListenerObject>();
+    const parentSignal = {
+      aborted: false,
+      addEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
+        listeners.add(cb);
+      },
+      removeEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
+        listeners.delete(cb);
+      }
+    } as unknown as AbortSignal;
+
+    const job = ScreenshotJobTracker.startJob(
+      "device-d",
+      async () => ({ success: true }),
+      { parentSignal }
+    );
+    // While in flight the job holds exactly one abort listener on the parent.
+    expect(listeners.size).toBe(1);
+
+    await job.promise;
+    await Promise.resolve();
+
+    // Cleanup prevents listener accumulation across every observe poll.
+    expect(listeners.size).toBe(0);
+  });
+
+  test("getMostRecentPendingDeviceId returns the last-registered device when start times tie", async () => {
+    // Both jobs start at fake time 0, so their startedAt values are identical;
+    // this exercises the `>=` tie rule (last registration wins).
+    const hang = (signal: AbortSignal) => new Promise<{ success: boolean }>(resolve => {
+      signal.addEventListener("abort", () => resolve({ success: false }), { once: true });
+    });
+
+    ScreenshotJobTracker.startJob("device-1", hang);
+    ScreenshotJobTracker.startJob("device-2", hang);
+
+    expect(ScreenshotJobTracker.getMostRecentPendingDeviceId()).toBe("device-2");
+  });
+
   test("waitForCompletion returns null when the job times out", async () => {
     ScreenshotJobTracker.startJob("device-2", async signal => {
       return new Promise(resolve => {

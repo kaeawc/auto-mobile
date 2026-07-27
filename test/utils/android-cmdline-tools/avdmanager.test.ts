@@ -7,6 +7,21 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 // 2. Strip Windows drive letter prefix (e.g., "C:" -> "")
 const normalizePath = (value: string): string => value.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "");
 
+/**
+ * REWRITE-5: await a promise that MUST reject, returning its Error. Replaces the
+ * `try { await p; expect(true).toBe(false); } catch (e) {...}` sentinel whose
+ * failure assertion is swallowed by its own catch and re-checked against a
+ * misleading message; this fails loudly and clearly when the promise resolves.
+ */
+async function expectRejection(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+  throw new Error("Expected the operation to reject, but it resolved");
+}
+
 describe("AVDManager", function() {
   let mockLocation: any;
   let avdmanager: any;
@@ -1174,12 +1189,9 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
         return child;
       };
 
-      try {
-        await resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps));
-        // Should not reach here
-        expect(true).toBe(false);
-      } catch (error: any) {
+      {
         // Error should be actionable with JAXB guidance
+        const error = await expectRejection(resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)));
         expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
         expect(error.message).toContain("javax.xml.bind");
         expect(error.message).toContain("cmdline-tools/latest");
@@ -1204,10 +1216,8 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
         return child;
       };
 
-      try {
-        await resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps));
-        expect(true).toBe(false);
-      } catch (error: any) {
+      {
+        const error = await expectRejection(resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)));
         expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
         expect(error.message).toContain("javax.xml.bind");
         expect(error.message).toContain("cmdline-tools/latest");
@@ -1251,10 +1261,8 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
         return child;
       };
 
-      try {
-        await resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps));
-        expect(true).toBe(false);
-      } catch (error: any) {
+      {
+        const error = await expectRejection(resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)));
         expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
         expect(error.message).toContain("javax.xml.bind");
         expect(error.message).toContain("cmdline-tools/latest");
@@ -1283,10 +1291,8 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
         return child;
       };
 
-      try {
-        await resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps));
-        expect(true).toBe(false);
-      } catch (error: any) {
+      {
+        const error = await expectRejection(resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)));
         expect(error.message).toContain("Detected deprecated Android SDK Tools");
         expect(error.message).toContain("cmdline-tools/latest");
       }
@@ -1343,10 +1349,8 @@ Additional error context`;
         return child;
       };
 
-      try {
-        await resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps));
-        expect(true).toBe(false);
-      } catch (error: any) {
+      {
+        const error = await expectRejection(resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps)));
         expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
         expect(error.message).toContain("javax.xml.bind");
         expect(error.message).toContain("cmdline-tools/latest");

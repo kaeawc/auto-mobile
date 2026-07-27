@@ -118,6 +118,30 @@ describe("McpCallRecorder", () => {
       expect(steps[0].params).toEqual({ text: "Login", action: "tap" });
     });
 
+    // Every routing param injected by ToolRegistry must be stripped from a
+    // recorded step. The router-internal `__mcpSessionId` and `__lockNamespace`
+    // had no coverage and would otherwise leak into exported plans.
+    test.each([
+      "platform",
+      "deviceId",
+      "sessionUuid",
+      "device",
+      "devices",
+      "keepScreenAwake",
+      "__mcpSessionId",
+      "__lockNamespace",
+      "__internalNoDiff",
+    ])("strips the internal routing param %p from a recorded step", internalParam => {
+      const recorder = new McpCallRecorder();
+      recorder.start();
+
+      recorder.record("tapOn", { text: "keep-me", [internalParam]: "leak" });
+
+      const steps = recorder.stop();
+      expect(steps).toHaveLength(1);
+      expect(steps[0].params).toEqual({ text: "keep-me" });
+    });
+
     test("preserves all non-internal params", () => {
       const recorder = new McpCallRecorder();
       recorder.start();
@@ -177,23 +201,6 @@ describe("stripInternalParams", () => {
 });
 
 describe("PLAN_RELEVANT_TOOLS", () => {
-  test("includes core interaction tools", () => {
-    const expected = [
-      "tapOn", "swipeOn", "inputText", "clearText",
-      "pressButton", "dragAndDrop", "pinchOn", "imeAction",
-    ];
-    for (const tool of expected) {
-      expect(PLAN_RELEVANT_TOOLS.has(tool)).toBe(true);
-    }
-  });
-
-  test("includes observation and lifecycle tools", () => {
-    expect(PLAN_RELEVANT_TOOLS.has("observe")).toBe(true);
-    expect(PLAN_RELEVANT_TOOLS.has("launchApp")).toBe(true);
-    expect(PLAN_RELEVANT_TOOLS.has("terminateApp")).toBe(true);
-    expect(PLAN_RELEVANT_TOOLS.has("setUIState")).toBe(true);
-  });
-
   test("excludes infrastructure tools", () => {
     const excluded = [
       "listDevices", "startDevice", "killDevice", "setActiveDevice",

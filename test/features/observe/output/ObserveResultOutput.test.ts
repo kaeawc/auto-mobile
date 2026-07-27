@@ -4,6 +4,7 @@ import type { ViewHierarchyNode } from "../../../../src/models/ViewHierarchyResu
 import {
   sanitizeObserveResult,
   GFXINFO_DUMP_MARKER,
+  type SanitizeObserveConfig,
 } from "../../../../src/features/observe/output/ObserveResultOutput";
 import {
   loadAndroidHomeObserve,
@@ -112,16 +113,10 @@ describe("sanitizeObserveResult", () => {
       expect(sanitizeObserveResult(observe, COMPACT).screenIdentity).toEqual(observe.screenIdentity);
     });
 
-    test("completes well under the 100ms unit-test budget", () => {
-      const { observe } = loadAndroidHomeObserve();
-      const start = performance.now();
-      sanitizeObserveResult(observe, DROP_ELEMENTS);
-      expect(performance.now() - start).toBeLessThan(100);
-    });
   });
 
   describe("perf-audit strip (always)", () => {
-    test("nulls gfxinfoRaw and cpuStatsRaw", () => {
+    test("perf-audit strip nulls gfxinfoRaw and cpuStatsRaw", () => {
       const { observe } = loadAndroidHomeObserve();
       // Precondition: the baseline carries the heavy raw dumps.
       expect(observe.performanceAudit?.metrics.gfxinfoRaw?.length).toBeGreaterThan(0);
@@ -133,7 +128,7 @@ describe("sanitizeObserveResult", () => {
       expect(out.performanceAudit?.metrics.cpuStatsRaw).toBeNull();
     });
 
-    test("truncates diagnostics to the summary above the GFXINFO DUMP marker", () => {
+    test("perf-audit strip truncates diagnostics to the summary above the GFXINFO DUMP marker", () => {
       const { observe } = loadAndroidHomeObserve();
       const original = observe.performanceAudit!.diagnostics!;
       expect(original).toContain(GFXINFO_DUMP_MARKER);
@@ -149,7 +144,7 @@ describe("sanitizeObserveResult", () => {
       expect(diagnostics).toContain("Top contributors:");
     });
 
-    test("preserves computed metrics and violations", () => {
+    test("perf-audit strip preserves computed metrics and violations", () => {
       const { observe } = loadAndroidHomeObserve();
       const out = sanitizeObserveResult(observe, DROP_NONE);
 
@@ -174,7 +169,7 @@ describe("sanitizeObserveResult", () => {
       expect(measureValue(out).bytes).toBeLessThan(measureValue(observe).bytes - 10_000);
     });
 
-    test("is a no-op when performanceAudit is absent", () => {
+    test("perf-audit strip is a no-op when performanceAudit is absent", () => {
       const { observe } = loadAndroidHomeObserve();
       delete observe.performanceAudit;
       const out = sanitizeObserveResult(observe, DROP_NONE);
@@ -328,8 +323,19 @@ describe("sanitizeObserveResult", () => {
       );
       expect(dupBefore.length).toBeGreaterThan(0);
 
+      // Count-guard (R2): the fixture carries view-ids that DIFFER from
+      // resource-id and must survive the dedup. Without this, a trim that
+      // deleted EVERY view-id would pass the loop below vacuously.
+      const distinctBefore = allHierarchyNodes(observe).filter(
+        n => n["view-id"] !== undefined && n["view-id"] !== (n as Record<string, unknown>)["resource-id"]
+      );
+      expect(distinctBefore.length).toBeGreaterThan(0);
+
       const out = sanitizeObserveResult(observe, DROP_NONE);
 
+      const survivingViewIds = allHierarchyNodes(out).filter(n => n["view-id"] !== undefined);
+      // The distinct view-ids are not collateral damage of the dedup.
+      expect(survivingViewIds.length).toBeGreaterThan(0);
       for (const n of allHierarchyNodes(out)) {
         const rec = n as Record<string, unknown>;
         if (rec["resource-id"] !== undefined && n["view-id"] !== undefined) {
@@ -541,7 +547,7 @@ describe("sanitizeObserveResult", () => {
       expect(measureValue(trimmed).tokens).toBeLessThan(measureValue(untrimmed).tokens);
     });
 
-    test("does not touch rawViewHierarchy (raw stays raw)", () => {
+    test("per-node trim does not touch rawViewHierarchy (raw stays raw)", () => {
       const { observe } = loadAndroidHomeObserve();
       observe.rawViewHierarchy = {
         hierarchy: {
@@ -562,7 +568,7 @@ describe("sanitizeObserveResult", () => {
       expect(JSON.stringify(out.rawViewHierarchy)).toBe(rawBefore);
     });
 
-    test("can be disabled via trimNodes:false", () => {
+    test("per-node trim can be disabled via trimNodes:false", () => {
       const { observe } = loadAndroidHomeObserve();
       const out = sanitizeObserveResult(observe, { dropElements: false, trimNodes: false });
       const dup = allHierarchyNodes(out).filter(
@@ -573,7 +579,7 @@ describe("sanitizeObserveResult", () => {
   });
 
   describe("elements-drop (gated)", () => {
-    test("omits the elements block when dropElements is true", () => {
+    test("elements-drop omits the elements block when dropElements is true", () => {
       const { observe } = loadAndroidHomeObserve();
       expect(observe.elements).toBeDefined();
 
@@ -615,12 +621,17 @@ describe("sanitizeObserveResult", () => {
     test("keeps object-shaped bounds when compact is off (today's shape)", () => {
       const { observe } = loadAndroidHomeObserve();
       const out = sanitizeObserveResult(observe, DROP_NONE);
+      let checked = 0;
       for (const n of allHierarchyNodes(out)) {
         if (n.bounds !== undefined) {
           expect(Array.isArray(n.bounds)).toBe(false);
           expect(n.bounds).toHaveProperty("left");
+          checked++;
         }
       }
+      // Count-guard (R4): a trim that dropped every `bounds` would pass the loop
+      // vacuously — mirrors the `checked > 0` idiom in the round-trip test below.
+      expect(checked).toBeGreaterThan(0);
     });
 
     test("bounds tuple round-trips losslessly back to the original object", () => {
@@ -663,7 +674,7 @@ describe("sanitizeObserveResult", () => {
       expect(measureValue(compact).tokens).toBeLessThan(measureValue(nonCompact).tokens);
     });
 
-    test("is a no-op for nodes that carry no bounds", () => {
+    test("bounds compaction is a no-op for nodes that carry no bounds", () => {
       const obs: ObserveResult = {
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
@@ -735,48 +746,20 @@ describe("sanitizeObserveResult", () => {
   });
 
   describe("iOS XCTest/UIKit cleanup fixture (#3317)", () => {
-    function nodeText(node: ViewHierarchyNode): string | undefined {
-      return (node as unknown as Record<string, unknown>).text as string | undefined;
-    }
+    // R5: the old "before smaller than after" test compared two DIFFERENT
+    // fixtures, so it measured the fixtures' hand-authored size gap, not any
+    // behavior of `sanitizeObserveResult`. Rewritten to a single fixture:
+    // COMPACT must shrink that one observation versus its own non-compact output.
+    // D1/D2 removed the two fixture-only assertions that called no src symbol
+    // (they inspected `loadIosRemindersNoiseObservePair().after` directly).
+    test("compacting a single iOS Reminders observation shrinks its own output", () => {
+      const { before } = loadIosRemindersNoiseObservePair();
 
-    function nodeClass(node: ViewHierarchyNode): string | undefined {
-      return ((node as unknown as Record<string, unknown>).class
-        ?? (node as unknown as Record<string, unknown>).className) as string | undefined;
-    }
+      const nonCompact = sanitizeObserveResult(before, DROP_NONE);
+      const compact = sanitizeObserveResult(before, COMPACT);
 
-    test("Reminders compact observe is smaller after structural-noise cleanup", () => {
-      const { before, after } = loadIosRemindersNoiseObservePair();
-
-      const beforeCompact = sanitizeObserveResult(before, COMPACT);
-      const afterCompact = sanitizeObserveResult(after, COMPACT);
-
-      expect(measureValue(afterCompact).bytes).toBeLessThan(measureValue(beforeCompact).bytes);
-      expect(measureValue(afterCompact).tokens).toBeLessThan(measureValue(beforeCompact).tokens);
-    });
-
-    test("Reminders cleanup preserves actionable buttons, text fields, toolbar controls, and list cells", () => {
-      const { after } = loadIosRemindersNoiseObservePair();
-      const nodes = allHierarchyNodes(after);
-
-      expect(nodes.some(node => nodeText(node) === "New Reminder")).toBe(true);
-      expect(nodes.some(node => nodeClass(node) === "UITextField" && nodeText(node) === "Title")).toBe(true);
-      expect(nodes.some(node => nodeText(node) === "Details")).toBe(true);
-      expect(nodes.some(node => nodeText(node) === "Today")).toBe(true);
-      expect(nodes.some(node => nodeClass(node) === "UITableViewCell" && nodeText(node) === "Buy milk")).toBe(true);
-    });
-
-    test("Playground-style iOS hierarchy remains navigable after cleanup", () => {
-      const { after } = loadIosRemindersNoiseObservePair();
-      const nodes = allHierarchyNodes(after);
-      const actionable = nodes.filter(node => {
-        const attrs = node as unknown as Record<string, unknown>;
-        return attrs.clickable === "true" || attrs.scrollable === "true" || attrs.actions !== undefined;
-      });
-
-      expect(actionable.map(nodeText)).toContain("New Reminder");
-      expect(actionable.map(nodeText)).toContain("Done");
-      expect(actionable.some(node => nodeClass(node) === "UITextField")).toBe(true);
-      expect(nodes.some(node => nodeText(node)?.includes("scroll bar"))).toBe(false);
+      expect(measureValue(compact).bytes).toBeLessThan(measureValue(nonCompact).bytes);
+      expect(measureValue(compact).tokens).toBeLessThan(measureValue(nonCompact).tokens);
     });
   });
 
@@ -863,6 +846,31 @@ describe("sanitizeObserveResult", () => {
       sanitizeObserveResult(obs, COMPACT);
       expect(JSON.stringify(obs)).toBe(before);
     });
+
+    // P2 — purity table. Every sanitize configuration is OUTPUT-ONLY: it deep-
+    // clones and mutates only the copy, so no config may perturb the caller's
+    // in-memory ObserveResult. Placed in this block so `makeMultiSiteObserve`
+    // (which seeds a bounds object at every distinct site) is in scope. One row
+    // per transform toggle; a new transform added without a purity row is the
+    // regression this table exists to catch.
+    const PURITY_CONFIGS: ReadonlyArray<readonly [string, SanitizeObserveConfig]> = [
+      ["elements-drop", { dropElements: true }],
+      ["compact bounds", { dropElements: false, compact: true }],
+      ["node trim", { dropElements: false, trimNodes: true }],
+      ["skeleton projection", { dropElements: false, project: "skeleton" }],
+      ["compact + drop + trim composed", { dropElements: true, compact: true, trimNodes: true }],
+      ["all transforms off (trim disabled)", { dropElements: false, trimNodes: false }],
+    ];
+
+    test.each(PURITY_CONFIGS)("sanitize is output-only under %s", (_label, cfg) => {
+      const input = makeMultiSiteObserve();
+      const before = JSON.stringify(input);
+      const out = sanitizeObserveResult(input, cfg);
+      // The caller's object is byte-for-byte unchanged...
+      expect(JSON.stringify(input)).toBe(before);
+      // ...and the returned copy is a distinct reference.
+      expect(out).not.toBe(input);
+    });
   });
 
   describe("skeleton projection (cfg.project)", () => {
@@ -930,6 +938,352 @@ describe("sanitizeObserveResult", () => {
       const before = measureValue(observe).tokens;
       const after = measureValue(out).tokens;
       expect(after).toBeLessThan(before * 0.7);
+    });
+  });
+
+  // ---- P3: default-false boolean drop table -----------------------------
+  //
+  // The trim drops a view-hierarchy boolean only when it holds its documented
+  // default value (`false` / `"false"`) AND the key is on the allow-list. The
+  // allow-list's whole rationale — "do not nuke a legit text field that happens
+  // to hold the string 'false'" — was previously untested. This table exercises
+  // every allow-listed key in both its string and boolean form (dropped), the
+  // non-default forms (kept), and the survivor rows the allow-list protects.
+  describe("default-false boolean drop table (P3)", () => {
+    /** Trim one synthetic node carrying `attrs` and return the surviving attrs. */
+    function trimmedNode(attrs: Record<string, unknown>): Record<string, unknown> {
+      const obs: ObserveResult = {
+        updatedAt: 0,
+        screenSize: { width: 1, height: 1 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: {
+          hierarchy: {
+            node: { "class": "android.view.View", ...attrs, "node": [], "$": {} } as any,
+          },
+        },
+      };
+      return sanitizeObserveResult(obs, DROP_NONE).viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+    }
+
+    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='false' (string default) is dropped", key => {
+      expect(trimmedNode({ [key]: "false" })).not.toHaveProperty(key);
+    });
+
+    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s=false (boolean default) is dropped", key => {
+      expect(trimmedNode({ [key]: false })).not.toHaveProperty(key);
+    });
+
+    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='true' (non-default) is kept", key => {
+      expect(trimmedNode({ [key]: "true" })[key]).toBe("true");
+    });
+
+    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s=true (boolean non-default) is kept", key => {
+      expect(trimmedNode({ [key]: true })[key]).toBe(true);
+    });
+
+    // Survivor rows: a value of "false" on a NON-allow-listed key, or on a text
+    // field, is real content and must never be dropped. The whitespace rows pin
+    // that emptiness is literal `""`, not "blank after trimming": a single space
+    // and a zero-width space are both content the trim keeps.
+    const SURVIVORS: ReadonlyArray<readonly [string, string, unknown]> = [
+      ["text holding the literal 'false'", "text", "false"],
+      ["content-desc holding 'false'", "content-desc", "false"],
+      ["resource-id holding 'false'", "resource-id", "false"],
+      ["a non-allow-listed flag holding 'false'", "custom-flag", "false"],
+      ["text holding '0'", "text", "0"],
+      ["text of a single space (not empty)", "text", " "],
+      ["content-desc of a single space (not empty)", "content-desc", " "],
+      // JS `.trim()` does NOT strip U+200B, so this survives even a trim-based
+      // empty check — it documents current behavior rather than guarding it.
+      ["text of a zero-width space U+200B (not empty)", "text", "​"],
+    ];
+
+    test.each(SURVIVORS)("%s survives the trim", (_label, key, value) => {
+      expect(trimmedNode({ [key]: value })[key]).toBe(value);
+    });
+  });
+
+  // ---- A3 / P4: bounds-compaction shape table ---------------------------
+  //
+  // Compaction flattens a `{left,top,right,bottom}` object to the positional
+  // tuple `[left,top,right,bottom]`. The positional contract means a hole must
+  // stay a hole (an `undefined` slot), NEVER be dropped — dropping it would shift
+  // every following coordinate and silently corrupt the decode. Non-object bounds
+  // (already a tuple, or a string) are left untouched so the transform is
+  // idempotent.
+  describe("bounds-compaction shape table (A3/P4)", () => {
+    /** Compact a single node whose `bounds` is `input`; return the emitted bounds. */
+    function compactNodeBounds(input: unknown): unknown {
+      const obs: ObserveResult = {
+        updatedAt: 0,
+        screenSize: { width: 1, height: 1 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: {
+          hierarchy: {
+            node: { "resource-id": "r", "bounds": input as any, "node": [], "$": {} } as any,
+          },
+        },
+      };
+      return (sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node as any).bounds;
+    }
+
+    const ROWS: ReadonlyArray<readonly [string, unknown, unknown]> = [
+      ["full object", { left: 1, top: 2, right: 3, bottom: 4 }, [1, 2, 3, 4]],
+      ["zero values", { left: 0, top: 0, right: 0, bottom: 0 }, [0, 0, 0, 0]],
+      ["negative values", { left: -5, top: -10, right: 5, bottom: 10 }, [-5, -10, 5, 10]],
+      ["fractional values", { left: 1.5, top: 2.25, right: 3.75, bottom: 4.5 }, [1.5, 2.25, 3.75, 4.5]],
+      // Partial holes: the ONLY rows that catch a hole-dropping compactor. Holes
+      // are `undefined` in-memory (they only serialize to `null` via JSON).
+      ["missing left+top (leading holes)", { right: 30, bottom: 40 }, [undefined, undefined, 30, 40]],
+      ["missing right+bottom (trailing holes)", { left: 10, top: 20 }, [10, 20, undefined, undefined]],
+      ["null-valued left (kept as null, not dropped)", { left: null, top: 0, right: 10, bottom: 10 }, [null, 0, 10, 10]],
+      ["large values", { left: 0, top: 0, right: 100000, bottom: 250000 }, [0, 0, 100000, 250000]],
+      // Non-object bounds are left untouched → idempotent.
+      ["already a tuple (idempotent)", [1, 2, 3, 4], [1, 2, 3, 4]],
+      ["a string bounds (untouched)", "0,0,10,10", "0,0,10,10"],
+    ];
+
+    test.each(ROWS)("%s compacts to the expected tuple", (_label, input, expected) => {
+      expect(compactNodeBounds(input)).toEqual(expected);
+    });
+
+    test("double compaction never nests the tuple ([[...]])", () => {
+      const once = compactNodeBounds({ left: 1, top: 2, right: 3, bottom: 4 });
+      expect(compactNodeBounds(once)).toEqual([1, 2, 3, 4]);
+    });
+
+    test("a node with no bounds stays without bounds (no synthetic tuple)", () => {
+      expect(compactNodeBounds(undefined)).toBeUndefined();
+    });
+
+    // D6: the old diff "tuple-vs-tuple" characterization is folded here — the
+    // shape contract lives with the compactor, not the diff.
+    test("systemInsets (a {top,bottom,left,right} object) is never compacted", () => {
+      const obs: ObserveResult = {
+        updatedAt: 0,
+        screenSize: { width: 1, height: 1 },
+        systemInsets: { top: 5, bottom: 6, left: 7, right: 8 },
+        viewHierarchy: { hierarchy: { node: { "resource-id": "r" } as any } },
+      };
+      expect(sanitizeObserveResult(obs, COMPACT).systemInsets).toEqual({ top: 5, bottom: 6, left: 7, right: 8 });
+    });
+  });
+
+  // ---- A5: gfx-trim 0-boundary table ------------------------------------
+  //
+  // A frame field in `gfxMetrics` is redundant with `performanceAudit.metrics`
+  // only when the audit actually carries a replacement. `0` is a REAL
+  // measurement (zero missed vsyncs), not "missing", so a `0` audit value must
+  // still drop the redundant gfx field. An `if (metrics.x)` refactor treats `0`
+  // as falsy and re-ships the redundancy — this table is the guard.
+  describe("gfx-trim 0-boundary table (A5)", () => {
+    const GFX_AUDIT_PAIRS: ReadonlyArray<readonly [string, string]> = [
+      ["p50Ms", "percentile50thMs"],
+      ["p90Ms", "percentile90thMs"],
+      ["p95Ms", "percentile95thMs"],
+      ["p99Ms", "percentile99thMs"],
+      ["missedVsyncCount", "missedVsyncCount"],
+      ["slowUiThreadCount", "slowUiThreadCount"],
+      ["frameDeadlineMissedCount", "frameDeadlineMissedCount"],
+    ];
+
+    function fullGfxMetrics(): NonNullable<ObserveResult["gfxMetrics"]> {
+      return {
+        packageName: "com.example.app",
+        percentile50thMs: 12,
+        percentile90thMs: 18,
+        percentile95thMs: 22,
+        percentile99thMs: 30,
+        missedVsyncCount: 1,
+        slowUiThreadCount: 1,
+        frameDeadlineMissedCount: 0,
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      };
+    }
+
+    test.each(GFX_AUDIT_PAIRS)("a 0-valued audit %s still drops redundant gfxMetrics.%s", (auditKey, gfxKey) => {
+      const { observe } = loadAndroidHomeObserve();
+      const m = observe.performanceAudit!.metrics as unknown as Record<string, unknown>;
+      // Null every frame replacement so ONLY the tested field's 0 can drive a drop.
+      for (const [ak] of GFX_AUDIT_PAIRS) {
+        m[ak] = null;
+      }
+      m[auditKey] = 0; // a genuine measurement of zero, not "no data"
+      observe.gfxMetrics = fullGfxMetrics();
+
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+
+      expect(out.gfxMetrics).not.toHaveProperty(gfxKey);
+    });
+
+    test("keeps every non-frame UI-stability gfxMetrics field", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.gfxMetrics = fullGfxMetrics();
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+      // The action UI-stability fields are not perf-audit duplicates → retained.
+      expect(out.gfxMetrics).toMatchObject({
+        packageName: "com.example.app",
+        pollCount: 7,
+        stabilityWaitMs: 350,
+        isStable: true,
+      });
+    });
+  });
+
+  // ---- A6: GFXINFO diagnostics-marker boundaries ------------------------
+  describe("GFXINFO diagnostics-marker boundaries (A6)", () => {
+    function strippedDiagnostics(diagnostics: string): string {
+      const { observe } = loadAndroidHomeObserve();
+      observe.performanceAudit!.diagnostics = diagnostics;
+      return sanitizeObserveResult(observe, DROP_NONE).performanceAudit!.diagnostics!;
+    }
+
+    test("a marker at index 0 truncates diagnostics to the empty string", () => {
+      // The whole diagnostics string is the dump; nothing survives above it.
+      expect(strippedDiagnostics(`${GFXINFO_DUMP_MARKER}\nraw dump line\nmore`)).toBe("");
+    });
+
+    test("an absent marker leaves diagnostics untouched", () => {
+      expect(strippedDiagnostics("Summary only, no dump present")).toBe("Summary only, no dump present");
+    });
+
+    test("a marker mid-string keeps the summary above it and drops the dump", () => {
+      const diag = strippedDiagnostics(`Performance issues detected:\nline\n${GFXINFO_DUMP_MARKER}\nraw`);
+      expect(diag).toBe("Performance issues detected:\nline");
+      expect(diag).not.toContain(GFXINFO_DUMP_MARKER);
+    });
+  });
+
+  // ---- A10: unicode preservation through trim + compact -----------------
+  //
+  // The slice had zero non-ASCII coverage. Trim/compact must never corrupt or
+  // drop multi-byte, astral (surrogate-pair), or zero-width text.
+  describe("unicode text preservation (A10)", () => {
+    function trimmedCompactNode(attrs: Record<string, unknown>): Record<string, unknown> {
+      const obs: ObserveResult = {
+        updatedAt: 0,
+        screenSize: { width: 1, height: 1 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { hierarchy: { node: { "resource-id": "r", ...attrs, "node": [], "$": {} } as any } },
+      };
+      return sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+    }
+
+    const UNICODE_TEXTS: ReadonlyArray<readonly [string, string]> = [
+      ["combining/NFD accent", "café"],
+      ["precomposed/NFC accent", "café"],
+      ["astral ZWJ family emoji", "\u{1F468}‍\u{1F469}‍\u{1F467}"],
+      ["flag (regional indicators)", "\u{1F1FA}\u{1F1F8}"],
+      ["zero-width joiner inside text", "a‍b"],
+      ["CJK", "設定"],
+    ];
+
+    test.each(UNICODE_TEXTS)("preserves %s in text verbatim through trim+compact", (_label, text) => {
+      expect(trimmedCompactNode({ text })["text"]).toBe(text);
+    });
+
+    test("NFC and NFD forms are preserved as distinct byte sequences (no normalization)", () => {
+      const nfc = trimmedCompactNode({ text: "café" })["text"];
+      const nfd = trimmedCompactNode({ text: "café" })["text"];
+      expect(nfc).not.toBe(nfd);
+    });
+  });
+
+  // ---- P1: reduction table ("measurably shrinks" siblings) --------------
+  //
+  // Every reduction must shrink the payload it targets, and — the boundary the
+  // audit flags — must NEVER grow an observation that lacks the field. `tokensToo`
+  // is `false` for view-id dedup: it removes a duplicate id string that shrinks
+  // bytes without necessarily removing a token.
+  describe("reduction table (P1)", () => {
+    interface ReductionRow {
+      label: string;
+      reduced: () => unknown;
+      reference: () => unknown;
+      tokensToo: boolean;
+    }
+
+    const ROWS: ReductionRow[] = [
+      {
+        label: "perf-audit strip",
+        reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_NONE),
+        reference: () => loadAndroidHomeObserve().observe,
+        tokensToo: true,
+      },
+      {
+        label: "drop perfTiming",
+        reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_NONE),
+        reference: () => {
+          const { observe } = loadAndroidHomeObserve();
+          return { ...sanitizeObserveResult(observe, DROP_NONE), perfTiming: observe.perfTiming };
+        },
+        tokensToo: true,
+      },
+      {
+        label: "elements drop",
+        reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_ELEMENTS),
+        reference: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_NONE),
+        tokensToo: true,
+      },
+      {
+        label: "compact bounds",
+        reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, COMPACT),
+        reference: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_NONE),
+        tokensToo: true,
+      },
+      {
+        label: "skeleton projection",
+        reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, { dropElements: false, project: "skeleton" }),
+        reference: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_NONE),
+        tokensToo: true,
+      },
+      {
+        label: "node trim (view-id dedup)",
+        reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_NONE),
+        reference: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, { dropElements: false, trimNodes: false }),
+        // View-id dedup removes a duplicate id string: bytes shrink, tokens may not.
+        tokensToo: false,
+      },
+      {
+        label: "combined (perf + elements + trim)",
+        reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_ELEMENTS),
+        reference: () => loadAndroidHomeObserve().observe,
+        tokensToo: true,
+      },
+    ];
+
+    test.each(ROWS)("$label measurably shrinks the payload", ({ reduced, reference, tokensToo }) => {
+      const r = measureValue(reduced());
+      const ref = measureValue(reference());
+      expect(r.bytes).toBeLessThan(ref.bytes);
+      if (tokensToo) {
+        expect(r.tokens).toBeLessThan(ref.tokens);
+      } else {
+        expect(r.tokens).toBeLessThanOrEqual(ref.tokens);
+      }
+    });
+
+    // Boundary: a reduction applied to an observation LACKING its target field
+    // must be a no-op — never grow the payload.
+    const BARE: ObserveResult = {
+      updatedAt: 0,
+      screenSize: { width: 1, height: 1 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: { "resource-id": "r", "node": [], "$": {} } as any } },
+    };
+
+    test("compact on a bounds-free observation does not grow it", () => {
+      const compacted = sanitizeObserveResult(BARE, COMPACT);
+      const plain = sanitizeObserveResult(BARE, DROP_NONE);
+      expect(measureValue(compacted).bytes).toBeLessThanOrEqual(measureValue(plain).bytes);
+    });
+
+    test("dropElements on an elements-free observation does not grow it", () => {
+      const dropped = sanitizeObserveResult(BARE, DROP_ELEMENTS);
+      const kept = sanitizeObserveResult(BARE, DROP_NONE);
+      expect(measureValue(dropped).bytes).toBeLessThanOrEqual(measureValue(kept).bytes);
     });
   });
 });

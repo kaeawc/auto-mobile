@@ -274,13 +274,22 @@ describe("WebRtcPublisher WHIP answer validation", () => {
 });
 
 describe("WebRtcPublisher.notifySourceFailed", () => {
-  test("is a no-op after close (does not throw)", async () => {
+  test("suppresses the source-failure callback and reconnect after close", async () => {
+    // After stop() a late capture-source failure must not trigger recovery — it
+    // must neither invoke onSourceFailure nor kick the reconnect controller,
+    // otherwise a torn-down publisher resurrects itself.
+    const failures: Array<Error | undefined> = [];
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
-      { createWhipClient: () => ({}) as unknown as WhipClient }
+      {
+        createWhipClient: () => ({}) as unknown as WhipClient,
+        onSourceFailure: error => failures.push(error),
+      }
     );
     await publisher.stop();
+
     expect(() => publisher.notifySourceFailed()).not.toThrow();
+    expect(failures).toHaveLength(0);
   });
 
   test("routes a synchronously throwing connected hook through recovery", async () => {

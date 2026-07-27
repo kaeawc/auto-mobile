@@ -260,6 +260,9 @@ const sanitizeMessage = (message: string): string => {
   return message.replace(/[\r\n\t]/g, " ");
 };
 
+// Exported for unit tests that pin the redaction / injection-sanitizing contract.
+export { SENSITIVE_ENV_KEYS, safeStringify, sanitizeMessage };
+
 // Function to write to log file
 const writeToLogFile = async (level: string, message: string, args: any[]) => {
   try {

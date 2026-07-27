@@ -316,7 +316,13 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
       return;
     }
 
-    const keepAliveIntervalMs = this.config.getKeepAliveIntervalMs?.() ?? this.config.keepAliveIntervalMs;
+    // When a dynamic provider is configured, its answer is authoritative -- a
+    // returned null/undefined means "stop keepalive", NOT "fall back to the
+    // static cadence". Using `??` here would resurrect the static value and keep
+    // capturing after the provider asked to stop (issue #4172).
+    const keepAliveIntervalMs = this.config.getKeepAliveIntervalMs
+      ? this.config.getKeepAliveIntervalMs()
+      : this.config.keepAliveIntervalMs;
     if (keepAliveIntervalMs === null || keepAliveIntervalMs === undefined || keepAliveIntervalMs <= 0) {
       return;
     }

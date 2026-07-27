@@ -124,6 +124,29 @@ describe("TouchFrameReconstructor", () => {
     expect((results[0] as GestureEvent).button).toBe("volume_up");
   });
 
+  // Full KEY_TO_BUTTON map: every hardware key the recorder understands must map
+  // to its AutoMobile button name. Four of these (menu, power, volume_down,
+  // recent) had no coverage.
+  test.each([
+    ["KEY_BACK", "back"],
+    ["KEY_HOME", "home"],
+    ["KEY_MENU", "menu"],
+    ["KEY_POWER", "power"],
+    ["KEY_VOLUMEUP", "volume_up"],
+    ["KEY_VOLUMEDOWN", "volume_down"],
+    ["KEY_APPSELECT", "recent"],
+  ])("EV_KEY %s DOWN emits pressButton with the mapped button name", (keyCode, expectedButton) => {
+    const results = feedLines(r, [`[  5.000000] EV_KEY    ${keyCode}             DOWN`]);
+    expect(results).toHaveLength(1);
+    expect((results[0] as GestureEvent).type).toBe("pressButton");
+    expect((results[0] as GestureEvent).button).toBe(expectedButton);
+  });
+
+  test("EV_KEY DOWN for an unmapped key emits nothing", () => {
+    const results = feedLines(r, ["[  5.000000] EV_KEY    KEY_CAMERA           DOWN"]);
+    expect(results).toHaveLength(0);
+  });
+
   test("EV_KEY UP events are ignored", () => {
     const results = feedLines(r, ["[  5.000000] EV_KEY    KEY_BACK             UP"]);
     expect(results).toHaveLength(0);

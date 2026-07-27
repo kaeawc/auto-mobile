@@ -1,4 +1,5 @@
 import { RtpHeader, RtpPacket } from "werift";
+import { ActionableError } from "../../models";
 import type { RtpPacketSink } from "./RtpH264TrackWriter";
 
 /**
@@ -38,6 +39,15 @@ export class RtpPcmuTrackWriter {
     this.ssrc = options.ssrc >>> 0;
     this.payloadType = options.payloadType ?? PCMU_PAYLOAD_TYPE;
     this.mtu = options.mtu ?? DEFAULT_AUDIO_MTU;
+    // The packetization loop advances by `mtu` bytes per iteration; a zero,
+    // negative, or non-finite MTU would never advance and wedge the daemon
+    // (issue #4170). Each PCMU sample is one byte, so any mtu >= 1 is legitimate
+    // (the audio path deliberately constructs with small MTUs in tests).
+    if (!Number.isFinite(this.mtu) || this.mtu <= 0) {
+      throw new ActionableError(
+        `PCMU RTP MTU must be a positive number of bytes; got ${this.mtu}.`
+      );
+    }
     this.sequenceNumber = (options.initialSequenceNumber ?? 0) & 0xffff;
   }
 

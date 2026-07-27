@@ -27,8 +27,9 @@ describe("GetDeepLinks", () => {
   };
 
   beforeEach(() => {
-    // Create GetDeepLinks instance
-    getDeepLinks = new GetDeepLinks("test-device");
+    // GetDeepLinks takes a BootedDevice | null; the device is irrelevant here
+    // because the DeepLinkManager is replaced by a mock below.
+    getDeepLinks = new GetDeepLinks(null);
 
     // Create mock DeepLinkManager
     mockDeepLinkManager = {
@@ -39,17 +40,8 @@ describe("GetDeepLinks", () => {
     (getDeepLinks as any).deepLinkManager = mockDeepLinkManager;
   });
 
-  describe("constructor", () => {
-    test("should create GetDeepLinks with device ID", () => {
-      const instance = new GetDeepLinks("test-device");
-      expect(instance).toBeInstanceOf(GetDeepLinks);
-    });
-
-    test("should create GetDeepLinks without device ID", () => {
-      const instance = new GetDeepLinks();
-      expect(instance).toBeInstanceOf(GetDeepLinks);
-    });
-  });
+  // (Deleted the `constructor` describe block: `new GetDeepLinks(...)` is trivially
+  // `toBeInstanceOf(GetDeepLinks)`, a tautology that guards no behavior.)
 
   describe("execute", () => {
     test("should successfully get deep links for a valid app ID", async () => {
@@ -118,14 +110,7 @@ describe("GetDeepLinks", () => {
       expect(result.deepLinks.schemes).toHaveLength(0);
     });
 
-    test("should log successful execution", async () => {
-      // This test verifies that the method completes without throwing
-      // and returns the expected successful result structure
-      const result = await getDeepLinks.execute("com.example.app");
-
-      expect(result.success).toBe(true);
-      expect(result.deepLinks.schemes.length).toBeGreaterThan(0);
-      expect(result.deepLinks.hosts.length).toBeGreaterThan(0);
-    });
+    // (Deleted "should log successful execution": its assertions were a strict
+    // subset of "should successfully get deep links for a valid app ID" above.)
   });
 });

@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { promises as fsPromises } from "node:fs";
-import os, { platform } from "node:os";
+import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import {
@@ -238,42 +238,40 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
   });
 
   describe("Hardware Acceleration Detection", function() {
-    test("should detect platform capabilities", async function() {
-      const osPlatform = platform();
-      const hwAccel = await (backend as any).detectHardwareAccel();
+    // The injected platform provider lets every OS branch be verified on any
+    // host, instead of only the one matching the CI runner. listEncoders is
+    // stubbed in beforeEach to advertise all three hardware encoders, so each
+    // platform selects its own preferred encoder.
+    function backendForPlatform(os: NodeJS.Platform): FfmpegVideoProcessingBackend {
+      const scoped = new FfmpegVideoProcessingBackend(undefined, undefined, undefined, () => os);
+      (scoped as any).listEncoders = async () => {
+        listEncodersCalls += 1;
+        return ["h264_nvenc", "h264_vaapi", "h264_videotoolbox"];
+      };
+      return scoped;
+    }
 
-      expect(hwAccel).toBeDefined();
-      expect(hwAccel.encoder).toBeDefined();
-      expect(typeof hwAccel.available).toBe("boolean");
-      expect(hwAccel.description).toBeDefined();
-
-      if (osPlatform === "darwin") {
-        expect(hwAccel.encoder).toBe("h264_videotoolbox");
-        expect(hwAccel.available).toBe(true);
-        expect(listEncodersCalls).toBe(1);
-      } else if (osPlatform === "linux") {
-        expect(hwAccel.encoder).toBe("h264_nvenc");
-        expect(hwAccel.available).toBe(true);
-        expect(listEncodersCalls).toBe(1);
-      } else {
-        expect(hwAccel.encoder).toBe("libx264");
-        expect(hwAccel.available).toBe(false);
-        expect(hwAccel.description).toContain("Unsupported platform");
-        expect(listEncodersCalls).toBe(0);
-      }
+    test.each([
+      ["darwin", "h264_videotoolbox", true],
+      ["linux", "h264_nvenc", true],
+      ["win32", "libx264", false],
+    ])("selects the %s hardware encoder", async (os, encoder, available) => {
+      const hwAccel = await (backendForPlatform(os as NodeJS.Platform) as any).detectHardwareAccel();
+      expect(hwAccel.encoder).toBe(encoder);
+      expect(hwAccel.available).toBe(available);
     });
 
-    test("should cache hardware acceleration detection", async function() {
-      const osPlatform = platform();
-      const hwAccel1 = await (backend as any).detectHardwareAccel();
-      const hwAccel2 = await (backend as any).detectHardwareAccel();
+    test("caches the detection result so encoders are probed at most once", async function() {
+      // Unconditional assertion (not gated on host platform): a darwin backend
+      // probes exactly once across two detect calls.
+      const scoped = backendForPlatform("darwin");
+      listEncodersCalls = 0;
 
-      expect(hwAccel1).toEqual(hwAccel2);
-      if (osPlatform === "darwin" || osPlatform === "linux") {
-        expect(listEncodersCalls).toBe(1);
-      } else {
-        expect(listEncodersCalls).toBe(0);
-      }
+      const first = await (scoped as any).detectHardwareAccel();
+      const second = await (scoped as any).detectHardwareAccel();
+
+      expect(first).toEqual(second);
+      expect(listEncodersCalls).toBe(1);
     });
   });
 

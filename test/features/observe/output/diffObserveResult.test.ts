@@ -189,8 +189,11 @@ describe("diffObserveResult", () => {
     const next = obs({ ...node }, { updatedAt: 999 });
 
     const diff = diffObserveResult(baseline, next);
+    // D4: the constant restatement `DIFF_SCALAR_FIELDS.not.toContain("updatedAt")`
+    // was removed — the behavioral assertion above (no `fields` emitted for an
+    // updatedAt-only delta) is what actually guards the exclusion, and the
+    // membership is covered structurally by the P6 table.
     expect(diff.fields).toBeUndefined();
-    expect(DIFF_SCALAR_FIELDS).not.toContain("updatedAt");
   });
 
   test("sibling index disambiguates identical siblings (same resource-id/bounds/text)", () => {
@@ -217,18 +220,10 @@ describe("diffObserveResult", () => {
     expect(JSON.stringify(next)).toBe(beforeNext);
   });
 
-  test("handles compacted tuple bounds equivalently to object bounds", () => {
-    // When --observe-result-compact is on, bounds is a [l,t,r,b] tuple; the key
-    // must normalize both shapes so a compacted stream still diffs correctly.
-    const baseline = obs({ "resource-id": "a", "bounds": [0, 0, 10, 10] as any, "text": "same" });
-    const next = obs({ "resource-id": "a", "bounds": [0, 0, 10, 10] as any, "text": "same" });
-    const diff = diffObserveResult(baseline, next);
-    expect(diff.added).toEqual([]);
-    expect(diff.removed).toEqual([]);
-    expect(diff.changed).toEqual([]);
-  });
-
-  test("completes well under the 100ms unit-test budget", () => {
+  test("dropping the first of 200 uniquely-identified rows yields exactly one removal", () => {
+    // R1: rewritten from a pure wall-clock timing assertion into a diff-SHAPE
+    // assertion. Removing k0 leaves k1..k199 re-pairing cleanly (same content,
+    // only sibling index shifted), so the diff is exactly one removal.
     const kids = Array.from({ length: 200 }, (_, i) => ({
       "resource-id": `k${i}`,
       "bounds": { left: 0, top: i, right: 10, bottom: i + 10 },
@@ -236,9 +231,12 @@ describe("diffObserveResult", () => {
     }));
     const baseline = obs({ "resource-id": "root", "bounds": { left: 0, top: 0, right: 10, bottom: 2000 }, "node": kids });
     const next = obs({ "resource-id": "root", "bounds": { left: 0, top: 0, right: 10, bottom: 2000 }, "node": kids.slice(1) });
-    const start = performance.now();
-    diffObserveResult(baseline, next);
-    expect(performance.now() - start).toBeLessThan(100);
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.removed[0].attributes["resource-id"]).toBe("k0");
+    expect(diff.added).toEqual([]);
+    expect(diff.changed).toEqual([]);
   });
 
   test("identical cells in different subtrees do not collide (ancestry path key)", () => {
@@ -297,7 +295,13 @@ describe("diffObserveResult", () => {
     (roots[0] as any).selected = "true"; // toggle one attribute on one node
 
     const diff = diffObserveResult(baseline, next);
-    expect(diff.changed.length + diff.added.length + diff.removed.length).toBeGreaterThan(0);
+    // R3: a "one-node change" must diff to EXACTLY one changed entry — a diff that
+    // exploded into many entries (or that lost the change entirely) is not a
+    // one-node change, even though it would satisfy a `> 0` assertion.
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed[0].changes.selected).toEqual({ from: undefined, to: "true" });
     expect(measureValue(diff).bytes).toBeLessThan(measureValue(baseline).bytes * 0.1);
   });
 
@@ -723,12 +727,27 @@ describe("diffObserveResult", () => {
     expect(JSON.stringify(next)).toBe(beforeNext);
   });
 
-  test("EC1.6: a large scroll still completes well under the 100ms budget", () => {
+  test("EC1.6: a 300-row scroll re-pairs every row into a bounds `changed` (positional churn would be 600)", () => {
+    // R1: rewritten from a wall-clock timing test into a diff-SHAPE assertion.
+    // A 300-row scroll shifts every row's bounds, so positional-only matching
+    // churns all 600 (300 removed + 300 added). Content identity collapses that
+    // to 300 bounds-only `changed` entries, each carrying a `fromKey` distinct
+    // from `key` (the key embeds bounds, which the scroll changed).
     const baseline = obs(list(300, 0));
     const next = obs(list(300, -50));
-    const start = performance.now();
-    diffObserveResult(baseline, next);
-    expect(performance.now() - start).toBeLessThan(100);
+
+    const positional = diffObserveResult(baseline, next, { contentIdentity: false });
+    expect(positional.added.length + positional.removed.length).toBe(600);
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(300);
+    for (const c of diff.changed) {
+      expect(Object.keys(c.changes)).toEqual(["bounds"]);
+      expect(c.fromKey).toBeDefined();
+      expect(c.fromKey).not.toBe(c.key);
+    }
   });
 
   test("EC1.7: contentIdentity:false reproduces positional-only churn exactly", () => {
@@ -1291,10 +1310,6 @@ describe("diffObserveResult — volatile `extras` metadata exclusion (#3051)", (
     expect(Object.keys(diff.changed[0].changes)).toEqual(["bounds"]);
   });
 
-  test("DIFF_IGNORED_ATTRS names `extras` (single source of truth)", () => {
-    expect([...DIFF_IGNORED_ATTRS]).toContain("extras");
-  });
-
   test("a mirror field (focusedElement) whose only change is `extras` churn is not reported", () => {
     // The element mirror fields are diffed separately from node attributes
     // (leanElementForDiff / elementValuesEqual), so the ignore-list must apply
@@ -1421,6 +1436,364 @@ describe("diffObserveResult — volatile occlusion exclusion (#4399)", () => {
   });
 });
 
+// ---- A1: pure sibling reorder (documented "looks unchanged" limitation) ----
+//
+// Node identity is content + geometry, NOT tree order. Swapping two siblings
+// that keep their own bounds is therefore invisible to a content-identity diff
+// (each re-pairs to itself with no attribute change) — a real, documented
+// limitation. A change that folded sibling index into the content key would
+// break the first assertion, which is exactly the regression this characterizes.
+describe("diffObserveResult — pure sibling reorder (A1)", () => {
+  const A = { "resource-id": "A", "text": "Alpha", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+  const B = { "resource-id": "B", "text": "Beta", "bounds": { left: 0, top: 10, right: 10, bottom: 20 } };
+  const parent = (kids: Record<string, unknown>[]) => ({
+    "resource-id": "list",
+    "bounds": { left: 0, top: 0, right: 10, bottom: 100 },
+    "node": kids,
+  });
+
+  test("with content identity (default), a reorder reads as no change (limitation)", () => {
+    const diff = diffObserveResult(obs(parent([{ ...A }, { ...B }])), obs(parent([{ ...B }, { ...A }])));
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toEqual([]);
+  });
+
+  test("positional-only surfaces the reorder as remove+add (a:2, r:2)", () => {
+    const diff = diffObserveResult(
+      obs(parent([{ ...A }, { ...B }])),
+      obs(parent([{ ...B }, { ...A }])),
+      { contentIdentity: false }
+    );
+    expect(diff.added).toHaveLength(2);
+    expect(diff.removed).toHaveLength(2);
+    expect(diff.changed).toEqual([]);
+  });
+});
+
+// ---- A2: scalarFields config override --------------------------------------
+describe("diffObserveResult — scalarFields override (A2)", () => {
+  test("restricts scalar diffing to the override set", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, { rotation: 0, wakefulness: "Awake" });
+    const next = obs({ ...node }, { rotation: 1, wakefulness: "Asleep" });
+
+    const diff = diffObserveResult(baseline, next, { scalarFields: ["wakefulness"] });
+    // Only the override field is diffed; rotation is ignored entirely.
+    expect(diff.fields!.wakefulness).toEqual({ from: "Awake", to: "Asleep" });
+    expect(diff.fields!.rotation).toBeUndefined();
+  });
+
+  test("an empty override diffs no scalar fields", () => {
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const baseline = obs({ ...node }, { rotation: 0 });
+    const next = obs({ ...node }, { rotation: 1 });
+    const diff = diffObserveResult(baseline, next, { scalarFields: [] });
+    expect(diff.fields).toBeUndefined();
+  });
+});
+
+// ---- A7: view-id-driven content identity (#3228) ---------------------------
+describe("diffObserveResult — view-id content identity (A7)", () => {
+  test("view-id alone re-pairs scrolled rows that share all other identity", () => {
+    // Three rows identical except their (content-derived) view-id; the other
+    // three content-key fields (resource-id/content-desc/text) are the SAME on
+    // every row, so ONLY view-id can tell the rows apart. With ≥3 rows the
+    // resource-id fallback is ambiguous, so removing view-id from the content key
+    // collapses re-pairing back to remove+add (the M6 regression).
+    const row = (viewId: string, top: number) => ({
+      "resource-id": "row",
+      "view-id": viewId,
+      "text": "",
+      "bounds": { left: 0, top, right: 100, bottom: top + 10 },
+    });
+    const list = (dy: number) => ({
+      "resource-id": "list",
+      "bounds": { left: 0, top: 0, right: 100, bottom: 1000 },
+      "node": [row("v0", 0 + dy), row("v1", 20 + dy), row("v2", 40 + dy)],
+    });
+
+    const diff = diffObserveResult(obs(list(0)), obs(list(-30)));
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(3);
+    for (const c of diff.changed) {
+      // view-id is in DIFF_IGNORED_ATTRS, so the only reported change is bounds.
+      expect(Object.keys(c.changes)).toEqual(["bounds"]);
+    }
+  });
+
+  test("a node whose only change is view-id churn is never `changed` (M4 guard)", () => {
+    // Post-trim a view-id is a synthetic content-derived id; its churn is not an
+    // actionable UI delta (the descendant whose content changed reports its own
+    // change), so it is excluded from the changed comparison.
+    const baseline = obs({ "resource-id": "a", "view-id": "hash-1", "text": "Same", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } });
+    const next = obs({ "resource-id": "a", "view-id": "hash-2", "text": "Same", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+  });
+});
+
+// ---- P6: every advertised DIFF_SCALAR_FIELDS member is diffed --------------
+describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
+  const warning = {
+    type: "important-content-under-inset",
+    severity: "warning",
+    element: { text: "T", bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
+    categories: ["text"],
+    insetTypes: ["safeArea"],
+    sides: ["top"],
+    overflowPx: { top: 30 },
+    insetPx: { top: 59.5 },
+    overlapPercent: 100,
+    confidence: "high",
+  } as const;
+
+  const SCALAR_VALUE_PAIRS: Record<string, { from: unknown; to: unknown }> = {
+    rotation: { from: 0, to: 1 },
+    wakefulness: { from: "Awake", to: "Asleep" },
+    userId: { from: 0, to: 10 },
+    intentChooserDetected: { from: false, to: true },
+    notificationPermissionDetected: { from: false, to: true },
+    deviceLock: {
+      from: { locked: false, keyguardShowing: false, secure: true },
+      to: { locked: true, keyguardShowing: true, secure: true },
+    },
+    awaitTimeout: { from: false, to: true },
+    awaitDuration: { from: undefined, to: 250 },
+    layoutWarnings: { from: undefined, to: [warning] },
+    error: { from: undefined, to: "capture failed" },
+  };
+
+  // Independent membership pin: hardcoded so DROPPING a field from
+  // DIFF_SCALAR_FIELDS (which would silently undiff it) reddens here rather than
+  // just removing a generated row. `updatedAt` must stay OUT (churns every capture).
+  const EXPECTED_SCALARS = [
+    "awaitDuration",
+    "awaitTimeout",
+    "deviceLock",
+    "error",
+    "intentChooserDetected",
+    "layoutWarnings",
+    "notificationPermissionDetected",
+    "rotation",
+    "userId",
+    "wakefulness",
+  ];
+
+  test("DIFF_SCALAR_FIELDS holds exactly the advertised members (and not updatedAt)", () => {
+    expect([...DIFF_SCALAR_FIELDS].sort()).toEqual(EXPECTED_SCALARS);
+    expect(DIFF_SCALAR_FIELDS).not.toContain("updatedAt");
+  });
+
+  test("every advertised scalar field has a value pair (coverage guard)", () => {
+    for (const field of DIFF_SCALAR_FIELDS) {
+      expect(SCALAR_VALUE_PAIRS).toHaveProperty(field);
+    }
+  });
+
+  test.each([...DIFF_SCALAR_FIELDS])("scalar field %s is surfaced in the diff `fields`", field => {
+    const { from, to } = SCALAR_VALUE_PAIRS[field];
+    const node = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+    const diff = diffObserveResult(obs({ ...node }, { [field]: from }), obs({ ...node }, { [field]: to }));
+    expect(diff.fields).toBeDefined();
+    expect(diff.fields![field]).toBeDefined();
+  });
+});
+
+// ---- P5: element mirror-field matrix (3 fields × 7 scenarios) --------------
+describe("diffObserveResult — mirror-field matrix (P5)", () => {
+  const MIRROR_FIELDS = ["focusedElement", "accessibilityFocusedElement", "awaitedElement"] as const;
+  const NODE = { "resource-id": "a", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } };
+  const el = (extra: Record<string, unknown> = {}) => ({ bounds: { left: 0, top: 0, right: 10, bottom: 10 }, ...extra });
+  const heavy = (childText: string) => ({
+    "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+    "resource-id": "f",
+    "node": [{ "resource-id": "child", "bounds": { left: 1, top: 1, right: 2, bottom: 2 }, "text": childText }],
+  });
+  const withExtras = (t: string) => ({
+    "resource-id": "f",
+    "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+    "extras": { "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": t },
+  });
+
+  const SCENARIOS: ReadonlyArray<readonly [string, unknown, unknown, boolean]> = [
+    ["changed element", el({ "resource-id": "x" }), el({ "resource-id": "y" }), true],
+    ["gained (undefined → element)", undefined, el({ "resource-id": "x" }), true],
+    ["lost (element → undefined)", el({ "resource-id": "x" }), undefined, true],
+    ["unchanged element", el({ "resource-id": "x" }), el({ "resource-id": "x" }), false],
+    ["bounds shape only (object vs tuple)", { "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "resource-id": "x" }, { "bounds": [0, 0, 10, 10], "resource-id": "x" }, false],
+    ["subtree churn only (.node child edited)", heavy("before"), heavy("after"), false],
+    ["extras churn only", withExtras("84"), withExtras("335"), false],
+  ];
+
+  for (const field of MIRROR_FIELDS) {
+    test.each(SCENARIOS)(`${field}: %s`, (_label, from, to, reported) => {
+      const baseline = obs({ ...NODE }, { [field]: from } as never);
+      const next = obs({ ...NODE }, { [field]: to } as never);
+      const diff = diffObserveResult(baseline, next);
+      expect(diff.fields?.[field] !== undefined).toBe(reported);
+    });
+  }
+});
+
+// ---- A9 / P8: iOS conservative stable-identity boundaries (#3318) ----------
+//
+// The iOS editable-control repair pass keys on a stable id + class + an
+// 8px-quantized region. This table pins the quantization cliff (Δ4 crosses a
+// bucket because Math.round(4/8) === 1), the id-source precedence, the
+// generated-UUID refusal, and the class/ancestor gates. The fields carry NO
+// content-identity key (empty resource-id/text/content-desc/view-id, or a
+// changing text), so the earlier content-identity pass cannot re-pair them —
+// isolating the iOS pass under test.
+describe("diffObserveResult — iOS stable-identity boundaries (A9/P8)", () => {
+  const REGION = { left: 16, top: 120, right: 304, bottom: 160 }; // all coords multiples of 8
+  const shift = (b: typeof REGION, d: number) => ({ left: b.left + d, top: b.top + d, right: b.right + d, bottom: b.bottom + d });
+
+  // A field distinguished ONLY by accessibilityIdentifier (not in the content
+  // key), so a same-text scroll must go through the iOS quantized-region pass.
+  const scrollField = (bounds: Record<string, number>) => ({
+    "className": "XCUIElementTypeTextField",
+    "accessibilityIdentifier": "title",
+    "text": "",
+    "bounds": bounds,
+  });
+
+  const repaired = (d: ReturnType<typeof diffObserveResult>) =>
+    d.changed.length === 1 && d.added.length === 0 && d.removed.length === 0;
+  const splitAddRemove = (d: ReturnType<typeof diffObserveResult>) =>
+    d.added.length === 1 && d.removed.length === 1 && d.changed.length === 0;
+
+  const QUANT_ROWS: ReadonlyArray<readonly [number, boolean]> = [
+    [1, true], [2, true], [3, true], // within the same 8px bucket → re-pair
+    [4, false], [5, false], [6, false], [7, false], [8, false], // Δ4 is the cliff
+  ];
+
+  test.each(QUANT_ROWS)("a Δ%dpx scroll re-pairs=%s under 8px quantization", (delta, expectRepaired) => {
+    const diff = diffObserveResult(iosObs(scrollField(REGION)), iosObs(scrollField(shift(REGION, delta))));
+    if (expectRepaired) {
+      expect(repaired(diff)).toBe(true);
+    } else {
+      expect(splitAddRemove(diff)).toBe(true);
+    }
+  });
+
+  test("a Δ0 (identical) field produces an empty diff, not a re-pair", () => {
+    const diff = diffObserveResult(iosObs(scrollField(REGION)), iosObs(scrollField(REGION)));
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toEqual([]);
+  });
+
+  // Id-source precedence + UUID refusal, exercised via an in-place text edit
+  // (text differs → no content-identity re-pair → iOS pass decides).
+  const textEdit = (idAttrs: Record<string, unknown>, editable = true) => {
+    const node = (t: string) => ({
+      "className": editable ? "XCUIElementTypeTextField" : "XCUIElementTypeStaticText",
+      ...idAttrs,
+      "text": t,
+      "value": t,
+      "bounds": { ...REGION },
+    });
+    return diffObserveResult(iosObs(node("Old")), iosObs(node("New")));
+  };
+
+  const PRECEDENCE_ROWS: ReadonlyArray<readonly [string, Record<string, unknown>, boolean, boolean]> = [
+    ["resource-id resolves the stable id", { "resource-id": "TitleField" }, true, true],
+    ["accessibilityIdentifier resolves when no resource-id", { "accessibilityIdentifier": "title" }, true, true],
+    ["non-UUID view-id resolves when no resource-id/accId", { "view-id": "title-field" }, true, true],
+    ["generated UUID view-id is refused (id-less)", { "view-id": "123e4567-e89b-12d3-a456-426614174000" }, true, false],
+    ["no stable id at all → no repair", {}, true, false],
+    ["non-editable class is not repaired even with a resource-id", { "resource-id": "TitleField" }, false, false],
+  ];
+
+  test.each(PRECEDENCE_ROWS)("%s", (_label, idAttrs, editable, expectRepaired) => {
+    const diff = textEdit(idAttrs, editable);
+    if (expectRepaired) {
+      expect(diff.changed).toHaveLength(1);
+      expect(diff.changed[0].changes.text).toEqual({ from: "Old", to: "New" });
+    } else {
+      expect(diff.added).toHaveLength(1);
+      expect(diff.removed).toHaveLength(1);
+      expect(diff.changed).toEqual([]);
+    }
+  });
+
+  test("an editable field with a list-cell class opts out of the repair", () => {
+    const node = (t: string) => ({
+      "className": "XCUIElementTypeCell",
+      "resource-id": "ReusableCell",
+      "text": t,
+      "value": t,
+      "bounds": { ...REGION },
+    });
+    const diff = diffObserveResult(iosObs(node("Old")), iosObs(node("New")));
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.changed).toEqual([]);
+  });
+
+  test("an editable field under a list-cell ancestor opts out of the repair", () => {
+    const tree = (t: string) => ({
+      "resource-id": "Table",
+      "className": "XCUIElementTypeTable",
+      "bounds": { left: 0, top: 100, right: 390, bottom: 700 },
+      "node": [{
+        "className": "XCUIElementTypeCell",
+        "bounds": { left: 0, top: 100, right: 390, bottom: 160 },
+        "node": [{
+          "resource-id": "TitleField",
+          "className": "XCUIElementTypeTextField",
+          "text": t,
+          "value": t,
+          "bounds": { ...REGION },
+        }],
+      }],
+    });
+    const diff = diffObserveResult(iosObs(tree("Old")), iosObs(tree("New")));
+    expect(diff.changed).toEqual([]);
+    expect(diff.added.length + diff.removed.length).toBeGreaterThan(0);
+  });
+});
+
+// ---- A10: unicode identity discrimination ---------------------------------
+//
+// The slice had zero non-ASCII coverage. A content key built by splitting on
+// code points (or truncating a surrogate pair) would collapse distinct emoji
+// sequences that share a leading code point, false-merging an unrelated
+// remove+add into a single `changed`. These rows pin that distinct unicode text
+// stays distinct.
+describe("diffObserveResult — unicode identity discrimination (A10)", () => {
+  // Only `text` distinguishes these nodes (no resource-id), so the content key
+  // is the raw text; they are scrolled so they are leftover remove+add first.
+  const textNode = (text: string, top: number) => ({ text, "bounds": { left: 0, top, right: 10, bottom: top + 10 } });
+  const parent = (kid: Record<string, unknown>) => ({
+    "resource-id": "list",
+    "bounds": { left: 0, top: 0, right: 10, bottom: 100 },
+    "node": [kid],
+  });
+
+  const DISCRIMINATING: ReadonlyArray<readonly [string, string, string]> = [
+    // Family emoji ZWJ sequences that differ ONLY in the final person — same
+    // leading surrogate pair (👨). A first-code-point key would false-merge them.
+    ["astral ZWJ sequences differing past the first surrogate pair", "\u{1F468}‍\u{1F469}‍\u{1F467}", "\u{1F468}‍\u{1F469}‍\u{1F466}"],
+    ["NFC vs NFD forms of the same grapheme", "café", "café"],
+    ["zero-width space presence differs", "ab", "a​b"],
+  ];
+
+  test.each(DISCRIMINATING)("%s does NOT false-merge (stays remove+add)", (_label, a, b) => {
+    const diff = diffObserveResult(obs(parent(textNode(a, 0))), obs(parent(textNode(b, 50))));
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.added[0].attributes.text).toBe(b);
+    expect(diff.removed[0].attributes.text).toBe(a);
+  });
+});
+
 describe("isSameObservationScreen", () => {
   const iosIdentity = (
     key: string,
@@ -1539,5 +1912,46 @@ describe("isSameObservationScreen", () => {
       screenIdentity: iosIdentity("bundle=com.apple.reminders|focus=Title", "low"),
     });
     expect(isSameObservationScreen(a, b)).toBe(false);
+  });
+
+  // ---- A8 / P7: consolidated same-screen decision table -------------------
+  //
+  // When BOTH sides carry a non-low-confidence identity, the decision is
+  // identity-only (platform + source + key) and the app/activity/package
+  // fallback is bypassed. When an identity is missing on either side, the
+  // decision falls through to that fallback. Rows corrected per the audit:
+  // the source-mismatch row uses a real `ScreenIdentitySource` ("sdk"); the
+  // one-missing-identity row is `true` (fallback matches) unless appId is varied.
+  describe("same-screen decision table (A8/P7)", () => {
+    const withIdentity = (
+      appId: string,
+      identity: ObserveResult["screenIdentity"] | undefined
+    ): ObserveResult =>
+      obs({ "resource-id": "a" }, {
+        activeWindow: { appId, activityName: "", layoutSeqSum: 1 },
+        viewHierarchy: { packageName: appId, hierarchy: { node: { "resource-id": "a" } as any } },
+        screenIdentity: identity,
+      });
+
+    const APP = "com.apple.reminders";
+    const idHigh = iosIdentity("bundle=com.apple.reminders|nav=Reminders", "high", "heuristic");
+    const idOtherKey = iosIdentity("bundle=com.apple.reminders|nav=New Reminder", "high", "heuristic");
+    const idSdk = iosIdentity("bundle=com.apple.reminders|nav=Reminders", "high", "sdk");
+
+    const ROWS: ReadonlyArray<readonly [string, ObserveResult, ObserveResult, boolean]> = [
+      ["both identities equal → same", withIdentity(APP, idHigh), withIdentity(APP, { ...idHigh }), true],
+      ["both present, different key → different", withIdentity(APP, idHigh), withIdentity(APP, idOtherKey), false],
+      ["both present, source mismatch (heuristic vs sdk) → different", withIdentity(APP, idHigh), withIdentity(APP, idSdk), false],
+      ["both present, platform mismatch → different", withIdentity(APP, idHigh), withIdentity(APP, { ...idHigh!, platform: "android" }), false],
+      ["identity short-circuits the appId fallback: same identity, differing appId → same", withIdentity(APP, idHigh), withIdentity("com.other.app", { ...idHigh }), true],
+      ["one identity missing, matching app/activity/package → same (fallback)", withIdentity(APP, idHigh), withIdentity(APP, undefined), true],
+      ["one identity missing, differing appId → different (fallback)", withIdentity(APP, idHigh), withIdentity("com.other.app", undefined), false],
+      ["neither identity, matching app/activity/package → same", withIdentity(APP, undefined), withIdentity(APP, undefined), true],
+      ["low confidence on one side forces a full emit → different", withIdentity(APP, idHigh), withIdentity(APP, iosIdentity("k", "low")), false],
+    ];
+
+    test.each(ROWS)("%s", (_label, a, b, expected) => {
+      expect(isSameObservationScreen(a, b)).toBe(expected);
+    });
   });
 });

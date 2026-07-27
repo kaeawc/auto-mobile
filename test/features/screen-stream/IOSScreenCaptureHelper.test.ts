@@ -94,40 +94,27 @@ describe("IOSScreenCaptureHelper", () => {
     expect(spawnArgs.args).toEqual(["--simulator-window", "98765"]);
   });
 
-  test("passes --simulator-fps when fps is provided", () => {
-    const { spawnArgs, helper } = withFakeSpawner({
-      kind: "simulator",
-      windowID: 1,
-      fps: 30,
-    });
+  // The fps guard runs on start() (in buildArgs), not the constructor. Accepted
+  // values are integers in the inclusive [5, 60] range, including both bounds.
+  test.each([5, 30, 60])("accepts a valid simulator fps %p and forwards it", fps => {
+    const { spawnArgs, helper } = withFakeSpawner({ kind: "simulator", windowID: 1, fps });
     helper.start();
-    expect(spawnArgs.args).toEqual([
-      "--simulator-window",
-      "1",
-      "--simulator-fps",
-      "30",
-    ]);
+    expect(spawnArgs.args).toEqual(["--simulator-window", "1", "--simulator-fps", String(fps)]);
   });
 
-  test("rejects simulator fps outside [5, 60]", () => {
-    const fake = new FakeChildProcess();
-    const helper = new IOSScreenCaptureHelper({
-      binaryPath: "/fake/screen-capture-helper",
-      target: { kind: "simulator", windowID: 1, fps: 61 },
-      spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
-    });
-    expect(() => helper.start()).toThrow(/simulator fps must be an integer in \[5, 60\]/);
-  });
-
-  test("rejects non-integer simulator fps", () => {
-    const fake = new FakeChildProcess();
-    const helper = new IOSScreenCaptureHelper({
-      binaryPath: "/fake/screen-capture-helper",
-      target: { kind: "simulator", windowID: 1, fps: 30.5 },
-      spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
-    });
-    expect(() => helper.start()).toThrow(/integer/);
-  });
+  // Below-min, negative, above-max, and non-integer all fail the same guard.
+  test.each([4, 0, -30, 61, 30.5, Number.NaN])(
+    "rejects an out-of-range or non-integer simulator fps %p on start()",
+    fps => {
+      const fake = new FakeChildProcess();
+      const helper = new IOSScreenCaptureHelper({
+        binaryPath: "/fake/screen-capture-helper",
+        target: { kind: "simulator", windowID: 1, fps },
+        spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+      });
+      expect(() => helper.start()).toThrow(/simulator fps must be an integer in \[5, 60\]/);
+    }
+  );
 
   test("coalesces a burst into the newest decoded frame", async () => {
     const { fake, helper } = withFakeSpawner();

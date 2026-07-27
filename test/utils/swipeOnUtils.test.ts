@@ -74,6 +74,34 @@ describe("resolveSwipeDirection", () => {
     });
   });
 
+  describe("exact response messages", () => {
+    it("emits the exact finger-gesture message", () => {
+      const result = resolveSwipeDirection({ direction: "up" });
+      expect(result.message).toBe("Swiping up (finger gesture)");
+    });
+
+    it("emits the exact scroll message with the revealed-content phrase", () => {
+      const result = resolveSwipeDirection({ direction: "up", gestureType: "scrollTowardsDirection" });
+      expect(result.message).toBe("Scrolling up to reveal content above");
+    });
+
+    it("reports the missing-direction error verbatim", () => {
+      expect(resolveSwipeDirection({ direction: undefined }).error).toBe("direction is required");
+    });
+  });
+
+  describe("unknown gestureType", () => {
+    it("treats any non-finger gestureType as a scroll and inverts the direction", () => {
+      // Documents current behavior: an unrecognized gestureType falls through to
+      // the scroll branch and inverts the finger direction.
+      const result = resolveSwipeDirection({
+        direction: "up",
+        gestureType: "totally-unknown" as unknown as "scrollTowardsDirection"
+      });
+      expect(result.direction).toBe("down");
+    });
+  });
+
   describe("regression: object API required (not positional args)", () => {
     it("returns error when direction field is missing from options object", () => {
       // The old call site used resolveSwipeDirection(args.direction, args.gestureType) with

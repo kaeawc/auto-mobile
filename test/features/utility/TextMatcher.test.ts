@@ -160,5 +160,20 @@ describe("DefaultTextMatcher", () => {
       expect(normalizeQuotes("Don't Allow")).toBe("Don't Allow");
       expect(normalizeQuotes('"hello"')).toBe('"hello"');
     });
+
+    test("does not normalize a non-breaking space (U+00A0 is outside the replacement set)", () => {
+      // Boundary: NBSP is a common source of match failures in system dialogs but
+      // is deliberately NOT in normalizeQuotes' replacement set. This pins that gap
+      // so any future change to NBSP handling is a conscious, tested decision.
+      expect(normalizeQuotes("a b")).toBe("a b");
+    });
+  });
+
+  describe("non-breaking space boundary", () => {
+    test("a regular space does not match a non-breaking space", () => {
+      // Because NBSP is not normalized, "Allow App" and "Allow App" are not
+      // considered equal — this is the observable consequence of the gap above.
+      expect(matcher.partialTextMatch("Allow App", "Allow App")).toBe(false);
+    });
   });
 });

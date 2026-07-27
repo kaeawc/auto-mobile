@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { VisualHighlight, VisualHighlightClient } from "../../../src/features/debug/VisualHighlight";
+import type { HighlightDeviceClient } from "../../../src/features/debug/VisualHighlight";
 import type { BootedDevice, HighlightOperationResult, HighlightShape } from "../../../src/models";
+import { ActionableError } from "../../../src/models/ActionableError";
 
 describe("VisualHighlight", () => {
   const androidDevice: BootedDevice = {
@@ -92,7 +94,7 @@ describe("VisualHighlight", () => {
     ]);
   });
 
-  test("addHighlight rejects invalid shapes", async () => {
+  test("addHighlight rejects an invalid shape with the zod validation message before contacting the client", async () => {
     const invalidShape: HighlightShape = {
       type: "box",
       bounds: {
@@ -103,14 +105,22 @@ describe("VisualHighlight", () => {
       }
     };
 
+    let requests = 0;
     const fakeClient = {
-      requestAddHighlight: async () => ({
-        success: true
-      })
-    };
+      requestAddHighlight: async () => {
+        requests += 1;
+        return { success: true };
+      }
+    } as unknown as HighlightDeviceClient;
 
-    const highlight = new VisualHighlight(androidDevice, null, fakeClient as any);
-    await expect(highlight.addHighlight("highlight-1", invalidShape)).rejects.toThrow();
+    const highlight = new VisualHighlight(androidDevice, null, fakeClient);
+    const error = await highlight.addHighlight("highlight-1", invalidShape).catch(caught => caught);
+
+    expect(error).toBeInstanceOf(ActionableError);
+    // The zod message reports the constraint but NOT the offending field name.
+    expect((error as Error).message).toContain("Too small: expected number to be >0");
+    // Validation happens before the wire call, so the client is never contacted.
+    expect(requests).toBe(0);
   });
 
   test("addHighlight rejects invalid highlight responses", async () => {

@@ -24,8 +24,6 @@ import {
   ActionableError,
   BootedDevice,
   ClipboardResult,
-  Element,
-  ObserveResult,
   OpenURLResult,
   SwipeOnToolPayload,
 } from "../models";
@@ -36,6 +34,7 @@ import {
   refineWaitForArgs,
   settledSchema,
   waitForObservation,
+  type WaitForObservationOutcome,
   waitForSchema,
 } from "./observeTools";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -364,12 +363,7 @@ export const openLinkSchema = withAppIdAliases(withJsonSchemaOverride(addDeviceT
 })).superRefine(refineWaitForArgs), overrideWaitForJsonSchema));
 
 /** Outcome of a post-open waitFor poll, as produced by {@link waitForObservation}. */
-export interface OpenLinkWaitOutcome {
-  observation: ObserveResult;
-  awaitedElement?: Element;
-  awaitDuration: number;
-  awaitTimeout: boolean;
-}
+export type OpenLinkWaitOutcome = WaitForObservationOutcome;
 
 /**
  * Build the openLink response payload. Without a wait it is the plain open
@@ -395,6 +389,13 @@ export const buildOpenLinkPayload = (
     awaitedElement: waitOutcome.awaitedElement,
     awaitDuration: waitOutcome.awaitDuration,
     awaitTimeout: waitOutcome.awaitTimeout,
+    matched: waitOutcome.matched,
+    settled: waitOutcome.settled,
+    timedOut: waitOutcome.timedOut,
+    polls: waitOutcome.polls,
+    waitMs: waitOutcome.waitMs,
+    matchedElement: waitOutcome.matchedElement,
+    candidates: waitOutcome.candidates,
   };
 };
 

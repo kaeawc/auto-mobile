@@ -82,7 +82,7 @@ const waitForCommonShape = {
   activeWindow: activeWindowWaitForSchema.optional().describe("Foreground app/window predicates"),
   absent: absentPredicateSchema.optional().describe("Wait until an element matching these fields is absent"),
   timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
-  timeoutMs: z.number().optional().describe("Alias for timeout; use timeoutMs when migrating to waitForCondition"),
+  timeoutMs: z.number().optional().describe("Alias for timeout"),
   container: waitForContainerField
 };
 
@@ -168,7 +168,7 @@ const waitForConditionDslSchema = z.object({
   pollMs: z.number().optional().describe("Poll interval ms (default 150)"),
   stableReads: z.number().optional().describe("Consecutive stable reads for countStable/stable (default 2)"),
   timeout: z.number().optional().describe("Wait timeout ms (default 5000; stable default 2500)"),
-  timeoutMs: z.number().optional().describe("Alias for timeout; matches waitForCondition"),
+  timeoutMs: z.number().optional().describe("Alias for timeout"),
   container: waitForContainerField,
   textAny: z.never().optional(),
   className: z.never().optional(),

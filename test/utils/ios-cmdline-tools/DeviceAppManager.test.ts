@@ -413,6 +413,7 @@ describe("DeviceAppManager", () => {
   });
 
   test("clearAppDataViaReinstall preserves app data when bundle resolution fails", async () => {
+    const temporaryDir = "/tmp/automobile-device-app-manager-test";
     const commands: Array<{ file: string; args: string[] }> = [];
     const inspector = new DeviceAppManager({
       platform: () => "darwin",
@@ -429,7 +430,7 @@ describe("DeviceAppManager", () => {
         };
       },
       readFile: async () => { throw new Error("bundle lookup should fail before reading JSON"); },
-      mkdtemp: async () => "/tmp/automobile-device-app-manager-test",
+      mkdtemp: async () => temporaryDir,
       rm: async () => {},
       readdir: async () => { throw new Error("bundle lookup should fail before copying the app"); },
       stat: async () => { throw new Error("bundle lookup should fail before copying the app"); },
@@ -450,7 +451,7 @@ describe("DeviceAppManager", () => {
         "devicectl", "device", "info", "apps",
         "--device", "device-udid",
         "--bundle-id", bundleId,
-        "--json-output", "/tmp/automobile-device-app-manager-test/apps.json",
+        "--json-output", join(temporaryDir, "apps.json"),
         "--quiet"
       ]
     }]);

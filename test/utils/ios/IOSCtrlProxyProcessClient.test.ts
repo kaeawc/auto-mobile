@@ -65,6 +65,27 @@ describe("IOSCtrlProxyProcessClient", () => {
     ]));
   });
 
+  test("propagates deadline expiry while waiting for a process tree to exit", async () => {
+    const timer = new FakeTimer();
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args) {
+        if (file === "ps") {
+          return result("42 1\n");
+        }
+        if (file === "kill" && args[0] === "-0") {
+          timer.advanceTime(100);
+          throw new Error("kill -0 timed out");
+        }
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer, { releaseAttempts: 1, releaseGraceMs: 1 });
+
+    await expect(client.terminateProcessTree(42, 100)).rejects.toThrow(
+      "Startup CtrlProxy runner sweep deadline elapsed"
+    );
+  });
+
   test("treats permission failures as an unavailable PID rather than signaling it", async () => {
     const host = new FakeHostCommandExecutor();
     host.setCommandResponse("kill -0 77", result("", "Operation not permitted"));

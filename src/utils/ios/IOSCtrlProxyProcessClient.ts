@@ -113,6 +113,10 @@ export class IOSCtrlProxyProcessClient {
       const result = await this.executeCommand("kill", ["-0", String(pid)], deadline);
       return !/operation not permitted|permission denied/i.test(result.stderr);
     } catch (error) {
+      // A command error means the process is unavailable only while the
+      // caller's cleanup budget remains. Do not turn deadline expiry into a
+      // successful exit observation.
+      this.remainingTimeoutMs(deadline);
       logger.debug(`[IOSCtrlProxy] Failed to check PID ${pid}: ${error}`);
       return false;
     }

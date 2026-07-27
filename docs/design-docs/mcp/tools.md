@@ -4,7 +4,7 @@
 
 #### Observe
 
-Almost all other tool calls have built-in observation via the [interaction loop](interaction-loop.md), but we also have a standalone [observe](observe/index.md) tool that specifically performs just that action to get the AI agent up to speed.
+Almost all other tool calls have built-in observation via the [interaction loop](interaction-loop.md), but we also have a standalone [observe](observe/index.md) tool that specifically performs just that action to get the AI agent up to speed. Its `waitFor` DSL can wait for `appear`, `disappear`, `clickable`, `textEquals`, `countStable`, or whole-screen `stable`; wait responses include the final observation, state, poll count, elapsed time, and relevant match or timeout candidates. The legacy `waitFor` forms remain supported.
 
 #### Interactions
 

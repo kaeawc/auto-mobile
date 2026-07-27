@@ -78,10 +78,22 @@ describe("buildOpenLinkPayload", () => {
       awaitedElement,
       awaitDuration: 1200,
       awaitTimeout: false,
+      matched: true,
+      timedOut: false,
+      polls: 2,
+      waitMs: 1200,
+      matchedElement: awaitedElement,
+      candidates: [],
     });
     expect(payload.observation).toBe(awaited);
     expect(payload.awaitedElement).toBe(awaitedElement);
     expect(payload.awaitDuration).toBe(1200);
     expect(payload.awaitTimeout).toBe(false);
+    expect(payload.matched).toBe(true);
+    expect(payload.timedOut).toBe(false);
+    expect(payload.polls).toBe(2);
+    expect(payload.waitMs).toBe(1200);
+    expect(payload.matchedElement).toBe(awaitedElement);
+    expect(payload.candidates).toEqual([]);
   });
 });

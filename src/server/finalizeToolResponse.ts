@@ -53,6 +53,19 @@ export type ObservationArtifactMode = "always" | "oversized";
 
 export const DEFAULT_OBSERVATION_INLINE_MAX_BYTES = 64 * 1024;
 
+const OBSERVE_WAIT_METADATA_KEYS = [
+  "awaitedElement",
+  "awaitDuration",
+  "awaitTimeout",
+  "matched",
+  "settled",
+  "timedOut",
+  "polls",
+  "waitMs",
+  "matchedElement",
+  "candidates",
+] as const;
+
 type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unknown";
 
 function classifyObservationAction(
@@ -371,7 +384,12 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     && shouldArtifactObservationPayload(ctx, sanitizedPayload)
   ) {
     if (isObserveTool) {
-      sanitizedPayload = writeObservationArtifact(ctx, sanitizedPayload) as unknown as Record<string, unknown>;
+      // Keep compact wait status inline: without it, an artifacted `observe`
+      // response hides whether the requested condition matched or timed out.
+      sanitizedPayload = {
+        ...pickObserveWaitMetadata(sanitizedPayload),
+        ...writeObservationArtifact(ctx, sanitizedPayload),
+      };
     } else {
       sanitizedPayload = {
         ...sanitizedPayload,
@@ -398,6 +416,14 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   pendingBaselineUpdate && ctx.baselineStore!.set(pendingBaselineUpdate.sessionUuid, pendingBaselineUpdate.observation);
 
   return response;
+}
+
+function pickObserveWaitMetadata(payload: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    OBSERVE_WAIT_METADATA_KEYS
+      .filter(key => payload[key] !== undefined)
+      .map(key => [key, payload[key]])
+  );
 }
 
 function artifactMode(ctx: FinalizeToolResponseContext): ObservationArtifactMode {

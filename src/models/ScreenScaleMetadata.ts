@@ -44,3 +44,19 @@ export function readScreenScaleMetadata(source: {
   }
   return { nativeScale, pixelWidth, pixelHeight };
 }
+
+/**
+ * A spreadable object carrying the three metadata fields when — and only when — the whole tuple is
+ * complete-finite-positive, and `{}` otherwise. Converters use this to attach the fields to a
+ * `ViewHierarchyResult`, so the conversion path and the client retention path (`getScreenScaleMetadata`)
+ * apply the SAME all-or-nothing acceptance rule from a single validator. Spreading `{}` for a
+ * partial/degenerate/absent payload keeps pre-#4548 (and malformed) results byte-identical: the
+ * three keys are omitted entirely rather than emitted as `undefined`.
+ */
+export function screenScaleMetadataSpread(source: {
+  nativeScale?: number | null;
+  pixelWidth?: number | null;
+  pixelHeight?: number | null;
+} | null | undefined): ScreenScaleMetadata | Record<string, never> {
+  return readScreenScaleMetadata(source) ?? {};
+}

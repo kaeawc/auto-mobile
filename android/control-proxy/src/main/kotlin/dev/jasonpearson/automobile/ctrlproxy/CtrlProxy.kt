@@ -2072,26 +2072,41 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val wakefulness = getWakefulness()
     val foreground = getForegroundActivity(capturedRootPackage, capturedWindowClass)
     val density = getDensity()
-    return hierarchy?.copy(
-      screenWidth = screenDimensions?.width,
-      screenHeight = screenDimensions?.height,
-      rotation = rotation,
-      systemInsets = legacySystemInsets(insets),
-      insets = insets,
-      wakefulness = wakefulness,
-      foregroundActivity = foreground,
-      density = density,
-      sdkInt = Build.VERSION.SDK_INT,
-      deviceModel = Build.MODEL,
-      isEmulator = getIsEmulator(),
-      // Scale metadata (#4548): Android hierarchy bounds and screenshots are both physical
-      // pixels, so the bounds->pixel ratio is exactly 1 and the pixel dimensions equal the
-      // reported screen dimensions. Omitted entirely when dimensions are unavailable.
+    val enriched =
+      hierarchy?.copy(
+        screenWidth = screenDimensions?.width,
+        screenHeight = screenDimensions?.height,
+        rotation = rotation,
+        systemInsets = legacySystemInsets(insets),
+        insets = insets,
+        wakefulness = wakefulness,
+        foregroundActivity = foreground,
+        density = density,
+        sdkInt = Build.VERSION.SDK_INT,
+        deviceModel = Build.MODEL,
+        isEmulator = getIsEmulator(),
+      )
+    return withScaleMetadata(enriched, screenDimensions)
+  }
+
+  /**
+   * Apply the additive #4548 scale metadata to a hierarchy response. Android accessibility bounds
+   * and screenshots are both physical pixels, so the bounds->pixel ratio is exactly 1 and the pixel
+   * dimensions equal the reported screen dimensions; the fields are omitted (null) when screen
+   * dimensions are unavailable. EVERY route that produces a hierarchy response — the debounced
+   * direct extraction ([extractHierarchyDirect]) AND the ADB EXTRACT_HIERARCHY broadcast
+   * ([extractHierarchy]) — passes through here, so the daemon can retain the metadata regardless of
+   * which route delivered the hierarchy (#4548).
+   */
+  private fun withScaleMetadata(
+    hierarchy: ViewHierarchy?,
+    screenDimensions: ScreenDimensions?,
+  ): ViewHierarchy? =
+    hierarchy?.copy(
       nativeScale = if (screenDimensions != null) 1f else null,
       pixelWidth = screenDimensions?.width,
       pixelHeight = screenDimensions?.height,
     )
-  }
 
   /**
    * Extract hierarchy immediately and broadcast synchronously, bypassing the debouncer and the
@@ -2193,30 +2208,34 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return null
     }
 
-    return if (!allWindows.isNullOrEmpty()) {
-      Log.d(
-        TAG,
-        "extractHierarchy from ${allWindows.size} windows " +
-          "(disableAllFiltering: $disableAllFiltering, occlusionEnabled: $occlusionEnabled)",
-      )
-      viewHierarchyExtractor.extractFromAllWindows(
-        allWindows,
-        rootNode,
-        textFilter,
-        screenDimensions,
-        true,
-        disableAllFiltering,
-        occlusionEnabled,
-      )
-    } else {
-      viewHierarchyExtractor.extractFromActiveWindow(
-        rootNode,
-        textFilter,
-        screenDimensions,
-        true,
-        disableAllFiltering,
-      )
-    }
+    val hierarchy =
+      if (!allWindows.isNullOrEmpty()) {
+        Log.d(
+          TAG,
+          "extractHierarchy from ${allWindows.size} windows " +
+            "(disableAllFiltering: $disableAllFiltering, occlusionEnabled: $occlusionEnabled)",
+        )
+        viewHierarchyExtractor.extractFromAllWindows(
+          allWindows,
+          rootNode,
+          textFilter,
+          screenDimensions,
+          true,
+          disableAllFiltering,
+          occlusionEnabled,
+        )
+      } else {
+        viewHierarchyExtractor.extractFromActiveWindow(
+          rootNode,
+          textFilter,
+          screenDimensions,
+          true,
+          disableAllFiltering,
+        )
+      }
+    // The ADB EXTRACT_HIERARCHY route must carry the #4548 scale metadata too (this route does not
+    // add the other device metadata, but the daemon retains scale metadata off any route).
+    return withScaleMetadata(hierarchy, screenDimensions)
   }
 
   private fun sendResult(success: Boolean, data: String? = null, error: String? = null) {

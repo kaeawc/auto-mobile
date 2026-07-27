@@ -2804,67 +2804,83 @@ describe("IOSCtrlProxyClient", function() {
     });
 
     describe("scale metadata retention (issue #4548)", function() {
-      test("retains runner-reported scale metadata WITHOUT changing the geometry computation", async function() {
+      /**
+       * Deliver a hierarchy the way the runner does — a raw `hierarchy_update` through
+       * `processMessage` — so retention is exercised on RECEIPT, not via the observation-stream
+       * push. A `requestId` routes it as a request-response update (the push-gated path); omitting
+       * it routes it as a spontaneous push.
+       */
+      const receiveHierarchy = (
+        data: Record<string, unknown>,
+        requestId?: string
+      ): void => {
+        (ctrlProxyClient as any).processMessage({
+          type: "hierarchy_update",
+          ...(requestId ? { requestId } : {}),
+          timestamp: fakeTimer.now(),
+          data: { packageName: "com.example.ios", hierarchy: {}, ...data },
+        });
+      };
+
+      const fullMetadata = {
+        screenWidth: 375, screenHeight: 812, screenScale: 3,
+        nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553,
+      };
+      const expectedFull = { nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553 };
+
+      test("retains metadata on receipt even when NO device-data stream server is running", async function() {
+        // No startStreamServer() here: the push early-returns with no server
+        // (pushHierarchyToObservationStream ~2050), so a push-gated retention would leave this
+        // null. Receipt-based retention must not. (afterEach stops any server from other tests.)
+        await stopDeviceDataStreamSocketServer();
+        receiveHierarchy(fullMetadata);
+        expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual(expectedFull);
+      });
+
+      test("retains metadata on receipt even when the observation-stream push is SUPPRESSED", async function() {
+        await startStreamServer();
+        // Arm an initial-frame suppression for a requestId, then deliver that response. The push is
+        // skipped (consumeHierarchyObservationStreamSuppression), but retention still happens.
+        const requestId = "req-suppressed-1";
+        (ctrlProxyClient as any).hierarchyObservationStreamSuppressions.set(
+          requestId,
+          fakeTimer.setTimeout(() => {}, 10_000)
+        );
+        receiveHierarchy(fullMetadata, requestId);
+        // Prove the push really was suppressed (the suppression was consumed).
+        expect((ctrlProxyClient as any).hierarchyObservationStreamSuppressions.has(requestId)).toBe(false);
+        expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual(expectedFull);
+      });
+
+      test("retention on receipt does NOT change the tracked geometry computation", async function() {
         await startStreamServer();
         const geometry = (ctrlProxyClient as any).screenGeometry;
 
-        // Display Zoom values chosen so the two computations DISAGREE: the legacy geometry is
-        // points * screenScale (375*3=1125, 812*3=2436) while the runner's reported pixel dims
-        // are points * nativeScale (1179x2553). This PR is retention-only (#4548): the tracked
-        // geometry MUST keep the old screenScale computation — switching it is #4549's job.
-        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
-          screenWidth: 375,
-          screenHeight: 812,
-          screenScale: 3,
-          nativeScale: 3.144,
-          pixelWidth: 1179,
-          pixelHeight: 2553,
-        });
-
-        expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual({
-          nativeScale: 3.144,
-          pixelWidth: 1179,
-          pixelHeight: 2553,
-        });
+        // Display Zoom values chosen so the two computations DISAGREE: the tracked geometry stays
+        // points * screenScale (375*3=1125, 812*3=2436) while the reported pixel dims are
+        // points * nativeScale (1179x2553). #4549 flips geometry; this PR must not.
+        receiveHierarchy(fullMetadata);
+        expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual(expectedFull);
         const bound = geometry.bind();
         expect(bound.width).toBe(1125);
         expect(bound.height).toBe(2436);
       });
 
-      test("legacy hierarchy without the fields: metadata is null and geometry is unchanged", async function() {
-        await startStreamServer();
-        const geometry = (ctrlProxyClient as any).screenGeometry;
-
-        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
-          screenWidth: 390,
-          screenHeight: 844,
-          screenScale: 3,
-        });
-
+      test("legacy hierarchy without the fields: metadata is null", function() {
+        receiveHierarchy({ screenWidth: 390, screenHeight: 844, screenScale: 3 });
         expect(ctrlProxyClient.getScreenScaleMetadata()).toBeNull();
-        const bound = geometry.bind();
-        expect(bound.width).toBe(1170);
-        expect(bound.height).toBe(2532);
       });
 
-      test("a later hierarchy without the fields resets retained metadata to null", async function() {
-        await startStreamServer();
-
-        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
-          screenWidth: 375, screenHeight: 812, screenScale: 3,
-          nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553,
-        });
+      test("a later hierarchy without the fields resets retained metadata to null", function() {
+        receiveHierarchy(fullMetadata);
         expect(ctrlProxyClient.getScreenScaleMetadata()).not.toBeNull();
 
         // e.g. the device reconnects to a pre-#4548 runner: stale metadata must not survive.
-        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
-          screenWidth: 375, screenHeight: 812, screenScale: 3,
-        });
+        receiveHierarchy({ screenWidth: 375, screenHeight: 812, screenScale: 3 });
         expect(ctrlProxyClient.getScreenScaleMetadata()).toBeNull();
       });
 
-      test("partial or degenerate metadata is never retained", async function() {
-        await startStreamServer();
+      test("partial or degenerate metadata is never retained", function() {
         const base = { screenWidth: 375, screenHeight: 812, screenScale: 3 };
         const degenerates = [
           { nativeScale: 3.144, pixelWidth: 1179 }, // missing pixelHeight
@@ -2875,20 +2891,16 @@ describe("IOSCtrlProxyClient", function() {
           { nativeScale: 3.144, pixelWidth: 1179, pixelHeight: Number.POSITIVE_INFINITY },
         ];
         for (const metadata of degenerates) {
-          (ctrlProxyClient as any).pushHierarchyToObservationStream(
-            { hierarchy: {} } as any,
-            { ...base, ...metadata }
-          );
+          receiveHierarchy({ ...base, ...metadata });
           expect(ctrlProxyClient.getScreenScaleMetadata()).toBeNull();
         }
       });
 
-      test("golden scaleReporting rows round-trip through retention", async function() {
-        await startStreamServer();
+      test("golden scaleReporting rows round-trip through retention", function() {
         const vectors = loadCoordinateMappingVectors().scaleReporting;
         expect(vectors.length).toBeGreaterThan(0);
         for (const vector of vectors) {
-          (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
+          receiveHierarchy({
             screenWidth: vector.pointWidth,
             screenHeight: vector.pointHeight,
             screenScale: 3,

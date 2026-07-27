@@ -674,4 +674,24 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     expect("pixelWidth" in result).toBe(false);
     expect("pixelHeight" in result).toBe(false);
   });
+
+  test("omits ALL scale fields when the metadata tuple is partial or degenerate (all-or-nothing, matches retention)", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 375, bottom: 812 },
+    };
+    const base = { ...makeHierarchy(root), screenScale: 3.0, screenWidth: 375, screenHeight: 812 };
+    const partials = [
+      { nativeScale: 3.144 }, // pixelWidth/pixelHeight missing
+      { nativeScale: 3.144, pixelWidth: 1179 }, // pixelHeight missing
+      { nativeScale: 0, pixelWidth: 1179, pixelHeight: 2553 },
+      { nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 0 },
+    ];
+    for (const partial of partials) {
+      const result = subject.convertToViewHierarchyResult({ ...base, ...partial } as any);
+      expect("nativeScale" in result).toBe(false);
+      expect("pixelWidth" in result).toBe(false);
+      expect("pixelHeight" in result).toBe(false);
+    }
+  });
 });

@@ -77,20 +77,23 @@ class ViewHierarchyScaleMetadataTest {
   }
 
   /**
-   * Structural guard on the single hierarchy enrichment site: `extractHierarchyDirect` in
-   * CtrlProxy.kt is the only place device metadata is attached to broadcast hierarchies, so if the
-   * scale metadata assignments are removed there, no serialization test above would notice. Scans
-   * the committed source (the BroadcastGuardAdoptionTest mechanism) rather than executing the
+   * Structural guard on the SHARED enrichment helper. `withScaleMetadata` is the single point that
+   * attaches the scale metadata, and EVERY route that produces a hierarchy response must pass
+   * through it — the debounced direct extraction ([extractHierarchyDirect]) and the ADB
+   * EXTRACT_HIERARCHY broadcast ([extractHierarchy]). If the helper's scale-1 contract is altered,
+   * or either route stops calling it, no serialization test above would notice. Scans the committed
+   * source (the BroadcastGuardAdoptionTest mechanism) rather than executing the
    * AccessibilityService, which cannot be constructed in a unit test.
    */
   @Test
-  fun `extractHierarchyDirect attaches all three scale metadata fields`() {
+  fun `withScaleMetadata pins the scale-1 contract`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
-    val marker = "private fun extractHierarchyDirect"
+    val marker = "private fun withScaleMetadata"
     val start = source.indexOf(marker)
-    assertTrue("extractHierarchyDirect not found in CtrlProxy.kt", start >= 0)
-    val bodyOpen = source.indexOf('{', start)
-    val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+    assertTrue("withScaleMetadata not found in CtrlProxy.kt", start >= 0)
+    // The helper is a single-expression `copy(...)`; carve out its argument list.
+    val parenOpen = source.indexOf('(', source.indexOf("hierarchy?.copy", start))
+    val body = source.substring(parenOpen, KotlinSourceScan.matchParen(source, parenOpen))
 
     assertTrue(
       "Android must report exactly scale 1, gated on having dimensions (bounds are already pixels)",
@@ -104,12 +107,22 @@ class ViewHierarchyScaleMetadataTest {
       "pixelHeight must mirror the screen height (scale-1 contract)",
       "pixelHeight = screenDimensions?.height" in body,
     )
-    // Exactly one nativeScale assignment: a second one could override the scale-1 contract.
-    assertEquals(
-      "expected exactly one nativeScale assignment in extractHierarchyDirect",
-      1,
-      Regex("nativeScale\\s*=").findAll(body).count(),
-    )
+  }
+
+  @Test
+  fun `every hierarchy route enriches scale metadata through the shared helper`() {
+    val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
+
+    for (route in listOf("private fun extractHierarchyDirect", "private fun extractHierarchy(")) {
+      val start = source.indexOf(route)
+      assertTrue("$route not found in CtrlProxy.kt", start >= 0)
+      val bodyOpen = source.indexOf('{', start)
+      val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+      assertTrue(
+        "$route must enrich scale metadata via withScaleMetadata so the daemon retains it off this route (#4548)",
+        "withScaleMetadata(" in body,
+      )
+    }
   }
 
   private fun locateCtrlProxySource(): File {

@@ -1388,6 +1388,63 @@ describe("AndroidCtrlProxyClient", function() {
       expect("pixelHeight" in nulls).toBe(false);
     });
 
+    test("omits ALL scale fields when the metadata tuple is partial or degenerate (all-or-nothing, matches retention)", function() {
+      const base = {
+        updatedAt: 1750934583218,
+        packageName: "com.test.app",
+        hierarchy: { text: "root" },
+        screenWidth: 1080,
+        screenHeight: 2340,
+      };
+      // Each of these has nativeScale present but the tuple is incomplete or degenerate. The
+      // converter must match the retention validator: NO scale fields, not a leaked partial.
+      const partials = [
+        { nativeScale: 1 }, // pixelWidth/pixelHeight missing
+        { nativeScale: 1, pixelWidth: 1080 }, // pixelHeight missing
+        { nativeScale: 0, pixelWidth: 1080, pixelHeight: 2340 },
+        { nativeScale: -1, pixelWidth: 1080, pixelHeight: 2340 },
+        { nativeScale: 1, pixelWidth: 0, pixelHeight: 2340 },
+      ];
+      for (const partial of partials) {
+        const result = accessibilityServiceClient.convertToViewHierarchyResult({ ...base, ...partial } as any);
+        expect("nativeScale" in result).toBe(false);
+        expect("pixelWidth" in result).toBe(false);
+        expect("pixelHeight" in result).toBe(false);
+      }
+    });
+
+    test("carries scale metadata through the rootless (UIAutomator-fallback) early return", function() {
+      // A ctrlProxyIncomplete payload with no hierarchy node takes the early return; #4549 must
+      // still see the metadata off this route.
+      const rootless = accessibilityServiceClient.convertToViewHierarchyResult({
+        updatedAt: 1750934583218,
+        packageName: "com.test.app",
+        hierarchy: undefined,
+        ctrlProxyIncomplete: true,
+        screenWidth: 1080,
+        screenHeight: 2340,
+        nativeScale: 1,
+        pixelWidth: 1080,
+        pixelHeight: 2340,
+      } as any);
+
+      expect(rootless.hierarchy.error).toBeDefined();
+      expect(rootless.nativeScale).toBe(1);
+      expect(rootless.pixelWidth).toBe(1080);
+      expect(rootless.pixelHeight).toBe(2340);
+
+      // And a rootless payload WITHOUT the fields still omits them (byte-identical legacy).
+      const rootlessLegacy = accessibilityServiceClient.convertToViewHierarchyResult({
+        updatedAt: 1750934583218,
+        packageName: "com.test.app",
+        hierarchy: undefined,
+        ctrlProxyIncomplete: true,
+      } as any);
+      expect("nativeScale" in rootlessLegacy).toBe(false);
+      expect("pixelWidth" in rootlessLegacy).toBe(false);
+      expect("pixelHeight" in rootlessLegacy).toBe(false);
+    });
+
     test("should handle conversion errors gracefully", function() {
       // Create a hierarchy that will cause conversion issues
       const problematicHierarchy = {

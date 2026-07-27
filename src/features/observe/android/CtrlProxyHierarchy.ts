@@ -12,6 +12,7 @@ import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
 import type { ViewHierarchyResult } from "../../../models";
+import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type {
   HierarchyDelegateContext,
@@ -498,7 +499,11 @@ export class CtrlProxyHierarchy {
           intentChooserDetected: accessibilityHierarchy.intentChooserDetected,
           notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected,
           ctrlProxyIncomplete: accessibilityHierarchy.ctrlProxyIncomplete,
-          sources: ["control-proxy"]
+          sources: ["control-proxy"],
+          // Carry the #4548 scale metadata through the rootless / UIAutomator-fallback branch too,
+          // so #4549 can consume it regardless of which route produced the hierarchy. Same
+          // all-or-nothing validator as the main return and client retention.
+          ...screenScaleMetadataSpread(accessibilityHierarchy)
         } as ViewHierarchyResult;
       }
 
@@ -543,12 +548,11 @@ export class CtrlProxyHierarchy {
         "sdkInt": accessibilityHierarchy.sdkInt,
         "deviceModel": accessibilityHierarchy.deviceModel,
         "isEmulator": accessibilityHierarchy.isEmulator,
-        // Additive scale metadata (#4548), retained for #4549. The runner serializes absent
-        // optionals as JSON null; omit the keys entirely on legacy/absent payloads so results
-        // from pre-#4548 runners stay byte-identical.
-        ...(typeof accessibilityHierarchy.nativeScale === "number" ? { nativeScale: accessibilityHierarchy.nativeScale } : {}),
-        ...(typeof accessibilityHierarchy.pixelWidth === "number" ? { pixelWidth: accessibilityHierarchy.pixelWidth } : {}),
-        ...(typeof accessibilityHierarchy.pixelHeight === "number" ? { pixelHeight: accessibilityHierarchy.pixelHeight } : {})
+        // Additive scale metadata (#4548), retained for #4549. All-or-nothing via the shared
+        // validator (same rule as client retention): the three keys are spread only when the whole
+        // tuple is complete-finite-positive, and omitted entirely otherwise — so a partial or
+        // legacy payload (the runner serializes absent optionals as JSON null) stays byte-identical.
+        ...screenScaleMetadataSpread(accessibilityHierarchy)
       };
 
       const duration = this.context.timer.now() - startTime;

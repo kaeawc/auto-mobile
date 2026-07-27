@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readScreenScaleMetadata } from "../../src/models/ScreenScaleMetadata";
+import { readScreenScaleMetadata, screenScaleMetadataSpread } from "../../src/models/ScreenScaleMetadata";
 
 describe("readScreenScaleMetadata (#4548)", () => {
   test("extracts complete, well-formed metadata", () => {
@@ -40,5 +40,43 @@ describe("readScreenScaleMetadata (#4548)", () => {
     expect(
       readScreenScaleMetadata({ nativeScale: "3" as unknown as number, pixelWidth: 1179, pixelHeight: 2553 })
     ).toBeNull();
+  });
+});
+
+describe("screenScaleMetadataSpread (#4548)", () => {
+  test("spreads the full tuple only when complete-finite-positive", () => {
+    expect(
+      screenScaleMetadataSpread({ nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553 })
+    ).toEqual({ nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553 });
+  });
+
+  test("spreads nothing (omits all keys) for absent / partial / degenerate input", () => {
+    for (const source of [
+      null,
+      undefined,
+      {},
+      { nativeScale: 3, pixelWidth: 1179 }, // partial
+      { nativeScale: 0, pixelWidth: 1179, pixelHeight: 2553 }, // degenerate
+      { nativeScale: null, pixelWidth: null, pixelHeight: null }, // runner JSON nulls
+    ]) {
+      const spread = screenScaleMetadataSpread(source as never);
+      expect(Object.keys(spread)).toEqual([]);
+      // Spreading it into an object adds no keys — the byte-identical-legacy guarantee.
+      expect({ a: 1, ...spread }).toEqual({ a: 1 });
+    }
+  });
+
+  test("uses the SAME acceptance rule as readScreenScaleMetadata", () => {
+    const cases = [
+      { nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553 },
+      { nativeScale: 3.144, pixelWidth: 1179 },
+      { nativeScale: -1, pixelWidth: 1179, pixelHeight: 2553 },
+      {},
+    ];
+    for (const c of cases) {
+      const validated = readScreenScaleMetadata(c as never);
+      const spread = screenScaleMetadataSpread(c as never);
+      expect(spread).toEqual(validated ?? {});
+    }
   });
 });

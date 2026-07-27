@@ -1702,27 +1702,33 @@ fun AutoMobileContent(
               modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
             )
 
-            // Why control is unavailable (issue #3490). The policy's reason is surfaced only when
-            // no interaction snapshot exists — while a post-input refresh retains one, clicks
-            // still actuate the device, so a "blocked" notice would contradict what the user
-            // experiences. The notice itself debounces, so the transient reasons that come and go
-            // during normal streaming never flicker into view.
-            DeviceControlBlockedNotice(
-              reason =
-                if (controlSnapshot == null) {
-                  (deviceControlDecision as? DeviceControlDecision.Blocked)?.reason
-                } else {
-                  null
-                },
-              modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
-            )
-
-            deviceControlTapError?.let { message ->
-              DeviceControlTapErrorBanner(
-                message = message,
-                onDismiss = { deviceControlTapError = null },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+            // Bottom notices share one Column so they stack instead of overlapping when both are
+            // visible (a lingering tap-error banner plus a block that outlasts the debounce).
+            Column(
+              modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              // Why control is unavailable (issue #4531). The policy's reason is surfaced only
+              // when no interaction snapshot exists — while a post-input refresh retains one,
+              // clicks still actuate the device, so a "blocked" notice would contradict what the
+              // user experiences. The notice itself debounces, so the transient reasons that come
+              // and go during normal streaming never flicker into view.
+              DeviceControlBlockedNotice(
+                reason =
+                  if (controlSnapshot == null) {
+                    (deviceControlDecision as? DeviceControlDecision.Blocked)?.reason
+                  } else {
+                    null
+                  }
               )
+
+              deviceControlTapError?.let { message ->
+                DeviceControlTapErrorBanner(
+                  message = message,
+                  onDismiss = { deviceControlTapError = null },
+                )
+              }
             }
           }
         } else {

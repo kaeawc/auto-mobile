@@ -64,7 +64,7 @@ export interface AdbExecutor {
    * Get the list of booted Android devices
    * @returns Promise with array of booted devices
    */
-  getBootedAndroidDevices(): Promise<BootedDevice[]>;
+  getBootedAndroidDevices(options?: { bypassCache?: boolean }): Promise<BootedDevice[]>;
 
   /**
    * Check if the device screen is currently on

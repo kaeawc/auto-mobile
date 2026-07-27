@@ -22,6 +22,11 @@ export interface BootedDeviceDiscovery {
   succeededPlatforms: Set<Platform>;
 }
 
+export interface BootedDeviceDiscoveryOptions {
+  /** Bypass Android's short device-list cache to verify ADB transport identity. */
+  bypassAndroidDeviceListCache?: boolean;
+}
+
 /**
  * Interface for device utility operations
  * Provides platform-agnostic device management for Android emulators and iOS simulators
@@ -56,7 +61,10 @@ export interface PlatformDeviceManager {
    * pruning devices on a transient/partial discovery failure.
    * @param platform - Target platform ("android", "ios", or "either" for both)
    */
-  getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery>;
+  getBootedDevicesDetailed(
+    platform: SomePlatform,
+    options?: BootedDeviceDiscoveryOptions
+  ): Promise<BootedDeviceDiscovery>;
 
   /**
    * Start a device (emulator or simulator)
@@ -241,13 +249,18 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
   }
 
-  async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
+  async getBootedDevicesDetailed(
+    platform: SomePlatform,
+    options: BootedDeviceDiscoveryOptions = {}
+  ): Promise<BootedDeviceDiscovery> {
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();
 
     if (platform === "android" || platform === "either") {
       try {
-        const emulators = await this.emulator.getBootedDevicesChecked();
+        const emulators = await this.emulator.getBootedDevicesChecked(false, {
+          bypassDeviceListCache: options.bypassAndroidDeviceListCache,
+        });
         devices.push(...emulators);
         succeededPlatforms.add("android");
       } catch (error) {

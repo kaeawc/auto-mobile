@@ -125,6 +125,11 @@ export interface AppendTextInput {
   ): Promise<{ success: boolean; error?: string; charsSent?: number }>;
 }
 
+interface CachedAppendTextInput {
+  input: AppendTextInput;
+  transportId?: string;
+}
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private socketFileIdentity: SocketFileIdentity | null = null;
@@ -173,7 +178,7 @@ export class UnixSocketServer {
    * same per-device key, same idle window), so a device that re-appears under the
    * same id with a different image re-probes rather than trusting a stale API level.
    */
-  private appendTextInputs: Map<string, AppendTextInput> = new Map();
+  private appendTextInputs: Map<string, CachedAppendTextInput> = new Map();
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -978,9 +983,22 @@ export class UnixSocketServer {
       args.platform,
       args.deviceId,
       socketSessionId,
-      "input/typeText"
+      "input/typeText",
+      args.append
     );
     const inputResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      // A same-serial emulator may reconnect while this request waits behind an
+      // earlier input. Re-read its ADB transport inside the keyed callback so the
+      // append-helper lookup cannot reuse a capability from that older instance.
+      const executionTargetDevice = args.append && args.platform === "android"
+        ? await this.resolveInputTargetDevice(
+          args.platform,
+          targetDevice.deviceId,
+          socketSessionId,
+          "input/typeText",
+          true
+        )
+        : targetDevice;
       const queueWaitMs = this.timer.now() - queueEnterMs;
       const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
       if (remainingTimeoutMs <= 0) {
@@ -1001,7 +1019,7 @@ export class UnixSocketServer {
         () =>
           this.executeInputTypeText(
             args.platform,
-            targetDevice,
+            executionTargetDevice,
             args.text,
             imeAction,
             remainingTimeoutMs,
@@ -1432,13 +1450,14 @@ export class UnixSocketServer {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: "input/tap" | "input/swipe" | "input/typeText" | "input/pressButton" | "input/key"
+    action: "input/tap" | "input/swipe" | "input/typeText" | "input/pressButton" | "input/key",
+    bypassAndroidDeviceListCache: boolean = false
   ): Promise<BootedDevice> {
-    const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
-    if (!discovery.succeededPlatforms.has(platform)) {
-      throw new Error(`Unable to discover booted ${platform} devices for ${action}`);
-    }
-    const bootedDevices = discovery.devices;
+    const bootedDevices = await this.discoverInputTargetDevices(
+      platform,
+      action,
+      bypassAndroidDeviceListCache
+    );
     if (deviceId) {
       const targetDevice = bootedDevices.find(device => device.deviceId === deviceId);
       if (!targetDevice) {
@@ -1470,6 +1489,20 @@ export class UnixSocketServer {
       throw new Error(`No booted ${platform} devices found for ${action}`);
     }
     throw new Error(`${action} requires deviceId when multiple ${platform} devices are booted`);
+  }
+
+  private async discoverInputTargetDevices(
+    platform: "android" | "ios",
+    action: "input/tap" | "input/swipe" | "input/typeText" | "input/pressButton" | "input/key",
+    bypassAndroidDeviceListCache: boolean
+  ): Promise<BootedDevice[]> {
+    const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform, {
+      bypassAndroidDeviceListCache,
+    });
+    if (!discovery.succeededPlatforms.has(platform)) {
+      throw new Error(`Unable to discover booted ${platform} devices for ${action}`);
+    }
+    return discovery.devices;
   }
 
   private async handleIdeRequest(
@@ -1639,29 +1672,41 @@ export class UnixSocketServer {
   }
 
   /**
-   * Drop the cached append helper for a device that has disconnected (issue #3351).
+   * Drop the cached append helper after a device lifecycle change (issue #3351).
    *
    * The cache is keyed by deviceId and otherwise lives until the 5-minute idle
    * close. If an emulator is replaced under a reused serial (`emulator-5554`)
    * before then, the next device would inherit the previous one's cached API-level
    * capability — an API 31+ / pre-31 mismatch that mis-handles SHIFT and uppercase.
-   * The daemon's device-disconnect monitor calls this on a confirmed disconnect so
-   * the replacement re-probes from scratch. Idempotent; safe for an unknown id.
+   * The device pool calls this after it adds a device, rediscovers it during a
+   * refresh, or binds it after startDevice. Direct socket discovery also rebuilds
+   * a helper when ADB reports a changed transport id for the same serial. The
+   * confirmed-disconnect monitor remains a backstop.
+   * Idempotent; safe for an unknown id.
    */
   evictDeviceInputCache(deviceId: string): void {
     if (this.appendTextInputs.delete(deviceId)) {
-      logger.debug(`[UnixSocketServer] Evicted cached append helper for disconnected device ${deviceId}`);
+      logger.debug(`[UnixSocketServer] Evicted cached append helper for device ${deviceId}`);
     }
   }
 
   /** Cached-per-device accessor for the append helper; see {@link appendTextInputs}. */
   private getAppendTextInput(device: BootedDevice): AppendTextInput {
     const existing = this.appendTextInputs.get(device.deviceId);
+    if (
+      existing?.transportId !== undefined &&
+      device.transportId === existing.transportId
+    ) {
+      return existing.input;
+    }
     if (existing) {
-      return existing;
+      logger.debug(
+        `[UnixSocketServer] Rebuilding cached append helper for ${device.deviceId}: ` +
+        `ADB transport changed from ${existing.transportId} to ${device.transportId}`
+      );
     }
     const created = this.appendTextFactory(device);
-    this.appendTextInputs.set(device.deviceId, created);
+    this.appendTextInputs.set(device.deviceId, { input: created, transportId: device.transportId });
     return created;
   }
 

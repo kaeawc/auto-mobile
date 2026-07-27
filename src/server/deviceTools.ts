@@ -217,6 +217,12 @@ export function registerDeviceTools() {
       const boot = await bootService.boot(args, progress ? { report: progress } : undefined);
       perf.endOperation("bootDevice");
 
+      // A ready device may reuse an existing serial. Invalidate daemon-side
+      // per-device state before any later await lets socket traffic reach it.
+      if (DaemonState.getInstance().isInitialized()) {
+        DaemonState.getInstance().getDevicePool().notifyDeviceReady(boot.device.deviceId);
+      }
+
       if (boot.source === "cold-boot" || boot.provisioned) {
         perf.startOperation("notifyResources");
         await deps.notifyResourcesChanged();

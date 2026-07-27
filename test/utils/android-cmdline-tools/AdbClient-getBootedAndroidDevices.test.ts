@@ -29,7 +29,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       if (command.includes("adb devices")) {
         return createExecResult([
           "List of devices attached",
-          "emulator-5554\tdevice",
+          "emulator-5554\tdevice product:sdk_gphone64_arm64 transport_id:42",
           "emulator-5556\tbooting",
           "emulator-5558\toffline",
           "emulator-5560\tunauthorized",
@@ -43,8 +43,32 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     const devices = await adb.getBootedAndroidDevices();
 
     expect(devices).toEqual([
-      { name: "emulator-5554", platform: "android", deviceId: "emulator-5554" },
+      {
+        name: "emulator-5554",
+        platform: "android",
+        deviceId: "emulator-5554",
+        transportId: "42",
+      },
     ]);
+  });
+
+  test("bypasses the device-list cache when checking a connection incarnation", async () => {
+    let calls = 0;
+    const adb = new AdbClient(null, async (command: string): Promise<ExecResult> => {
+      if (!command.includes("adb devices")) {
+        return createExecResult("");
+      }
+      calls++;
+      return createExecResult([
+        "List of devices attached",
+        `emulator-5554\tdevice transport_id:${calls}`,
+        "",
+      ].join("\n"));
+    });
+
+    expect(await adb.getBootedAndroidDevices()).toMatchObject([{ transportId: "1" }]);
+    expect(await adb.getBootedAndroidDevices({ bypassCache: true })).toMatchObject([{ transportId: "2" }]);
+    expect(calls).toBe(2);
   });
 
   test("does not retry commands when adb reports the target serial is gone", async () => {

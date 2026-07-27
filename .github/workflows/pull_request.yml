@@ -206,6 +206,14 @@ jobs:
           filters: |
             desktop_core:
               - 'android/desktop-core/**'
+              # desktop-core depends on desktop-domain (api(project(":desktop-domain"))),
+              # and the desktop-domain mapper's golden/unit tests LIVE in desktop-core
+              # (e.g. CoordinateMappingGoldenVectorTest for issue #4547). Without this
+              # entry a desktop-domain-only change skipped desktop-core-unit-tests and
+              # the drift guard never executed (pre-existing gap; #4547 made it
+              # load-bearing). ide-plugin and desktop-app jobs OR on this output, so
+              # they pick up desktop-domain changes through it as well.
+              - 'android/desktop-domain/**'
               - 'android/protocol/**'
               - 'android/test-plan-validation/**'
               - 'android/gradle.properties'

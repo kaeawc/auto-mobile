@@ -371,6 +371,16 @@ export function diffNumericRows<T extends Record<string, number | boolean | unde
     for (const field of fields) {
       const a = Number(actual[i][field]);
       const e = Number(expected[i][field]);
+      // Fail CLOSED on a missing or non-numeric field: `Number(undefined)` is NaN and every
+      // NaN comparison is false, so a malformed fixture/table row would otherwise sail through
+      // the tolerance check as "not different" and neuter the drift guard.
+      if (!Number.isFinite(a) || !Number.isFinite(e)) {
+        diffs.push(
+          `row ${i} field ${field}: missing or non-finite value ` +
+            `(actual=${String(actual[i][field])}, expected=${String(expected[i][field])})`,
+        );
+        continue;
+      }
       if (Math.abs(a - e) > tolerance) {
         diffs.push(`row ${i} field ${field}: ${a} !== ${e}`);
       }

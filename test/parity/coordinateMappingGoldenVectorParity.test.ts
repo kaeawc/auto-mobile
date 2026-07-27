@@ -96,6 +96,16 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
     expect(diffs.some(d => d.includes("rootWidth"))).toBe(true);
   });
 
+  test("AC2: the guard fails CLOSED on a missing field, not open", function() {
+    // `Number(undefined)` is NaN and NaN compares as "not different" under any tolerance check,
+    // so a malformed row (deleted field, typo'd key) must be reported as drift — silently
+    // passing would neuter the guard exactly when the fixture is broken.
+    const tampered = kotlinViewportToDevice.map(row => ({ ...row }));
+    delete (tampered[3] as Partial<(typeof tampered)[number]>).expectedY;
+    const diffs = diffNumericRows(tampered, canonical.viewportToDevice, VIEWPORT_TO_DEVICE_FIELDS);
+    expect(diffs.some(d => d.includes("row 3 field expectedY") && d.includes("missing or non-finite"))).toBe(true);
+  });
+
   test("the Kotlin runtime golden loops still drive the real mapper", function() {
     // This guard only proves literals <-> JSON. The math <-> literals half lives in the Kotlin
     // test's runtime loops. If someone deleted those loops but kept the tables, this parity suite

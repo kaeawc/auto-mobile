@@ -371,6 +371,7 @@ class DeviceControlSessionTest {
               receivedAtMs = 1_000L,
               width = 1080,
               height = 2340,
+              rotation = 0,
             )
         )
     val mirrored = assertNotNull(session.evaluate(withMirror).snapshotOrNull)

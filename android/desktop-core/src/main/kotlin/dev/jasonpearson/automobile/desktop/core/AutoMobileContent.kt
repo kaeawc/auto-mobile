@@ -1646,6 +1646,7 @@ fun AutoMobileContent(
                       receivedAtMs = frame.receivedAtMs,
                       width = frame.bitmap.width,
                       height = frame.bitmap.height,
+                      rotation = frame.rotation,
                     )
                   },
               )

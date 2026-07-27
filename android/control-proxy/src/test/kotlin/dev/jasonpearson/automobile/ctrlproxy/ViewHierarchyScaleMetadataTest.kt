@@ -125,6 +125,29 @@ class ViewHierarchyScaleMetadataTest {
     }
   }
 
+  @Test
+  fun `adb hierarchy fallback brackets and stamps rotation`() {
+    val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
+    val marker = "private fun extractHierarchy("
+    val start = source.indexOf(marker)
+    assertTrue("ADB hierarchy route not found in CtrlProxy.kt", start >= 0)
+    val bodyOpen = source.indexOf('{', start)
+    val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+
+    assertTrue(
+      "ADB fallback must sample rotation before hierarchy inputs",
+      "val rotationBeforeExtraction = getRotationOrNull()" in body,
+    )
+    assertTrue(
+      "ADB fallback must sample rotation after hierarchy extraction",
+      "val rotationAfterExtraction = getRotationOrNull()" in body,
+    )
+    assertTrue(
+      "ADB fallback must stamp only a stable rotation onto its hierarchy",
+      "hierarchy?.copy(rotation = rotation)" in body,
+    )
+  }
+
   private fun locateCtrlProxySource(): File {
     val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
     // The Gradle working directory may be the module root, `android`, or the repo root.

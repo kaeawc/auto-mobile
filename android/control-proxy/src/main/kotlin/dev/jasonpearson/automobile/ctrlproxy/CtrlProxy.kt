@@ -2307,6 +2307,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     disableAllFiltering: Boolean = false,
   ): ViewHierarchy? {
     val contextAtExtractionStart = currentFrameContext()
+    // This is the synchronous ADB-broadcast fallback, not the debounced direct route above. It
+    // must bracket the same inputs and extraction so the fallback never publishes a hierarchy
+    // whose geometry and rotation came from different display states.
+    val rotationBeforeExtraction = getRotationOrNull()
     val allWindows = windows
     val rootNode = rootInActiveWindow
     val screenDimensions = getScreenDimensions()
@@ -2340,9 +2344,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           disableAllFiltering,
         )
       }
+    val rotationAfterExtraction = getRotationOrNull()
+    val rotation =
+      if (rotationBeforeExtraction == rotationAfterExtraction) rotationAfterExtraction else null
     // The ADB EXTRACT_HIERARCHY route must carry the #4548 scale metadata too (this route does not
     // add the other device metadata, but the daemon retains scale metadata off any route).
-    val hierarchyWithScaleMetadata = withScaleMetadata(hierarchy, screenDimensions)
+    val hierarchyWithScaleMetadata = withScaleMetadata(hierarchy?.copy(rotation = rotation), screenDimensions)
     if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
       extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
     }

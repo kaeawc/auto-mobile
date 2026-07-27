@@ -424,6 +424,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - DeviceControlPolicy.LIVE_FRAME_MAX_AGE_MS - 1,
         width = 1080,
         height = 2340,
+        rotation = 0,
       )
     assertEquals(DeviceControlBlockReason.StaleFrame, blockedReason(inputs(liveFrame = stalled)))
   }
@@ -437,6 +438,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - 50L,
         width = 1080,
         height = 2340,
+        rotation = 0,
       )
     val snapshot =
       assertNotNull(DeviceControlPolicy.evaluate(inputs(liveFrame = live), now).snapshotOrNull)
@@ -445,6 +447,43 @@ class DeviceControlPolicyTest {
     // Ordering comes from the OBSERVATION counter alone: the mirror's counter is a different
     // domain, and folding it in would make the sequence fall back when the mirror clears.
     assertEquals(11L, snapshot.sequence)
+  }
+
+  @Test
+  fun `a live frame without rotation provenance fails closed`() {
+    val unproven =
+      LiveFrameFacts(
+        deviceId = device,
+        sequence = 905L,
+        receivedAtMs = now - 50L,
+        width = 1080,
+        height = 2340,
+      )
+
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      blockedReason(inputs(liveFrame = unproven)),
+    )
+  }
+
+  @Test
+  fun `a 180 degree live rotation blocks even when dimensions still match`() {
+    // Rotation 0 -> 2 preserves 1080x2340, so the exact live-frame geometry check alone would
+    // otherwise map the upside-down new pixels through the old hierarchy bounds.
+    val upsideDown =
+      LiveFrameFacts(
+        deviceId = device,
+        sequence = 906L,
+        receivedAtMs = now - 50L,
+        width = 1080,
+        height = 2340,
+        rotation = 2,
+      )
+
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      blockedReason(inputs(liveFrame = upsideDown)),
+    )
   }
 
   @Test
@@ -504,6 +543,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - 50L,
         width = 720,
         height = 1560,
+        rotation = 0,
       )
     assertEquals(
       DeviceControlBlockReason.LiveFrameGeometryUnverifiable,
@@ -522,6 +562,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - 50L,
         width = 360,
         height = 780,
+        rotation = 0,
       )
     assertEquals(
       DeviceControlBlockReason.LiveFrameGeometryUnverifiable,
@@ -541,6 +582,7 @@ class DeviceControlPolicyTest {
         receivedAtMs = now - 50L,
         width = 2340,
         height = 1080,
+        rotation = 0,
       )
     assertEquals(
       DeviceControlBlockReason.LiveFrameGeometryUnverifiable,

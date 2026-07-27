@@ -220,6 +220,17 @@ public object DeviceControlPolicy {
       // reveals it.
       return blocked(DeviceControlBlockReason.StaleFrame)
     }
+    if (
+      liveFrame != null &&
+        (liveFrame.rotation == null ||
+          liveFrame.rotation !in 0..3 ||
+          liveFrame.rotation != screenshotRotation)
+    ) {
+      // A WebRTC frame has no observation capture identity, so its own rotation provenance is the
+      // only evidence that the displayed pixels still match the hierarchy bounds. In particular,
+      // 180-degree rotation keeps dimensions unchanged and defeats the exact-geometry check below.
+      return blocked(DeviceControlBlockReason.RotationMismatch)
+    }
 
     val frameWidth = liveFrame?.width ?: screenshot.width
     val frameHeight = liveFrame?.height ?: screenshot.height

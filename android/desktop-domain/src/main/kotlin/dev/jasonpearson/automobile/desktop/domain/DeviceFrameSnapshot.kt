@@ -113,6 +113,8 @@ public data class LiveFrameFacts(
   val receivedAtMs: Long,
   val width: Int,
   val height: Int,
+  /** Device display rotation proven for these live-video pixels; absent provenance fails closed. */
+  val rotation: Int? = null,
 )
 
 /**

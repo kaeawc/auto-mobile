@@ -325,12 +325,8 @@ export class InputText extends BaseVisualChange {
    *   Omitting it leaves the subprocesses unbounded, which is only safe for a caller
    *   that owns its own lifetime.
    *
-   *   Caveat: the budget bounds only the operations this method issues. It does NOT
-   *   bound `AdbClient`'s shared ADB-path discovery (`ensureAdbPath`), which runs
-   *   inside `executeArgsImpl` BEFORE the per-command timeout applies. On a cold or
-   *   expired 60s path cache a stalled discovery probe can still wedge the queue —
-   *   a property of the shared adb primitive every input path uses, tracked in
-   *   #4533, not fixable here.
+   *   `AdbClient` charges its shared ADB-path discovery against the same command
+   *   deadline, so a cold or expired path cache cannot escape this request budget.
    */
   async appendText(
     text: string,
@@ -479,9 +475,8 @@ export class InputText extends BaseVisualChange {
         // attempts, each charged the SAME budget — and runInputOperationWithTimeout
         // awaits the losing operation before releasing the per-device queue, so a
         // stalled key event would otherwise hold the queue for ~4x the request
-        // deadline. A single attempt keeps this append's own device ops within one
-        // budget (the shared ensureAdbPath discovery is the one exception — see the
-        // appendText caveat and issue #4533).
+        // deadline. A single attempt keeps this append's device operations within
+        // one budget, including shared ADB-path discovery.
         await this.executeKeyEventPlan(plan, budget, true);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

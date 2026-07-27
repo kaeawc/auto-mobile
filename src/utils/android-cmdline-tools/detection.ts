@@ -2,6 +2,18 @@ import { join, dirname } from "path";
 import { logger } from "../logger";
 import { SystemDetection, DefaultSystemDetection } from "../system/SystemDetection";
 
+/**
+ * Signals that a caller-owned deadline expired while this module was probing
+ * the host. Discovery normally treats missing commands as a negative result;
+ * a deadline expiry must instead reach that caller unchanged.
+ */
+export class AndroidToolsDetectionTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AndroidToolsDetectionTimeoutError";
+  }
+}
+
 export type AndroidToolsSource = "homebrew" | "android_home" | "android_sdk_root" | "path" | "manual" | "typical";
 
 export interface AndroidToolsLocation {
@@ -202,6 +214,9 @@ export async function isToolInPath(toolName: string, systemDetection = createDef
     await systemDetection.executeCommand(command, [toolName]);
     return true;
   } catch (error) {
+    if (error instanceof AndroidToolsDetectionTimeoutError) {
+      throw error;
+    }
     // which/where exits non-zero when the tool isn't on PATH; that's a normal "not found", not a fault.
     logger.debug(`src/utils/android-cmdline-tools/detection.ts fallback failed: ${error}`, error);
     return false;
@@ -218,6 +233,9 @@ export async function getToolPathFromPath(toolName: string, systemDetection = cr
     const path = result.stdout.trim().split("\n")[0]; // Take first result if multiple
     return path || null;
   } catch (error) {
+    if (error instanceof AndroidToolsDetectionTimeoutError) {
+      throw error;
+    }
     // which/where exits non-zero when the tool isn't on PATH; null tells the caller to keep searching.
     logger.debug(`src/utils/android-cmdline-tools/detection.ts fallback failed: ${error}`, error);
     return null;
@@ -410,6 +428,9 @@ export async function detectAndroidCommandLineTools(systemDetection = createDefa
       logger.debug(`Found Android tools in PATH: ${pathLocation.available_tools.join(", ")}`);
     }
   } catch (error) {
+    if (error instanceof AndroidToolsDetectionTimeoutError) {
+      throw error;
+    }
     logger.warn(`Error detecting Android tools in PATH: ${(error as Error).message}`);
   }
 

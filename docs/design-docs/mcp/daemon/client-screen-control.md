@@ -293,7 +293,6 @@ tracked back to [#1099](https://github.com/kaeawc/auto-mobile/issues/1099):
 | [#4502](https://github.com/kaeawc/auto-mobile/issues/4502) | Close the same-device rotation window in the client control-tap gate. |
 | [#4505](https://github.com/kaeawc/auto-mobile/issues/4505) | Daemon-side frame-context validation so the *daemon* rejects stale-context input (protects clients that will not reimplement the client-side snapshot rules). |
 | [#4519](https://github.com/kaeawc/auto-mobile/issues/4519) | iOS non-destructive text append for keyboard forwarding. |
-| [#4533](https://github.com/kaeawc/auto-mobile/issues/4533) | Bound `ensureAdbPath` discovery so a cold cache cannot wedge the per-device input queue. |
 | [#4534](https://github.com/kaeawc/auto-mobile/issues/4534) | Evict the append cache on rapid same-serial device reuse (needs a device-connect signal). |
 | [#4535](https://github.com/kaeawc/auto-mobile/issues/4535) | Optional daemon capability signal for newer input params (e.g. `input/typeText mode:append`). |
 | [#4536](https://github.com/kaeawc/auto-mobile/issues/4536) | Prefer a reliable native AltGraph signal over the `ctrl && alt` heuristic. |

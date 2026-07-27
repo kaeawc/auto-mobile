@@ -987,6 +987,18 @@ export class UnixSocketServer {
       args.append
     );
     const inputResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      // A same-serial emulator may reconnect while this request waits behind an
+      // earlier input. Re-read its ADB transport inside the keyed callback so the
+      // append-helper lookup cannot reuse a capability from that older instance.
+      const executionTargetDevice = args.append && args.platform === "android"
+        ? await this.resolveInputTargetDevice(
+          args.platform,
+          targetDevice.deviceId,
+          socketSessionId,
+          "input/typeText",
+          true
+        )
+        : targetDevice;
       const queueWaitMs = this.timer.now() - queueEnterMs;
       const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
       if (remainingTimeoutMs <= 0) {
@@ -1007,7 +1019,7 @@ export class UnixSocketServer {
         () =>
           this.executeInputTypeText(
             args.platform,
-            targetDevice,
+            executionTargetDevice,
             args.text,
             imeAction,
             remainingTimeoutMs,

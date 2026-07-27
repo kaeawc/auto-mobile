@@ -473,6 +473,7 @@ describe("InputText", () => {
     expect(result.method).toBe("eventOnly");
     expect(observeScreen.getGetMostRecentCachedObserveResultCallCount()).toBe(1);
     expect(observeScreen.getExecuteCallCount()).toBe(2);
+    expect(observeScreen.getExecuteOptions()[0]?.skipWaitForFresh).toBe(false);
     expect(inputCommands(factory)).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
       "shell input keyevent KEYCODE_DEL",

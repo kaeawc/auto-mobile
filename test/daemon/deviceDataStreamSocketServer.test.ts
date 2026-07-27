@@ -1295,6 +1295,101 @@ describe("DeviceDataStreamSocketServer", () => {
     });
   });
 
+  describe("canonical-pixel conversion at the wire (issue #4549)", () => {
+    // A hierarchy carrying the #4548 runner scale metadata: iOS points + nativeScale + reported
+    // physical pixel dims. Element bounds live under $.bounds as {left,top,right,bottom}.
+    const iosFrame = () =>
+      ({
+        hierarchy: {
+          bounds: { left: 0, top: 0, right: 390, bottom: 844 },
+          node: {
+            $: { class: "UIWindow", bounds: { left: 0, top: 0, right: 390, bottom: 844 } },
+            node: [{ $: { class: "UIButton", text: "Go", bounds: { left: 10, top: 20, right: 100, bottom: 60 } } }],
+          },
+        },
+        screenWidth: 390,
+        screenHeight: 844,
+        screenScale: 3,
+        nativeScale: 3,
+        pixelWidth: 1170,
+        pixelHeight: 2532,
+      }) as any;
+
+    it("publishes iOS element bounds and screen dims in pixels and stamps coordinateSpace:px", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "ios-1" });
+      server.pushHierarchyUpdate("ios-1", iosFrame());
+
+      const [message] = socket.getWrittenMessages<any>();
+      expect(message.type).toBe("hierarchy_update");
+      expect(message.coordinateSpace).toBe("px");
+      expect(message.data.screenWidth).toBe(1170);
+      expect(message.data.screenHeight).toBe(2532);
+      expect(message.data.hierarchy.node.$.bounds).toEqual({ left: 0, top: 0, right: 1170, bottom: 2532 });
+      expect(message.data.hierarchy.node.node[0].$.bounds).toEqual({ left: 30, top: 60, right: 300, bottom: 180 });
+      expect(message.data.hierarchy.bounds).toEqual({ left: 0, top: 0, right: 1170, bottom: 2532 });
+    });
+
+    it("does not mutate the caller's hierarchy (MCP observe keeps point-space bounds)", () => {
+      server.simulateSubscription({ deviceId: "ios-1" });
+      const input = iosFrame();
+      server.pushHierarchyUpdate("ios-1", input);
+      // The push converts a clone; the object the caller (and MCP observe) holds is untouched.
+      expect(input.data ?? input.hierarchy.node.$.bounds).toEqual({ left: 0, top: 0, right: 390, bottom: 844 });
+      expect(input.screenWidth).toBe(390);
+    });
+
+    it("LEGACY: a hierarchy without runner metadata is byte-identical (points, no px stamp)", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "ios-legacy" });
+      const legacy = iosFrame();
+      delete legacy.nativeScale;
+      delete legacy.pixelWidth;
+      delete legacy.pixelHeight;
+      server.pushHierarchyUpdate("ios-legacy", legacy);
+
+      const [message] = socket.getWrittenMessages<any>();
+      expect(message.coordinateSpace).toBeUndefined();
+      // Point-space bounds and dims pass through unchanged.
+      expect(message.data.screenWidth).toBe(390);
+      expect(message.data.hierarchy.node.node[0].$.bounds).toEqual({ left: 10, top: 20, right: 100, bottom: 60 });
+    });
+
+    it("Android (nativeScale 1) leaves bounds numerically identical but still declares px", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "android-1" });
+      const androidFrame = {
+        hierarchy: { node: { $: { class: "FrameLayout", bounds: { left: 0, top: 0, right: 1080, bottom: 2340 } } } },
+        screenWidth: 1080,
+        screenHeight: 2340,
+        nativeScale: 1,
+        pixelWidth: 1080,
+        pixelHeight: 2340,
+      } as any;
+      server.pushHierarchyUpdate("android-1", androidFrame);
+
+      const [message] = socket.getWrittenMessages<any>();
+      expect(message.coordinateSpace).toBe("px");
+      expect(message.data.hierarchy.node.$.bounds).toEqual({ left: 0, top: 0, right: 1080, bottom: 2340 });
+    });
+
+    it("stamps coordinateSpace:px on a screenshot when the caller declares px", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "ios-1" });
+      const seq = server.pushHierarchyUpdate("ios-1", iosFrame());
+      server.pushScreenshotUpdate("ios-1", pngFrame(1170, 2532), 1170, 2532, {}, {
+        captureSequence: seq ?? undefined,
+        coordinateSpace: "px",
+      });
+      const shot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(shot.coordinateSpace).toBe("px");
+      expect(shot.captureSequence).toBe(seq);
+    });
+
+    it("omits coordinateSpace on a screenshot from a legacy (non-px) caller", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "ios-legacy" });
+      server.pushScreenshotUpdate("ios-legacy", pngFrame(1170, 2532), 1170, 2532, {}, {});
+      const shot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+      expect(shot.coordinateSpace).toBeUndefined();
+    });
+  });
+
   describe("coordinate-mapping golden vectors: geometry pairing (issue #4547)", () => {
     // Cross-language golden suite, B0 of the canonical-pixel campaign (#4547 -> #4549). Each
     // vector drives the daemon's REAL header-measurement pairing (pixelsMatchClaimedGeometry via

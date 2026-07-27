@@ -87,10 +87,13 @@ describe("UnixSocketServer input/swipe", () => {
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
-  test("routes iOS coordinate swipes through the duration-aware iOS drag gesture", async () => {
+  test("LEGACY iOS swipe (no runner scale metadata) passes coordinates through unchanged", async () => {
     const requestDrag = mock(async () => ({ success: true }));
+    const fetchHierarchy = mock(async () => null);
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestDrag,
+      getScreenScaleMetadata: () => null,
+      requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
@@ -117,6 +120,33 @@ describe("UnixSocketServer input/swipe", () => {
       durationMs: 750,
     });
     expect(requestDrag).toHaveBeenCalledWith(20, 30, 80, 90, 0, 750, 0, 30_000);
+  });
+
+  test("canonical-pixel iOS swipe divides each endpoint by nativeScale before dispatch", async () => {
+    // px frame (#4549): endpoints arrive in pixels, divided by nativeScale=3 to runner points.
+    const requestDrag = mock(async () => ({ success: true }));
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestDrag,
+      getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/swipe", {
+      platform: "ios",
+      deviceId: "ios-sim-1",
+      startX: 300,
+      startY: 600,
+      endX: 900,
+      endY: 1500,
+      durationMs: 750,
+    });
+
+    expect(response.success).toBe(true);
+    // Echoed endpoints stay in the client's px space; only the runner dispatch is converted.
+    expect(response.result).toMatchObject({ start: { x: 300, y: 600 }, end: { x: 900, y: 1500 } });
+    expect(requestDrag).toHaveBeenCalledWith(100, 200, 300, 500, 0, 750, 0, 30_000);
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {

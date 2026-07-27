@@ -311,6 +311,25 @@ they return the action result only. Callers that need post-input state should
 call `observe` through the MCP proxy or subscribe to the observation stream after
 the input response returns.
 
+#### Coordinate space (canonical pixels)
+
+Coordinates are **canonical physical pixels** in the current device orientation —
+the same space the observation stream publishes element `bounds` and screen
+dimensions in when a message carries `coordinateSpace: "px"` (issue
+[#4549](https://github.com/kaeawc/auto-mobile/issues/4549)). A client maps a tap
+from the frame it is rendering straight into these `input/*` coordinates with no
+unit conversion of its own.
+
+The daemon performs any runner-specific conversion internally: the iOS XCUITest
+runner addresses the screen in **logical points**, so for iOS the daemon divides
+each incoming pixel coordinate by the runner-reported `nativeScale` (round-half-
+even) before dispatch. Android runners already take physical pixels, so nothing
+is converted. If the iOS runner supplied no scale metadata (a pre-#4548 runner,
+so its frames were never published as `coordinateSpace: "px"`), the daemon leaves
+the coordinates untouched — the legacy point-space fallback, in which the client
+was already working in points. See
+[Client Frame Snapshot: coordinate space](client-frame-snapshot.md#coordinate-space-canonical-pixels).
+
 ### Implementation status
 
 | Method | Android | iOS | Notes |

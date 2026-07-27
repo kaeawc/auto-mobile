@@ -46,6 +46,7 @@ import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortM
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
 import { TrackedScreenGeometry, type ScreenGeometryBinding } from "../TrackedScreenGeometry";
 import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
+import { COORDINATE_SPACE_PX } from "../../../daemon/canonicalPixels";
 import {
   ScreenshotBackoffScheduler,
   DefaultScreenshotBackoffScheduler,
@@ -2951,6 +2952,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // stamping it, which catches a geometry change between binding and delivery.
       server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata, {
         captureSequence: binding?.captureSequence,
+        // Android bounds are already physical pixels (nativeScale === 1), so a post-#4548 runner's
+        // frame is canonical pixels as-is — declare it so the client reads px uniformly (#4549).
+        ...(this.getScreenScaleMetadata() ? { coordinateSpace: COORDINATE_SPACE_PX } : {}),
       });
     } catch (error) {
       logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);

@@ -2852,18 +2852,21 @@ describe("IOSCtrlProxyClient", function() {
         expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual(expectedFull);
       });
 
-      test("retention on receipt does NOT change the tracked geometry computation", async function() {
+      test("canonical pixels (#4549): the tracked geometry claim uses nativeScale pixel dims", async function() {
         await startStreamServer();
         const geometry = (ctrlProxyClient as any).screenGeometry;
 
-        // Display Zoom values chosen so the two computations DISAGREE: the tracked geometry stays
-        // points * screenScale (375*3=1125, 812*3=2436) while the reported pixel dims are
-        // points * nativeScale (1179x2553). #4549 flips geometry; this PR must not.
+        // Display Zoom values chosen so the two computations DISAGREE: points * screenScale
+        // (375*3=1125, 812*3=2436) vs the runner-reported pixel dims points * nativeScale
+        // (1179x2553). Under #4549 the capture-identity claim must equal the screenshot's real
+        // pixels, which XCUIScreenshot renders at NATIVE scale — so the claim is 1179x2553, NOT the
+        // old screenScale computation. This is what makes the daemon's exact pixel pairing work
+        // under Display Zoom.
         receiveHierarchy(fullMetadata);
         expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual(expectedFull);
         const bound = geometry.bind();
-        expect(bound.width).toBe(1125);
-        expect(bound.height).toBe(2436);
+        expect(bound.width).toBe(1179);
+        expect(bound.height).toBe(2553);
       });
 
       test("legacy hierarchy without the fields: metadata is null", function() {

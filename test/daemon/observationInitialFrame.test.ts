@@ -31,7 +31,8 @@ class FakeObservationStreamServer {
     screenshotBase64: string,
     screenWidth: number,
     screenHeight: number,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    options?: { coordinateSpace?: "px" }
   ): void {
     this.screenshotUpdates.push({
       deviceId,
@@ -39,6 +40,7 @@ class FakeObservationStreamServer {
       screenWidth,
       screenHeight,
       ...(metadata === undefined ? {} : { metadata }),
+      ...(options?.coordinateSpace === undefined ? {} : { coordinateSpace: options.coordinateSpace }),
     });
   }
 }
@@ -49,6 +51,7 @@ interface ScreenshotUpdate {
   screenWidth: number;
   screenHeight: number;
   metadata?: Record<string, unknown>;
+  coordinateSpace?: "px";
 }
 
 class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
@@ -165,7 +168,11 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
   }
 
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult {
-    const typedHierarchy = hierarchy as CtrlProxyHierarchy;
+    const typedHierarchy = hierarchy as CtrlProxyHierarchy & {
+      nativeScale?: number;
+      pixelWidth?: number;
+      pixelHeight?: number;
+    };
     return {
       hierarchy: { node: { $: { text: typedHierarchy.hierarchy.text } } },
       packageName: typedHierarchy.packageName,
@@ -173,6 +180,11 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
       screenWidth: typedHierarchy.screenWidth,
       screenHeight: typedHierarchy.screenHeight,
       screenScale: typedHierarchy.screenScale,
+      // Additive #4548 scale metadata, mirroring the real converter's spread — so the daemon's
+      // canonical-pixel path (#4549) is exercised when the runner supplied it.
+      ...(typedHierarchy.nativeScale === undefined ? {} : { nativeScale: typedHierarchy.nativeScale }),
+      ...(typedHierarchy.pixelWidth === undefined ? {} : { pixelWidth: typedHierarchy.pixelWidth }),
+      ...(typedHierarchy.pixelHeight === undefined ? {} : { pixelHeight: typedHierarchy.pixelHeight }),
     };
   }
 
@@ -558,26 +570,38 @@ describe("pushInitialObservationFramesForSubscriber", () => {
   });
 
   describe("coordinate-mapping golden vectors: iOS point->pixel (issue #4547)", () => {
-    // Cross-language golden suite, B0 of the canonical-pixel campaign (#4547 -> #4549). Each
-    // vector drives the daemon's REAL iOS point->pixel conversion (getIosScreenshotDimensions via
-    // pushInitialObservationFramesForSubscriber): screenshot geometry is published as
-    // round(points * screenScale), defaulting the multiplier to 1 when the hierarchy carries no
-    // scale (encoded as scale=0 in the fixture). Every row is flagged
-    // willChangeUnderCanonicalPixels: once #4549 delivers pixel-space hierarchies, this
-    // daemon-side multiply must disappear and these vectors must be updated deliberately.
+    // Cross-language golden suite, B0/B2 of the canonical-pixel campaign (#4547 -> #4549). Each
+    // vector drives the daemon's REAL iOS screenshot-dimension publishing (getIosScreenshotDimensions
+    // via pushInitialObservationFramesForSubscriber). Under #4549, when the runner supplies complete
+    // scale metadata (nativeScale + reported pixelWidth/pixelHeight), the daemon publishes those
+    // physical pixel dimensions DIRECTLY — the old points*screenScale multiply disappears — and
+    // stamps coordinateSpace:"px". A row with scale=0 encodes a pre-#4548 runner (no metadata): the
+    // daemon falls back to the legacy round(points * 1) point-space claim and does NOT stamp px.
+    // (The per-element point->pixel bounds conversion these same vectors drive lives in
+    // test/daemon/canonicalPixels.test.ts.)
     const vectors = loadCoordinateMappingVectors().iosPointToPixel;
 
     for (const [index, vector] of vectors.entries()) {
-      it(`row ${index}: ${vector.pointWidth}x${vector.pointHeight} points at scale ${vector.scale || "absent"} -> ${vector.expectedPixelWidth}x${vector.expectedPixelHeight} pixels`, async () => {
+      const hasMetadata = vector.scale !== 0;
+      it(`row ${index}: ${vector.pointWidth}x${vector.pointHeight} @ ${vector.scale || "no-metadata"} -> ${vector.expectedPixelWidth}x${vector.expectedPixelHeight} px${hasMetadata ? " (px-stamped)" : " (legacy)"}`, async () => {
         const streamServer = new FakeObservationStreamServer();
         const iosClient = new FakeIosInitialFrameClient(true, {
           updatedAt: 1,
           packageName: "com.example.ios",
           screenWidth: vector.pointWidth,
           screenHeight: vector.pointHeight,
-          ...(vector.scale === 0 ? {} : { screenScale: vector.scale }),
+          // A real runner reports nativeScale + the derived pixel dims. scale=0 == pre-#4548 runner:
+          // no metadata, so the daemon takes the legacy path and never stamps px.
+          ...(hasMetadata
+            ? {
+              screenScale: vector.scale,
+              nativeScale: vector.scale,
+              pixelWidth: vector.expectedPixelWidth,
+              pixelHeight: vector.expectedPixelHeight,
+            }
+            : {}),
           hierarchy: { text: "Golden" },
-        });
+        } as any);
 
         await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
           streamServer,
@@ -592,6 +616,9 @@ describe("pushInitialObservationFramesForSubscriber", () => {
           screenWidth: vector.expectedPixelWidth,
           screenHeight: vector.expectedPixelHeight,
         });
+        // The px declaration is gated on runner metadata: present == canonical pixels declared,
+        // absent (legacy runner) == no field so the client keeps its point-space fallback.
+        expect(streamServer.screenshotUpdates[0].coordinateSpace).toBe(hasMetadata ? "px" : undefined);
       });
     }
   });

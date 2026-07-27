@@ -10,25 +10,35 @@
     "  test/parity/coordinateMappingGoldenVectorParity.test.ts parses those inline literals out of",
     "  the Kotlin source and verifies them against this file (the pinch drift-guard mechanism).",
     "- TypeScript: test/daemon/deviceDataStreamSocketServer.test.ts drives the daemon's",
-    "  pixelsMatchClaimedGeometry pairing from the geometryPairing section, and",
-    "  test/daemon/observationInitialFrame.test.ts drives the daemon's iOS point->pixel conversion",
-    "  from the iosPointToPixel section, both reading this file directly.",
+    "  pixelsMatchClaimedGeometry pairing from the geometryPairing section; the iosPointToPixel",
+    "  section drives BOTH the daemon's canonical-pixel element-bounds conversion",
+    "  (test/daemon/canonicalPixels.test.ts, roundHalfEven(point*nativeScale) + the round-trip proof)",
+    "  and its screenshot-dimension publishing (test/daemon/observationInitialFrame.test.ts, which",
+    "  now publishes the runner-reported pixel dimensions and stamps coordinateSpace:px).",
     "- Swift: ONE consumer, the scaleReporting section. Since #4548 the iOS runner derives the",
     "  physical screenshot pixel dimensions it reports (ElementLocator.computePixelDimensions,",
     "  points * UIScreen.nativeScale); ElementLocatorTests.swift holds an inline copy of the",
     "  scaleReporting rows and the parity suite parses it out of the source. The runner still",
-    "  performs no viewport<->device mapping: point-space bounds plus screenScale cross the wire",
-    "  and the point->pixel conversion for geometry pairing happens daemon-side in TypeScript",
-    "  (IOSCtrlProxyClient.updateScreenGeometryFrom / observationInitialFrame). The runner's other",
+    "  performs no viewport<->device mapping: point-space bounds plus nativeScale metadata cross the",
+    "  wire and the point->pixel conversion happens daemon-side in TypeScript (#4549:",
+    "  deviceDataStreamSocketServer.pushHierarchyUpdate -> convertHierarchyToCanonicalPixels,",
+    "  IOSCtrlProxyClient.updateScreenGeometryFrom, observationInitialFrame). The runner's other",
     "  coordinate math, pinch endpoint geometry, is pinned by pinch-golden-vectors.json.",
     "",
-    "These vectors PIN CURRENT BEHAVIOR. Rows with willChangeUnderCanonicalPixels=true document",
-    "iOS point-space cases whose expected values MUST change when #4549 converts hierarchy bounds",
-    "to canonical pixels — a green suite across that change means the conversion silently drifted.",
+    "Rows with willChangeUnderCanonicalPixels=true are the iOS cases the #4549 conversion touched",
+    "and were UPDATED in that PR to post-conversion (canonical-pixel) values. In viewportToDevice /",
+    "deviceToViewport the device dimensions became physical pixels (deviceWidth *= nativeScale) and",
+    "the expected mapper outputs scaled accordingly; the client mapper CODE is unchanged (it simply",
+    "receives px device dims now). In iosPointToPixel `scale` is now the runner-reported nativeScale",
+    "and the rows pin the daemon's point->pixel bounds/dimension conversion (a value coincides with",
+    "the old point*screenScale publish on non-Display-Zoom device classes, where screenScale ==",
+    "nativeScale — the semantic change there is the nativeScale source and the coordinateSpace:px",
+    "declaration, not the number). A green suite across a FUTURE conversion change still means drift.",
     "",
     "Booleans are encoded as 0/1 so the Kotlin inline tables stay purely numeric for the positional",
     "source parser. In geometryPairing, measuredWidth=measuredHeight=-1 means an unmeasurable frame.",
-    "In iosPointToPixel, scale=0 means the hierarchy carried no screenScale (daemon defaults to 1).",
+    "In iosPointToPixel, scale=0 means no runner scale metadata (pre-#4548 runner): the daemon does",
+    "not convert and does not stamp coordinateSpace:px (legacy point-space fallback).",
     "",
     "scaleReporting (#4548, B1) pins the RUNNER-side derivation of the reported physical pixel",
     "dimensions: pixel = round(point * nativeScale), where nativeScale is UIScreen.nativeScale on",
@@ -123,25 +133,25 @@
       "expectedX": 13, "expectedY": 7, "expectedInBounds": 1
     },
     {
-      "comment": "iOS 3x device (iPhone-class 390x844): device space is POINTS today, so a 390pt-wide frame maps 1:1. Under #4549 (canonical pixels) deviceWidth/deviceHeight become 1170x2532 and expectedX/expectedY become 585/1266.",
+      "comment": "iOS 3x device (iPhone-class 390x844): CANONICAL PIXELS (#4549). The daemon now publishes device dimensions in physical pixels (390pt x nativeScale 3 = 1170x2532), so a frame still displayed at 390px maps up by deviceWidth/frameWidthPx = 3. The input path divides the returned pixel coordinate back by nativeScale, so the physical tap is unchanged (585/3 = 195).",
       "willChangeUnderCanonicalPixels": true,
       "frameWidthPx": 390, "frameHeightPx": 844, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 390, "deviceHeight": 844, "viewportX": 195, "viewportY": 422,
-      "expectedX": 195, "expectedY": 422, "expectedInBounds": 1
+      "deviceWidth": 1170, "deviceHeight": 2532, "viewportX": 195, "viewportY": 422,
+      "expectedX": 585, "expectedY": 1266, "expectedInBounds": 1
     },
     {
-      "comment": "iOS 2x device (375x667 points) with fractional viewport input. Under #4549 the device space becomes 750x1334 pixels and the expected coordinates double (modulo rounding).",
+      "comment": "iOS 2x device (375x667 points) with fractional viewport input: CANONICAL PIXELS (#4549). Device dimensions become 750x1334 (nativeScale 2), so the expected coordinates roughly double modulo float32 rounding (100.4 -> 201, 200.6 -> 401).",
       "willChangeUnderCanonicalPixels": true,
       "frameWidthPx": 375, "frameHeightPx": 667, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 375, "deviceHeight": 667, "viewportX": 100.4, "viewportY": 200.6,
-      "expectedX": 100, "expectedY": 201, "expectedInBounds": 1
+      "deviceWidth": 750, "deviceHeight": 1334, "viewportX": 100.4, "viewportY": 200.6,
+      "expectedX": 201, "expectedY": 401, "expectedInBounds": 1
     },
     {
-      "comment": "iOS Display Zoom-like device (320x693 zoomed points at 3x). Under #4549 the device space becomes 960x2079 pixels.",
+      "comment": "iOS Display Zoom-like device (320x693 zoomed points at 3x): CANONICAL PIXELS (#4549). Device dimensions become 960x2079, so the frame-to-device ratio is 3 and the expected coordinates scale up (160 -> 480, 346.5 -> 1040).",
       "willChangeUnderCanonicalPixels": true,
       "frameWidthPx": 320, "frameHeightPx": 693, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 320, "deviceHeight": 693, "viewportX": 160, "viewportY": 346.5,
-      "expectedX": 160, "expectedY": 347, "expectedInBounds": 1
+      "deviceWidth": 960, "deviceHeight": 2079, "viewportX": 160, "viewportY": 346.5,
+      "expectedX": 480, "expectedY": 1040, "expectedInBounds": 1
     },
     {
       "comment": "width-derived-ratio invariant: deliberately aspect-MISMATCHED frame (500x500 frame, 1000x2000 device; width ratio 2, height ratio 4). Not a realistic aspect-fitted frame — the pipeline pre-aligns rotation and fits to the device aspect — but it pins the documented rule that BOTH axes scale by deviceWidth/frameWidthPx: a height-derived y would give 800, not 400.",
@@ -170,11 +180,11 @@
       "expectedX": 17, "expectedY": 29
     },
     {
-      "comment": "iOS 3x point-space inverse. Under #4549 deviceWidth/deviceHeight become 1170x2532 pixels, so the same device point lands at a different viewport position.",
+      "comment": "iOS 3x inverse: CANONICAL PIXELS (#4549). deviceWidth/deviceHeight become 1170x2532, so the SAME device point (195,422) — now interpreted in physical pixels near the top-left — maps back to a different viewport position (device-to-frame ratio 390/1170 = 1/3): 195 -> 65, 422 -> 140.667.",
       "willChangeUnderCanonicalPixels": true,
       "deviceX": 195, "deviceY": 422, "frameWidthPx": 390, "frameHeightPx": 844, "scale": 1,
-      "offsetX": 0, "offsetY": 0, "deviceWidth": 390, "deviceHeight": 844,
-      "expectedX": 195, "expectedY": 422
+      "offsetX": 0, "offsetY": 0, "deviceWidth": 1170, "deviceHeight": 2532,
+      "expectedX": 65, "expectedY": 140.66667
     },
     {
       "comment": "width-derived-ratio invariant (inverse): deliberately aspect-MISMATCHED frame (500x500 frame, 1000x2000 device; width ratio 0.5, height ratio 0.25). Not a realistic aspect-fitted frame — it pins the documented rule that BOTH axes scale by frameWidthPx/deviceWidth: a height-derived y would give 100, not 200.",
@@ -345,37 +355,37 @@
   ],
   "iosPointToPixel": [
     {
-      "comment": "2x device: 375x667 points -> 750x1334 pixels. Under #4549 the hierarchy arrives in canonical pixels and this daemon-side multiply disappears (or becomes identity).",
+      "comment": "2x device: a 375x667 point rect converts to 750x1334 canonical pixels. Under #4549 `scale` is the runner-reported nativeScale (#4548): the daemon converts iOS element bounds points->pixels (roundHalfEven(point*nativeScale), test/daemon/canonicalPixels.test.ts) and publishes screenshot dims from the reported pixel dimensions — the old getIosScreenshotDimensions points*screenScale multiply disappears. Numeric value is unchanged on a non-Display-Zoom 2x device (nativeScale == screenScale == 2); what changed is the source (nativeScale, authoritative under Display Zoom) and the coordinateSpace:px declaration.",
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 375, "pointHeight": 667, "scale": 2,
       "expectedPixelWidth": 750, "expectedPixelHeight": 1334
     },
     {
-      "comment": "3x device: 390x844 points -> 1170x2532 pixels",
+      "comment": "3x device: 390x844 point rect -> 1170x2532 canonical pixels via nativeScale 3",
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 390, "pointHeight": 844, "scale": 3,
       "expectedPixelWidth": 1170, "expectedPixelHeight": 2532
     },
     {
-      "comment": "Display Zoom-like: zoomed 320x693 points at 3x -> 960x2079 pixels",
+      "comment": "Display Zoom-like: 320x693 point rect -> 960x2079 canonical pixels via nativeScale 3",
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 320, "pointHeight": 693, "scale": 3,
       "expectedPixelWidth": 960, "expectedPixelHeight": 2079
     },
     {
-      "comment": "fractional scale rounding boundary: 375*2.5 = 937.5 rounds half-up to 938",
+      "comment": "fractional nativeScale rounding boundary: 375*2.5 = 937.5 -> 938 (round-half-even: 938 is even; coincides with round-half-up here)",
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 375, "pointHeight": 812, "scale": 2.5,
       "expectedPixelWidth": 938, "expectedPixelHeight": 2030
     },
     {
-      "comment": "absent screenScale (0 sentinel): daemon defaults the multiplier to 1",
+      "comment": "no runner metadata (0 sentinel = pre-#4548 runner): the daemon does NOT convert — bounds stay point-space and the frame is not stamped coordinateSpace:px (legacy fallback), so the identity 390x844 is preserved",
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 390, "pointHeight": 844, "scale": 0,
       "expectedPixelWidth": 390, "expectedPixelHeight": 844
     },
     {
-      "comment": "fractional HEIGHT product isolated: 667*2.5 = 1667.5 rounds half-up to 1668 while the width product (400*2.5=1000) is integral — a height-axis-only rounding regression cannot hide behind the width case",
+      "comment": "fractional HEIGHT product isolated: 667*2.5 = 1667.5 -> 1668 (round-half-even) while the width product (400*2.5=1000) is integral — a height-axis-only rounding regression cannot hide behind the width case",
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 400, "pointHeight": 667, "scale": 2.5,
       "expectedPixelWidth": 1000, "expectedPixelHeight": 1668

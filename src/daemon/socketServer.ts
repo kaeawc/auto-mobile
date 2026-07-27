@@ -63,6 +63,7 @@ import {
   type InputKeyName,
 } from "../features/action/InputKey";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import { canonicalPixelsToPoints } from "./canonicalPixels";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice, ImeAction } from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
@@ -876,6 +877,39 @@ export class UnixSocketServer {
     }
   }
 
+  /**
+   * Convert incoming `input/*` coordinates to the units the iOS XCUITest runner expects (points).
+   *
+   * A control client that renders a canonical-pixel observation frame (#4549) sends taps/swipes in
+   * PIXELS, so divide by the runner-reported `nativeScale` before dispatch — the inverse of the
+   * daemon's publish-side point->pixel conversion, so the tap lands at the same physical location.
+   * The divide is EXACT (fractional points; XCUITest accepts them), so the round-trip carries only
+   * the single publish-side quantization.
+   *
+   * The scale metadata is populated by #4548 on hierarchy RECEIPT, which has not happened yet if a
+   * control client sends its first input before the daemon has received any hierarchy for this
+   * device — dispatching those pixels as points would land a 3x tap at 1/3 scale. So when the
+   * metadata is null we fetch one hierarchy first (no observation-stream push) to populate it, then
+   * decide. If it is STILL null (a pre-#4548 legacy runner), the control client never received px
+   * bounds either, so it is sending point-space coordinates and we pass them through unchanged.
+   */
+  private async toIosRunnerCoordinates(
+    client: IOSCtrlProxyClient,
+    coordinates: number[],
+    timeoutMs: number
+  ): Promise<number[]> {
+    let nativeScale = client.getScreenScaleMetadata()?.nativeScale;
+    if (nativeScale === undefined) {
+      await client.requestHierarchySyncWithoutObservationStreamPush(undefined, false, undefined, timeoutMs);
+      nativeScale = client.getScreenScaleMetadata()?.nativeScale;
+    }
+    if (nativeScale === undefined) {
+      return coordinates;
+    }
+    const scale = nativeScale;
+    return coordinates.map(coordinate => canonicalPixelsToPoints(coordinate, scale));
+  }
+
   private async handleInputTap(
     request: DaemonRequest,
     socketSessionId?: string
@@ -901,13 +935,14 @@ export class UnixSocketServer {
         });
       }
 
-      return args.platform === "android"
-        ? await AndroidCtrlProxyClient
+      if (args.platform === "android") {
+        return await AndroidCtrlProxyClient
           .getInstance(targetDevice, defaultAdbClientFactory)
-          .requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs)
-        : await IOSCtrlProxyClient
-          .getInstance(targetDevice)
           .requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs);
+      }
+      const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
+      const [x, y] = await this.toIosRunnerCoordinates(iosClient, [args.x, args.y], remainingTimeoutMs);
+      return await iosClient.requestTapCoordinates(x, y, args.duration, remainingTimeoutMs);
     });
 
     if (!gestureResult.success) {
@@ -948,13 +983,18 @@ export class UnixSocketServer {
         });
       }
 
-      return args.platform === "android"
-        ? await AndroidCtrlProxyClient
+      if (args.platform === "android") {
+        return await AndroidCtrlProxyClient
           .getInstance(targetDevice, defaultAdbClientFactory)
-          .requestSwipe(args.startX, args.startY, args.endX, args.endY, args.durationMs, remainingTimeoutMs)
-        : await IOSCtrlProxyClient
-          .getInstance(targetDevice)
-          .requestDrag(args.startX, args.startY, args.endX, args.endY, 0, args.durationMs, 0, remainingTimeoutMs);
+          .requestSwipe(args.startX, args.startY, args.endX, args.endY, args.durationMs, remainingTimeoutMs);
+      }
+      const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
+      const [startX, startY, endX, endY] = await this.toIosRunnerCoordinates(
+        iosClient,
+        [args.startX, args.startY, args.endX, args.endY],
+        remainingTimeoutMs
+      );
+      return await iosClient.requestDrag(startX, startY, endX, endY, 0, args.durationMs, 0, remainingTimeoutMs);
     });
 
     if (!gestureResult.success) {

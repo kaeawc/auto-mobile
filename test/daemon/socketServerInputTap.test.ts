@@ -83,10 +83,15 @@ describe("UnixSocketServer input/tap", () => {
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
-  test("routes iOS coordinate taps through the iOS gesture client", async () => {
+  test("LEGACY iOS tap (no runner scale metadata) passes pixel coordinates through unchanged", async () => {
+    // No metadata even after fetching a hierarchy: a pre-#4548 runner. The control client never got
+    // px bounds, so it is sending point-space coordinates — pass through, no division.
     const requestTapCoordinates = mock(async () => ({ success: true }));
+    const fetchHierarchy = mock(async () => null);
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestTapCoordinates,
+      getScreenScaleMetadata: () => null,
+      requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
@@ -107,7 +112,69 @@ describe("UnixSocketServer input/tap", () => {
       success: true,
       coordinates: { x: 20, y: 30 },
     });
+    expect(fetchHierarchy).toHaveBeenCalledTimes(1); // it tried to learn the scale first
     expect(requestTapCoordinates).toHaveBeenCalledWith(20, 30, undefined, 30_000);
+  });
+
+  test("canonical-pixel iOS tap divides by nativeScale (exact) before dispatch to the points-based runner", async () => {
+    // The control client renders a px frame (#4549) and sends the tap in PIXELS; the daemon divides
+    // EXACTLY by nativeScale so the XCUITest runner receives (fractional) points and the tap lands
+    // at the same physical location. 1170/3 = 390, 2533/3 = 844.333...
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestTapCoordinates,
+      getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/tap", {
+      platform: "ios",
+      deviceId: "ios-sim-1",
+      x: 1170,
+      y: 2533,
+    });
+
+    expect(response.success).toBe(true);
+    // The echoed coordinates stay in the client's px space; only the runner dispatch is converted.
+    expect(response.result).toMatchObject({ coordinates: { x: 1170, y: 2533 } });
+    const [x, y] = requestTapCoordinates.mock.calls[0];
+    expect(x).toBe(390);
+    expect(y).toBeCloseTo(2533 / 3, 10); // fractional point preserved, not quantized to 844
+  });
+
+  test("iOS tap before ANY hierarchy fetches one first, then divides by the learned nativeScale", async () => {
+    // Startup window: the control client's first tap arrives before the daemon received any
+    // hierarchy, so #4548 receipt-based retention has not run and getScreenScaleMetadata() is null.
+    // The daemon fetches a hierarchy (populating the scale via receipt), then converts.
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    let scale: { nativeScale: number; pixelWidth: number; pixelHeight: number } | null = null;
+    const fetchHierarchy = mock(async () => {
+      // Simulate #4548 receipt-based retention populating the scale during the fetch.
+      scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
+      return null;
+    });
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestTapCoordinates,
+      getScreenScaleMetadata: () => scale,
+      requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/tap", {
+      platform: "ios",
+      deviceId: "ios-sim-1",
+      x: 600,
+      y: 900,
+    });
+
+    expect(response.success).toBe(true);
+    expect(fetchHierarchy).toHaveBeenCalledTimes(1);
+    // 600/3 = 200, 900/3 = 300 — NOT dispatched as 600/900 points (which would tap at 1/3 scale).
+    expect(requestTapCoordinates).toHaveBeenCalledWith(200, 300, undefined, 30_000);
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {

@@ -1001,6 +1001,7 @@ export class UnixSocketServer {
       "input/typeText",
       args.append
     );
+    let confirmedAppendCharsSent: number | undefined;
     const inputResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
       // A same-serial emulator may reconnect while this request waits behind an
       // earlier input. Re-read its ADB transport inside the keyed callback so the
@@ -1038,8 +1039,15 @@ export class UnixSocketServer {
             args.text,
             imeAction,
             remainingTimeoutMs,
-            args.append
-          )
+            args.append,
+            charsSent => {
+              confirmedAppendCharsSent = charsSent;
+            }
+          ),
+        timeoutError =>
+          args.append && confirmedAppendCharsSent !== undefined
+            ? new InputTypeTextAppendError(timeoutError.message, confirmedAppendCharsSent)
+            : undefined
       );
     });
 
@@ -1154,7 +1162,8 @@ export class UnixSocketServer {
     text: string,
     imeAction: ImeAction | undefined,
     timeoutMs: number,
-    append: boolean = false
+    append: boolean = false,
+    onConfirmedAppendCharsSent?: (charsSent: number) => void
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     // Charge set-text and the optional submit/IME action against a single
     // shared budget. Otherwise submit:true would hand each request the full
@@ -1178,6 +1187,9 @@ export class UnixSocketServer {
     let appendCharsSent: number | undefined;
     if (append && platform === "android") {
       const textResult = await this.getAppendTextInput(targetDevice).appendText(text, timeoutMs);
+      if (textResult.charsSent !== undefined) {
+        onConfirmedAppendCharsSent?.(textResult.charsSent);
+      }
       if (!textResult.success) {
         return {
           success: false,
@@ -1229,7 +1241,8 @@ export class UnixSocketServer {
     totalTimeoutMs: number,
     remainingTimeoutMs: number,
     origin: string,
-    operation: () => Promise<T>
+    operation: () => Promise<T>,
+    timeoutError?: (timeout: McpTimeoutError) => Error | undefined
   ): Promise<T> {
     let timeoutHandle: NodeJS.Timeout | undefined;
     let timedOut = false;
@@ -1247,12 +1260,13 @@ export class UnixSocketServer {
         return result;
       }
 
-      throw new McpTimeoutError({
+      const error = new McpTimeoutError({
         toolName,
         timeoutMs: totalTimeoutMs,
         origin,
         detail: `operation exceeded remaining budget ${remainingTimeoutMs}ms`,
       });
+      throw timeoutError?.(error) ?? error;
     } finally {
       if (timeoutHandle) {
         this.timer.clearTimeout(timeoutHandle);

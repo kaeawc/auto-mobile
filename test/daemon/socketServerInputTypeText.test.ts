@@ -306,6 +306,48 @@ describe("UnixSocketServer input/typeText", () => {
     expect(requestImeAction).toHaveBeenCalledWith("done", 30_000);
   });
 
+  test("append preserves full progress when submit reaches the shared deadline", async () => {
+    const requestImeAction = mock(
+      () =>
+        new Promise(resolve => {
+          fakeTimer.setTimeout(
+            () => resolve({ success: false, error: "enter key unavailable", totalTimeMs: 1 }),
+            100
+          );
+        })
+    );
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server.appendTextFactory = () => ({
+      appendText: async () => ({ success: true, charsSent: 2 }),
+    });
+    await server.start();
+
+    const responsePromise = sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "ab",
+      mode: "append",
+      submit: true,
+    }, 100);
+
+    await flushMicrotasks();
+    expect(requestImeAction).toHaveBeenCalledWith("done", 100);
+    fakeTimer.advanceTime(100);
+    await flushMicrotasks();
+
+    const response = await withWedgeGuard(
+      responsePromise,
+      "the timed-out submit did not release the per-device queue"
+    );
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("input/typeText exceeded 100ms");
+    expect(response.charsSent).toBe(2);
+  });
+
   // The review's Critical + P1 finding, which share one root cause: the append path
   // used to receive no timeout at all. `runInputOperationWithTimeout` detects the
   // socket deadline but then AWAITS the in-flight operation before releasing the

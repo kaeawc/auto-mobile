@@ -608,10 +608,10 @@ omitted for non-append failures.
 Android may have accepted that current character before the host kills the child.
 The failed response therefore omits `charsSent`, even when earlier characters were
 confirmed, because retrying a suffix at that boundary could duplicate the timed-out
-character. Re-observe the field before deciding how to recover. A client that
-needs per-character atomicity can still send **one character per
-`input/typeText` request**, which is exactly what the reference desktop client
-does (one request per keystroke).
+character. Re-observe the field before deciding how to recover, including when
+the request contained only one character. Sending one character per request makes
+definitive failure recovery simple, and is what the reference desktop client does,
+but it does not make a timed-out key event atomic.
 
 **Partial append failure response**
 

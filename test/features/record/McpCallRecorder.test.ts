@@ -73,6 +73,19 @@ describe("McpCallRecorder", () => {
       expect(recorder.stepCount).toBe(7);
     });
 
+    test("records clearText and dragAndDrop as plan steps", () => {
+      const recorder = new McpCallRecorder();
+      recorder.start();
+
+      recorder.record("clearText", { id: "email" });
+      recorder.record("dragAndDrop", { from: "source", to: "destination" });
+
+      expect(recorder.stop()).toEqual([
+        { tool: "clearText", params: { id: "email" } },
+        { tool: "dragAndDrop", params: { from: "source", to: "destination" } },
+      ]);
+    });
+
     test("ignores infrastructure tools", () => {
       const recorder = new McpCallRecorder();
       recorder.start();

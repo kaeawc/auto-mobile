@@ -15,7 +15,10 @@ type FakeAdbClientContract = Pick<
 /** How a spawned command should terminate, keyed by a substring of its argv. */
 interface SpawnBehavior {
   match: string;
-  outcome: { kind: "exit"; code: number } | { kind: "error"; error: Error };
+  outcome:
+    | { kind: "exit"; code: number }
+    | { kind: "error"; error: Error }
+    | { kind: "reject"; error: Error };
 }
 
 /**
@@ -116,7 +119,9 @@ export class FakeAdbClient implements FakeAdbClientContract {
     const proc = new FakeAdbProcess();
     const joined = args.join(" ");
     const behavior = this.spawnBehaviors.find(b => joined.includes(b.match));
-    if (behavior?.outcome.kind === "error") {
+    if (behavior?.outcome.kind === "reject") {
+      throw behavior.outcome.error;
+    } else if (behavior?.outcome.kind === "error") {
       proc.scheduleError(behavior.outcome.error);
     } else {
       proc.scheduleExit(behavior?.outcome.kind === "exit" ? behavior.outcome.code : 0);
@@ -134,6 +139,11 @@ export class FakeAdbClient implements FakeAdbClientContract {
 
   setSpawnError(match: string, error: Error): void {
     this.spawnBehaviors.push({ match, outcome: { kind: "error", error } });
+  }
+
+  /** Configure a spawned command to reject before a process is created. */
+  setSpawnRejection(match: string, error: Error): void {
+    this.spawnBehaviors.push({ match, outcome: { kind: "reject", error } });
   }
 
   /** All recorded spawn argv arrays, in order. */

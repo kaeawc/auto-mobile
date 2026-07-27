@@ -82,6 +82,8 @@ describe("MCP Tools List", () => {
       expect(toolNames).toContain("observe");
       expect(toolNames).toContain("tapOn");
       expect(toolNames).toContain("inputText");
+      expect(toolNames).not.toContain("settleObserve");
+      expect(toolNames).not.toContain("waitForCondition");
     });
 
     test("strict clients can compile observe outputSchema", async function() {

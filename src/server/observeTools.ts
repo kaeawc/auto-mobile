@@ -7,8 +7,7 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
 import { RealSettleObserve } from "../features/observe/SettleObserve";
 import { RealWaitForCondition } from "../features/observe/WaitForCondition";
-import type { SettleResult } from "../features/observe/interfaces/SettleObserve";
-import type { ConditionPredicate, WaitForConditionResult } from "../features/observe/interfaces/WaitForCondition";
+import type { ConditionPredicate } from "../features/observe/interfaces/WaitForCondition";
 import { appear, disappear, clickable, textEquals, countStable, ConditionSelector } from "../features/observe/ConditionPredicates";
 import { createJSONToolResponse, createStructuredToolResponse, throwIfAborted, StructuredToolResponse } from "../utils/toolUtils";
 import { BootedDevice, Element, ObserveResult, ObserveToolPayload, ViewHierarchyResult } from "../models";
@@ -432,40 +431,6 @@ const observeBaseSchema = withJsonSchemaOverride(addDeviceTargetingToSchema(z.ob
 
 export const observeSchema = withAppIdAliases(observeBaseSchema);
 
-// Standalone settle/wait tools (issue #4398) expose the #4389 primitives directly.
-// They use the primitive option names (timeoutMs/pollMs/stableReads) so the tool
-// surface reads the same as the class it drives.
-export const settleObserveSchema = addDeviceTargetingToSchema(z.object({
-  platform: platformSchema,
-  timeoutMs: z.number().optional().describe("Budget ms (default 2500)"),
-  pollMs: z.number().optional().describe("Poll interval ms (default 150)"),
-  stableReads: z.number().optional().describe("Equal snapshots to settle (default 2)")
-}));
-
-export const waitForConditionSchema = addDeviceTargetingToSchema(z.object({
-  platform: platformSchema,
-  for: z.enum(WAIT_FOR_CONDITION_KINDS).describe("appear|disappear|clickable|textEquals|countStable"),
-  elementId: z.string().optional().describe("Element resource ID / accessibility identifier"),
-  text: z.string().optional().describe("Element text; for `textEquals` the exact expected value"),
-  container: waitForContainerField,
-  timeoutMs: z.number().optional().describe("Budget ms (default 5000)"),
-  pollMs: z.number().optional().describe("Poll interval ms (default 150)"),
-  stableReads: z.number().optional().describe("Stable reads for countStable (default 2)")
-}).superRefine((value, ctx) => {
-  if (value.elementId === undefined && value.text === undefined) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: `waitForCondition "for: ${value.for}" requires elementId or text`
-    });
-  }
-  if (value.for === "textEquals" && value.text === undefined) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "waitForCondition \"for: textEquals\" requires text (the exact expected value)"
-    });
-  }
-}));
-
 export const identifyInteractionsSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
   filter: z.object({
@@ -491,6 +456,21 @@ export type WaitForWithSettled = ObserveWaitForOptions & { settled?: SettledOpti
 type ObserveArgs = z.infer<typeof observeSchema>;
 type WaitForConditionDsl = z.infer<typeof waitForConditionDslSchema>;
 type WaitForConditionKind = (typeof WAIT_FOR_CONDITION_KINDS)[number];
+
+/** Metadata produced by an `observe.waitFor` poll. */
+export interface WaitForObservationOutcome {
+  observation: ObserveResult;
+  awaitedElement?: Element;
+  awaitDuration: number;
+  awaitTimeout: boolean;
+  matched?: boolean;
+  settled?: boolean;
+  timedOut: boolean;
+  polls: number;
+  waitMs: number;
+  matchedElement?: Element;
+  candidates?: Element[];
+}
 
 /** True when the waitFor options are the #4398 declarative `for` DSL form. */
 const isConditionDsl = (waitFor: ObserveWaitForOptions): waitFor is WaitForConditionDsl =>
@@ -543,7 +523,7 @@ const runWaitForConditionDsl = async (
   waitFor: WaitForConditionDsl,
   signal: AbortSignal | undefined,
   timer: Timer
-): Promise<{ observation: ObserveResult; awaitedElement?: Element; awaitDuration: number; awaitTimeout: boolean }> => {
+): Promise<WaitForObservationOutcome> => {
   const pollMs = waitFor.pollMs;
   if (waitFor.for === "stable") {
     const settle = await new RealSettleObserve(observeScreen, timer).execute({
@@ -557,6 +537,10 @@ const runWaitForConditionDsl = async (
       awaitedElement: undefined,
       awaitDuration: settle.waitMs,
       awaitTimeout: !settle.settled,
+      settled: settle.settled,
+      timedOut: !settle.settled,
+      polls: settle.polls,
+      waitMs: settle.waitMs,
     };
   }
 
@@ -577,52 +561,13 @@ const runWaitForConditionDsl = async (
     awaitedElement: result.matchedElement,
     awaitDuration: result.waitMs,
     awaitTimeout: result.timedOut,
+    matched: result.matched,
+    timedOut: result.timedOut,
+    polls: result.polls,
+    waitMs: result.waitMs,
+    matchedElement: result.matchedElement,
+    candidates: result.candidates,
   };
-};
-
-type SettleObserveArgs = z.infer<typeof settleObserveSchema>;
-type WaitForConditionArgs = z.infer<typeof waitForConditionSchema>;
-
-/**
- * Core of the `settleObserve` tool (issue #4398): drive `RealSettleObserve` over
- * the injected screen. Separated from the registered handler so it is testable
- * with a fake screen + FakeTimer (no device, no ADB).
- */
-export const runSettleObserveTool = async (
-  observeScreen: ObserveScreen,
-  args: SettleObserveArgs,
-  timer: Timer = defaultTimer,
-  signal?: AbortSignal
-): Promise<SettleResult> =>
-  new RealSettleObserve(observeScreen, timer).execute({
-    timeoutMs: args.timeoutMs,
-    pollMs: args.pollMs,
-    stableReads: args.stableReads,
-    signal,
-  });
-
-/**
- * Core of the `waitForCondition` tool (issue #4398): build the predicate from the
- * declarative selector and drive `RealWaitForCondition` over the injected screen.
- */
-export const runWaitForConditionTool = async (
-  observeScreen: ObserveScreen,
-  args: WaitForConditionArgs,
-  timer: Timer = defaultTimer,
-  signal?: AbortSignal
-): Promise<WaitForConditionResult> => {
-  const finder = new DefaultElementFinder();
-  const predicate = buildConditionPredicate(
-    finder,
-    args.for,
-    { elementId: args.elementId, text: args.text, container: args.container },
-    { stableReads: args.stableReads }
-  );
-  return new RealWaitForCondition(observeScreen, timer).execute(predicate, {
-    timeoutMs: args.timeoutMs,
-    pollMs: args.pollMs,
-    signal,
-  });
 };
 
 const waitForContainerForFinder = (
@@ -949,12 +894,7 @@ export const waitForObservation = async (
   skipBackStack: boolean = false,
   timer: Timer = defaultTimer,
   platform?: BootedDevice["platform"]
-): Promise<{
-  observation: ObserveResult;
-  awaitedElement?: Element;
-  awaitDuration: number;
-  awaitTimeout: boolean;
-}> => {
+): Promise<WaitForObservationOutcome> => {
   // Declarative `for` DSL (issue #4398) routes to the #4389 primitives; the
   // legacy element/textAny/activeWindow path below is unchanged (back-compat).
   if (isConditionDsl(waitFor)) {
@@ -1009,6 +949,7 @@ export const waitForObservation = async (
 
   throwIfAborted(signal);
   let observation = await observeOnce();
+  let polls = 1;
   let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform);
 
   if (waitEvaluation.matched && settleReady(observation)) {
@@ -1016,7 +957,12 @@ export const waitForObservation = async (
       observation,
       awaitedElement: waitEvaluation.awaitedElement,
       awaitDuration: timer.now() - startTime,
-      awaitTimeout: false
+      awaitTimeout: false,
+      matched: true,
+      timedOut: false,
+      polls,
+      waitMs: timer.now() - startTime,
+      matchedElement: waitEvaluation.awaitedElement,
     };
   }
   if (!waitEvaluation.matched) {
@@ -1027,7 +973,11 @@ export const waitForObservation = async (
     return {
       observation,
       awaitDuration: timer.now() - startTime,
-      awaitTimeout: true
+      awaitTimeout: true,
+      matched: false,
+      timedOut: true,
+      polls,
+      waitMs: timer.now() - startTime,
     };
   }
 
@@ -1036,6 +986,7 @@ export const waitForObservation = async (
     throwIfAborted(signal);
 
     observation = await observeOnce();
+    polls++;
     waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform);
 
     if (waitEvaluation.matched) {
@@ -1044,7 +995,12 @@ export const waitForObservation = async (
           observation,
           awaitedElement: waitEvaluation.awaitedElement,
           awaitDuration: timer.now() - startTime,
-          awaitTimeout: false
+          awaitTimeout: false,
+          matched: true,
+          timedOut: false,
+          polls,
+          waitMs: timer.now() - startTime,
+          matchedElement: waitEvaluation.awaitedElement,
         };
       }
     } else {
@@ -1055,7 +1011,11 @@ export const waitForObservation = async (
   return {
     observation,
     awaitDuration: timer.now() - startTime,
-    awaitTimeout: true
+    awaitTimeout: true,
+    matched: false,
+    timedOut: true,
+    polls,
+    waitMs: timer.now() - startTime,
   };
 };
 
@@ -1121,61 +1081,27 @@ export function registerObserveTools() {
       ]);
 
       if (waitOutcome) {
-        return createStructuredToolResponse({
-          ...result,
+        const waitMetadata: Omit<WaitForObservationOutcome, "observation"> = {
           awaitedElement: waitOutcome.awaitedElement,
           awaitDuration: waitOutcome.awaitDuration,
-          awaitTimeout: waitOutcome.awaitTimeout
+          awaitTimeout: waitOutcome.awaitTimeout,
+          matched: waitOutcome.matched,
+          settled: waitOutcome.settled,
+          timedOut: waitOutcome.timedOut,
+          polls: waitOutcome.polls,
+          waitMs: waitOutcome.waitMs,
+          matchedElement: waitOutcome.matchedElement,
+          candidates: waitOutcome.candidates,
+        };
+        return createStructuredToolResponse({
+          ...result,
+          ...waitMetadata,
         });
       }
 
       return createStructuredToolResponse(result);
     } catch (error) {
       throw new ActionableError(`Failed to execute observe: ${error}`);
-    }
-  };
-
-  // settleObserve: poll until the screen is structurally stable, return only the
-  // final snapshot (issue #4398, primitive #4389). Mirrors the `shake` 5-step
-  // pattern — construct RealObserveScreen, delegate to the primitive core.
-  const settleObserveHandler = async (device: BootedDevice, args: SettleObserveArgs, _progress?: unknown, signal?: AbortSignal) => {
-    try {
-      const observeScreen = new RealObserveScreen(device);
-      const result = await runSettleObserveTool(observeScreen, args, defaultTimer, signal);
-      return createJSONToolResponse({
-        message: result.settled
-          ? `Screen settled after ${result.polls} polls (${result.waitMs}ms)`
-          : `Screen did not settle within budget (${result.polls} polls, ${result.waitMs}ms)`,
-        settled: result.settled,
-        polls: result.polls,
-        waitMs: result.waitMs,
-        observation: result.observation,
-      });
-    } catch (error) {
-      throw new ActionableError(`Failed to settle observe: ${error}`);
-    }
-  };
-
-  // waitForCondition: poll until a declarative predicate holds, returning the
-  // matched element or (on timeout) the last-seen near-matches (issue #4398).
-  const waitForConditionHandler = async (device: BootedDevice, args: WaitForConditionArgs, _progress?: unknown, signal?: AbortSignal) => {
-    try {
-      const observeScreen = new RealObserveScreen(device);
-      const result = await runWaitForConditionTool(observeScreen, args, defaultTimer, signal);
-      return createJSONToolResponse({
-        message: result.matched
-          ? `Condition "${args.for}" met after ${result.polls} polls (${result.waitMs}ms)`
-          : `Condition "${args.for}" not met within ${result.waitMs}ms; ${result.candidates.length} near-match(es)`,
-        matched: result.matched,
-        matchedElement: result.matchedElement,
-        candidates: result.candidates,
-        timedOut: result.timedOut,
-        polls: result.polls,
-        waitMs: result.waitMs,
-        observation: result.observation,
-      });
-    } catch (error) {
-      throw new ActionableError(`Failed to wait for condition: ${error}`);
     }
   };
 
@@ -1216,22 +1142,6 @@ export function registerObserveTools() {
     observeSchema,
     observeHandler,
     { outputSchema: observeToolResultSchema }
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "settleObserve",
-    "Observe once the screen stops changing; returns only the final snapshot.",
-    settleObserveSchema,
-    settleObserveHandler,
-    { supportsProgress: true }
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "waitForCondition",
-    "Wait until a predicate holds (appear/disappear/clickable/textEquals/countStable).",
-    waitForConditionSchema,
-    waitForConditionHandler,
-    { supportsProgress: true }
   );
 
   ToolRegistry.registerDeviceAware("identifyInteractions", "Suggest likely interactions", identifyInteractionsSchema, identifyInteractionsHandler, { debugOnly: true });

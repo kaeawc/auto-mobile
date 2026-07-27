@@ -4,10 +4,6 @@ import {
   buildConditionPredicate,
   observeSchema,
   registerObserveTools,
-  runSettleObserveTool,
-  runWaitForConditionTool,
-  settleObserveSchema,
-  waitForConditionSchema,
   waitForObservation,
 } from "../../src/server/observeTools";
 import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
@@ -131,7 +127,7 @@ describe("buildConditionPredicate", () => {
 // observe waitFor DSL path via the injectable waitForObservation seam (AC3)
 // ---------------------------------------------------------------------------
 describe("waitForObservation DSL branch", () => {
-  test("for:'appear' polls until the element shows up and reports it as awaitedElement", async () => {
+  test("for:'appear' retains condition metadata alongside the awaited-element compatibility field", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
@@ -150,9 +146,14 @@ describe("waitForObservation DSL branch", () => {
 
     expect(outcome.awaitTimeout).toBe(false);
     expect(outcome.awaitedElement?.["resource-id"]).toBe("submit");
+    expect((outcome as any).matched).toBe(true);
+    expect((outcome as any).timedOut).toBe(false);
+    expect((outcome as any).matchedElement?.["resource-id"]).toBe("submit");
+    expect((outcome as any).polls).toBe(2);
+    expect((outcome as any).waitMs).toBeGreaterThanOrEqual(0);
   });
 
-  test("for:'stable' routes to the settle loop and returns the final settled snapshot (no awaitedElement)", async () => {
+  test("for:'stable' retains settle metadata and returns the final settled snapshot", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
@@ -173,6 +174,10 @@ describe("waitForObservation DSL branch", () => {
 
     expect(outcome.awaitTimeout).toBe(false);
     expect(outcome.awaitedElement).toBeUndefined();
+    expect((outcome as any).settled).toBe(true);
+    expect((outcome as any).timedOut).toBe(false);
+    expect((outcome as any).polls).toBe(3);
+    expect((outcome as any).waitMs).toBeGreaterThanOrEqual(0);
   });
 
   test("for:'textEquals' waits until the located element shows the exact value", async () => {
@@ -196,15 +201,17 @@ describe("waitForObservation DSL branch", () => {
     expect(outcome.awaitedElement?.text).toBe("5");
   });
 
-  test("for:'appear' times out (no bare crash) when the element never appears", async () => {
+  test("for:'clickable' retains timeout candidates rather than a bare timeout", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveResult(index => makeObservation([node({ "resource-id": "spinner" })], (index + 1) * 10));
+    observeScreen.setObserveResult(index => makeObservation([
+      node({ "resource-id": "submit", "text": "Go", "clickable": false }),
+    ], (index + 1) * 10));
 
     const outcome = await waitForObservation(
       observeScreen,
-      { for: "appear", elementId: "submit", timeout: 300 } as any,
+      { for: "clickable", elementId: "submit", timeout: 300 } as any,
       undefined,
       false,
       timer
@@ -212,6 +219,12 @@ describe("waitForObservation DSL branch", () => {
 
     expect(outcome.awaitTimeout).toBe(true);
     expect(outcome.awaitedElement).toBeUndefined();
+    expect((outcome as any).matched).toBe(false);
+    expect((outcome as any).timedOut).toBe(true);
+    expect((outcome as any).candidates).toEqual([
+      expect.objectContaining({ "resource-id": "submit" }),
+    ]);
+    expect((outcome as any).polls).toBeGreaterThan(1);
   });
 });
 
@@ -321,127 +334,13 @@ describe("waitFor back-compat", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Standalone tool schemas (AC1 / AC2)
-// ---------------------------------------------------------------------------
-describe("settleObserveSchema", () => {
-  test("accepts an empty settle request (all defaults)", () => {
-    expect(settleObserveSchema.parse({ platform: "android" })).toMatchObject({ platform: "android" });
-  });
-
-  test("accepts tuning knobs", () => {
-    const parsed = settleObserveSchema.parse({ platform: "ios", timeoutMs: 4000, pollMs: 200, stableReads: 3 });
-    expect(parsed).toMatchObject({ timeoutMs: 4000, pollMs: 200, stableReads: 3 });
-  });
-});
-
-describe("waitForConditionSchema", () => {
-  test("accepts a valid appear condition", () => {
-    expect(waitForConditionSchema.parse({ platform: "android", for: "appear", elementId: "x" })).toMatchObject({
-      for: "appear",
-      elementId: "x",
-    });
-  });
-
-  test("does not offer `stable` (that is the settleObserve tool)", () => {
-    expect(() => waitForConditionSchema.parse({ platform: "android", for: "stable" })).toThrow();
-  });
-
-  test("requires a selector for appear", () => {
-    expect(() => waitForConditionSchema.parse({ platform: "android", for: "appear" })).toThrow();
-  });
-
-  test("accepts a container scope", () => {
-    expect(waitForConditionSchema.parse({
-      platform: "android",
-      for: "appear",
-      elementId: "row",
-      container: { text: "Recent orders" },
-    })).toMatchObject({ container: { text: "Recent orders" } });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Standalone tool handler cores (AC1 / AC2) — injected ObserveScreen + timer
-// ---------------------------------------------------------------------------
-describe("runSettleObserveTool", () => {
-  test("returns the settled final snapshot", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const observeScreen = new FakeObserveScreen();
-    const settled = makeObservation([node({ "resource-id": "content", "text": "done" })], 30);
-    observeScreen.setObserveSequence([
-      makeObservation([node({ "resource-id": "content", "text": "loading" })], 10),
-      settled,
-      settled,
-    ]);
-
-    const result = await runSettleObserveTool(observeScreen, { platform: "android" } as any, timer);
-    expect(result.settled).toBe(true);
-    expect(result.observation.viewHierarchy).toBeDefined();
-  });
-});
-
-describe("runWaitForConditionTool", () => {
-  test("builds the predicate from the DSL and resolves with the matched element", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveSequence([
-      makeObservation([node({ "resource-id": "spinner" })], 10),
-      makeObservation([node({ "resource-id": "submit", "text": "Go" })], 20),
-    ]);
-
-    const result = await runWaitForConditionTool(
-      observeScreen,
-      { platform: "android", for: "appear", elementId: "submit" } as any,
-      timer
-    );
-    expect(result.matched).toBe(true);
-    expect(result.matchedElement?.["resource-id"]).toBe("submit");
-  });
-
-  test("does not satisfy a condition from outside the requested container", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveSequence([
-      makeObservation([
-        node({ "resource-id": "other", "node": [node({ "resource-id": "submit" })] }),
-        node({ "resource-id": "checkout", "node": [] }),
-      ], 10),
-      makeObservation([
-        node({ "resource-id": "other", "node": [node({ "resource-id": "submit" })] }),
-        node({ "resource-id": "checkout", "node": [node({ "resource-id": "submit" })] }),
-      ], 20),
-    ]);
-
-    const result = await runWaitForConditionTool(
-      observeScreen,
-      {
-        platform: "android",
-        for: "appear",
-        elementId: "submit",
-        container: { elementId: "checkout" },
-      } as any,
-      timer
-    );
-
-    expect(result.matched).toBe(true);
-    expect(result.observation.updatedAt).toBe(20);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Registration (AC1 / AC2) — the tools are reachable from the registry
+// Registration — the consolidated surface has no standalone polling tools.
 // ---------------------------------------------------------------------------
 describe("tool registration", () => {
-  test("registers settleObserve and waitForCondition as served (not debug-only) device-aware tools", () => {
+  test("does not advertise the retired standalone polling tools", () => {
     registerObserveTools();
-    // The default getAllTools() is the served, availability-filtered set — asserting
-    // against it (not includeUnavailable) proves the tools are actually reachable,
-    // not merely present but gated off as debugOnly.
     const names = ToolRegistry.getAllTools().map(tool => tool.name);
-    expect(names).toContain("settleObserve");
-    expect(names).toContain("waitForCondition");
+    expect(names).not.toContain("settleObserve");
+    expect(names).not.toContain("waitForCondition");
   });
 });

@@ -5521,6 +5521,431 @@
           ],
           "additionalProperties": {}
         },
+        "matched": {
+          "type": "boolean"
+        },
+        "settled": {
+          "type": "boolean"
+        },
+        "timedOut": {
+          "type": "boolean"
+        },
+        "polls": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "waitMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "matchedElement": {
+          "type": "object",
+          "properties": {
+            "bounds": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "number"
+                },
+                "top": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "number"
+                },
+                "bottom": {
+                  "type": "number"
+                },
+                "centerX": {
+                  "type": "number"
+                },
+                "centerY": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "left",
+                "top",
+                "right",
+                "bottom"
+              ],
+              "additionalProperties": false,
+              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+            },
+            "text": {
+              "type": "string"
+            },
+            "resource-id": {
+              "type": "string"
+            },
+            "view-id": {
+              "type": "string"
+            },
+            "content-desc": {
+              "type": "string"
+            },
+            "occlusionState": {
+              "type": "string"
+            },
+            "occludedBy": {
+              "type": "string"
+            },
+            "occludedByViewId": {
+              "type": "string"
+            },
+            "class": {
+              "type": "string"
+            },
+            "package": {
+              "type": "string"
+            },
+            "checkable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "checked": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "clickable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "enabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "focusable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "focused": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "accessibility-focused": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "scrollable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "selected": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            }
+          },
+          "required": [
+            "bounds"
+          ],
+          "additionalProperties": {}
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "bounds": {
+                "type": "object",
+                "properties": {
+                  "left": {
+                    "type": "number"
+                  },
+                  "top": {
+                    "type": "number"
+                  },
+                  "right": {
+                    "type": "number"
+                  },
+                  "bottom": {
+                    "type": "number"
+                  },
+                  "centerX": {
+                    "type": "number"
+                  },
+                  "centerY": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "left",
+                  "top",
+                  "right",
+                  "bottom"
+                ],
+                "additionalProperties": false,
+                "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+              },
+              "text": {
+                "type": "string"
+              },
+              "resource-id": {
+                "type": "string"
+              },
+              "view-id": {
+                "type": "string"
+              },
+              "content-desc": {
+                "type": "string"
+              },
+              "occlusionState": {
+                "type": "string"
+              },
+              "occludedBy": {
+                "type": "string"
+              },
+              "occludedByViewId": {
+                "type": "string"
+              },
+              "class": {
+                "type": "string"
+              },
+              "package": {
+                "type": "string"
+              },
+              "checkable": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "const": "true"
+                  },
+                  {
+                    "type": "string",
+                    "const": "false"
+                  }
+                ]
+              },
+              "checked": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "const": "true"
+                  },
+                  {
+                    "type": "string",
+                    "const": "false"
+                  }
+                ]
+              },
+              "clickable": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "const": "true"
+                  },
+                  {
+                    "type": "string",
+                    "const": "false"
+                  }
+                ]
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "const": "true"
+                  },
+                  {
+                    "type": "string",
+                    "const": "false"
+                  }
+                ]
+              },
+              "focusable": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "const": "true"
+                  },
+                  {
+                    "type": "string",
+                    "const": "false"
+                  }
+                ]
+              },
+              "focused": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "const": "true"
+                  },
+                  {
+                    "type": "string",
+                    "const": "false"
+                  }
+                ]
+              },
+              "accessibility-focused": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "const": "true"
+                  },
+                  {
+                    "type": "string",
+                    "const": "false"
+                  }
+                ]
+              },
+              "scrollable": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "const": "true"
+                  },
+                  {
+                    "type": "string",
+                    "const": "false"
+                  }
+                ]
+              },
+              "selected": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "const": "true"
+                  },
+                  {
+                    "type": "string",
+                    "const": "false"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "bounds"
+            ],
+            "additionalProperties": {}
+          }
+        },
         "freshness": {
           "type": "object",
           "properties": {
@@ -7250,50 +7675,6 @@
         "key",
         "value",
         "type"
-      ],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "settleObserve",
-    "description": "Observe once the screen stops changing; returns only the final snapshot.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "platform": {
-          "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ]
-        },
-        "timeoutMs": {
-          "description": "Budget ms (default 2500)",
-          "type": "number"
-        },
-        "pollMs": {
-          "description": "Poll interval ms (default 150)",
-          "type": "number"
-        },
-        "stableReads": {
-          "description": "Equal snapshots to settle (default 2)",
-          "type": "number"
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "required": [
-        "platform"
       ],
       "additionalProperties": false
     }
@@ -10416,101 +10797,6 @@
       "required": [
         "action",
         "platform"
-      ],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "waitForCondition",
-    "description": "Wait until a predicate holds (appear/disappear/clickable/textEquals/countStable).",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "platform": {
-          "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ]
-        },
-        "for": {
-          "type": "string",
-          "enum": [
-            "appear",
-            "disappear",
-            "clickable",
-            "textEquals",
-            "countStable"
-          ],
-          "description": "appear|disappear|clickable|textEquals|countStable"
-        },
-        "elementId": {
-          "description": "Element resource ID / accessibility identifier",
-          "type": "string"
-        },
-        "text": {
-          "description": "Element text; for `textEquals` the exact expected value",
-          "type": "string"
-        },
-        "container": {
-          "description": "Scope match to a container",
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "type": "string",
-                  "description": "Container resource ID"
-                }
-              },
-              "required": [
-                "elementId"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "description": "Container text"
-                }
-              },
-              "required": [
-                "text"
-              ],
-              "additionalProperties": false
-            }
-          ]
-        },
-        "timeoutMs": {
-          "description": "Budget ms (default 5000)",
-          "type": "number"
-        },
-        "pollMs": {
-          "description": "Poll interval ms (default 150)",
-          "type": "number"
-        },
-        "stableReads": {
-          "description": "Stable reads for countStable (default 2)",
-          "type": "number"
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "required": [
-        "platform",
-        "for"
       ],
       "additionalProperties": false
     }

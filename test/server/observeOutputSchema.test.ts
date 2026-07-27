@@ -51,6 +51,16 @@ function collectBoundsUnions(schema: unknown): Array<Record<string, unknown>> {
 }
 
 describe("observeResultSchema: parses real captures (#3025)", () => {
+  test("models declarative waitFor outcome metadata", () => {
+    expect(() => observeResultSchema.parse({
+      matched: false,
+      timedOut: true,
+      polls: 3,
+      waitMs: 250,
+      candidates: [{ "resource-id": "submit", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } }],
+    })).not.toThrow();
+  });
+
   test("accepts source-attributed insets and advisory layout warnings", () => {
     const parsed = observeResultSchema.safeParse({
       screenSize: { width: 375, height: 812 },

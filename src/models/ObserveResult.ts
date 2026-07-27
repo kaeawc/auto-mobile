@@ -237,6 +237,27 @@ export interface ObserveResult {
   /** True if the wait timed out without finding the element */
   awaitTimeout?: boolean;
 
+  /** Whether a declarative waitFor condition matched. */
+  matched?: boolean;
+
+  /** Whether a whole-screen declarative waitFor stable condition settled. */
+  settled?: boolean;
+
+  /** True if a declarative waitFor condition or stability wait timed out. */
+  timedOut?: boolean;
+
+  /** Number of observations made by the waitFor poll. */
+  polls?: number;
+
+  /** Elapsed time spent in the waitFor poll, in milliseconds. */
+  waitMs?: number;
+
+  /** Element that satisfied a declarative waitFor condition, when applicable. */
+  matchedElement?: Element;
+
+  /** Last-seen near matches when a declarative waitFor condition times out. */
+  candidates?: Element[];
+
   /** Performance timing data (only present when --debug-perf is enabled) */
   perfTiming?: TimingData;
 

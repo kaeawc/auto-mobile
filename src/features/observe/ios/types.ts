@@ -254,6 +254,7 @@ export interface CtrlProxyCachedHierarchy {
   receivedAt: number;
   fresh: boolean;
   perfTiming?: CtrlProxyPerfTiming;
+  frameContext?: string;
 }
 
 export type CachedHierarchy = CtrlProxyCachedHierarchy;
@@ -266,6 +267,7 @@ export interface CtrlProxyHierarchyResponse {
   fresh: boolean;
   updatedAt?: number;
   perfTiming?: CtrlProxyPerfTiming;
+  frameContext?: string;
   reconnectStatus?: CtrlProxyReconnectStatus;
   reconnectMessage?: string;
 }

@@ -740,14 +740,14 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     signal?: AbortSignal,
     timeoutMs?: number,
     diagnostics?: HierarchySyncDiagnostics
-  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null>;
+  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[]; frameContext?: string } | null>;
 
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number
-  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null>;
+  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[]; frameContext?: string } | null>;
 
   convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult;
 
@@ -2842,7 +2842,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       hierarchy: data,
       receivedAt: now,
       fresh: true,
-      perfTiming
+      perfTiming,
+      frameContext,
     };
 
     // Update cached screen dimensions

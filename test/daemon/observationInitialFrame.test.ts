@@ -19,11 +19,19 @@ import type {
 import { loadCoordinateMappingVectors } from "../parity/coordinateMappingGoldenVectors";
 
 class FakeObservationStreamServer {
-  readonly hierarchyUpdates: Array<{ deviceId: string; hierarchy: ViewHierarchyResult }> = [];
+  readonly hierarchyUpdates: Array<{
+    deviceId: string;
+    hierarchy: ViewHierarchyResult;
+    frameContext?: string;
+  }> = [];
   readonly screenshotUpdates: ScreenshotUpdate[] = [];
 
-  pushHierarchyUpdate(deviceId: string, hierarchy: ViewHierarchyResult): void {
-    this.hierarchyUpdates.push({ deviceId, hierarchy });
+  pushHierarchyUpdate(deviceId: string, hierarchy: ViewHierarchyResult, frameContext?: string): void {
+    this.hierarchyUpdates.push({
+      deviceId,
+      hierarchy,
+      ...(frameContext === undefined ? {} : { frameContext }),
+    });
   }
 
   pushScreenshotUpdate(
@@ -32,7 +40,12 @@ class FakeObservationStreamServer {
     screenWidth: number,
     screenHeight: number,
     metadata?: Record<string, unknown>,
-    options?: { captureSequence?: number; coordinateSpace?: "px"; rotation?: number }
+    options?: {
+      captureSequence?: number;
+      coordinateSpace?: "px";
+      frameContext?: string;
+      rotation?: number;
+    }
   ): void {
     const screenshotOptions = options?.captureSequence === undefined && options?.rotation === undefined
       ? undefined
@@ -45,6 +58,7 @@ class FakeObservationStreamServer {
       ...(metadata === undefined ? {} : { metadata }),
       ...(options?.coordinateSpace === undefined ? {} : { coordinateSpace: options.coordinateSpace }),
       ...(screenshotOptions === undefined ? {} : { options: screenshotOptions }),
+      ...(options?.frameContext === undefined ? {} : { frameContext: options.frameContext }),
     });
   }
 }
@@ -57,6 +71,7 @@ interface ScreenshotUpdate {
   metadata?: Record<string, unknown>;
   coordinateSpace?: "px";
   options?: { captureSequence?: number; rotation?: number };
+  frameContext?: string;
 }
 
 class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
@@ -118,6 +133,9 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
       updatedAt: hierarchy.updatedAt,
       screenWidth: hierarchy.screenWidth,
       screenHeight: hierarchy.screenHeight,
+      ...("frameContext" in hierarchy && typeof hierarchy.frameContext === "string"
+        ? { frameContext: hierarchy.frameContext }
+        : {}),
     };
   }
 
@@ -191,6 +209,9 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
       ...(typedHierarchy.pixelWidth === undefined ? {} : { pixelWidth: typedHierarchy.pixelWidth }),
       ...(typedHierarchy.pixelHeight === undefined ? {} : { pixelHeight: typedHierarchy.pixelHeight }),
       rotation: typedHierarchy.rotation,
+      ...("frameContext" in typedHierarchy && typeof typedHierarchy.frameContext === "string"
+        ? { frameContext: typedHierarchy.frameContext }
+        : {}),
     };
   }
 
@@ -265,6 +286,39 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     ]);
     expect(androidClient.suppressedSyncHierarchyCalls).toHaveLength(0);
     expect(androidClient.observationScreenshotCallCount).toBe(1);
+  });
+
+  it("forwards proven Android initial-frame contexts", async () => {
+    const streamServer = new FakeObservationStreamServer();
+    const androidClient = new FakeAndroidInitialFrameClient(
+      true,
+      {
+        updatedAt: 123,
+        packageName: "com.example",
+        screenWidth: 1440,
+        screenHeight: 3120,
+        hierarchy: { text: "Home" },
+        frameContext: "android-hierarchy",
+      } as any,
+      undefined,
+      true,
+      {
+        success: true,
+        data: "android-shot",
+        frameContext: "android-screenshot",
+      }
+    );
+
+    await pushInitialObservationFramesForSubscriber(androidDevice.id, [androidDevice], {
+      streamServer,
+      androidClientFactory: () => androidClient,
+      iosClientFactory: () => {
+        throw new Error("unexpected iOS client");
+      },
+    });
+
+    expect(streamServer.hierarchyUpdates[0].frameContext).toBe("android-hierarchy");
+    expect(streamServer.screenshotUpdates[0].frameContext).toBe("android-screenshot");
   });
 
   it("pushes Android initial ADB fallback screenshots with fallback metadata", async () => {
@@ -483,6 +537,35 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     expect(iosClient.suppressedScreenshotCalls).toEqual([{ timeoutMs: 3000 }]);
   });
 
+  it("forwards proven iOS initial-frame contexts", async () => {
+    const streamServer = new FakeObservationStreamServer();
+    const iosClient = new FakeIosInitialFrameClient(
+      true,
+      {
+        updatedAt: 456,
+        packageName: "com.example.ios",
+        screenWidth: 390,
+        screenHeight: 844,
+        screenScale: 3,
+        hierarchy: { text: "Home" },
+        frameContext: "ios-hierarchy",
+      } as any,
+      undefined,
+      { success: true, data: "ios-shot", format: "png", frameContext: "ios-screenshot" }
+    );
+
+    await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
+      streamServer,
+      androidClientFactory: () => {
+        throw new Error("unexpected Android client");
+      },
+      iosClientFactory: () => iosClient,
+    });
+
+    expect(streamServer.hierarchyUpdates[0].frameContext).toBe("ios-hierarchy");
+    expect(streamServer.screenshotUpdates[0].frameContext).toBe("ios-screenshot");
+  });
+
   it("captures iOS hierarchy synchronously when the initial cache is empty", async () => {
     const streamServer = new FakeObservationStreamServer();
     const iosClient = new FakeIosInitialFrameClient(
@@ -515,6 +598,33 @@ describe("pushInitialObservationFramesForSubscriber", () => {
       screenWidth: 800,
       screenHeight: 1600,
     });
+  });
+
+  it("forwards the synchronous iOS hierarchy context when the initial cache is empty", async () => {
+    const streamServer = new FakeObservationStreamServer();
+    const iosClient = new FakeIosInitialFrameClient(
+      true,
+      null,
+      {
+        updatedAt: 789,
+        packageName: "com.example",
+        screenWidth: 390,
+        screenHeight: 844,
+        screenScale: 3,
+        hierarchy: { text: "Cold start" },
+        frameContext: "ios-sync",
+      } as any
+    );
+
+    await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
+      streamServer,
+      androidClientFactory: () => {
+        throw new Error("unexpected Android client");
+      },
+      iosClientFactory: () => iosClient,
+    });
+
+    expect(streamServer.hierarchyUpdates[0].frameContext).toBe("ios-sync");
   });
 
   it("does not seed iOS subscribers from stale cached hierarchy", async () => {

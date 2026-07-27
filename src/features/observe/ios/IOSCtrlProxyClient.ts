@@ -180,7 +180,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null>;
+  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string } | null>;
   requestAddHighlight(
     id: string,
     shape: HighlightShape,
@@ -199,7 +199,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null>;
+  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string } | null>;
 
   convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult;
 
@@ -1489,7 +1489,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         hierarchy: message.data,
         receivedAt: now,
         fresh: true,
-        perfTiming: message.perfTiming as CtrlProxyPerfTiming | undefined
+        perfTiming: message.perfTiming as CtrlProxyPerfTiming | undefined,
+        frameContext: message.frameContext,
       };
       logger.info(`[IOSCtrlProxyClient] Received hierarchy push update - UI changed`);
 
@@ -1645,7 +1646,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs: number = 5000
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
+  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, true);
   }
 

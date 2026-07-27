@@ -182,7 +182,8 @@ export class CtrlProxyHierarchy {
               hierarchy: cachedHierarchy.hierarchy,
               fresh: isFresh,
               updatedAt: updatedAt,
-              perfTiming: cachedHierarchy.perfTiming
+              perfTiming: cachedHierarchy.perfTiming,
+              frameContext: cachedHierarchy.frameContext,
             };
           }
         } else {
@@ -195,7 +196,8 @@ export class CtrlProxyHierarchy {
             hierarchy: cachedHierarchy.hierarchy,
             fresh: isFresh,
             updatedAt: updatedAt,
-            perfTiming: cachedHierarchy.perfTiming
+            perfTiming: cachedHierarchy.perfTiming,
+            frameContext: cachedHierarchy.frameContext,
           };
         }
       }
@@ -224,7 +226,8 @@ export class CtrlProxyHierarchy {
             hierarchy: freshData.hierarchy,
             fresh: true,
             updatedAt: freshData.hierarchy.updatedAt,
-            perfTiming: freshData.perfTiming
+            perfTiming: freshData.perfTiming,
+            frameContext: freshData.frameContext,
           };
         } else {
           // Record timeout so we skip WebSocket wait for a while
@@ -247,7 +250,8 @@ export class CtrlProxyHierarchy {
               hierarchy: currentCache.hierarchy,
               fresh: false,
               updatedAt: currentCache.hierarchy.updatedAt,
-              perfTiming: currentCache.perfTiming
+              perfTiming: currentCache.perfTiming,
+              frameContext: currentCache.frameContext,
             };
           }
         }
@@ -322,6 +326,7 @@ export class CtrlProxyHierarchy {
       let hierarchyData = response.hierarchy;
       let isFresh = response.fresh;
       let androidPerfTiming = response.perfTiming;
+      let frameContext = response.frameContext;
 
       // If no hierarchy from WebSocket or data is stale, sync to get fresh data
       const needsSync = !hierarchyData || !isFresh;
@@ -343,6 +348,7 @@ export class CtrlProxyHierarchy {
           if (syncResult.perfTiming) {
             androidPerfTiming = syncResult.perfTiming;
           }
+          frameContext = syncResult.frameContext;
           isFresh = true;
           if (hierarchyData.packageName) {
             this.lastKnownPackageName = hierarchyData.packageName;
@@ -368,6 +374,9 @@ export class CtrlProxyHierarchy {
       // Add the device timestamp to the result
       if (hierarchyData!.updatedAt) {
         convertedHierarchy.updatedAt = hierarchyData!.updatedAt;
+      }
+      if (frameContext !== undefined) {
+        convertedHierarchy.frameContext = frameContext;
       }
 
       // Merge Android-side performance timing
@@ -400,7 +409,7 @@ export class CtrlProxyHierarchy {
     signal?: AbortSignal,
     timeoutMs: number = 10000,
     diagnostics?: HierarchySyncDiagnostics
-  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
+  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[]; frameContext?: string } | null> {
     const startTime = this.context.timer.now();
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
 
@@ -456,7 +465,8 @@ export class CtrlProxyHierarchy {
         logger.debug(`[CTRL_PROXY] Sync complete: ${duration}ms (updatedAt: ${freshData.hierarchy.updatedAt})`);
         return {
           hierarchy: freshData.hierarchy,
-          perfTiming: freshData.perfTiming
+          perfTiming: freshData.perfTiming,
+          frameContext: freshData.frameContext,
         };
       }
 

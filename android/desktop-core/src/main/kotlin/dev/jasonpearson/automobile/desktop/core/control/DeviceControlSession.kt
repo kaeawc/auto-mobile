@@ -154,7 +154,7 @@ class DeviceControlSession(
     // stale content could stay actionable indefinitely.
     interactionSnapshot =
       if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
-        retainedIfStillFresh(decision, now)
+        retainedIfStillActionable(decision, inputs, now)
       } else {
         live
       }
@@ -162,21 +162,63 @@ class DeviceControlSession(
   }
 
   /**
-   * The retained frame, or null once it is no longer fresh enough to act on.
+   * The retained frame, or null once it is no longer safe to act through.
    *
-   * Two independent signals retire it, because either alone can be the first to notice: the live
-   * decision reporting [DeviceControlBlockReason.StaleFrame] (the sources stopped producing), and
-   * the retained frame's own age (nothing new has arrived to make the live decision say anything).
+   * Three independent signals retire it, because any one can be the first to notice:
+   * - the live decision reporting [DeviceControlBlockReason.StaleFrame] (the sources stopped
+   *   producing),
+   * - the retained frame's own age (nothing new has arrived to make the live decision say
+   *   anything), and
+   * - a **coordinate-space transition** on the sources it was built from (issue #4550), below.
    */
-  private fun retainedIfStillFresh(
+  private fun retainedIfStillActionable(
     decision: DeviceControlDecision,
+    inputs: DeviceControlInputs,
     nowMs: Long,
   ): DeviceFrameSnapshot? {
     val retained = renderSnapshot ?: return null
     val blockedForStaleness =
       (decision as? DeviceControlDecision.Blocked)?.reason == DeviceControlBlockReason.StaleFrame
     if (blockedForStaleness) return null
+    if (!spaceStillMatchesSources(retained, inputs)) return null
     return retained.takeIf { DeviceControlPolicy.isSnapshotFresh(it, nowMs) }
+  }
+
+  /**
+   * Whether the retained frame's bound coordinate space still describes the device's current
+   * sources (issue #4550).
+   *
+   * The daemon converts an incoming `input/tap` or `input/swipe` coordinate using the runner's
+   * **current** scale metadata, not the frame's. Retention breaks the usual coupling: after a
+   * successful input this session deliberately keeps the clicked frame **clickable** while its
+   * sources move on, so a hierarchy that arrives with a different declaration (iOS scale metadata
+   * appearing, or a runner downgrade removing it) leaves a frame on screen whose coordinates are in
+   * one space while the daemon would convert them as the other — a tap in the wrong physical place,
+   * silently.
+   *
+   * A retained frame whose sources have changed space is therefore retired exactly like a stale
+   * one: control drops to Inspector until a fresh, agreed frame arrives. Failing closed is cheap
+   * here (the user loses control for one refresh cycle) and the alternative is a mis-placed tap on
+   * real hardware.
+   *
+   * A source that is absent proves nothing, so it is not treated as a transition — the retained
+   * frame's own age and the live decision still bound it.
+   *
+   * Scope note: this closes the window the client can observe, which is the one that lasts (a
+   * retention is bounded by the 3 s refresh timeout, not by a scheduler tick). The residual
+   * sub-dispatch race — metadata flipping between the click and the queued request reaching the
+   * daemon — cannot be closed from the client at all; it needs the input endpoints to accept a
+   * caller-declared space, which is a wire change and deliberately out of scope here.
+   */
+  private fun spaceStillMatchesSources(
+    retained: DeviceFrameSnapshot,
+    inputs: DeviceControlInputs,
+  ): Boolean {
+    val screenshotAgrees =
+      inputs.screenshot?.let { it.coordinateSpace == retained.coordinateSpace } ?: true
+    val hierarchyAgrees =
+      inputs.hierarchy?.let { it.coordinateSpace == retained.coordinateSpace } ?: true
+    return screenshotAgrees && hierarchyAgrees
   }
 
   /**

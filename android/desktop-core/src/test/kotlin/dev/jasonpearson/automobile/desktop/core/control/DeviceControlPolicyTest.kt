@@ -544,6 +544,43 @@ class DeviceControlPolicyTest {
       )
     assertEquals(1170, snapshot.deviceWidth)
     assertEquals(2532, snapshot.deviceHeight)
+    // The agreed space is BOUND to the snapshot, not re-derived later: a snapshot outlives the
+    // facts it was built from, and the unit its coordinates are in has to travel with it.
+    assertEquals(CoordinateSpace.Pixels, snapshot.coordinateSpace)
+  }
+
+  @Test
+  fun `a legacy snapshot binds a null space rather than inheriting one`() {
+    val snapshot =
+      assertNotNull(
+        DeviceControlPolicy.evaluate(
+            inputs(
+              screenshot = screenshotFacts(1080, 2340, coordinateSpace = null),
+              hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
+            ),
+            now,
+          )
+          .snapshotOrNull
+      )
+    assertNull(snapshot.coordinateSpace)
+  }
+
+  @Test
+  fun `a snapshot built from disagreeing declarations binds the conservative legacy space`() {
+    // The bound space must match the space the geometry was JUDGED in, or the snapshot would claim
+    // a unit the policy never verified.
+    val snapshot =
+      assertNotNull(
+        DeviceControlPolicy.evaluate(
+            inputs(
+              screenshot = screenshotFacts(1080, 2340, CoordinateSpace.Pixels),
+              hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
+            ),
+            now,
+          )
+          .snapshotOrNull
+      )
+    assertNull(snapshot.coordinateSpace)
   }
 
   @Test

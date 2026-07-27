@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.control
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
@@ -555,6 +556,78 @@ class DeviceControlSessionTest {
   }
 
   @Test
+  fun `a coordinate-space flip retires the retained frame before it can be tapped again`() =
+    runTest {
+      // Issue #4550. The daemon converts an incoming input coordinate using the runner's CURRENT
+      // scale metadata, not the frame's. Retention deliberately keeps the clicked frame clickable
+      // while its sources move on — so if iOS scale metadata appears (or a downgrade removes it)
+      // during that window, a coordinate mapped in one space would be converted as the other and
+      // land in the wrong physical place. The retained frame must stop being actionable instead.
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val client = FakeAutoMobileClient()
+      val session = session(scope, client)
+
+      // Clicked while the device was still publishing legacy point-space frames.
+      val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+      assertNotNull(session.evaluate(legacy).snapshotOrNull)
+      val retained = assertNotNull(session.interactionSnapshot)
+      assertNull(retained.coordinateSpace, "the clicked frame's space is bound to the snapshot")
+
+      session.tap(retained, point)
+      advanceUntilIdle()
+      assertEquals(1, client.inputTapCalls.size)
+      assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+      // A hierarchy arrives declaring canonical pixels — the runner now reports scale metadata.
+      // Nothing pairs yet, so the live decision is Blocked and the retained frame is still on
+      // screen; without the guard it would also still be clickable.
+      val flipped =
+        legacy.copy(
+          hierarchy =
+            legacy.hierarchy?.copy(
+              sequence = 20L,
+              captureSequence = 8L,
+              coordinateSpace = CoordinateSpace.Pixels,
+            )
+        )
+      assertNull(session.evaluate(flipped).snapshotOrNull)
+
+      assertEquals(retained, session.renderSnapshot, "the picture does not flicker")
+      assertNull(
+        session.interactionSnapshot,
+        "a frame mapped in the old space must not be dispatched under the new one",
+      )
+      scope.cancel()
+    }
+
+  @Test
+  fun `retention survives source updates that keep the same coordinate space`() = runTest {
+    // The guard must fire on a TRANSITION, not on every update: a screenshot-only update in the
+    // same declared space is the ordinary post-input case and must keep the frame clickable.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    val px =
+      paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = CoordinateSpace.Pixels)
+    assertNotNull(session.evaluate(px).snapshotOrNull)
+    val retained = assertNotNull(session.interactionSnapshot)
+    assertEquals(CoordinateSpace.Pixels, retained.coordinateSpace)
+
+    session.tap(retained, point)
+    advanceUntilIdle()
+
+    val sameSpace = px.copy(screenshot = px.screenshot?.copy(sequence = 20L, captureSequence = 8L))
+    assertNull(session.evaluate(sameSpace).snapshotOrNull)
+
+    assertEquals(retained, session.interactionSnapshot, "still clickable in the same space")
+    session.tap(assertNotNull(session.interactionSnapshot), point)
+    advanceUntilIdle()
+    assertEquals(2, client.inputTapCalls.size)
+    scope.cancel()
+  }
+
+  @Test
   fun `retention does not outlive freshness`() = runTest {
     // Finding 1: tap a frame that is already near the freshness bound, then evaluate 200ms later.
     // The live decision correctly rejects it as stale, but the 3s refresh wait is still running —
@@ -606,6 +679,7 @@ class DeviceControlSessionTest {
     height: Int = 2340,
     data: ByteArray? = null,
     receivedAtMs: Long = 1_000L,
+    coordinateSpace: CoordinateSpace? = null,
   ) =
     DeviceControlInputs(
       enabled = true,
@@ -622,6 +696,7 @@ class DeviceControlSessionTest {
           width = width,
           height = height,
           data = data,
+          coordinateSpace = coordinateSpace,
         ),
       hierarchy =
         HierarchyFrameFacts(
@@ -632,6 +707,7 @@ class DeviceControlSessionTest {
           hierarchy = null,
           rootWidth = width,
           rootHeight = height,
+          coordinateSpace = coordinateSpace,
         ),
       liveFrame = null,
     )

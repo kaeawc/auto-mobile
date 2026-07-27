@@ -167,6 +167,11 @@ platforms. That is the whole contract:
 - **Writing.** Send `input/tap` and `input/swipe` coordinates in those same pixels. The daemon does
   any runner-specific conversion itself (it divides by the runner-reported `nativeScale` for the iOS
   XCUITest runner, exactly and without rounding; Android runners already take pixels).
+- **Do not outlive the declaration.** That conversion uses the runner's *current* metadata, so a
+  coordinate mapped against a frame whose space has since changed would be converted as the wrong
+  unit. Bind the declared space to the snapshot and stop acting through a **retained** frame the
+  moment an incoming message declares a different one — see
+  [Client Frame Snapshot](client-frame-snapshot.md#coordinate-space-canonical-pixels).
 
 The daemon stamps `"px"` only when the runner supplied complete scale metadata
 ([#4548](https://github.com/kaeawc/auto-mobile/issues/4548),

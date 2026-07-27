@@ -32,6 +32,7 @@ class PostInputRefreshTrackerTest {
       deviceHeight = 2340,
       screenshotData = null,
       hierarchy = null,
+      coordinateSpace = null,
       captureSequence = captureSequence,
       screenshotSequence = sourceSequence,
       hierarchySequence = sourceSequence,

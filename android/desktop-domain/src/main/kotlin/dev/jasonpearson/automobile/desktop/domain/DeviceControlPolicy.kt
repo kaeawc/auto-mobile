@@ -210,6 +210,11 @@ public object DeviceControlPolicy {
     val frameWidth = liveFrame?.width ?: screenshot.width
     val frameHeight = liveFrame?.height ?: screenshot.height
 
+    // Resolved ONCE, then both compared against and bound into the snapshot, so the space a frame
+    // is
+    // judged in and the space it is later dispatched in cannot diverge.
+    val pairedSpace = pairedCoordinateSpace(screenshot, hierarchy)
+
     if (liveFrame != null) {
       // The live mirror carries NO capture identity — it is a separate WebRTC transport with no
       // link to the observation stream's captures — so none of the pairing above says anything
@@ -239,7 +244,7 @@ public object DeviceControlPolicy {
         // A polled screenshot may arrive in native pixel orientation (notably iOS) and the renderer
         // rotates it, so an orientation difference there is expected.
         allowRotation = true,
-        coordinateSpace = pairedCoordinateSpace(screenshot, hierarchy),
+        coordinateSpace = pairedSpace,
       )
     ) {
       return blocked(DeviceControlBlockReason.GeometryMismatch)
@@ -264,6 +269,11 @@ public object DeviceControlPolicy {
         deviceHeight = deviceHeight,
         screenshotData = screenshot.data,
         hierarchy = hierarchy.hierarchy,
+        // Bind the agreed space to the snapshot, exactly as captureSequence is bound: a snapshot
+        // outlives the facts it was built from (the post-input refresh retains it), and the unit
+        // its
+        // coordinates are in must travel with it rather than be re-derived at dispatch time.
+        coordinateSpace = pairedSpace,
         captureSequence = captureSequence,
         screenshotSequence = screenshot.sequence,
         hierarchySequence = hierarchy.sequence,

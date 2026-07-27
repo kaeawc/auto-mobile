@@ -155,6 +155,15 @@ public data class LiveFrameFacts(
  *   renders AND maps through, so a retained snapshot cannot show new pixels against an old tree.
  * @param hierarchy the hierarchy paired into this snapshot; may be null only when the update
  *   carried no parsed tree.
+ * @param coordinateSpace the space the screenshot and the hierarchy AGREED on when this snapshot
+ *   was built (issue #4550) — the unit of [deviceWidth]/[deviceHeight] and of every coordinate
+ *   mapped through them. Bound here for the same reason [captureSequence] is: a snapshot can stay
+ *   clickable after the sources it was built from have moved on (the post-input refresh retains
+ *   it), and the daemon converts an incoming input coordinate using the runner's **current** scale
+ *   metadata. If that metadata appears or disappears while a retained frame is still on screen, a
+ *   coordinate mapped in one space would be converted as though it were in the other and land in
+ *   the wrong physical place. Carrying the space lets the session notice the transition and fail
+ *   closed; see `DeviceControlSession`.
  * @param captureSequence the daemon capture identity the screenshot and hierarchy agreed on.
  * @param screenshotSequence provenance of the observation screenshot this snapshot was built from.
  * @param hierarchySequence provenance of the hierarchy this snapshot was built from.
@@ -171,6 +180,7 @@ public data class DeviceFrameSnapshot(
   val deviceHeight: Int,
   val screenshotData: ByteArray?,
   val hierarchy: ParsedHierarchy?,
+  val coordinateSpace: CoordinateSpace?,
   val captureSequence: Long,
   val screenshotSequence: Long,
   val hierarchySequence: Long,

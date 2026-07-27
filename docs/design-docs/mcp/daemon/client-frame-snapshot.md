@@ -128,6 +128,20 @@ message paired with one undeclared message is precisely the mixed-unit state the
 exact check must not be applied to, so it takes the legacy path
 ([#4550](https://github.com/kaeawc/auto-mobile/issues/4550)).
 
+**Bind the space to the frame, and retire a retained frame when it changes.** The
+daemon converts an incoming `input/tap` or `input/swipe` coordinate using the
+runner's **current** scale metadata, not the frame's. That is safe while a client
+acts on the frame it is rendering, but the [post-input refresh](#post-input-refresh-policy)
+deliberately keeps the clicked frame **clickable** while its sources move on. If
+scale metadata appears (or a runner downgrade removes it) during that window, a
+coordinate mapped in one space would be converted as though it were in the other
+and land in the wrong physical place. So a client must:
+
+- record the agreed space **on the snapshot**, alongside its capture identity, and
+- stop acting through a retained snapshot as soon as an incoming `hierarchy_update`
+  or `screenshot_update` declares a different space — retire it exactly like a
+  stale one and drop to inspector behavior until a fresh, agreed frame arrives.
+
 One consequence worth calling out: a **live mirror** frame on iOS is verifiable
 again. The live-frame check below has always demanded an exact match, which a
 point-space hierarchy could never satisfy against pixel mirror frames; published

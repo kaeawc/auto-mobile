@@ -153,4 +153,43 @@ describe("AdbClient ADB-path discovery deadline", () => {
 
     expect(adbPathProbeCalls).toBe(2);
   });
+
+  test("does not cache the fallback path when an environment probe is aborted", async () => {
+    process.env.ANDROID_HOME = "/sdk";
+    const client = new AdbClient(null, null, null, defaultRetryExecutor, new FakeTimer());
+    const internals = client as unknown as AdbClientInternals;
+    internals.isTestMode = false;
+    let versionProbeCalls = 0;
+    const commandFiles: string[] = [];
+    internals.execWithSignal = async (file, args, _maxBuffer, _timeoutMs, signal) => {
+      if (signal?.aborted) {
+        throw new Error("probe aborted");
+      }
+      if (file === "/sdk/platform-tools/adb" && args[0] === "version") {
+        versionProbeCalls += 1;
+        if (versionProbeCalls === 1) {
+          return new Promise<ExecResult>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(new Error("probe aborted")), { once: true });
+          });
+        }
+        return ok();
+      }
+      if (args[0] === "shell") {
+        commandFiles.push(file);
+      }
+      return ok();
+    };
+
+    const controller = new AbortController();
+    const aborted = client.execute(["shell", "true"], { noRetry: true, signal: controller.signal });
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(aborted).rejects.toThrow("Operation cancelled");
+
+    await client.execute(["shell", "true"], { noRetry: true });
+
+    expect(commandFiles).toEqual(["/sdk/platform-tools/adb"]);
+    expect(versionProbeCalls).toBe(2);
+  });
 });

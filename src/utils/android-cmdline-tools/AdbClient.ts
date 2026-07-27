@@ -210,7 +210,7 @@ export class AdbClient implements AdbExecutor {
         logger.debug(`Using ADB from environment: ${envPath}`);
         return envPath;
       } catch (error) {
-        this.throwIfAdbPathTimeout(error);
+        this.throwIfAdbPathTimeout(error, signal);
         logger.debug(`ADB path from environment not working: ${envPath}`);
       }
     }
@@ -224,7 +224,7 @@ export class AdbClient implements AdbExecutor {
         return adbFromPath;
       }
     } catch (error) {
-      this.throwIfAdbPathTimeout(error);
+      this.throwIfAdbPathTimeout(error, signal);
       logger.debug("ADB not found via 'which adb'");
     }
 

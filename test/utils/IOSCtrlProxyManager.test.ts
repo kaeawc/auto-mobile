@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { ChildProcess } from "node:child_process";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -8,6 +9,8 @@ import { createExecResult } from "../../src/utils/execResult";
 import { PortManager } from "../../src/utils/PortManager";
 import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
 import { IOSCtrlProxyProcessClient } from "../../src/utils/ios/IOSCtrlProxyProcessClient";
+import type { Xcodebuild } from "../../src/utils/ios-cmdline-tools/XcodebuildClient";
+import type { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import type { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/XcodeSigning";
 import * as fs from "fs/promises";
@@ -568,6 +571,52 @@ describe("IOSCtrlProxyManager", function() {
       expect(await manager.isRunning()).toBe(false);
       manager.resetSetupState();
       expect(await manager.isRunning()).toBe(true);
+    });
+
+    test("allows setup to launch again after a completed setup attempt", async function() {
+      const fakeExecutor = new FakeProcessExecutor();
+      let runnerHealthy = false;
+      let launchCount = 0;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(runnerHealthy ? JSON.stringify({ status: "ok" }) : "", "")
+      );
+      fakeExecutor.setCommandHandler("kill -0", () => {
+        throw new Error("runner is no longer running");
+      });
+
+      const fakeDeviceAppManager = {
+        getInstalledAppBundleHash: async () => null
+      } as unknown as DeviceAppManager;
+      const xcodebuild: Xcodebuild = {
+        executeCommand: async () => createExecResult("", ""),
+        isAvailable: async () => true,
+        startStreaming: async () => {
+          launchCount++;
+          runnerHealthy = true;
+          return new FakeChildProcess() as unknown as ChildProcess;
+        }
+      };
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+        undefined,
+        fakeDeviceAppManager,
+        undefined,
+        undefined,
+        xcodebuild
+      );
+      fakeTimer.enableAutoAdvance();
+
+      expect((await manager.setup()).success).toBe(true);
+      expect(launchCount).toBe(1);
+
+      runnerHealthy = false;
+      manager.resetSetupState();
+
+      expect((await manager.setup()).success).toBe(true);
+      expect(launchCount).toBe(2);
     });
   });
 

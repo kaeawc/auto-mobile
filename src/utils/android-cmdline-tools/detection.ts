@@ -14,6 +14,20 @@ export class AndroidToolsDetectionTimeoutError extends Error {
   }
 }
 
+/** Preserves caller cancellation through discovery's normal miss handling. */
+export class AndroidToolsDetectionAbortError extends Error {
+  constructor(readonly abortError: Error) {
+    super(abortError.message);
+    this.name = "AndroidToolsDetectionAbortError";
+  }
+}
+
+function isAndroidToolsDetectionControlError(
+  error: unknown
+): error is AndroidToolsDetectionTimeoutError | AndroidToolsDetectionAbortError {
+  return error instanceof AndroidToolsDetectionTimeoutError || error instanceof AndroidToolsDetectionAbortError;
+}
+
 export type AndroidToolsSource = "homebrew" | "android_home" | "android_sdk_root" | "path" | "manual" | "typical";
 
 export interface AndroidToolsLocation {
@@ -214,7 +228,7 @@ export async function isToolInPath(toolName: string, systemDetection = createDef
     await systemDetection.executeCommand(command, [toolName]);
     return true;
   } catch (error) {
-    if (error instanceof AndroidToolsDetectionTimeoutError) {
+    if (isAndroidToolsDetectionControlError(error)) {
       throw error;
     }
     // which/where exits non-zero when the tool isn't on PATH; that's a normal "not found", not a fault.
@@ -233,7 +247,7 @@ export async function getToolPathFromPath(toolName: string, systemDetection = cr
     const path = result.stdout.trim().split("\n")[0]; // Take first result if multiple
     return path || null;
   } catch (error) {
-    if (error instanceof AndroidToolsDetectionTimeoutError) {
+    if (isAndroidToolsDetectionControlError(error)) {
       throw error;
     }
     // which/where exits non-zero when the tool isn't on PATH; null tells the caller to keep searching.
@@ -428,7 +442,7 @@ export async function detectAndroidCommandLineTools(systemDetection = createDefa
       logger.debug(`Found Android tools in PATH: ${pathLocation.available_tools.join(", ")}`);
     }
   } catch (error) {
-    if (error instanceof AndroidToolsDetectionTimeoutError) {
+    if (isAndroidToolsDetectionControlError(error)) {
       throw error;
     }
     logger.warn(`Error detecting Android tools in PATH: ${(error as Error).message}`);

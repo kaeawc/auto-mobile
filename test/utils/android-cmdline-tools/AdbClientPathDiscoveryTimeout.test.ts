@@ -192,4 +192,42 @@ describe("AdbClient ADB-path discovery deadline", () => {
     expect(commandFiles).toEqual(["/sdk/platform-tools/adb"]);
     expect(versionProbeCalls).toBe(2);
   });
+
+  test("does not cache the fallback path when a later tool-discovery probe is aborted", async () => {
+    const client = new AdbClient(null, null, null, defaultRetryExecutor, new FakeTimer());
+    const internals = client as unknown as AdbClientInternals;
+    internals.isTestMode = false;
+    let adbPathProbeCalls = 0;
+    const commandFiles: string[] = [];
+    internals.execWithSignal = async (file, args, _maxBuffer, _timeoutMs, signal) => {
+      if (signal?.aborted) {
+        throw new Error("probe aborted");
+      }
+      if (file === "which" && args[0] === "adb") {
+        adbPathProbeCalls += 1;
+        return adbPathProbeCalls === 1 ? ok("") : ok("/sdk/platform-tools/adb\n");
+      }
+      if (file === "which") {
+        return new Promise<ExecResult>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("probe aborted")), { once: true });
+        });
+      }
+      if (args[0] === "shell") {
+        commandFiles.push(file);
+      }
+      return ok();
+    };
+
+    const controller = new AbortController();
+    const aborted = client.execute(["shell", "true"], { noRetry: true, signal: controller.signal });
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(aborted).rejects.toThrow("Operation cancelled");
+
+    await client.execute(["shell", "true"], { noRetry: true });
+
+    expect(adbPathProbeCalls).toBe(2);
+    expect(commandFiles).toEqual(["/sdk/platform-tools/adb"]);
+  });
 });

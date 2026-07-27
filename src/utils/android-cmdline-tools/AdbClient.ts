@@ -3,6 +3,7 @@ import { promisify } from "util";
 import { logger } from "../logger";
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../models";
 import {
+  AndroidToolsDetectionAbortError,
   AndroidToolsDetectionTimeoutError,
   detectAndroidCommandLineTools,
   getBestAndroidToolsLocation,
@@ -251,6 +252,9 @@ export class AdbClient implements AdbExecutor {
       if (error instanceof AndroidToolsDetectionTimeoutError) {
         throw new AdbCommandTimeoutError(error.message);
       }
+      if (error instanceof AndroidToolsDetectionAbortError) {
+        throw error.abortError;
+      }
       logger.debug(`Failed to detect ADB path via Android tools detection: ${error}`);
     }
 
@@ -289,6 +293,9 @@ export class AdbClient implements AdbExecutor {
         } catch (error) {
           if (error instanceof AdbCommandTimeoutError) {
             throw new AndroidToolsDetectionTimeoutError(error.message);
+          }
+          if (signal?.aborted) {
+            throw new AndroidToolsDetectionAbortError(this.getAbortError(signal));
           }
           throw error;
         }

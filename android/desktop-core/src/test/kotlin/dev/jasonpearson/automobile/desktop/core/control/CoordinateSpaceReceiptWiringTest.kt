@@ -23,37 +23,70 @@ class CoordinateSpaceReceiptWiringTest {
 
   private val hook = "deviceControlSession.onObservationSpaceDeclared(update.coordinateSpace)"
 
-  @Test
-  fun `both stream collectors declare the coordinate space at receipt`() {
-    val source = readAutoMobileContentSource()
-    val occurrences = source.split(hook).size - 1
-    assertTrue(
-      occurrences == 2,
-      "Expected exactly 2 receipt-time `$hook` calls in AutoMobileContent.kt (one per stream " +
-        "collector), found $occurrences. A collector that stops declaring the space at receipt " +
-        "reopens the debounce window a tap can be mis-converted in (issue #4550).",
+  /**
+   * One collector's source region: from where it starts consuming the flow to where it writes the
+   * frame state. The hook must live inside THIS span.
+   *
+   * Scoping per collector is the point. A whole-file occurrence count plus a `lastIndexOf` walk
+   * backwards from each apply passes when one collector holds two hooks and the other holds none —
+   * the asymmetric regression this guard exists to catch. Each collector is therefore isolated to
+   * its own slice and asserted independently, so removing either hook fails exactly one test.
+   */
+  private data class CollectorSpan(val name: String, val start: String, val apply: String)
+
+  private val collectors =
+    listOf(
+      CollectorSpan(
+        name = "hierarchy",
+        start = "liveStreamClient.hierarchyUpdates.collect { update ->",
+        apply = "layoutInspectorState.applyHierarchyUpdate(",
+      ),
+      CollectorSpan(
+        name = "screenshot",
+        start = "liveStreamClient.screenshotUpdates.collect { update ->",
+        apply = "layoutInspectorState.updateScreenshot(",
+      ),
     )
+
+  @Test
+  fun `the hierarchy collector declares the coordinate space before applying the update`() {
+    assertHookPrecedesApply(collectors.single { it.name == "hierarchy" })
   }
 
   @Test
-  fun `the receipt-time call precedes the state apply in both collectors`() {
-    // Ordering, not just presence: the whole point is that the gate runs BEFORE the frame facts are
-    // written. A call that drifted below `applyHierarchyUpdate` / `updateScreenshot` would be back
-    // inside the window it exists to close, while still satisfying the presence check above.
-    val source = readAutoMobileContentSource()
-    val applies =
-      listOf("layoutInspectorState.applyHierarchyUpdate(", "layoutInspectorState.updateScreenshot(")
+  fun `the screenshot collector declares the coordinate space before applying the update`() {
+    assertHookPrecedesApply(collectors.single { it.name == "screenshot" })
+  }
 
-    applies.forEach { apply ->
-      val applyIndex = source.indexOf(apply)
-      assertTrue(applyIndex >= 0, "could not find `$apply` in AutoMobileContent.kt")
-      val hookIndex = source.lastIndexOf(hook, applyIndex)
-      assertTrue(
-        hookIndex in 0 until applyIndex,
-        "`$hook` must appear BEFORE `$apply` in its collector (issue #4550): detecting the " +
-          "transition from the frame facts is one debounce interval too late.",
-      )
-    }
+  /**
+   * Assert [span]'s own region contains the hook, ahead of its own state write.
+   *
+   * Both facts in one assertion because they are one property: a hook that is present but below the
+   * apply is back inside the window it exists to close, and a hook that is absent leaves the window
+   * fully open. Slicing to the region makes them per-collector rather than file-wide.
+   */
+  private fun assertHookPrecedesApply(span: CollectorSpan) {
+    val source = readAutoMobileContentSource()
+    val start = source.indexOf(span.start)
+    assertTrue(
+      start >= 0,
+      "could not find the ${span.name} collector (`${span.start}`) in AutoMobileContent.kt — if it " +
+        "was renamed, update this guard rather than deleting it (issue #4550)",
+    )
+    val applyIndex = source.indexOf(span.apply, start)
+    assertTrue(
+      applyIndex > start,
+      "could not find `${span.apply}` after the ${span.name} collector in AutoMobileContent.kt",
+    )
+
+    val region = source.substring(start, applyIndex)
+    assertTrue(
+      region.contains(hook),
+      "The ${span.name} collector must call `$hook` at RECEIPT — inside its own body and BEFORE " +
+        "`${span.apply}` (issue #4550). Detecting the transition from the frame facts instead is " +
+        "one debounce interval too late, and a tap in that window is mapped in the old coordinate " +
+        "space while the daemon already converts under the new one.",
+    )
   }
 
   private fun readAutoMobileContentSource(): String = locateAutoMobileContentSource().readText()

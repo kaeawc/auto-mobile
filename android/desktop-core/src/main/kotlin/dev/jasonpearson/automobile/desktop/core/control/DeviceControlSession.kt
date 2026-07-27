@@ -1,5 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlBlockReason
@@ -44,8 +47,12 @@ import kotlinx.coroutines.withContext
  * - **Track** the post-input refresh policy ([PostInputRefreshTracker]).
  * - **Reset** all of the above coherently when the control context changes.
  *
- * Compose-free and unit-testable: the daemon client, the clock, the UI context and the IO
- * dispatcher are all injected, so tests drive it with fakes and no real device, socket or timer.
+ * Unit-testable: the daemon client, the clock, the UI context and the IO dispatcher are all
+ * injected, so tests drive it with fakes and no real device, socket or timer. The decision LOGIC is
+ * Compose-free — it lives in [DeviceControlPolicy] in `desktop-domain` — but the two snapshot
+ * properties below are deliberately Compose-observable state, because an invalidation that the view
+ * cannot see is not an invalidation (issue #4550; see [interactionSnapshot]). Snapshot state reads
+ * and writes work outside a composition, so tests are unaffected.
  *
  * @param scope the coroutine scope the single dispatch consumer runs in (cancelled with the host).
  * @param clientProvider mints a daemon client per action; the consumer closes it after dispatch.
@@ -104,6 +111,12 @@ class DeviceControlSession(
       return flipped
     }
 
+    /**
+     * Whether [space] still agrees with what was last recorded. Nothing observed yet agrees with
+     * everything — there is no declaration to contradict, so this must not reject.
+     */
+    fun matches(space: CoordinateSpace?): Boolean = !seen || space == last
+
     fun forget() {
       seen = false
       last = null
@@ -136,8 +149,10 @@ class DeviceControlSession(
    * [PostInputRefreshTracker] bounds how long that can last.
    *
    * Updated by [evaluate]; null before the first snapshot and after [reset].
+   *
+   * Compose-OBSERVABLE (issue #4550). See [interactionSnapshot] for why that matters.
    */
-  var renderSnapshot: DeviceFrameSnapshot? = null
+  var renderSnapshot by mutableStateOf<DeviceFrameSnapshot?>(null)
     private set
 
   /**
@@ -155,8 +170,17 @@ class DeviceControlSession(
    * The retention is still bounded by everything that already bounds it: [reset] clears it, and a
    * wait that times out releases it (see [evaluate]), after which this falls back to the live
    * decision and drops to inspector mode.
+   *
+   * **Compose-observable, deliberately** (issue #4550). Most writes here happen during a
+   * composition pass that some other state change already triggered, so a plain field would look
+   * like it worked. [onObservationSpaceDeclared] is the exception that proves it does not: it fires
+   * from a stream collector with no other state change to ride on, and a plain field would leave
+   * the view holding the retired frame — and happily mapping clicks through it — until the next
+   * recomposition, which for the hierarchy path is the ~100 ms debounce. That is precisely the
+   * window the receipt-time hook exists to close, so the invalidation has to be visible to Compose
+   * or the early detection buys nothing.
    */
-  var interactionSnapshot: DeviceFrameSnapshot? = null
+  var interactionSnapshot by mutableStateOf<DeviceFrameSnapshot?>(null)
     private set
 
   /**
@@ -272,6 +296,27 @@ class DeviceControlSession(
   }
 
   /**
+   * Whether [snapshot]'s coordinates can still be sent to the device — i.e. its declared
+   * [CoordinateSpace] is the one the device is currently publishing (issue #4550).
+   *
+   * Defence in depth, at the last possible moment. [onObservationSpaceDeclared] retires the
+   * interaction snapshot as soon as the flip is observed, and that state is Compose-observable so
+   * the view drops it promptly. Neither closes the gap for a click ALREADY in flight: a pointer
+   * event captured the snapshot before the flip and reaches dispatch after it, and the view cannot
+   * un-capture it. This is where that click stops.
+   *
+   * Only the coordinate-bearing actions consult it. [key] and its siblings carry no coordinate —
+   * they use the snapshot solely for its device id, which a space change does not invalidate — so
+   * rejecting them here would drop keystrokes for a reason that does not apply to them.
+   *
+   * Uses the same recorded stream space the transition check does, so there is one notion of "the
+   * current space" rather than a third mechanism. A session that has observed no declaration yet
+   * accepts everything: there is nothing to contradict.
+   */
+  private fun coordinatesAreStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
+    streamSpace.matches(snapshot.coordinateSpace)
+
+  /**
    * Enqueue a tap on [snapshot] at the mapped device coordinate [point], in click order.
    *
    * [snapshot] is the frame the user actually clicked, captured by the view atomically with
@@ -286,6 +331,7 @@ class DeviceControlSession(
     // "success" that parks the client in AwaitingSnapshot for the full refresh timeout waiting for
     // a device change that was never requested.
     if (!point.inBounds) return false
+    if (!coordinatesAreStillDispatchable(snapshot)) return false
     return enqueue { client, platformName, token ->
       DeviceControlInputCommand.Tap(
         point = point,
@@ -313,6 +359,7 @@ class DeviceControlSession(
    * the bounded queue is full, in which case an overload error has already been published.
    */
   fun swipe(snapshot: DeviceFrameSnapshot, start: DevicePoint, end: DevicePoint): Boolean {
+    if (!coordinatesAreStillDispatchable(snapshot)) return false
     val decision =
       DeviceDragGesturePolicy.evaluate(
         start = start,

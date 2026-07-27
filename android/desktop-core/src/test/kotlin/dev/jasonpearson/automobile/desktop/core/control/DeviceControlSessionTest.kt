@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.control
 
+import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.runtime.snapshots.SnapshotStateObserver
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorMockData
@@ -738,6 +740,96 @@ class DeviceControlSessionTest {
     advanceUntilIdle()
     assertEquals(CoordinateSpace.Pixels, state.hierarchyFacts?.coordinateSpace)
     assertTrue(client.inputTapCalls.isEmpty(), "nothing reached the device")
+    scope.cancel()
+  }
+
+  @Test
+  fun `the receipt-time retirement invalidates Compose readers of the interaction snapshot`() =
+    runTest {
+      // Half (a) of the receipt fix. Retiring the snapshot early is only useful if the VIEW
+      // notices:
+      // the hook fires from a stream collector with no other state change to ride on, so with a
+      // plain (non-snapshot) field DeviceScreenView would keep its stale controlFrame — and keep
+      // mapping clicks through it — until the next recomposition, which for the hierarchy path is
+      // the ~100ms debounce. Composing the real view here would need the whole host graph, so this
+      // asserts the property the view depends on: a Compose reader of interactionSnapshot is
+      // invalidated by the retirement.
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val session = session(scope, FakeAutoMobileClient())
+
+      session.onObservationSpaceDeclared(null)
+      assertNotNull(
+        session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
+      )
+      assertNotNull(session.interactionSnapshot)
+
+      val observer = SnapshotStateObserver { block -> block() }
+      observer.start()
+      try {
+        var invalidated = false
+        // Records exactly what the view records: a read of the snapshot control maps clicks
+        // through.
+        observer.observeReads("view", { invalidated = true }) { session.interactionSnapshot }
+        Snapshot.sendApplyNotifications()
+        assertFalse(invalidated, "no write yet")
+
+        session.onObservationSpaceDeclared(CoordinateSpace.Pixels)
+        Snapshot.sendApplyNotifications()
+
+        assertTrue(
+          invalidated,
+          "retiring the frame must invalidate the view's read, or the stale controlFrame survives " +
+            "until the debounce fires",
+        )
+        assertNull(session.interactionSnapshot)
+      } finally {
+        observer.stop()
+        observer.clear()
+      }
+      scope.cancel()
+    }
+
+  @Test
+  fun `a tap or swipe carrying a retired snapshot is rejected at dispatch`() = runTest {
+    // Half (b): defence in depth. Even with the observable retirement, a pointer event that
+    // CAPTURED the snapshot before the flip can reach dispatch after it — the view cannot
+    // un-capture it. Dispatch is the last place to catch a coordinate in the wrong unit, and
+    // `inBounds` alone says nothing about units.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    session.onObservationSpaceDeclared(null)
+    assertNotNull(
+      session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
+    )
+    val clickedBeforeFlip = assertNotNull(session.interactionSnapshot)
+
+    // The device starts publishing canonical pixels; the in-flight click still carries the legacy
+    // frame it was mapped through.
+    session.onObservationSpaceDeclared(CoordinateSpace.Pixels)
+
+    assertFalse(
+      session.tap(clickedBeforeFlip, point),
+      "a tap mapped in the retired space must not be queued",
+    )
+    assertFalse(
+      session.swipe(
+        clickedBeforeFlip,
+        DevicePoint(100, 100, inBounds = true),
+        DevicePoint(100, 400, inBounds = true),
+      ),
+      "and neither must a swipe",
+    )
+    advanceUntilIdle()
+    assertTrue(client.inputTapCalls.isEmpty(), "nothing reached the device")
+    assertTrue(client.inputSwipeCalls.isEmpty())
+
+    // A frame in the CURRENT space still dispatches, so this is a units gate and not a freeze.
+    val current = testSnapshot(coordinateSpace = CoordinateSpace.Pixels)
+    assertTrue(session.tap(current, point))
+    advanceUntilIdle()
+    assertEquals(1, client.inputTapCalls.size)
     scope.cancel()
   }
 

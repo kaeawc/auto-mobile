@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  registerInteractionTools,
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
   waitForNotificationMatch
 } from "../../src/server/interactionTools";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   ensureSystemTrayClosed,
   ensureSystemTrayOpen,
@@ -11,6 +13,7 @@ import {
   swipeElement,
   isMatchInCollapsedGroup,
   expandNotificationGroup,
+  EXPAND_GROUP_SETTLE_MS,
 } from "../../src/server/systemTrayHelpers";
 import type { SystemTrayIosClient } from "../../src/server/systemTrayHelpers";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -780,6 +783,7 @@ describe("systemTray grouped notifications", () => {
 describe("systemTray group expansion", () => {
   afterEach(() => {
     resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
   });
 
   test("detects match in collapsed group via groupNode", async () => {
@@ -959,36 +963,26 @@ describe("systemTray group expansion", () => {
       observeScreenFactory: () => fakeObserveScreen
     });
 
-    const result = await waitForNotificationMatch(
-      device,
-      { title: "Zillow Real-Time Tour request" },
-      [],
-      5000
-    );
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+    const handler = ToolRegistry.getTool("systemTray")?.deviceAwareHandler;
+    expect(handler).toBeDefined();
 
-    expect(result.match).not.toBeNull();
-    expect(isMatchInCollapsedGroup(result.match!)).toBe(true);
-
-    // Actually expand the group between the two matches. If expandNotificationGroup
-    // is deleted or gutted, no expand-button tap is issued and this fails — the
-    // pre-supplied expanded observation would otherwise mask a missing expand
-    // (#4183 R2).
-    const expanded = await expandNotificationGroup(device, result.match!);
-    expect(expanded).toBe(true);
+    const tap = handler!(device, {
+      action: "tap",
+      notification: { title: "Zillow Real-Time Tour request" },
+      awaitTimeout: 5000,
+      platform: "android",
+    });
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+    await tap;
 
     const tapCommands = fakeAdb.getExecutedCommands()
-      .filter(cmd => cmd.includes("input tap 1190 697"));
-    expect(tapCommands.length).toBe(1);
-
-    const reResult = await waitForNotificationMatch(
-      device,
-      { title: "Zillow Real-Time Tour request" },
-      [],
-      5000
-    );
-
-    expect(reResult.match).not.toBeNull();
-    expect(isMatchInCollapsedGroup(reResult.match!)).toBe(false);
+      .filter(cmd => cmd.includes("input tap"));
+    expect(tapCommands).toHaveLength(2);
+    expect(tapCommands[0]).toContain("input tap 1190 697");
+    expect(tapCommands[1]).not.toContain("input tap 1190 697");
   });
 
   test("re-match returns null when notification disappears after expand", async () => {

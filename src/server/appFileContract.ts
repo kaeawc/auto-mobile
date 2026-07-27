@@ -136,7 +136,9 @@ export const putAppFileSchema = withAppIdAliases(addDeviceTargetingToSchema(z.ob
   if (args.contentBase64 !== undefined) {
     try {
       const decoded = Buffer.from(args.contentBase64, "base64");
-      if (decoded.toString("base64") !== args.contentBase64) {
+      const canonical = decoded.toString("base64");
+      const unpadded = canonical.replace(/=+$/, "");
+      if (args.contentBase64 !== canonical && args.contentBase64 !== unpadded) {
         throw new Error("round-trip mismatch");
       }
       // An empty ("") or all-padding ("====") payload round-trips cleanly but

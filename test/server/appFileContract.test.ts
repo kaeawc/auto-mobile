@@ -79,7 +79,9 @@ describe("putAppFileSchema contentBase64 guard (#4183 A4)", () => {
   // file to the device.
   test.each([
     ["aGVsbG8=", true], // "hello"
+    ["aGVsbG8", true], // canonical unpadded "hello"
     ["QQ==", true], // "A"
+    ["QQ", true], // canonical unpadded "A"
     ["AAAA", true], // 3 zero bytes (non-empty)
     ["QUJD", true], // "ABC"
     ["not valid base64!!", false],

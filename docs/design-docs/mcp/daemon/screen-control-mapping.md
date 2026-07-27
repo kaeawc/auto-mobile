@@ -266,15 +266,22 @@ and macOS Option — and it is **platform-dependent**, so the host (not the pure
 policy) must resolve it. The rule is:
 
 ```text
-altComposesText = printable && !meta && ( isMac ? alt : (ctrl && alt) )
+altComposesText = printable && !meta && when {
+  isMac -> alt
+  isLinux && nativeAltGraph != null -> alt && nativeAltGraph
+  else -> ctrl && alt
+}
 ```
 
-- **Windows/Linux:** composition is **AltGr**, which AWT/Compose surfaces as
-  **Ctrl+Alt** (`@`, `€`, `{`, `\`). A *plain* Alt (no Ctrl) is a **menu
-  accelerator** — `Alt+F` opens File — and, crucially, AWT reports a printable
-  `keyChar` for it too. So `alt && printable` cannot tell them apart; treating
-  plain Alt as composition would **swallow the host's menu shortcut** and type the
-  letter into the device instead. Only Ctrl+Alt composes here.
+- **Linux:** composition is **AltGr**, identified by AWT's native
+  `isAltGraphDown()` signal. A genuine Ctrl+Alt shortcut has AltGraph unset, so
+  it stays with the host rather than typing its printable character into the
+  device.
+- **Windows:** composition is **AltGr**, but many JDKs surface it only as
+  **Ctrl+Alt** (`@`, `€`, `{`, `\`) and leave the native AltGraph flag unset. The
+  Ctrl+Alt fallback is therefore retained. A *plain* Alt (no Ctrl) is a **menu
+  accelerator** — `Alt+F` opens File — and AWT reports a printable `keyChar` for
+  it too, so it must not count as composition.
 - **macOS:** composition is the **Option** key, which is plain **Alt** (Option+L =
   `@`, Option+5 = `[`), and macOS menus use **Cmd/Meta, never Alt** — so plain Alt
   is safe to treat as composition on macOS only.
@@ -292,18 +299,15 @@ when it also produced a **typable ASCII** character. A porting client on another
 host must make the same platform-aware decision rather than inferring composition
 from `alt && printable`.
 
-**Known limitation (Windows/Linux).** The `ctrl && alt` test above is a heuristic,
-not a true AltGraph detector. AWT does expose an AltGraph signal (the native
+**Known limitation (Windows).** The `ctrl && alt` fallback is a heuristic, not a
+true AltGraph detector. AWT exposes an AltGraph signal (the native
 `java.awt.event.KeyEvent.isAltGraphDown()` behind Compose's `KeyEvent.nativeKeyEvent`,
-mirrored by `PointerKeyboardModifiers.isAltGraphPressed`), but it is unreliable on
-the platform that needs it: many Windows JDKs report a real AltGr keystroke as plain
-Ctrl+Alt with the `ALT_GRAPH` mask **unset**, making AltGr and a genuine Ctrl+Alt
-host shortcut indistinguishable there. Requiring the mask would regress AltGr typing
-(`@`, `€`, `{`) on those JDKs — the common case this exception exists for — to fix
-only the rare case of a Ctrl+Alt host shortcut that happens to carry a printable
-character. So the heuristic stays, with the accepted consequence that **such a
-Ctrl+Alt host shortcut may be forwarded to the device rather than reaching the host**
-on some Windows/Linux layouts. Tracked for a reliable-signal fix in
+mirrored by `PointerKeyboardModifiers.isAltGraphPressed`), but many Windows JDKs
+report a real AltGr keystroke as plain Ctrl+Alt with the `ALT_GRAPH` mask **unset**.
+Requiring the mask would regress common AltGr typing (`@`, `€`, `{`) on those JDKs.
+The accepted consequence is that **a genuine Ctrl+Alt host shortcut that produces a
+printable character may still be forwarded to the device rather than reaching the
+host** on Windows. Linux uses the reliable native signal. Tracked in
 [#4536](https://github.com/kaeawc/auto-mobile/issues/4536).
 
 A client that knows its own host leaves a particular chord unclaimed may opt it in
@@ -518,9 +522,10 @@ key-over-character precedence, the control-character filter, the character-keyed
 chord allowlist, the platform text gate, and the printable-ASCII range from both
 sides (every character in `U+0020`–`U+007E` forwards; `é`/`€`/CJK are declined and
 left unconsumed). `DeviceKeyboardEventTranslatorTest` pins the platform-aware
-resolution of that flag (Ctrl+Alt composes on Windows/Linux and plain Alt does
-not; plain Alt composes on macOS; Meta never does) end-to-end through the policy,
-parameterized by an injected `isMac` so both platforms are deterministic. `InputText.test.ts` pins the daemon append mode itself: it
+resolution of that flag (native AltGraph composes on Linux; Ctrl+Alt remains the
+Windows fallback; plain Alt composes on macOS; Meta never does) end-to-end through
+the policy, parameterized by injected platform and AltGraph inputs so every branch
+is deterministic. `InputText.test.ts` pins the daemon append mode itself: it
 issues key events and makes **no** `ACTION_SET_TEXT` call and **no** clear, so N
 single-character calls accumulate; that uppercase fails with an actionable error
 below API 31 and succeeds at 31+; and that every adb round trip is charged against

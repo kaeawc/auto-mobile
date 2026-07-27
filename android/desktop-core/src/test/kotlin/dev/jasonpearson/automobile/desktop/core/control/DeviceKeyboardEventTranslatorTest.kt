@@ -7,6 +7,9 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardInputPolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardKey
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyboardRejection
+import java.awt.Canvas
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent as AwtKeyEvent
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -18,6 +21,16 @@ import kotlin.test.assertTrue
  * meaning, and which code points survive as a typable character.
  */
 class DeviceKeyboardEventTranslatorTest {
+
+  private fun composeEvent(event: AwtKeyEvent): androidx.compose.ui.input.key.KeyEvent {
+    val nativeEvent =
+      Class.forName("androidx.compose.ui.input.key.KeyEvent_desktopKt")
+        .getMethod("toComposeEvent", AwtKeyEvent::class.java)
+        .invoke(null, event)
+    return (Class.forName("androidx.compose.ui.input.key.KeyEvent")
+      .getMethod("box-impl", Any::class.java)
+      .invoke(null, nativeEvent) as androidx.compose.ui.input.key.KeyEvent)
+  }
 
   private fun translate(key: Key, codePoint: Int = 0) =
     DeviceKeyboardEventTranslator.translate(key, codePoint, DeviceKeyModifiers())
@@ -70,20 +83,67 @@ class DeviceKeyboardEventTranslatorTest {
   // character or is a menu accelerator. `alt && printable` alone cannot tell them apart, because on
   // Windows/Linux AWT reports a printable keyChar for a plain Alt+F accelerator too.
 
-  private fun resolvedAltComposition(modifiers: DeviceKeyModifiers, isMac: Boolean): Boolean =
-    DeviceKeyboardEventTranslator.translate(Key.A, 'x'.code, modifiers, isMac).altComposesText
+  private fun resolvedAltComposition(
+    modifiers: DeviceKeyModifiers,
+    isMac: Boolean = false,
+    isLinux: Boolean = false,
+    isAltGraphDown: Boolean = false,
+  ): Boolean =
+    DeviceKeyboardEventTranslator.translate(
+        Key.A,
+        'x'.code,
+        modifiers,
+        isMac,
+        isLinux,
+        isAltGraphDown,
+      )
+      .altComposesText
 
   @Test
-  fun `on Windows or Linux only Ctrl+Alt is composition, plain Alt is a menu accelerator`() {
-    // Restores the original AltGr shape: AltGr surfaces as Ctrl+Alt, so that composes; a plain Alt
-    // is Alt+F-style menu access and must NOT be treated as composition.
+  fun `on Windows Ctrl+Alt is composition and plain Alt is a menu accelerator`() {
+    // Windows JDKs do not reliably set the native AltGraph mask, so its Ctrl+Alt fallback stays.
     assertTrue(
       resolvedAltComposition(DeviceKeyModifiers(ctrl = true, alt = true), isMac = false),
-      "AltGr (Ctrl+Alt) composes on Windows/Linux",
+      "AltGr (Ctrl+Alt) composes on Windows",
     )
     assertFalse(
       resolvedAltComposition(DeviceKeyModifiers(alt = true), isMac = false),
       "plain Alt is a menu accelerator on Windows/Linux, not composition",
+    )
+  }
+
+  @Test
+  fun `on Linux only native AltGraph is composition`() {
+    val modifiers = DeviceKeyModifiers(ctrl = true, alt = true)
+    assertTrue(
+      resolvedAltComposition(modifiers, isLinux = true, isAltGraphDown = true),
+      "native AltGraph composes on Linux",
+    )
+    assertFalse(
+      resolvedAltComposition(modifiers, isLinux = true, isAltGraphDown = false),
+      "a genuine Linux Ctrl+Alt shortcut stays with the host",
+    )
+  }
+
+  @Test
+  fun `live Linux event reads native AltGraph through Compose`() {
+    val awtEvent =
+      AwtKeyEvent(
+        Canvas(),
+        AwtKeyEvent.KEY_PRESSED,
+        0L,
+        InputEvent.CTRL_DOWN_MASK or InputEvent.ALT_DOWN_MASK or InputEvent.ALT_GRAPH_DOWN_MASK,
+        AwtKeyEvent.VK_A,
+        '@',
+      )
+
+    assertTrue(
+      DeviceKeyboardEventTranslator.translate(
+          composeEvent(awtEvent),
+          isMac = false,
+          isLinux = true,
+        )
+        .altComposesText
     )
   }
 
@@ -113,10 +173,19 @@ class DeviceKeyboardEventTranslatorTest {
   private fun decideForChar(
     codePoint: Int,
     modifiers: DeviceKeyModifiers,
-    isMac: Boolean,
+    isMac: Boolean = false,
+    isLinux: Boolean = false,
+    isAltGraphDown: Boolean = false,
   ): DeviceKeyboardDecision {
     val stroke: DeviceKeyStroke =
-      DeviceKeyboardEventTranslator.translate(Key.A, codePoint, modifiers, isMac)
+      DeviceKeyboardEventTranslator.translate(
+        Key.A,
+        codePoint,
+        modifiers,
+        isMac,
+        isLinux,
+        isAltGraphDown,
+      )
     return DeviceKeyboardInputPolicy.evaluate(stroke)
   }
 
@@ -135,6 +204,19 @@ class DeviceKeyboardEventTranslatorTest {
     assertEquals(
       DeviceKeyboardDecision.TypeText("@"),
       decideForChar('@'.code, DeviceKeyModifiers(ctrl = true, alt = true), isMac = false),
+    )
+  }
+
+  @Test
+  fun `Linux native AltGraph types while Ctrl+Alt shortcut stays with the host`() {
+    val modifiers = DeviceKeyModifiers(ctrl = true, alt = true)
+    assertEquals(
+      DeviceKeyboardDecision.TypeText("@"),
+      decideForChar('@'.code, modifiers, isLinux = true, isAltGraphDown = true),
+    )
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      decideForChar('f'.code, modifiers, isLinux = true),
     )
   }
 

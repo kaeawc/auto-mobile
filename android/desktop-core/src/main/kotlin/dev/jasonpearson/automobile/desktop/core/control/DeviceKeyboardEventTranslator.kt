@@ -105,6 +105,21 @@ object DeviceKeyboardEventTranslator {
    *
    * Meta always disqualifies: `Cmd`/`Meta` shortcuts never compose characters, so Meta-held is the
    * reliable "shortcut, not typing" signal on every platform.
+   *
+   * KNOWN LIMITATION (Windows/Linux): the `ctrl && alt` test is a heuristic, not a true AltGraph
+   * detector. AWT does expose an AltGraph signal — the native
+   * [java.awt.event.KeyEvent.isAltGraphDown] behind
+   * [androidx.compose.ui.input.key.KeyEvent.nativeKeyEvent], mirrored by Compose's
+   * `PointerKeyboardModifiers.isAltGraphPressed` — but it is NOT reliable on the platform that
+   * needs it: many Windows JDKs report a real AltGr keystroke as plain Ctrl+Alt with the ALT_GRAPH
+   * mask UNSET, so AltGr and a genuine Ctrl+Alt host shortcut are indistinguishable there.
+   * Requiring the mask would therefore regress AltGr typing (`@`, `€`, `{`) on those JDKs —
+   * breaking the common case the exception exists for — to fix only the rare
+   * genuine-Ctrl+Alt-shortcut-with-a-printable- char case. So the heuristic stays: a Ctrl+Alt host
+   * shortcut that happens to produce a printable character on some Windows/Linux layout is
+   * forwarded to the device rather than reaching the host. Tracked in #4536; if a reliable
+   * per-platform AltGraph signal becomes available, thread it in alongside `isMac` and prefer it
+   * over `ctrl && alt`.
    */
   private fun resolvesAltComposition(modifiers: DeviceKeyModifiers, isMac: Boolean): Boolean {
     if (modifiers.meta || !modifiers.alt) return false

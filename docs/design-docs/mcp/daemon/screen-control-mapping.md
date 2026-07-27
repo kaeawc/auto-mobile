@@ -292,6 +292,20 @@ when it also produced a **typable ASCII** character. A porting client on another
 host must make the same platform-aware decision rather than inferring composition
 from `alt && printable`.
 
+**Known limitation (Windows/Linux).** The `ctrl && alt` test above is a heuristic,
+not a true AltGraph detector. AWT does expose an AltGraph signal (the native
+`java.awt.event.KeyEvent.isAltGraphDown()` behind Compose's `KeyEvent.nativeKeyEvent`,
+mirrored by `PointerKeyboardModifiers.isAltGraphPressed`), but it is unreliable on
+the platform that needs it: many Windows JDKs report a real AltGr keystroke as plain
+Ctrl+Alt with the `ALT_GRAPH` mask **unset**, making AltGr and a genuine Ctrl+Alt
+host shortcut indistinguishable there. Requiring the mask would regress AltGr typing
+(`@`, `€`, `{`) on those JDKs — the common case this exception exists for — to fix
+only the rare case of a Ctrl+Alt host shortcut that happens to carry a printable
+character. So the heuristic stays, with the accepted consequence that **such a
+Ctrl+Alt host shortcut may be forwarded to the device rather than reaching the host**
+on some Windows/Linux layouts. Tracked for a reliable-signal fix in
+[#4536](https://github.com/kaeawc/auto-mobile/issues/4536).
+
 A client that knows its own host leaves a particular chord unclaimed may opt it in
 explicitly (`forwardedChords`). The default list is **empty**. Entries match
 either a device key **or a produced character**, case-insensitively — the latter

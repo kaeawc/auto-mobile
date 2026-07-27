@@ -237,6 +237,19 @@ class DeviceKeyboardInputPolicyTest {
         forwardedChords = metaEscapeOptIn,
       ),
     )
+    // Alt-Escape too: the contract requires it to stay host-handled, so an accidental Alt allowance
+    // (or a match that ignored alt) cannot regress unnoticed.
+    assertEquals(
+      DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
+      DeviceKeyboardInputPolicy.evaluate(
+        stroke =
+          DeviceKeyStroke(
+            key = DeviceKeyboardKey.Escape,
+            modifiers = DeviceKeyModifiers(alt = true),
+          ),
+        forwardedChords = metaEscapeOptIn,
+      ),
+    )
   }
 
   @Test

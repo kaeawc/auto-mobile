@@ -146,11 +146,11 @@ describe("waitForObservation DSL branch", () => {
 
     expect(outcome.awaitTimeout).toBe(false);
     expect(outcome.awaitedElement?.["resource-id"]).toBe("submit");
-    expect((outcome as any).matched).toBe(true);
-    expect((outcome as any).timedOut).toBe(false);
-    expect((outcome as any).matchedElement?.["resource-id"]).toBe("submit");
-    expect((outcome as any).polls).toBe(2);
-    expect((outcome as any).waitMs).toBeGreaterThanOrEqual(0);
+    expect(outcome.matched).toBe(true);
+    expect(outcome.timedOut).toBe(false);
+    expect(outcome.matchedElement?.["resource-id"]).toBe("submit");
+    expect(outcome.polls).toBe(2);
+    expect(outcome.waitMs).toBeGreaterThanOrEqual(0);
   });
 
   test("for:'stable' retains settle metadata and returns the final settled snapshot", async () => {
@@ -174,10 +174,10 @@ describe("waitForObservation DSL branch", () => {
 
     expect(outcome.awaitTimeout).toBe(false);
     expect(outcome.awaitedElement).toBeUndefined();
-    expect((outcome as any).settled).toBe(true);
-    expect((outcome as any).timedOut).toBe(false);
-    expect((outcome as any).polls).toBe(3);
-    expect((outcome as any).waitMs).toBeGreaterThanOrEqual(0);
+    expect(outcome.settled).toBe(true);
+    expect(outcome.timedOut).toBe(false);
+    expect(outcome.polls).toBe(3);
+    expect(outcome.waitMs).toBeGreaterThanOrEqual(0);
   });
 
   test("for:'textEquals' waits until the located element shows the exact value", async () => {
@@ -219,12 +219,34 @@ describe("waitForObservation DSL branch", () => {
 
     expect(outcome.awaitTimeout).toBe(true);
     expect(outcome.awaitedElement).toBeUndefined();
-    expect((outcome as any).matched).toBe(false);
-    expect((outcome as any).timedOut).toBe(true);
-    expect((outcome as any).candidates).toEqual([
+    expect(outcome.matched).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.candidates).toEqual([
       expect.objectContaining({ "resource-id": "submit" }),
     ]);
-    expect((outcome as any).polls).toBeGreaterThan(1);
+    expect(outcome.polls).toBeGreaterThan(1);
+  });
+
+  test("for:'stable' reports a screen-off fast-fail without claiming a timeout", async () => {
+    const timer = new FakeTimer();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult({
+      ...makeObservation([node({ "resource-id": "content" })], 10),
+      wakefulness: "Asleep",
+    });
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      { for: "stable" } as any,
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.settled).toBe(false);
+    expect(outcome.awaitTimeout).toBe(true);
+    expect(outcome.timedOut).toBe(false);
+    expect(outcome.polls).toBe(1);
   });
 });
 
@@ -232,6 +254,26 @@ describe("waitForObservation DSL branch", () => {
 // Back-compat: the legacy element-appear waitFor form is untouched (AC4)
 // ---------------------------------------------------------------------------
 describe("waitFor back-compat", () => {
+  test("legacy waitFor reports settled when its quiet gate succeeds", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    const observation = makeObservation([node({ "resource-id": "submit" })], 10);
+    observeScreen.setObserveResult(observation);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      { elementId: "submit", settled: { quietPeriodMs: 100 } },
+      undefined,
+      false,
+      timer
+    );
+
+    expect(outcome.matched).toBe(true);
+    expect(outcome.settled).toBe(true);
+    expect(outcome.timedOut).toBe(false);
+  });
+
   test("legacy element-appear form (no `for`) still parses", () => {
     const parsed = observeSchema.parse({
       platform: "android",

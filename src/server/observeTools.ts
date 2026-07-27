@@ -538,7 +538,9 @@ const runWaitForConditionDsl = async (
       awaitDuration: settle.waitMs,
       awaitTimeout: !settle.settled,
       settled: settle.settled,
-      timedOut: !settle.settled,
+      // A screen-off capture fast-fails the settle primitive; it did not use
+      // the timeout budget, so distinguish it from a genuine timeout.
+      timedOut: !settle.settled && settle.observation.wakefulness !== "Asleep",
       polls: settle.polls,
       waitMs: settle.waitMs,
     };
@@ -953,15 +955,17 @@ export const waitForObservation = async (
   let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform);
 
   if (waitEvaluation.matched && settleReady(observation)) {
+    const waitMs = timer.now() - startTime;
     return {
       observation,
       awaitedElement: waitEvaluation.awaitedElement,
-      awaitDuration: timer.now() - startTime,
+      awaitDuration: waitMs,
       awaitTimeout: false,
       matched: true,
+      settled: settled ? true : undefined,
       timedOut: false,
       polls,
-      waitMs: timer.now() - startTime,
+      waitMs,
       matchedElement: waitEvaluation.awaitedElement,
     };
   }
@@ -970,14 +974,16 @@ export const waitForObservation = async (
   }
 
   if (timer.now() - startTime >= timeoutMs) {
+    const waitMs = timer.now() - startTime;
     return {
       observation,
-      awaitDuration: timer.now() - startTime,
+      awaitDuration: waitMs,
       awaitTimeout: true,
       matched: false,
+      settled: settled ? false : undefined,
       timedOut: true,
       polls,
-      waitMs: timer.now() - startTime,
+      waitMs,
     };
   }
 
@@ -991,15 +997,17 @@ export const waitForObservation = async (
 
     if (waitEvaluation.matched) {
       if (settleReady(observation)) {
+        const waitMs = timer.now() - startTime;
         return {
           observation,
           awaitedElement: waitEvaluation.awaitedElement,
-          awaitDuration: timer.now() - startTime,
+          awaitDuration: waitMs,
           awaitTimeout: false,
           matched: true,
+          settled: settled ? true : undefined,
           timedOut: false,
           polls,
-          waitMs: timer.now() - startTime,
+          waitMs,
           matchedElement: waitEvaluation.awaitedElement,
         };
       }
@@ -1008,14 +1016,16 @@ export const waitForObservation = async (
     }
   }
 
+  const waitMs = timer.now() - startTime;
   return {
     observation,
-    awaitDuration: timer.now() - startTime,
+    awaitDuration: waitMs,
     awaitTimeout: true,
     matched: false,
+    settled: settled ? false : undefined,
     timedOut: true,
     polls,
-    waitMs: timer.now() - startTime,
+    waitMs,
   };
 };
 

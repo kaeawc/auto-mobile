@@ -1114,6 +1114,29 @@ describe("finalizeToolResponse", () => {
       expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
     });
 
+    test("artifacted observe keeps wait status inline", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({
+          ...makeObserveResult(),
+          matched: false,
+          timedOut: true,
+          polls: 3,
+          waitMs: 250,
+        }),
+        { name: "observe", sessionUuid: "s1", artifactWriter: writer } as any
+      );
+
+      expect(finalized.structuredContent).toMatchObject({
+        artifact: expect.any(Object),
+        matched: false,
+        timedOut: true,
+        polls: 3,
+        waitMs: 250,
+      });
+      expect(writer.writes[0].data).toMatchObject({ matched: false, timedOut: true });
+    });
+
     test("action observation fields are replaced with artifact metadata", () => {
       const writer = new FakeObservationArtifactWriter();
       const finalized = finalizeToolResponse(

@@ -56,6 +56,13 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // coordinateMappingGoldenVectorParity.test.ts parses the inline golden
     // tables out of CoordinateMappingGoldenVectorTest.kt (issue #4547).
     "android/desktop-core/src/test/kotlin/**",
+    // The same parity suite also parses the drag-threshold constants
+    // (MIN_SWIPE_DISTANCE_PX / MAX_COVERED_NATIVE_SCALE / IOS_TOUCH_SLOP_POINTS)
+    // out of DeviceDragGesturePolicy.kt and asserts the bound matches the golden
+    // fixture's largest device scale (issue #4550). Without this input a
+    // Kotlin-only edit to those constants would leave the turbo hash unchanged,
+    // so CI would replay a cached green Bun result and never re-run the check.
+    "android/desktop-domain/src/main/kotlin/**",
   ] as const;
 
   interface TurboConfig {

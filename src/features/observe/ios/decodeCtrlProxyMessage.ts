@@ -62,8 +62,6 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
         timestamp: message.timestamp,
         frameContext: message.frameContext,
         rotation: message.rotation,
-        frameContext: message.frameContext,
-        rotation: message.rotation,
       };
       break;
 

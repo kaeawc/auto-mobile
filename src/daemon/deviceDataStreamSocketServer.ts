@@ -404,8 +404,6 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       ...(scaleMetadata ? { coordinateSpace: COORDINATE_SPACE_PX } : {}),
       frameContext,
       rotation: hierarchy.rotation,
-      frameContext,
-      rotation: hierarchy.rotation,
     };
 
     const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
@@ -465,8 +463,6 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       // against mapping bounds that may not describe these pixels.
       captureSequence: claimMatchesPixels ? options.captureSequence : undefined,
       ...(options.coordinateSpace ? { coordinateSpace: options.coordinateSpace } : {}),
-      frameContext: options.frameContext,
-      rotation: options.rotation,
       frameContext: options.frameContext,
       rotation: options.rotation,
       screenshotMimeType,

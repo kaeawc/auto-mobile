@@ -2352,7 +2352,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             binding,
             message.frameContext,
             message.rotation,
-            message.frameContext,
           );
         } else {
           logger.debug("[CTRL_PROXY] Suppressed screenshot observation stream push for explicit initial-frame request");
@@ -2362,8 +2361,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           data: message.data,
           format: message.format || "jpeg",
           timestamp: message.timestamp,
-          frameContext: message.frameContext,
-          rotation: message.rotation,
           frameContext: message.frameContext,
           rotation: message.rotation,
           ...screenshotPerformanceMetadataFrom(message),
@@ -2951,7 +2948,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     binding?: ScreenGeometryBinding,
     frameContext?: string,
     rotation?: number,
-    frameContext?: string,
   ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
@@ -3045,7 +3041,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         (result: ScreenshotCaptureResult) => {
           if (result.data) {
             this.pushScreenshotToObservationStream(
-              result.data, result, result.captureBinding, result.rotation, result.frameContext
+              result.data, result, result.captureBinding, result.frameContext, result.rotation
             );
           }
         },
@@ -3123,8 +3119,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         data: result.data,
         checksum,
         captureBinding,
-        frameContext: result.frameContext,
-        rotation: result.rotation,
         frameContext: result.frameContext,
         rotation: result.rotation,
         ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, result.format),

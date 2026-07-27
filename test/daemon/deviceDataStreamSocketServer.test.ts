@@ -7,6 +7,7 @@ import {
 } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { loadCoordinateMappingVectors } from "../parity/coordinateMappingGoldenVectors";
 
 /**
  * Test helper that wraps DeviceDataStreamSocketServer to allow injecting fake sockets
@@ -542,18 +543,18 @@ describe("DeviceDataStreamSocketServer", () => {
     });
   });
 
-  describe("hierarchy diff annotation", () => {
-    /** A minimal PNG whose IHDR declares the given pixel size, base64-encoded as CtrlProxy sends it. */
-    const pngFrame = (width: number, height: number): string => {
-      const buffer = Buffer.alloc(24);
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buffer, 0);
-      buffer.writeUInt32BE(13, 8); // IHDR data length, fixed by the PNG spec
-      buffer.write("IHDR", 12, "ascii");
-      buffer.writeUInt32BE(width, 16);
-      buffer.writeUInt32BE(height, 20);
-      return buffer.toString("base64");
-    };
+  /** A minimal PNG whose IHDR declares the given pixel size, base64-encoded as CtrlProxy sends it. */
+  const pngFrame = (width: number, height: number): string => {
+    const buffer = Buffer.alloc(24);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buffer, 0);
+    buffer.writeUInt32BE(13, 8); // IHDR data length, fixed by the PNG spec
+    buffer.write("IHDR", 12, "ascii");
+    buffer.writeUInt32BE(width, 16);
+    buffer.writeUInt32BE(height, 20);
+    return buffer.toString("base64");
+  };
 
+  describe("hierarchy diff annotation", () => {
     const frame = (text: string) =>
       ({ hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } } }) as any;
 
@@ -1292,5 +1293,45 @@ describe("DeviceDataStreamSocketServer", () => {
 
       expect(socket.getWrittenMessages()).toHaveLength(0);
     });
+  });
+
+  describe("coordinate-mapping golden vectors: geometry pairing (issue #4547)", () => {
+    // Cross-language golden suite, B0 of the canonical-pixel campaign (#4547 -> #4549). Each
+    // vector drives the daemon's REAL header-measurement pairing (pixelsMatchClaimedGeometry via
+    // pushScreenshotUpdate): the capture identity is echoed on the screenshot exactly when the
+    // frame's measured pixels are consistent with the claimed geometry (exact match or swapped
+    // orientation — never a scale change, never an unmeasurable frame).
+    const goldenFrame = (text: string) =>
+      ({ hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } } }) as any;
+
+    const vectors = loadCoordinateMappingVectors().geometryPairing;
+
+    for (const [index, vector] of vectors.entries()) {
+      it(`row ${index}: measured ${vector.measuredWidth}x${vector.measuredHeight} vs claimed ${vector.claimedWidth}x${vector.claimedHeight} -> ${vector.expectedMatch === 1 ? "paired" : "not paired"}`, () => {
+        const { socket } = server.simulateSubscription({ deviceId: "device-golden" });
+
+        const captureSequence = server.pushHierarchyUpdate("device-golden", goldenFrame("a"));
+        // measuredWidth/Height of -1 encodes an unmeasurable frame (not a decodable PNG header).
+        const screenshotBase64 =
+          vector.measuredWidth < 0
+            ? Buffer.from("not-an-image").toString("base64")
+            : pngFrame(vector.measuredWidth, vector.measuredHeight);
+        server.pushScreenshotUpdate(
+          "device-golden",
+          screenshotBase64,
+          vector.claimedWidth,
+          vector.claimedHeight,
+          {},
+          { captureSequence: captureSequence ?? undefined }
+        );
+
+        const screenshot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
+        if (vector.expectedMatch === 1) {
+          expect(screenshot.captureSequence).toBe(captureSequence);
+        } else {
+          expect(screenshot.captureSequence).toBeUndefined();
+        }
+      });
+    }
   });
 });

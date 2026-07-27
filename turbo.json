@@ -38,7 +38,7 @@
       "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
     },
     "test": {
-      "description": "Run Bun test suite. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach (registrationTeardownGuard, ctrlProxyProtocol, ctrlProxyWireParity, webrtcDeviceCaptureLatency); without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test:coverage's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.test.ts (issue #4351).",
+      "description": "Run Bun test suite. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach (registrationTeardownGuard, ctrlProxyProtocol, ctrlProxyWireParity, webrtcDeviceCaptureLatency, pinchGoldenVectorParity, coordinateMappingGoldenVectorParity); without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test:coverage's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.test.ts (issue #4351).",
       "inputs": [
         "src/**",
         "test/**",
@@ -50,10 +50,13 @@
         "turbo.json",
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
+        "android/control-proxy/src/test/kotlin/**",
+        "android/desktop-core/src/test/kotlin/**",
         "android/protocol/src/main/kotlin/**",
         "android/video-server/src/main/kotlin/**",
         "ios/auto-mobile-sdk/Sources/**",
-        "ios/control-proxy/Sources/**"
+        "ios/control-proxy/Sources/**",
+        "ios/control-proxy/Tests/**"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -99,10 +102,13 @@
         "turbo.json",
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
+        "android/control-proxy/src/test/kotlin/**",
+        "android/desktop-core/src/test/kotlin/**",
         "android/protocol/src/main/kotlin/**",
         "android/video-server/src/main/kotlin/**",
         "ios/auto-mobile-sdk/Sources/**",
-        "ios/control-proxy/Sources/**"
+        "ios/control-proxy/Sources/**",
+        "ios/control-proxy/Tests/**"
       ],
       "outputs": ["coverage/**"],
       "outputLogs": "new-only",

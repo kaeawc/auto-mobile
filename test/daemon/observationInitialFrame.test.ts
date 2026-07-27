@@ -16,6 +16,7 @@ import type {
   CtrlProxyHierarchyResponse,
   CtrlProxyScreenshotResult,
 } from "../../src/features/observe/ios/types";
+import { loadCoordinateMappingVectors } from "../parity/coordinateMappingGoldenVectors";
 
 class FakeObservationStreamServer {
   readonly hierarchyUpdates: Array<{ deviceId: string; hierarchy: ViewHierarchyResult }> = [];
@@ -554,6 +555,45 @@ describe("pushInitialObservationFramesForSubscriber", () => {
 
     expect(streamServer.hierarchyUpdates.map(update => update.deviceId)).toEqual([androidDevice.id]);
     expect(streamServer.screenshotUpdates.map(update => update.deviceId)).toEqual([androidDevice.id]);
+  });
+
+  describe("coordinate-mapping golden vectors: iOS point->pixel (issue #4547)", () => {
+    // Cross-language golden suite, B0 of the canonical-pixel campaign (#4547 -> #4549). Each
+    // vector drives the daemon's REAL iOS point->pixel conversion (getIosScreenshotDimensions via
+    // pushInitialObservationFramesForSubscriber): screenshot geometry is published as
+    // round(points * screenScale), defaulting the multiplier to 1 when the hierarchy carries no
+    // scale (encoded as scale=0 in the fixture). Every row is flagged
+    // willChangeUnderCanonicalPixels: once #4549 delivers pixel-space hierarchies, this
+    // daemon-side multiply must disappear and these vectors must be updated deliberately.
+    const vectors = loadCoordinateMappingVectors().iosPointToPixel;
+
+    for (const [index, vector] of vectors.entries()) {
+      it(`row ${index}: ${vector.pointWidth}x${vector.pointHeight} points at scale ${vector.scale || "absent"} -> ${vector.expectedPixelWidth}x${vector.expectedPixelHeight} pixels`, async () => {
+        const streamServer = new FakeObservationStreamServer();
+        const iosClient = new FakeIosInitialFrameClient(true, {
+          updatedAt: 1,
+          packageName: "com.example.ios",
+          screenWidth: vector.pointWidth,
+          screenHeight: vector.pointHeight,
+          ...(vector.scale === 0 ? {} : { screenScale: vector.scale }),
+          hierarchy: { text: "Golden" },
+        });
+
+        await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
+          streamServer,
+          androidClientFactory: () => {
+            throw new Error("unexpected Android client");
+          },
+          iosClientFactory: () => iosClient,
+        });
+
+        expect(streamServer.screenshotUpdates[0]).toMatchObject({
+          deviceId: iosDevice.id,
+          screenWidth: vector.expectedPixelWidth,
+          screenHeight: vector.expectedPixelHeight,
+        });
+      });
+    }
   });
 
   it("does not push an initial frame when connection fails", async () => {

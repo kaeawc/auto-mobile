@@ -1,0 +1,240 @@
+/**
+ * Drift guard for the cross-language coordinate-mapping golden vectors (issue #4547, B0 of the
+ * canonical-pixel campaign #4547 -> #4548 -> #4549 -> #4550).
+ *
+ * Single source of truth: `test/fixtures/coordinate-mapping-golden-vectors.json`. The Kotlin
+ * consumer (`CoordinateMappingGoldenVectorTest.kt`, desktop-core) holds committed inline copies of
+ * the five `DeviceScreenCoordinateMapper` sections; this suite parses those literals out of the
+ * Kotlin source and asserts they match the JSON, so a coordinated one-sided edit (change the
+ * mapper's math AND its golden literals without updating the JSON, or vice versa) fails here —
+ * the same mechanism as `pinchGoldenVectorParity.test.ts`.
+ *
+ * The JSON is also a DERIVED source, not a hand-copy: float32-exact reference ports of the Kotlin
+ * mapper (and of the daemon's pairing / point->pixel logic) recompute every row's expected outputs
+ * from its inputs. The daemon sections (`geometryPairing`, `iosPointToPixel`) are additionally
+ * consumed against the REAL daemon code in `test/daemon/deviceDataStreamSocketServer.test.ts` and
+ * `test/daemon/observationInitialFrame.test.ts`.
+ */
+import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
+import {
+  COORDINATE_KOTLIN_TEST_PATH,
+  DEVICE_TO_VIEWPORT_FIELDS,
+  diffNumericRows,
+  FIT_SCALE_FIELDS,
+  FIT_TO_VIEWPORT_FIELDS,
+  loadCoordinateMappingVectors,
+  parseKotlinDeviceToViewportTable,
+  parseKotlinFitScaleTable,
+  parseKotlinFitToViewportTable,
+  parseKotlinScreenshotRotationTable,
+  parseKotlinViewportToDeviceTable,
+  referenceDetectScreenshotRotation,
+  referenceDeviceToViewport,
+  referenceFitScale,
+  referenceFitToViewport,
+  referenceGeometryPairing,
+  referenceIosPointToPixel,
+  referenceViewportToDevice,
+  SCREENSHOT_ROTATION_FIELDS,
+  validateCoordinateMappingVectors,
+  VIEWPORT_TO_DEVICE_FIELDS,
+} from "./coordinateMappingGoldenVectors";
+
+describe("coordinate-mapping golden vector parity (issue #4547)", function() {
+  const canonical = loadCoordinateMappingVectors();
+  const kotlinViewportToDevice = parseKotlinViewportToDeviceTable();
+  const kotlinDeviceToViewport = parseKotlinDeviceToViewportTable();
+  const kotlinFitToViewport = parseKotlinFitToViewportTable();
+  const kotlinFitScale = parseKotlinFitScaleTable();
+  const kotlinScreenshotRotation = parseKotlinScreenshotRotationTable();
+
+  test("canonical JSON exposes non-trivial tables for every section", function() {
+    // Guards against an empty/renamed fixture silently making every parity assertion vacuous.
+    expect(canonical.viewportToDevice.length).toBeGreaterThanOrEqual(10);
+    expect(canonical.deviceToViewport.length).toBeGreaterThanOrEqual(3);
+    expect(canonical.fitToViewport.length).toBeGreaterThanOrEqual(4);
+    expect(canonical.fitScale.length).toBeGreaterThanOrEqual(3);
+    expect(canonical.screenshotRotation.length).toBeGreaterThanOrEqual(6);
+    expect(canonical.geometryPairing.length).toBeGreaterThanOrEqual(6);
+    expect(canonical.iosPointToPixel.length).toBeGreaterThanOrEqual(4);
+  });
+
+  test("AC1: Kotlin viewportToDevice literals are verified against the single source", function() {
+    expect(diffNumericRows(kotlinViewportToDevice, canonical.viewportToDevice, VIEWPORT_TO_DEVICE_FIELDS)).toEqual([]);
+  });
+
+  test("AC1: Kotlin deviceToViewport literals are verified against the single source", function() {
+    expect(diffNumericRows(kotlinDeviceToViewport, canonical.deviceToViewport, DEVICE_TO_VIEWPORT_FIELDS)).toEqual([]);
+  });
+
+  test("AC1: Kotlin fitToViewport literals are verified against the single source", function() {
+    expect(diffNumericRows(kotlinFitToViewport, canonical.fitToViewport, FIT_TO_VIEWPORT_FIELDS)).toEqual([]);
+  });
+
+  test("AC1: Kotlin fitScale literals are verified against the single source", function() {
+    expect(diffNumericRows(kotlinFitScale, canonical.fitScale, FIT_SCALE_FIELDS)).toEqual([]);
+  });
+
+  test("AC1: Kotlin screenshotRotation literals are verified against the single source", function() {
+    expect(diffNumericRows(kotlinScreenshotRotation, canonical.screenshotRotation, SCREENSHOT_ROTATION_FIELDS)).toEqual([]);
+  });
+
+  test("AC2: a coordinated one-sided edit of the Kotlin table is detected", function() {
+    // Simulate the failure mode the guard exists for: someone changes the Kotlin mapper's rounding
+    // AND updates only the Kotlin golden literals. The untouched JSON no longer matches.
+    const tampered = kotlinViewportToDevice.map(row => ({ ...row }));
+    tampered[0] = { ...tampered[0], expectedX: tampered[0].expectedX + 5 };
+    const diffs = diffNumericRows(tampered, canonical.viewportToDevice, VIEWPORT_TO_DEVICE_FIELDS);
+    expect(diffs.length).toBeGreaterThan(0);
+    expect(diffs.some(d => d.includes("row 0 field expectedX"))).toBe(true);
+  });
+
+  test("AC2: an input-tuple divergence is also detected", function() {
+    const tampered = kotlinScreenshotRotation.map(row => ({ ...row }));
+    tampered[2] = { ...tampered[2], rootWidth: tampered[2].rootWidth + 1 };
+    const diffs = diffNumericRows(tampered, canonical.screenshotRotation, SCREENSHOT_ROTATION_FIELDS);
+    expect(diffs.some(d => d.includes("rootWidth"))).toBe(true);
+  });
+
+  test("AC2: the guard fails CLOSED on a missing field, not open", function() {
+    // `Number(undefined)` is NaN and NaN compares as "not different" under any tolerance check,
+    // so a malformed row (deleted field, typo'd key) must be reported as drift — silently
+    // passing would neuter the guard exactly when the fixture is broken.
+    const tampered = kotlinViewportToDevice.map(row => ({ ...row }));
+    delete (tampered[3] as Partial<(typeof tampered)[number]>).expectedY;
+    const diffs = diffNumericRows(tampered, canonical.viewportToDevice, VIEWPORT_TO_DEVICE_FIELDS);
+    expect(diffs.some(d => d.includes("row 3 field expectedY") && d.includes("missing or non-numeric"))).toBe(true);
+  });
+
+  test("AC2: the guard rejects a coercible non-numeric field, not just a missing one", function() {
+    // `Number(null)`, `Number(false)`, and `Number("0")` all coerce to 0, so a ZERO-valued
+    // canonical input (offsetX is 0 in most rows) corrupted to one of those would pass a
+    // coercing comparison — the raw value must be validated as a genuine finite number.
+    for (const corrupted of [null, false, "0"]) {
+      const tampered = canonical.viewportToDevice.map(row => ({ ...row }));
+      expect(tampered[0].offsetX).toBe(0); // the coercion-equivalent target the guard must catch
+      (tampered[0] as Record<string, unknown>).offsetX = corrupted;
+      const diffs = diffNumericRows(kotlinViewportToDevice, tampered, VIEWPORT_TO_DEVICE_FIELDS);
+      expect(
+        diffs.some(d => d.includes("row 0 field offsetX") && d.includes("missing or non-numeric")),
+      ).toBe(true);
+    }
+  });
+
+  test("AC2: daemon-only sections are strictly validated at load time", function() {
+    // The Kotlin-backed sections get a second layer via diffNumericRows, but geometryPairing and
+    // iosPointToPixel are consumed directly by the daemon tests, where JS coercion hides
+    // corruption: `"375" * 2 === 750`, so a string-typed pointWidth would pass BOTH the reference
+    // recalculation and the real daemon path. The loader must reject it with the location named.
+    const corrupted = structuredClone(canonical);
+    (corrupted.iosPointToPixel[0] as Record<string, unknown>).pointWidth = "375";
+    expect(() => validateCoordinateMappingVectors(corrupted, "fixture.json")).toThrow(
+      /fixture\.json: section iosPointToPixel row 0 field pointWidth: missing or non-numeric value \("375"\)/,
+    );
+    // A deleted expected field in a daemon-only section must also fail (no silent unmatch).
+    const missing = structuredClone(canonical);
+    delete (missing.geometryPairing[2] as Partial<(typeof missing.geometryPairing)[number]>).expectedMatch;
+    expect(() => validateCoordinateMappingVectors(missing, "fixture.json")).toThrow(
+      /section geometryPairing row 2 field expectedMatch/,
+    );
+    // And the shipped fixture passes (already exercised by loadCoordinateMappingVectors above).
+    expect(() => validateCoordinateMappingVectors(canonical, "fixture.json")).not.toThrow();
+  });
+
+  test("the Kotlin runtime golden loops still drive the real mapper", function() {
+    // This guard only proves literals <-> JSON. The math <-> literals half lives in the Kotlin
+    // test's runtime loops. If someone deleted those loops but kept the tables, this parity suite
+    // would still pass while the mapper drifted — assert the assertion-driving symbols exist.
+    const kotlinSource = readFileSync(COORDINATE_KOTLIN_TEST_PATH, "utf8");
+    for (const symbol of [
+      "viewportToDevice(",
+      "deviceToViewport(",
+      "fitToViewport(",
+      "fitScale(",
+      "detectScreenshotRotation(",
+      "assertEquals",
+    ]) {
+      expect(kotlinSource).toContain(symbol);
+    }
+  });
+
+  test("every viewportToDevice row's expected outputs are DERIVABLE from its inputs", function() {
+    for (let i = 0; i < canonical.viewportToDevice.length; i++) {
+      const row = canonical.viewportToDevice[i];
+      const computed = referenceViewportToDevice(row);
+      expect(`${i}:${computed.x},${computed.y},${computed.inBounds ? 1 : 0}`)
+        .toBe(`${i}:${row.expectedX},${row.expectedY},${row.expectedInBounds}`);
+    }
+  });
+
+  test("every deviceToViewport row's expected outputs are DERIVABLE from its inputs", function() {
+    for (let i = 0; i < canonical.deviceToViewport.length; i++) {
+      const row = canonical.deviceToViewport[i];
+      const computed = referenceDeviceToViewport(row);
+      expect(Math.abs(computed.x - row.expectedX)).toBeLessThanOrEqual(1e-3);
+      expect(Math.abs(computed.y - row.expectedY)).toBeLessThanOrEqual(1e-3);
+    }
+  });
+
+  test("every fitToViewport row's expected outputs are DERIVABLE from its inputs", function() {
+    for (let i = 0; i < canonical.fitToViewport.length; i++) {
+      const row = canonical.fitToViewport[i];
+      const computed = referenceFitToViewport(row);
+      expect(Math.abs(computed.widthPx - row.expectedWidthPx)).toBeLessThanOrEqual(1e-3);
+      expect(Math.abs(computed.heightPx - row.expectedHeightPx)).toBeLessThanOrEqual(1e-3);
+    }
+  });
+
+  test("every fitScale row's expected output is DERIVABLE from its inputs", function() {
+    for (let i = 0; i < canonical.fitScale.length; i++) {
+      const row = canonical.fitScale[i];
+      expect(Math.abs(referenceFitScale(row) - row.expected)).toBeLessThanOrEqual(1e-3);
+    }
+  });
+
+  test("every screenshotRotation row's expected code is DERIVABLE from its inputs", function() {
+    for (let i = 0; i < canonical.screenshotRotation.length; i++) {
+      const row = canonical.screenshotRotation[i];
+      expect(`${i}:${referenceDetectScreenshotRotation(row)}`).toBe(`${i}:${row.expected}`);
+    }
+  });
+
+  test("every geometryPairing row's expected match is DERIVABLE from its inputs", function() {
+    for (let i = 0; i < canonical.geometryPairing.length; i++) {
+      const row = canonical.geometryPairing[i];
+      expect(`${i}:${referenceGeometryPairing(row) ? 1 : 0}`).toBe(`${i}:${row.expectedMatch}`);
+    }
+  });
+
+  test("every iosPointToPixel row's expected pixels are DERIVABLE from its inputs", function() {
+    for (let i = 0; i < canonical.iosPointToPixel.length; i++) {
+      const row = canonical.iosPointToPixel[i];
+      const computed = referenceIosPointToPixel(row);
+      expect(`${i}:${computed.width}x${computed.height}`)
+        .toBe(`${i}:${row.expectedPixelWidth}x${row.expectedPixelHeight}`);
+    }
+  });
+
+  test("the reference math catches a corrupted expected value in the source", function() {
+    // Negative control: a mis-typed expected endpoint must trip the derivation check.
+    const row = canonical.viewportToDevice[0];
+    const computed = referenceViewportToDevice(row);
+    expect(computed.x).not.toBe(row.expectedX + 7);
+  });
+
+  test("AC3: iOS point-space rows are explicitly flagged as changing under canonical pixels", function() {
+    // The proof the suite will catch the #4549 conversion: at least one row in each affected
+    // section is documented as MUST-change, so that PR has to touch this fixture deliberately.
+    expect(canonical.viewportToDevice.some(row => row.willChangeUnderCanonicalPixels === true)).toBe(true);
+    expect(canonical.deviceToViewport.some(row => row.willChangeUnderCanonicalPixels === true)).toBe(true);
+    expect(canonical.iosPointToPixel.every(row => row.willChangeUnderCanonicalPixels === true)).toBe(true);
+    // And the flagged viewportToDevice rows are exactly the point-space ones (deviceWidth equals
+    // the frame width at scale 1 with an iOS point-class dimension, not an Android pixel one).
+    for (const row of canonical.viewportToDevice) {
+      if (row.willChangeUnderCanonicalPixels) {
+        expect(row.deviceWidth).toBeLessThan(1000);
+      }
+    }
+  });
+});

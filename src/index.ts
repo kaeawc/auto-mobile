@@ -188,7 +188,7 @@ async function main() {
     startStartupMaintenance({
       platform: process.platform,
       startAndroidSweep: () => AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(),
-      startIosReap: () => IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(),
+      startIosReap: () => IOSCtrlProxyManager.startOrphanRunnerReapOnStartup(),
     });
     if (skipCtrlProxyDownload) {
       logger.info(`CtrlProxy downloads disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`);

@@ -34,6 +34,14 @@ interface FakeListeningProcess {
   ignoreKill?: boolean;
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 /**
  * A minimal format-version-1 xctestrun with a single UI-test bundle, used by the
  * boundary test to model what the in-simulator runner actually reads.
@@ -2378,6 +2386,41 @@ describe("IOSCtrlProxyManager", function() {
       expect(unrelatedXcodebuilds.every(process => process.alive)).toBe(true);
     });
 
+    test("startup orphan reaping inspects past live CtrlProxy runners before applying its cap", async function() {
+      const liveRunners: FakeListeningProcess[] = Array.from(
+        { length: MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES },
+        (_, index) => ({
+          pid: 6700 + index,
+          port: 0,
+          ppid: 8000 + index,
+          command: `/tmp/CtrlProxyUITests-Runner.app/CtrlProxyUITests-Runner live-${index}`,
+          alive: true,
+        })
+      );
+      const orphanedRunner: FakeListeningProcess = {
+        pid: 6800,
+        port: 0,
+        ppid: 1,
+        command: "/tmp/CtrlProxyUITests-Runner.app/CtrlProxyUITests-Runner orphan",
+        alive: true,
+      };
+      const fakeExecutor = new FakeProcessExecutor();
+      installListeningProcessFakes(fakeExecutor, [...liveRunners, orphanedRunner]);
+      fakeExecutor.setCommandResponse(
+        "pgrep -f 'CtrlProxy'",
+        createExecResult([...liveRunners, orphanedRunner].map(process => String(process.pid)).join("\n"), "")
+      );
+      fakeTimer.enableAutoAdvance();
+
+      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(
+        new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer),
+        fakeTimer
+      );
+
+      expect(orphanedRunner.alive).toBe(false);
+      expect(liveRunners.every(process => process.alive)).toBe(true);
+    });
+
     test("startup orphan reaping stops at its fake-clock deadline", async function() {
       const candidates: FakeListeningProcess[] = [0, 1].map(index => ({
         pid: 7000 + index,
@@ -2415,6 +2458,87 @@ describe("IOSCtrlProxyManager", function() {
         );
       } finally {
         warnSpy.mockRestore();
+      }
+    });
+
+    test("startup orphan reaping does not terminate a tree when ancestry traversal exhausts its deadline", async function() {
+      const shell: FakeListeningProcess = {
+        pid: 7101,
+        port: 0,
+        ppid: 1,
+        command: "/bin/sh -c xcodebuild",
+        alive: true,
+      };
+      const xcodebuild: FakeListeningProcess = {
+        pid: 7102,
+        port: 0,
+        ppid: shell.pid,
+        command: `xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun ` +
+          `-destination platform=iOS Simulator,id=${testDevice.deviceId} ` +
+          "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
+        alive: true,
+      };
+      const runner: FakeListeningProcess = {
+        pid: 7103,
+        port: 0,
+        ppid: xcodebuild.pid,
+        command: "/tmp/CtrlProxyUITests-Runner.app/CtrlProxyUITests-Runner",
+        alive: true,
+      };
+      const fakeExecutor = new FakeProcessExecutor();
+      installListeningProcessFakes(fakeExecutor, [shell, xcodebuild, runner]);
+      fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxy'", createExecResult(`${runner.pid}\n`, ""));
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      let nowCallCount = 0;
+      const nowSpy = spyOn(fakeTimer, "now").mockImplementation(() => {
+        nowCallCount++;
+        return nowCallCount >= 4 ? STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS : 0;
+      });
+
+      try {
+        await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(
+          new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer),
+          fakeTimer
+        );
+
+        expect(runner.alive).toBe(true);
+        expect(xcodebuild.alive).toBe(true);
+        expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -7101")).toBe(false);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("startup CtrlProxy runner sweep timed out")
+        );
+      } finally {
+        nowSpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("start waits for startup orphan reaping before probing a simulator runner", async function() {
+      const reaping = deferred();
+      const reapSpy = spyOn(
+        IOSCtrlProxyManager,
+        "reapOrphanedRunnerProcessesOnStartup"
+      ).mockImplementation(() => reaping.promise);
+      const fakeExecutor = new FakeProcessExecutor();
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("ok", ""));
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor
+      );
+
+      try {
+        IOSCtrlProxyManager.startOrphanRunnerReapOnStartup();
+        const start = manager.start();
+        await Promise.resolve();
+
+        expect(fakeExecutor.wasCommandExecuted("curl -s")).toBe(false);
+        reaping.resolve();
+        await start;
+        expect(fakeExecutor.wasCommandExecuted("curl -s")).toBe(true);
+      } finally {
+        reapSpy.mockRestore();
       }
     });
 

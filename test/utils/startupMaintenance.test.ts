@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  STARTUP_MAINTENANCE_TIMEOUT_MS,
+  STARTUP_MAINTENANCE_SLOW_WARNING_MS,
   startStartupMaintenance,
 } from "../../src/utils/startupMaintenance";
 import { FakeLogger } from "../fakes/FakeLogger";
@@ -31,7 +31,6 @@ describe("startStartupMaintenance", () => {
       logger: log,
     });
 
-    await expect(Promise.resolve("request-ready")).resolves.toBe("request-ready");
     expect(androidStarted).toBe(true);
     expect(iosStarted).toBe(true);
   });
@@ -68,7 +67,7 @@ describe("startStartupMaintenance", () => {
       timer,
       logger: log,
     });
-    timer.advanceTime(STARTUP_MAINTENANCE_TIMEOUT_MS);
+    timer.advanceTime(STARTUP_MAINTENANCE_SLOW_WARNING_MS);
 
     expect(log.at("warn").map(message => message.message)).toEqual([
       expect.stringContaining("Android CtrlProxy prefetch cleanup exceeded"),

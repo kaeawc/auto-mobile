@@ -1,7 +1,7 @@
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { logger, type Logger } from "./logger";
 
-export const STARTUP_MAINTENANCE_TIMEOUT_MS = 5_000;
+export const STARTUP_MAINTENANCE_SLOW_WARNING_MS = 5_000;
 
 export interface StartupMaintenanceDependencies {
   readonly platform: NodeJS.Platform;
@@ -51,9 +51,9 @@ function startBackgroundCleanup(
 
   const timeout = timer.setTimeout(() => {
     log.warn(
-      `[STARTUP_MAINTENANCE] ${label} exceeded ${STARTUP_MAINTENANCE_TIMEOUT_MS}ms; continuing startup`
+      `[STARTUP_MAINTENANCE] ${label} exceeded ${STARTUP_MAINTENANCE_SLOW_WARNING_MS}ms; continuing startup`
     );
-  }, STARTUP_MAINTENANCE_TIMEOUT_MS);
+  }, STARTUP_MAINTENANCE_SLOW_WARNING_MS);
   (timeout as { unref?: () => void }).unref?.();
 
   void work

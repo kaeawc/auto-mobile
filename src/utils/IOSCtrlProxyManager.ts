@@ -104,6 +104,16 @@ interface ListeningProcess {
   ppid?: number;
 }
 
+type DaemonManagedRunnerTreeRoot =
+  | { readonly kind: "root"; readonly pid: number }
+  | { readonly kind: "not_daemon_managed" }
+  | { readonly kind: "deadline_exhausted" };
+
+interface DaemonManagedRunnerParentRoot {
+  readonly rootPid: number | null;
+  readonly terminal: boolean;
+}
+
 // Re-exported from the extracted collaborator (issue #3218) so existing
 // consumers/tests keep importing it from this facade module.
 export type { HostPortAvailabilityChecker };
@@ -146,6 +156,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   // Singleton instances per device
   private static instances: Map<string, IOSCtrlProxyManager> = new Map();
+  private static startupOrphanRunnerReap: Promise<void> | null = null;
 
   // Cache for status checks
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
@@ -361,6 +372,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public static resetInstances(): void {
     IOSCtrlProxyManager.instances.clear();
+    IOSCtrlProxyManager.startupOrphanRunnerReap = null;
   }
 
   /**
@@ -370,6 +382,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const instances = Array.from(IOSCtrlProxyManager.instances.values());
     await Promise.all(instances.map(instance => instance.stop()));
     IOSCtrlProxyManager.instances.clear();
+  }
+
+  /**
+   * Starts orphan reaping during daemon initialization while retaining the
+   * promise so the first simulator request cannot adopt a runner being reaped.
+   */
+  public static startOrphanRunnerReapOnStartup(): Promise<void> {
+    const work = IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup();
+    IOSCtrlProxyManager.startupOrphanRunnerReap = work.catch(error => {
+      logger.debug(`[IOSCtrlProxy] Startup orphan runner sweep failed: ${error}`);
+    });
+    return work;
   }
 
   /**
@@ -389,16 +413,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
 
-    const candidates = pids.slice(0, MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES);
-    const skippedCandidateCount = pids.length - candidates.length;
-    if (skippedCandidateCount > 0) {
-      logger.warn(
-        `[IOSCtrlProxy] startup sweep skipped ${skippedCandidateCount} startup CtrlProxy runner candidate(s) after ` +
-        `reaching the ${MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES}-candidate cap`
-      );
-    }
-
-    for (const pid of candidates) {
+    const reapedRootPids = new Set<number>();
+    for (const pid of pids) {
       if (timer.now() >= deadline) {
         logger.warn(
           `[IOSCtrlProxy] startup CtrlProxy runner sweep timed out after ${STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS}ms`
@@ -406,39 +422,56 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return;
       }
       try {
-        const processInfo = await processClient.getProcessInfo(pid);
-        if (!processInfo || !processClient.isCtrlProxyRunnerCommand(processInfo.command)) {
-          continue;
-        }
-        const rootPid = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(
-          processClient,
-          {
-            pid,
-            port: IOSCtrlProxyManager.DEFAULT_PORT,
-            command: processInfo.command,
-            environment: processInfo.environment,
-            ppid: processInfo.ppid,
-          },
-          {
-            requireOrphanedRoot: true,
-            shouldContinue: () => timer.now() < deadline,
-          }
-        );
-        if (timer.now() >= deadline) {
+        const root = await IOSCtrlProxyManager.findStartupOrphanRunnerRoot(processClient, pid, deadline, timer);
+        if (root.kind === "deadline_exhausted" || timer.now() >= deadline) {
           logger.warn(
             `[IOSCtrlProxy] startup CtrlProxy runner sweep timed out after ${STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS}ms`
           );
           return;
         }
-        if (rootPid === null) {
+        if (root.kind !== "root" || reapedRootPids.has(root.pid)) {
           continue;
         }
-        logger.info(`[IOSCtrlProxy] Reaping orphaned CtrlProxy iOS process tree rooted at ${rootPid}`);
-        await processClient.terminateProcessTree(rootPid);
+        if (reapedRootPids.size >= MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES) {
+          logger.warn(
+            `[IOSCtrlProxy] startup sweep skipped 1 startup CtrlProxy runner candidate after ` +
+            `reaching the ${MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES}-candidate cap`
+          );
+          return;
+        }
+        reapedRootPids.add(root.pid);
+        logger.info(`[IOSCtrlProxy] Reaping orphaned CtrlProxy iOS process tree rooted at ${root.pid}`);
+        await processClient.terminateProcessTree(root.pid);
       } catch (error) {
         logger.debug(`[IOSCtrlProxy] Failed to reap orphaned CtrlProxy iOS process ${pid}: ${error}`);
       }
     }
+  }
+
+  private static async findStartupOrphanRunnerRoot(
+    processClient: IOSCtrlProxyProcessClient,
+    pid: number,
+    deadline: number,
+    timer: Timer
+  ): Promise<DaemonManagedRunnerTreeRoot> {
+    const processInfo = await processClient.getProcessInfo(pid);
+    if (!processInfo || !processClient.isCtrlProxyRunnerCommand(processInfo.command)) {
+      return { kind: "not_daemon_managed" };
+    }
+    return IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(
+      processClient,
+      {
+        pid,
+        port: IOSCtrlProxyManager.DEFAULT_PORT,
+        command: processInfo.command,
+        environment: processInfo.environment,
+        ppid: processInfo.ppid,
+      },
+      {
+        requireOrphanedRoot: true,
+        shouldContinue: () => timer.now() < deadline,
+      }
+    );
   }
 
   /**
@@ -657,6 +690,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`
       );
     }
+
+    await this.awaitStartupOrphanRunnerReap();
 
     logger.info("[IOSCtrlProxy] Starting CtrlProxy");
     this.isStopping = false;
@@ -1600,7 +1635,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           this.processClient,
           process
         );
-        if (daemonManagedRoot !== null && daemonManagedRoot !== process.pid) {
+        if (daemonManagedRoot.kind === "root" && daemonManagedRoot.pid !== process.pid) {
           continue;
         }
         if (!await this.processAncestryContainsDeviceId(process)) {
@@ -1732,30 +1767,34 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private async findDaemonManagedRunnerTreeRoot(process: ListeningProcess): Promise<number> {
-    return (await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(this.processClient, process)) ??
-      process.pid;
+    const result = await IOSCtrlProxyManager.findDaemonManagedRunnerTreeRoot(this.processClient, process);
+    return result.kind === "root" ? result.pid : process.pid;
   }
 
   private static async findDaemonManagedRunnerTreeRoot(
     processClient: IOSCtrlProxyProcessClient,
     process: ListeningProcess,
     options: { requireOrphanedRoot?: boolean; shouldContinue?: () => boolean } = {}
-  ): Promise<number | null> {
+  ): Promise<DaemonManagedRunnerTreeRoot> {
     if (!IOSCtrlProxyManager.isCtrlProxyRunnerCommand(process.command)) {
-      return null;
+      return { kind: "not_daemon_managed" };
     }
 
-    let rootPid: number | null = process.ppid === 1 ? process.pid : null;
+    let rootPid = process.ppid === 1 ? process.pid : null;
     let parentPid = process.ppid;
     const visitedPids = new Set<number>([process.pid]);
 
     if (IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)) {
-      rootPid = options.requireOrphanedRoot && process.ppid !== 1 ? null : process.pid;
+      rootPid = IOSCtrlProxyManager.rootPidForDaemonManagedProcess(
+        process.pid,
+        process.ppid,
+        options.requireOrphanedRoot
+      );
     }
 
     while (parentPid !== undefined && parentPid > 1 && !visitedPids.has(parentPid)) {
       if (options.shouldContinue && !options.shouldContinue()) {
-        return null;
+        return { kind: "deadline_exhausted" };
       }
       visitedPids.add(parentPid);
       const parentInfo = await processClient.getProcessInfo(parentPid);
@@ -1763,21 +1802,60 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         break;
       }
 
-      if (
-        IOSCtrlProxyManager.isShellCommand(parentInfo.command) &&
-        IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command)
-      ) {
-        return options.requireOrphanedRoot && parentInfo.ppid !== 1 ? null : parentPid;
-      }
-
-      if (IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command)) {
-        rootPid = options.requireOrphanedRoot && parentInfo.ppid !== 1 ? null : parentPid;
+      const parentRoot = IOSCtrlProxyManager.daemonManagedParentRoot(
+        parentInfo,
+        parentPid,
+        options.requireOrphanedRoot
+      );
+      if (parentRoot) {
+        if (parentRoot.terminal) {
+          return IOSCtrlProxyManager.toDaemonManagedRunnerTreeRoot(parentRoot.rootPid);
+        }
+        rootPid = parentRoot.rootPid;
       }
 
       parentPid = parentInfo.ppid;
     }
 
-    return rootPid;
+    return IOSCtrlProxyManager.toDaemonManagedRunnerTreeRoot(rootPid);
+  }
+
+  private async awaitStartupOrphanRunnerReap(): Promise<void> {
+    if (this.isSimulator()) {
+      await IOSCtrlProxyManager.awaitStartupOrphanRunnerReap();
+    }
+  }
+
+  private static async awaitStartupOrphanRunnerReap(): Promise<void> {
+    await IOSCtrlProxyManager.startupOrphanRunnerReap;
+  }
+
+  private static daemonManagedParentRoot(
+    process: { command: string; ppid?: number },
+    pid: number,
+    requireOrphanedRoot: boolean | undefined
+  ): DaemonManagedRunnerParentRoot | null {
+    if (!IOSCtrlProxyManager.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)) {
+      return null;
+    }
+    return {
+      rootPid: IOSCtrlProxyManager.rootPidForDaemonManagedProcess(pid, process.ppid, requireOrphanedRoot),
+      terminal: IOSCtrlProxyManager.isShellCommand(process.command),
+    };
+  }
+
+  private static rootPidForDaemonManagedProcess(
+    pid: number,
+    ppid: number | undefined,
+    requireOrphanedRoot: boolean | undefined
+  ): number | null {
+    return requireOrphanedRoot && ppid !== 1 ? null : pid;
+  }
+
+  private static toDaemonManagedRunnerTreeRoot(rootPid: number | null): DaemonManagedRunnerTreeRoot {
+    return rootPid === null
+      ? { kind: "not_daemon_managed" }
+      : { kind: "root", pid: rootPid };
   }
 
   private formatListeningProcesses(processes: ListeningProcess[]): string {

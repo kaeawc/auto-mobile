@@ -24,6 +24,9 @@ import { IOSCtrlProxyHealthClient, isValidCtrlProxyPort } from "./ios/IOSCtrlPro
 import { IOSCtrlProxyProcessClient } from "./ios/IOSCtrlProxyProcessClient";
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
+export const MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES = 20;
+export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
+
 /**
  * iOS-specific setup result; carries the build result alongside the
  * platform-agnostic fields.
@@ -377,6 +380,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     processClient: IOSCtrlProxyProcessClient = new IOSCtrlProxyProcessClient(),
     timer: Timer = defaultTimer
   ): Promise<void> {
+    const deadline = timer.now() + STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS;
     let pids: number[] = [];
     try {
       pids = await processClient.findStartupCandidatePids();
@@ -385,7 +389,22 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
 
-    for (const pid of pids) {
+    const candidates = pids.slice(0, MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES);
+    const skippedCandidateCount = pids.length - candidates.length;
+    if (skippedCandidateCount > 0) {
+      logger.warn(
+        `[IOSCtrlProxy] startup sweep skipped ${skippedCandidateCount} startup CtrlProxy runner candidate(s) after ` +
+        `reaching the ${MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES}-candidate cap`
+      );
+    }
+
+    for (const pid of candidates) {
+      if (timer.now() >= deadline) {
+        logger.warn(
+          `[IOSCtrlProxy] startup CtrlProxy runner sweep timed out after ${STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS}ms`
+        );
+        return;
+      }
       try {
         const processInfo = await processClient.getProcessInfo(pid);
         if (!processInfo || !processClient.isCtrlProxyRunnerCommand(processInfo.command)) {
@@ -400,8 +419,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             environment: processInfo.environment,
             ppid: processInfo.ppid,
           },
-          { requireOrphanedRoot: true }
+          {
+            requireOrphanedRoot: true,
+            shouldContinue: () => timer.now() < deadline,
+          }
         );
+        if (timer.now() >= deadline) {
+          logger.warn(
+            `[IOSCtrlProxy] startup CtrlProxy runner sweep timed out after ${STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS}ms`
+          );
+          return;
+        }
         if (rootPid === null) {
           continue;
         }
@@ -1711,7 +1739,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private static async findDaemonManagedRunnerTreeRoot(
     processClient: IOSCtrlProxyProcessClient,
     process: ListeningProcess,
-    options: { requireOrphanedRoot?: boolean } = {}
+    options: { requireOrphanedRoot?: boolean; shouldContinue?: () => boolean } = {}
   ): Promise<number | null> {
     if (!IOSCtrlProxyManager.isCtrlProxyRunnerCommand(process.command)) {
       return null;
@@ -1726,6 +1754,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     while (parentPid !== undefined && parentPid > 1 && !visitedPids.has(parentPid)) {
+      if (options.shouldContinue && !options.shouldContinue()) {
+        return null;
+      }
       visitedPids.add(parentPid);
       const parentInfo = await processClient.getProcessInfo(parentPid);
       if (!parentInfo) {

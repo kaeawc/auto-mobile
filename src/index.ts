@@ -39,6 +39,7 @@ import {
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "./processLifecycle";
+import { startStartupMaintenance } from "./utils/startupMaintenance";
 
 interface FatalLogger {
   error(...args: unknown[]): void;
@@ -181,10 +182,14 @@ async function main() {
     serverConfig.setNetworkMockableEnabled(networkMockable);
     serverConfig.setDismissKeyboardAfterInputEnabled(dismissKeyboardAfterInput);
     serverConfig.setEventAllMarkers(eventAllMarkers);
-    // Reclaim any auto-mobile-prefetch-* scratch dirs leaked by a previously
-    // crashed/killed daemon before its shutdown cleanup ran (#4334). Runs even
-    // when downloads are disabled, since leaked dirs still need reclaiming.
-    await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup();
+    // Reclaim artifacts leaked by previous daemons without gating stdio
+    // readiness. The sweeps are best-effort maintenance, not a prerequisite for
+    // serving a new client (issue #4581).
+    startStartupMaintenance({
+      platform: process.platform,
+      startAndroidSweep: () => AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(),
+      startIosReap: () => IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(),
+    });
     if (skipCtrlProxyDownload) {
       logger.info(`CtrlProxy downloads disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`);
     } else {
@@ -193,10 +198,9 @@ async function main() {
       AndroidCtrlProxyManager.prefetchApk();
     }
 
-    // Reap orphaned iOS runners before the daemon accepts iOS work, then start
-    // the build prefetch asynchronously so it can be ready for first use.
+    // Start the iOS build prefetch asynchronously so it can be ready for first
+    // use. Runner cleanup above is also asynchronous and bounded.
     if (process.platform === "darwin") {
-      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup();
       if (skipCtrlProxyDownload) {
         logger.info(`CtrlProxy iOS prefetch disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`);
       } else {

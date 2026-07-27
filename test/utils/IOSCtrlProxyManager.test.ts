@@ -1,6 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
-import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
+import {
+  IOSCtrlProxyManager,
+  STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS,
+  MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES,
+} from "../../src/utils/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
@@ -9,6 +13,7 @@ import { createExecResult } from "../../src/utils/execResult";
 import { PortManager } from "../../src/utils/PortManager";
 import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
 import { IOSCtrlProxyProcessClient } from "../../src/utils/ios/IOSCtrlProxyProcessClient";
+import { logger } from "../../src/utils/logger";
 import type { Xcodebuild } from "../../src/utils/ios-cmdline-tools/XcodebuildClient";
 import type { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
@@ -2204,7 +2209,7 @@ describe("IOSCtrlProxyManager", function() {
         alive: true,
       };
       installListeningProcessFakes(fakeExecutor, [orphanProcess]);
-      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("4444\n", ""));
+      fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxy'", createExecResult("4444\n", ""));
       fakeTimer.enableAutoAdvance();
 
       await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer), fakeTimer);
@@ -2222,8 +2227,7 @@ describe("IOSCtrlProxyManager", function() {
         alive: true,
       };
       installListeningProcessFakes(fakeExecutor, [orphanProcess]);
-      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
-      fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxyUITests-Runner'", createExecResult("4445\n", ""));
+      fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxy'", createExecResult("4445\n", ""));
       fakeTimer.enableAutoAdvance();
 
       await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer), fakeTimer);
@@ -2260,8 +2264,7 @@ describe("IOSCtrlProxyManager", function() {
         alive: true,
       };
       installListeningProcessFakes(fakeExecutor, [orphanedRunner, orphanedXcodebuild, orphanedShell]);
-      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("4447\n", ""));
-      fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxyUITests-Runner'", createExecResult("4448\n", ""));
+      fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxy'", createExecResult("4447\n4448\n", ""));
       fakeTimer.enableAutoAdvance();
 
       await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer), fakeTimer);
@@ -2293,8 +2296,7 @@ describe("IOSCtrlProxyManager", function() {
         ignoreKill: true,
       };
       installListeningProcessFakes(fakeExecutor, [liveParent, liveXcodebuild]);
-      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("4451\n", ""));
-      fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxyUITests-Runner'", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxy'", createExecResult("4451\n", ""));
       fakeTimer.enableAutoAdvance();
 
       await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer), fakeTimer);
@@ -2302,6 +2304,118 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.wasCommandExecuted("kill -TERM -- -4451")).toBe(false);
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 4451")).toBe(false);
       expect(liveXcodebuild.alive).toBe(true);
+    });
+
+    test("startup orphan reaping caps candidate process work and logs skipped candidates", async function() {
+      const candidates: FakeListeningProcess[] = Array.from(
+        { length: MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES + 1 },
+        (_, index) => ({
+          pid: 6000 + index,
+          port: 0,
+          ppid: 1,
+          command: `xcodebuild test-without-building -xctestrun /tmp/CtrlProxy-${index}.xctestrun ` +
+            `-destination platform=iOS Simulator,id=${testDevice.deviceId} ` +
+            `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+          alive: true,
+        })
+      );
+      const fakeExecutor = new FakeProcessExecutor();
+      installListeningProcessFakes(fakeExecutor, candidates);
+      fakeExecutor.setCommandResponse(
+        "pgrep -f 'CtrlProxy'",
+        createExecResult(candidates.map(candidate => String(candidate.pid)).join("\n"), "")
+      );
+      fakeTimer.enableAutoAdvance();
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+      try {
+        await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(
+          new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer),
+          fakeTimer
+        );
+
+        expect(candidates.filter(candidate => candidate.alive)).toHaveLength(1);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("skipped 1 startup CtrlProxy runner candidate")
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("startup orphan reaping filters unrelated xcodebuild candidates before applying its cap", async function() {
+      const unrelatedXcodebuilds: FakeListeningProcess[] = Array.from(
+        { length: MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES },
+        (_, index) => ({
+          pid: 6500 + index,
+          port: 0,
+          ppid: 1,
+          command: `xcodebuild test-without-building -xctestrun /tmp/Unrelated-${index}.xctestrun`,
+          alive: true,
+        })
+      );
+      const orphanedRunner: FakeListeningProcess = {
+        pid: 6600,
+        port: 0,
+        ppid: 1,
+        command: "/tmp/CtrlProxyUITests-Runner.app/CtrlProxyUITests-Runner",
+        alive: true,
+      };
+      const fakeExecutor = new FakeProcessExecutor();
+      installListeningProcessFakes(fakeExecutor, [...unrelatedXcodebuilds, orphanedRunner]);
+      fakeExecutor.setCommandResponse(
+        "pgrep -f 'CtrlProxy'",
+        createExecResult(`${orphanedRunner.pid}\n`, "")
+      );
+      fakeTimer.enableAutoAdvance();
+
+      await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(
+        new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer),
+        fakeTimer
+      );
+
+      expect(orphanedRunner.alive).toBe(false);
+      expect(unrelatedXcodebuilds.every(process => process.alive)).toBe(true);
+    });
+
+    test("startup orphan reaping stops at its fake-clock deadline", async function() {
+      const candidates: FakeListeningProcess[] = [0, 1].map(index => ({
+        pid: 7000 + index,
+        port: 0,
+        ppid: 1,
+        command: `xcodebuild test-without-building -xctestrun /tmp/CtrlProxy-${index}.xctestrun ` +
+          `-destination platform=iOS Simulator,id=${testDevice.deviceId} ` +
+          `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+        alive: true,
+      }));
+      const fakeExecutor = new FakeProcessExecutor();
+      fakeExecutor.setCommandHandler("ps -p", command => {
+        const pid = Number(command.match(/ps -p\s+(\d+)/)?.[1]);
+        const process = candidates.find(candidate => candidate.pid === pid && candidate.alive);
+        fakeTimer.advanceTime(STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS);
+        return createExecResult(process ? `${process.ppid} ${process.command}` : "", "");
+      });
+      installListeningProcessFakes(fakeExecutor, candidates);
+      fakeExecutor.setCommandResponse(
+        "pgrep -f 'CtrlProxy'",
+        createExecResult(candidates.map(candidate => String(candidate.pid)).join("\n"), "")
+      );
+      fakeTimer.enableAutoAdvance();
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+      try {
+        await IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(
+          new IOSCtrlProxyProcessClient(fakeExecutor, fakeTimer),
+          fakeTimer
+        );
+
+        expect(candidates.filter(candidate => candidate.alive)).toHaveLength(2);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("startup CtrlProxy runner sweep timed out")
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
 
     test("start() reports the bound PID and command when owned port cleanup cannot free the port", async function() {

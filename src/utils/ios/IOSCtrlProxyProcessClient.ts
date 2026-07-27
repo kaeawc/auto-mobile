@@ -65,13 +65,10 @@ export class IOSCtrlProxyProcessClient {
   }
 
   async findStartupCandidatePids(): Promise<number[]> {
-    const pids = new Set<number>();
-    for (const [pattern, exact] of [["xcodebuild", true], ["CtrlProxyUITests-Runner", false]] as const) {
-      for (const pid of await this.findPids(pattern, exact)) {
-        pids.add(pid);
-      }
-    }
-    return [...pids];
+    // The startup sweep caps inspection, so discover only CtrlProxy-shaped
+    // commands before the cap rather than letting unrelated xcodebuild work
+    // consume it.
+    return this.findPids("CtrlProxy", false);
   }
 
   async findXcodebuildPids(): Promise<number[]> {

@@ -29,6 +29,8 @@ import {
   DefaultAndroidPrerequisiteDetector
 } from "./android-cmdline-tools/AndroidPrerequisiteDetector";
 
+export const MAX_STALE_PREFETCH_DIRS_PER_STARTUP = 20;
+
 /**
  * Android-specific accessibility-service lifecycle, extending the
  * platform-agnostic {@link ProxyManager}.
@@ -424,24 +426,42 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return;
     }
 
+    const candidates = entries.filter(
+      entry => entry.isDirectory() && entry.name.startsWith(AndroidCtrlProxyManager.PREFETCH_DIR_PREFIX)
+    );
     const now = timer.now();
-    let reclaimed = 0;
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !entry.name.startsWith(AndroidCtrlProxyManager.PREFETCH_DIR_PREFIX)) {
-        continue;
-      }
+    const staleDirectories: string[] = [];
+    for (const entry of candidates) {
       const dir = path.join(tempRoot, entry.name);
       try {
         const stats = await fs.stat(dir);
-        if (now - stats.mtimeMs < AndroidCtrlProxyManager.STALE_PREFETCH_MAX_AGE_MS) {
-          continue;
+        if (now - stats.mtimeMs >= AndroidCtrlProxyManager.STALE_PREFETCH_MAX_AGE_MS) {
+          staleDirectories.push(dir);
         }
+      } catch (error) {
+        // Per-entry best-effort: a concurrent process may remove the same dir,
+        // or it may vanish mid-sweep. Skip it and keep going.
+        logger.debug(`[CTRL_PROXY] Failed to inspect stale prefetch dir ${dir}: ${error}`);
+      }
+    }
+
+    const skippedCandidateCount = Math.max(0, staleDirectories.length - MAX_STALE_PREFETCH_DIRS_PER_STARTUP);
+    if (skippedCandidateCount > 0) {
+      logger.warn(
+        `[CTRL_PROXY] Prefetch sweep skipped ${skippedCandidateCount} stale prefetch dir(s) after ` +
+        `reaching the ${MAX_STALE_PREFETCH_DIRS_PER_STARTUP}-directory startup cap`
+      );
+    }
+
+    let reclaimed = 0;
+    for (const dir of staleDirectories.slice(0, MAX_STALE_PREFETCH_DIRS_PER_STARTUP)) {
+      try {
         await fs.rm(dir, { recursive: true, force: true });
         reclaimed++;
       } catch (error) {
         // Per-entry best-effort: a concurrent process may remove the same dir,
         // or it may vanish mid-sweep. Skip it and keep going.
-        logger.debug(`[CTRL_PROXY] Failed to sweep stale prefetch dir ${dir}: ${error}`);
+        logger.debug(`[CTRL_PROXY] Failed to remove stale prefetch dir ${dir}: ${error}`);
       }
     }
 

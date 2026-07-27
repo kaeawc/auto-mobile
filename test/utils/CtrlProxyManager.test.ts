@@ -109,7 +109,7 @@ describe("CtrlProxyManager", function() {
       expect(result).toBe(false);
     });
 
-    test("should return false when the ADB command throws", async function() {
+    test("returns false when the ADB command throws", async function() {
       // ADD-10: exercise the catch path for real. Setting stderr on a resolved
       // response never entered the catch (isInstalled reads stdout only), so it
       // could not distinguish "return false" from any other catch behavior.
@@ -144,7 +144,7 @@ describe("CtrlProxyManager", function() {
       expect(result).toBe(false);
     });
 
-    test("should return false when ADB command fails", async function() {
+    test("returns false when the ADB command fails", async function() {
       fakeAdb.setCommandResponse("settings get secure", {
         stdout: "",
         stderr: "Error"

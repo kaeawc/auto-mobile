@@ -223,4 +223,32 @@ class TouchFeedbackModelTest {
     assertEquals(0f, offset.x)
     assertEquals(0f, offset.y)
   }
+
+  // --- Orientation (issue #3352): a rotation mid-pulse drops stale-oriented markers. ---
+
+  @Test
+  fun `retainOnlyOrientation drops pulses after a portrait to landscape flip`() {
+    val model = model()
+    now = 0L
+    // Captured in portrait (w < h).
+    model.record(x = 540, y = 1170, deviceWidth = 1080, deviceHeight = 2340)
+    assertEquals(1, model.active().size)
+
+    // Device rotates to landscape (w > h): the portrait marker no longer maps into the frame.
+    model.retainOnlyOrientation(deviceWidth = 2340, deviceHeight = 1080)
+    assertTrue(model.active().isEmpty())
+  }
+
+  @Test
+  fun `retainOnlyOrientation keeps pulses on a same-orientation resolution change`() {
+    val model = model()
+    now = 0L
+    // Captured in portrait 1080x2340.
+    model.record(x = 540, y = 1170, deviceWidth = 1080, deviceHeight = 2340)
+
+    // A same-orientation resolution change (still portrait) must NOT drop the pulse — the captured
+    // bounds already place it correctly.
+    model.retainOnlyOrientation(deviceWidth = 720, deviceHeight = 1560)
+    assertEquals(1, model.active().size)
+  }
 }

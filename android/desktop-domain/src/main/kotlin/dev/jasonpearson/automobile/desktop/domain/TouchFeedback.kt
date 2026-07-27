@@ -121,6 +121,23 @@ public class TouchFeedbackModel(
   }
 
   /**
+   * Drop pulses whose captured orientation no longer matches the current [deviceWidth] x
+   * [deviceHeight] (issue #3352).
+   *
+   * A marker is placed by scaling its captured device point through its captured bounds
+   * ([ActiveTouchFeedback.frameOffset]), which is exact only within the orientation it was captured
+   * in. If the device rotates during a pulse (portrait↔landscape — the width/height aspect flips),
+   * the same device point maps into a differently-shaped frame and the pulse would land outside the
+   * clipped canvas. A transient 600ms marker is not worth transforming across a rotation, and a
+   * stale-oriented pulse is worse than none — so it is simply dropped. Same-orientation resolution
+   * changes are unaffected (that is what the captured bounds already handle).
+   */
+  public fun retainOnlyOrientation(deviceWidth: Int, deviceHeight: Int) {
+    val landscape = deviceWidth > deviceHeight
+    markers.removeAll { (it.deviceWidth > it.deviceHeight) != landscape }
+  }
+
+  /**
    * Fade progress of [marker] at [now]: `0.0` when just recorded, `1.0` once [durationMs] has
    * elapsed. A non-positive [durationMs] makes every marker immediately expired (feedback off).
    * Elapsed is clamped at `0.0` defensively; a monotonic clock never produces a negative elapsed,

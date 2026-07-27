@@ -433,6 +433,15 @@ fun DeviceScreenView(
   LaunchedEffect(controlMode) {
     if (controlMode != DeviceScreenControlMode.Control) touchFeedback.reset()
   }
+  // Drop pulses when the device rotates mid-fade (issue #3352): a marker is placed by scaling its
+  // captured device point through its captured bounds, which only holds within the orientation it
+  // was captured in — after a portrait<->landscape flip the same point maps into a differently
+  // shaped frame and would land outside the clipped canvas. Keying on the orientation flag fires
+  // this only on an actual flip, so a same-orientation resolution change keeps its pulses.
+  val controlSnapshotLandscape = controlSnapshot?.let { it.deviceWidth > it.deviceHeight }
+  LaunchedEffect(controlSnapshotLandscape) {
+    controlSnapshot?.let { touchFeedback.retainOnlyOrientation(it.deviceWidth, it.deviceHeight) }
+  }
   LaunchedEffect(touchFeedbackGeneration, controlMode) {
     if (controlMode != DeviceScreenControlMode.Control) return@LaunchedEffect
     while (touchFeedback.hasActive()) {

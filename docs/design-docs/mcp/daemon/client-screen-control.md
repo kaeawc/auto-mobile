@@ -43,6 +43,93 @@ the normative spec for its piece.
 | 4 | **Key-forwarding** and host-shortcut policy ([#3351](https://github.com/kaeawc/auto-mobile/issues/3351)) | [Screen Control Mapping → Keyboard forwarding policy](screen-control-mapping.md#keyboard-forwarding-policy) |
 | 5 | **Frame snapshot** pairing + **post-input refresh** ([#3348](https://github.com/kaeawc/auto-mobile/issues/3348)) | [Client Frame Snapshot](client-frame-snapshot.md) |
 
+## Observation stream protocol
+
+The frame snapshot in step 1 is assembled from the daemon's **observation stream**, a separate Unix
+socket from the request/response `input/*` API. This is the wire contract a client needs to connect;
+it is authoritative to `src/daemon/deviceDataStreamSocketServer.ts`.
+
+### Socket and framing
+
+- **Path:** `~/.auto-mobile/observation-stream.sock` (`$HOME/.auto-mobile/observation-stream.sock`).
+- **Framing:** newline-delimited JSON. Each request and each pushed message is a single JSON object
+  on its own line (`\n`-terminated). There is no length prefix.
+
+### Subscribe handshake
+
+Send a `subscribe` command; the daemon replies once, then pushes update messages until you
+`unsubscribe` or disconnect.
+
+```json
+// client -> daemon
+{ "id": "1", "command": "subscribe", "deviceId": "emulator-5554" }
+// daemon -> client
+{ "id": "1", "type": "subscription_response", "success": true }
+```
+
+- `deviceId` is **optional**: omit it (or send `null`) to receive frames for **all** devices; pass a
+  specific id to receive only that device's frames. A control client should subscribe to the one
+  device the user selected.
+- Optional `screenshotIntervalMs` / `hierarchyIntervalMs` on the `subscribe` request set the capture
+  cadence (daemon defaults: screenshot 3000 ms, hierarchy 1000 ms; minimum 250 ms). To change
+  cadence in place later, send `{ "command": "update_cadence", "screenshotIntervalMs": …,
+  "hierarchyIntervalMs": … }`; to stop, send `{ "command": "unsubscribe" }`. An older daemon that
+  does not know a command replies with a benign error and keeps its default cadence.
+
+### Pushed messages
+
+Every push carries a `type`, the `deviceId` it belongs to, and a display-only `timestamp`. Pair
+frames **only** across messages with the same `deviceId`.
+
+**`hierarchy_update`** — the element tree. Carries a `captureSequence` on **every** message.
+
+```json
+{
+  "type": "hierarchy_update",
+  "deviceId": "emulator-5554",
+  "timestamp": 1737942000123,
+  "data": { "hierarchy": { "…": "ViewHierarchyResult with element bounds" } },
+  "hierarchyDiff": { "…": "optional per-frame diff summary" },
+  "captureSequence": 42
+}
+```
+
+**`screenshot_update`** — the pixels. Carries a `captureSequence` **only when** the daemon verified
+that the frame's real pixel dimensions match the geometry its capture client claimed; otherwise the
+field is **absent** and a control client must fail closed for that frame.
+
+```json
+{
+  "type": "screenshot_update",
+  "deviceId": "emulator-5554",
+  "timestamp": 1737942000456,
+  "screenshotBase64": "<PNG bytes, base64>",
+  "screenWidth": 1080,
+  "screenHeight": 2340,
+  "captureSequence": 42
+}
+```
+
+**`error`** — a device-side problem (e.g. connection lost):
+`{ "type": "error", "deviceId": "…", "timestamp": …, "error": "device connection lost" }`.
+
+(The stream also pushes `navigation_update`, `performance_update`, and `storage_update`; a control
+client ignores them.)
+
+### Pairing and the active device
+
+- **Pair on `captureSequence`, never on `timestamp`.** A screenshot and a hierarchy describe the
+  same captured device state only when their `captureSequence` values are **equal**. `timestamp` is
+  display-only and mixes two clocks (a hierarchy's is the device wall clock, a screenshot's is the
+  daemon's), so it must not gate pairing. `captureSequence` is monotonic and never reset for the
+  daemon process lifetime, so an id cannot be reused across a device reconnect. A `screenshot_update`
+  with **no** `captureSequence` cannot be paired — fail closed. The full rationale and the rest of
+  the availability rules are in [Client Frame Snapshot](client-frame-snapshot.md).
+- **Active device:** every message's `deviceId` identifies its device. Subscribe with the selected
+  device's id (rather than the all-devices `null`) so you only receive its frames, and still confirm
+  each message's `deviceId` matches the selection before pairing — a lingering frame from a
+  previously-selected device must not pair with the new one.
+
 ## Implementing a client, end to end
 
 A control client is a loop: assemble a frame, map an input against it, forward it, wait for the
@@ -50,8 +137,9 @@ picture to catch up. Do these in order.
 
 ### 1. Subscribe and assemble a frame snapshot
 
-Subscribe to the daemon observation stream and consume `screenshot_update` and `hierarchy_update`
-messages. **Do not** act on either message alone. Assemble an immutable
+Subscribe to the daemon observation stream (wire protocol below:
+[Observation stream protocol](#observation-stream-protocol)) and consume `screenshot_update` and
+`hierarchy_update` messages. **Do not** act on either message alone. Assemble an immutable
 [frame snapshot](client-frame-snapshot.md#the-snapshot) that binds together, for one device:
 
 - the displayed pixels and their real dimensions,

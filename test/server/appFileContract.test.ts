@@ -83,6 +83,8 @@ describe("putAppFileSchema contentBase64 guard (#4183 A4)", () => {
     ["AAAA", true], // 3 zero bytes (non-empty)
     ["QUJD", true], // "ABC"
     ["not valid base64!!", false],
+    ["QQ===", false],
+    ["AAAA==", false],
     ["====", false],
     ["", false],
   ])("contentBase64 %p accepted=%p", (payload, accepted) => {

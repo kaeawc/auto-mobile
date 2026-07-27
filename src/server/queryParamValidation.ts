@@ -19,7 +19,7 @@ export function optionalInteger(
   }
   const parsed = Number(normalized);
   const min = options.min ?? 0;
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < min ||
+  if (!Number.isSafeInteger(parsed) || parsed < min ||
     options.max !== undefined && parsed > options.max) {
     throw new Error(`Invalid ${label}: ${value}`);
   }

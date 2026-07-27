@@ -8,15 +8,20 @@ export interface DeviceMatcher {
   matchDeviceImage(criteria: DeviceMatchCriteria, images: DeviceInfo[], strategy: MatchingStrategy): DeviceInfo | null;
 }
 
-function parseVersion(version: string): number[] {
-  // parseInt (not Number) tolerates a trailing non-numeric suffix such as the
-  // quarterly-release marker in "14-QPR1", coercing the segment to its leading
-  // integer instead of NaN. A segment with no leading digit (an Android
-  // codename like "Tiramisu") still yields NaN and is handled in compareVersions.
-  return version.split(".").map(segment => {
-    const parsed = parseInt(segment, 10);
-    return Number.isNaN(parsed) ? NaN : parsed;
-  });
+interface ParsedDeviceVersion {
+  components: number[];
+  qpr?: number;
+}
+
+function parseDeviceVersion(version: string): ParsedDeviceVersion | null {
+  const match = /^(\d+(?:\.\d+)*)(?:-QPR(\d+))?$/i.exec(version);
+  if (!match) {
+    return null;
+  }
+  return {
+    components: match[1].split(".").map(Number),
+    ...(match[2] === undefined ? {} : { qpr: Number(match[2]) }),
+  };
 }
 
 function compareParsedVersions(partsA: number[], partsB: number[]): number {
@@ -33,20 +38,27 @@ export function compareStrictNumericVersions(a: string, b: string): number {
   if (![a, b].every(version => version.split(".").every(component => /^\d+$/.test(component)))) {
     return Number.NaN;
   }
-  return compareParsedVersions(parseVersion(a), parseVersion(b));
+  return compareParsedVersions(a.split(".").map(Number), b.split(".").map(Number));
 }
 
 export function compareVersions(a: string, b: string): number {
-  const delta = compareParsedVersions(parseVersion(a), parseVersion(b));
-  if (Number.isNaN(delta)) {
-    // A fully non-numeric segment (e.g. an Android codename like "Tiramisu")
-    // cannot be ordered numerically. Fall back to a deterministic string
-    // comparison so the version is never silently dropped by BOTH the min and
-    // max filters at once via a NaN comparison (issue #4183).
-    if (a === b) { return 0; }
-    return a < b ? -1 : 1;
+  const parsedA = parseDeviceVersion(a);
+  const parsedB = parseDeviceVersion(b);
+  if (parsedA && parsedB) {
+    const delta = compareParsedVersions(parsedA.components, parsedB.components);
+    if (delta !== 0) {
+      return delta;
+    }
+    if (parsedA.qpr !== undefined && parsedB.qpr !== undefined) {
+      return parsedA.qpr - parsedB.qpr;
+    }
+    return 0;
   }
-  return delta;
+  if (parsedA || parsedB) {
+    return Number.NaN;
+  }
+  if (a === b) { return 0; }
+  return a < b ? -1 : 1;
 }
 
 function matchesCriteria(
@@ -87,6 +99,11 @@ function matchesScreenSize(item: { screenWidth?: number; screenHeight?: number }
   return widthRatio <= 0.1 && heightRatio <= 0.1;
 }
 
+function prefersNumericVersion<T extends { osVersion?: string }>(candidate: T, current: T): boolean {
+  return parseDeviceVersion(candidate.osVersion ?? "") !== null &&
+    parseDeviceVersion(current.osVersion ?? "") === null;
+}
+
 function applyStrategy<T extends { osVersion?: string }>(candidates: T[], strategy: MatchingStrategy, random: Random): T | null {
   if (candidates.length === 0) { return null; }
   if (candidates.length === 1) { return candidates[0]; }
@@ -96,6 +113,12 @@ function applyStrategy<T extends { osVersion?: string }>(candidates: T[], strate
   let best = candidates[0];
   for (const candidate of candidates.slice(1)) {
     const delta = compareVersions(candidate.osVersion ?? "0", best.osVersion ?? "0");
+    if (Number.isNaN(delta)) {
+      if (prefersNumericVersion(candidate, best)) {
+        best = candidate;
+      }
+      continue;
+    }
     if (wantLatest ? delta > 0 : delta < 0) { best = candidate; }
   }
   return best;

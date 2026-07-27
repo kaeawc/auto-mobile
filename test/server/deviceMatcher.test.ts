@@ -40,17 +40,14 @@ describe("compareVersions", () => {
     expect(compareVersions("17.1", "17")).toBeGreaterThan(0);
   });
 
-  // Regression #4183 P1: a non-numeric osVersion segment must never make
-  // compareVersions return NaN, because NaN is neither >= min nor <= max, so
-  // the device is silently dropped by BOTH range filters at once.
-  it("coerces a quarterly-release suffix to its leading integer", () => {
+  it("orders quarterly-release suffixes while treating a bare major as the same release", () => {
     expect(compareVersions("14-QPR1", "14")).toBe(0);
-    expect(compareVersions("14-QPR2", "14-QPR1")).toBe(0);
+    expect(compareVersions("14-QPR2", "14-QPR1")).toBeGreaterThan(0);
     expect(compareVersions("15-QPR1", "14")).toBeGreaterThan(0);
   });
 
-  it("never returns NaN for a codename osVersion", () => {
-    expect(Number.isNaN(compareVersions("Tiramisu", "14"))).toBe(false);
+  it("does not order a codename against a numeric release", () => {
+    expect(Number.isNaN(compareVersions("Tiramisu", "14"))).toBe(true);
     expect(Number.isNaN(compareVersions("Tiramisu", "Tiramisu"))).toBe(false);
     expect(compareVersions("Tiramisu", "Tiramisu")).toBe(0);
   });
@@ -290,6 +287,34 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
       "LATEST"
     );
     expect(result?.deviceId).toBe("1");
+  });
+
+  it("does not let an older QPR satisfy a newer QPR minimum", () => {
+    const devices = [
+      bootedDevice({ deviceId: "qpr1", osVersion: "14-QPR1" }),
+      bootedDevice({ deviceId: "qpr2", osVersion: "14-QPR2" }),
+    ];
+
+    const result = matcher.matchBootedDevice(
+      { platform: "android", minOsVersion: "14-QPR2" },
+      devices,
+      "LATEST"
+    );
+    expect(result?.deviceId).toBe("qpr2");
+  });
+
+  it("does not let a codename satisfy a numeric minimum or outrank a numeric release", () => {
+    const devices = [
+      bootedDevice({ deviceId: "codename", osVersion: "Tiramisu" }),
+      bootedDevice({ deviceId: "numeric", osVersion: "15" }),
+    ];
+
+    expect(matcher.matchBootedDevice(
+      { platform: "android", minOsVersion: "14" },
+      devices,
+      "LATEST"
+    )?.deviceId).toBe("numeric");
+    expect(matcher.matchBootedDevice({ platform: "android" }, devices, "LATEST")?.deviceId).toBe("numeric");
   });
 
   it("skips devices without osVersion when minOsVersion filter is set", () => {

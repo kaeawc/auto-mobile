@@ -104,7 +104,10 @@ describe("observation stream keepalive doc (client-screen-control.md)", () => {
     expect(DEFAULT_KEEPALIVE_CONFIG.intervalMs).toBe(10_000);
     expect(DEFAULT_KEEPALIVE_CONFIG.timeoutMs).toBe(30_000);
     expect(section).toContain("**10 s**");
-    expect(section).toContain("**30 s**");
+    expect(section).toContain("**more than 30 s**");
+    // Reaping happens only on sweep boundaries, so the doc must state the effective
+    // disconnect window rather than a hard 30 s cliff (#4546 review).
+    expect(section).toContain("between just over 30 s and just under 40 s");
   });
 
   test("the documented pong line, fed verbatim, refreshes liveness with no response", async () => {

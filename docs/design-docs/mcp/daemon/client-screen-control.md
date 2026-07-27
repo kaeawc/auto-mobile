@@ -78,10 +78,12 @@ Send a `subscribe` command; the daemon replies once, then pushes update messages
 
 ### Keepalive (ping/pong) — required to stay connected
 
-The daemon actively reaps subscribers it considers dead. Every **10 s** it sends each subscriber a
-ping push, and any subscriber whose activity has not been refreshed within the last **30 s** has its
-socket **destroyed** and its subscription removed. A client that subscribes but never answers pings
-is disconnected roughly 30 s after connecting — even while it is happily receiving frames.
+The daemon actively reaps subscribers it considers dead. Every **10 s** a keepalive sweep sends
+each subscriber a ping push and destroys any subscriber whose activity has not been refreshed for
+**more than 30 s**, removing its subscription. Because reaping happens only on those 10 s sweep
+boundaries, the effective disconnect lands **between just over 30 s and just under 40 s** of
+inactivity, depending on how the subscription aligns with the sweep. A client that subscribes but
+never answers pings is disconnected in that window — even while it is happily receiving frames.
 
 ```json
 // daemon -> client, every 10 s
@@ -96,9 +98,9 @@ is disconnected roughly 30 s after connecting — even while it is happily recei
 - The ping's `timestamp` is the daemon's clock in epoch milliseconds; it is informational.
 - **Receiving pushed frames does not count as activity.** The daemon deliberately does not refresh
   liveness on its own successful outbound writes — otherwise the frame stream itself would keep a
-  hung client "alive" forever. A client that consumes `screenshot_update`s but never pongs times
-  out at 30 s. Liveness is refreshed by your `pong`, the initial `subscribe`, and one narrow
-  exception below.
+  hung client "alive" forever. A client that consumes `screenshot_update`s but never pongs is
+  reaped by the first sweep after 30 s of inactivity. Liveness is refreshed by your `pong`, the
+  initial `subscribe`, and one narrow exception below.
 - **The one exception — backpressure `drain` — is not something to rely on.** If a push overflows
   the daemon-side socket buffer (the write crosses the high-water mark), the daemon listens for the
   socket's `drain` event, and that drain — proof the peer actually read the backlog — refreshes the

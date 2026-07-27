@@ -428,6 +428,12 @@ a screenshot; if the UI changes during capture, the screenshot intentionally has
 client must not invent one. This protects same-size navigation as well as rotations and resolution
 changes.
 
+The device-boundary guarantee currently applies to `input/tap` and `input/swipe`. `input/typeText`,
+`input/pressButton`, and `input/key` receive the daemon's latest-observation check only; a UI
+transition before a replacement hierarchy reaches the daemon can still execute those non-gesture
+requests. Android's remaining device-boundary work is tracked in
+[#4586](https://github.com/kaeawc/auto-mobile/issues/4586).
+
 The value is opaque, device-specific, and must only be echoed unchanged. It is not a timestamp,
 not portable across devices or runner restarts, and a client must fail closed when the screenshot
 and hierarchy contexts are absent or unequal.

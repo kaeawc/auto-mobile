@@ -172,9 +172,13 @@ describe("daemon input API consumer docs", () => {
     expect(clientGuide).toContain("wait for a newly paired snapshot before");
     expect(clientGuide).toContain("runner that does not publish `frameContext` cannot produce a controllable");
     expect(clientGuide).toContain("default `0.0.46` CtrlProxy artifacts predate `frameContext`");
+    expect(clientGuide).toContain("does not yet implement `frameContext` pairing or echoing");
+    expect(clientGuide).toContain("[#4596](https://github.com/kaeawc/auto-mobile/issues/4596)");
+    expect(clientGuide).toContain("having the gesture guarantee");
     expect(snapshotGuide).toContain("default `0.0.46` CtrlProxy artifacts predate this protocol");
     expect(unixSocketApi).toContain("`frameContext` | `string` | No |");
     expect(unixSocketApi).toContain("default `0.0.46` CtrlProxy artifacts are legacy");
+    expect(unixSocketApi).toContain("device-boundary guarantee currently applies to `input/tap` and `input/swipe`");
     expect(unixSocketApi).toMatch(/"duration": 50,\r?\n    "frameContext": "android-generation-42"/);
     expect(unixSocketApi).toMatch(/"durationMs": 350,\r?\n    "frameContext": "android-generation-42"/);
     expect(unixSocketApi).toMatch(/"button": "back",\r?\n    "frameContext": "android-generation-42"/);

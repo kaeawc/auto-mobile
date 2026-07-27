@@ -13,14 +13,14 @@ The contract is deliberately published rather than kept as private UI detail, be
 **desktop app is not the only consumer**: any client that speaks the daemon's Unix-socket
 `input/*` protocol can implement the same control surface. Everything a third-party author needs
 is on this page or in the documents it links; **you do not need to read any Compose or
-Kotlin source to implement a correct client.** The desktop inspector is merely the reference
-implementation.
+Kotlin source to implement a correct client.** The desktop app is a consumer, but it is not yet a
+conforming `frameContext` reference implementation.
 
 ## What talks to the daemon (and what does not)
 
 | Consumer | Uses screen control? |
 | --- | --- |
-| Desktop app (`android/desktop-app`) | **Yes** — the reference control client. |
+| Desktop app (`android/desktop-app`) | **Yes** — legacy frame-context integration; see [#4596](https://github.com/kaeawc/auto-mobile/issues/4596). |
 | Third-party daemon clients | **Yes** — the audience for this document. |
 | IntelliJ / Android Studio plugin (`android/ide-plugin`) | **No — inspector only.** |
 
@@ -179,6 +179,11 @@ client ignores them.)
 
 ## Implementing a client, end to end
 
+This is the protocol contract for a third-party screen-control client. The bundled desktop client
+does not yet implement `frameContext` pairing or echoing, so it is not a conforming reference for
+this flow; its integration is tracked in [#4596](https://github.com/kaeawc/auto-mobile/issues/4596).
+Treat its current control behavior as legacy.
+
 A control client is a loop: assemble a frame, map an input against it, forward it, wait for the
 picture to catch up. Do these in order.
 
@@ -253,6 +258,13 @@ input was mapped through, never from a device selection resolved at send time. E
 opaque `frameContext` on every request (`input/tap`, `input/swipe`, `input/pressButton`,
 `input/typeText`, and `input/key`); do not generate it, substitute a newer value, or carry it
 across a reconnect.
+
+The echo gives every endpoint the daemon's latest-observation freshness check. `input/tap` and
+`input/swipe` additionally carry the token to CtrlProxy for device-boundary validation. Text,
+button, and key input do not yet have that final runner check, so a transition between the last
+hierarchy update and execution can still pass the daemon gate; do not describe those endpoints as
+having the gesture guarantee. Android's remaining device-boundary work is tracked in
+[#4586](https://github.com/kaeawc/auto-mobile/issues/4586).
 
 Forward all inputs through **one ordered, bounded queue** so a tap-then-swipe-then-type sequence
 reaches the device in the order the user made it. If the queue is full (a stalled daemon), surface

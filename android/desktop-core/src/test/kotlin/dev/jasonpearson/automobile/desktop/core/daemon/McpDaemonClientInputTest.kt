@@ -263,6 +263,30 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `append mode preserves a capability probe handshake error`() {
+    TestDaemonSocket(error = "AutoMobile daemon version mismatch: desktop requires 1.2.0").use {
+      server ->
+      val result =
+        McpDaemonClient(
+            socketPathValue = server.socketPath.toString(),
+            clientVersion = "1.2.0",
+          )
+          .inputTypeText(
+            text = "a",
+            append = true,
+          )
+
+      assertEquals("daemon/capabilities", server.awaitRequest().method)
+      assertEquals("1.2.0", server.awaitRequest().clientVersion)
+      assertEquals(false, result.success)
+      assertEquals(
+        "AutoMobile daemon version mismatch: desktop requires 1.2.0",
+        result.error,
+      )
+    }
+  }
+
+  @Test
   fun `input helpers reject malformed success payloads`() {
     TestDaemonSocket(resultJson = "{}", error = null).use { server ->
       assertFailsWith<SerializationException> {

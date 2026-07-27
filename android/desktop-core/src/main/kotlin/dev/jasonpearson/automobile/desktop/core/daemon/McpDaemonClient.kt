@@ -29,6 +29,7 @@ import kotlinx.serialization.serializer
 
 private const val DAEMON_CAPABILITIES_METHOD = "daemon/capabilities"
 private const val INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append"
+private const val OLD_DAEMON_CAPABILITIES_ERROR = "Unsupported daemon method: daemon/capabilities"
 private const val OLD_DAEMON_APPEND_MODE_ERROR = "input/typeText unsupported params: mode"
 private const val UNSUPPORTED_APPEND_MODE_ERROR =
   "The connected daemon does not support input/typeText mode:append. Restart or update the daemon before typing into the device."
@@ -353,11 +354,12 @@ class McpDaemonClient(
     submit: Boolean?,
     append: Boolean,
   ): InputActionResult {
-    if (append && !supportsInputTypeTextAppend()) {
+    val appendSupportError = if (append) inputTypeTextAppendSupportError() else null
+    if (appendSupportError != null) {
       return InputActionResult(
         action = "input/typeText",
         success = false,
-        error = UNSUPPORTED_APPEND_MODE_ERROR,
+        error = appendSupportError,
       )
     }
     return try {
@@ -515,31 +517,48 @@ class McpDaemonClient(
   /**
    * Reads the daemon's additive capability list before the desktop sends `mode: "append"`.
    *
-   * An older daemon answers this query with its normal unsupported-method envelope. That is a
-   * capability miss rather than a transport error: the caller receives
-   * [UNSUPPORTED_APPEND_MODE_ERROR] and never emits the destructive replace request. Successful
-   * Responses are shared only while the Unix socket's file identity is unchanged, so the per-action
-   * facade clients in the control queue reuse one probe without trusting a daemon restarted at the
-   * same pathname. An unsupported older daemon is deliberately not cached so restarting it lets the
-   * next keystroke discover the upgraded capability.
+   * An older daemon answers this query with its normal unsupported-method envelope. That specific
+   * response is a capability miss rather than a transport error: the caller receives
+   * [UNSUPPORTED_APPEND_MODE_ERROR] and never emits the destructive replace request. Other probe
+   * failures, including version mismatches, are preserved. Successful responses are shared only
+   * while the Unix socket's file identity is unchanged, so the per-action facade clients in the
+   * control queue reuse one probe without trusting a daemon restarted at the same pathname. An
+   * unsupported older daemon is deliberately not cached so restarting it lets the next keystroke
+   * discover the upgraded capability.
    */
-  private fun supportsInputTypeTextAppend(): Boolean {
+  private fun inputTypeTextAppendSupportError(): String? {
     val identity = socketIdentity()
     val capabilities =
       if (identity == null) {
-        queryDaemonCapabilities(null)
+        when (val probe = queryDaemonCapabilities(null)) {
+          is DaemonCapabilitiesProbe.Available -> probe.capabilities
+          is DaemonCapabilitiesProbe.Failure -> return probe.error
+        }
       } else {
         daemonCapabilities?.takeIf { it.identity == identity }?.capabilities
           ?: sharedDaemonCapabilities[identity]
-          ?: queryDaemonCapabilities(identity)
-      } ?: return false
-    return INPUT_TYPE_TEXT_APPEND_CAPABILITY in capabilities
+          ?: when (val probe = queryDaemonCapabilities(identity)) {
+            is DaemonCapabilitiesProbe.Available -> probe.capabilities
+            is DaemonCapabilitiesProbe.Failure -> return probe.error
+          }
+      }
+    return if (INPUT_TYPE_TEXT_APPEND_CAPABILITY in capabilities) null
+    else UNSUPPORTED_APPEND_MODE_ERROR
   }
 
-  private fun queryDaemonCapabilities(identity: SocketIdentity?): Set<String>? {
+  private fun queryDaemonCapabilities(identity: SocketIdentity?): DaemonCapabilitiesProbe {
     val response = sendRequest(DAEMON_CAPABILITIES_METHOD)
-    if (!response.success || response.result == null) {
-      return null
+    if (!response.success) {
+      return DaemonCapabilitiesProbe.Failure(
+        if (response.error == OLD_DAEMON_CAPABILITIES_ERROR) {
+          UNSUPPORTED_APPEND_MODE_ERROR
+        } else {
+          response.error ?: "Daemon capability probe failed."
+        }
+      )
+    }
+    if (response.result == null) {
+      return DaemonCapabilitiesProbe.Failure("Daemon capability probe returned no result.")
     }
     val capabilities =
       try {
@@ -547,7 +566,9 @@ class McpDaemonClient(
           .decodeFromJsonElement(serializer<DaemonCapabilitiesResult>(), response.result)
           .capabilities
       } catch (_: Exception) {
-        return null
+        return DaemonCapabilitiesProbe.Failure(
+          "Daemon capability probe returned an invalid result."
+        )
       }
     val resolved = capabilities.toSet()
     // A daemon restart can replace a socket at the same pathname between the probe and this
@@ -556,7 +577,7 @@ class McpDaemonClient(
       daemonCapabilities = CachedDaemonCapabilities(identity, resolved)
       sharedDaemonCapabilities[identity] = resolved
     }
-    return resolved
+    return DaemonCapabilitiesProbe.Available(resolved)
   }
 
   private fun evictDaemonCapabilities() {
@@ -776,6 +797,12 @@ private data class CachedDaemonCapabilities(
   val identity: SocketIdentity,
   val capabilities: Set<String>,
 )
+
+private sealed interface DaemonCapabilitiesProbe {
+  data class Available(val capabilities: Set<String>) : DaemonCapabilitiesProbe
+
+  data class Failure(val error: String) : DaemonCapabilitiesProbe
+}
 
 private val sharedDaemonCapabilities = ConcurrentHashMap<SocketIdentity, Set<String>>()
 

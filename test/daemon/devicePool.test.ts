@@ -174,6 +174,31 @@ describe("DevicePool", () => {
     });
   });
 
+  describe("device-ready notifications", () => {
+    test("notifies when a boot-ready device reuses an existing serial", async () => {
+      const connectedDeviceIds: string[] = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        device => connectedDeviceIds.push(device.deviceId)
+      );
+      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
+
+      await devicePool.addDevice(createBootedDevice("emulator-5554"));
+
+      expect(connectedDeviceIds).toEqual(["emulator-5554"]);
+      expect(devicePool.getTotalDeviceCount()).toBe(1);
+      expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
+    });
+  });
+
   describe("refreshDevices", () => {
     test("does not query simctl during Linux Android-only refresh", async () => {
       await withProcessPlatform("linux", async () => {

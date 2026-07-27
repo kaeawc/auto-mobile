@@ -202,7 +202,8 @@ export class Daemon {
       undefined,
       this.deviceSessionRepository,
       undefined,
-      (sessionId, _deviceId, releaseReason) => this.cancelAndReleaseSession(sessionId, releaseReason)
+      (sessionId, _deviceId, releaseReason) => this.cancelAndReleaseSession(sessionId, releaseReason),
+      device => this.socketServer?.evictDeviceInputCache(device.deviceId)
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(this.sessionManager, this.devicePool);

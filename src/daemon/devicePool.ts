@@ -75,6 +75,10 @@ interface DeviceDisconnectSessionReleaser {
   (sessionId: string, deviceId: string, releaseReason: string): Promise<void>;
 }
 
+interface DeviceReadyListener {
+  (device: BootedDevice): void;
+}
+
 /**
  * Device Pool
  *
@@ -103,6 +107,7 @@ export class DevicePool {
   private readonly deviceSessionRepository: DeviceSessionRepository;
   private readonly criteriaMatcher: DeviceCriteriaMatcher;
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
+  private readonly onDeviceReady: DeviceReadyListener | undefined;
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
@@ -121,7 +126,8 @@ export class DevicePool {
     retryExecutor: RetryExecutor = defaultRetryExecutor,
     deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
     criteriaMatcher: DeviceCriteriaMatcher = new DeviceCriteriaMatcher(),
-    releaseSessionForDisconnectedDevice?: DeviceDisconnectSessionReleaser
+    releaseSessionForDisconnectedDevice?: DeviceDisconnectSessionReleaser,
+    onDeviceReady?: DeviceReadyListener
   ) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
@@ -131,6 +137,7 @@ export class DevicePool {
     this.retryExecutor = retryExecutor;
     this.deviceSessionRepository = deviceSessionRepository;
     this.criteriaMatcher = criteriaMatcher;
+    this.onDeviceReady = onDeviceReady;
     this.releaseSessionForDisconnectedDevice = releaseSessionForDisconnectedDevice ?? (async (
       sessionId,
       _deviceId,
@@ -288,30 +295,35 @@ export class DevicePool {
         existing.simulatorType = this.criteriaMatcher.getBootedDeviceSimulatorType(device) ?? existing.simulatorType;
         existing.lastUsedAt = this.seedLastUsedAt(this.timer.now());
         logger.info(`Recovered errored device ${device.deviceId} after successful boot`);
-        return;
+      } else {
+        logger.warn(`Device ${device.deviceId} already in pool`);
       }
-      logger.warn(`Device ${device.deviceId} already in pool`);
-      return;
+    } else {
+      const now = this.seedLastUsedAt(this.timer.now());
+      this.devices.set(device.deviceId, {
+        id: device.deviceId,
+        name: device.name,
+        platform: device.platform,
+        sessionId: null,
+        status: "idle",
+        lastUsedAt: now,
+        assignmentCount: 0,
+        errorCount: 0,
+        iosVersion: device.iosVersion,
+        simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
+      });
+      this.deviceSessionStarts.set(device.deviceId, now);
+      this.refreshMissingDeviceMisses.delete(device.deviceId);
+      await this.setDeviceSessionTracking(device.deviceId, now);
+
+      logger.info(`Added device ${device.deviceId} to pool`);
     }
 
-    const now = this.seedLastUsedAt(this.timer.now());
-    this.devices.set(device.deviceId, {
-      id: device.deviceId,
-      name: device.name,
-      platform: device.platform,
-      sessionId: null,
-      status: "idle",
-      lastUsedAt: now,
-      assignmentCount: 0,
-      errorCount: 0,
-      iosVersion: device.iosVersion,
-      simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
-    });
-    this.deviceSessionStarts.set(device.deviceId, now);
-    this.refreshMissingDeviceMisses.delete(device.deviceId);
-    await this.setDeviceSessionTracking(device.deviceId, now);
-
-    logger.info(`Added device ${device.deviceId} to pool`);
+    try {
+      this.onDeviceReady?.(device);
+    } catch (error) {
+      logger.warn(`[DevicePool] Device-ready listener failed for ${device.deviceId}: ${error}`);
+    }
   }
 
   /**

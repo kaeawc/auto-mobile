@@ -32,6 +32,17 @@ public enum class DeviceControlBlockReason {
    * guessing.
    */
   CaptureIdentityUnavailable,
+  /**
+   * A contributing message declared a [CoordinateSpace] this client does not implement
+   * (issue #4550).
+   *
+   * Distinct from a message that declares nothing: an ABSENT field is the legacy point-space
+   * fallback, whose geometry and input-unit semantics this client knows exactly. A DECLARED but
+   * unknown space is a forward-compatibility failure — the client can know neither what the
+   * reported bounds mean nor what unit the daemon's input endpoints expect for that device — so
+   * control fails closed instead of guessing that it resembles the legacy space.
+   */
+  UnsupportedCoordinateSpace,
   /** The displayed frame is older than the freshness bound for its source. */
   StaleFrame,
   /** The displayed screenshot and the mapping bounds disagree geometrically. */
@@ -162,6 +173,18 @@ public object DeviceControlPolicy {
     val liveFrame = inputs.liveFrame?.takeIf { it.width > 0 && it.height > 0 }
     if (liveFrame != null && liveFrame.deviceId != selected) {
       return blocked(DeviceControlBlockReason.DeviceMismatch)
+    }
+
+    // "Can these messages be interpreted at all" precedes "do they describe the same capture", so
+    // this runs before provenance pairing. A DECLARED but unknown space means this client can read
+    // neither the geometry nor the unit the daemon's input endpoints expect for the device, so
+    // there is nothing to pair and nothing safe to dispatch. An ABSENT declaration is untouched:
+    // that is the legacy point-space fallback, and it continues below.
+    if (
+      screenshot.coordinateSpace is CoordinateSpace.Unrecognized ||
+        hierarchy.coordinateSpace is CoordinateSpace.Unrecognized
+    ) {
+      return blocked(DeviceControlBlockReason.UnsupportedCoordinateSpace)
     }
 
     // Provenance pairing by SHARED CAPTURE IDENTITY, not elapsed time.
@@ -336,6 +359,12 @@ public object DeviceControlPolicy {
    *   comparable. All that can be checked is that the aspect ratios agree within
    *   [GEOMETRY_ASPECT_TOLERANCE] — which is why this path cannot catch an equal-aspect resolution
    *   change, and why provenance pairing exists. Retained only for those frames; do not extend it.
+   *
+   * [CoordinateSpace.Unrecognized] never reaches here from [evaluate]: a declared-but-unknown space
+   * blocks control outright with [DeviceControlBlockReason.UnsupportedCoordinateSpace], because a
+   * space this client cannot read is not a weaker version of the legacy space. A direct caller that
+   * passes one gets the conservative aspect-only comparison, which is the safe default for a
+   * geometry question but is NOT a licence to act on such a frame.
    *
    * A non-positive displayed dimension (no frame yet) is inconsistent in both modes. Non-positive
    * device dimensions mean neither source reported a size, in which case the renderer falls back to

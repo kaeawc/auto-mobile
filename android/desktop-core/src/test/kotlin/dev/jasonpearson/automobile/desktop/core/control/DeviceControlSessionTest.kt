@@ -601,6 +601,72 @@ class DeviceControlSessionTest {
     }
 
   @Test
+  fun `a screenshot-only space flip retires the retained frame just as a hierarchy flip does`() =
+    runTest {
+      // The two sources are gated independently, so each needs its own coverage: a regression that
+      // stopped checking the SCREENSHOT's declaration would still pass the hierarchy-flip test.
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val session = session(scope, FakeAutoMobileClient())
+
+      val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+      assertNotNull(session.evaluate(legacy).snapshotOrNull)
+      val retained = assertNotNull(session.interactionSnapshot)
+      session.tap(retained, point)
+      advanceUntilIdle()
+      assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+
+      // Only the screenshot flips this time.
+      val flipped =
+        legacy.copy(
+          screenshot =
+            legacy.screenshot?.copy(
+              sequence = 20L,
+              captureSequence = 8L,
+              coordinateSpace = CoordinateSpace.Pixels,
+            )
+        )
+      assertNull(session.evaluate(flipped).snapshotOrNull)
+
+      assertEquals(retained, session.renderSnapshot, "the picture does not flicker")
+      assertNull(
+        session.interactionSnapshot,
+        "a screenshot-space flip must retire the retained frame too",
+      )
+      scope.cancel()
+    }
+
+  @Test
+  fun `a flip into an unrecognized space retires the retained frame`() = runTest {
+    // The reason absent and declared-but-unknown must be different values: collapsed to one, this
+    // transition would compare equal to the retained legacy frame and pass unnoticed, leaving a
+    // frame clickable against a daemon whose input unit this client cannot know.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val session = session(scope, FakeAutoMobileClient())
+
+    val legacy = paired(captureSequence = 7L, sourceSequence = 10L, coordinateSpace = null)
+    assertNotNull(session.evaluate(legacy).snapshotOrNull)
+    val retained = assertNotNull(session.interactionSnapshot)
+    session.tap(retained, point)
+    advanceUntilIdle()
+
+    val flipped =
+      legacy.copy(
+        hierarchy =
+          legacy.hierarchy?.copy(
+            sequence = 20L,
+            captureSequence = 8L,
+            coordinateSpace = CoordinateSpace.Unrecognized("pt"),
+          )
+      )
+    assertNull(session.evaluate(flipped).snapshotOrNull)
+    assertNull(
+      session.interactionSnapshot,
+      "legacy -> unrecognized is a transition, not a no-op",
+    )
+    scope.cancel()
+  }
+
+  @Test
   fun `retention survives source updates that keep the same coordinate space`() = runTest {
     // The guard must fire on a TRANSITION, not on every update: a screenshot-only update in the
     // same declared space is the ordinary post-input case and must keep the frame clickable.

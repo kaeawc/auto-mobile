@@ -78,7 +78,10 @@ are already physical pixels (`nativeScale` 1), so its conversion is the identity
 > formulas are ratio-based and unit-agnostic — but a client must not compare the
 > frame's absolute dimensions against the bounds' (see
 > [Client Frame Snapshot](client-frame-snapshot.md#coordinate-space-canonical-pixels)).
-> Never infer pixels from a missing field.
+> Never infer pixels from a missing field — and never treat an *unrecognized*
+> declaration as this fallback. A space the client does not implement means a
+> daemon newer than the client, so control must fail closed on that frame; only
+> an absent field is the legacy point space.
 
 ## Rendering pipeline
 

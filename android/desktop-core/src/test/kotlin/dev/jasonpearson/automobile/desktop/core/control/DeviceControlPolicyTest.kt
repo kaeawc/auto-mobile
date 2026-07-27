@@ -14,6 +14,7 @@ import dev.jasonpearson.automobile.desktop.domain.ScreenshotFrameFacts
 import dev.jasonpearson.automobile.desktop.domain.UIElementInfo
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
@@ -718,12 +719,97 @@ class DeviceControlPolicyTest {
   }
 
   @Test
-  fun `an unrecognized wire space is read as legacy, never as pixels`() {
-    // A future daemon that declares a space this client does not know must degrade to the
-    // conservative path rather than be silently treated as pixels.
+  fun `fromWire distinguishes absent from declared-but-unrecognized`() {
+    // Three states, not two. Collapsing an unknown declaration into the absent/legacy null would
+    // both enable control through a path this client cannot justify and hide a transition from the
+    // retained-frame guard.
     assertEquals(CoordinateSpace.Pixels, CoordinateSpace.fromWire("px"))
-    assertNull(CoordinateSpace.fromWire(null))
-    assertNull(CoordinateSpace.fromWire("pt"))
-    assertNull(CoordinateSpace.fromWire("PX"))
+    assertNull(CoordinateSpace.fromWire(null), "absent stays absent — the legacy fallback")
+    assertEquals(CoordinateSpace.Unrecognized("pt"), CoordinateSpace.fromWire("pt"))
+    // The wire value is case-sensitive, so a differently-cased spelling is a DIFFERENT space, not
+    // a sloppy "px" to be accepted.
+    assertEquals(CoordinateSpace.Unrecognized("PX"), CoordinateSpace.fromWire("PX"))
+  }
+
+  @Test
+  fun `a declared but unrecognized space blocks control instead of falling back to legacy`() {
+    // Forward compatibility: a daemon newer than this client declares a space whose geometry AND
+    // whose input-endpoint unit semantics are both unknown here. Degrading to the aspect-only
+    // legacy branch would enable control and forward coordinates whose meaning the client cannot
+    // justify. The geometry below is otherwise perfectly consistent, so only the space can block.
+    val unknown = CoordinateSpace.Unrecognized("pt")
+    assertEquals(
+      DeviceControlBlockReason.UnsupportedCoordinateSpace,
+      blockedReason(
+        inputs(
+          screenshot = screenshotFacts(1080, 2340, unknown),
+          hierarchy = hierarchyFacts(1080, 2340, unknown),
+        )
+      ),
+    )
+    // Either message alone is enough to block — there is no "mostly readable" frame.
+    assertEquals(
+      DeviceControlBlockReason.UnsupportedCoordinateSpace,
+      blockedReason(
+        inputs(
+          screenshot = screenshotFacts(1080, 2340, unknown),
+          hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
+        )
+      ),
+      "screenshot declared an unknown space",
+    )
+    assertEquals(
+      DeviceControlBlockReason.UnsupportedCoordinateSpace,
+      blockedReason(
+        inputs(
+          screenshot = screenshotFacts(1080, 2340, CoordinateSpace.Pixels),
+          hierarchy = hierarchyFacts(1080, 2340, unknown),
+        )
+      ),
+      "hierarchy declared an unknown space",
+    )
+  }
+
+  @Test
+  fun `an absent declaration still takes the legacy path, unlike an unrecognized one`() {
+    // The contrast that makes the distinction meaningful: the SAME geometry that blocks under an
+    // unknown declaration is available under no declaration at all.
+    assertNotNull(
+      DeviceControlPolicy.evaluate(
+          inputs(
+            screenshot = screenshotFacts(1080, 2340, coordinateSpace = null),
+            hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
+          ),
+          now,
+        )
+        .snapshotOrNull
+    )
+  }
+
+  @Test
+  fun `snapshots with identical provenance but different spaces are not equal`() {
+    // Equality is the provenance contract, and the coordinate space is part of it: the two frames
+    // below carry coordinates that mean different physical locations, so equality-based state must
+    // not conflate them.
+    fun snapshotIn(space: CoordinateSpace?) =
+      assertNotNull(
+        DeviceControlPolicy.evaluate(
+            inputs(
+              screenshot = screenshotFacts(1080, 2340, space),
+              hierarchy = hierarchyFacts(1080, 2340, space),
+            ),
+            now,
+          )
+          .snapshotOrNull
+      )
+
+    val legacy = snapshotIn(null)
+    val pixels = snapshotIn(CoordinateSpace.Pixels)
+
+    assertEquals(legacy.captureSequence, pixels.captureSequence, "provenance is identical")
+    assertEquals(legacy.sequence, pixels.sequence)
+    assertNotEquals(legacy, pixels, "but the coordinate space makes them different snapshots")
+    assertNotEquals(legacy.hashCode(), pixels.hashCode())
+    assertEquals(legacy, snapshotIn(null), "and equality still holds within one space")
   }
 }

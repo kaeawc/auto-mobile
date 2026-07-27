@@ -3,19 +3,31 @@ package dev.jasonpearson.automobile.desktop.domain
 /**
  * The unit a geometry-bearing observation message expresses its coordinates in (issue #4550).
  *
- * The daemon declares this per message with a `coordinateSpace` field (issue #4549). There is
- * exactly ONE declared space — [Pixels] — and its absence is the legacy point-space fallback, so
- * this type is modelled as a nullable enum rather than as a two-valued one: `null` means "the
- * daemon did not declare a space", which is a different statement from "the daemon declared
- * points".
+ * The daemon declares this per message with a `coordinateSpace` field (issue #4549). Three states
+ * are distinguishable, and every distinction is load-bearing:
+ * - [Pixels] — declared `"px"`, canonical physical pixels. Absolute dimensions compare exactly, and
+ *   input coordinates are sent in the same unit.
+ * - [Unrecognized] — a space was DECLARED, but this client does not implement it. Control fails
+ *   closed; see below.
+ * - `null` — no declaration at all. The LEGACY point-space fallback, and the only state that keeps
+ *   the aspect-only geometry check.
  *
- * A client MUST NOT infer pixels from silence. A pre-#4548 runner supplies no scale metadata, so
+ * A client must not infer pixels from silence. A pre-#4548 runner supplies no scale metadata, so
  * the daemon leaves its iOS hierarchy bounds in logical points against a pixel screenshot and
  * stamps nothing — the mixed-unit state canonical pixels replaced. Treating that as [Pixels] would
  * compare a 390-wide point-space root against a 1170-wide pixel frame and reject a perfectly good
  * frame.
+ *
+ * Nor may it collapse [Unrecognized] into that same `null`. "Absent" is a state this client
+ * understands completely: it knows what a legacy daemon's geometry means and what unit its input
+ * endpoints expect. "Declared something else" is a state it understands nothing about — neither the
+ * geometry semantics nor the input unit — so acting on such a frame would forward a coordinate
+ * whose meaning is unknown to real hardware. Keeping them distinct is also what makes a
+ * legacy-to-unknown transition visible to the retained-frame guard in `DeviceControlSession`:
+ * collapsed to `null`, both sides would compare equal and the transition would pass unnoticed.
  */
-public enum class CoordinateSpace {
+public sealed interface CoordinateSpace {
+
   /**
    * Canonical physical pixels in the current device orientation.
    *
@@ -24,19 +36,33 @@ public enum class CoordinateSpace {
    * the daemon multiplies iOS logical points by the runner-reported `nativeScale`. That is what
    * makes an EXACT absolute-dimension comparison meaningful — see [DeviceControlPolicy.evaluate].
    */
-  Pixels;
+  public data object Pixels : CoordinateSpace
+
+  /**
+   * A space this client does not implement, carrying the declared value verbatim so a caller can
+   * report what it actually saw.
+   *
+   * Reached only when a daemon declares a space newer than this client. Control is blocked with
+   * [DeviceControlBlockReason.UnsupportedCoordinateSpace] rather than degraded: a
+   * forward-compatibility failure should look like "this client is too old", never like a silent
+   * reinterpretation of coordinates.
+   */
+  public data class Unrecognized(val wireValue: String) : CoordinateSpace
 
   public companion object {
     /** The wire value the daemon stamps for [Pixels]. */
     public const val WIRE_PIXELS: String = "px"
 
     /**
-     * Map a wire `coordinateSpace` value to this enum, or null when the field was absent.
-     *
-     * An UNRECOGNIZED value also maps to null. A future daemon that declares a space this client
-     * does not know must degrade to the conservative legacy path, never be silently read as pixels.
+     * Map a wire `coordinateSpace` value: `null` stays `null` (absent — legacy), `"px"` becomes
+     * [Pixels], and anything else becomes [Unrecognized] rather than being flattened into the
+     * legacy state.
      */
     public fun fromWire(value: String?): CoordinateSpace? =
-      if (value == WIRE_PIXELS) Pixels else null
+      when (value) {
+        null -> null
+        WIRE_PIXELS -> Pixels
+        else -> Unrecognized(value)
+      }
   }
 }

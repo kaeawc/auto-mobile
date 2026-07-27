@@ -122,6 +122,13 @@ compare absolute dimensions exactly. On the input side, a client that renders a
 `"px"` frame sends `input/*` coordinates in **pixels**; the daemon divides by
 `nativeScale` (an exact fractional quotient — the runner takes `Double` points)
 before dispatching to the iOS runner, so the physical tap location is unchanged.
+A **third** state exists and must not be folded into either: a `coordinateSpace`
+the client does not recognize. That is a daemon newer than the client, whose
+geometry it cannot interpret and whose `input/*` unit it cannot know, so control
+must **fail closed** with a distinct "unsupported coordinate space" reason rather
+than degrade to the legacy path. Absent means "a daemon I understand"; unknown
+means "a daemon I do not". Only absent takes the aspect-only fallback.
+
 The two comparison modes are all-or-nothing per snapshot: the exact check runs
 only when the screenshot **and** the hierarchy both declare `"px"`. One declared
 message paired with one undeclared message is precisely the mixed-unit state the
@@ -141,6 +148,8 @@ and land in the wrong physical place. So a client must:
 - stop acting through a retained snapshot as soon as an incoming `hierarchy_update`
   or `screenshot_update` declares a different space — retire it exactly like a
   stale one and drop to inspector behavior until a fresh, agreed frame arrives.
+  Both messages are checked independently, and a move into (or out of) an
+  *unrecognized* space counts as a change like any other.
 
 One consequence worth calling out: a **live mirror** frame on iOS is verifiable
 again. The live-frame check below has always demanded an exact match, which a

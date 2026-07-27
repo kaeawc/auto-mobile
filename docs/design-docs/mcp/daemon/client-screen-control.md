@@ -192,6 +192,17 @@ was already working in points). A client in this state must:
 A simple client may support only the `"px"` path and treat a frame with no `coordinateSpace` as
 unavailable for control; that fails closed, which is always safe.
 
+**An unrecognized value is not the legacy fallback.** If a message declares a `coordinateSpace` this
+client does not implement — some future value — you **must** treat that frame as **unsupported** and
+fail closed, not fold it into the absent/point-space path. The two states carry different amounts of
+knowledge: *absent* means "a daemon whose geometry and `input/*` units I know exactly", while
+*declared something else* means "a daemon newer than me, whose bounds I cannot interpret and whose
+input endpoints may expect a unit I do not know". Degrading the second into the first would forward
+coordinates whose meaning is unknown, to real hardware. Surface it as a version mismatch — the
+reference client blocks with a distinct `UnsupportedCoordinateSpace` reason and tells the user to
+update — rather than as a transient condition that will resolve itself. Keeping the two distinct is
+also what lets the retained-frame rule below notice a transition *into* an unknown space.
+
 ### Pairing and the active device
 
 - **Pair on `captureSequence`, never on `timestamp`.** A screenshot and a hierarchy describe the

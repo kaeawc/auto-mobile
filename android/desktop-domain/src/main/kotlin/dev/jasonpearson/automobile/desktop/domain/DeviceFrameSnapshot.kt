@@ -198,6 +198,13 @@ public data class DeviceFrameSnapshot(
   // the generated hashCode would too — consistent, but easy to misread. Spell it out: a snapshot
   // is identified by its provenance, and two snapshots with the same sequences ARE the same
   // snapshot regardless of buffer identity.
+  //
+  // [coordinateSpace] is included alongside that provenance even though it is derived from the same
+  // sources, because it is part of the INPUT-MAPPING contract rather than a rendering detail: two
+  // frames with identical provenance but different spaces carry coordinates that mean different
+  // physical locations, and equality-based state (retention checks, set/map membership, "is this
+  // still the frame I acted through?") must not conflate them. Omitting it would let a legacy frame
+  // silently satisfy an equality check against a pixel-mapped one.
   override fun equals(other: Any?): Boolean {
     if (this === other) return true
     if (other !is DeviceFrameSnapshot) return false
@@ -206,7 +213,8 @@ public data class DeviceFrameSnapshot(
       captureSequence == other.captureSequence &&
       screenshotSequence == other.screenshotSequence &&
       hierarchySequence == other.hierarchySequence &&
-      liveFrameSequence == other.liveFrameSequence
+      liveFrameSequence == other.liveFrameSequence &&
+      coordinateSpace == other.coordinateSpace
   }
 
   override fun hashCode(): Int {
@@ -216,6 +224,7 @@ public data class DeviceFrameSnapshot(
     result = 31 * result + screenshotSequence.hashCode()
     result = 31 * result + hierarchySequence.hashCode()
     result = 31 * result + (liveFrameSequence?.hashCode() ?: 0)
+    result = 31 * result + (coordinateSpace?.hashCode() ?: 0)
     return result
   }
 }

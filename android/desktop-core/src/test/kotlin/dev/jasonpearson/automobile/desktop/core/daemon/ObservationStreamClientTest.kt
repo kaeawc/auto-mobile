@@ -149,10 +149,10 @@ class ObservationStreamClientTest {
   }
 
   @Test
-  fun `an absent or unknown coordinate space is emitted as the legacy null`() = runTest {
-    // A pre-#4548 runner declares nothing, and a future daemon may declare a space this client does
-    // not know. Both must degrade to the legacy point-space fallback rather than be read as pixels,
-    // and an unknown value must not fail the whole message.
+  fun `an absent space is legacy while an unknown one is surfaced as unrecognized`() = runTest {
+    // A pre-#4548 runner declares nothing (legacy point-space). A future daemon may declare a space
+    // this client does not know — which must be kept DISTINCT from absent, so control can fail
+    // closed on it, and must not fail the whole message.
     val client = ObservationStreamClient()
 
     client.screenshotUpdates.test {
@@ -185,7 +185,7 @@ class ObservationStreamClientTest {
         """
           .trimIndent()
       )
-      assertNull(awaitItem().coordinateSpace)
+      assertEquals(CoordinateSpace.Unrecognized("dp"), awaitItem().coordinateSpace)
     }
   }
 

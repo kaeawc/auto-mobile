@@ -76,6 +76,41 @@ Send a `subscribe` command; the daemon replies once, then pushes update messages
   "hierarchyIntervalMs": … }`; to stop, send `{ "command": "unsubscribe" }`. An older daemon that
   does not know a command replies with a benign error and keeps its default cadence.
 
+### Keepalive (ping/pong) — required to stay connected
+
+The daemon actively reaps subscribers it considers dead. Every **10 s** a keepalive sweep sends
+each subscriber a ping push and destroys any subscriber whose activity has not been refreshed for
+**more than 30 s**, removing its subscription. Because reaping happens only on those 10 s sweep
+boundaries, the effective disconnect lands **between just over 30 s and just under 40 s** of
+inactivity, depending on how the subscription aligns with the sweep. A client that subscribes but
+never answers pings is disconnected in that window — even while it is happily receiving frames.
+
+```json
+// daemon -> client, every 10 s
+{ "type": "ping", "timestamp": 1737942000789 }
+// client -> daemon, in reply
+{ "command": "pong" }
+```
+
+- Reply to each `ping` with `{ "command": "pong" }` on the same connection (newline-terminated,
+  like every request). No `id` is needed, and the daemon sends **no response** to a pong — it only
+  refreshes your subscription's activity timestamp.
+- The ping's `timestamp` is the daemon's clock in epoch milliseconds; it is informational.
+- **Receiving pushed frames does not count as activity.** The daemon deliberately does not refresh
+  liveness on its own successful outbound writes — otherwise the frame stream itself would keep a
+  hung client "alive" forever. A client that consumes `screenshot_update`s but never pongs is
+  reaped by the first sweep after 30 s of inactivity. Liveness is refreshed by your `pong`, the
+  initial `subscribe`, and one narrow exception below.
+- **The one exception — backpressure `drain` — is not something to rely on.** If a push overflows
+  the daemon-side socket buffer (the write crosses the high-water mark), the daemon listens for the
+  socket's `drain` event, and that drain — proof the peer actually read the backlog — refreshes the
+  activity timestamp. A slow reader that repeatedly triggers backpressure can therefore incidentally
+  survive past 30 s without ponging. Do **not** design a client around this: a healthy reader never
+  fills the buffer, so no drain events fire, and only pongs keep it alive.
+- Simplest compliant implementation: on any received line with `"type": "ping"`, immediately write
+  `{"command":"pong"}\n`. There is no harm in an unsolicited pong; an unknown command, by contrast,
+  gets an `error` response.
+
 ### Pushed messages
 
 Every push carries a `type`, the `deviceId` it belongs to, and a display-only `timestamp`. Pair

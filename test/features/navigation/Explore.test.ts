@@ -822,27 +822,7 @@ describe("Explore", () => {
       expect(key1).toMatch(/^Screen1->[a-f0-9]{8}->Screen2$/);
     });
 
-    test("should include graph traversal metrics in result", async () => {
-      // Create a simple graph
-      fakeGraph.recordNavigationEvent({
-        destination: "Screen1",
-        source: "TEST",
-        arguments: {},
-        metadata: {},
-        timestamp: Date.now(),
-        sequenceNumber: 1,
-        applicationId: "com.test.app"
-      });
-
-      // Inject fakeGraph via constructor
-      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
-      (explore as any).observeScreen = mockObserveScreen;
-
-      // Initialize traversal state on explore instance
-      (explore as any).graphTraversalState = await initializeGraphTraversal(fakeGraph);
-      const state = (explore as any).graphTraversalState;
-
-      // Mark some edges as traversed
+    test("reports complete traversal coverage when every graph node and edge is visited", async () => {
       const mockEdge = {
         from: "Screen1",
         to: "Screen2",
@@ -854,6 +834,29 @@ describe("Explore", () => {
           timestamp: fakeTimer.now()
         }
       };
+      fakeGraph.addNode({
+        screenName: "Screen1",
+        firstSeenAt: fakeTimer.now(),
+        lastSeenAt: fakeTimer.now(),
+        visitCount: 1
+      });
+      fakeGraph.addNode({
+        screenName: "Screen2",
+        firstSeenAt: fakeTimer.now(),
+        lastSeenAt: fakeTimer.now(),
+        visitCount: 1
+      });
+      fakeGraph.addEdge(mockEdge);
+
+      // Inject fakeGraph via constructor
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      (explore as any).observeScreen = mockObserveScreen;
+
+      // Initialize traversal state on explore instance
+      (explore as any).graphTraversalState = await initializeGraphTraversal(fakeGraph);
+      const state = (explore as any).graphTraversalState;
+
+      // Validate the edge stored in the graph, as validate mode does.
       markEdgeTraversed(state, mockEdge, "Screen2", true, fakeTimer);
       markNodeVisited(state, "Screen1");
       markNodeVisited(state, "Screen2");
@@ -863,14 +866,12 @@ describe("Explore", () => {
 
       expect(result.graphTraversal).toBeDefined();
       expect(result.graphTraversal?.nodesVisited).toBe(2);
+      expect(result.graphTraversal?.totalNodes).toBe(2);
       expect(result.graphTraversal?.edgesTraversed).toBe(1);
+      expect(result.graphTraversal?.totalEdges).toBe(1);
       expect(result.graphTraversal?.edgeValidationResults).toBeDefined();
       expect(result.graphTraversal?.edgeValidationResults.length).toBeGreaterThan(0);
-      // NOTE (#4171 follow-up): this pins the CURRENT, apparently-buggy output.
-      // With 2/2 nodes visited and 1/1 edges traversed the coverage should read
-      // ~100%, but generateReport computes 0. Asserting the real value keeps the
-      // test truthful; the formula itself needs a separate fix/investigation.
-      expect(result.graphTraversal?.coveragePercentage).toBe(0);
+      expect(result.graphTraversal?.coveragePercentage).toBe(100);
     });
   });
 });

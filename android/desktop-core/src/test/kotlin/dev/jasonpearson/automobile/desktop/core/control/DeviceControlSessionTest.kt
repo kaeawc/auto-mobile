@@ -1304,6 +1304,92 @@ class DeviceControlSessionTest {
     scope.cancel()
   }
 
+  @Test
+  fun `a screenshot-first rotation with a stale hierarchy blocks dispatch`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val base = paired(captureSequence = 8L, sourceSequence = 11L)
+    val conflictingRotations = base.copy(screenshot = base.screenshot?.copy(rotation = 1))
+
+    session.evaluate(conflictingRotations)
+
+    assertFalse(
+      session.tap(testSnapshot().copy(rotation = 0), point),
+      "the stale hierarchy cannot make the disagreement dispatchable",
+    )
+    advanceUntilIdle()
+    assertTrue(client.inputTapCalls.isEmpty(), "nothing reaches the device during disagreement")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a hierarchy-first rotation with a stale screenshot blocks dispatch`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val base = paired(captureSequence = 8L, sourceSequence = 11L)
+    val conflictingRotations = base.copy(hierarchy = base.hierarchy?.copy(rotation = 1))
+
+    session.evaluate(conflictingRotations)
+
+    assertFalse(
+      session.tap(testSnapshot().copy(rotation = 1), point),
+      "the newer hierarchy cannot make the disagreement dispatchable",
+    )
+    advanceUntilIdle()
+    assertTrue(client.inputTapCalls.isEmpty(), "nothing reaches the device during disagreement")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a pointer captured before a rotation disagreement is not dispatched`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val clicked = assertNotNull(session.evaluate(initial).snapshotOrNull)
+    val conflictingRotations =
+      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
+
+    session.evaluate(conflictingRotations)
+
+    assertFalse(session.tap(clicked, point), "the in-flight pointer must fail closed")
+    advanceUntilIdle()
+    assertTrue(client.inputTapCalls.isEmpty(), "the captured pointer never reaches the device")
+    scope.cancel()
+  }
+
+  @Test
+  fun `single and unanimous proven rotations remain dispatchable`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val singleSourceBase = paired(captureSequence = 8L, sourceSequence = 11L)
+    val singleSource =
+      singleSourceBase.copy(
+        screenshot = singleSourceBase.screenshot?.copy(rotation = 1),
+        hierarchy = singleSourceBase.hierarchy?.copy(rotation = null),
+      )
+
+    session.evaluate(singleSource)
+    assertTrue(session.tap(testSnapshot().copy(rotation = 1), point))
+    advanceUntilIdle()
+
+    val unanimousBase = paired(captureSequence = 9L, sourceSequence = 12L)
+    val unanimous =
+      unanimousBase.copy(
+        screenshot = unanimousBase.screenshot?.copy(rotation = 2),
+        hierarchy = unanimousBase.hierarchy?.copy(rotation = 2),
+      )
+    session.evaluate(unanimous)
+    assertTrue(session.tap(testSnapshot().copy(rotation = 2), point))
+    advanceUntilIdle()
+
+    assertEquals(2, client.inputTapCalls.size)
+    scope.cancel()
+  }
+
   /** A coherent, freshly-received screenshot+hierarchy pair sharing one capture identity. */
   private fun paired(
     captureSequence: Long,

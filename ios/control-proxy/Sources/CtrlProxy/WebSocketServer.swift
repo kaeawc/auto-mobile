@@ -112,6 +112,7 @@ public class WebSocketServer: WebSocketServing {
     private let perfProvider: PerfProvider
     private let sdkHierarchyCache: SdkHierarchyCache?
     private let frameContext: FrameContext
+    private let broadcastSink: ((Data) -> Void)?
     private let queue = DispatchQueue(label: "com.ctrlproxy.server")
     var onSdkHierarchyUpdated: (() -> Void)?
 
@@ -131,6 +132,23 @@ public class WebSocketServer: WebSocketServing {
         self.perfProvider = perfProvider
         self.sdkHierarchyCache = sdkHierarchyCache
         self.frameContext = frameContext
+        broadcastSink = nil
+    }
+
+    init(
+        port: UInt16,
+        commandHandler: CommandHandler,
+        perfProvider: PerfProvider,
+        sdkHierarchyCache: SdkHierarchyCache?,
+        frameContext: FrameContext,
+        broadcastSink: ((Data) -> Void)?
+    ) {
+        self.port = port
+        self.commandHandler = commandHandler
+        self.perfProvider = perfProvider
+        self.sdkHierarchyCache = sdkHierarchyCache
+        self.frameContext = frameContext
+        self.broadcastSink = broadcastSink
     }
 
     /// Starts the server
@@ -300,6 +318,10 @@ public class WebSocketServer: WebSocketServing {
 
     /// Broadcast a message to all connected clients
     public func broadcast(_ data: Data) {
+        if let broadcastSink {
+            broadcastSink(data)
+            return
+        }
         for connection in connections.values() {
             connection.send(data)
         }
@@ -307,12 +329,12 @@ public class WebSocketServer: WebSocketServing {
 
     /// Broadcast a hierarchy update to all connected clients (push notification)
     public func broadcastHierarchyUpdate(_ hierarchy: ViewHierarchy) {
-        frameContext.recordTransition(to: hierarchy)
+        let context = frameContext.recordTransition(to: hierarchy)
         let response = HierarchyUpdateResponse(
             requestId: nil, // No requestId for push updates
             data: hierarchy,
             perfTiming: nil,
-            frameContext: frameContext.context(for: hierarchy)
+            frameContext: context
         )
 
         do {

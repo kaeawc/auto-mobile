@@ -21,6 +21,18 @@ final class WebSocketServerTests: XCTestCase {
         }
     }
 
+    private final class TransitionInjectingExecutor: FrameContextMainExecuting {
+        var afterNextPerform: (() -> Void)?
+
+        func perform<T>(_ operation: () throws -> T) throws -> T {
+            let result = try operation()
+            let callback = afterNextPerform
+            afterNextPerform = nil
+            callback?()
+            return result
+        }
+    }
+
     private var perfProvider: PerfProvider!
 
     override func tearDown() {
@@ -31,7 +43,12 @@ final class WebSocketServerTests: XCTestCase {
 
     /// A `WebSocketServer` wired to fakes, with a test perf provider so the
     /// singleton is untouched.
-    private func makeServer() -> WebSocketServer {
+    private func makeServer(
+        frameContext: FrameContext = FrameContext(),
+        broadcastSink: ((Data) -> Void)? = nil
+    )
+        -> WebSocketServer
+    {
         let fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
         perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
         let handler = CommandHandler.createForTesting(
@@ -39,7 +56,14 @@ final class WebSocketServerTests: XCTestCase {
             gesturePerformer: FakeGesturePerformer(),
             perfProvider: perfProvider
         )
-        return WebSocketServer(commandHandler: handler, perfProvider: perfProvider)
+        return WebSocketServer(
+            port: 8765,
+            commandHandler: handler,
+            perfProvider: perfProvider,
+            sdkHierarchyCache: nil,
+            frameContext: frameContext,
+            broadcastSink: broadcastSink
+        )
     }
 
     /// Drive a raw command through the real `handleMessage` and return the single
@@ -91,6 +115,38 @@ final class WebSocketServerTests: XCTestCase {
             file: file,
             line: line
         )
+    }
+
+    func testBroadcastHierarchyUpdateRetainsCapturedTransitionContext() throws {
+        let screenA = ViewHierarchy(
+            packageName: "com.example.app",
+            hierarchy: UIElementInfo(text: "A")
+        )
+        let screenB = ViewHierarchy(
+            packageName: "com.example.app",
+            hierarchy: UIElementInfo(text: "B")
+        )
+        let epoch = UUID()
+        let expectedContext = FrameContext(epoch: epoch).recordTransition(to: screenA)
+        let executor = TransitionInjectingExecutor()
+        let frameContext = FrameContext(epoch: epoch, mainThreadExecutor: executor)
+        var broadcasts: [Data] = []
+        let server = makeServer(
+            frameContext: frameContext,
+            broadcastSink: { broadcasts.append($0) }
+        )
+
+        executor.afterNextPerform = {
+            frameContext.recordTransition(to: screenB)
+            frameContext.recordTransition(to: screenA)
+        }
+
+        server.broadcastHierarchyUpdate(screenA)
+
+        XCTAssertEqual(broadcasts.count, 1)
+        let response = try JSONDecoder().decode(HierarchyUpdateResponse.self, from: broadcasts[0])
+        XCTAssertEqual(response.frameContext, expectedContext)
+        XCTAssertNotEqual(response.frameContext, frameContext.context(for: screenA))
     }
 
     // MARK: - Decode-failure → error envelope (real handleMessage path)

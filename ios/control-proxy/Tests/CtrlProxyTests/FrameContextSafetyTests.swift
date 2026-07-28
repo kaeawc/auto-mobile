@@ -118,10 +118,80 @@ final class FrameContextSafetyTests: XCTestCase {
         XCTAssertEqual(fakeGesturePerformer.getOpenRecentAppsCallCount(), 0)
     }
 
+    func testTransitionQueuedBeforeGestureExecutionRejectsStaleContext() {
+        let screenA = makeHierarchy(text: "A")
+        let screenB = makeHierarchy(text: "B")
+        let executor = TestFrameContextMainExecutor()
+        let frameContext = FrameContext(epoch: UUID(), mainThreadExecutor: executor)
+        let expected = frameContext.context(for: screenA)
+        var operationCalled = false
+
+        executor.enqueue {
+            frameContext.recordTransition(to: screenB)
+        }
+
+        XCTAssertThrowsError(
+            try frameContext.performIfCurrent(
+                expected: expected,
+                hierarchy: screenA
+            ) {
+                operationCalled = true
+            }
+        )
+        XCTAssertFalse(operationCalled)
+        executor.drain()
+    }
+
+    func testTransitionContextKeepsItsOriginalGenerationAfterDelayedBroadcast() {
+        let screenA = makeHierarchy(text: "A")
+        let screenB = makeHierarchy(text: "B")
+        let delayedBroadcastContext = frameContext.recordTransition(to: screenA)
+
+        frameContext.recordTransition(to: screenB)
+        frameContext.recordTransition(to: screenA)
+
+        XCTAssertNotEqual(delayedBroadcastContext, frameContext.context(for: screenA))
+    }
+
     private func makeHierarchy(text: String) -> ViewHierarchy {
         ViewHierarchy(
             packageName: "com.example.app",
             hierarchy: UIElementInfo(text: text)
         )
+    }
+}
+
+private final class TestFrameContextMainExecutor: FrameContextMainExecuting {
+    private let queue = DispatchQueue(label: "FrameContextSafetyTests.main")
+    private let key = DispatchSpecificKey<UUID>()
+    private let identifier = UUID()
+
+    init() {
+        queue.setSpecific(key: key, value: identifier)
+    }
+
+    func perform<T>(_ operation: () throws -> T) throws -> T {
+        if DispatchQueue.getSpecific(key: key) == identifier {
+            return try operation()
+        }
+
+        var result: Result<T, Error>?
+        withoutActuallyEscaping(operation) { operation in
+            queue.sync {
+                result = Result { try operation() }
+            }
+        }
+        guard let result else {
+            preconditionFailure("Frame-context executor did not return a result")
+        }
+        return try result.get()
+    }
+
+    func enqueue(_ operation: @escaping () -> Void) {
+        queue.async(execute: operation)
+    }
+
+    func drain() {
+        queue.sync {}
     }
 }

@@ -3112,6 +3112,9 @@ describe("AndroidCtrlProxyClient", function() {
     // identity onto fresh pixels, and a control client would map a tap through stale bounds.
 
     test("binds an explicitly forwarded initial hierarchy for later static-screen screenshots", () => {
+      let backoffStarts = 0;
+      (accessibilityServiceClient as any).startScreenshotBackoff = () => { backoffStarts++; };
+
       accessibilityServiceClient.recordInitialObservationStreamHierarchy(
         hierarchyWithScreenSize(1080, 2340),
         41
@@ -3122,6 +3125,7 @@ describe("AndroidCtrlProxyClient", function() {
         width: 1080,
         height: 2340,
       });
+      expect(backoffStarts).toBe(1);
     });
 
     test("drops stale provenance when an initial hierarchy has no assigned identity", () => {

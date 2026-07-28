@@ -2728,6 +2728,9 @@ describe("IOSCtrlProxyClient", function() {
     // identity the daemon assigns is recorded against the geometry it actually describes.
 
     test("binds an explicitly forwarded initial hierarchy for later static-screen screenshots", function() {
+      let backoffStarts = 0;
+      (ctrlProxyClient as any).startScreenshotBackoff = () => { backoffStarts++; };
+
       ctrlProxyClient.recordInitialObservationStreamHierarchy({
         hierarchy: {},
         screenWidth: 390,
@@ -2740,6 +2743,7 @@ describe("IOSCtrlProxyClient", function() {
         width: 1170,
         height: 2532,
       });
+      expect(backoffStarts).toBe(1);
     });
 
     test("drops stale provenance when an initial hierarchy has no assigned identity", function() {

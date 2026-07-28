@@ -2088,7 +2088,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   /**
    * Bind the hierarchy explicitly forwarded by the daemon's subscriber bootstrap. The request
    * suppressed this client's normal stream push, so it must replace any prior provenance before
-   * accepting the identity assigned by that explicit push.
+   * accepting the identity assigned by that explicit push, then start keepalives for a static
+   * screen.
    */
   recordInitialObservationStreamHierarchy(
     hierarchy: ViewHierarchyResult,
@@ -2099,6 +2100,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (captureSequence !== null) {
       this.screenGeometry.markForwarded(captureSequence);
     }
+    this.startScreenshotBackoff();
   }
 
   /**

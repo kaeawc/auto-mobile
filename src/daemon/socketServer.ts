@@ -478,11 +478,10 @@ export class UnixSocketServer {
           const forwardStartMs = this.timer.now();
           try {
             const mcpClient = await this.getMcpClient(forwardKey);
+            this.recordBoundMcpClientKey(request, sessionId, forwardKey);
 
             try {
-              const response = await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs, sessionId);
-              this.recordBoundMcpClientKey(request, sessionId, forwardKey);
-              return response;
+              return await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs, sessionId);
             } catch (ideError) {
               const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
               if (ideErrorMessage.includes("Session not found")) {
@@ -499,8 +498,8 @@ export class UnixSocketServer {
                     detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - forwardStartMs}ms)`,
                   });
                 }
-                const response = await this.handleIdeRequest(freshClient, request, retryRemainingMs, sessionId);
                 this.recordBoundMcpClientKey(request, sessionId, forwardKey);
+                const response = await this.handleIdeRequest(freshClient, request, retryRemainingMs, sessionId);
                 return response;
               }
               throw ideError;

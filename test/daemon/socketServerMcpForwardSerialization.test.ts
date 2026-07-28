@@ -328,6 +328,52 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
+  test("keeps the bound client for tools/list when the session-aware call returns an error", async () => {
+    await server.close();
+    socketPath = join(tmpdir(), `mcp-session-list-error-${randomUUID()}.sock`);
+    fakeTimer = new FakeTimer();
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
+      fakeTimer,
+    );
+    await server.start();
+
+    const clients: FakeMcpClient[] = [];
+    server.mcpClientFactory = async () => {
+      const clientIndex = clients.length;
+      const client: FakeMcpClient = {
+        listTools: async () => ({ tools: [{ name: `client-${clientIndex}` }] }),
+        callTool: async () => {
+          throw new Error("invalid tool arguments");
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      clients.push(client);
+      return client;
+    };
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      await client.request("tools/list", {});
+      const failedCall = await client.request("tools/call", {
+        name: "observe",
+        arguments: { sessionUuid: "session-a" },
+      });
+      const refreshedList = await client.request("tools/list", {});
+
+      expect(failedCall.success).toBe(false);
+      expect(refreshedList.result).toEqual({ tools: [{ name: "client-1" }] });
+    } finally {
+      client.close();
+    }
+  });
+
   test("explicit device targets serialize even when session UUIDs differ", async () => {
     let inFlight = 0;
     let maxInFlight = 0;

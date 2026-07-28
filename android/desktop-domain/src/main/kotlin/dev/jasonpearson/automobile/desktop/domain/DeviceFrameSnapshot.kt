@@ -39,6 +39,8 @@ public enum class DeviceFrameSource {
  *   (issue #4550). [CoordinateSpace.Pixels] when the message carried `coordinateSpace: "px"`; null
  *   for a legacy frame that declared nothing. Travels per message rather than per session because
  *   the declaration is per message: a runner can start reporting scale metadata mid-stream.
+ * @param frameContext opaque device-authored identity for the UI state that produced these pixels.
+ *   A controllable snapshot requires this to agree with [HierarchyFrameFacts.frameContext].
  */
 public data class ScreenshotFrameFacts(
   val deviceId: String?,
@@ -49,6 +51,7 @@ public data class ScreenshotFrameFacts(
   val height: Int,
   val data: ByteArray?,
   val coordinateSpace: CoordinateSpace? = null,
+  val frameContext: String? = null,
   /** Device display rotation reported for this capture; null means legacy/unproven provenance. */
   val rotation: Int? = null,
 ) {
@@ -63,6 +66,7 @@ public data class ScreenshotFrameFacts(
       sequence == other.sequence &&
       captureSequence == other.captureSequence &&
       receivedAtMs == other.receivedAtMs &&
+      frameContext == other.frameContext &&
       width == other.width &&
       height == other.height &&
       rotation == other.rotation &&
@@ -75,6 +79,7 @@ public data class ScreenshotFrameFacts(
     result = 31 * result + sequence.hashCode()
     result = 31 * result + (captureSequence?.hashCode() ?: 0)
     result = 31 * result + receivedAtMs.hashCode()
+    result = 31 * result + (frameContext?.hashCode() ?: 0)
     result = 31 * result + width
     result = 31 * result + height
     result = 31 * result + (rotation ?: 0)
@@ -99,6 +104,7 @@ public data class ScreenshotFrameFacts(
  *   [ScreenshotFrameFacts.coordinateSpace][ScreenshotFrameFacts]. Only when this AND the paired
  *   screenshot both declare [CoordinateSpace.Pixels] do the two describe one unit, which is the
  *   precondition [DeviceControlPolicy] requires before comparing absolute dimensions.
+ * @param frameContext opaque device-authored identity for this hierarchy capture.
  */
 public data class HierarchyFrameFacts(
   val deviceId: String?,
@@ -109,6 +115,7 @@ public data class HierarchyFrameFacts(
   val rootWidth: Int,
   val rootHeight: Int,
   val coordinateSpace: CoordinateSpace? = null,
+  val frameContext: String? = null,
   /** Device display rotation reported for this hierarchy capture. */
   val rotation: Int? = null,
 )
@@ -173,6 +180,7 @@ public data class LiveFrameFacts(
  *   the wrong physical place. Carrying the space lets the session notice the transition and fail
  *   closed; see `DeviceControlSession`.
  * @param captureSequence the daemon capture identity the screenshot and hierarchy agreed on.
+ * @param frameContext the device-authored UI identity the screenshot and hierarchy agreed on.
  * @param rotation the device rotation the contributing sources agreed on when this snapshot was
  *   captured. Retention compares later source observations against this value so a partially
  *   received rotation update cannot leave old coordinate bounds clickable.
@@ -193,6 +201,7 @@ public data class DeviceFrameSnapshot(
   val hierarchy: ParsedHierarchy?,
   val coordinateSpace: CoordinateSpace?,
   val captureSequence: Long,
+  val frameContext: String,
   val rotation: Int = 0,
   val screenshotSequence: Long,
   val hierarchySequence: Long,
@@ -223,6 +232,7 @@ public data class DeviceFrameSnapshot(
     return deviceId == other.deviceId &&
       sequence == other.sequence &&
       captureSequence == other.captureSequence &&
+      frameContext == other.frameContext &&
       rotation == other.rotation &&
       screenshotSequence == other.screenshotSequence &&
       hierarchySequence == other.hierarchySequence &&
@@ -234,6 +244,7 @@ public data class DeviceFrameSnapshot(
     var result = deviceId.hashCode()
     result = 31 * result + sequence.hashCode()
     result = 31 * result + captureSequence.hashCode()
+    result = 31 * result + frameContext.hashCode()
     result = 31 * result + rotation
     result = 31 * result + screenshotSequence.hashCode()
     result = 31 * result + hierarchySequence.hashCode()

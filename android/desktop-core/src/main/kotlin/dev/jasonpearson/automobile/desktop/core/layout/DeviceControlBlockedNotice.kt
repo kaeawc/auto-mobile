@@ -51,6 +51,10 @@ internal fun deviceControlBlockReasonText(reason: DeviceControlBlockReason): Str
       "Device control paused: waiting for screenshot and layout to sync"
     DeviceControlBlockReason.CaptureIdentityUnavailable ->
       "Device control unavailable: daemon does not report capture identity"
+    DeviceControlBlockReason.FrameContextUnavailable ->
+      "Device control unavailable: runner does not report frame context"
+    DeviceControlBlockReason.FrameContextMismatch ->
+      "Device control paused: screenshot and layout frame contexts disagree"
     // A permanent, actionable condition rather than a transient one: the daemon is newer than this
     // client, so the wording points at the fix (update) instead of implying it will resolve itself.
     DeviceControlBlockReason.UnsupportedCoordinateSpace ->

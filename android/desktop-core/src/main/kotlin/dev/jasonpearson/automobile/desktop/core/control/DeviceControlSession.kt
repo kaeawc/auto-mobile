@@ -193,6 +193,13 @@ class DeviceControlSession(
     private set
 
   /**
+   * Capture identity of a snapshot the daemon rejected as stale. The rendered snapshot remains
+   * useful for inspection, but its coordinates are no longer actionable until a later paired
+   * capture arrives.
+   */
+  private var staleContextRejectedCaptureSequence: Long? = null
+
+  /**
    * Evaluate control availability for [inputs] and, on the way, offer the resulting snapshot to the
    * refresh tracker so a pending post-input wait settles on the first superseding snapshot.
    *
@@ -208,6 +215,11 @@ class DeviceControlSession(
     inputs.newestProvenRotation()?.let { lastProvenRotation = it }
     val decision = DeviceControlPolicy.evaluate(inputs, now)
     val live = decision.snapshotOrNull
+    staleContextRejectedCaptureSequence?.let { rejectedCapture ->
+      if (live != null && live.captureSequence > rejectedCapture) {
+        staleContextRejectedCaptureSequence = null
+      }
+    }
     if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
       // Hold the clicked snapshot on screen until something supersedes it (or the wait times out).
       val settled =
@@ -228,7 +240,9 @@ class DeviceControlSession(
     // view in Control for the rest of the 3s wait, and each successful tap restarts that wait, so
     // stale content could stay actionable indefinitely.
     interactionSnapshot =
-      if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
+      if (staleContextRejectedCaptureSequence != null) {
+        null
+      } else if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
         retainedIfStillActionable(decision, inputs, now)
       } else {
         live
@@ -363,7 +377,8 @@ class DeviceControlSession(
    * nothing to contradict.
    */
   private fun coordinatesAreStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
-    streamSpace.matches(snapshot.coordinateSpace) &&
+    staleContextRejectedCaptureSequence == null &&
+      streamSpace.matches(snapshot.coordinateSpace) &&
       lastProvenRotation.let { it == null || it == snapshot.rotation }
 
   /**
@@ -472,6 +487,7 @@ class DeviceControlSession(
    * view received while focused and in control mode.
    */
   fun key(snapshot: DeviceFrameSnapshot, stroke: DeviceKeyStroke): Boolean {
+    if (!coordinatesAreStillDispatchable(snapshot)) return false
     when (val decision = decide(stroke)) {
       is DeviceKeyboardDecision.PressButton ->
         enqueue { client, platformName, token ->
@@ -582,6 +598,7 @@ class DeviceControlSession(
     dispatcher.reset()
     errorToken.incrementAndGet()
     refreshTracker.reset()
+    staleContextRejectedCaptureSequence = null
     renderSnapshot = null
     interactionSnapshot = null
     publishError(null)
@@ -603,6 +620,12 @@ class DeviceControlSession(
       } else {
         // Failure: the device did not change, so nothing on screen is stale and nothing is cleared.
         refreshTracker.onInputFailed()
+        if (isStaleFrameContextError(message)) {
+          staleContextRejectedCaptureSequence = command.snapshot.captureSequence
+          // Inputs already queued against the rejected snapshot must not become implicit retries.
+          dispatcher.reset()
+          interactionSnapshot = null
+        }
         // Serialize the claim check with the banner write on the UI context so a superseded
         // attempt's stale error cannot resurrect a banner a newer attempt already cleared.
         if (command.token == errorToken.get()) publishError(message)
@@ -622,6 +645,7 @@ class DeviceControlSession(
           client = command.client,
           platform = command.platform,
           deviceId = command.snapshot.deviceId,
+          frameContext = command.snapshot.frameContext,
           onError = onError,
         )
       is DeviceControlInputCommand.Swipe ->
@@ -632,6 +656,7 @@ class DeviceControlSession(
           client = command.client,
           platform = command.platform,
           deviceId = command.snapshot.deviceId,
+          frameContext = command.snapshot.frameContext,
           onError = onError,
         )
       is DeviceControlInputCommand.PressButton ->
@@ -640,6 +665,7 @@ class DeviceControlSession(
           client = command.client,
           platform = command.platform,
           deviceId = command.snapshot.deviceId,
+          frameContext = command.snapshot.frameContext,
           onError = onError,
         )
       is DeviceControlInputCommand.TypeText ->
@@ -648,6 +674,7 @@ class DeviceControlSession(
           client = command.client,
           platform = command.platform,
           deviceId = command.snapshot.deviceId,
+          frameContext = command.snapshot.frameContext,
           onError = onError,
         )
       is DeviceControlInputCommand.SendKey ->
@@ -656,12 +683,17 @@ class DeviceControlSession(
           client = command.client,
           platform = command.platform,
           deviceId = command.snapshot.deviceId,
+          frameContext = command.snapshot.frameContext,
           onError = onError,
         )
     }
   }
 
   companion object {
+    private fun isStaleFrameContextError(message: String): Boolean =
+      message.contains("frameContext", ignoreCase = true) &&
+        message.contains("stale or unavailable", ignoreCase = true)
+
     /**
      * Shown when the bounded dispatch queue rejects an input because the daemon is not draining it.
      */

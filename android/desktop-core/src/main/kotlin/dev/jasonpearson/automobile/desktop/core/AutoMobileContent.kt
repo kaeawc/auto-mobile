@@ -952,6 +952,7 @@ fun AutoMobileContent(
             // resolution change can never supply the bounds a tap is mapped through — however few
             // milliseconds behind it is (issue #3348).
             captureSequence = update.captureSequence,
+            frameContext = update.frameContext,
             // The unit this update's bounds are in, as the daemon declared it. Carried per update
             // rather than per session because the declaration is per message, and the control
             // policy only compares dimensions exactly when the paired screenshot declared the same
@@ -1002,6 +1003,7 @@ fun AutoMobileContent(
           generation = generation,
           // Pairs by equality against the hierarchy's id; see the hierarchy collector above.
           captureSequence = update.captureSequence,
+          frameContext = update.frameContext,
           // Same reasoning as the hierarchy collector: the declared unit travels with the frame
           // (issue #4550).
           coordinateSpace = update.coordinateSpace,

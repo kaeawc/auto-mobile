@@ -437,6 +437,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     platform: String,
     deviceId: String?,
     duration: Int?,
+    frameContext: String?,
   ) = notImplemented()
 
   override fun inputSwipe(
@@ -447,12 +448,14 @@ class FakeAutoMobileClient : AutoMobileClient {
     platform: String,
     deviceId: String?,
     durationMs: Int?,
+    frameContext: String?,
   ) = notImplemented()
 
   override fun inputPressButton(
     button: String,
     platform: String,
     deviceId: String?,
+    frameContext: String?,
   ) = notImplemented()
 
   override fun inputTypeText(
@@ -461,12 +464,14 @@ class FakeAutoMobileClient : AutoMobileClient {
     deviceId: String?,
     submit: Boolean?,
     append: Boolean,
+    frameContext: String?,
   ) = notImplemented()
 
   override fun inputKey(
     key: String,
     platform: String,
     deviceId: String?,
+    frameContext: String?,
   ) = notImplemented()
 
   override fun setKeyValue(

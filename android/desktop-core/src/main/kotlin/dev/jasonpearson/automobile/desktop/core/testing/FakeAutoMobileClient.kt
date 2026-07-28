@@ -134,6 +134,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     val platform: String,
     val deviceId: String?,
     val duration: Int?,
+    val frameContext: String? = null,
   )
 
   data class InputSwipeCall(
@@ -144,12 +145,14 @@ class FakeAutoMobileClient : AutoMobileClient {
     val platform: String,
     val deviceId: String?,
     val durationMs: Int?,
+    val frameContext: String? = null,
   )
 
   data class InputPressButtonCall(
     val button: String,
     val platform: String,
     val deviceId: String?,
+    val frameContext: String? = null,
   )
 
   data class InputTypeTextCall(
@@ -158,12 +161,14 @@ class FakeAutoMobileClient : AutoMobileClient {
     val deviceId: String?,
     val submit: Boolean?,
     val append: Boolean = false,
+    val frameContext: String? = null,
   )
 
   data class InputKeyCall(
     val key: String,
     val platform: String,
     val deviceId: String?,
+    val frameContext: String? = null,
   )
 
   val setKeyValueCalls = mutableListOf<SetKeyValueCall>()
@@ -298,9 +303,10 @@ class FakeAutoMobileClient : AutoMobileClient {
     platform: String,
     deviceId: String?,
     duration: Int?,
+    frameContext: String?,
   ): InputActionResult {
     calls.add("inputTap")
-    inputTapCalls.add(InputTapCall(x, y, platform, deviceId, duration))
+    inputTapCalls.add(InputTapCall(x, y, platform, deviceId, duration, frameContext))
     return inputTapResult
   }
 
@@ -312,9 +318,12 @@ class FakeAutoMobileClient : AutoMobileClient {
     platform: String,
     deviceId: String?,
     durationMs: Int?,
+    frameContext: String?,
   ): InputActionResult {
     calls.add("inputSwipe")
-    inputSwipeCalls.add(InputSwipeCall(startX, startY, endX, endY, platform, deviceId, durationMs))
+    inputSwipeCalls.add(
+      InputSwipeCall(startX, startY, endX, endY, platform, deviceId, durationMs, frameContext)
+    )
     return inputSwipeResult
   }
 
@@ -322,9 +331,10 @@ class FakeAutoMobileClient : AutoMobileClient {
     button: String,
     platform: String,
     deviceId: String?,
+    frameContext: String?,
   ): InputActionResult {
     calls.add("inputPressButton")
-    inputPressButtonCalls.add(InputPressButtonCall(button, platform, deviceId))
+    inputPressButtonCalls.add(InputPressButtonCall(button, platform, deviceId, frameContext))
     return inputPressButtonResult
   }
 
@@ -334,9 +344,12 @@ class FakeAutoMobileClient : AutoMobileClient {
     deviceId: String?,
     submit: Boolean?,
     append: Boolean,
+    frameContext: String?,
   ): InputActionResult {
     calls.add("inputTypeText")
-    inputTypeTextCalls.add(InputTypeTextCall(text, platform, deviceId, submit, append))
+    inputTypeTextCalls.add(
+      InputTypeTextCall(text, platform, deviceId, submit, append, frameContext)
+    )
     return inputTypeTextResult
   }
 
@@ -344,9 +357,10 @@ class FakeAutoMobileClient : AutoMobileClient {
     key: String,
     platform: String,
     deviceId: String?,
+    frameContext: String?,
   ): InputActionResult {
     calls.add("inputKey")
-    inputKeyCalls.add(InputKeyCall(key, platform, deviceId))
+    inputKeyCalls.add(InputKeyCall(key, platform, deviceId, frameContext))
     return inputKeyResult
   }
 

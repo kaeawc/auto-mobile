@@ -34,6 +34,7 @@ class PostInputRefreshTrackerTest {
       hierarchy = null,
       coordinateSpace = null,
       captureSequence = captureSequence,
+      frameContext = "epoch:$captureSequence",
       screenshotSequence = sourceSequence,
       hierarchySequence = sourceSequence,
       liveFrameSequence = null,

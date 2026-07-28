@@ -71,6 +71,7 @@ class DeviceControlSessionTest {
     // The snapshot is the authority for the target device, so a selection change racing the
     // dispatch cannot redirect this tap.
     assertEquals("emulator-5554", call.deviceId)
+    assertEquals("epoch:5", call.frameContext)
     scope.cancel()
   }
 
@@ -125,6 +126,80 @@ class DeviceControlSessionTest {
     // what must never happen is a *stale* error outliving a newer clear.
     assertEquals("stale failure", banner)
     assertEquals(2, client.inputTapCalls.size)
+    scope.cancel()
+  }
+
+  @Test
+  fun `a stale frame-context rejection preserves rendering but blocks retry until a newer pair`() =
+    runTest {
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val client =
+        FakeAutoMobileClient().apply {
+          inputTapResult =
+            InputActionResult(
+              action = "input/tap",
+              success = false,
+              error =
+                "input/tap frameContext is stale or unavailable; observe a fresh frame before retrying",
+            )
+        }
+      val session = session(scope, client)
+      val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+      val rejected = assertNotNull(session.evaluate(initial).snapshotOrNull)
+
+      session.tap(rejected, point)
+      advanceUntilIdle()
+      session.evaluate(initial)
+
+      assertEquals(rejected, session.renderSnapshot)
+      assertNull(session.interactionSnapshot)
+      assertFalse(
+        session.tap(rejected, point),
+        "the rejected snapshot must not retry automatically",
+      )
+
+      val fresh = paired(captureSequence = 8L, sourceSequence = 12L)
+      val freshSnapshot = assertNotNull(session.evaluate(fresh).snapshotOrNull)
+
+      assertEquals(freshSnapshot, session.interactionSnapshot)
+      scope.cancel()
+    }
+
+  @Test
+  fun `a stale frame-context rejection drops queued retries`() = runTest {
+    val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+    val client =
+      FakeAutoMobileClient().apply {
+        inputTapResult =
+          InputActionResult(
+            action = "input/tap",
+            success = false,
+            error =
+              "input/tap frameContext is stale or unavailable; observe a fresh frame before retrying",
+          )
+      }
+    val session =
+      DeviceControlSession(
+        scope = scope,
+        clientProvider = { client },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = {},
+        uiContext = StandardTestDispatcher(testScheduler),
+        ioDispatcher = StandardTestDispatcher(testScheduler),
+      )
+    val snapshot = testSnapshot(sequence = 7L)
+
+    session.tap(snapshot, point)
+    session.tap(snapshot, point)
+    advanceUntilIdle()
+
+    assertEquals(
+      1,
+      client.inputTapCalls.size,
+      "the queued gesture must not retry stale coordinates",
+    )
+    assertNull(session.interactionSnapshot)
     scope.cancel()
   }
 
@@ -1100,6 +1175,7 @@ class DeviceControlSessionTest {
           height = height,
           data = data,
           coordinateSpace = coordinateSpace,
+          frameContext = "epoch:$captureSequence",
           rotation = 0,
         ),
       hierarchy =
@@ -1112,6 +1188,7 @@ class DeviceControlSessionTest {
           rootWidth = width,
           rootHeight = height,
           coordinateSpace = coordinateSpace,
+          frameContext = "epoch:$captureSequence",
           rotation = 0,
         ),
       liveFrame = null,

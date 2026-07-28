@@ -1,9 +1,21 @@
-import { expect, describe, test, spyOn, afterEach } from "bun:test";
+import { expect, describe, test, spyOn, afterEach, beforeEach } from "bun:test";
 import { SelectAllText } from "../../../src/features/action/SelectAllText";
 import { BootedDevice } from "../../../src/models";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { PortManager } from "../../../src/utils/PortManager";
+
+beforeEach(() => {
+  PortManager.reset();
+  PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
+});
+
+afterEach(() => {
+  IOSCtrlProxyClient.resetInstances();
+  AndroidCtrlProxyClient.resetInstances();
+  PortManager.setPortAvailabilityCheckerForTesting(null);
+});
 
 describe("SelectAllText Android", () => {
   // Regression for https://github.com/kaeawc/auto-mobile/issues/2231.

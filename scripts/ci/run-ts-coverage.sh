@@ -13,7 +13,7 @@ log_file="${1:-ci-logs/ts-coverage.log}"
 mkdir -p "$(dirname "${log_file}")"
 
 set +e
-bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage > "${log_file}" 2>&1
+bun test --isolate --coverage --coverage-reporter=lcov --coverage-dir=coverage > "${log_file}" 2>&1
 status=$?
 set -e
 

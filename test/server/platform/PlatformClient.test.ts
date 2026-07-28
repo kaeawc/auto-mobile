@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { afterEach, beforeEach, describe, it, expect } from "bun:test";
 import { createPlatformClient } from "../../../src/server/platform/createPlatformClient";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
@@ -16,6 +16,7 @@ import { FakePlatformClient } from "../../fakes/FakePlatformClient";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeSystemConfigurationAdapter } from "../../fakes/FakeSystemConfigurationAdapter";
 import { FakeNotificationUIDetector } from "../../fakes/FakeNotificationUIDetector";
+import { PortManager } from "../../../src/utils/PortManager";
 import type { BootedDevice } from "../../../src/models";
 import type { PlatformClient } from "../../../src/utils/interfaces/PlatformClient";
 
@@ -27,6 +28,17 @@ import type { PlatformClient } from "../../../src/utils/interfaces/PlatformClien
  * `PlatformClient`.
  */
 describe("PlatformClient", () => {
+  beforeEach(() => {
+    PortManager.reset();
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
+  });
+
+  afterEach(() => {
+    IOSCtrlProxyClient.resetInstances();
+    AndroidCtrlProxyClient.resetInstances();
+    PortManager.setPortAvailabilityCheckerForTesting(null);
+  });
+
   const androidDevice: BootedDevice = {
     deviceId: "emulator-5554",
     name: "Pixel_5",

@@ -334,6 +334,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val timeProvider: TimeProvider = SystemTimeProvider()
   private lateinit var webSocketServer: WebSocketServer
   private lateinit var hierarchyDebouncer: HierarchyDebouncer
+  private lateinit var rotationProvenance: RotationProvenanceTracker
   private var hierarchyBroadcastThrottler: BroadcastThrottler? = null
   private val navigationEventAccumulator = NavigationEventAccumulator()
   private lateinit var overlayManager: OverlayManager
@@ -829,6 +830,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
+      rotationProvenance =
+        RotationProvenanceTracker(
+          DisplayRotationChangeSignal(
+            getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+          )
+        )
       overlayDrawer = OverlayDrawer(screenDimensionsProvider = { getScreenDimensions() })
       overlayManager =
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
@@ -1119,6 +1126,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       unregisterReceiver(screenStateReceiver)
     } catch (e: Exception) {
       Log.e(TAG, "Error unregistering screen state receiver", e)
+    }
+
+    if (::rotationProvenance.isInitialized) {
+      rotationProvenance.close()
     }
 
     // Stop logcat reader
@@ -2188,7 +2199,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val contextAtExtractionStart = currentFrameContext()
     // Bracket every input acquisition and the extraction itself. If rotation changes anywhere in
     // that interval, hierarchy geometry cannot be proven to match a single display orientation.
-    val rotationBeforeExtraction = getRotationOrNull()
+    val rotationCapture = rotationProvenance.beginCapture()
+    val rotationAtCaptureStart = getRotationOrNull()
     // Get all windows to capture popups, toolbars, and other floating windows
     val allWindows = windows
     val rootNode = rootInActiveWindow
@@ -2231,9 +2243,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
       }
 
-    val rotationAfterExtraction = getRotationOrNull()
     val rotation =
-      if (rotationBeforeExtraction == rotationAfterExtraction) rotationAfterExtraction else null
+      rotationProvenance.rotationIfUnchanged(
+        rotationCapture,
+        rotationAtCaptureStart,
+        getRotationOrNull(),
+      )
 
     // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
     val wakefulness = getWakefulness()
@@ -2375,7 +2390,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // This is the synchronous ADB-broadcast fallback, not the debounced direct route above. It
     // must bracket the same inputs and extraction so the fallback never publishes a hierarchy
     // whose geometry and rotation came from different display states.
-    val rotationBeforeExtraction = getRotationOrNull()
+    val rotationCapture = rotationProvenance.beginCapture()
+    val rotationAtCaptureStart = getRotationOrNull()
     val allWindows = windows
     val rootNode = rootInActiveWindow
     val screenDimensions = getScreenDimensions()
@@ -2409,9 +2425,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           disableAllFiltering,
         )
       }
-    val rotationAfterExtraction = getRotationOrNull()
     val rotation =
-      if (rotationBeforeExtraction == rotationAfterExtraction) rotationAfterExtraction else null
+      rotationProvenance.rotationIfUnchanged(
+        rotationCapture,
+        rotationAtCaptureStart,
+        getRotationOrNull(),
+      )
     // The ADB EXTRACT_HIERARCHY route must carry the #4548 scale metadata too (this route does not
     // add the other device metadata, but the daemon retains scale metadata off any route).
     val hierarchyWithScaleMetadata =
@@ -2565,7 +2584,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val startTime = System.currentTimeMillis()
 
         // Use suspendCancellableCoroutine to bridge callback-based API
-        val rotationBeforeCapture = getRotationOrNull()
+        val rotationCapture = rotationProvenance.beginCapture()
+        val rotationAtCaptureStart = getRotationOrNull()
         val captured =
           suspendCancellableCoroutine<Pair<Bitmap, Int?>?> { continuation ->
             takeScreenshot(
@@ -2583,12 +2603,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                     continuation.resume(null)
                     return
                   }
-                  val rotationAfterCapture = getRotationOrNull()
-                  // A changed rotation makes the pixels' orientation ambiguous. Preserve that
+                  // A display change makes the pixels' orientation ambiguous. Preserve that
                   // ambiguity as null so desktop control fails closed rather than guessing.
                   val rotation =
-                    if (rotationBeforeCapture == rotationAfterCapture) rotationAfterCapture
-                    else null
+                    rotationProvenance.rotationIfUnchanged(
+                      rotationCapture,
+                      rotationAtCaptureStart,
+                      getRotationOrNull(),
+                    )
                   continuation.resume(hardwareBitmap to rotation)
                 }
 

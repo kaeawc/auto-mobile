@@ -2727,6 +2727,36 @@ describe("IOSCtrlProxyClient", function() {
     // The iOS ordering rule: geometry must be derived from a hierarchy BEFORE it is pushed, so the
     // identity the daemon assigns is recorded against the geometry it actually describes.
 
+    test("binds an explicitly forwarded initial hierarchy for later static-screen screenshots", function() {
+      ctrlProxyClient.recordInitialObservationStreamHierarchy({
+        hierarchy: {},
+        screenWidth: 390,
+        screenHeight: 844,
+        screenScale: 3,
+      }, 42);
+
+      expect((ctrlProxyClient as any).screenGeometry.bind()).toEqual({
+        captureSequence: 42,
+        width: 1170,
+        height: 2532,
+      });
+    });
+
+    test("drops stale provenance when an initial hierarchy has no assigned identity", function() {
+      const geometry = (ctrlProxyClient as any).screenGeometry;
+      geometry.update(1170, 2532);
+      geometry.markForwarded(41);
+
+      ctrlProxyClient.recordInitialObservationStreamHierarchy({
+        hierarchy: {},
+        screenWidth: 390,
+        screenHeight: 844,
+        screenScale: 3,
+      }, null);
+
+      expect(geometry.bind()).toBeNull();
+    });
+
     const startStreamServer = async (): Promise<FakeSocket> => {
       await stopDeviceDataStreamSocketServer();
       const server = await startDeviceDataStreamSocketServer(fakeTimer);

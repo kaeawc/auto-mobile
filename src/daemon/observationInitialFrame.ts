@@ -49,6 +49,10 @@ export interface ObservationStreamAndroidClient {
     timeoutMs?: number
   ): Promise<{ hierarchy: AccessibilityHierarchy; frameContext?: string } | null>;
   convertToViewHierarchyResult(hierarchy: AccessibilityHierarchy): ViewHierarchyResult;
+  recordInitialObservationStreamHierarchy(
+    hierarchy: ViewHierarchyResult,
+    captureSequence: number | null
+  ): void;
   captureScreenshotForObservationStream(): Promise<ScreenshotCaptureResult>;
 }
 
@@ -68,6 +72,10 @@ export interface ObservationStreamIosClient {
     timeoutMs?: number
   ): Promise<{ hierarchy: unknown; frameContext?: string } | null>;
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
+  recordInitialObservationStreamHierarchy(
+    hierarchy: ViewHierarchyResult,
+    captureSequence: number | null
+  ): void;
   requestScreenshotWithoutObservationStreamPush(timeoutMs?: number, perf?: PerformanceTracker): Promise<CtrlProxyScreenshotResult>;
 }
 
@@ -136,16 +144,24 @@ async function pushAndroidInitialObservationFrame(
 
   const viewHierarchy = client.convertToViewHierarchyResult(initialHierarchy.hierarchy);
   const frameContext = initialHierarchy.frameContext ?? viewHierarchy.frameContext;
-  dependencies.streamServer.pushHierarchyUpdate(device.deviceId, viewHierarchy, frameContext);
+  const captureSequence = dependencies.streamServer.pushHierarchyUpdate(device.deviceId, viewHierarchy, frameContext);
+  client.recordInitialObservationStreamHierarchy(viewHierarchy, captureSequence);
 
-  await pushAndroidInitialScreenshot(device.deviceId, client, dependencies.streamServer, viewHierarchy);
+  await pushAndroidInitialScreenshot(
+    device.deviceId,
+    client,
+    dependencies.streamServer,
+    viewHierarchy,
+    captureSequence
+  );
 }
 
 async function pushAndroidInitialScreenshot(
   deviceId: string,
   client: ObservationStreamAndroidClient,
   streamServer: Pick<DeviceDataStreamSocketServer, "pushScreenshotUpdate">,
-  viewHierarchy: ViewHierarchyResult
+  viewHierarchy: ViewHierarchyResult,
+  captureSequence: number | null
 ): Promise<void> {
   const screenshot = await client.captureScreenshotForObservationStream();
   if (screenshot.success && screenshot.data) {
@@ -157,6 +173,7 @@ async function pushAndroidInitialScreenshot(
       dimensions.height,
       pickScreenshotMetadata(screenshot),
       {
+        ...(captureSequence === null ? {} : { captureSequence }),
         ...canonicalPixelScreenshotOptions(viewHierarchy),
         rotation: screenshot.rotation,
         ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
@@ -224,7 +241,8 @@ async function pushIosInitialObservationFrame(
 
   const viewHierarchy = client.convertToViewHierarchyResult(initialHierarchy.hierarchy);
   const frameContext = initialHierarchy.frameContext ?? viewHierarchy.frameContext;
-  dependencies.streamServer.pushHierarchyUpdate(device.deviceId, viewHierarchy, frameContext);
+  const captureSequence = dependencies.streamServer.pushHierarchyUpdate(device.deviceId, viewHierarchy, frameContext);
+  client.recordInitialObservationStreamHierarchy(viewHierarchy, captureSequence);
 
   const screenshot = await client.requestScreenshotWithoutObservationStreamPush(INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS);
   if (screenshot.success && screenshot.data) {
@@ -236,6 +254,7 @@ async function pushIosInitialObservationFrame(
       dimensions.height,
       metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, screenshot.format),
       {
+        ...(captureSequence === null ? {} : { captureSequence }),
         ...canonicalPixelScreenshotOptions(viewHierarchy),
         rotation: screenshot.rotation,
         ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),

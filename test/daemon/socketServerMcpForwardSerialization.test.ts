@@ -336,7 +336,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
-  test("keeps the bound client for tools/list when the session-aware call returns an error", async () => {
+  test("keeps the successful session binding when a later explicit session call fails", async () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-session-list-error-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
@@ -353,8 +353,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
       const clientIndex = clients.length;
       const client: FakeMcpClient = {
         listTools: async () => ({ tools: [{ name: `client-${clientIndex}` }] }),
-        callTool: async () => {
-          throw new Error("invalid tool arguments");
+        callTool: async (...args: unknown[]) => {
+          const request = args[0] as { arguments?: { sessionUuid?: string } };
+          if (request.arguments?.sessionUuid === "session-b") {
+            throw new Error("clipboard requires the 'clipboard' capability");
+          }
+          return { content: [] };
         },
         listResources: async () => ({ resources: [] }),
         readResource: async () => ({ contents: [] }),
@@ -369,13 +373,23 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await client.connect(socketPath);
     try {
       await client.request("tools/list", {});
-      const failedCall = await client.request("tools/call", {
+      const boundCall = await client.request("tools/call", {
         name: "observe",
         arguments: { sessionUuid: "session-a" },
       });
+      const failedCall = await client.request("tools/call", {
+        name: "clipboard",
+        arguments: { sessionUuid: "session-b" },
+      });
+      const sessionlessCall = await client.request("tools/call", {
+        name: "exportPlan",
+        arguments: {},
+      });
       const refreshedList = await client.request("tools/list", {});
 
+      expect(boundCall.success).toBe(true);
       expect(failedCall.success).toBe(false);
+      expect(sessionlessCall.success).toBe(true);
       expect(refreshedList.result).toEqual({ tools: [{ name: "client-1" }] });
     } finally {
       client.close();

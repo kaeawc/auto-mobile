@@ -488,12 +488,11 @@ describe("InputText", () => {
   });
 
   test("eventOnly rejects after a refreshed hierarchy still lacks a focused editable field", async () => {
-    const adb = new FakeAdbExecutor();
-    adb.setDeviceTimestampMs(42);
-    const inputText = new InputText(androidDevice, adb);
+    const inputText = new InputText(androidDevice, new FakeAdbExecutor());
     const observeScreen = new FakeObserveScreen();
     const unfocused = {
       viewHierarchy: {
+        updatedAt: 42,
         hierarchy: {
           node: {
             class: "android.view.inputmethod.SoftInputWindow"
@@ -516,7 +515,96 @@ describe("InputText", () => {
     expect(result.error).toBe("eventOnly requires a focused editable field");
     expect(observeScreen.getExecuteCallCount()).toBe(1);
     expect(observeScreen.getExecuteOptions()[0]?.skipWaitForFresh).toBe(false);
-    expect(observeScreen.getExecuteOptions()[0]?.minTimestamp).toBe(42);
+    expect(observeScreen.getExecuteOptions()[0]?.minTimestamp).toBe(43);
+  });
+
+  test("eventOnly rejects a stale focused refresh from the same second without sending key events", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const observeScreen = new FakeObserveScreen();
+    const staleCachedHierarchy = {
+      viewHierarchy: {
+        updatedAt: 1_700_000_000_500,
+        hierarchy: {
+          node: {
+            class: "android.view.inputmethod.SoftInputWindow"
+          }
+        }
+      }
+    } as ObserveResult;
+    observeScreen.setObserveSequence([
+      {
+        ...observeResultWithFocusedText("old"),
+        freshness: {
+          requestedAfter: 1_700_000_000_501,
+          actualTimestamp: 1_700_000_000_500,
+          isFresh: false,
+          staleDurationMs: 1
+        }
+      }
+    ]);
+    inputText.observeScreen = observeScreen;
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "next",
+      undefined,
+      false,
+      "eventOnly",
+      staleCachedHierarchy
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("eventOnly requires a focused editable field");
+    expect(observeScreen.getExecuteOptions()[0]?.minTimestamp).toBe(1_700_000_000_501);
+    expect(inputCommands(factory)).toEqual([]);
+  });
+
+  test("eventOnly accepts a newer fresh focused refresh", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const observeScreen = new FakeObserveScreen();
+    const staleCachedHierarchy = {
+      viewHierarchy: {
+        updatedAt: 1_700_000_000_500,
+        hierarchy: {
+          node: {
+            class: "android.view.inputmethod.SoftInputWindow"
+          }
+        }
+      }
+    } as ObserveResult;
+    observeScreen.setObserveSequence([
+      {
+        ...observeResultWithFocusedText("old"),
+        freshness: {
+          requestedAfter: 1_700_000_000_501,
+          actualTimestamp: 1_700_000_000_501,
+          isFresh: true
+        }
+      }
+    ]);
+    inputText.observeScreen = observeScreen;
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "next",
+      undefined,
+      false,
+      "eventOnly",
+      staleCachedHierarchy
+    );
+
+    expect(result.success).toBe(true);
+    expect(observeScreen.getExecuteOptions()[0]?.minTimestamp).toBe(1_700_000_000_501);
+    expect(inputCommands(factory)).toEqual([
+      "shell input keyevent KEYCODE_MOVE_END",
+      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_N",
+      "shell input keyevent KEYCODE_E",
+      "shell input keyevent KEYCODE_X",
+      "shell input keyevent KEYCODE_T"
+    ]);
   });
 
   test("eventOnly delegates keyboard dismissal to the keyboard closer", async () => {

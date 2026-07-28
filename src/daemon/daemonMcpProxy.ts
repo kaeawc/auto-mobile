@@ -504,11 +504,18 @@ export class DaemonMcpProxy {
     }
 
     // The release portions (before the `+g<sha>` dev stamp) drive the
-    // newer/older decision. Equal release + differing full strings means two
-    // source checkouts at the same release but different commits (dev-skew).
+    // newer/older decision. A plain release client intentionally matches a
+    // source-stamped daemon at that release; two stamped versions still detect
+    // source-checkout dev-skew.
     const runningBase = releaseVersion(runningVersion);
     const clientBase = releaseVersion(this.clientVersion);
     const sameRelease = runningBase === clientBase;
+    const clientDeclaresFullVersion = clientBase !== this.clientVersion;
+    const daemonDeclaresFullVersion = runningBase !== runningVersion;
+
+    if (sameRelease && (!clientDeclaresFullVersion || !daemonDeclaresFullVersion)) {
+      return;
+    }
 
     if (!this.config.autoStartDaemon) {
       throw this.versionMismatchError(runningVersion, "autoStartDisabled", "auto-start is disabled");

@@ -1744,6 +1744,7 @@ jobs:
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         env:
           AUTOMOBILE_DAEMON_DEBUG: "1"
+          AUTOMOBILE_DAEMON_EMBEDDED_SDK: "1"
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       # Launch CtrlProxy on the booted sim now (a slow, one-time xcodebuild launch)

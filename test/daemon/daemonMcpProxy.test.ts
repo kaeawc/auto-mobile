@@ -164,6 +164,9 @@ describe("DaemonMcpProxy", () => {
         daemonOptions?: { debug?: boolean; port?: number };
         statusAfterRestartVersion?: string;
         clientVersion?: string;
+        daemonBuildId?: string;
+        daemonEntryScript?: string;
+        clientBuild?: { buildId: string; entryScript: string };
       } = {}) {
         const timer = new FakeTimer();
         timer.advanceTime(100_000);
@@ -178,6 +181,8 @@ describe("DaemonMcpProxy", () => {
           socketPath: "/tmp/test.sock",
           ...(opts.runningVersion !== undefined ? { version: opts.runningVersion } : {}),
           ...(opts.startedAt !== undefined ? { startedAt: opts.startedAt } : {}),
+          ...(opts.daemonBuildId !== undefined ? { buildId: opts.daemonBuildId } : {}),
+          ...(opts.daemonEntryScript !== undefined ? { entryScript: opts.daemonEntryScript } : {}),
         };
         fakeManager.statusResult = initialStatus;
         fakeManager.statusResults = [
@@ -199,6 +204,7 @@ describe("DaemonMcpProxy", () => {
           daemonOptions: opts.daemonOptions,
           timer,
           clientVersion: opts.clientVersion ?? CLIENT_VERSION,
+          buildIdentity: opts.clientBuild,
         });
         return { fakeClient, fakeManager, isAvailableSpy, proxy };
       }
@@ -253,6 +259,31 @@ describe("DaemonMcpProxy", () => {
         try {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("allows a plain release client to use a same-release stamped daemon", async () => {
+        const build = {
+          buildId: "92e3642b15e5388c",
+          entryScript: "/workspace/auto-mobile/dist/src/index.js",
+        };
+        const { fakeClient, fakeManager, isAvailableSpy, proxy } = makeProxy({
+          clientVersion: "0.0.46",
+          runningVersion: "0.0.46+g8e5738e53463",
+          startedAt: ANCIENT_TIMESTAMP,
+          clientBuild: build,
+          daemonBuildId: build.buildId,
+          daemonEntryScript: build.entryScript,
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+          expect(fakeClient.callDaemonMethodCalls).toEqual([
+            { method: "tools/list", params: {} },
+          ]);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

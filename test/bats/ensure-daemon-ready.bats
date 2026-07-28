@@ -31,6 +31,9 @@ if [ "\$1" = "--daemon" ] && [ "\$2" = "start" ]; then
   if [ "\$3" = "--debug" ]; then
     printf '%s\n' "enabled" > "${MOCK_BIN}/debug-mode"
   fi
+  if [ "\$3" = "--embedded-sdk" ] || [ "\$4" = "--embedded-sdk" ]; then
+    printf '%s\n' "enabled" > "${MOCK_BIN}/embedded-sdk-mode"
+  fi
   printf '%s\n' "\${AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS:-unset}" > "${MOCK_BIN}/startup-timeout"
   exit 0
 elif [ "\$1" = "--daemon" ] && [ "\$2" = "health" ]; then
@@ -127,4 +130,12 @@ SCRIPT
   run env AUTOMOBILE_DAEMON_DEBUG=1 bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$(cat "${MOCK_BIN}/debug-mode")" = "enabled" ]
+}
+
+@test "starts the daemon in embedded SDK mode when requested" {
+  make_mock_auto_mobile 0
+  run env AUTOMOBILE_DAEMON_DEBUG=1 AUTOMOBILE_DAEMON_EMBEDDED_SDK=1 bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${MOCK_BIN}/debug-mode")" = "enabled" ]
+  [ "$(cat "${MOCK_BIN}/embedded-sdk-mode")" = "enabled" ]
 }

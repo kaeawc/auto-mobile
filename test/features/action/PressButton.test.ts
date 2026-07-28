@@ -106,8 +106,8 @@ describe("PressButton", () => {
     const fakeTimer = new FakeTimer();
     const capturedTimeouts: (number | undefined)[] = [];
     const fakeAdb = {
-      executeCommand: async (_command: string, timeoutMs?: number) => {
-        capturedTimeouts.push(timeoutMs);
+      execute: async (_args: string[], options?: { timeoutMs?: number }) => {
+        capturedTimeouts.push(options?.timeoutMs);
         return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
       }
     } as any;
@@ -130,8 +130,8 @@ describe("PressButton", () => {
 
     const capturedTimeouts: (number | undefined)[] = [];
     const fakeAdb = {
-      executeCommand: async (_command: string, timeoutMs?: number) => {
-        capturedTimeouts.push(timeoutMs);
+      execute: async (_args: string[], options?: { timeoutMs?: number }) => {
+        capturedTimeouts.push(options?.timeoutMs);
         return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
       }
     } as any;
@@ -165,8 +165,8 @@ describe("PressButton", () => {
     } as any);
 
     const fakeAdb = {
-      executeCommand: async (_command: string, timeoutMs?: number) => {
-        adbTimeouts.push(timeoutMs);
+      execute: async (_args: string[], options?: { timeoutMs?: number }) => {
+        adbTimeouts.push(options?.timeoutMs);
         return { stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false };
       }
     } as any;

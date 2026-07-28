@@ -152,7 +152,8 @@ async function pushAndroidInitialObservationFrame(
     client,
     dependencies.streamServer,
     viewHierarchy,
-    captureSequence
+    captureSequence,
+    frameContext
   );
 }
 
@@ -161,7 +162,8 @@ async function pushAndroidInitialScreenshot(
   client: ObservationStreamAndroidClient,
   streamServer: Pick<DeviceDataStreamSocketServer, "pushScreenshotUpdate">,
   viewHierarchy: ViewHierarchyResult,
-  captureSequence: number | null
+  captureSequence: number | null,
+  hierarchyFrameContext: string | undefined
 ): Promise<void> {
   const screenshot = await client.captureScreenshotForObservationStream();
   if (screenshot.success && screenshot.data) {
@@ -173,7 +175,7 @@ async function pushAndroidInitialScreenshot(
       dimensions.height,
       pickScreenshotMetadata(screenshot),
       {
-        ...(captureSequence === null ? {} : { captureSequence }),
+        ...captureSequenceOptions(captureSequence, hierarchyFrameContext, screenshot.frameContext),
         ...canonicalPixelScreenshotOptions(viewHierarchy),
         rotation: screenshot.rotation,
         ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
@@ -191,6 +193,27 @@ function canonicalPixelScreenshotOptions(
   hierarchy: ViewHierarchyResult
 ): { coordinateSpace: typeof COORDINATE_SPACE_PX } | Record<string, never> {
   return readScreenScaleMetadata(hierarchy) ? { coordinateSpace: COORDINATE_SPACE_PX } : {};
+}
+
+/**
+ * A screenshot captured after the paired hierarchy may describe a same-size new screen. When
+ * both device-authored contexts are present, only an exact match proves the old identity still
+ * applies. Legacy runners omit one or both contexts, so they retain the existing identity rule.
+ */
+function captureSequenceOptions(
+  captureSequence: number | null,
+  hierarchyFrameContext: string | undefined,
+  screenshotFrameContext: string | undefined
+): { captureSequence?: number } {
+  if (
+    captureSequence === null ||
+    (hierarchyFrameContext !== undefined &&
+      screenshotFrameContext !== undefined &&
+      hierarchyFrameContext !== screenshotFrameContext)
+  ) {
+    return {};
+  }
+  return { captureSequence };
 }
 
 async function getAndroidInitialHierarchy(
@@ -254,7 +277,7 @@ async function pushIosInitialObservationFrame(
       dimensions.height,
       metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, screenshot.format),
       {
-        ...(captureSequence === null ? {} : { captureSequence }),
+        ...captureSequenceOptions(captureSequence, frameContext, screenshot.frameContext),
         ...canonicalPixelScreenshotOptions(viewHierarchy),
         rotation: screenshot.rotation,
         ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),

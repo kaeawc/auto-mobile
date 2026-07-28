@@ -1,5 +1,12 @@
 import { BaseVisualChange } from "./BaseVisualChange";
-import { BootedDevice, ImeAction, KeyboardResult, ObserveResult, SendTextResult } from "../../models";
+import {
+  BootedDevice,
+  ImeAction,
+  KeyboardResult,
+  ObserveResult,
+  SendTextResult,
+  ViewHierarchyResult
+} from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -568,7 +575,8 @@ export class InputText extends BaseVisualChange {
       };
     }
 
-    if (!hasFocusedTextInput(viewHierarchy)) {
+    const focusedViewHierarchy = await this.refreshFocusedTextInputHierarchy(viewHierarchy);
+    if (!focusedViewHierarchy) {
       return {
         success: false,
         text,
@@ -577,7 +585,7 @@ export class InputText extends BaseVisualChange {
       };
     }
 
-    await clearTextWithKeyEvents(this.adb, getFocusedTextLength(viewHierarchy));
+    await clearTextWithKeyEvents(this.adb, getFocusedTextLength(focusedViewHierarchy));
     for (const keyEventPlan of keyEventPlans) {
       await this.executeKeyEventPlan(keyEventPlan);
     }
@@ -606,6 +614,26 @@ export class InputText extends BaseVisualChange {
       imeAction,
       method: "eventOnly"
     };
+  }
+
+  private async refreshFocusedTextInputHierarchy(
+    viewHierarchy: ViewHierarchyResult
+  ): Promise<ViewHierarchyResult | undefined> {
+    if (hasFocusedTextInput(viewHierarchy)) {
+      return viewHierarchy;
+    }
+
+    const minTimestamp = typeof this.adb.getDeviceTimestampMs === "function"
+      ? await this.adb.getDeviceTimestampMs()
+      : this.timer.now();
+    const refreshedObserveResult = await this.observeScreen.execute({
+      skipWaitForFresh: false,
+      minTimestamp
+    });
+    const refreshedViewHierarchy = refreshedObserveResult.viewHierarchy;
+    return refreshedViewHierarchy && hasFocusedTextInput(refreshedViewHierarchy)
+      ? refreshedViewHierarchy
+      : undefined;
   }
 
   /**

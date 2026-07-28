@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
@@ -6,6 +6,7 @@ import type { BootedDevice } from "../../src/models";
 import { Explore } from "../../src/features/navigation/Explore";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { DefaultPathOptimizer } from "../../src/features/navigation/DefaultPathOptimizer";
+import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { NavigationRepository } from "../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
 import { createMcpServer } from "../../src/server/index";
@@ -153,7 +154,16 @@ describe("Android navigation graph workflow (#4459)", () => {
 
     const graphTool = ToolRegistry.getTool("getNavigationGraph");
     expect(graphTool).toBeDefined();
-    const graphResponse = await graphTool!.deviceAwareHandler!(device, { platform: "android", sessionUuid });
+    const observationSpy = spyOn(RealObserveScreen, "getRecentCachedResultForDevice").mockReturnValue({
+      viewHierarchy: { packageName: appId },
+    } as never);
+    const graphResponse = await (async () => {
+      try {
+        return await graphTool!.deviceAwareHandler!(device, { platform: "android", sessionUuid });
+      } finally {
+        observationSpy.mockRestore();
+      }
+    })();
     const graph = JSON.parse(graphResponse.content[0].text);
     expect(graph).toMatchObject({
       currentScreen: "Settings",

@@ -7,7 +7,7 @@ set -euo pipefail
 
 device_id="${1:?usage: navigation-graph-sdk-event-integration.sh <simulator-udid>}"
 timestamp_ms="$(($(date +%s) * 1000))"
-bundle_id="dev.jasonpearson.automobile.issue4460"
+bundle_id="com.apple.reminders"
 home_screen="Issue4460Home"
 detail_screen="Issue4460Detail"
 # Keep the runner's SDK-event consumer and the public graph query in one session. Each CLI
@@ -30,35 +30,53 @@ require_command xcrun
 
 xcrun simctl getenv "${device_id}" HOME >/dev/null
 
-# CtrlProxy allocates a per-device host port; 8765 is only its preferred default
-# and may already belong to another local service. Ask the daemon that warmed the
-# runner for the selected simulator's reported port instead of probing a stale
-# default. `doctor` can exit non-zero for unrelated diagnostics, but still emits
-# the JSON report that contains this ready runner's round-trip result.
-doctor_report="$(auto-mobile --cli doctor --ios --json || true)"
-ctrl_proxy_port="$(jq -er --arg device_id "${device_id}" '
-  .ios.checks[]
-  | select(.name == "iOS Observe Round Trip")
-  | .message
-  | split(" | ")
-  | map(select(contains("device=" + $device_id + ";")))
-  | .[0]
-  | capture("runnerPort=(?<port>[0-9]+)")
-  | .port
-' <<<"${doctor_report}")" || {
-  echo "error: could not determine CtrlProxy port for simulator ${device_id}" >&2
-  exit 1
+ctrl_proxy_port_for_device() {
+  # CtrlProxy allocates a per-device host port; 8765 is only its preferred
+  # default and may already belong to another local service. `doctor` can exit
+  # non-zero for unrelated diagnostics, but still emits the JSON round-trip
+  # report that contains this ready runner's port.
+  local doctor_report ctrl_proxy_port
+  doctor_report="$(auto-mobile --cli doctor --ios --json || true)"
+  if ! ctrl_proxy_port="$(jq -er --arg device_id "${device_id}" '
+      .ios.checks[]
+      | select(.name == "iOS Observe Round Trip")
+      | .message
+      | split(" | ")
+      | map(select(contains("device=" + $device_id + ";")))
+      | .[0]
+      | capture("runnerPort=(?<port>[0-9]+)")
+      | .port
+    ' <<<"${doctor_report}")"; then
+    echo "error: could not determine CtrlProxy port for simulator ${device_id}" >&2
+    return 1
+  fi
+  printf '%s\n' "${ctrl_proxy_port}"
 }
 
+ctrl_proxy_port="$(ctrl_proxy_port_for_device)"
+
 curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null
+
+# The graph query selects the target device's latest observed foreground app.
+# Keep the injected SDK events and the following observations scoped to the
+# same installed app instead of letting a SpringBoard observation hide them.
+if ! auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" launchApp --platform ios --appId "${bundle_id}" --deviceId "${device_id}" >/dev/null; then
+  echo "error: could not launch iOS graph target app" >&2
+  exit 1
+fi
 
 # `doctor` above may have started the shared CtrlProxy client while it was
 # unbound. Bind it to this graph session before posting events so its SDK-event
 # poller cannot consume them into the global NavigationGraphManager.
-if ! auto-mobile --debug --cli --session-uuid "${session_uuid}" observe --platform ios --deviceId "${device_id}" >/dev/null; then
+if ! auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" observe --platform ios --deviceId "${device_id}" >/dev/null; then
   echo "error: could not bind iOS SDK events to navigation graph session" >&2
   exit 1
 fi
+
+# Requesting debug and embedded-SDK tools can restart the daemon. That restart
+# creates a new CtrlProxy client, so the prior daemon's reported port is stale.
+ctrl_proxy_port="$(ctrl_proxy_port_for_device)"
+curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null
 
 event_payload() {
   local destination="$1"
@@ -88,12 +106,12 @@ curl --fail --silent --show-error --max-time 5 \
 # relying on its background poll leaves a race on a busy Simulator runner.
 # Query through the public, daemon-backed tool until the batched events appear.
 for attempt in 1 2 3 4 5; do
-  if ! auto-mobile --debug --cli --session-uuid "${session_uuid}" observe --platform ios --deviceId "${device_id}" >/dev/null; then
+  if ! auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" observe --platform ios --deviceId "${device_id}" >/dev/null; then
     echo "observe refresh attempt ${attempt} failed; retrying in 2s..." >&2
     sleep 2
     continue
   fi
-  if ! graph="$(auto-mobile --debug --cli --session-uuid "${session_uuid}" getNavigationGraph --platform ios --deviceId "${device_id}")"; then
+  if ! graph="$(auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" getNavigationGraph --platform ios --deviceId "${device_id}")"; then
     echo "getNavigationGraph attempt ${attempt} failed; retrying in 2s..." >&2
     sleep 2
     continue

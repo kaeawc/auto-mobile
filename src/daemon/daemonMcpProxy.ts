@@ -207,12 +207,12 @@ export interface ProxiedResourceTemplate {
 
 /**
  * The daemon startup options that change its observable MCP behavior and so must
- * match before a running daemon can be reused: `embeddedSdk`, `networkMockable`,
+ * match before a running daemon can be reused: `debug`, `embeddedSdk`, `networkMockable`,
  * marker-based eventAll promotion config, plus every output-reduction flag. A
  * same-build MCP client that requests one of these against an already-running
  * daemon started without it (or vice versa) would otherwise silently get the
  * wrong tool-output or inputText behavior until a manual restart (issue #2759 —
- * the `toolResultsNoStructuredContent` case). `embeddedSdk` and `networkMockable`
+ * the `toolResultsNoStructuredContent` case). `debug`, `embeddedSdk`, and `networkMockable`
  * additionally gate whole tool families out of the registry, so reusing a daemon
  * that lacks the requested flag makes those tools unreachable (issue #4247). The
  * output-reduction fields are derived from `OUTPUT_REDUCTION_FLAG_SPECS` (whose
@@ -220,6 +220,7 @@ export interface ProxiedResourceTemplate {
  * automatically.
  */
 export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
+  "debug",
   "embeddedSdk",
   "networkMockable",
   "safeAreaWarnings",

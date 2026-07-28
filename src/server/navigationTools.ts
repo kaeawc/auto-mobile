@@ -106,10 +106,10 @@ export function registerNavigationTools() {
   ) => {
     try {
       const manager = getNavigationManager(args.sessionUuid);
-      const stats = await manager.getStats();
-      const graph = await manager.exportGraph();
       const observation = RealObserveScreen.getRecentCachedResultForDevice(device.deviceId);
       const appId = observation?.viewHierarchy?.packageName ?? observation?.activeWindow?.appId;
+      const stats = await manager.getStatsForApp(appId ?? null);
+      const graph = await manager.exportGraphForApp(appId ?? null);
 
       return createJSONToolResponse({
         message: `Navigation graph for app: ${appId || "none"}`,

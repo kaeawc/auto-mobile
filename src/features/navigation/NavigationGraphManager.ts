@@ -1197,7 +1197,14 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Get graph statistics for debugging.
    */
   public async getStats(): Promise<NavigationGraphStats> {
-    if (!this.currentAppId) {
+    return this.getStatsForApp(this.currentAppId);
+  }
+
+  /**
+   * Get graph statistics for a specific app without changing the active graph.
+   */
+  public async getStatsForApp(appId: string | null): Promise<NavigationGraphStats> {
+    if (!appId) {
       return {
         nodeCount: 0,
         edgeCount: 0,
@@ -1208,15 +1215,16 @@ export class NavigationGraphManager implements NavigationGraphService {
       };
     }
 
-    const stats = await this.repository.getStats(this.currentAppId);
+    const stats = await this.repository.getStats(appId);
+    const isCurrentApp = appId === this.currentAppId;
 
     return {
       nodeCount: stats.nodeCount,
       edgeCount: stats.edgeCount,
-      currentScreen: this.currentScreen,
+      currentScreen: isCurrentApp ? this.currentScreen : null,
       knownEdgeCount: stats.toolEdgeCount,
       unknownEdgeCount: stats.unknownEdgeCount,
-      toolCallHistorySize: this.toolCallHistory.length,
+      toolCallHistorySize: isCurrentApp ? this.toolCallHistory.length : 0,
     };
   }
 
@@ -1249,7 +1257,14 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Export the current graph for debugging/visualization.
    */
   public async exportGraph(): Promise<ExportedGraph> {
-    if (!this.currentAppId) {
+    return this.exportGraphForApp(this.currentAppId);
+  }
+
+  /**
+   * Export a specific app's graph without changing the active graph.
+   */
+  public async exportGraphForApp(appId: string | null): Promise<ExportedGraph> {
+    if (!appId) {
       return {
         appId: null,
         nodes: [],
@@ -1258,8 +1273,8 @@ export class NavigationGraphManager implements NavigationGraphService {
       };
     }
 
-    const dbNodes = await this.repository.getNodes(this.currentAppId);
-    const dbEdges = await this.repository.getEdges(this.currentAppId);
+    const dbNodes = await this.repository.getNodes(appId);
+    const dbEdges = await this.repository.getEdges(appId);
 
     const nodes: NavigationNode[] = [];
     for (const dbNode of dbNodes) {
@@ -1282,10 +1297,10 @@ export class NavigationGraphManager implements NavigationGraphService {
     const edges = await this.convertDBEdgesToNavigationEdges(dbEdges);
 
     return {
-      appId: this.currentAppId,
+      appId,
       nodes,
       edges,
-      currentScreen: this.currentScreen,
+      currentScreen: appId === this.currentAppId ? this.currentScreen : null,
     };
   }
 

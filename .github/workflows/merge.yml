@@ -522,10 +522,22 @@ jobs:
         with:
           lfs: false
 
+      - name: "Build source CLI for installer diagnostics"
+        uses: ./.github/actions/setup-auto-mobile-npm-package
+        with:
+          install-global: "false"
+
       - name: "Run Installer (development)"
         id: run-installer-development
         shell: bash
         continue-on-error: true
+        env:
+          # Keep this disabled-job definition aligned with the PR installer lane.
+          AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "30000"
+          AUTOMOBILE_STARTUP_BENCHMARK: "1"
+          AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT: "${{ github.workspace }}/ci-logs/installer-daemon-startup.json"
+          AUTOMOBILE_STARTUP_BENCHMARK_LABEL: "installer-development-${{ matrix.os }}"
+          AUTOMOBILE_CLI_PATH: "${{ github.workspace }}/dist/src/index.js"
         run: |
           set -uo pipefail
           mkdir -p ci-logs
@@ -533,6 +545,18 @@ jobs:
           bash ./scripts/install.sh --contributor --preset development --non-interactive 2>&1 | tee ci-logs/installer.log
           install_status=${PIPESTATUS[0]}
           set -e
+          mkdir -p ci-logs/daemon-logs
+          if [[ -d "${HOME}/.auto-mobile/logs" ]]; then
+            cp -R "${HOME}/.auto-mobile/logs/." ci-logs/daemon-logs/ || true
+          else
+            echo "No daemon logs directory was created" > ci-logs/daemon-logs/README.txt
+          fi
+          : > ci-logs/ctrl-proxy-cache-state.txt
+          for cache_path in "${TMPDIR:-/tmp}"/auto-mobile-prefetch-* "${HOME}/.automobile/ctrl-proxy-ios"; do
+            [[ -e "${cache_path}" ]] || continue
+            printf '%s\n' "=== ${cache_path} ===" >> ci-logs/ctrl-proxy-cache-state.txt
+            find "${cache_path}" -maxdepth 2 -mindepth 0 -print >> ci-logs/ctrl-proxy-cache-state.txt 2>&1 || true
+          done
           echo "INSTALL_EXIT_CODE=${install_status}" >> "$GITHUB_ENV"
           echo "install_exit_code=${install_status}" >> "$GITHUB_OUTPUT"
           exit 0

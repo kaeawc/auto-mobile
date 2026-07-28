@@ -202,18 +202,18 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Call this at server startup to warm the cache before first device connection.
    * This is a no-op if prefetch is already in progress or completed.
    */
-  public static prefetchApk(): void {
+  public static prefetchApk(): Promise<string | null> {
     // Skip if already prefetching or prefetched
     if (AndroidCtrlProxyManager.prefetchPromise !== null) {
       logger.info("[CTRL_PROXY] APK prefetch already initiated, skipping");
-      return;
+      return AndroidCtrlProxyManager.prefetchPromise;
     }
 
     // Skip if there's an override path (local APK)
     const overridePath = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH?.trim();
     if (overridePath && overridePath.length > 0) {
       logger.info("[CTRL_PROXY] Using local APK override, skipping prefetch");
-      return;
+      return Promise.resolve(null);
     }
 
     logger.info("[CTRL_PROXY] Starting APK prefetch");
@@ -238,6 +238,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         AndroidCtrlProxyManager.prefetchPromise = null;
         return null;
       });
+    return AndroidCtrlProxyManager.prefetchPromise;
   }
 
   /**
@@ -1744,7 +1745,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.fileDownloader !== AndroidCtrlProxyManager.defaultFileDownloader) {
       return;
     }
-    AndroidCtrlProxyManager.prefetchApk();
+    void AndroidCtrlProxyManager.prefetchApk();
   }
 
   private isNetworkError(message: string): boolean {

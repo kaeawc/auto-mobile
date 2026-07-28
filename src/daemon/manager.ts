@@ -961,15 +961,23 @@ export class DaemonManager implements DaemonManagerLike {
   async waitForReady(timeout: number, signal?: AbortSignal): Promise<boolean> {
     const startTime = this.timer.now();
     const pollInterval = 100; // Poll every 100ms
+    let pollCount = 0;
+    let socketObserved = false;
 
     while (this.timer.now() - startTime < timeout) {
       if (signal?.aborted) {
         return false;
       }
+      pollCount++;
       if (existsSync(this.socketPath)) {
+        socketObserved = true;
         const status = await this.status();
         if (status.running) {
           if (await this.verifyDaemonConnection()) {
+            stderrLog(
+              `Daemon readiness probe succeeded after ${this.timer.now() - startTime}ms ` +
+              `(${pollCount} polls; socket observed)`
+            );
             return true;
           }
           if (signal?.aborted) {
@@ -982,6 +990,10 @@ export class DaemonManager implements DaemonManagerLike {
       await this.sleepUnlessAborted(pollInterval, signal);
     }
 
+    stderrLog(
+      `Daemon readiness probe timed out after ${this.timer.now() - startTime}ms ` +
+      `(${pollCount} polls; socket ${socketObserved ? "observed" : "not observed"})`
+    );
     return false;
   }
 

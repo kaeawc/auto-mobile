@@ -278,6 +278,30 @@ describe("DaemonManager readiness", () => {
     expect(clients).toHaveLength(0);
   });
 
+  test("reports elapsed readiness timing when no daemon socket appears", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const stderr = spyOn(process.stderr, "write").mockImplementation(() => true);
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath
+    );
+
+    try {
+      await expect(manager.waitForReady(200)).resolves.toBe(false);
+      expect(stderr).toHaveBeenCalledWith(
+        "Daemon readiness probe timed out after 200ms (2 polls; socket not observed)\n"
+      );
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
   test("startup timeout includes bounded daemon log context", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();

@@ -313,10 +313,12 @@ export class Daemon {
     // isolated-path launch during our own multi-second startup window, instead
     // of failing closed on an unknown path. The ordering lives behind
     // runStartupPrologue() so it can be asserted with fakes (issue #2871).
-    await runStartupPrologue({
-      writeEarlyOwnerRecord: () => this.writeEarlyOwnerRecord(),
-      initializeDatabase: () => this.initializeDatabase(),
-    });
+    await startupBenchmark.runPhase("daemonDatabaseInitialization", () =>
+      runStartupPrologue({
+        writeEarlyOwnerRecord: () => this.writeEarlyOwnerRecord(),
+        initializeDatabase: () => this.initializeDatabase(),
+      })
+    );
 
     // Find an available port
     this.port = await this.findAvailablePort(this.port);
@@ -336,7 +338,7 @@ export class Daemon {
 
     // Initialize iOS CtrlProxy iOS connections for discovered iOS devices
     // This establishes WebSocket connections early so observe calls are fast
-    await this.initializeIosServices();
+    await startupBenchmark.runPhase("iosServices", () => this.initializeIosServices());
 
     // Start Unix socket server AFTER device pool is ready
     logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
@@ -356,6 +358,7 @@ export class Daemon {
     startupBenchmark.endPhase("socketServerStart");
     logger.info("Unix socket server started");
 
+    startupBenchmark.startPhase("auxiliarySocketServerStart");
     await startVideoRecordingSocketServer();
     await startTestRecordingSocketServer();
     await startDeviceSnapshotSocketServer();
@@ -368,6 +371,7 @@ export class Daemon {
     await startTelemetryPushSocketServer();
     await startWebRtcStreamSocketServer();
     await startVideoStreamSocketServer();
+    startupBenchmark.endPhase("auxiliarySocketServerStart");
 
     // Wire up callback to establish WebSocket connections when IDE plugins subscribe
     this.setupDeviceDataStreamCallback();
@@ -393,6 +397,8 @@ export class Daemon {
       port: this.port,
       socketPath: SOCKET_PATH,
       deviceCount: this.devicePool.getTotalDeviceCount(),
+      mcpHttpListenerBound: this.httpServer?.listening ?? false,
+      daemonSocketListenerBound: this.socketServer?.isListening() ?? false,
     });
 
     logger.info(

@@ -162,7 +162,7 @@ class DeviceControlSession(
 
   // The latest proven device rotations, for the dispatch-time gate. Null until one is observed,
   // one value when every proving source agrees, and multiple values during a disagreement.
-  private var lastProvenRotations: Set<Int>? = null
+  @Volatile private var lastProvenRotations: Set<Int>? = null
 
   // Backstop trackers on the frame FACTS, for updates that never came through the stream collectors
   // (see [resetOnCoordinateSpaceTransition]).
@@ -424,9 +424,12 @@ class DeviceControlSession(
     staleContextRejectedFrameContext == null &&
       streamSpace.matches(snapshot.coordinateSpace) &&
       streamFrameContext.matches(snapshot.frameContext) &&
-      lastProvenRotations.let { rotations ->
-        rotations == null || (rotations.size == 1 && snapshot.rotation in rotations)
-      }
+      rotationIsStillDispatchable(snapshot)
+
+  private fun rotationIsStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
+    lastProvenRotations.let { rotations ->
+      rotations == null || (rotations.size == 1 && snapshot.rotation in rotations)
+    }
 
   /**
    * A source can arrive before it pairs with its counterpart during a rotation. That unpaired
@@ -664,11 +667,26 @@ class DeviceControlSession(
       return
     }
     var error: String? = null
-    try {
-      withContext(ioDispatcher) { forward(command) { message -> error = message } }
-    } finally {
-      command.client?.close()
-    }
+    val forwarded =
+      try {
+        withContext(ioDispatcher) {
+          // The main-to-IO dispatcher hop admits another observation before the daemon call.
+          // This volatile read is the final rotation gate before coordinates leave the process.
+          if (
+            (command is DeviceControlInputCommand.Tap ||
+              command is DeviceControlInputCommand.Swipe) &&
+              !rotationIsStillDispatchable(command.snapshot)
+          ) {
+            false
+          } else {
+            forward(command) { message -> error = message }
+            true
+          }
+        }
+      } finally {
+        command.client?.close()
+      }
+    if (!forwarded) return
     val message = error
     withContext(uiContext) {
       if (message == null) {

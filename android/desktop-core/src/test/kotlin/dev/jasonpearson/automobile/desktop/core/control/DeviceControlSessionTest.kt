@@ -30,6 +30,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -1397,6 +1398,43 @@ class DeviceControlSessionTest {
       assertTrue(client.inputSwipeCalls.isEmpty(), "a queued swipe cannot survive disagreement")
       assertTrue("close" in client.calls, "a discarded command closes its captured client")
     }
+    assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    scope.cancel()
+  }
+
+  @Test
+  fun `coordinate commands revalidate rotations after dispatching to io`() = runTest {
+    val ioScheduler = TestCoroutineScheduler()
+    val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session =
+      DeviceControlSession(
+        scope = scope,
+        clientProvider = { client },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = {},
+        uiContext = StandardTestDispatcher(testScheduler),
+        ioDispatcher = StandardTestDispatcher(ioScheduler),
+      )
+    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val snapshot = assertNotNull(session.evaluate(initial).snapshotOrNull)
+
+    assertTrue(session.tap(snapshot, point))
+    advanceUntilIdle()
+
+    // The consumer passed its pre-IO check but is suspended before the daemon call.
+    session.evaluate(
+      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
+    )
+    ioScheduler.advanceUntilIdle()
+    advanceUntilIdle()
+
+    assertTrue(
+      client.inputTapCalls.isEmpty(),
+      "the IO-boundary check must reject stale coordinates",
+    )
+    assertTrue("close" in client.calls, "the discarded command closes its captured client")
     assertEquals(PostInputRefreshState.Idle, session.refreshState)
     scope.cancel()
   }

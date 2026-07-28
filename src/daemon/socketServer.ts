@@ -68,7 +68,7 @@ import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { KeyValueType } from "../features/storage/storageTypes";
-import type { BootedDevice, ImeAction } from "../models";
+import type { BootedDevice, ImeAction, ScreenScaleMetadata } from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
 /** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
 const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
@@ -964,13 +964,15 @@ export class UnixSocketServer {
     client: IOSCtrlProxyClient,
     deviceId: string,
     coordinates: number[],
-    probeTimeoutMs: number
+    probeTimeoutMs: number,
+    validateCanonicalCoordinates?: (geometry: ScreenScaleMetadata) => void
   ): Promise<number[]> {
-    const knownScale = client.getScreenScaleMetadata()?.nativeScale;
-    if (knownScale !== undefined) {
+    const knownMetadata = client.getScreenScaleMetadata();
+    if (knownMetadata) {
       // Metadata present: a runner upgrade drops any stale confirmed-legacy verdict for this device.
       this.confirmedLegacyScaleDevices.delete(deviceId);
-      return coordinates.map(coordinate => canonicalPixelsToPoints(coordinate, knownScale));
+      validateCanonicalCoordinates?.(knownMetadata);
+      return coordinates.map(coordinate => canonicalPixelsToPoints(coordinate, knownMetadata.nativeScale));
     }
     if (this.confirmedLegacyScaleDevices.has(deviceId)) {
       // A prior probe SUCCEEDED with no metadata: a confirmed legacy runner. Skip the round trip.
@@ -996,15 +998,37 @@ export class UnixSocketServer {
       );
     }
 
-    const probedScale = client.getScreenScaleMetadata()?.nativeScale;
-    if (probedScale === undefined) {
+    const probedMetadata = client.getScreenScaleMetadata();
+    if (!probedMetadata) {
       // Probe SUCCEEDED but the runner reported no scale metadata: a genuine pre-#4548 legacy
       // runner. The control client never received px bounds, so it sends points — pass through, and
       // cache the verdict so subsequent legacy taps skip the probe.
       this.confirmedLegacyScaleDevices.add(deviceId);
       return coordinates;
     }
-    return coordinates.map(coordinate => canonicalPixelsToPoints(coordinate, probedScale));
+    validateCanonicalCoordinates?.(probedMetadata);
+    return coordinates.map(coordinate => canonicalPixelsToPoints(coordinate, probedMetadata.nativeScale));
+  }
+
+  /**
+   * Canonical pixel bounds arrive with the complete runner metadata. A missing tuple is a legacy
+   * runner or an unseen hierarchy, where preserving the existing pass-through behavior is safer
+   * than guessing dimensions.
+   */
+  private requireCoordinatesWithinKnownScreenGeometry(
+    coordinates: readonly [number, number],
+    geometry: ScreenScaleMetadata | null
+  ): void {
+    if (!geometry) {
+      return;
+    }
+    const [x, y] = coordinates;
+    if (x < 0 || x >= geometry.pixelWidth || y < 0 || y >= geometry.pixelHeight) {
+      throw new Error(
+        `input/tap coordinates x=${x}, y=${y} are outside device canonical pixel bounds ` +
+        `x: 0..${geometry.pixelWidth - 1}, y: 0..${geometry.pixelHeight - 1}`
+      );
+    }
   }
 
   private async handleInputTap(
@@ -1035,6 +1059,7 @@ export class UnixSocketServer {
 
       if (args.platform === "android") {
         const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        this.requireCoordinatesWithinKnownScreenGeometry([args.x, args.y], client.getScreenScaleMetadata?.() ?? null);
         return args.frameContext === undefined
           ? await client.requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs)
           : await client.requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs, undefined, args.frameContext);
@@ -1044,7 +1069,8 @@ export class UnixSocketServer {
         iosClient,
         targetDevice.deviceId,
         [args.x, args.y],
-        remainingTimeoutMs
+        remainingTimeoutMs,
+        geometry => this.requireCoordinatesWithinKnownScreenGeometry([args.x, args.y], geometry)
       );
       const gestureTimeoutMs = this.remainingBudgetAfterProbe(queueEnterMs, totalTimeoutMs, request.method, "handleInputTap");
       return args.frameContext === undefined

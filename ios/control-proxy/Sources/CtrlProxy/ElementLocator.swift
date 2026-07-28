@@ -186,6 +186,7 @@ public class ElementLocator: ElementLocating {
             application: XCUIApplication? = nil,
             perfProvider: PerfProvider = PerfProvider.instance
         ) {
+            DeviceRotation.startMonitoring()
             tracker.setApplication(application, bundleId: nil, observe: false)
             self.perfProvider = perfProvider
         }

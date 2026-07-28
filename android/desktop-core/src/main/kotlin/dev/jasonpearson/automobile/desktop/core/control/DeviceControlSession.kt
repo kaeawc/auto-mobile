@@ -370,14 +370,15 @@ class DeviceControlSession(
    * already seen is ignored outright: it neither records nor resets.
    *
    * `captureSequence` is the ordering signal because it is already bound to each frame and is
-   * monotonic per device (issue #3348) — no new clock, no third notion of "current". It is absent
-   * only on frames the policy already refuses to pair, and on those there is nothing to order
-   * against, so they are observed as before. The hierarchy path is unaffected: the daemon assigns
-   * the id on every hierarchy push, so a hierarchy's id is always the newest at the time it is sent
-   * and can never be rejected here.
+   * monotonic per device (issue #3348) — no new clock, no third notion of "current". A session that
+   * has never received one still observes unsequenced legacy frames as before. Once a sequenced
+   * observation establishes the current space, an unsequenced frame cannot prove it is newer and is
+   * ignored. The hierarchy path is unaffected: the daemon assigns the id on every hierarchy push,
+   * so a hierarchy's id is always the newest at the time it is sent and can never be rejected here.
    */
   fun onObservationSpaceDeclared(coordinateSpace: CoordinateSpace?, captureSequence: Long?) {
     val lastSeen = lastObservedSpaceCapture
+    if (captureSequence == null && lastSeen != null) return
     if (captureSequence != null && lastSeen != null && captureSequence <= lastSeen) return
     if (captureSequence != null) lastObservedSpaceCapture = captureSequence
     if (streamSpace.observe(coordinateSpace)) resetPreservingSpaceBaseline()

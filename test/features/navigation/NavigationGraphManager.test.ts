@@ -481,6 +481,32 @@ describe("NavigationGraphManager", () => {
       expect(stats.knownEdgeCount).toBe(1);
       expect(stats.unknownEdgeCount).toBe(0);
     });
+
+    test("returns stats for a requested non-current app without its active screen", async () => {
+      await manager.setCurrentApp("com.apple.Preferences");
+      await manager.recordNavigationEvent(createEvent("iOS Settings", 1000));
+      await manager.recordNavigationEvent(createEvent("iOS General", 2000));
+
+      await manager.setCurrentApp("com.google.android.settings");
+      await manager.recordNavigationEvent(createEvent("Android Settings", 3000));
+
+      expect(await manager.getStatsForApp("com.apple.Preferences")).toEqual({
+        nodeCount: 2,
+        edgeCount: 1,
+        currentScreen: null,
+        knownEdgeCount: 0,
+        unknownEdgeCount: 1,
+        toolCallHistorySize: 0,
+      });
+      expect(await manager.getStatsForApp(null)).toEqual({
+        nodeCount: 0,
+        edgeCount: 0,
+        currentScreen: null,
+        knownEdgeCount: 0,
+        unknownEdgeCount: 0,
+        toolCallHistorySize: 0,
+      });
+    });
   });
 
   describe("exportGraph", () => {
@@ -505,6 +531,33 @@ describe("NavigationGraphManager", () => {
       const homeNode = exported.nodes.find(n => n.screenName === "Home");
       expect(homeNode).toBeDefined();
       expect(homeNode!.visitCount).toBe(1);
+    });
+
+    test("exports only the requested non-current app graph", async () => {
+      await manager.setCurrentApp("com.apple.Preferences");
+      await manager.recordNavigationEvent(createEvent("iOS Settings", 1000));
+      await manager.recordNavigationEvent(createEvent("iOS General", 2000));
+
+      await manager.setCurrentApp("com.google.android.settings");
+      await manager.recordNavigationEvent(createEvent("Android Settings", 3000));
+
+      const exported = await manager.exportGraphForApp("com.apple.Preferences");
+
+      expect(exported.appId).toBe("com.apple.Preferences");
+      expect(exported.currentScreen).toBeNull();
+      expect(exported.nodes.map(node => node.screenName)).toEqual([
+        "iOS General",
+        "iOS Settings",
+      ]);
+      expect(exported.edges.map(edge => [edge.from, edge.to])).toEqual([
+        ["iOS Settings", "iOS General"],
+      ]);
+      expect(await manager.exportGraphForApp(null)).toEqual({
+        appId: null,
+        nodes: [],
+        edges: [],
+        currentScreen: null,
+      });
     });
   });
 

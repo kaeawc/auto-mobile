@@ -840,15 +840,19 @@ export class ToolRegistryClass {
     this.invalidateToolDefinitionSchemaCache();
     // Create a wrapper that handles device ID injection
     const wrappedHandler: ToolHandler = async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
+      const capabilityContext = getToolCapabilityContext();
+      const handlerArgs = capabilityContext?.sessionUuid && args.sessionUuid !== capabilityContext.sessionUuid
+        ? { ...args, sessionUuid: capabilityContext.sessionUuid }
+        : args;
       const toolStartMs = this.timer.now();
       const toolCallTimestamp = new Date().toISOString();
       let toolDurationMs: number | undefined;
-      let sessionUuid = args.sessionUuid;
+      let sessionUuid = handlerArgs.sessionUuid;
 
       try {
         const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
           name,
-          args,
+          args: handlerArgs,
           options,
           deviceSessionManager: this.deviceSessionManager,
         });
@@ -867,12 +871,12 @@ export class ToolRegistryClass {
                 if (!options.nonDeviceHandler) {
                   throw new ActionableError(`Tool ${name} requires a device.`);
                 }
-                response = await options.nonDeviceHandler(args, progress, signal);
+                response = await options.nonDeviceHandler(handlerArgs, progress, signal);
               } else if (resolvedTarget.device !== undefined) {
-                this.navigationToolCallRecorder.record(name, args, resolvedTarget.device, resolvedTarget.sessionUuid);
+                this.navigationToolCallRecorder.record(name, handlerArgs, resolvedTarget.device, resolvedTarget.sessionUuid);
                 response = await this.auditRunner.run({
                   name,
-                  args,
+                  args: handlerArgs,
                   device: resolvedTarget.device,
                   handler,
                   progress,
@@ -882,7 +886,7 @@ export class ToolRegistryClass {
 
               const afterToolCallResult = await this.afterToolCall.handle({
                 name,
-                args,
+                args: handlerArgs,
                 device: resolvedTarget.device,
                 internalCall: resolvedTarget.internalCall,
                 response,
@@ -903,7 +907,7 @@ export class ToolRegistryClass {
             } finally {
               await this.planLifecycleManager.afterExecution({
                 name,
-                args,
+                args: handlerArgs,
                 baseSessionUuid: resolvedTarget.baseSessionUuid,
                 cleanupService: this.cleanupService,
                 device: resolvedTarget.device,

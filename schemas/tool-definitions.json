@@ -790,6 +790,24 @@
         "__lockNamespace": {
           "description": "Internal plan-scoped lock namespace (injected)",
           "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
         }
       },
       "required": [

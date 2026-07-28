@@ -48,6 +48,47 @@ describe("session tool capability MCP enforcement", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  test("denies a disabled device-aware tool when its schema strips sessionUuid", async () => {
+    const isEnabled = mock(async (_sessionUuid: string | undefined, capability: string) =>
+      capability === "test-authoring"
+    );
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled };
+    fixture = new McpTestFixture({
+      sessionContext: { sessionId: "mcp-session-1" },
+      sessionToolProfileService: profileService,
+    });
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    const handler = mock(async () => ({ content: [{ type: "text", text: "ok" }] }));
+    const nonDeviceHandler = mock(async () => ({ content: [{ type: "text", text: "ok" }] }));
+    ToolRegistry.registerDeviceAware(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      handler,
+      {
+        shouldEnsureDevice: () => false,
+        nonDeviceHandler,
+      }
+    );
+
+    await expect(fixture.client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "clipboard",
+          arguments: { sessionUuid: "device-session-1" },
+        },
+      },
+      z.any()
+    )).rejects.toThrow("requires the 'clipboard' capability");
+
+    expect(isEnabled).toHaveBeenCalledWith("device-session-1", "clipboard");
+    expect(handler).not.toHaveBeenCalled();
+    expect(nonDeviceHandler).not.toHaveBeenCalled();
+  });
+
   test("allows an enabled direct tool", async () => {
     const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
       isEnabled: async () => true,

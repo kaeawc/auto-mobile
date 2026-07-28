@@ -97,6 +97,9 @@ export interface AdbExecutor {
    */
   getForegroundApp(signal?: AbortSignal): Promise<{ packageName: string; userId: number } | null>;
 
+  /** Get device time in milliseconds. */
+  getDeviceTimestampMs(): Promise<number>;
+
   /**
    * Resolve and return the path to the `adb` binary without executing a command.
    * Used by diagnostics (doctor) to surface the detected path.

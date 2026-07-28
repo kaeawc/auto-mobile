@@ -13,6 +13,10 @@ class FakeAdbExecutor implements AdbExecutor {
   private callCount = 0;
   private shouldError = false;
 
+  async getDeviceTimestampMs(): Promise<number> {
+    return 0;
+  }
+
   setResponse(output: string): void {
     this.responses.set("default", output);
   }

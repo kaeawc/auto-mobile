@@ -12,7 +12,7 @@
     "- TypeScript: test/daemon/deviceDataStreamSocketServer.test.ts drives the daemon's",
     "  pixelsMatchClaimedGeometry pairing from the geometryPairing section; the iosPointToPixel",
     "  section drives BOTH the daemon's canonical-pixel element-bounds conversion",
-    "  (test/daemon/canonicalPixels.test.ts, roundHalfEven(point*nativeScale) + the round-trip proof)",
+    "  (test/daemon/canonicalPixels.test.ts, roundHalfAwayFromZero(point*nativeScale) + the round-trip proof)",
     "  and its screenshot-dimension publishing (test/daemon/observationInitialFrame.test.ts, which",
     "  now publishes the runner-reported pixel dimensions and stamps coordinateSpace:px).",
     "- Swift: ONE consumer, the scaleReporting section. Since #4548 the iOS runner derives the",
@@ -338,6 +338,11 @@
       "expectedMatch": 1
     },
     {
+      "comment": "iOS exact-half scale: the 375x811 point hierarchy and its screenshot both resolve to 1313x2839 pixels at nativeScale 3.5, so exact px pairing enables control",
+      "measuredWidth": 1313, "measuredHeight": 2839, "claimedWidth": 1313, "claimedHeight": 2839,
+      "expectedMatch": 1
+    },
+    {
       "comment": "square frame: same-orientation and swapped checks coincide, accepted",
       "measuredWidth": 1000, "measuredHeight": 1000, "claimedWidth": 1000, "claimedHeight": 1000,
       "expectedMatch": 1
@@ -355,7 +360,7 @@
   ],
   "iosPointToPixel": [
     {
-      "comment": "2x device: a 375x667 point rect converts to 750x1334 canonical pixels. Under #4549 `scale` is the runner-reported nativeScale (#4548): the daemon converts iOS element bounds points->pixels (roundHalfEven(point*nativeScale), test/daemon/canonicalPixels.test.ts) and publishes screenshot dims from the reported pixel dimensions — the old getIosScreenshotDimensions points*screenScale multiply disappears. Numeric value is unchanged on a non-Display-Zoom 2x device (nativeScale == screenScale == 2); what changed is the source (nativeScale, authoritative under Display Zoom) and the coordinateSpace:px declaration.",
+      "comment": "2x device: a 375x667 point rect converts to 750x1334 canonical pixels. Under #4549 `scale` is the runner-reported nativeScale (#4548): the daemon converts iOS element bounds points->pixels with round-half-away-from-zero and publishes screenshot dims from the reported pixel dimensions — the old getIosScreenshotDimensions points*screenScale multiply disappears. Numeric value is unchanged on a non-Display-Zoom 2x device (nativeScale == screenScale == 2); what changed is the source (nativeScale, authoritative under Display Zoom) and the coordinateSpace:px declaration.",
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 375, "pointHeight": 667, "scale": 2,
       "expectedPixelWidth": 750, "expectedPixelHeight": 1334
@@ -373,7 +378,7 @@
       "expectedPixelWidth": 960, "expectedPixelHeight": 2079
     },
     {
-      "comment": "fractional nativeScale rounding boundary: 375*2.5 = 937.5 -> 938 (round-half-even: 938 is even; coincides with round-half-up here)",
+      "comment": "fractional nativeScale rounding boundary: 375*2.5 = 937.5 -> 938 (round-half-away-from-zero)",
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 375, "pointHeight": 812, "scale": 2.5,
       "expectedPixelWidth": 938, "expectedPixelHeight": 2030
@@ -385,10 +390,16 @@
       "expectedPixelWidth": 390, "expectedPixelHeight": 844
     },
     {
-      "comment": "fractional HEIGHT product isolated: 667*2.5 = 1667.5 -> 1668 (round-half-even) while the width product (400*2.5=1000) is integral — a height-axis-only rounding regression cannot hide behind the width case",
+      "comment": "fractional HEIGHT product isolated: 667*2.5 = 1667.5 -> 1668 (round-half-away-from-zero) while the width product (400*2.5=1000) is integral — a height-axis-only rounding regression cannot hide behind the width case",
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 400, "pointHeight": 667, "scale": 2.5,
       "expectedPixelWidth": 1000, "expectedPixelHeight": 1668
+    },
+    {
+      "comment": "exact-half tie on both axes: 375*3.5 = 1312.5 -> 1313 and 811*3.5 = 2838.5 -> 2839. This differs from half-even and must match the runner's claimed screenshot dimensions exactly.",
+      "willChangeUnderCanonicalPixels": true,
+      "pointWidth": 375, "pointHeight": 811, "scale": 3.5,
+      "expectedPixelWidth": 1313, "expectedPixelHeight": 2839
     }
   ],
   "scaleReporting": [

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.layout
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenCoordinateMapper
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenGeometry
 import dev.jasonpearson.automobile.desktop.domain.ViewportPoint
+import kotlin.math.roundToInt
 import kotlin.test.assertEquals
 import org.junit.Test
 
@@ -11,9 +12,9 @@ import org.junit.Test
  * canonical-pixel campaign #4547 -> #4548 -> #4549 -> #4550).
  *
  * The canonical single source is `test/fixtures/coordinate-mapping-golden-vectors.json` at the repo
- * root. The inline tables below are a committed copy of its five [DeviceScreenCoordinateMapper]
- * sections; `test/parity/coordinateMappingGoldenVectorParity.test.ts` parses these literals out of
- * this file's source and verifies them against the JSON (the same drift-guard mechanism as
+ * root. The inline tables below are committed copies of its five [DeviceScreenCoordinateMapper]
+ * sections plus the shared scale-reporting contract; `test/parity/coordinateMappingGoldenVectorParity.test.ts`
+ * parses these literals out of this file's source and verifies them against the JSON (the same drift-guard mechanism as
  * `PinchGeometryTest.kt` / `pinch-golden-vectors.json`), so a one-sided edit of either side fails
  * `bun test`.
  *
@@ -204,6 +205,26 @@ class CoordinateMappingGoldenVectorTest {
       ScreenshotRotationVector(1080, 2340, 1080, 0, 0),
     )
 
+  private data class ScaleReportingVector(
+    val pointWidth: Double,
+    val pointHeight: Double,
+    val nativeScale: Double,
+    val expectedPixelWidth: Int,
+    val expectedPixelHeight: Int,
+  )
+
+  private val scaleReportingVectors =
+    listOf(
+      ScaleReportingVector(393.0, 852.0, 3.0, 1179, 2556),
+      ScaleReportingVector(375.0, 812.0, 3.144, 1179, 2553),
+      ScaleReportingVector(414.0, 736.0, 2.608696, 1080, 1920),
+      ScaleReportingVector(320.0, 568.0, 2.0, 640, 1136),
+      // Exact-half dimensions use the same round-half-away-from-zero rule as the iOS runner.
+      ScaleReportingVector(375.0, 811.0, 3.5, 1313, 2839),
+      // Android's production contract is the scale-1 identity: it has no point-to-pixel conversion.
+      ScaleReportingVector(1080.0, 2340.0, 1.0, 1080, 2340),
+    )
+
   private fun geometry(vector: ViewportToDeviceVector) =
     DeviceScreenGeometry(
       frameWidthPx = vector.frameWidthPx,
@@ -288,6 +309,14 @@ class CoordinateMappingGoldenVectorTest {
           vector.rootHeight,
         )
       assertEquals(vector.expected, rotation, "row $index")
+    }
+  }
+
+  @Test
+  fun `scale reporting matches the golden vectors`() {
+    for ((index, vector) in scaleReportingVectors.withIndex()) {
+      assertEquals(vector.expectedPixelWidth, (vector.pointWidth * vector.nativeScale).roundToInt(), "row $index width")
+      assertEquals(vector.expectedPixelHeight, (vector.pointHeight * vector.nativeScale).roundToInt(), "row $index height")
     }
   }
 

@@ -13,9 +13,9 @@
  * left untouched (point-space), and is NOT stamped — so old runners and new daemons degrade to
  * exactly today's semantics (the legacy fallback #4550 keys its aspect-only tolerance on).
  *
- * Rounding is round-half-even (banker's rounding) so the point -> pixel -> point round-trip the
- * input path performs (`input/*` divides by nativeScale for the XCUITest runner, which wants
- * points) lands back within the same point at .5 boundaries instead of biasing away from zero.
+ * Rounding is round-half-away-from-zero, matching the iOS runner's physical screenshot dimension
+ * derivation. A `coordinateSpace: "px"` frame is compared exactly, so its hierarchy bounds and
+ * reported screenshot dimensions must use the same conversion rule at .5 boundaries.
  */
 import type { ScreenScaleMetadata } from "../models/ScreenScaleMetadata";
 import type {
@@ -32,27 +32,19 @@ export const COORDINATE_SPACE_PX = "px" as const;
 export type CoordinateSpace = typeof COORDINATE_SPACE_PX;
 
 /**
- * Round to the nearest integer, ties to even (banker's rounding). Unlike `Math.round` (ties toward
- * +Infinity) this is symmetric about zero, so converting a coordinate to pixels and back to points
- * cannot accumulate a directional bias at exact half-values — the property the round-trip goldens
- * pin. `-0` is normalized to `0`.
+ * Round to the nearest integer, ties away from zero. This matches Swift `Double.rounded()`'s default
+ * rule and is deliberately implemented without `Math.round`, whose negative ties go toward positive
+ * infinity instead. `-0` is normalized to `0`.
  */
-export function roundHalfEven(value: number): number {
+export function roundHalfAwayFromZero(value: number): number {
   if (!Number.isFinite(value)) {
     return value;
   }
-  const floor = Math.floor(value);
-  const remainder = value - floor;
-  let result: number;
-  if (remainder < 0.5) {
-    result = floor;
-  } else if (remainder > 0.5) {
-    result = floor + 1;
-  } else {
-    // Exactly halfway: pick the even neighbour.
-    result = floor % 2 === 0 ? floor : floor + 1;
-  }
-  return result === 0 ? 0 : result;
+  const magnitude = Math.abs(value);
+  const floor = Math.floor(magnitude);
+  const result = magnitude - floor >= 0.5 ? floor + 1 : floor;
+  const signedResult = value < 0 ? -result : result;
+  return signedResult === 0 ? 0 : signedResult;
 }
 
 /**
@@ -65,7 +57,7 @@ export function roundHalfEven(value: number): number {
  * accept fractional `Double` points (they feed `CGVector`), so quantizing here would discard
  * sub-point precision (401px @ 2x is 200.5pt, not 200; 1px @ 3x is 0.333pt, not 0) and would add a
  * second rounding to the point->pixel->point round-trip. Pixels are already integer coordinates
- * (round-half-even on the publish/multiply side); keeping the divide exact means the round-trip
+ * (round-half-away-from-zero on the publish/multiply side); keeping the divide exact means the round-trip
  * carries only the single publish-side quantization.
  */
 export function canonicalPixelsToPoints(pixels: number, nativeScale: number): number {
@@ -77,12 +69,12 @@ export function canonicalPixelsToPoints(pixels: number, nativeScale: number): nu
 
 const BOUNDS_EDGES = ["left", "top", "right", "bottom"] as const;
 
-/** Scale one bounds object in place by `nativeScale`, round-half-even. Non-numeric edges are left. */
+/** Scale one bounds object in place by `nativeScale`, rounding ties away from zero. Non-numeric edges are left. */
 function scaleBoundsInPlace(bounds: Record<string, unknown>, nativeScale: number): void {
   for (const edge of BOUNDS_EDGES) {
     const value = bounds[edge];
     if (typeof value === "number") {
-      bounds[edge] = roundHalfEven(value * nativeScale);
+      bounds[edge] = roundHalfAwayFromZero(value * nativeScale);
     }
   }
 }
@@ -177,12 +169,12 @@ function scaleAllBounds(hierarchy: ViewHierarchyResult, nativeScale: number): vo
   }
 }
 
-/** Scale a `{top,right,bottom,left}` inset alias in place by `nativeScale`, round-half-even. */
+/** Scale a `{top,right,bottom,left}` inset alias in place by `nativeScale`, rounding ties away from zero. */
 function scaleEdgeInsetsInPlace(insets: Record<string, unknown>, nativeScale: number): void {
   for (const edge of ["top", "right", "bottom", "left"]) {
     const value = insets[edge];
     if (typeof value === "number") {
-      insets[edge] = roundHalfEven(value * nativeScale);
+      insets[edge] = roundHalfAwayFromZero(value * nativeScale);
     }
   }
 }

@@ -834,6 +834,21 @@ class DeviceControlPolicyTest {
   }
 
   @Test
+  fun `an iOS exact-half pixel frame enables control`() {
+    // 375x811 points at nativeScale 3.5 rounds to 1313x2839 on both the runner screenshot claim
+    // and daemon-published hierarchy. Pixels mode requires this exact equality.
+    assertNotNull(
+      DeviceControlPolicy.evaluate(
+        inputs(
+          screenshot = screenshotFacts(1313, 2839, CoordinateSpace.Pixels),
+          hierarchy = hierarchyFacts(1313, 2839, CoordinateSpace.Pixels),
+        ),
+        now,
+      ).snapshotOrNull,
+    )
+  }
+
+  @Test
   fun `isGeometryConsistent compares exactly only when told the space is pixels`() {
     // The pure function, exercised directly on the one input that separates the two modes.
     assert(

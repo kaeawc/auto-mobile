@@ -4,7 +4,7 @@
  *
  * Canonical source: `test/fixtures/coordinate-mapping-golden-vectors.json`. Consumers:
  * - Kotlin `CoordinateMappingGoldenVectorTest.kt` (desktop-core) holds inline copies of the five
- *   `DeviceScreenCoordinateMapper` sections; this module parses those committed literals out of
+ *   `DeviceScreenCoordinateMapper` sections plus the scale-reporting contract; this module parses those committed literals out of
  *   the Kotlin source (the pinch-vector mechanism, see `pinchGoldenVectors.ts`) and the parity
  *   test verifies them against the JSON.
  * - TypeScript daemon tests read the JSON directly: `geometryPairing` drives the daemon's
@@ -326,6 +326,16 @@ export function parseKotlinScreenshotRotationTable(): ScreenshotRotationVector[]
     rootWidth: row[2],
     rootHeight: row[3],
     expected: row[4],
+  }));
+}
+
+export function parseKotlinScaleReportingTable(): ScaleReportingVector[] {
+  return parseKotlinSection("val scaleReportingVectors =", 5).map(row => ({
+    pointWidth: row[0],
+    pointHeight: row[1],
+    nativeScale: row[2],
+    expectedPixelWidth: row[3],
+    expectedPixelHeight: row[4],
   }));
 }
 

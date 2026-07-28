@@ -203,6 +203,51 @@ class DeviceControlSessionTest {
   }
 
   @Test
+  fun `a stale rejection preserves a queued input from a newer paired frame`() = runTest {
+    val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+    val staleClient =
+      FakeAutoMobileClient().apply {
+        inputTapResult =
+          InputActionResult(
+            action = "input/tap",
+            success = false,
+            error =
+              "input/tap frameContext is stale or unavailable; observe a fresh frame before retrying",
+          )
+      }
+    val freshClient = FakeAutoMobileClient()
+    val clients = listOf(staleClient, freshClient)
+    var clientIndex = 0
+    val session =
+      DeviceControlSession(
+        scope = scope,
+        clientProvider = { clients[clientIndex++] },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = {},
+        uiContext = StandardTestDispatcher(testScheduler),
+        ioDispatcher = StandardTestDispatcher(testScheduler),
+      )
+    val staleSnapshot =
+      assertNotNull(
+        session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
+      )
+    assertTrue(session.tap(staleSnapshot, point))
+    val freshSnapshot =
+      assertNotNull(
+        session.evaluate(paired(captureSequence = 8L, sourceSequence = 12L)).snapshotOrNull
+      )
+
+    assertTrue(session.tap(freshSnapshot, point))
+    advanceUntilIdle()
+
+    assertEquals(1, staleClient.inputTapCalls.size)
+    assertEquals(1, freshClient.inputTapCalls.size, "newer-frame input must survive stale cleanup")
+    assertEquals(freshSnapshot, session.interactionSnapshot)
+    scope.cancel()
+  }
+
+  @Test
   fun `reset clears the banner and drops a pending refresh wait`() = runTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     var banner: String? = "something"

@@ -621,10 +621,19 @@ class DeviceControlSession(
         // Failure: the device did not change, so nothing on screen is stale and nothing is cleared.
         refreshTracker.onInputFailed()
         if (isStaleFrameContextError(message)) {
-          staleContextRejectedCaptureSequence = command.snapshot.captureSequence
-          // Inputs already queued against the rejected snapshot must not become implicit retries.
-          dispatcher.reset()
-          interactionSnapshot = null
+          // Inputs already queued against the rejected snapshot must not become implicit retries,
+          // but a user can receive a newer paired frame and enqueue a valid command while this
+          // one is in flight. Reject only this context so that newer command stays in gesture
+          // order and can still reach the device.
+          dispatcher.discardFrameContext(command.snapshot.frameContext)
+          if (!hasNewerInteractionSnapshotThan(command.snapshot)) {
+            staleContextRejectedCaptureSequence =
+              maxOf(
+                staleContextRejectedCaptureSequence ?: Long.MIN_VALUE,
+                command.snapshot.captureSequence,
+              )
+            interactionSnapshot = null
+          }
         }
         // Serialize the claim check with the banner write on the UI context so a superseded
         // attempt's stale error cannot resurrect a banner a newer attempt already cleared.
@@ -688,6 +697,9 @@ class DeviceControlSession(
         )
     }
   }
+
+  private fun hasNewerInteractionSnapshotThan(snapshot: DeviceFrameSnapshot): Boolean =
+    interactionSnapshot?.captureSequence?.let { it > snapshot.captureSequence } == true
 
   companion object {
     private fun isStaleFrameContextError(message: String): Boolean =

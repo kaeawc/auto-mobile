@@ -7,10 +7,24 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 
-export class SelectAllText extends BaseVisualChange {
+type SelectAllTextCtrlProxy = {
+  requestSelectAll(): Promise<{ success: boolean; error?: string; totalTimeMs: number }>;
+};
+type SelectAllTextCtrlProxyFactory = (
+  device: BootedDevice,
+  adbFactory: AdbClientFactory
+) => SelectAllTextCtrlProxy;
 
-  constructor(device: BootedDevice, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null) {
+export class SelectAllText extends BaseVisualChange {
+  private readonly ctrlProxyFactory: SelectAllTextCtrlProxyFactory | undefined;
+
+  constructor(
+    device: BootedDevice,
+    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null,
+    ctrlProxyFactory?: SelectAllTextCtrlProxyFactory
+  ) {
     super(device, adbFactoryOrExecutor);
+    this.ctrlProxyFactory = ctrlProxyFactory;
   }
 
   async execute(progress?: ProgressCallback): Promise<SelectAllTextResult> {
@@ -58,7 +72,8 @@ export class SelectAllText extends BaseVisualChange {
    */
   private async executeiOSSelectAll(): Promise<SelectAllTextResult> {
     try {
-      const client = IOSCtrlProxyClient.getInstance(this.device);
+      const client = this.ctrlProxyFactory?.(this.device, this.adbFactory) ??
+        IOSCtrlProxyClient.getInstance(this.device);
       const result = await client.requestSelectAll();
 
       if (result.success) {
@@ -79,7 +94,8 @@ export class SelectAllText extends BaseVisualChange {
    * Uses ACTION_SET_SELECTION which is significantly faster than ADB double-tap.
    */
   private async executeAndroidSelectAll(): Promise<SelectAllTextResult> {
-    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    const a11yClient = this.ctrlProxyFactory?.(this.device, this.adbFactory) ??
+      AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const a11yResult = await a11yClient.requestSelectAll();
 
     if (a11yResult.success) {

@@ -35,6 +35,7 @@ interface StepExecutionContext {
   sessionUuid?: string;
   signal?: AbortSignal;
   captureObserveSteps?: NonNullable<PlanExecutionOptions["captureObserveSteps"]>;
+  sessionToolProfileService?: PlanExecutionOptions["sessionToolProfileService"];
   logPrefix: string;
   debugLog?: boolean;
 }
@@ -342,7 +343,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       logger.info(`[PlanExecutor] Injecting deviceId ${deviceId} into ${step.tool}`);
     }
 
-    if (sessionUuid && !enhancedParams.sessionUuid) {
+    if (sessionUuid) {
       enhancedParams.sessionUuid = sessionUuid;
       logger.info(`[PlanExecutor] Injecting sessionUuid ${sessionUuid} into ${step.tool}`);
     }
@@ -400,7 +401,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
         logger.info(`${context.logPrefix} Calling ${step.tool} with params: ${paramsPreview}`);
       }
 
-      const response = await ToolRegistry.callInternal(tool, parsedParams, undefined, context.signal);
+      const response = await ToolRegistry.callInternal(tool, parsedParams, undefined, context.signal, {
+        forPlan: true,
+        sessionUuid: context.sessionUuid,
+        sessionToolProfileService: context.sessionToolProfileService,
+      });
       throwIfAborted(context.signal);
 
       const toolResult = this.extractToolResult(response);
@@ -571,7 +576,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
         deviceId,
         sessionUuid,
         signal,
-        abortStrategy
+        abortStrategy,
+        executionOptions
       );
     } else {
       // Single-device sequential execution
@@ -644,6 +650,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           sessionUuid,
           signal,
           captureObserveSteps: executionOptions?.captureObserveSteps,
+          sessionToolProfileService: executionOptions?.sessionToolProfileService,
           logPrefix: `[PLAN_STEP_${i + 1}]`,
         });
 
@@ -746,7 +753,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
     deviceId?: string,
     sessionUuid?: string,
     signal?: AbortSignal,
-    abortStrategy: AbortStrategy = DEFAULT_ABORT_STRATEGY
+    abortStrategy: AbortStrategy = DEFAULT_ABORT_STRATEGY,
+    executionOptions?: PlanExecutionOptions,
   ): Promise<PlanExecutionResult> {
     const debugMode = isDebugModeEnabled();
 
@@ -789,7 +797,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
           platform,
           deviceId,
           sessionUuid,
-          combinedSignal
+          combinedSignal,
+          executionOptions,
         );
 
         const deviceResult: DeviceExecutionResult = {
@@ -943,7 +952,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
     platform?: string,
     deviceId?: string,
     sessionUuid?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    executionOptions?: PlanExecutionOptions,
   ): Promise<{
     success: boolean;
     executedSteps: number;
@@ -986,6 +996,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           deviceId,
           sessionUuid,
           signal,
+          sessionToolProfileService: executionOptions?.sessionToolProfileService,
           logPrefix: `[PARALLEL_EXEC][${device}]`,
           debugLog: true,
         });

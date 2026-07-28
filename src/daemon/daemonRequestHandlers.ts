@@ -11,6 +11,7 @@ export interface DaemonStateAccess {
   isInitialized(): boolean;
   getSessionManager(): {
     getSession(sessionId: string): Session | null;
+    getSessionForDevice?(deviceId: string): string | null;
     getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;
     releaseSession(sessionId: string): Promise<string | null>;
   };

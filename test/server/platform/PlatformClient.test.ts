@@ -1,7 +1,5 @@
 import { describe, it, expect } from "bun:test";
 import { createPlatformClient } from "../../../src/server/platform/createPlatformClient";
-import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { AndroidTapStrategy } from "../../../src/features/action/strategies/AndroidTapStrategy";
 import { IosTapStrategy } from "../../../src/features/action/strategies/IosTapStrategy";
 import { AndroidSystemConfigurationAdapter } from "../../../src/features/utility/system-configuration/AndroidSystemConfigurationAdapter";
@@ -17,6 +15,7 @@ import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeSystemConfigurationAdapter } from "../../fakes/FakeSystemConfigurationAdapter";
 import { FakeNotificationUIDetector } from "../../fakes/FakeNotificationUIDetector";
 import type { BootedDevice } from "../../../src/models";
+import type { CtrlProxyClient } from "../../../src/features/observe/interfaces/CtrlProxyClient";
 import type { PlatformClient } from "../../../src/utils/interfaces/PlatformClient";
 
 /**
@@ -48,7 +47,6 @@ describe("PlatformClient", () => {
   interface PlatformCase {
     name: string;
     device: BootedDevice;
-    expectedCtrlProxyCtor: Function;
     expectedTapStrategyCtor: Function;
     expectedSystemConfigCtor: Function;
     expectedNotificationUICtor: Function;
@@ -58,7 +56,6 @@ describe("PlatformClient", () => {
     {
       name: "android",
       device: androidDevice,
-      expectedCtrlProxyCtor: AndroidCtrlProxyClient,
       expectedTapStrategyCtor: AndroidTapStrategy,
       expectedSystemConfigCtor: AndroidSystemConfigurationAdapter,
       expectedNotificationUICtor: AndroidNotificationUIDetector,
@@ -66,7 +63,6 @@ describe("PlatformClient", () => {
     {
       name: "ios",
       device: iosDevice,
-      expectedCtrlProxyCtor: IOSCtrlProxyClient,
       expectedTapStrategyCtor: IosTapStrategy,
       expectedSystemConfigCtor: IosSystemConfigurationAdapter,
       expectedNotificationUICtor: IosNotificationUIDetector,
@@ -75,32 +71,49 @@ describe("PlatformClient", () => {
 
   for (const c of cases) {
     describe(`createPlatformClient (${c.name})`, () => {
-      it("returns the platform-appropriate CtrlProxy client", () => {
-        const client = createPlatformClient(c.device, buildOptions());
-        expect(client.ctrlProxy).toBeInstanceOf(c.expectedCtrlProxyCtor);
+      const createOptions = () => ({
+        ...buildOptions(),
+        ctrlProxy: {} as CtrlProxyClient,
+      });
+
+      it("passes the target device and ADB factory to the injected CtrlProxy factory", () => {
+        const adbFactory = new FakeAdbClientFactory();
+        const ctrlProxy = {} as CtrlProxyClient;
+        const calls: Array<[BootedDevice, FakeAdbClientFactory]> = [];
+        const client = createPlatformClient(c.device, {
+          ...buildOptions(),
+          adbFactory,
+          ctrlProxyFactory: (device, factory) => {
+            calls.push([device, factory as FakeAdbClientFactory]);
+            return ctrlProxy;
+          },
+        });
+
+        expect(client.ctrlProxy).toBe(ctrlProxy);
+        expect(calls).toEqual([[c.device, adbFactory]]);
       });
 
       it("returns the platform-appropriate TapStrategy", () => {
-        const client = createPlatformClient(c.device, buildOptions());
+        const client = createPlatformClient(c.device, createOptions());
         expect(client.tapStrategy).toBeInstanceOf(c.expectedTapStrategyCtor);
       });
 
       it("returns the platform-appropriate SystemConfigurationAdapter", () => {
-        const client = createPlatformClient(c.device, buildOptions());
+        const client = createPlatformClient(c.device, createOptions());
         expect(client.systemConfiguration).toBeInstanceOf(
           c.expectedSystemConfigCtor
         );
       });
 
       it("returns the platform-appropriate NotificationUIDetector", () => {
-        const client = createPlatformClient(c.device, buildOptions());
+        const client = createPlatformClient(c.device, createOptions());
         expect(client.notificationUI).toBeInstanceOf(
           c.expectedNotificationUICtor
         );
       });
 
       it("bundles the same device on the facade", () => {
-        const client = createPlatformClient(c.device, buildOptions());
+        const client = createPlatformClient(c.device, createOptions());
         expect(client.device).toBe(c.device);
         expect(client.notificationUI.device).toBe(c.device);
       });
@@ -108,7 +121,7 @@ describe("PlatformClient", () => {
       it("satisfies the PlatformClient interface", () => {
         const client: PlatformClient = createPlatformClient(
           c.device,
-          buildOptions()
+          createOptions()
         );
         expect(client.device).toBeDefined();
         expect(client.ctrlProxy).toBeDefined();

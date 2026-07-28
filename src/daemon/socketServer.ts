@@ -45,6 +45,7 @@ import {
   type SessionToolProfileService,
   type ToolCapability,
 } from "../features/toolCapabilities/SessionToolProfileService";
+import { assertToolEnabledForSession } from "../features/toolCapabilities/toolCapabilityPolicy";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   IOS_CTRL_PROXY_APP_HASH,
@@ -140,6 +141,15 @@ interface CachedAppendTextInput {
   transportId?: string;
 }
 
+interface BoundMcpClient {
+  forwardKey: string;
+  sessionUuid: string;
+  requiresLiveDaemonSession: boolean;
+}
+
+const isNonBlankSessionUuid = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0;
+
 /**
  * Preserve the normal failed socket envelope while carrying append progress for
  * a client that can safely retry only the unsent suffix.
@@ -170,10 +180,10 @@ export class UnixSocketServer {
   private mcpClientPromises: Map<string, Promise<Client>> = new Map();
   /**
    * The loopback MCP client that a socket transport most recently bound with a
-   * device session. `tools/list` carries no arguments, so this preserves the
-   * client-local session context selected by the preceding device-aware call.
+   * device session. Follow-up requests can omit their session UUID, so reuse
+   * this client to preserve the selected capability profile.
    */
-  private boundMcpClientKeysBySocketSession: Map<string, string> = new Map();
+  private boundMcpClientKeysBySocketSession: Map<string, BoundMcpClient> = new Map();
   /** Promise tails that serialize MCP HTTP forwards only within the same target key. */
   private mcpForwardTails: Map<string, Promise<void>> = new Map();
   private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -181,7 +191,7 @@ export class UnixSocketServer {
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
-  private readonly sessionToolProfileService?: Pick<SessionToolProfileService, "setEnabled">;
+  private readonly sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled" | "setEnabled">;
   /**
    * Factory that `getMcpClient()` calls to open the loopback MCP HTTP client.
    * Defaults to the real {@link createMcpClient}; tests assign a fake here to
@@ -228,7 +238,7 @@ export class UnixSocketServer {
     handshakeConfig: {
       identity?: DaemonSelfIdentity;
       enforce?: boolean;
-      sessionToolProfileService?: Pick<SessionToolProfileService, "setEnabled">;
+      sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled" | "setEnabled">;
     } = {}
   ) {
     this.socketPath = socketPath;
@@ -344,7 +354,7 @@ export class UnixSocketServer {
       this.sessions.delete(sessionId);
       this.clientSockets.delete(sessionId);
       this.notificationSubscribers.delete(sessionId);
-      this.boundMcpClientKeysBySocketSession.delete(sessionId);
+      this.clearBoundMcpClientKey(sessionId);
     });
 
     socket.on("error", error => {
@@ -352,7 +362,7 @@ export class UnixSocketServer {
       this.sessions.delete(sessionId);
       this.clientSockets.delete(sessionId);
       this.notificationSubscribers.delete(sessionId);
-      this.boundMcpClientKeysBySocketSession.delete(sessionId);
+      this.clearBoundMcpClientKey(sessionId);
       if (!socket.destroyed) {
         socket.destroy();
       }
@@ -479,10 +489,17 @@ export class UnixSocketServer {
           const forwardStartMs = this.timer.now();
           try {
             const mcpClient = await this.getMcpClient(forwardKey);
-            this.recordBoundMcpClientKey(request, sessionId, forwardKey);
+            const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
 
             try {
-              return await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs, sessionId);
+              const response = await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs, sessionId);
+              this.recordBoundMcpClientKey(
+                request,
+                sessionId,
+                forwardKey,
+                sessionWasActiveBeforeForward
+              );
+              return response;
             } catch (ideError) {
               const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
               if (ideErrorMessage.includes("Session not found")) {
@@ -499,8 +516,13 @@ export class UnixSocketServer {
                     detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - forwardStartMs}ms)`,
                   });
                 }
-                this.recordBoundMcpClientKey(request, sessionId, forwardKey);
                 const response = await this.handleIdeRequest(freshClient, request, retryRemainingMs, sessionId);
+                this.recordBoundMcpClientKey(
+                  request,
+                  sessionId,
+                  forwardKey,
+                  sessionWasActiveBeforeForward
+                );
                 return response;
               }
               throw ideError;
@@ -606,28 +628,17 @@ export class UnixSocketServer {
 
   private getMcpForwardKey(request: DaemonRequest, socketSessionId: string): string {
     if (request.method === "tools/call") {
-      const args = request.params?.arguments;
-      const scopedKey = this.getRequestArgumentScopeKey(args);
-      if (scopedKey) {
-        return scopedKey;
-      }
-
-      const implicitAutolockKey = this.getImplicitAutolockScopeKey(socketSessionId, args);
-      if (implicitAutolockKey) {
-        return implicitAutolockKey;
-      }
-
-      // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
-      // pre-forward key so separate daemon clients can autolock and run independently.
-      return `socket:${socketSessionId}`;
+      return this.getToolsCallForwardKey(request.params?.arguments, socketSessionId);
     }
 
     if (request.method === "tools/list") {
-      return this.boundMcpClientKeysBySocketSession.get(socketSessionId) ?? `method:${request.method}`;
+      return this.getBoundMcpClientKey(socketSessionId) ?? `method:${request.method}`;
     }
 
     if (request.method === "ide/getNavigationGraph") {
-      return this.getRequestArgumentScopeKey(request.params) ?? `method:${request.method}`;
+      return this.getRequestArgumentScopeKey(request.params)
+        ?? this.getBoundMcpClientKey(socketSessionId)
+        ?? `method:${request.method}`;
     }
 
     if (request.method === "resources/read") {
@@ -638,17 +649,104 @@ export class UnixSocketServer {
     return `method:${request.method}`;
   }
 
+  private getToolsCallForwardKey(args: unknown, socketSessionId: string): string {
+    const scopedKey = this.getRequestArgumentScopeKey(args);
+    if (scopedKey) {
+      return scopedKey;
+    }
+
+    const boundKey = this.getBoundMcpClientKey(socketSessionId);
+    if (boundKey) {
+      return boundKey;
+    }
+
+    const implicitAutolockKey = this.getImplicitAutolockScopeKey(socketSessionId, args);
+    if (implicitAutolockKey) {
+      return implicitAutolockKey;
+    }
+
+    // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
+    // pre-forward key so separate daemon clients can autolock and run independently.
+    return `socket:${socketSessionId}`;
+  }
+
   private recordBoundMcpClientKey(
     request: DaemonRequest,
     socketSessionId: string,
-    forwardKey: string
+    forwardKey: string,
+    sessionWasActiveBeforeForward: boolean
   ): void {
     if (request.method !== "tools/call") {
       return;
     }
     const sessionUuid = this.getSessionUuid(request.params?.arguments);
-    if (sessionUuid) {
-      this.boundMcpClientKeysBySocketSession.set(socketSessionId, forwardKey);
+    if (!sessionUuid) {
+      return;
+    }
+    const sessionIsActiveAfterForward = this.hasActiveDaemonSession(sessionUuid);
+    if (
+      (sessionWasActiveBeforeForward || request.params?.name === "executePlan")
+      && !sessionIsActiveAfterForward
+    ) {
+      this.clearBoundMcpClientKey(socketSessionId);
+      return;
+    }
+    this.boundMcpClientKeysBySocketSession.set(socketSessionId, {
+      forwardKey,
+      sessionUuid,
+      requiresLiveDaemonSession: sessionWasActiveBeforeForward || sessionIsActiveAfterForward,
+    });
+  }
+
+  private getBoundMcpClientKey(socketSessionId: string): string | undefined {
+    const boundClient = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
+    if (!boundClient) {
+      return undefined;
+    }
+    if (!boundClient.requiresLiveDaemonSession || !this.daemonState.isInitialized()) {
+      return boundClient.forwardKey;
+    }
+    if (this.hasActiveDaemonSession(boundClient.sessionUuid)) {
+      return boundClient.forwardKey;
+    }
+    this.clearBoundMcpClientKey(socketSessionId);
+    return undefined;
+  }
+
+  private clearBoundMcpClientKey(socketSessionId: string): void {
+    const boundClient = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
+    if (!boundClient) {
+      return;
+    }
+    this.boundMcpClientKeysBySocketSession.delete(socketSessionId);
+    this.scheduleMcpClientIdleClose(boundClient.forwardKey);
+  }
+
+  private isMcpClientKeyBound(key: string): boolean {
+    for (const boundClient of this.boundMcpClientKeysBySocketSession.values()) {
+      if (boundClient.forwardKey === key) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private wasRequestSessionActive(request: DaemonRequest): boolean {
+    const sessionUuid = request.method === "tools/call"
+      ? this.getSessionUuid(request.params?.arguments)
+      : undefined;
+    return sessionUuid ? this.hasActiveDaemonSession(sessionUuid) : false;
+  }
+
+  private hasActiveDaemonSession(sessionUuid: string): boolean {
+    if (!this.daemonState.isInitialized()) {
+      return false;
+    }
+    try {
+      return this.daemonState.getSessionManager().getSession(sessionUuid) !== null;
+    } catch (error) {
+      logger.debug(`Unable to resolve bound session ${sessionUuid}: ${error}`);
+      return false;
     }
   }
 
@@ -657,7 +755,7 @@ export class UnixSocketServer {
       return undefined;
     }
     const sessionUuid = (args as Record<string, unknown>).sessionUuid;
-    return typeof sessionUuid === "string" && sessionUuid.length > 0 ? sessionUuid : undefined;
+    return isNonBlankSessionUuid(sessionUuid) ? sessionUuid : undefined;
   }
 
   private getRequestArgumentScopeKey(args: unknown): string | undefined {
@@ -666,7 +764,7 @@ export class UnixSocketServer {
     }
 
     const record = args as Record<string, unknown>;
-    const hasSessionUuid = typeof record.sessionUuid === "string" && record.sessionUuid.length > 0;
+    const hasSessionUuid = isNonBlankSessionUuid(record.sessionUuid);
     const hasDeviceLabel = typeof record.device === "string" && record.device.length > 0;
 
     // Precedence (pinned by #2565 review): a device label resolves the mapped session before
@@ -901,6 +999,7 @@ export class UnixSocketServer {
         if (!args.deviceId || !args.appId || !args.fileName || !args.key || !args.type) {
           throw new Error("setKeyValue requires deviceId, appId, fileName, key, and type params");
         }
+        await this.assertSocketToolEnabled(args.deviceId, "setKeyValue");
         const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
         const targetDevice = bootedDevices.find(d => d.deviceId === args.deviceId);
         if (!targetDevice) {
@@ -930,6 +1029,7 @@ export class UnixSocketServer {
         if (!args.deviceId || !args.appId || !args.fileName || !args.key) {
           throw new Error("removeKeyValue requires deviceId, appId, fileName, and key params");
         }
+        await this.assertSocketToolEnabled(args.deviceId, "removeKeyValue");
         const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
         const targetDevice = bootedDevices.find(d => d.deviceId === args.deviceId);
         if (!targetDevice) {
@@ -948,6 +1048,7 @@ export class UnixSocketServer {
         if (!args.deviceId || !args.appId || !args.fileName) {
           throw new Error("clearKeyValueFile requires deviceId, appId, and fileName params");
         }
+        await this.assertSocketToolEnabled(args.deviceId, "clearKeyValueFile");
         const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
         const targetDevice = bootedDevices.find(d => d.deviceId === args.deviceId);
         if (!targetDevice) {
@@ -960,6 +1061,35 @@ export class UnixSocketServer {
       default:
         return undefined;
     }
+  }
+
+  private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {
+    const sessionUuid = this.daemonState.isInitialized()
+      ? this.getCapabilityProfileSessionUuid(
+        this.daemonState.getSessionManager().getSessionForDevice?.(deviceId) ?? undefined
+      )
+      : undefined;
+    await assertToolEnabledForSession(toolName, sessionUuid, this.sessionToolProfileService);
+  }
+
+  private getCapabilityProfileSessionUuid(sessionUuid: string | undefined): string | undefined {
+    if (!sessionUuid || !this.daemonState.isInitialized()) {
+      return sessionUuid;
+    }
+
+    const sessionManager = this.daemonState.getSessionManager();
+    for (
+      let separatorIndex = sessionUuid.lastIndexOf(":");
+      separatorIndex >= 0;
+      separatorIndex = sessionUuid.lastIndexOf(":", separatorIndex - 1)
+    ) {
+      const candidateBaseSessionUuid = sessionUuid.slice(0, separatorIndex);
+      const deviceLabels = sessionManager.getDeviceLabels(candidateBaseSessionUuid);
+      if (deviceLabels && Object.values(deviceLabels).includes(sessionUuid)) {
+        return candidateBaseSessionUuid;
+      }
+    }
+    return sessionUuid;
   }
 
   /**
@@ -2057,7 +2187,7 @@ export class UnixSocketServer {
 
   private async closeIdleMcpClient(key: string): Promise<void> {
     this.mcpClientIdleTimers.delete(key);
-    if (this.mcpForwardTails.has(key)) {
+    if (this.mcpForwardTails.has(key) || this.isMcpClientKeyBound(key)) {
       return;
     }
     // The append helper shares the device's idle lifecycle: once nothing has

@@ -1,8 +1,6 @@
-import { expect, describe, test, beforeEach, spyOn } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { Clipboard } from "../../../src/features/action/Clipboard";
 import { BootedDevice } from "../../../src/models";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
-import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
@@ -20,12 +18,11 @@ describe("Clipboard iOS", () => {
 
     fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
 
-    // Mock IOSCtrlProxyClient.getInstance to return our fake
-    spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIOSCtrlProxy as unknown as IOSCtrlProxyClient
+    clipboard = new Clipboard(
+      mockDevice,
+      new FakeAdbClientFactory(),
+      () => fakeIOSCtrlProxy
     );
-
-    clipboard = new Clipboard(mockDevice);
   });
 
   test("get returns clipboard text", async () => {
@@ -138,35 +135,33 @@ describe("Clipboard Android", () => {
   // and silently breaks the a11y clipboard path.
   test("passes the injected AdbClientFactory (not AdbExecutor) to AndroidCtrlProxyClient.getInstance", async () => {
     const factory = new FakeAdbClientFactory();
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-      requestClipboard: async () => ({ success: true, action: "copy", totalTimeMs: 1 }),
-    } as unknown as AndroidCtrlProxyClient);
+    let passedFactory: FakeAdbClientFactory | undefined;
+    const clipboard = new Clipboard(androidDevice, factory, (_device, adbFactory) => {
+      passedFactory = adbFactory as FakeAdbClientFactory;
+      return {
+        requestClipboard: async () => ({ success: true, action: "copy", totalTimeMs: 1 }),
+      };
+    });
 
-    const clipboard = new Clipboard(androidDevice, factory);
     await clipboard.execute("copy", "hello");
 
-    expect(getInstanceSpy).toHaveBeenCalled();
-    const [, passedFactory] = getInstanceSpy.mock.calls[0] as [BootedDevice, FakeAdbClientFactory];
-    expect(typeof passedFactory.create).toBe("function");
+    expect(passedFactory).toBeDefined();
+    expect(typeof passedFactory!.create).toBe("function");
     expect(passedFactory).toBe(factory);
     expect(factory.wasCalledForDevice(androidDevice.deviceId)).toBe(true);
-
-    getInstanceSpy.mockRestore();
   });
 
   test("get returns accessibility restriction error without ADB fallback when Android denies clipboard reads", async () => {
     const factory = new FakeAdbClientFactory();
     const fakeAdb = factory.getFakeClient();
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+    const clipboard = new Clipboard(androidDevice, factory, () => ({
       requestClipboard: async () => ({
         success: false,
         action: "get",
         totalTimeMs: 1,
         error: "Clipboard read is restricted while CtrlProxy is not foreground",
       }),
-    } as unknown as AndroidCtrlProxyClient);
-
-    const clipboard = new Clipboard(androidDevice, factory);
+    }));
     const result = await clipboard.execute("get");
 
     expect(result.success).toBe(false);
@@ -175,21 +170,18 @@ describe("Clipboard Android", () => {
     expect(result.error).toContain("Clipboard read is restricted");
     expect(fakeAdb.getAllCommands()).not.toContain("shell cmd clipboard get");
 
-    getInstanceSpy.mockRestore();
   });
 
   test("get returns default accessibility error when Android read fails without details", async () => {
     const factory = new FakeAdbClientFactory();
     const fakeAdb = factory.getFakeClient();
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+    const clipboard = new Clipboard(androidDevice, factory, () => ({
       requestClipboard: async () => ({
         success: false,
         action: "get",
         totalTimeMs: 1,
       }),
-    } as unknown as AndroidCtrlProxyClient);
-
-    const clipboard = new Clipboard(androidDevice, factory);
+    }));
     const result = await clipboard.execute("get");
 
     expect(result.success).toBe(false);
@@ -197,23 +189,20 @@ describe("Clipboard Android", () => {
     expect(result.method).toBe("a11y");
     expect(fakeAdb.getAllCommands()).not.toContain("shell cmd clipboard get");
 
-    getInstanceSpy.mockRestore();
   });
 
   test("get does not use unsupported cmd clipboard fallback for an empty accessibility read", async () => {
     const factory = new FakeAdbClientFactory();
     const fakeAdb = factory.getFakeClient();
     fakeAdb.setCommandResult("shell cmd clipboard get", "No shell command implementation");
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+    const clipboard = new Clipboard(androidDevice, factory, () => ({
       requestClipboard: async () => ({
         success: true,
         action: "get",
         text: "",
         totalTimeMs: 1,
       }),
-    } as unknown as AndroidCtrlProxyClient);
-
-    const clipboard = new Clipboard(androidDevice, factory);
+    }));
     const result = await clipboard.execute("get");
 
     expect(result.success).toBe(true);
@@ -222,6 +211,5 @@ describe("Clipboard Android", () => {
     expect(result.method).toBe("a11y");
     expect(fakeAdb.getAllCommands()).not.toContain("shell cmd clipboard get");
 
-    getInstanceSpy.mockRestore();
   });
 });

@@ -5,7 +5,7 @@ export class SessionToolBinding {
     const explicit = params && typeof params === "object" && !Array.isArray(params)
       ? (params as Record<string, unknown>).sessionUuid
       : undefined;
-    return typeof explicit === "string"
+    return typeof explicit === "string" && explicit.trim().length > 0
       ? explicit
       : mcpSessionId
         ? this.boundDeviceSessions.get(mcpSessionId)
@@ -13,7 +13,7 @@ export class SessionToolBinding {
   }
 
   bind(mcpSessionId: string | undefined, sessionUuid: string | undefined): boolean {
-    if (!mcpSessionId || !sessionUuid || this.boundDeviceSessions.get(mcpSessionId) === sessionUuid) {
+    if (!mcpSessionId || !sessionUuid?.trim() || this.boundDeviceSessions.get(mcpSessionId) === sessionUuid) {
       return false;
     }
     this.boundDeviceSessions.set(mcpSessionId, sessionUuid);

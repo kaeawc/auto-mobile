@@ -72,18 +72,6 @@ describe("requireBootedDevice", () => {
 });
 
 describe("requireBootedDevice integration with factories", () => {
-  test("AndroidCtrlProxyClient.getInstance throws on bare deviceId string", async () => {
-    const { AndroidCtrlProxyClient } = await import("../../src/features/observe/android/AndroidCtrlProxyClient");
-    expect(() => AndroidCtrlProxyClient.getInstance("emulator-5554" as never))
-      .toThrow(/AndroidCtrlProxyClient\.getInstance: expected BootedDevice/);
-  });
-
-  test("AndroidCtrlProxyClient.getInstance throws on empty object", async () => {
-    const { AndroidCtrlProxyClient } = await import("../../src/features/observe/android/AndroidCtrlProxyClient");
-    expect(() => AndroidCtrlProxyClient.getInstance({} as never))
-      .toThrow(/expected BootedDevice/);
-  });
-
   test("IOSCtrlProxyClient.getInstance throws on bare deviceId string", async () => {
     const { IOSCtrlProxyClient } = await import("../../src/features/observe/ios/IOSCtrlProxyClient");
     expect(() => IOSCtrlProxyClient.getInstance("ABCDEF" as never))

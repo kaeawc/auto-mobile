@@ -24,6 +24,27 @@ import {
 } from "../systemTrayHelpers";
 import { createNotificationUIDetector } from "../system-tray/createNotificationUIDetector";
 
+type CtrlProxyClientFactory = (
+  device: BootedDevice,
+  adbFactory: AdbClientFactory
+) => CtrlProxyClient;
+
+function resolveCtrlProxy(
+  device: BootedDevice,
+  adbFactory: AdbClientFactory,
+  options: CreatePlatformClientOptions
+): CtrlProxyClient {
+  if (options.ctrlProxy) {
+    return options.ctrlProxy;
+  }
+  if (options.ctrlProxyFactory) {
+    return options.ctrlProxyFactory(device, adbFactory);
+  }
+  return device.platform === "ios"
+    ? IOSCtrlProxyClient.getInstance(device)
+    : AndroidCtrlProxyClient.getInstance(device, adbFactory);
+}
+
 /**
  * Optional injection points for {@link createPlatformClient}. All
  * defaults reach for the same singletons the existing sub-factories
@@ -38,6 +59,7 @@ export interface CreatePlatformClientOptions {
   // Per-handle overrides for tests. Pass a fake instead of letting the
   // factory build the default platform-specific implementation.
   ctrlProxy?: CtrlProxyClient;
+  ctrlProxyFactory?: CtrlProxyClientFactory;
   tapStrategy?: TapStrategy;
   systemConfiguration?: SystemConfigurationAdapter;
   notificationUI?: NotificationUIDetector;
@@ -65,11 +87,7 @@ export function createPlatformClient(
   const processExecutor =
     options.processExecutor ?? new DefaultHostCommandExecutor();
 
-  const ctrlProxy: CtrlProxyClient =
-    options.ctrlProxy ??
-    (device.platform === "ios"
-      ? IOSCtrlProxyClient.getInstance(device)
-      : AndroidCtrlProxyClient.getInstance(device, adbFactory));
+  const ctrlProxy = resolveCtrlProxy(device, adbFactory, options);
 
   const adb = adbFactory.create(device);
 

@@ -8,6 +8,7 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import type { SessionToolProfileService } from "../../src/features/toolCapabilities/SessionToolProfileService";
 
 interface CapturedCall {
   params: Record<string, unknown>;
@@ -224,5 +225,158 @@ describe("PlanExecutor executeStep refactor", () => {
     } finally {
       (AbortSignal as any).any = originalAny;
     }
+  });
+
+  test("rejects a base-profile-disabled labeled device step before target resolution", async () => {
+    const clipboardHandler = mock(async () => createStructuredToolResponse({ success: true }));
+    ToolRegistry.registerDeviceAware(
+      "clipboard",
+      "clipboard",
+      z.object({
+        device: z.string(),
+        sessionUuid: z.string().optional(),
+      }),
+      clipboardHandler
+    );
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
+      isEnabled: async (_sessionUuid, capability) => capability !== "clipboard",
+    };
+    const resolveExecutionTarget = mock(async () => {
+      throw new Error("target resolution should not run");
+    });
+    const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: { resolveExecutionTarget },
+    });
+
+    try {
+      const result = await planExecutor.executePlan(
+        {
+          name: "capability-denied-step",
+          devices: ["B"],
+          steps: [{ tool: "clipboard", params: { device: "B" } }],
+        },
+        0,
+        "android",
+        "emulator-5554",
+        "session-1",
+        undefined,
+        undefined,
+        { sessionToolProfileService: profileService }
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.failedStep).toMatchObject({
+        stepIndex: 0,
+        tool: "clipboard",
+      });
+      expect(result.failedStep?.error).toContain("requires the 'clipboard' capability");
+      expect(clipboardHandler).not.toHaveBeenCalled();
+      expect(resolveExecutionTarget).not.toHaveBeenCalled();
+    } finally {
+      restorePipelineOverrides();
+    }
+  });
+
+  test("uses the execution session instead of a sessionUuid supplied by the plan", async () => {
+    const clipboardHandler = mock(async () => createStructuredToolResponse({ success: true }));
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({ sessionUuid: z.string().optional() }),
+      clipboardHandler
+    );
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
+      isEnabled: async sessionUuid => sessionUuid === "enabled-session",
+    };
+
+    const result = await planExecutor.executePlan(
+      {
+        name: "session-override-denied-step",
+        steps: [{ tool: "clipboard", params: { sessionUuid: "enabled-session" } }],
+      },
+      0,
+      "android",
+      "emulator-5554",
+      "disabled-session",
+      undefined,
+      undefined,
+      { sessionToolProfileService: profileService }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.failedStep?.error).toContain("requires the 'clipboard' capability");
+    expect(clipboardHandler).not.toHaveBeenCalled();
+  });
+
+  test("uses the device-track execution session instead of a sessionUuid supplied by the plan", async () => {
+    const clipboardHandler = mock(async () => createStructuredToolResponse({ success: true }));
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({
+        device: z.string(),
+        sessionUuid: z.string().optional(),
+      }),
+      clipboardHandler
+    );
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
+      isEnabled: async sessionUuid => sessionUuid === "enabled-session",
+    };
+
+    const result = await planExecutor.executePlan(
+      {
+        name: "parallel-session-override-denied-step",
+        devices: ["device-a"],
+        steps: [{
+          tool: "clipboard",
+          params: { device: "device-a", sessionUuid: "enabled-session" },
+        }],
+      },
+      0,
+      "android",
+      "emulator-5554",
+      "disabled-session",
+      undefined,
+      undefined,
+      { sessionToolProfileService: profileService }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.failedStep?.error).toContain("requires the 'clipboard' capability");
+    expect(clipboardHandler).not.toHaveBeenCalled();
+  });
+
+  test("executes a capability-enabled step", async () => {
+    const clipboardHandler = mock(async () => createStructuredToolResponse({ success: true }));
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({
+        platform: z.string().optional(),
+        sessionUuid: z.string().optional(),
+      }),
+      clipboardHandler
+    );
+    (ToolRegistry.getTool("clipboard") as { requiresDevice: boolean }).requiresDevice = true;
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
+      isEnabled: async () => true,
+    };
+
+    const result = await planExecutor.executePlan(
+      {
+        name: "capability-enabled-step",
+        steps: [{ tool: "clipboard", params: {} }],
+      },
+      0,
+      "android",
+      "emulator-5554",
+      "session-1",
+      undefined,
+      undefined,
+      { sessionToolProfileService: profileService }
+    );
+
+    expect(result.success).toBe(true);
+    expect(clipboardHandler).toHaveBeenCalledTimes(1);
   });
 });

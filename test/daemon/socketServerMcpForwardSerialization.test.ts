@@ -281,10 +281,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(inFlight).toBe(0);
   });
 
-  test("routes tools/list through the client bound by an earlier session-aware call on the same socket", async () => {
+  test("routes sessionless calls through the client bound by an earlier session-aware call", async () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-session-list-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
+    sessionDevices.set("session-a", "device-a");
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
@@ -294,11 +295,18 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await server.start();
 
     const clients: FakeMcpClient[] = [];
+    const forwardedCalls: Array<{ clientIndex: number; toolName: string | undefined }> = [];
     server.mcpClientFactory = async () => {
       const clientIndex = clients.length;
       const client: FakeMcpClient = {
         listTools: async () => ({ tools: [{ name: `client-${clientIndex}` }] }),
-        callTool: async () => ({ content: [] }),
+        callTool: async (...args: unknown[]) => {
+          forwardedCalls.push({
+            clientIndex,
+            toolName: (args[0] as { name?: string }).name,
+          });
+          return { content: [] };
+        },
         listResources: async () => ({ resources: [] }),
         readResource: async () => ({ contents: [] }),
         listResourceTemplates: async () => ({ resourceTemplates: [] }),
@@ -316,22 +324,36 @@ describe("UnixSocketServer MCP forward serialization", () => {
         name: "observe",
         arguments: { sessionUuid: "session-a" },
       });
+      const sessionlessCall = await client.request("tools/call", {
+        name: "videoRecording",
+        arguments: { action: "stop", recordingId: "recording-1" },
+      });
+      const navigationGraph = await client.request("ide/getNavigationGraph", {});
       const refreshedList = await client.request("tools/list", {});
 
       expect(initialList.success).toBe(true);
       expect(initialList.result).toEqual({ tools: [{ name: "client-0" }] });
       expect(call.success).toBe(true);
+      expect(sessionlessCall.success).toBe(true);
+      expect(navigationGraph.success).toBe(true);
       expect(refreshedList.success).toBe(true);
       expect(refreshedList.result).toEqual({ tools: [{ name: "client-1" }] });
+      expect(forwardedCalls).toEqual([
+        { clientIndex: 1, toolName: "observe" },
+        { clientIndex: 1, toolName: "videoRecording" },
+        { clientIndex: 1, toolName: "getNavigationGraph" },
+      ]);
+      expect(clients).toHaveLength(2);
     } finally {
       client.close();
     }
   });
 
-  test("keeps the bound client for tools/list when the session-aware call returns an error", async () => {
+  test("keeps the successful session binding when a later explicit session call fails", async () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-session-list-error-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
+    sessionDevices.set("session-a", "device-a");
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
@@ -341,12 +363,18 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await server.start();
 
     const clients: FakeMcpClient[] = [];
+    const forwardedCalls: Array<{ clientIndex: number; toolName: string | undefined }> = [];
     server.mcpClientFactory = async () => {
       const clientIndex = clients.length;
       const client: FakeMcpClient = {
         listTools: async () => ({ tools: [{ name: `client-${clientIndex}` }] }),
-        callTool: async () => {
-          throw new Error("invalid tool arguments");
+        callTool: async (...args: unknown[]) => {
+          const request = args[0] as { name?: string; arguments?: { sessionUuid?: string } };
+          forwardedCalls.push({ clientIndex, toolName: request.name });
+          if (request.arguments?.sessionUuid === "session-b") {
+            throw new Error("clipboard requires the 'clipboard' capability");
+          }
+          return { content: [] };
         },
         listResources: async () => ({ resources: [] }),
         readResource: async () => ({ contents: [] }),
@@ -361,14 +389,127 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await client.connect(socketPath);
     try {
       await client.request("tools/list", {});
-      const failedCall = await client.request("tools/call", {
+      const boundCall = await client.request("tools/call", {
         name: "observe",
         arguments: { sessionUuid: "session-a" },
       });
+      const failedCall = await client.request("tools/call", {
+        name: "clipboard",
+        arguments: { sessionUuid: "session-b" },
+      });
+      const sessionlessCall = await client.request("tools/call", {
+        name: "exportPlan",
+        arguments: {},
+      });
       const refreshedList = await client.request("tools/list", {});
 
+      expect(boundCall.success).toBe(true);
       expect(failedCall.success).toBe(false);
+      expect(sessionlessCall.success).toBe(true);
       expect(refreshedList.result).toEqual({ tools: [{ name: "client-1" }] });
+      expect(forwardedCalls).toEqual([
+        { clientIndex: 1, toolName: "observe" },
+        { clientIndex: 2, toolName: "clipboard" },
+        { clientIndex: 1, toolName: "exportPlan" },
+      ]);
+    } finally {
+      client.close();
+    }
+  });
+
+  test("preserves a profile-only binding for sessionless follow-up calls", async () => {
+    const clients: FakeMcpClient[] = [];
+    const forwardedCalls: Array<{ clientIndex: number; toolName: string | undefined }> = [];
+    server.mcpClientFactory = async () => {
+      const clientIndex = clients.length;
+      const client: FakeMcpClient = {
+        listTools: async () => ({ tools: [{ name: `client-${clientIndex}` }] }),
+        callTool: async (...args: unknown[]) => {
+          forwardedCalls.push({
+            clientIndex,
+            toolName: (args[0] as { name?: string }).name,
+          });
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      clients.push(client);
+      return client;
+    };
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      await client.request("tools/list", {});
+      const recordingStop = await client.request("tools/call", {
+        name: "videoRecording",
+        arguments: { action: "stop", recordingId: "recording-1", sessionUuid: "profile-only" },
+      });
+      const sessionlessCall = await client.request("tools/call", {
+        name: "exportPlan",
+        arguments: {},
+      });
+      const refreshedList = await client.request("tools/list", {});
+
+      expect(recordingStop.success).toBe(true);
+      expect(sessionlessCall.success).toBe(true);
+      expect(forwardedCalls).toEqual([
+        { clientIndex: 1, toolName: "videoRecording" },
+        { clientIndex: 1, toolName: "exportPlan" },
+      ]);
+      expect(refreshedList.result).toEqual({ tools: [{ name: "client-1" }] });
+    } finally {
+      client.close();
+    }
+  });
+
+  test("drops a bound client after its successful plan call releases the session", async () => {
+    sessionDevices.set("session-a", "device-a");
+    const clients: FakeMcpClient[] = [];
+    const forwardedClientIndexes: number[] = [];
+    server.mcpClientFactory = async () => {
+      const clientIndex = clients.length;
+      const client: FakeMcpClient = {
+        listTools: async () => ({ tools: [{ name: `client-${clientIndex}` }] }),
+        callTool: async (...args: unknown[]) => {
+          forwardedClientIndexes.push(clientIndex);
+          const request = args[0] as { name?: string; arguments?: { sessionUuid?: string } };
+          if (request.name === "executePlan" && request.arguments?.sessionUuid === "session-a") {
+            sessionDevices.delete("session-a");
+          }
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      clients.push(client);
+      return client;
+    };
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const initialList = await client.request("tools/list", {});
+      const executePlan = await client.request("tools/call", {
+        name: "executePlan",
+        arguments: { sessionUuid: "session-a" },
+      });
+      const sessionlessCall = await client.request("tools/call", {
+        name: "exportPlan",
+        arguments: {},
+      });
+      const refreshedList = await client.request("tools/list", {});
+
+      expect(initialList.result).toEqual({ tools: [{ name: "client-0" }] });
+      expect(executePlan.success).toBe(true);
+      expect(sessionlessCall.success).toBe(true);
+      expect(forwardedClientIndexes).toEqual([1, 2]);
+      expect(refreshedList.result).not.toEqual({ tools: [{ name: "client-1" }] });
     } finally {
       client.close();
     }

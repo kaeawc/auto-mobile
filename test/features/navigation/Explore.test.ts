@@ -486,8 +486,8 @@ describe("Explore", () => {
     test("uses injected Android recovery dependencies without nested progress", async () => {
       const commands: string[] = [];
       const adb = {
-        executeCommand: async (command: string) => {
-          commands.push(command);
+        execute: async (args: string[]) => {
+          commands.push(args.join(" "));
           return "";
         }
       } as AdbClient;
@@ -526,7 +526,7 @@ describe("Explore", () => {
         requestGlobalAction: async () => ({ success: false, error: "unavailable" })
       } as never);
       const adb = {
-        executeCommand: async () => { throw new Error("Back navigation was rejected"); }
+        execute: async () => { throw new Error("Back navigation was rejected"); }
       } as AdbClient;
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
 
@@ -546,7 +546,7 @@ describe("Explore", () => {
         requestGlobalAction: async () => ({ success: false, error: "unavailable" })
       } as never);
       const adb = {
-        executeCommand: async () => { throw new Error("Home navigation was rejected"); }
+        execute: async () => { throw new Error("Home navigation was rejected"); }
       } as AdbClient;
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
 
@@ -566,7 +566,7 @@ describe("Explore", () => {
         requestGlobalAction: async () => ({ success: false, error: "unavailable" })
       } as never);
       const adb = {
-        executeCommand: async () => { throw new Error("Back navigation was rejected"); }
+        execute: async () => { throw new Error("Back navigation was rejected"); }
       } as AdbClient;
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
       (explore as any).observeScreen = {

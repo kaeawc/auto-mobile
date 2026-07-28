@@ -144,6 +144,11 @@ const NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES = [
 ];
 const DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS = 5000;
 const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
+// When waiting for a notification, re-issue the shade expand (at most this often) if the
+// shade is found closed. A high-importance notification that re-posts (e.g. a persistent
+// connection push) re-fires a heads-up that can collapse the shade or race the initial
+// expand; without re-expanding, the poll loop would sit on a closed shade until timeout.
+const SYSTEM_TRAY_REEXPAND_INTERVAL_MS = 1000;
 export const SYSTEM_TRAY_CLEAR_MAX_ITERATIONS = 25;
 // Re-export shared constant so existing callers (interactionTools.ts) keep working.
 export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS;
@@ -212,6 +217,20 @@ const expandSystemTray = async (
   observation?: ObserveResult
 ): Promise<void> => {
   await detector.expandTray(observation);
+};
+
+// Re-expand the shade while waiting for a notification, swallowing failures: a
+// re-posting high-importance push can collapse the shade mid-wait, and the next
+// poll will re-observe and retry, so a single failed expand here is not fatal.
+const reexpandSystemTrayBestEffort = async (
+  detector: NotificationUIDetector,
+  observation?: ObserveResult
+): Promise<void> => {
+  try {
+    await expandSystemTray(detector, observation);
+  } catch (error) {
+    logger.debug(`[systemTray] re-expand while waiting for notification failed: ${error}`);
+  }
 };
 
 const collapseSystemTray = async (
@@ -1039,6 +1058,65 @@ export const ensureSystemTrayClosed = async (
   };
 };
 
+// Collect every text/content-desc string inside a candidate notification row's
+// subtree. Iterative (not recursive) to keep depth shallow for the lint ratchet.
+const collectNotificationSubtreeTexts = (node: any): string[] => {
+  const texts: string[] = [];
+  const stack: any[] = [node];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    for (const text of extractNodeTextCandidates(current)) {
+      texts.push(text);
+    }
+    const children = current.node;
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        stack.push(child);
+      }
+    } else if (children && typeof children === "object") {
+      stack.push(children);
+    }
+  }
+  return texts;
+};
+
+// Diagnostic: when the shade is open but no notification matched the criteria,
+// summarize every notification-row candidate and the text found inside each so a
+// failing run reveals whether the target text is present-but-unmatched vs. absent
+// from the captured hierarchy (issue: persistent-push notification "not found").
+const buildUnmatchedNotificationDiagnostics = (
+  viewHierarchy: ViewHierarchyResult,
+  criteria: SystemTrayNotificationArgs,
+  appMatchTexts: string[]
+): string => {
+  const candidates = collectNotificationCandidates(viewHierarchy);
+  const lines: string[] = [];
+  for (let index = 0; index < candidates.length; index++) {
+    const candidate = candidates[index];
+    const texts = collectNotificationSubtreeTexts(candidate.node);
+    lines.push(
+      `  candidate#${index} depth=${candidate.depth} inGroup=${Boolean(candidate.groupNode)} ` +
+      `bounds=${JSON.stringify(candidate.element?.bounds ?? null)} texts=${JSON.stringify(texts)}`
+    );
+  }
+  const criteriaSummary = JSON.stringify({
+    title: criteria.title,
+    body: criteria.body,
+    appId: criteria.appId,
+    tapActionLabel: criteria.tapActionLabel
+  });
+  const header =
+    `[systemTray][diag] shade open but no notification matched. ` +
+    `criteria=${criteriaSummary} appMatchTexts=${JSON.stringify(appMatchTexts)} ` +
+    `candidateCount=${candidates.length}`;
+  return candidates.length > 0
+    ? `${header}\n${lines.join("\n")}`
+    : `${header} (no notification-row candidates detected in the open shade)`;
+};
+
 export const waitForNotificationMatch = async (
   device: BootedDevice,
   criteria: SystemTrayNotificationArgs,
@@ -1065,12 +1143,42 @@ export const waitForNotificationMatch = async (
     observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
   }
 
+  let lastDiagSignature = "";
+  let lastReexpandAtMs = timer.now();
   while (true) {
     const viewHierarchy = observation.viewHierarchy;
     if (viewHierarchy && detector.isTrayOpen(viewHierarchy)) {
       const match = findBestNotificationMatch(viewHierarchy, criteria, appMatchTexts);
       if (match) {
         return { observation, match };
+      }
+      // Diagnostic: log the candidate breakdown when the shade is open but nothing
+      // matched, deduped so a 120s poll loop does not emit identical lines each tick.
+      const diagnostics = buildUnmatchedNotificationDiagnostics(viewHierarchy, criteria, appMatchTexts);
+      if (diagnostics !== lastDiagSignature) {
+        lastDiagSignature = diagnostics;
+        logger.info(diagnostics);
+      }
+    } else {
+      // The shade is not open. ensureSystemTrayOpen expanded it once, but a
+      // high-importance notification that re-posts (e.g. a persistent connection
+      // push) re-fires a heads-up that can collapse the shade or race the initial
+      // expand. Without re-expanding, the loop would poll a closed shade until the
+      // (up to 120s) timeout and never match a notification that is genuinely there.
+      // Re-issue the expand, throttled, so a re-post can't leave the shade shut.
+      if (timer.now() - lastReexpandAtMs >= SYSTEM_TRAY_REEXPAND_INTERVAL_MS) {
+        lastReexpandAtMs = timer.now();
+        await reexpandSystemTrayBestEffort(detector, observation);
+      }
+      // Diagnostic: the shade is NOT detected as open (no hierarchy, a heads-up
+      // overlay, or the expand did not take). If this is all that appears for the
+      // whole wait, the failure is shade-open/detection, not notification matching.
+      const trayDiag =
+        `[systemTray][diag] shade NOT detected open during notification wait ` +
+        `(hasHierarchy=${Boolean(observation.viewHierarchy)})`;
+      if (trayDiag !== lastDiagSignature) {
+        lastDiagSignature = trayDiag;
+        logger.info(trayDiag);
       }
     }
 

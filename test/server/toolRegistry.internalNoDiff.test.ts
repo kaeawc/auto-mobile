@@ -11,6 +11,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
+import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
 
 /**
  * Internal tool-to-tool no-diff guard (issue #3053 part 2).
@@ -28,6 +29,14 @@ import type { ObserveResult } from "../../src/models/ObserveResult";
  */
 describe("ToolRegistry internal no-diff guard (#3053)", () => {
   const androidA: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
+  const enabledCapabilityProfile = { isEnabled: async () => true };
+
+  function runWithEnabledCapabilities<T>(fn: () => Promise<T>): Promise<T> {
+    return runWithToolCapabilityContext(
+      { sessionToolProfileService: enabledCapabilityProfile },
+      fn,
+    );
+  }
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
@@ -243,11 +252,11 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     });
 
     await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
-    const imeGo = await ToolRegistry.getTool("imeAction")!.handler({
+    const imeGo = await runWithEnabledCapabilities(() => ToolRegistry.getTool("imeAction")!.handler({
       platform: "android",
       __mcpSessionId: "mcp-session-1",
       action: "go",
-    });
+    }));
     expect((imeGo.structuredContent as any).observation.isDiff).toBeUndefined();
     expect((imeGo.structuredContent as any).observation.viewHierarchy).toBeDefined();
     expect((imeGo.structuredContent as any).observationDiff).toMatchObject({
@@ -276,11 +285,11 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     });
 
     await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
-    const imePrevious = await ToolRegistry.getTool("imeAction")!.handler({
+    const imePrevious = await runWithEnabledCapabilities(() => ToolRegistry.getTool("imeAction")!.handler({
       platform: "android",
       __mcpSessionId: "mcp-session-1",
       action: "previous",
-    });
+    }));
     expect((imePrevious.structuredContent as any).observation.isDiff).toBe(true);
     expect((imePrevious.structuredContent as any).observationDiff).toMatchObject({
       mode: "diff",

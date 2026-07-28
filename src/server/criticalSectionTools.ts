@@ -5,6 +5,7 @@ import { logger } from "../utils/logger";
 import { createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
+import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 
 // Schema for steps inside critical section.
 // Every sub-step MUST declare a target `device` — there is no routing
@@ -34,7 +35,7 @@ const criticalSectionStepSchema = z
 type CriticalSectionStepInput = z.infer<typeof criticalSectionStepSchema>;
 
 // Critical section tool schema
-const criticalSectionSchema = z.object({
+const criticalSectionSchema = addDeviceTargetingToSchema(z.object({
   lock: z
     .string()
     .describe(
@@ -69,7 +70,7 @@ const criticalSectionSchema = z.object({
     .string()
     .optional()
     .describe("Internal plan-scoped lock namespace (injected)"),
-});
+}));
 
 type CriticalSectionParams = z.infer<typeof criticalSectionSchema>;
 
@@ -150,24 +151,13 @@ const criticalSectionHandler = async (
           throw new ActionableError(`Tool "${step.tool}" not found in registry`);
         }
 
-        // Execute the tool with the device context
-        let result;
-        if (tool.deviceAwareHandler) {
-          // Device-aware tool
-          result = await tool.deviceAwareHandler(
-            device,
-            step.params,
-            undefined,
-            signal
-          );
-        } else if (tool.handler) {
-          // Regular tool
-          result = await tool.handler(step.params, undefined, signal);
-        } else {
-          throw new ActionableError(
-            `Tool "${step.tool}" has no handler registered`
-          );
-        }
+        const result = await ToolRegistry.callInternal(
+          tool,
+          step.params,
+          undefined,
+          signal,
+          { forPlan: true, targetDevice: device },
+        );
 
         // Check if tool returned failure
         if (result?.success === false) {

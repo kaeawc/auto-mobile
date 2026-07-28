@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
@@ -7,6 +7,7 @@ import { z } from "zod";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { logger } from "../../src/utils/logger";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import type { SessionToolProfileService } from "../../src/features/toolCapabilities/SessionToolProfileService";
 
 describe("criticalSection tool", () => {
   beforeAll(() => {
@@ -237,6 +238,40 @@ describe("criticalSection tool", () => {
     expect(result.success).toBe(true);
     expect(result.executedSteps).toBe(3);
     expect(executionLog).toEqual(["step1", "step2", "step3"]);
+  });
+
+  test("rejects a capability-disabled nested step before invoking its handler", async () => {
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
+    expect(tool).toBeDefined();
+    const nestedHandler = mock(async () => ({ success: true }));
+    ToolRegistry.register("clipboard", "clipboard", z.object({ device: z.string() }), nestedHandler);
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
+      isEnabled: async (_sessionUuid, capability) => capability === "test-authoring",
+    };
+    const fakeDevice: BootedDevice = {
+      platform: "android",
+      deviceId: "test-device-capability",
+      name: "Test Device Capability",
+    };
+
+    await expect(ToolRegistry.callInternal(
+      tool!,
+      {
+        lock: "capability-lock",
+        deviceCount: 1,
+        steps: [{ tool: "clipboard", params: { device: "A" } }],
+      },
+      undefined,
+      undefined,
+      {
+        forPlan: true,
+        targetDevice: fakeDevice,
+        sessionUuid: "session-1",
+        sessionToolProfileService: profileService,
+      },
+    )).rejects.toThrow("requires the 'clipboard' capability");
+
+    expect(nestedHandler).not.toHaveBeenCalled();
   });
 
   test("executes plan-executable debug-only steps hidden from MCP discovery", async () => {

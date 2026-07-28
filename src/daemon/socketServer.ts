@@ -45,6 +45,7 @@ import {
   type SessionToolProfileService,
   type ToolCapability,
 } from "../features/toolCapabilities/SessionToolProfileService";
+import { assertToolEnabledForSession } from "../features/toolCapabilities/toolCapabilityPolicy";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   IOS_CTRL_PROXY_APP_HASH,
@@ -181,7 +182,7 @@ export class UnixSocketServer {
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
-  private readonly sessionToolProfileService?: Pick<SessionToolProfileService, "setEnabled">;
+  private readonly sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled" | "setEnabled">;
   /**
    * Factory that `getMcpClient()` calls to open the loopback MCP HTTP client.
    * Defaults to the real {@link createMcpClient}; tests assign a fake here to
@@ -228,7 +229,7 @@ export class UnixSocketServer {
     handshakeConfig: {
       identity?: DaemonSelfIdentity;
       enforce?: boolean;
-      sessionToolProfileService?: Pick<SessionToolProfileService, "setEnabled">;
+      sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled" | "setEnabled">;
     } = {}
   ) {
     this.socketPath = socketPath;
@@ -901,6 +902,7 @@ export class UnixSocketServer {
         if (!args.deviceId || !args.appId || !args.fileName || !args.key || !args.type) {
           throw new Error("setKeyValue requires deviceId, appId, fileName, key, and type params");
         }
+        await this.assertSocketToolEnabled(args.deviceId, "setKeyValue");
         const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
         const targetDevice = bootedDevices.find(d => d.deviceId === args.deviceId);
         if (!targetDevice) {
@@ -930,6 +932,7 @@ export class UnixSocketServer {
         if (!args.deviceId || !args.appId || !args.fileName || !args.key) {
           throw new Error("removeKeyValue requires deviceId, appId, fileName, and key params");
         }
+        await this.assertSocketToolEnabled(args.deviceId, "removeKeyValue");
         const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
         const targetDevice = bootedDevices.find(d => d.deviceId === args.deviceId);
         if (!targetDevice) {
@@ -948,6 +951,7 @@ export class UnixSocketServer {
         if (!args.deviceId || !args.appId || !args.fileName) {
           throw new Error("clearKeyValueFile requires deviceId, appId, and fileName params");
         }
+        await this.assertSocketToolEnabled(args.deviceId, "clearKeyValueFile");
         const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
         const targetDevice = bootedDevices.find(d => d.deviceId === args.deviceId);
         if (!targetDevice) {
@@ -960,6 +964,13 @@ export class UnixSocketServer {
       default:
         return undefined;
     }
+  }
+
+  private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {
+    const sessionUuid = this.daemonState.isInitialized()
+      ? this.daemonState.getSessionManager().getSessionForDevice?.(deviceId) ?? undefined
+      : undefined;
+    await assertToolEnabledForSession(toolName, sessionUuid, this.sessionToolProfileService);
   }
 
   /**

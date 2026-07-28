@@ -37,6 +37,12 @@ import {
 } from "./internalToolPayloads";
 import { JsonToolOutputArtifactWriter, type ToolOutputArtifactRetention } from "./toolOutputArtifactWriter";
 import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
+import type { SessionToolProfileService } from "../features/toolCapabilities/SessionToolProfileService";
+import { assertToolEnabledForSession } from "../features/toolCapabilities/toolCapabilityPolicy";
+import {
+  getToolCapabilityContext,
+  runWithToolCapabilityContext,
+} from "../features/toolCapabilities/toolCapabilityContext";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
@@ -69,6 +75,19 @@ interface ToolHandler<T = any> {
 // Interface for device-aware tool handlers
 interface DeviceAwareToolHandler<T = any> {
   (device: BootedDevice, args: T, progress?: ProgressCallback, signal?: AbortSignal): Promise<any>;
+}
+
+interface InternalToolCallOptions {
+  forPlan?: boolean;
+  sessionUuid?: string;
+  targetDevice?: BootedDevice;
+  sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
+}
+
+interface InternalToolInvocationContext {
+  args: Record<string, unknown>;
+  sessionUuid?: string;
+  sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
 }
 
 // Gate reason emitted for `planOnly` tools — hidden from discovery by design,
@@ -824,69 +843,76 @@ export class ToolRegistryClass {
       const toolStartMs = this.timer.now();
       const toolCallTimestamp = new Date().toISOString();
       let toolDurationMs: number | undefined;
-      let target: ExecutionTargetContext | undefined;
       let sessionUuid = args.sessionUuid;
 
       try {
-        target = await this.executionTargetResolver.resolveExecutionTarget({
+        const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
           name,
           args,
           options,
           deviceSessionManager: this.deviceSessionManager,
         });
-        sessionUuid = target.sessionUuid;
-        try {
-          let response: any | undefined;
-          if (!target.shouldResolveDevice) {
-            if (!options.nonDeviceHandler) {
-              throw new ActionableError(`Tool ${name} requires a device.`);
-            }
-            response = await options.nonDeviceHandler(args, progress, signal);
-          } else if (target.device !== undefined) {
-            this.navigationToolCallRecorder.record(name, args, target.device, target.sessionUuid);
-            response = await this.auditRunner.run({
-              name,
-              args,
-              device: target.device,
-              handler,
-              progress,
-              signal,
-            });
-          }
+        sessionUuid = resolvedTarget.sessionUuid;
+        await assertToolEnabledForSession(
+          name,
+          resolvedTarget.sessionUuid,
+          getToolCapabilityContext()?.sessionToolProfileService,
+        );
+        return await runWithToolCapabilityContext(
+          { sessionUuid: resolvedTarget.sessionUuid },
+          async () => {
+            try {
+              let response: any | undefined;
+              if (!resolvedTarget.shouldResolveDevice) {
+                if (!options.nonDeviceHandler) {
+                  throw new ActionableError(`Tool ${name} requires a device.`);
+                }
+                response = await options.nonDeviceHandler(args, progress, signal);
+              } else if (resolvedTarget.device !== undefined) {
+                this.navigationToolCallRecorder.record(name, args, resolvedTarget.device, resolvedTarget.sessionUuid);
+                response = await this.auditRunner.run({
+                  name,
+                  args,
+                  device: resolvedTarget.device,
+                  handler,
+                  progress,
+                  signal,
+                });
+              }
 
-          const afterToolCallResult = await this.afterToolCall.handle({
-            name,
-            args,
-            device: target.device,
-            internalCall: target.internalCall,
-            response,
-            sessionUuid: target.sessionUuid,
-            shouldResolveDevice: target.shouldResolveDevice,
-            signal,
-            timer: this.timer,
-            toolStartMs,
-          });
-          toolDurationMs = afterToolCallResult.durationMs;
-          return afterToolCallResult.finalizedResponse;
-        } catch (error) {
-          if (error instanceof ActionableError) {
-            throw error;
+              const afterToolCallResult = await this.afterToolCall.handle({
+                name,
+                args,
+                device: resolvedTarget.device,
+                internalCall: resolvedTarget.internalCall,
+                response,
+                sessionUuid: resolvedTarget.sessionUuid,
+                shouldResolveDevice: resolvedTarget.shouldResolveDevice,
+                signal,
+                timer: this.timer,
+                toolStartMs,
+              });
+              toolDurationMs = afterToolCallResult.durationMs;
+              return afterToolCallResult.finalizedResponse;
+            } catch (error) {
+              if (error instanceof ActionableError) {
+                throw error;
+              }
+              const deviceContext = resolvedTarget.device ? ` on device ${resolvedTarget.device.deviceId}` : "";
+              throw new ActionableError(`Failed to execute tool ${name}${deviceContext}: ${error}`);
+            } finally {
+              await this.planLifecycleManager.afterExecution({
+                name,
+                args,
+                baseSessionUuid: resolvedTarget.baseSessionUuid,
+                cleanupService: this.cleanupService,
+                device: resolvedTarget.device,
+                sessionUuid: resolvedTarget.sessionUuid,
+                shouldResolveDevice: resolvedTarget.shouldResolveDevice,
+              });
+            }
           }
-          const deviceContext = target.device ? ` on device ${target.device.deviceId}` : "";
-          throw new ActionableError(`Failed to execute tool ${name}${deviceContext}: ${error}`);
-        } finally {
-          if (target) {
-            await this.planLifecycleManager.afterExecution({
-              name,
-              args,
-              baseSessionUuid: target.baseSessionUuid,
-              cleanupService: this.cleanupService,
-              device: target.device,
-              sessionUuid: target.sessionUuid,
-              shouldResolveDevice: target.shouldResolveDevice,
-            });
-          }
-        }
+        );
       } finally {
         await this.toolCallRepository.recordToolCall({
           toolName: name,
@@ -952,7 +978,7 @@ export class ToolRegistryClass {
     args: Record<string, unknown>,
     progress?: ProgressCallback,
     signal?: AbortSignal,
-    options: { forPlan?: boolean } = {}
+    options: InternalToolCallOptions = {}
   ): Promise<any> {
     const resolved = typeof tool === "string"
       ? (options.forPlan ? this.getToolForPlan(tool) : this.getTool(tool))
@@ -960,7 +986,55 @@ export class ToolRegistryClass {
     if (!resolved) {
       throw new ActionableError(`Tool not found: ${tool}`);
     }
-    return resolved.handler(markInternalToolCall(args), progress, signal);
+    const invocation = this.createInternalToolInvocationContext(args, options);
+
+    return runWithToolCapabilityContext(
+      invocation,
+      () => this.invokeInternalTool(
+        resolved,
+        invocation.args,
+        progress,
+        signal,
+        options.targetDevice,
+        invocation.sessionUuid,
+        invocation.sessionToolProfileService,
+      ),
+    );
+  }
+
+  private createInternalToolInvocationContext(
+    args: Record<string, unknown>,
+    options: InternalToolCallOptions,
+  ): InternalToolInvocationContext {
+    const context = getToolCapabilityContext();
+    const sessionUuid = options.sessionUuid
+      ?? context?.sessionUuid
+      ?? (typeof args.sessionUuid === "string" ? args.sessionUuid : undefined);
+    return {
+      args: sessionUuid && args.sessionUuid !== sessionUuid
+        ? { ...args, sessionUuid }
+        : args,
+      sessionUuid,
+      sessionToolProfileService: options.sessionToolProfileService ?? context?.sessionToolProfileService,
+    };
+  }
+
+  private async invokeInternalTool(
+    tool: RegisteredTool,
+    args: Record<string, unknown>,
+    progress: ProgressCallback | undefined,
+    signal: AbortSignal | undefined,
+    targetDevice: BootedDevice | undefined,
+    sessionUuid: string | undefined,
+    sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
+  ): Promise<any> {
+    if (targetDevice || !tool.deviceAwareHandler) {
+      await assertToolEnabledForSession(tool.name, sessionUuid, sessionToolProfileService);
+    }
+    if (targetDevice && tool.deviceAwareHandler) {
+      return tool.deviceAwareHandler(targetDevice, markInternalToolCall(args), progress, signal);
+    }
+    return tool.handler(markInternalToolCall(args), progress, signal);
   }
 
   // Typed variant of `callInternal` for the handful of internally-consumed tools
@@ -980,7 +1054,7 @@ export class ToolRegistryClass {
     args: Record<string, unknown>,
     progress?: ProgressCallback,
     signal?: AbortSignal,
-    options: { forPlan?: boolean } = {}
+    options: InternalToolCallOptions = {}
   ): Promise<StructuredToolResponse<InternalToolPayloads[K]> | undefined> {
     const response = await this.callInternal(name, args, progress, signal, options);
     return narrowInternalToolEnvelope(name, response);

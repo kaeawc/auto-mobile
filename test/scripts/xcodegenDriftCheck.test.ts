@@ -47,6 +47,21 @@ function expectExitStatus(result: ReturnType<typeof spawnSync>, expectedStatus: 
   }
 }
 
+function fakeToolEnvironment(
+  repoDir: string,
+  overrides: Record<string, string | undefined> = {}
+): Record<string, string | undefined> {
+  return {
+    ...process.env,
+    // xcodegen_version.sh prepends $HOME/.local/bin to PATH. Keep HOME owned
+    // by this fixture so a host XcodeGen binary cannot eclipse bin/xcodegen.
+    HOME: join(repoDir, "home"),
+    FAKE_REPO_ROOT: repoDir,
+    ...overrides,
+    PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
+  };
+}
+
 afterEach(() => {
   while (tempDirs.length > 0) {
     const tempDir = tempDirs.pop();
@@ -218,13 +233,9 @@ describe("xcodegen drift check", () => {
     const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
       cwd: repoDir,
       encoding: "utf8",
-      env: {
-        ...process.env,
-        HOME: repoDir,
-        FAKE_REPO_ROOT: repoDir,
+      env: fakeToolEnvironment(repoDir, {
         FAKE_XCODEGEN_BEHAVIOR: "modify",
-        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
-      },
+      }),
     });
 
     expectExitStatus(result, 1);
@@ -237,14 +248,10 @@ describe("xcodegen drift check", () => {
     const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
       cwd: repoDir,
       encoding: "utf8",
-      env: {
-        ...process.env,
-        HOME: repoDir,
-        FAKE_REPO_ROOT: repoDir,
+      env: fakeToolEnvironment(repoDir, {
         FAKE_XCODEGEN_BEHAVIOR: "recreate",
         FAKE_GIT_STATUS_OUTPUT: "?? ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj\n",
-        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
-      },
+      }),
     });
 
     expectExitStatus(result, 1);
@@ -261,14 +268,10 @@ describe("xcodegen drift check", () => {
     const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
       cwd: repoDir,
       encoding: "utf8",
-      env: {
-        ...process.env,
-        HOME: repoDir,
-        FAKE_REPO_ROOT: repoDir,
+      env: fakeToolEnvironment(repoDir, {
         FAKE_XCODEGEN_VERSION: "2.45.4",
         FAKE_XCODEGEN_BEHAVIOR: "modify",
-        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
-      },
+      }),
     });
 
     expectExitStatus(result, 1);
@@ -287,12 +290,7 @@ describe("xcodegen drift check", () => {
     const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
       cwd: repoDir,
       encoding: "utf8",
-      env: {
-        ...process.env,
-        HOME: repoDir,
-        FAKE_REPO_ROOT: repoDir,
-        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
-      },
+      env: fakeToolEnvironment(repoDir),
     });
 
     expectExitStatus(result, 0);
@@ -312,14 +310,10 @@ describe("xcodegen drift check", () => {
     const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
       cwd: repoDir,
       encoding: "utf8",
-      env: {
-        ...process.env,
-        HOME: repoDir,
-        FAKE_REPO_ROOT: repoDir,
+      env: fakeToolEnvironment(repoDir, {
         FAKE_XCODEGEN_BEHAVIOR: "reorder",
         FAKE_REORDERED_PROJECT: alphabeticalOrderProject,
-        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
-      },
+      }),
     });
 
     expectExitStatus(result, 0);
@@ -334,18 +328,14 @@ describe("xcodegen drift check", () => {
     const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--all"], {
       cwd: repoDir,
       encoding: "utf8",
-      env: {
-        ...process.env,
-        HOME: repoDir,
-        FAKE_REPO_ROOT: repoDir,
+      env: fakeToolEnvironment(repoDir, {
         FAKE_REPO_WIDE_GENERATOR_BEHAVIOR: "modify",
-        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
-      },
+      }),
     });
 
     expectExitStatus(result, 1);
     expect(result.stdout + result.stderr).toContain("Run scripts/ios/xcodegen-generate.sh");
-  });
+  }, 15_000);
 
   test("all scope fails when repo-wide generation fails", () => {
     const repoDir = createTempRepo();
@@ -353,12 +343,7 @@ describe("xcodegen drift check", () => {
     const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--all"], {
       cwd: repoDir,
       encoding: "utf8",
-      env: {
-        ...process.env,
-        HOME: repoDir,
-        FAKE_REPO_ROOT: repoDir,
-        PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
-      },
+      env: fakeToolEnvironment(repoDir),
     });
 
     expectExitStatus(result, 2);

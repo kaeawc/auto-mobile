@@ -654,6 +654,15 @@ class DeviceControlSession(
   }
 
   private suspend fun execute(command: DeviceControlInputCommand) {
+    // A command can wait behind another input while the sources rotate. Recheck at the FIFO
+    // consumer boundary so a coordinate captured before disagreement cannot reach the daemon.
+    if (
+      (command is DeviceControlInputCommand.Tap || command is DeviceControlInputCommand.Swipe) &&
+        !coordinatesAreStillDispatchable(command.snapshot)
+    ) {
+      command.client?.close()
+      return
+    }
     var error: String? = null
     try {
       withContext(ioDispatcher) { forward(command) { message -> error = message } }

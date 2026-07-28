@@ -1361,6 +1361,47 @@ class DeviceControlSessionTest {
   }
 
   @Test
+  fun `queued coordinate commands are discarded after a rotation disagreement`() = runTest {
+    val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+    val clients = mutableListOf<FakeAutoMobileClient>()
+    val session =
+      DeviceControlSession(
+        scope = scope,
+        clientProvider = { FakeAutoMobileClient().also { clients += it } },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = {},
+        uiContext = StandardTestDispatcher(testScheduler),
+        ioDispatcher = StandardTestDispatcher(testScheduler),
+      )
+    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val snapshot = assertNotNull(session.evaluate(initial).snapshotOrNull)
+
+    assertTrue(session.tap(snapshot, point))
+    assertTrue(
+      session.swipe(
+        snapshot,
+        DevicePoint(x = 540, y = 1800, inBounds = true),
+        DevicePoint(x = 540, y = 400, inBounds = true),
+      )
+    )
+    assertEquals(2, clients.size, "each queued command captures its client")
+
+    session.evaluate(
+      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
+    )
+    advanceUntilIdle()
+
+    clients.forEach { client ->
+      assertTrue(client.inputTapCalls.isEmpty(), "a queued tap cannot survive disagreement")
+      assertTrue(client.inputSwipeCalls.isEmpty(), "a queued swipe cannot survive disagreement")
+      assertTrue("close" in client.calls, "a discarded command closes its captured client")
+    }
+    assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    scope.cancel()
+  }
+
+  @Test
   fun `single and unanimous proven rotations remain dispatchable`() = runTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()

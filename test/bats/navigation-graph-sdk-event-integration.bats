@@ -9,6 +9,8 @@ setup() {
   export CURL_URL_FILE="${MOCK_BIN}/curl-urls"
   export SESSION_OBSERVE_FILE="${MOCK_BIN}/session-observe"
   export DOCTOR_CALLS_FILE="${MOCK_BIN}/doctor-calls"
+  export TARGET_APP_LAUNCHED_FILE="${MOCK_BIN}/target-app-launched"
+  export INVOCATION_FILE="${MOCK_BIN}/invocations"
 }
 
 teardown() {
@@ -55,6 +57,7 @@ fi
 exit 0
 '
   make_mock auto-mobile '
+printf "%s\n" "$*" >> "$INVOCATION_FILE"
 if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
   doctor_calls=0
   [ -f "$DOCTOR_CALLS_FILE" ] && doctor_calls="$(cat "$DOCTOR_CALLS_FILE")"
@@ -62,7 +65,19 @@ if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
   printf "{\"ios\":{\"checks\":[]}}\\n"
   exit 0
 fi
+if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "--session-uuid" ] && [ "$6" = "launchApp" ]; then
+  if [ "$7" != "--platform" ] || [ "$8" != "ios" ] || [ "$9" != "--appId" ] || [ "${10}" != "com.apple.reminders" ] || [ "${11}" != "--deviceId" ] || [ "${12}" != "simulator-udid" ]; then
+    echo "unexpected target app launch arguments: $*" >&2
+    exit 1
+  fi
+  touch "$TARGET_APP_LAUNCHED_FILE"
+  exit 0
+fi
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "--session-uuid" ] && [ "$6" = "observe" ]; then
+  if [ ! -f "$TARGET_APP_LAUNCHED_FILE" ]; then
+    echo "graph session was bound before its target app launched" >&2
+    exit 1
+  fi
   touch "$SESSION_OBSERVE_FILE"
   exit 0
 fi
@@ -83,7 +98,11 @@ fi
   [ "$status" -eq 0 ]
   [ "$(cat "$GRAPH_ATTEMPTS_FILE")" = "2" ]
   [ "$(cat "$DOCTOR_CALLS_FILE")" = "2" ]
+  [ -f "$TARGET_APP_LAUNCHED_FILE" ]
   [[ "$output" == *"getNavigationGraph attempt 1 failed"* ]]
+  launch_line="$(grep -n -- "launchApp --platform ios --appId com.apple.reminders --deviceId simulator-udid" "$INVOCATION_FILE" | head -n 1 | cut -d: -f1)"
+  observe_line="$(grep -n -- "observe --platform ios --deviceId simulator-udid" "$INVOCATION_FILE" | head -n 1 | cut -d: -f1)"
+  [ "$launch_line" -lt "$observe_line" ]
   grep -qx "http://127.0.0.1:8769/health" "$CURL_URL_FILE"
   grep -qx "http://127.0.0.1:8769/sdk-events" "$CURL_URL_FILE"
 }

@@ -7,7 +7,7 @@ set -euo pipefail
 
 device_id="${1:?usage: navigation-graph-sdk-event-integration.sh <simulator-udid>}"
 timestamp_ms="$(($(date +%s) * 1000))"
-bundle_id="dev.jasonpearson.automobile.issue4460"
+bundle_id="com.apple.reminders"
 home_screen="Issue4460Home"
 detail_screen="Issue4460Detail"
 # Keep the runner's SDK-event consumer and the public graph query in one session. Each CLI
@@ -56,6 +56,14 @@ ctrl_proxy_port_for_device() {
 ctrl_proxy_port="$(ctrl_proxy_port_for_device)"
 
 curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null
+
+# The graph query selects the target device's latest observed foreground app.
+# Keep the injected SDK events and the following observations scoped to the
+# same installed app instead of letting a SpringBoard observation hide them.
+if ! auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" launchApp --platform ios --appId "${bundle_id}" --deviceId "${device_id}" >/dev/null; then
+  echo "error: could not launch iOS graph target app" >&2
+  exit 1
+fi
 
 # `doctor` above may have started the shared CtrlProxy client while it was
 # unbound. Bind it to this graph session before posting events so its SDK-event

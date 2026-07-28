@@ -1776,7 +1776,11 @@ describe("finalizeToolResponse", () => {
  * sanitized tree) intact and never touch internal tool-to-tool calls.
  */
 describe("finalizeToolResponse observe scope experiments (#4344)", () => {
+  let originalSkeleton: boolean;
+
   beforeEach(() => {
+    originalSkeleton = serverConfig.isObserveResultProjectSkeletonEnabled();
+    serverConfig.setObserveResultProjectSkeletonEnabled(false);
     serverConfig.setObserveFocusScopeEnabled(false);
     serverConfig.setObserveOverviewEnabled(false);
     serverConfig.setObserveRegionEnabled(false);
@@ -1784,6 +1788,7 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
   });
 
   afterEach(() => {
+    serverConfig.setObserveResultProjectSkeletonEnabled(originalSkeleton);
     serverConfig.setObserveFocusScopeEnabled(false);
     serverConfig.setObserveOverviewEnabled(false);
     serverConfig.setObserveRegionEnabled(false);
@@ -1855,6 +1860,44 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
     expect(out.observeScope?.applied).toContain("focus");
     expect(out.observeScope!.nodesAfter).toBeLessThan(out.observeScope!.nodesBefore);
     // text mirror agrees with structuredContent.
+    expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+  });
+
+  test("explicit skeleton projection preserves all-gated scope metadata without a scope transform", () => {
+    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
+      name: "observe",
+      args: {
+        project: "skeleton",
+        scope: { focus: true, region: true, overview: true },
+      },
+    });
+
+    const out = finalized.structuredContent as ObserveResult;
+    expect(out.skeleton).toEqual([]);
+    expect(out.viewHierarchy).toBeUndefined();
+    expect(out.elements).toBeUndefined();
+    expect(out.observeScope).toMatchObject({
+      applied: [],
+      gatedOff: ["focus", "region", "overview"],
+    });
+    expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+  });
+
+  test("flag-enabled skeleton preserves gated metadata without applying enabled scope transforms", () => {
+    serverConfig.setObserveResultProjectSkeletonEnabled(true);
+    serverConfig.setObserveFocusScopeEnabled(true);
+    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
+      name: "observe",
+      args: { scope: { focus: true, region: true } },
+    });
+
+    const out = finalized.structuredContent as ObserveResult;
+    expect(out.skeleton).toEqual([]);
+    expect(out.viewHierarchy).toBeUndefined();
+    expect(out.observeScope).toMatchObject({
+      applied: [],
+      gatedOff: ["region"],
+    });
     expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
   });
 

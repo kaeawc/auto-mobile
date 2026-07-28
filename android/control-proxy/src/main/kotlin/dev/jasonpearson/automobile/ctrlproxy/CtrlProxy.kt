@@ -1199,7 +1199,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     frameContext: String?,
   ) {
     if (rejectStaleFrameContext(requestId, frameContext, "swipe")) return
-    performSwipe(requestId, x1, y1, x2, y2, duration)
+    performSwipe(requestId, x1, y1, x2, y2, duration, frameContext)
   }
 
   override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
@@ -1213,7 +1213,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     frameContext: String?,
   ) {
     if (rejectStaleFrameContext(requestId, frameContext, "tap")) return
-    performTapCoordinates(requestId, x, y, duration)
+    performTapCoordinates(requestId, x, y, duration, frameContext)
   }
 
   override fun requestTwoFingerSwipe(
@@ -1249,7 +1249,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     frameContext: String?,
   ) {
     if (rejectStaleFrameContext(requestId, frameContext, "drag")) return
-    performDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
+    performDrag(
+      requestId,
+      x1,
+      y1,
+      x2,
+      y2,
+      pressDurationMs,
+      dragDurationMs,
+      holdDurationMs,
+      frameContext,
+    )
   }
 
   /**
@@ -1267,6 +1277,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         "tap" -> broadcastTapCoordinatesResult(requestId, false, error, 0)
         "swipe" -> broadcastSwipeResult(requestId, false, error, 0, null)
         "drag" -> broadcastDragResult(requestId, false, error, 0, null)
+        "set_text" -> broadcastSetTextResult(requestId, false, error, 0)
+        "ime_action" -> broadcastImeActionResult(requestId, action, false, error, 0)
+        "global_action" ->
+          webSocketServer.broadcast(
+            dev.jasonpearson.automobile.protocol.GlobalActionResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = requestId,
+              success = false,
+              action = action,
+              totalTimeMs = 0,
+              error = error,
+            )
+          )
       }
     }
     return true
@@ -1298,8 +1321,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     dismissKeyboard: Boolean,
   ) = performSetText(requestId, text, resourceId, dismissKeyboard)
 
+  override fun requestSetText(
+    requestId: String?,
+    text: String,
+    resourceId: String?,
+    dismissKeyboard: Boolean,
+    frameContext: String?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, "set_text")) return
+    performSetText(requestId, text, resourceId, dismissKeyboard)
+  }
+
   override fun requestImeAction(requestId: String?, action: String) =
     performImeAction(requestId, action)
+
+  override fun requestImeAction(requestId: String?, action: String, frameContext: String?) {
+    if (rejectStaleFrameContext(requestId, frameContext, "ime_action")) return
+    performImeAction(requestId, action)
+  }
 
   override fun requestSelectAll(requestId: String?) = performSelectAll(requestId)
 
@@ -1324,6 +1363,31 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestGlobalAction(requestId: String?, action: String) =
     performGlobalActionRequest(requestId, action)
+
+  override fun requestGlobalAction(requestId: String?, action: String, frameContext: String?) {
+    if (rejectStaleFrameContext(requestId, frameContext, "global_action")) return
+    performGlobalActionRequest(requestId, action)
+  }
+
+  override fun validateFrameContext(requestId: String?, frameContext: String) {
+    val matches = frameContext == currentFrameContext()
+    asyncActionRunner.launch(requestId, "validate_frame_context") {
+      webSocketServer?.broadcast(
+        dev.jasonpearson.automobile.protocol.FrameContextValidationResult(
+          timestamp = System.currentTimeMillis(),
+          requestId = requestId,
+          success = matches,
+          totalTimeMs = 0,
+          error =
+            if (matches) {
+              null
+            } else {
+              "Stale frame context for input/key; observe a fresh frame before retrying"
+            },
+        )
+      )
+    }
+  }
 
   override fun requestDeviceInfo(requestId: String?) = performDeviceInfoRequest(requestId)
 
@@ -1600,6 +1664,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       if (
         event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
           event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+          event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
           event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
       ) {
         frameContext.incrementAndGet()
@@ -2597,6 +2662,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     requestId: String?,
     startTimeMs: Long,
     gestureBuiltTimeMs: Long,
+    frameContext: String? = null,
     beforeCompletedResult: () -> Unit = {},
     onResult: (GestureDispatchOutcome) -> Unit,
   ) {
@@ -2611,6 +2677,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       )
 
     lifecycle.startDispatch()
+    if (frameContext != null && frameContext != currentFrameContext()) {
+      lifecycle.failed(
+        IllegalStateException("Stale frame context; observe a fresh frame before retrying"),
+        onResult,
+      )
+      return
+    }
     val dispatched =
       try {
         dispatchGesture(
@@ -2649,6 +2722,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     x2: Double,
     y2: Double,
     duration: Long,
+    frameContext: String? = null,
   ) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performSwipe: ($x1, $y1) -> ($x2, $y2) duration=${duration}ms")
@@ -2673,8 +2747,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val gestureBuiltTime = System.currentTimeMillis()
       Log.d(TAG, "Gesture built in ${gestureBuiltTime - startTime}ms")
 
-      dispatchGestureWithResult("performSwipe", gesture, requestId, startTime, gestureBuiltTime) {
-        outcome ->
+      dispatchGestureWithResult(
+        "performSwipe",
+        gesture,
+        requestId,
+        startTime,
+        gestureBuiltTime,
+        frameContext,
+      ) { outcome ->
         if (outcome.completed) {
           Log.d(
             TAG,
@@ -2727,6 +2807,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     pressDurationMs: Long,
     dragDurationMs: Long,
     holdDurationMs: Long,
+    frameContext: String? = null,
   ) {
     val startTime = System.currentTimeMillis()
     Log.d(
@@ -2861,8 +2942,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val gestureBuiltTime = System.currentTimeMillis()
       Log.d(TAG, "Drag gesture built in ${gestureBuiltTime - startTime}ms")
 
-      dispatchGestureWithResult("performDrag", gesture, requestId, startTime, gestureBuiltTime) {
-        outcome ->
+      dispatchGestureWithResult(
+        "performDrag",
+        gesture,
+        requestId,
+        startTime,
+        gestureBuiltTime,
+        frameContext,
+      ) { outcome ->
         if (outcome.completed) {
           Log.d(
             TAG,
@@ -2903,7 +2990,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * @param y Y coordinate to tap
    * @param duration Duration of the tap in milliseconds (default 10ms for a quick tap)
    */
-  private fun performTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long = 10) {
+  private fun performTapCoordinates(
+    requestId: String?,
+    x: Double,
+    y: Double,
+    duration: Long = 10,
+    frameContext: String? = null,
+  ) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performTapCoordinates: ($x, $y) duration=${duration}ms")
     perfProvider.serial("performTapCoordinates")
@@ -2929,6 +3022,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         requestId,
         startTime,
         gestureBuiltTime,
+        frameContext,
         beforeCompletedResult = {
           // Wait for UI to settle after tap, then extract fresh hierarchy.
           val freshHierarchy =

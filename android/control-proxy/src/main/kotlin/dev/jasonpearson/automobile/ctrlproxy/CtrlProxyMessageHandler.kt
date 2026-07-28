@@ -51,6 +51,7 @@ import dev.jasonpearson.automobile.protocol.SubscribeStorage
 import dev.jasonpearson.automobile.protocol.SwipeResult
 import dev.jasonpearson.automobile.protocol.TapCoordinatesResult
 import dev.jasonpearson.automobile.protocol.UnsubscribeStorage
+import dev.jasonpearson.automobile.protocol.ValidateFrameContext
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
@@ -210,13 +211,28 @@ class CtrlProxyMessageHandler(
         )
       }
       is RequestSetText ->
-        actions.requestSetText(
-          request.requestId,
-          request.text,
-          request.resourceId,
-          request.dismissKeyboard,
-        )
-      is RequestImeAction -> actions.requestImeAction(request.requestId, request.action)
+        if (request.frameContext == null) {
+          actions.requestSetText(
+            request.requestId,
+            request.text,
+            request.resourceId,
+            request.dismissKeyboard,
+          )
+        } else {
+          actions.requestSetText(
+            request.requestId,
+            request.text,
+            request.resourceId,
+            request.dismissKeyboard,
+            request.frameContext,
+          )
+        }
+      is RequestImeAction ->
+        if (request.frameContext == null) {
+          actions.requestImeAction(request.requestId, request.action)
+        } else {
+          actions.requestImeAction(request.requestId, request.action, request.frameContext)
+        }
       is RequestSelectAll -> actions.requestSelectAll(request.requestId)
       is RequestAction ->
         actions.requestAction(
@@ -251,7 +267,14 @@ class CtrlProxyMessageHandler(
         } else {
           log("remove_ca_cert missing alias and certificate; ignoring")
         }
-      is RequestGlobalAction -> actions.requestGlobalAction(request.requestId, request.action)
+      is RequestGlobalAction ->
+        if (request.frameContext == null) {
+          actions.requestGlobalAction(request.requestId, request.action)
+        } else {
+          actions.requestGlobalAction(request.requestId, request.action, request.frameContext)
+        }
+      is ValidateFrameContext ->
+        actions.validateFrameContext(request.requestId, request.frameContext)
       is RequestDeviceInfo -> actions.requestDeviceInfo(request.requestId)
       is GetDeviceOwnerStatus -> actions.getDeviceOwnerStatus(request.requestId)
       is GetPermission ->

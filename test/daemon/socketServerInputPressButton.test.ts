@@ -227,6 +227,29 @@ describe("UnixSocketServer input/pressButton", () => {
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
+  test("forwards an Android frame context to the button implementation", async () => {
+    const press = mock(async (button: string): Promise<PressButtonResult> => ({
+      success: true,
+      button,
+      keyCode: 4,
+    }));
+    PressButton.prototype.press = press;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext = () => {};
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/pressButton", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      button: "back",
+      frameContext: "frame-1",
+    });
+
+    expect(response.success).toBe(true);
+    expect(press).toHaveBeenCalledWith("back", 30_000, "frame-1");
+  });
+
   test("routes iOS button presses through the existing pressButton implementation", async () => {
     const press = mock(async (button: string): Promise<PressButtonResult> => ({
       success: true,

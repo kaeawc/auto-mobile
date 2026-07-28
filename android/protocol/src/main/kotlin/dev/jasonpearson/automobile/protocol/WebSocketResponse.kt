@@ -538,6 +538,16 @@ data class GlobalActionResult(
   val error: String? = null,
 ) : WebSocketResponse()
 
+@Serializable
+@SerialName("frame_context_validation_result")
+data class FrameContextValidationResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val totalTimeMs: Long,
+  val error: String? = null,
+) : WebSocketResponse()
+
 // =============================================================================
 // Device Info Result
 // =============================================================================

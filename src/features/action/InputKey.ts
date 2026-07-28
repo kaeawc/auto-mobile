@@ -3,6 +3,7 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
+import { AndroidCtrlProxyClient } from "../observe/android";
 
 export const INPUT_KEY_CODE_MAP = {
   enter: "KEYCODE_ENTER",
@@ -34,19 +35,31 @@ export interface InputKeyResult {
   error?: string;
 }
 
+export interface FrameContextValidator {
+  validateFrameContext(
+    frameContext: string,
+    timeoutMs?: number
+  ): Promise<{ success: boolean; error?: string }>;
+}
+
 export class InputKey {
   private readonly device: BootedDevice;
   private readonly adb: AdbExecutor;
 
   constructor(
     device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory
+    private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    private readonly frameContextValidator?: FrameContextValidator
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
   }
 
-  async press(key: InputKeyName, timeoutMs?: number): Promise<InputKeyResult> {
+  async press(
+    key: InputKeyName,
+    timeoutMs?: number,
+    frameContext?: string
+  ): Promise<InputKeyResult> {
     if (this.device.platform !== "android") {
       return {
         success: false,
@@ -58,6 +71,19 @@ export class InputKey {
 
     const keyCode = INPUT_KEY_CODE_MAP[key];
     try {
+      if (frameContext !== undefined) {
+        const validator = this.frameContextValidator ??
+          AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+        const validation = await validator.validateFrameContext(frameContext, timeoutMs);
+        if (!validation.success) {
+          return {
+            success: false,
+            key,
+            keyCode,
+            error: validation.error ?? "Frame context is stale or unavailable; observe a fresh frame before retrying",
+          };
+        }
+      }
       await this.adb.executeCommand(`shell input keyevent ${keyCode}`, timeoutMs, undefined, true);
       return {
         success: true,

@@ -55,11 +55,11 @@ export class PressButton extends BaseVisualChange {
    *   per-transport hard-coded defaults. When omitted, the existing defaults
    *   apply.
    */
-  async press(button: string, timeoutMs?: number): Promise<PressButtonResult> {
+  async press(button: string, timeoutMs?: number, frameContext?: string): Promise<PressButtonResult> {
     try {
       switch (this.device.platform) {
         case "android":
-          return await this.executeAndroidButtonPress(button, timeoutMs);
+          return await this.executeAndroidButtonPress(button, timeoutMs, frameContext);
         case "ios":
           return await this.executeiOSButtonPress(button, timeoutMs);
         default:
@@ -89,7 +89,11 @@ export class PressButton extends BaseVisualChange {
   // before we fall back to ADB keyevent.
   private static readonly GLOBAL_ACTION_TIMEOUT_MS = 3000;
 
-  private async executeAndroidButtonPress(button: string, timeoutMs?: number): Promise<PressButtonResult> {
+  private async executeAndroidButtonPress(
+    button: string,
+    timeoutMs?: number,
+    frameContext?: string
+  ): Promise<PressButtonResult> {
     const normalized = button.toLowerCase();
     const keyCode = resolveAndroidKeyCode(normalized);
     if (keyCode === undefined) {
@@ -118,7 +122,12 @@ export class PressButton extends BaseVisualChange {
           : Math.min(PressButton.GLOBAL_ACTION_TIMEOUT_MS, budget);
         try {
           const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-          const result = await client.requestGlobalAction(normalized, globalActionTimeout);
+          const result = await client.requestGlobalAction(
+            normalized,
+            globalActionTimeout,
+            undefined,
+            frameContext
+          );
           if (result.success) {
             logger.debug(`[PRESS_BUTTON] Used accessibility service for ${button}`);
             return { success: true, button, keyCode };

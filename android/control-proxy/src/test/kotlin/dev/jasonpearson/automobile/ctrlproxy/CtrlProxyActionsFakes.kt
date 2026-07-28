@@ -271,8 +271,19 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     dismissKeyboard: Boolean,
   ) = record("requestSetText", requestId, text, resourceId, dismissKeyboard)
 
+  override fun requestSetText(
+    requestId: String?,
+    text: String,
+    resourceId: String?,
+    dismissKeyboard: Boolean,
+    frameContext: String?,
+  ) = record("requestSetText", requestId, text, resourceId, dismissKeyboard, frameContext)
+
   override fun requestImeAction(requestId: String?, action: String) =
     record("requestImeAction", requestId, action)
+
+  override fun requestImeAction(requestId: String?, action: String, frameContext: String?) =
+    record("requestImeAction", requestId, action, frameContext)
 
   override fun requestSelectAll(requestId: String?) = record("requestSelectAll", requestId)
 
@@ -297,6 +308,12 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun requestGlobalAction(requestId: String?, action: String) =
     record("requestGlobalAction", requestId, action)
+
+  override fun requestGlobalAction(requestId: String?, action: String, frameContext: String?) =
+    record("requestGlobalAction", requestId, action, frameContext)
+
+  override fun validateFrameContext(requestId: String?, frameContext: String) =
+    record("validateFrameContext", requestId, frameContext)
 
   override fun requestDeviceInfo(requestId: String?) = record("requestDeviceInfo", requestId)
 

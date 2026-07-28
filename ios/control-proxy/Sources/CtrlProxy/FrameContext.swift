@@ -11,11 +11,15 @@ public final class FrameContext {
         self.epoch = epoch
     }
 
-    /// Records a device-side UI transition, even when hierarchy publication is debounced.
-    public func recordTransition(to _: ViewHierarchy) {
+    /// Records a device-side UI transition and returns the context for that exact generation.
+    @discardableResult
+    public func recordTransition(to hierarchy: ViewHierarchy) -> String? {
+        let hash = Self.semanticHash(hierarchy)
         lock.lock()
         generation &+= 1
+        let context = hash.map { "\(epoch.uuidString):\(generation):\($0)" }
         lock.unlock()
+        return context
     }
 
     public func context(for hierarchy: ViewHierarchy) -> String? {
@@ -25,7 +29,7 @@ public final class FrameContext {
         return Self.semanticHash(hierarchy).map { "\(epoch.uuidString):\(currentGeneration):\($0)" }
     }
 
-    /// Serializes transition recording with the final context check and gesture dispatch.
+    /// Validates a context against the current hierarchy before dispatching a gesture.
     func performIfCurrent<T>(
         expected: String?,
         hierarchy: ViewHierarchy?,
@@ -38,9 +42,12 @@ public final class FrameContext {
             throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
         }
 
+        let hash = Self.semanticHash(hierarchy)
         lock.lock()
-        defer { lock.unlock() }
-        guard Self.semanticHash(hierarchy).map({ "\(epoch.uuidString):\(generation):\($0)" }) == expected else {
+        let isCurrent = hash.map { "\(epoch.uuidString):\(generation):\($0)" } == expected
+        lock.unlock()
+
+        guard isCurrent else {
             throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
         }
         return try operation()

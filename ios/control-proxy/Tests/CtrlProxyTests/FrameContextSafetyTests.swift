@@ -118,6 +118,40 @@ final class FrameContextSafetyTests: XCTestCase {
         XCTAssertEqual(fakeGesturePerformer.getOpenRecentAppsCallCount(), 0)
     }
 
+    func testValidatedGestureAllowsMainQueueTransitionBeforeSynchronousGestureHop() {
+        let screenA = makeHierarchy(text: "A")
+        let screenB = makeHierarchy(text: "B")
+        let expected = frameContext.context(for: screenA)
+        let operationFinished = DispatchSemaphore(value: 0)
+        let mainQueue = DispatchQueue(label: "FrameContextSafetyTests.main")
+
+        DispatchQueue.global().async { [frameContext] in
+            _ = try? frameContext?.performIfCurrent(
+                expected: expected,
+                hierarchy: screenA
+            ) {
+                mainQueue.async {
+                    frameContext?.recordTransition(to: screenB)
+                }
+                mainQueue.sync {}
+                operationFinished.signal()
+            }
+        }
+
+        XCTAssertEqual(operationFinished.wait(timeout: .now() + 0.05), .success)
+    }
+
+    func testTransitionContextKeepsItsOriginalGenerationAfterDelayedBroadcast() {
+        let screenA = makeHierarchy(text: "A")
+        let screenB = makeHierarchy(text: "B")
+        let delayedBroadcastContext = frameContext.recordTransition(to: screenA)
+
+        frameContext.recordTransition(to: screenB)
+        frameContext.recordTransition(to: screenA)
+
+        XCTAssertNotEqual(delayedBroadcastContext, frameContext.context(for: screenA))
+    }
+
     private func makeHierarchy(text: String) -> ViewHierarchy {
         ViewHierarchy(
             packageName: "com.example.app",

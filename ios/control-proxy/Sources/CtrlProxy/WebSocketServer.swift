@@ -307,12 +307,12 @@ public class WebSocketServer: WebSocketServing {
 
     /// Broadcast a hierarchy update to all connected clients (push notification)
     public func broadcastHierarchyUpdate(_ hierarchy: ViewHierarchy) {
-        frameContext.recordTransition(to: hierarchy)
+        let context = frameContext.recordTransition(to: hierarchy)
         let response = HierarchyUpdateResponse(
             requestId: nil, // No requestId for push updates
             data: hierarchy,
             perfTiming: nil,
-            frameContext: frameContext.context(for: hierarchy)
+            frameContext: context
         )
 
         do {

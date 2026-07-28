@@ -171,8 +171,8 @@ export class UnixSocketServer {
   private mcpClientPromises: Map<string, Promise<Client>> = new Map();
   /**
    * The loopback MCP client that a socket transport most recently bound with a
-   * device session. `tools/list` carries no arguments, so this preserves the
-   * client-local session context selected by the preceding device-aware call.
+   * device session. Follow-up requests can omit their session UUID, so reuse
+   * this client to preserve the selected capability profile.
    */
   private boundMcpClientKeysBySocketSession: Map<string, string> = new Map();
   /** Promise tails that serialize MCP HTTP forwards only within the same target key. */
@@ -607,20 +607,7 @@ export class UnixSocketServer {
 
   private getMcpForwardKey(request: DaemonRequest, socketSessionId: string): string {
     if (request.method === "tools/call") {
-      const args = request.params?.arguments;
-      const scopedKey = this.getRequestArgumentScopeKey(args);
-      if (scopedKey) {
-        return scopedKey;
-      }
-
-      const implicitAutolockKey = this.getImplicitAutolockScopeKey(socketSessionId, args);
-      if (implicitAutolockKey) {
-        return implicitAutolockKey;
-      }
-
-      // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
-      // pre-forward key so separate daemon clients can autolock and run independently.
-      return `socket:${socketSessionId}`;
+      return this.getToolsCallForwardKey(request.params?.arguments, socketSessionId);
     }
 
     if (request.method === "tools/list") {
@@ -628,7 +615,9 @@ export class UnixSocketServer {
     }
 
     if (request.method === "ide/getNavigationGraph") {
-      return this.getRequestArgumentScopeKey(request.params) ?? `method:${request.method}`;
+      return this.getRequestArgumentScopeKey(request.params)
+        ?? this.boundMcpClientKeysBySocketSession.get(socketSessionId)
+        ?? `method:${request.method}`;
     }
 
     if (request.method === "resources/read") {
@@ -637,6 +626,27 @@ export class UnixSocketServer {
     }
 
     return `method:${request.method}`;
+  }
+
+  private getToolsCallForwardKey(args: unknown, socketSessionId: string): string {
+    const scopedKey = this.getRequestArgumentScopeKey(args);
+    if (scopedKey) {
+      return scopedKey;
+    }
+
+    const boundKey = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
+    if (boundKey) {
+      return boundKey;
+    }
+
+    const implicitAutolockKey = this.getImplicitAutolockScopeKey(socketSessionId, args);
+    if (implicitAutolockKey) {
+      return implicitAutolockKey;
+    }
+
+    // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
+    // pre-forward key so separate daemon clients can autolock and run independently.
+    return `socket:${socketSessionId}`;
   }
 
   private recordBoundMcpClientKey(

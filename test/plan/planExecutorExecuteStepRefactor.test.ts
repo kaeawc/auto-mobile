@@ -227,40 +227,50 @@ describe("PlanExecutor executeStep refactor", () => {
     }
   });
 
-  test("rejects a capability-disabled step before invoking its handler", async () => {
+  test("rejects a capability-disabled device-aware step before target resolution", async () => {
     const clipboardHandler = mock(async () => createStructuredToolResponse({ success: true }));
-    ToolRegistry.register(
+    ToolRegistry.registerDeviceAware(
       "clipboard",
       "clipboard",
-      z.object({}),
+      z.object({ sessionUuid: z.string().optional() }),
       clipboardHandler
     );
-    (ToolRegistry.getTool("clipboard") as { requiresDevice: boolean }).requiresDevice = true;
     const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
       isEnabled: async (_sessionUuid, capability) => capability !== "clipboard",
     };
-
-    const result = await planExecutor.executePlan(
-      {
-        name: "capability-denied-step",
-        steps: [{ tool: "clipboard", params: {} }],
-      },
-      0,
-      "android",
-      "emulator-5554",
-      "session-1",
-      undefined,
-      undefined,
-      { sessionToolProfileService: profileService }
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.failedStep).toMatchObject({
-      stepIndex: 0,
-      tool: "clipboard",
+    const resolveExecutionTarget = mock(async () => {
+      throw new Error("target resolution should not run");
     });
-    expect(result.failedStep?.error).toContain("requires the 'clipboard' capability");
-    expect(clipboardHandler).not.toHaveBeenCalled();
+    const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: { resolveExecutionTarget },
+    });
+
+    try {
+      const result = await planExecutor.executePlan(
+        {
+          name: "capability-denied-step",
+          steps: [{ tool: "clipboard", params: {} }],
+        },
+        0,
+        "android",
+        "emulator-5554",
+        "session-1",
+        undefined,
+        undefined,
+        { sessionToolProfileService: profileService }
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.failedStep).toMatchObject({
+        stepIndex: 0,
+        tool: "clipboard",
+      });
+      expect(result.failedStep?.error).toContain("requires the 'clipboard' capability");
+      expect(clipboardHandler).not.toHaveBeenCalled();
+      expect(resolveExecutionTarget).not.toHaveBeenCalled();
+    } finally {
+      restorePipelineOverrides();
+    }
   });
 
   test("uses the execution session instead of a sessionUuid supplied by the plan", async () => {

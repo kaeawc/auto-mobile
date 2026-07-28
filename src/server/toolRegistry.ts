@@ -1032,9 +1032,7 @@ export class ToolRegistryClass {
     sessionUuid: string | undefined,
     sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
   ): Promise<any> {
-    if (targetDevice || !tool.deviceAwareHandler) {
-      await assertToolEnabledForSession(tool.name, sessionUuid, sessionToolProfileService);
-    }
+    await assertToolEnabledForSession(tool.name, sessionUuid, sessionToolProfileService);
     if (targetDevice && tool.deviceAwareHandler) {
       return tool.deviceAwareHandler(targetDevice, markInternalToolCall(args), progress, signal);
     }

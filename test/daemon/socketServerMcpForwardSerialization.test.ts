@@ -281,7 +281,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(inFlight).toBe(0);
   });
 
-  test("routes tools/list through the client bound by an earlier session-aware call on the same socket", async () => {
+  test("routes sessionless calls through the client bound by an earlier session-aware call", async () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-session-list-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
@@ -316,13 +316,21 @@ describe("UnixSocketServer MCP forward serialization", () => {
         name: "observe",
         arguments: { sessionUuid: "session-a" },
       });
+      const sessionlessCall = await client.request("tools/call", {
+        name: "videoRecording",
+        arguments: { action: "stop", recordingId: "recording-1" },
+      });
+      const navigationGraph = await client.request("ide/getNavigationGraph", {});
       const refreshedList = await client.request("tools/list", {});
 
       expect(initialList.success).toBe(true);
       expect(initialList.result).toEqual({ tools: [{ name: "client-0" }] });
       expect(call.success).toBe(true);
+      expect(sessionlessCall.success).toBe(true);
+      expect(navigationGraph.success).toBe(true);
       expect(refreshedList.success).toBe(true);
       expect(refreshedList.result).toEqual({ tools: [{ name: "client-1" }] });
+      expect(clients).toHaveLength(2);
     } finally {
       client.close();
     }

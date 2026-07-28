@@ -839,12 +839,13 @@ class DeviceControlPolicyTest {
     // and daemon-published hierarchy. Pixels mode requires this exact equality.
     assertNotNull(
       DeviceControlPolicy.evaluate(
-        inputs(
-          screenshot = screenshotFacts(1313, 2839, CoordinateSpace.Pixels),
-          hierarchy = hierarchyFacts(1313, 2839, CoordinateSpace.Pixels),
-        ),
-        now,
-      ).snapshotOrNull,
+          inputs(
+            screenshot = screenshotFacts(1313, 2839, CoordinateSpace.Pixels),
+            hierarchy = hierarchyFacts(1313, 2839, CoordinateSpace.Pixels),
+          ),
+          now,
+        )
+        .snapshotOrNull
     )
   }
 

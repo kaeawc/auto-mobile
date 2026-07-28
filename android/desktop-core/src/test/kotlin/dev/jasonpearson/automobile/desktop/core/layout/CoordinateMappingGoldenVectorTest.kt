@@ -13,8 +13,9 @@ import org.junit.Test
  *
  * The canonical single source is `test/fixtures/coordinate-mapping-golden-vectors.json` at the repo
  * root. The inline tables below are committed copies of its five [DeviceScreenCoordinateMapper]
- * sections plus the shared scale-reporting contract; `test/parity/coordinateMappingGoldenVectorParity.test.ts`
- * parses these literals out of this file's source and verifies them against the JSON (the same drift-guard mechanism as
+ * sections plus the shared scale-reporting contract;
+ * `test/parity/coordinateMappingGoldenVectorParity.test.ts` parses these literals out of this
+ * file's source and verifies them against the JSON (the same drift-guard mechanism as
  * `PinchGeometryTest.kt` / `pinch-golden-vectors.json`), so a one-sided edit of either side fails
  * `bun test`.
  *
@@ -315,8 +316,16 @@ class CoordinateMappingGoldenVectorTest {
   @Test
   fun `scale reporting matches the golden vectors`() {
     for ((index, vector) in scaleReportingVectors.withIndex()) {
-      assertEquals(vector.expectedPixelWidth, (vector.pointWidth * vector.nativeScale).roundToInt(), "row $index width")
-      assertEquals(vector.expectedPixelHeight, (vector.pointHeight * vector.nativeScale).roundToInt(), "row $index height")
+      assertEquals(
+        vector.expectedPixelWidth,
+        (vector.pointWidth * vector.nativeScale).roundToInt(),
+        "row $index width",
+      )
+      assertEquals(
+        vector.expectedPixelHeight,
+        (vector.pointHeight * vector.nativeScale).roundToInt(),
+        "row $index height",
+      )
     }
   }
 

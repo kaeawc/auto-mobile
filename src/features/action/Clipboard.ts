@@ -7,15 +7,32 @@ import { shellQuote } from "../../utils/shellQuote";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 
+type ClipboardCtrlProxy = {
+  requestClipboard(
+    action: "copy" | "paste" | "clear" | "get",
+    text?: string
+  ): Promise<{ success: boolean; error?: string; text?: string; totalTimeMs: number }>;
+};
+type ClipboardCtrlProxyFactory = (
+  device: BootedDevice,
+  adbFactory: AdbClientFactory
+) => ClipboardCtrlProxy;
+
 export class Clipboard {
   private device: BootedDevice;
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
+  private ctrlProxyFactory: ClipboardCtrlProxyFactory | undefined;
 
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory) {
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    ctrlProxyFactory?: ClipboardCtrlProxyFactory
+  ) {
     this.device = device;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
+    this.ctrlProxyFactory = ctrlProxyFactory;
   }
 
   async execute(
@@ -64,7 +81,7 @@ export class Clipboard {
       return { success: false, action, error: "Text is required for copy action" };
     }
 
-    const client = IOSCtrlProxyClient.getInstance(this.device);
+    const client = this.getIOSCtrlProxy();
     const result = await client.requestClipboard(action, text);
 
     if (!result.success) {
@@ -102,7 +119,7 @@ export class Clipboard {
     }
 
     // Try accessibility service first (preferred method)
-    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    const a11yClient = this.getAndroidCtrlProxy();
 
     try {
       const a11yResult = await a11yClient.requestClipboard(action, text);
@@ -154,6 +171,20 @@ export class Clipboard {
         error: `All clipboard methods failed. Last error: ${error instanceof Error ? error.message : String(error)}`
       };
     }
+  }
+
+  private getIOSCtrlProxy(): ClipboardCtrlProxy {
+    if (this.ctrlProxyFactory) {
+      return this.ctrlProxyFactory(this.device, this.adbFactory);
+    }
+    return IOSCtrlProxyClient.getInstance(this.device);
+  }
+
+  private getAndroidCtrlProxy(): ClipboardCtrlProxy {
+    if (this.ctrlProxyFactory) {
+      return this.ctrlProxyFactory(this.device, this.adbFactory);
+    }
+    return AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
   }
 
   /**

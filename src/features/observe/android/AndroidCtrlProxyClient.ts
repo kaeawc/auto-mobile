@@ -3216,6 +3216,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * accessibility service screenshots (API < 30).
    */
   private async captureScreenshotViaAdb(fallbackReason?: ScreenshotFallbackReason): Promise<ScreenshotCaptureResult> {
+    // Bind the geometry current when the ADB request begins, before its await can let a newer
+    // hierarchy relabel the returned pixels.
+    const captureBinding = this.screenGeometry.bind() ?? undefined;
+
     try {
       const tempFile = "/sdcard/screenshot_stream.png";
       const command = `shell "screencap -p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
@@ -3233,6 +3237,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         success: true,
         data,
         checksum,
+        captureBinding,
         ...ANDROID_ADB_SCREENSHOT_METADATA,
         screenshotFallbackReason: fallbackReason,
       };

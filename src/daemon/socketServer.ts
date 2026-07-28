@@ -174,7 +174,7 @@ export class UnixSocketServer {
    * device session. Follow-up requests can omit their session UUID, so reuse
    * this client to preserve the selected capability profile.
    */
-  private boundMcpClientKeysBySocketSession: Map<string, string> = new Map();
+  private boundMcpClientKeysBySocketSession: Map<string, { forwardKey: string; sessionUuid: string }> = new Map();
   /** Promise tails that serialize MCP HTTP forwards only within the same target key. */
   private mcpForwardTails: Map<string, Promise<void>> = new Map();
   private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -612,12 +612,12 @@ export class UnixSocketServer {
     }
 
     if (request.method === "tools/list") {
-      return this.boundMcpClientKeysBySocketSession.get(socketSessionId) ?? `method:${request.method}`;
+      return this.getBoundMcpClientKey(socketSessionId) ?? `method:${request.method}`;
     }
 
     if (request.method === "ide/getNavigationGraph") {
       return this.getRequestArgumentScopeKey(request.params)
-        ?? this.boundMcpClientKeysBySocketSession.get(socketSessionId)
+        ?? this.getBoundMcpClientKey(socketSessionId)
         ?? `method:${request.method}`;
     }
 
@@ -635,7 +635,7 @@ export class UnixSocketServer {
       return scopedKey;
     }
 
-    const boundKey = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
+    const boundKey = this.getBoundMcpClientKey(socketSessionId);
     if (boundKey) {
       return boundKey;
     }
@@ -660,8 +660,23 @@ export class UnixSocketServer {
     }
     const sessionUuid = this.getSessionUuid(request.params?.arguments);
     if (sessionUuid) {
-      this.boundMcpClientKeysBySocketSession.set(socketSessionId, forwardKey);
+      this.boundMcpClientKeysBySocketSession.set(socketSessionId, { forwardKey, sessionUuid });
     }
+  }
+
+  private getBoundMcpClientKey(socketSessionId: string): string | undefined {
+    const boundClient = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
+    if (!boundClient) {
+      return undefined;
+    }
+    if (!this.daemonState.isInitialized()) {
+      return boundClient.forwardKey;
+    }
+    if (this.daemonState.getSessionManager().getSession(boundClient.sessionUuid)) {
+      return boundClient.forwardKey;
+    }
+    this.boundMcpClientKeysBySocketSession.delete(socketSessionId);
+    return undefined;
   }
 
   private getSessionUuid(args: unknown): string | undefined {
@@ -979,9 +994,31 @@ export class UnixSocketServer {
 
   private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {
     const sessionUuid = this.daemonState.isInitialized()
-      ? this.daemonState.getSessionManager().getSessionForDevice?.(deviceId) ?? undefined
+      ? this.getCapabilityProfileSessionUuid(
+        this.daemonState.getSessionManager().getSessionForDevice?.(deviceId) ?? undefined
+      )
       : undefined;
     await assertToolEnabledForSession(toolName, sessionUuid, this.sessionToolProfileService);
+  }
+
+  private getCapabilityProfileSessionUuid(sessionUuid: string | undefined): string | undefined {
+    if (!sessionUuid || !this.daemonState.isInitialized()) {
+      return sessionUuid;
+    }
+
+    const sessionManager = this.daemonState.getSessionManager();
+    for (
+      let separatorIndex = sessionUuid.lastIndexOf(":");
+      separatorIndex >= 0;
+      separatorIndex = sessionUuid.lastIndexOf(":", separatorIndex - 1)
+    ) {
+      const candidateBaseSessionUuid = sessionUuid.slice(0, separatorIndex);
+      const deviceLabels = sessionManager.getDeviceLabels(candidateBaseSessionUuid);
+      if (deviceLabels && Object.values(deviceLabels).includes(sessionUuid)) {
+        return candidateBaseSessionUuid;
+      }
+    }
+    return sessionUuid;
   }
 
   /**

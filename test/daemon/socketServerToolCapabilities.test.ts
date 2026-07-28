@@ -18,13 +18,17 @@ const device = {
   platform: "android" as const,
 };
 
-function createDaemonState() {
+function createDaemonState(options?: { useLabeledSession?: boolean }) {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
       getSession: () => null,
-      getSessionForDevice: (deviceId: string) => deviceId === device.deviceId ? "device-session-1" : null,
-      getDeviceLabels: () => undefined,
+      getSessionForDevice: (deviceId: string) => deviceId === device.deviceId
+        ? options?.useLabeledSession ? "device-session-1:B" : "device-session-1"
+        : null,
+      getDeviceLabels: (sessionId: string) => sessionId === "device-session-1"
+        ? { A: "device-session-1", B: "device-session-1:B" }
+        : undefined,
       releaseSession: async () => null,
     }),
     getDevicePool: () => ({
@@ -66,7 +70,7 @@ describe("UnixSocketServer app-data capability enforcement", () => {
   let originalGetInstance: typeof AndroidCtrlProxyClient.getInstance;
   let getInstanceCalls: number;
 
-  beforeEach(async () => {
+  async function startServer(options?: { useLabeledSession?: boolean }): Promise<void> {
     socketPath = join(tmpdir(), `tool-capabilities-${randomUUID()}.sock`);
     isEnabled = mock(async () => false);
     const profileService: Pick<SessionToolProfileService, "isEnabled" | "setEnabled"> = {
@@ -89,12 +93,16 @@ describe("UnixSocketServer app-data capability enforcement", () => {
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
-      createDaemonState(),
+      createDaemonState(options),
       new FakeTimer(),
       null,
       { sessionToolProfileService: profileService }
     );
     await server.start();
+  }
+
+  beforeEach(async () => {
+    await startServer();
   });
 
   afterEach(async () => {
@@ -133,5 +141,24 @@ describe("UnixSocketServer app-data capability enforcement", () => {
 
     expect(response.success).toBe(true);
     expect(getInstanceCalls).toBe(1);
+  });
+
+  test("uses the base profile for a labeled device session", async () => {
+    await server.close();
+    await startServer({ useLabeledSession: true });
+
+    const response = await sendRequest(socketPath, "ide/setKeyValue", {
+      deviceId: device.deviceId,
+      appId: "com.example",
+      fileName: "prefs",
+      key: "name",
+      value: "value",
+      type: "STRING",
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("requires the 'app-data-interop' capability");
+    expect(isEnabled).toHaveBeenCalledWith("device-session-1", "app-data-interop");
+    expect(getInstanceCalls).toBe(0);
   });
 });

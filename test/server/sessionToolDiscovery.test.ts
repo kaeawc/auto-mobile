@@ -18,4 +18,11 @@ describe("session-scoped tool discovery", () => {
     expect(binding.bind("transport", "device-session-a")).toBe(false);
     expect(binding.bind("transport", "device-session-b")).toBe(true);
   });
+
+  test("uses the bound session when an explicit session UUID is empty", () => {
+    const binding = new SessionToolBinding();
+    binding.bind("transport", "disabled-session");
+
+    expect(binding.effectiveSessionUuid("transport", { sessionUuid: "" })).toBe("disabled-session");
+  });
 });

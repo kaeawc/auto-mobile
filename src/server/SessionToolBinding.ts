@@ -5,7 +5,7 @@ export class SessionToolBinding {
     const explicit = params && typeof params === "object" && !Array.isArray(params)
       ? (params as Record<string, unknown>).sessionUuid
       : undefined;
-    return typeof explicit === "string"
+    return typeof explicit === "string" && explicit.length > 0
       ? explicit
       : mcpSessionId
         ? this.boundDeviceSessions.get(mcpSessionId)

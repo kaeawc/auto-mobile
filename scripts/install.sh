@@ -2752,6 +2752,15 @@ detect_ide_plugins_dir() {
 }
 
 resolve_auto_mobile_command() {
+    if [[ -n "${AUTOMOBILE_CLI_PATH:-}" ]]; then
+        if [[ ! -x "${AUTOMOBILE_CLI_PATH}" ]]; then
+            log_error "AUTOMOBILE_CLI_PATH must point to an executable AutoMobile CLI: ${AUTOMOBILE_CLI_PATH}"
+            return 1
+        fi
+        AUTO_MOBILE_CMD=("${AUTOMOBILE_CLI_PATH}")
+        return 0
+    fi
+
     if command_exists bunx; then
         AUTO_MOBILE_CMD=("bunx" "@kaeawc/auto-mobile@latest")
         return 0

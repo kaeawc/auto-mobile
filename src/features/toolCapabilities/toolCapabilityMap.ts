@@ -1,13 +1,13 @@
 import type { ToolCapability } from "./SessionToolProfileService";
 
 const groups: Record<ToolCapability, readonly string[]> = {
-  clipboard: ["clipboard", "selectAllText"],
+  "clipboard": ["clipboard", "selectAllText"],
   "advanced-interaction": ["openLink", "imeAction", "dragAndDrop", "pinchOn", "shake", "rotate"],
   "app-permissions": ["getAppPermissions", "setAppPermissions"],
   "device-settings": ["changeLocalization", "getDeviceState", "setDeviceState"],
   "app-data-interop": ["putAppFile", "getPreference", "setPreference", "sqlQuery", "setKeyValue", "removeKeyValue", "clearKeyValueFile"],
-  notifications: ["systemTray", "postNotification", "getNotificationPolicy", "setNotificationPolicy"],
-  telephony: ["phoneCall", "sendSms"],
+  "notifications": ["systemTray", "postNotification", "getNotificationPolicy", "setNotificationPolicy"],
+  "telephony": ["phoneCall", "sendSms"],
   "accessibility-tools": ["accessibility", "accessibilityFocus"],
   "screen-artifacts": ["videoRecording", "deviceSnapshot", "highlight"],
   "test-authoring": ["executePlan", "startTestRecording", "exportPlan", "recordSteps", "barrier", "criticalSection"],

@@ -538,16 +538,16 @@ export class IOSCtrlProxyBuilder {
   /**
    * Prefetch download at startup (background, non-blocking)
    */
-  public static prefetchBuild(): void {
+  public static prefetchBuild(): Promise<CtrlProxyIosBuildResult | null> {
     // Only run on macOS
     if (process.platform !== "darwin") {
       logger.info("[IOSCtrlProxyBuilder] Prefetch skipped (not macOS)");
-      return;
+      return Promise.resolve(null);
     }
 
     if (IOSCtrlProxyBuilder.prefetchPromise !== null) {
       logger.info("[IOSCtrlProxyBuilder] Prefetch already initiated, skipping");
-      return;
+      return IOSCtrlProxyBuilder.prefetchPromise;
     }
 
     logger.info("[IOSCtrlProxyBuilder] Starting download prefetch");
@@ -576,6 +576,7 @@ export class IOSCtrlProxyBuilder {
         });
         return null;
       });
+    return IOSCtrlProxyBuilder.prefetchPromise;
   }
 
   /**

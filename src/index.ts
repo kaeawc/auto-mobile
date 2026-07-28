@@ -75,6 +75,9 @@ setFatalProcessHandler(event => {
 });
 
 async function main() {
+  startupBenchmark.mark("processEntry");
+  startupBenchmark.startPhase("moduleImports");
+
   const rawArgs = process.argv.slice(2);
   const bootDeviceIndex = rawArgs.indexOf("--boot-device");
   if (bootDeviceIndex >= 0) {
@@ -82,6 +85,7 @@ async function main() {
     // import and startup side effect: no database, daemon, CtrlProxy, or media
     // cache work is needed to launch and await a device.
     const { runBootDeviceCommand } = await import("./cli/bootDevice");
+    startupBenchmark.endPhase("moduleImports");
     await runBootDeviceCommand(rawArgs.slice(bootDeviceIndex + 1));
     // Android launch owns a live emulator child; the one-shot caller only
     // needs the already-flushed JSON result, not that child as its own event
@@ -110,8 +114,7 @@ async function main() {
   const { AndroidCtrlProxyManager } = await import("./utils/CtrlProxyManager");
   const { IOSCtrlProxyBuilder } = await import("./utils/IOSCtrlProxyBuilder");
   const { IOSCtrlProxyManager } = await import("./utils/IOSCtrlProxyManager");
-
-  startupBenchmark.mark("processEntry");
+  startupBenchmark.endPhase("moduleImports");
 
   const { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } = videoRecordingSocketServer;
   const { startTestRecordingSocketServer, stopTestRecordingSocketServer } = testRecordingSocketServer;
@@ -192,10 +195,14 @@ async function main() {
     });
     if (skipCtrlProxyDownload) {
       logger.info(`CtrlProxy downloads disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`);
+      startupBenchmark.recordPhase("androidCtrlProxyPrefetch", 0);
     } else {
       // Start prefetching the accessibility service APK in the background
       // This runs asynchronously and will be ready when first device connects
-      AndroidCtrlProxyManager.prefetchApk();
+      startupBenchmark.startPhase("androidCtrlProxyPrefetch");
+      void AndroidCtrlProxyManager.prefetchApk().then(() => {
+        startupBenchmark.endPhase("androidCtrlProxyPrefetch");
+      });
     }
 
     // Start the iOS build prefetch asynchronously so it can be ready for first
@@ -203,8 +210,12 @@ async function main() {
     if (process.platform === "darwin") {
       if (skipCtrlProxyDownload) {
         logger.info(`CtrlProxy iOS prefetch disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`);
+        startupBenchmark.recordPhase("iosCtrlProxyPrefetch", 0);
       } else {
-        IOSCtrlProxyBuilder.prefetchBuild();
+        startupBenchmark.startPhase("iosCtrlProxyPrefetch");
+        void IOSCtrlProxyBuilder.prefetchBuild().then(() => {
+          startupBenchmark.endPhase("iosCtrlProxyPrefetch");
+        });
       }
     }
 
@@ -282,31 +293,33 @@ async function main() {
       }
     };
 
-    if (daemonMode) {
-      await guardDatabaseStartup(async () => {
-        await new DefaultDatabaseInitializer().initialize();
-        await applyFeatureFlagStartup();
-      });
-    } else {
-      // Direct mode (--no-proxy/--direct) opens the shared SQLite DB in-process
-      // with no cross-process lock. Refuse BEFORE the first DB touch (feature-flag
-      // startup opens the DB and runs migrations) if a live daemon already owns
-      // the SAME resolved DB file, to avoid two writers on one sqlite file
-      // (SQLITE_BUSY stalls, competing migrations, aux-socket bind conflicts).
-      // File-scoped, so an isolated AUTOMOBILE_DB_PATH still starts normally. #2795
-      // The ordering (guard before the DB touch, only under noProxy) lives behind
-      // runDirectModeStartup() so it can be unit-tested with fakes (issue #2871).
-      const { runDirectModeStartup } = await import("./daemon/directModeStartup");
-      await runDirectModeStartup({
-        noProxy,
-        assertDbOwnership: async () => {
-          const { assertDirectModeDbOwnership, createDefaultDirectModeGuardDeps } =
-            await import("./daemon/directModeGuard");
-          assertDirectModeDbOwnership(createDefaultDirectModeGuardDeps());
-        },
-        applyFeatureFlagStartup,
-      });
-    }
+    await startupBenchmark.runPhase("databasePreflight", async () => {
+      if (daemonMode) {
+        await guardDatabaseStartup(async () => {
+          await new DefaultDatabaseInitializer().initialize();
+          await applyFeatureFlagStartup();
+        });
+      } else {
+        // Direct mode (--no-proxy/--direct) opens the shared SQLite DB in-process
+        // with no cross-process lock. Refuse BEFORE the first DB touch (feature-flag
+        // startup opens the DB and runs migrations) if a live daemon already owns
+        // the SAME resolved DB file, to avoid two writers on one sqlite file
+        // (SQLITE_BUSY stalls, competing migrations, aux-socket bind conflicts).
+        // File-scoped, so an isolated AUTOMOBILE_DB_PATH still starts normally. #2795
+        // The ordering (guard before the DB touch, only under noProxy) lives behind
+        // runDirectModeStartup() so it can be unit-tested with fakes (issue #2871).
+        const { runDirectModeStartup } = await import("./daemon/directModeStartup");
+        await runDirectModeStartup({
+          noProxy,
+          assertDbOwnership: async () => {
+            const { assertDirectModeDbOwnership, createDefaultDirectModeGuardDeps } =
+              await import("./daemon/directModeGuard");
+            assertDirectModeDbOwnership(createDefaultDirectModeGuardDeps());
+          },
+          applyFeatureFlagStartup,
+        });
+      }
+    });
 
     if (noWaitForPollingOverhead) {
       serverConfig.setWaitForPollingOverheadEnabled(false);

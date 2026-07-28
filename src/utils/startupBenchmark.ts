@@ -1,31 +1,41 @@
 import { performance } from "node:perf_hooks";
 import fs from "node:fs";
 import path from "node:path";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
 
 const STARTUP_BENCHMARK_PREFIX = "STARTUP_BENCHMARK";
 
 interface StartupBenchmarkReport {
   type: string;
+  state: "in_progress" | "ready";
   timestamp: string;
   pid: number;
   label?: string;
   marks: Record<string, number>;
   phases: Record<string, number>;
+  activePhases: string[];
   memoryUsage: NodeJS.MemoryUsage;
   meta: Record<string, unknown>;
 }
 
-const envEnabledRaw =
-  process.env.AUTOMOBILE_STARTUP_BENCHMARK ??
-  process.env.AUTO_MOBILE_STARTUP_BENCHMARK ??
-  "";
+export function isStartupBenchmarkEnabled(
+  args: readonly string[],
+  environment: Readonly<Record<string, string | undefined>>
+): boolean {
+  if (args.includes("--startup-benchmark")) {
+    return true;
+  }
 
-const envEnabled = envEnabledRaw.toLowerCase();
-const enabled =
-  process.argv.includes("--startup-benchmark") ||
-  envEnabled === "1" ||
-  envEnabled === "true" ||
-  envEnabled === "yes";
+  const envEnabled = (
+    environment.AUTOMOBILE_STARTUP_BENCHMARK ??
+    environment.AUTO_MOBILE_STARTUP_BENCHMARK ??
+    ""
+  ).toLowerCase();
+  return args.includes("--daemon-mode") &&
+    (envEnabled === "1" || envEnabled === "true" || envEnabled === "yes");
+}
+
+const enabled = isStartupBenchmarkEnabled(process.argv, process.env);
 
 const outputPath =
   process.env.AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT ??
@@ -35,15 +45,39 @@ const label =
   process.env.AUTOMOBILE_STARTUP_BENCHMARK_LABEL ??
   process.env.AUTO_MOBILE_STARTUP_BENCHMARK_LABEL;
 
-class StartupBenchmark {
+export interface StartupBenchmarkOptions {
+  outputPath?: string;
+  label?: string;
+  now?: () => number;
+  fileSystem?: StartupBenchmarkFileSystem;
+}
+
+export type StartupBenchmarkFileSystem = Pick<
+  typeof fs,
+  "existsSync" | "mkdirSync" | "renameSync" | "writeFileSync"
+>;
+
+export class StartupBenchmark {
   private marks = new Map<string, number>();
   private phaseStarts = new Map<string, number>();
   private phases = new Map<string, number>();
   private emitted = false;
+  private emittedReport: { type: string; meta: Record<string, unknown> } | undefined;
   private readonly enabled: boolean;
+  private readonly outputPath: string | undefined;
+  private readonly label: string | undefined;
+  private readonly now: () => number;
+  private readonly fileSystem: StartupBenchmarkFileSystem;
 
-  constructor(isEnabled: boolean) {
+  constructor(isEnabled: boolean, options: StartupBenchmarkOptions = {}) {
     this.enabled = isEnabled;
+    const rawOutputPath = options.outputPath ?? outputPath;
+    this.outputPath = rawOutputPath
+      ? resolvePathFromDaemonLaunchWorkingDirectory(rawOutputPath)
+      : undefined;
+    this.label = options.label ?? label;
+    this.now = options.now ?? performance.now;
+    this.fileSystem = options.fileSystem ?? fs;
   }
 
   isEnabled(): boolean {
@@ -54,14 +88,23 @@ class StartupBenchmark {
     if (!this.enabled || this.marks.has(name)) {
       return;
     }
-    this.marks.set(name, performance.now());
+    this.marks.set(name, this.now());
+    this.persistCheckpoint();
   }
 
   startPhase(name: string): void {
     if (!this.enabled || this.phases.has(name) || this.phaseStarts.has(name)) {
       return;
     }
-    this.phaseStarts.set(name, performance.now());
+    this.phaseStarts.set(name, this.now());
+    this.persistCheckpoint();
+  }
+
+  async runPhase<T>(name: string, work: () => Promise<T>): Promise<T> {
+    this.startPhase(name);
+    const result = await work();
+    this.endPhase(name);
+    return result;
   }
 
   endPhase(name: string): void {
@@ -72,7 +115,9 @@ class StartupBenchmark {
     if (start === undefined) {
       return;
     }
-    this.phases.set(name, performance.now() - start);
+    this.phases.set(name, this.now() - start);
+    this.phaseStarts.delete(name);
+    this.persistCheckpoint();
   }
 
   recordPhase(name: string, durationMs: number): void {
@@ -80,6 +125,7 @@ class StartupBenchmark {
       return;
     }
     this.phases.set(name, durationMs);
+    this.persistCheckpoint();
   }
 
   emit(type: string, meta: Record<string, unknown> = {}): void {
@@ -87,36 +133,58 @@ class StartupBenchmark {
       return;
     }
     this.emitted = true;
+    this.emittedReport = { type, meta };
 
+    const report = this.createReport(type, "ready", meta);
+    const payload = JSON.stringify(report);
+
+    this.writeReport(payload);
+    process.stderr.write(`${STARTUP_BENCHMARK_PREFIX} ${payload}\n`);
+  }
+
+  private persistCheckpoint(): void {
+    if (!this.enabled) {
+      return;
+    }
+    const report = this.emittedReport
+      ? this.createReport(this.emittedReport.type, "ready", this.emittedReport.meta)
+      : this.createReport("startup-checkpoint", "in_progress");
+    this.writeReport(JSON.stringify(report));
+  }
+
+  private createReport(
+    type: string,
+    state: StartupBenchmarkReport["state"],
+    meta: Record<string, unknown> = {}
+  ): StartupBenchmarkReport {
     const marks = Object.fromEntries(this.marks.entries());
     const phases = Object.fromEntries(this.phases.entries());
 
-    if (marks.processEntry !== undefined && phases.moduleImports === undefined) {
-      phases.moduleImports = marks.processEntry;
-    }
-
-    const report: StartupBenchmarkReport = {
+    return {
       type,
+      state,
       timestamp: new Date().toISOString(),
       pid: process.pid,
-      label,
+      label: this.label,
       marks,
       phases,
+      activePhases: [...this.phaseStarts.keys()],
       memoryUsage: process.memoryUsage(),
-      meta
+      meta,
     };
+  }
 
-    const payload = JSON.stringify(report);
-
-    if (outputPath) {
-      const dir = path.dirname(outputPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(outputPath, payload, "utf-8");
+  private writeReport(payload: string): void {
+    if (!this.outputPath) {
+      return;
     }
-
-    process.stderr.write(`${STARTUP_BENCHMARK_PREFIX} ${payload}\n`);
+    const dir = path.dirname(this.outputPath);
+    if (!this.fileSystem.existsSync(dir)) {
+      this.fileSystem.mkdirSync(dir, { recursive: true });
+    }
+    const temporaryPath = `${this.outputPath}.${process.pid}.tmp`;
+    this.fileSystem.writeFileSync(temporaryPath, payload, "utf-8");
+    this.fileSystem.renameSync(temporaryPath, this.outputPath);
   }
 }
 

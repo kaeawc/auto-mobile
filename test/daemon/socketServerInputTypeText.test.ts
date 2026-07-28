@@ -903,6 +903,36 @@ describe("UnixSocketServer input/typeText", () => {
     });
   });
 
+  test("rejects stale context before append mode emits Android key events", async () => {
+    const appendText = mock(async () => ({ success: true, charsSent: 1 }));
+    const validateFrameContext = mock(async () => ({
+      success: false,
+      error: "Stale frame context; observe a fresh frame before retrying",
+    }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      validateFrameContext,
+      requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server.appendTextFactory = () => ({ appendText });
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext = () => {};
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "a",
+      mode: "append",
+      frameContext: "epoch:2",
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("Stale frame context");
+    expect(validateFrameContext).toHaveBeenCalledWith("epoch:2", 30_000);
+    expect(appendText).not.toHaveBeenCalled();
+  });
+
   test("serializes concurrent typeText calls for the same device", async () => {
     let inFlight = 0;
     let maxInFlight = 0;

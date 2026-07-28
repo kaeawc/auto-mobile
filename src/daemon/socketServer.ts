@@ -1380,7 +1380,14 @@ export class UnixSocketServer {
     // input for this device, not just this one request.
     let appendCharsSent: number | undefined;
     if (append && platform === "android") {
-      const textResult = await this.getAppendTextInput(targetDevice).appendText(text, timeoutMs);
+      const textResult = await this.executeAndroidAppendText(
+        targetDevice,
+        text,
+        deadline,
+        timeoutMs,
+        frameContext,
+        client as AndroidCtrlProxyClient
+      );
       if (textResult.charsSent !== undefined) {
         onConfirmedAppendCharsSent?.(textResult.charsSent);
       }
@@ -1401,6 +1408,40 @@ export class UnixSocketServer {
       }
     }
     return await this.runImeActionWithinBudget(client, imeAction, deadline, timeoutMs, appendCharsSent);
+  }
+
+  private async executeAndroidAppendText(
+    targetDevice: BootedDevice,
+    text: string,
+    deadline: number,
+    totalTimeoutMs: number,
+    frameContext: string | undefined,
+    client: AndroidCtrlProxyClient
+  ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
+    if (frameContext !== undefined) {
+      const validationTimeoutMs = deadline - this.timer.now();
+      if (validationTimeoutMs <= 0) {
+        return {
+          success: false,
+          error: `input/typeText exceeded ${totalTimeoutMs}ms budget before append frame context validation`,
+        };
+      }
+      const validation = await client.validateFrameContext(frameContext, validationTimeoutMs);
+      if (!validation.success) {
+        return {
+          success: false,
+          error: validation.error ?? "Frame context is stale or unavailable; observe a fresh frame before retrying",
+        };
+      }
+    }
+    const appendTimeoutMs = deadline - this.timer.now();
+    if (appendTimeoutMs <= 0) {
+      return {
+        success: false,
+        error: `input/typeText exceeded ${totalTimeoutMs}ms budget before append key events`,
+      };
+    }
+    return await this.getAppendTextInput(targetDevice).appendText(text, appendTimeoutMs);
   }
 
   private async runImeActionWithinBudget(

@@ -4,6 +4,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 
 export const INPUT_KEY_CODE_MAP = {
   enter: "KEYCODE_ENTER",
@@ -49,7 +50,8 @@ export class InputKey {
   constructor(
     device: BootedDevice,
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    private readonly frameContextValidator?: FrameContextValidator
+    private readonly frameContextValidator?: FrameContextValidator,
+    private readonly timer: Timer = defaultTimer
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -71,20 +73,21 @@ export class InputKey {
 
     const keyCode = INPUT_KEY_CODE_MAP[key];
     try {
-      if (frameContext !== undefined) {
-        const validator = this.frameContextValidator ??
-          AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-        const validation = await validator.validateFrameContext(frameContext, timeoutMs);
-        if (!validation.success) {
-          return {
-            success: false,
-            key,
-            keyCode,
-            error: validation.error ?? "Frame context is stale or unavailable; observe a fresh frame before retrying",
-          };
-        }
+      const deadlineMs = timeoutMs !== undefined ? this.timer.now() + timeoutMs : undefined;
+      const validationFailure = await this.validateFrameContext(key, keyCode, frameContext, deadlineMs);
+      if (validationFailure) {
+        return validationFailure;
       }
-      await this.adb.executeCommand(`shell input keyevent ${keyCode}`, timeoutMs, undefined, true);
+      const adbTimeoutMs = this.remainingMs(deadlineMs);
+      if (adbTimeoutMs !== undefined && adbTimeoutMs <= 0) {
+        return {
+          success: false,
+          key,
+          keyCode,
+          error: "input/key deadline exhausted before ADB keyevent",
+        };
+      }
+      await this.adb.executeCommand(`shell input keyevent ${keyCode}`, adbTimeoutMs, undefined, true);
       return {
         success: true,
         key,
@@ -100,5 +103,41 @@ export class InputKey {
         error: `Failed to press key "${key}": ${message}`,
       };
     }
+  }
+
+  private async validateFrameContext(
+    key: InputKeyName,
+    keyCode: string,
+    frameContext: string | undefined,
+    deadlineMs: number | undefined
+  ): Promise<InputKeyResult | undefined> {
+    if (frameContext === undefined) {
+      return undefined;
+    }
+    const validationTimeoutMs = this.remainingMs(deadlineMs);
+    if (validationTimeoutMs !== undefined && validationTimeoutMs <= 0) {
+      return {
+        success: false,
+        key,
+        keyCode,
+        error: "input/key deadline exhausted before frame context validation",
+      };
+    }
+    const validator = this.frameContextValidator ??
+      AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    const validation = await validator.validateFrameContext(frameContext, validationTimeoutMs);
+    if (validation.success) {
+      return undefined;
+    }
+    return {
+      success: false,
+      key,
+      keyCode,
+      error: validation.error ?? "Frame context is stale or unavailable; observe a fresh frame before retrying",
+    };
+  }
+
+  private remainingMs(deadlineMs: number | undefined): number | undefined {
+    return deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
   }
 }

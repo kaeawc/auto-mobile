@@ -3,6 +3,7 @@ import { InputKey } from "../../../src/features/action/InputKey";
 import type { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -113,6 +114,52 @@ describe("InputKey", () => {
 
     expect(calls).toEqual([["epoch:3", 1234]]);
     expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_TAB"]);
+  });
+
+  test("shares one deadline between frame validation and the ADB keyevent", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const validationTimeouts: number[] = [];
+    const validator = {
+      validateFrameContext: async (_frameContext: string, timeoutMs?: number) => {
+        validationTimeouts.push(timeoutMs ?? -1);
+        timer.advanceTime(400);
+        return { success: true };
+      },
+    };
+    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator, timer);
+
+    const result = await inputKey.press("tab", 1_000, "epoch:4");
+
+    expect(result.success).toBe(true);
+    expect(validationTimeouts).toEqual([1_000]);
+    expect(fakeAdb.getCommandCalls()).toEqual([
+      {
+        command: "shell input keyevent KEYCODE_TAB",
+        timeoutMs: 600,
+        maxBuffer: undefined,
+        noRetry: true,
+        signal: undefined,
+      },
+    ]);
+  });
+
+  test("does not issue an ADB keyevent after validation exhausts the shared deadline", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const validator = {
+      validateFrameContext: async () => {
+        timer.advanceTime(1_000);
+        return { success: true };
+      },
+    };
+    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator, timer);
+
+    const result = await inputKey.press("tab", 1_000, "epoch:5");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("deadline exhausted");
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 
   test("wraps an ADB keyevent failure in a stable error envelope", async () => {

@@ -81,4 +81,37 @@ describe("PressButton Android keycode dispatch", () => {
     expect(result).toEqual({ success: true, button, keyCode });
     expect(fakeAdb.getExecutedCommands()).toEqual([`shell input keyevent ${keyCode}`]);
   });
+
+  test("rejects a stale context instead of falling back from a failed global action to ADB", async () => {
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      requestGlobalAction: async () => ({ success: false, error: "global action unavailable" }),
+      validateFrameContext: async () => ({
+        success: false,
+        error: "Stale frame context; observe a fresh frame before retrying",
+      }),
+    } as unknown as AndroidCtrlProxyClient);
+
+    const pressButton = new PressButton(androidDevice, fakeAdb);
+    const result = await (pressButton as any).executeAndroidButtonPress("back", 500, "epoch:2");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Stale frame context");
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("validates a context before dispatching an ADB-only hardware button", async () => {
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      validateFrameContext: async () => ({
+        success: false,
+        error: "Stale frame context; observe a fresh frame before retrying",
+      }),
+    } as unknown as AndroidCtrlProxyClient);
+
+    const pressButton = new PressButton(androidDevice, fakeAdb);
+    const result = await (pressButton as any).executeAndroidButtonPress("volume_up", 500, "epoch:3");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Stale frame context");
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
 });

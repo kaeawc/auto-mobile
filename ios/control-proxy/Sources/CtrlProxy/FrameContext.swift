@@ -1,25 +1,46 @@
 import Foundation
 
+protocol FrameContextMainExecuting: AnyObject {
+    func perform<T>(_ operation: () throws -> T) throws -> T
+}
+
+private final class MainThreadFrameContextExecutor: FrameContextMainExecuting {
+    func perform<T>(_ operation: () throws -> T) throws -> T {
+        try withoutActuallyEscaping(operation) { operation in
+            try runOnMainThread(operation)
+        }
+    }
+}
+
 /// Stable, opaque identity for a device hierarchy. A tracker belongs to one CtrlProxy process,
 /// so a delayed context can never be reused after that process restarts.
 public final class FrameContext {
     private let lock = NSLock()
     private let epoch: UUID
+    private let mainThreadExecutor: FrameContextMainExecuting
     private var generation: UInt64 = 0
 
     public init(epoch: UUID = UUID()) {
         self.epoch = epoch
+        mainThreadExecutor = MainThreadFrameContextExecutor()
+    }
+
+    init(epoch: UUID, mainThreadExecutor: FrameContextMainExecuting) {
+        self.epoch = epoch
+        self.mainThreadExecutor = mainThreadExecutor
     }
 
     /// Records a device-side UI transition and returns the context for that exact generation.
     @discardableResult
     public func recordTransition(to hierarchy: ViewHierarchy) -> String? {
-        let hash = Self.semanticHash(hierarchy)
-        lock.lock()
-        generation &+= 1
-        let context = hash.map { "\(epoch.uuidString):\(generation):\($0)" }
-        lock.unlock()
-        return context
+        try? mainThreadExecutor.perform { [self] in
+            let hash = Self.semanticHash(hierarchy)
+            self.lock.lock()
+            self.generation &+= 1
+            let context = hash.map { "\(self.epoch.uuidString):\(self.generation):\($0)" }
+            self.lock.unlock()
+            return context
+        }
     }
 
     public func context(for hierarchy: ViewHierarchy) -> String? {
@@ -29,7 +50,7 @@ public final class FrameContext {
         return Self.semanticHash(hierarchy).map { "\(epoch.uuidString):\(currentGeneration):\($0)" }
     }
 
-    /// Validates a context against the current hierarchy before dispatching a gesture.
+    /// Validates a context and dispatches its gesture on the transition executor.
     func performIfCurrent<T>(
         expected: String?,
         hierarchy: ViewHierarchy?,
@@ -37,20 +58,22 @@ public final class FrameContext {
     )
         throws -> T
     {
-        guard let expected else { return try operation() }
-        guard let hierarchy else {
-            throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
-        }
+        try mainThreadExecutor.perform { [self] in
+            guard let expected else { return try operation() }
+            guard let hierarchy else {
+                throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
+            }
 
-        let hash = Self.semanticHash(hierarchy)
-        lock.lock()
-        let isCurrent = hash.map { "\(epoch.uuidString):\(generation):\($0)" } == expected
-        lock.unlock()
+            let hash = Self.semanticHash(hierarchy)
+            self.lock.lock()
+            let isCurrent = hash.map { "\(self.epoch.uuidString):\(self.generation):\($0)" } == expected
+            self.lock.unlock()
 
-        guard isCurrent else {
-            throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
+            guard isCurrent else {
+                throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
+            }
+            return try operation()
         }
-        return try operation()
     }
 
     private static func semanticHash(_ hierarchy: ViewHierarchy) -> String? {

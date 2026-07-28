@@ -160,7 +160,6 @@ import dev.jasonpearson.automobile.desktop.core.video.toImageBitmap
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
-import dev.jasonpearson.automobile.desktop.domain.LiveFrameFacts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
@@ -551,10 +550,10 @@ fun AutoMobileContent(
       }
     }
   val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId, MONOTONIC_NOW_MS)
-  // Forces the control-availability decision to be re-evaluated on a timer, not only when a source
-  // produces an update (issue #3348). A stalled relay produces nothing at all — its staleness is
-  // visible only as time passing — so without this a frozen mirror would stay clickable until some
-  // unrelated recomposition happened to run.
+  // Forces the control-availability decision to be re-evaluated on a timer, not only when an
+  // observation source produces an update (issue #3348). A stalled observation stream produces
+  // nothing at all — its staleness is visible only as time passing — so without this a frozen
+  // screenshot would stay clickable until some unrelated recomposition happened to run.
   val controlFreshnessTick = rememberControlFreshnessTick(enableDeviceControl && isLiveLayoutMode)
 
   // Pending failure ID for deep linking from notifications
@@ -914,6 +913,10 @@ fun AutoMobileContent(
     liveStreamClient.resetLayoutReplayCache()
     liveStreamClient.hierarchyUpdates.collect { update ->
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
+      deviceControlSession.onObservationFrameContextDeclared(
+        update.frameContext,
+        update.captureSequence,
+      )
       // AT RECEIPT, before the parse below and before the layout state's debounce: the daemon has
       // already switched to interpreting input under the new scale metadata by the time it
       // publishes a new declaration, so a flip has to invalidate control NOW. Detecting it from
@@ -952,6 +955,7 @@ fun AutoMobileContent(
             // resolution change can never supply the bounds a tap is mapped through — however few
             // milliseconds behind it is (issue #3348).
             captureSequence = update.captureSequence,
+            frameContext = update.frameContext,
             // The unit this update's bounds are in, as the daemon declared it. Carried per update
             // rather than per session because the declaration is per message, and the control
             // policy only compares dimensions exactly when the paired screenshot declared the same
@@ -970,6 +974,10 @@ fun AutoMobileContent(
     liveStreamClient.resetLayoutReplayCache()
     liveStreamClient.screenshotUpdates.collect { update ->
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
+      deviceControlSession.onObservationFrameContextDeclared(
+        update.frameContext,
+        update.captureSequence,
+      )
       // Same receipt-time gate as the hierarchy collector; see its comment (issue #4550).
       deviceControlSession.onObservationSpaceDeclared(
         update.coordinateSpace,
@@ -1002,6 +1010,7 @@ fun AutoMobileContent(
           generation = generation,
           // Pairs by equality against the hierarchy's id; see the hierarchy collector above.
           captureSequence = update.captureSequence,
+          frameContext = update.frameContext,
           // Same reasoning as the hierarchy collector: the declared unit travels with the frame
           // (issue #4550).
           coordinateSpace = update.coordinateSpace,
@@ -1645,8 +1654,9 @@ fun AutoMobileContent(
           // view then maps clicks through that snapshot and hands it back with each tap, so a
           // snapshot swap between click and dispatch cannot change what the daemon receives.
           //
-          // Re-evaluated on a slow ticker as well as on source updates, because a stalled live
-          // relay produces no updates at all — its staleness is only visible as time passing.
+          // Re-evaluated on a slow ticker as well as on source updates, because a stalled
+          // observation stream produces no updates at all — its staleness is only visible as time
+          // passing.
           controlFreshnessTick
           val deviceControlDecision =
             deviceControlSession.evaluate(
@@ -1660,17 +1670,10 @@ fun AutoMobileContent(
                   layoutInspectorState.connectionStatus == ConnectionStatus.Connected,
                 screenshot = layoutInspectorState.screenshotFacts,
                 hierarchy = layoutInspectorState.hierarchyFacts,
-                liveFrame =
-                  liveVideoFrame?.let { frame ->
-                    LiveFrameFacts(
-                      deviceId = activeDeviceId,
-                      sequence = frame.sequence,
-                      receivedAtMs = frame.receivedAtMs,
-                      width = frame.bitmap.width,
-                      height = frame.bitmap.height,
-                      rotation = frame.rotation,
-                    )
-                  },
+                // Control maps and renders the paired observation screenshot. WebRTC has no
+                // capture identity, so it is only an Inspector-mode rendering source and must not
+                // decide whether the independently paired screenshot is actionable.
+                liveFrame = null,
               )
             )
           // What a CLICK acts through. While a post-input refresh is pending this is the retained
@@ -1693,7 +1696,10 @@ fun AutoMobileContent(
             DeviceScreenView(
               screenshotData =
                 renderSnapshot?.screenshotData ?: layoutInspectorState.screenshotData,
-              liveFrame = liveVideoFrame?.bitmap,
+              // WebRTC frames have no capture identity. In control mode render the paired
+              // observation screenshot instead, so the pixels the user clicks carry the same
+              // frameContext as the hierarchy and input request.
+              liveFrame = if (controlSnapshot == null) liveVideoFrame?.bitmap else null,
               screenWidth = renderSnapshot?.deviceWidth ?: layoutInspectorState.screenWidth,
               screenHeight = renderSnapshot?.deviceHeight ?: layoutInspectorState.screenHeight,
               rotation = layoutInspectorState.rotation,

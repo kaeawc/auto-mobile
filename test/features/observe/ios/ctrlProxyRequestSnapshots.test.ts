@@ -170,7 +170,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   {
     name: "request_append_text",
     builder: "CtrlProxyText.requestAppendText",
-    invoke: h => new CtrlProxyText(h.context).requestAppendText("a"),
+    invoke: h => new CtrlProxyText(h.context).requestAppendText("a", 5000, undefined, "frame-context"),
   },
   {
     name: "request_clear_text",
@@ -195,17 +195,17 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   {
     name: "request_press_button",
     builder: "CtrlProxyNavigation.requestPressButton",
-    invoke: h => new CtrlProxyNavigation(h.context).requestPressButton("volume_up"),
+    invoke: h => new CtrlProxyNavigation(h.context).requestPressButton("volume_up", 5000, undefined, "frame-context"),
   },
   {
     name: "request_press_home",
     builder: "CtrlProxyNavigation.requestPressHome",
-    invoke: h => new CtrlProxyNavigation(h.context).requestPressHome(),
+    invoke: h => new CtrlProxyNavigation(h.context).requestPressHome(5000, undefined, "frame-context"),
   },
   {
     name: "request_press_back",
     builder: "CtrlProxyNavigation.requestPressBack",
-    invoke: h => new CtrlProxyNavigation(h.context).requestPressBack(),
+    invoke: h => new CtrlProxyNavigation(h.context).requestPressBack(5000, undefined, "frame-context"),
   },
   {
     name: "request_shake",
@@ -215,7 +215,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   {
     name: "request_recent_apps",
     builder: "CtrlProxyNavigation.requestRecentApps",
-    invoke: h => new CtrlProxyNavigation(h.context).requestRecentApps(),
+    invoke: h => new CtrlProxyNavigation(h.context).requestRecentApps(5000, undefined, "frame-context"),
   },
   {
     name: "request_action",

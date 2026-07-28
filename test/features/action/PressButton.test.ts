@@ -96,6 +96,45 @@ describe("PressButton", () => {
     }
   });
 
+  test("ios button presses retain their desktop frame context through the runner request", async () => {
+    const contexts: string[] = [];
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPressBack: async (_timeoutMs?: number, _perf?: unknown, frameContext?: string) => {
+        contexts.push(frameContext ?? "");
+        return { success: true, totalTimeMs: 5 };
+      },
+      requestPressHome: async (_timeoutMs?: number, _perf?: unknown, frameContext?: string) => {
+        contexts.push(frameContext ?? "");
+        return { success: true, totalTimeMs: 5 };
+      },
+      requestRecentApps: async (_timeoutMs?: number, _perf?: unknown, frameContext?: string) => {
+        contexts.push(frameContext ?? "");
+        return { success: true, totalTimeMs: 5 };
+      },
+      requestPressButton: async (
+        _button: string,
+        _timeoutMs?: number,
+        _perf?: unknown,
+        frameContext?: string
+      ) => {
+        contexts.push(frameContext ?? "");
+        return { success: true, totalTimeMs: 5 };
+      }
+    } as any);
+
+    try {
+      const pressButton = new PressButton(iosDevice);
+      await pressButton.press("home", undefined, "desktop-frame");
+      await pressButton.press("back", undefined, "desktop-frame");
+      await pressButton.press("recent", undefined, "desktop-frame");
+      await pressButton.press("volume_up", undefined, "desktop-frame");
+
+      expect(contexts).toEqual(["desktop-frame", "desktop-frame", "desktop-frame", "desktop-frame"]);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
   test("android ADB keyevent honors the caller timeout budget", async () => {
     const androidDevice: BootedDevice = {
       deviceId: "android-device",

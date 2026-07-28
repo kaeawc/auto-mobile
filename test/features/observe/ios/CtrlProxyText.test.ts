@@ -16,6 +16,20 @@ describe("CtrlProxyText requestAppendText", () => {
     await expect(pending).resolves.toEqual({ success: true, totalTimeMs: 1 });
   });
 
+  test("includes a frame context when supplied", async () => {
+    const harness = createIosDelegateHarness({ supportedCommands: ["request_append_text"] });
+    const pending = new CtrlProxyText(harness.context).requestAppendText("a", 5000, undefined, "ios:7");
+    await flush();
+
+    expect(harness.sentMessages[0]).toMatchObject({
+      type: "request_append_text",
+      text: "a",
+      frameContext: "ios:7",
+    });
+    expect(harness.resolveLast({ success: true, totalTimeMs: 1 })).toBe(true);
+    await expect(pending).resolves.toEqual({ success: true, totalTimeMs: 1 });
+  });
+
   test("falls back to focused-field typeText on a runner that predates append", async () => {
     const harness = createIosDelegateHarness({ supportedCommands: ["request_set_text"] });
     const pending = new CtrlProxyText(harness.context).requestAppendText("a");

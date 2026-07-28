@@ -42,6 +42,7 @@ class DeviceControlInputForwarder {
    * @param client the daemon client to tap through, snapshotted at click time; null drops the tap.
    * @param platform the daemon platform string for the tapped device ("android" / "ios").
    * @param deviceId the target device id, or null to let the daemon pick its active device.
+   * @param frameContext opaque identity from the snapshot this input was mapped through.
    * @param onError invoked with the daemon's actionable error message (or an exception message)
    *   when the tap fails. Never called for an out-of-bounds point or a successful tap.
    */
@@ -51,6 +52,7 @@ class DeviceControlInputForwarder {
     platform: String,
     deviceId: String?,
     onError: (String) -> Unit,
+    frameContext: String,
   ) {
     // Out of bounds: the mapping never clamps, so a click outside the device screen produces an
     // off-screen coordinate. Dropping it honors the screen-control-mapping contract (the daemon
@@ -66,6 +68,7 @@ class DeviceControlInputForwarder {
         y = point.y.toDouble(),
         platform = platform,
         deviceId = deviceId,
+        frameContext = frameContext,
       )
     }
   }
@@ -88,6 +91,7 @@ class DeviceControlInputForwarder {
     platform: String,
     deviceId: String?,
     onError: (String) -> Unit,
+    frameContext: String,
   ) {
     // Either endpoint off-screen makes the whole gesture malformed: the daemon interpolates
     // between the two, so a bad end is as damaging as a bad start.
@@ -104,6 +108,7 @@ class DeviceControlInputForwarder {
         platform = platform,
         deviceId = deviceId,
         durationMs = durationMs,
+        frameContext = frameContext,
       )
     }
   }
@@ -123,10 +128,16 @@ class DeviceControlInputForwarder {
     platform: String,
     deviceId: String?,
     onError: (String) -> Unit,
+    frameContext: String,
   ) {
     if (client == null) return
     forward(onError) {
-      client.inputPressButton(button = button, platform = platform, deviceId = deviceId)
+      client.inputPressButton(
+        button = button,
+        platform = platform,
+        deviceId = deviceId,
+        frameContext = frameContext,
+      )
     }
   }
 
@@ -153,6 +164,7 @@ class DeviceControlInputForwarder {
     platform: String,
     deviceId: String?,
     onError: (String) -> Unit,
+    frameContext: String,
   ) {
     if (text.isEmpty()) return
     if (client == null) return
@@ -162,6 +174,7 @@ class DeviceControlInputForwarder {
         platform = platform,
         deviceId = deviceId,
         append = true,
+        frameContext = frameContext,
       )
     }
   }
@@ -179,9 +192,17 @@ class DeviceControlInputForwarder {
     platform: String,
     deviceId: String?,
     onError: (String) -> Unit,
+    frameContext: String,
   ) {
     if (client == null) return
-    forward(onError) { client.inputKey(key = key, platform = platform, deviceId = deviceId) }
+    forward(onError) {
+      client.inputKey(
+        key = key,
+        platform = platform,
+        deviceId = deviceId,
+        frameContext = frameContext,
+      )
+    }
   }
 
   /**

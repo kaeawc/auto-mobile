@@ -228,7 +228,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   ): Promise<CtrlProxySetTextResult>;
 
   requestAppendText(
-    text: string, timeoutMs?: number, perf?: PerformanceTracker
+    text: string, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxySetTextResult>;
 
   requestClearText(
@@ -255,11 +255,11 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   ): Promise<CtrlProxyClipboardResult>;
 
   requestPressHome(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyPressHomeResult>;
 
   requestPressBack(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyPressBackResult>;
 
   requestShake(
@@ -267,11 +267,11 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   ): Promise<CtrlProxyShakeResult>;
 
   requestPressButton(
-    button: string, timeoutMs?: number, perf?: PerformanceTracker
+    button: string, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyPressButtonResult>;
 
   requestRecentApps(
-    timeoutMs?: number, perf?: PerformanceTracker
+    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyRecentAppsResult>;
 
   requestRotate(
@@ -1747,9 +1747,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   async requestAppendText(
-    text: string, timeoutMs: number = 5000, perf?: PerformanceTracker
+    text: string, timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxySetTextResult> {
-    return this.text.requestAppendText(text, timeoutMs, perf);
+    return this.text.requestAppendText(text, timeoutMs, perf, frameContext);
   }
 
   async requestClearText(
@@ -1784,15 +1784,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestPressHome(
-    timeoutMs: number = 5000, perf?: PerformanceTracker
+    timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyPressHomeResult> {
-    return this.navigation.requestPressHome(timeoutMs, perf);
+    return this.navigation.requestPressHome(timeoutMs, perf, frameContext);
   }
 
   async requestPressBack(
-    timeoutMs: number = 5000, perf?: PerformanceTracker
+    timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyPressBackResult> {
-    return this.navigation.requestPressBack(timeoutMs, perf);
+    return this.navigation.requestPressBack(timeoutMs, perf, frameContext);
   }
 
   async requestShake(
@@ -1802,15 +1802,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   async requestPressButton(
-    button: string, timeoutMs: number = 5000, perf?: PerformanceTracker
+    button: string, timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyPressButtonResult> {
-    return this.navigation.requestPressButton(button, timeoutMs, perf);
+    return this.navigation.requestPressButton(button, timeoutMs, perf, frameContext);
   }
 
   async requestRecentApps(
-    timeoutMs: number = 5000, perf?: PerformanceTracker
+    timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyRecentAppsResult> {
-    return this.navigation.requestRecentApps(timeoutMs, perf);
+    return this.navigation.requestRecentApps(timeoutMs, perf, frameContext);
   }
 
   async requestRotate(

@@ -507,6 +507,7 @@ class DeviceScreenViewKeyboardTest {
       hierarchy = null,
       coordinateSpace = null,
       captureSequence = sequence,
+      frameContext = "epoch:$sequence",
       screenshotSequence = sequence,
       hierarchySequence = sequence,
       liveFrameSequence = null,

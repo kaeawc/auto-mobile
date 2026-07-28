@@ -33,6 +33,13 @@ public enum class DeviceControlBlockReason {
    */
   CaptureIdentityUnavailable,
   /**
+   * One or both contributing messages omitted the device-authored frame context. Older runners
+   * remain inspector-only rather than allowing control with an unprovable UI identity.
+   */
+  FrameContextUnavailable,
+  /** Screenshot and hierarchy frame contexts differ, so they cannot describe one UI state. */
+  FrameContextMismatch,
+  /**
    * A contributing message declared a [CoordinateSpace] this client does not implement
    * (issue #4550).
    *
@@ -217,6 +224,13 @@ public object DeviceControlPolicy {
     if (captureSequence == null || hierarchy.captureSequence == null) {
       return blocked(DeviceControlBlockReason.CaptureIdentityUnavailable)
     }
+    val frameContext = screenshot.frameContext
+    if (frameContext == null || hierarchy.frameContext == null) {
+      return blocked(DeviceControlBlockReason.FrameContextUnavailable)
+    }
+    if (frameContext != hierarchy.frameContext) {
+      return blocked(DeviceControlBlockReason.FrameContextMismatch)
+    }
 
     // Rotation is capture-time provenance, distinct from pixel orientation. iOS can deliver
     // native-portrait screenshot pixels for a landscape device, so geometry intentionally accepts
@@ -335,6 +349,7 @@ public object DeviceControlPolicy {
         // coordinates are in must travel with it rather than be re-derived at dispatch time.
         coordinateSpace = pairedSpace,
         captureSequence = captureSequence,
+        frameContext = frameContext,
         rotation = screenshotRotation,
         screenshotSequence = screenshot.sequence,
         hierarchySequence = hierarchy.sequence,

@@ -24,6 +24,7 @@ import Foundation
 /// Payload for commands that carry no parameters beyond the request id.
 public struct RequestEnvelope: Decodable {
     public var requestId: String?
+    public var frameContext: String? = nil
 }
 
 // MARK: View hierarchy
@@ -108,11 +109,13 @@ public struct RequestSetText: Decodable {
     public var requestId: String?
     public var text: String
     public var resourceId: String?
+    public var frameContext: String?
 }
 
 public struct RequestAppendText: Decodable {
     public var requestId: String?
     public var text: String
+    public var frameContext: String?
 }
 
 public struct RequestClearText: Decodable {
@@ -133,6 +136,7 @@ public struct RequestKeyboard: Decodable {
 public struct RequestPressButton: Decodable {
     public var requestId: String?
     public var action: String
+    public var frameContext: String? = nil
 }
 
 // MARK: Actions

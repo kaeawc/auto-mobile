@@ -20,13 +20,18 @@ class DeviceControlInputForwarderTest {
 
   private val forwarder = DeviceControlInputForwarder()
 
+  private companion object {
+    const val TEST_FRAME_CONTEXT = "android:44"
+  }
+
   private fun forward(
     point: DevicePoint,
     client: AutoMobileClient?,
     platform: String = "android",
     deviceId: String? = "emulator-5554",
     onError: (String) -> Unit = { error("unexpected error: $it") },
-  ) = forwarder.forwardTap(point, client, platform, deviceId, onError)
+    frameContext: String = TEST_FRAME_CONTEXT,
+  ) = forwarder.forwardTap(point, client, platform, deviceId, onError, frameContext)
 
   @Test
   fun `in-bounds tap forwards mapped device coordinates to inputTap`() {
@@ -50,6 +55,7 @@ class DeviceControlInputForwarderTest {
           platform = "android",
           deviceId = "emulator-5554",
           duration = null,
+          frameContext = TEST_FRAME_CONTEXT,
         )
       ),
       fake.inputTapCalls,
@@ -110,6 +116,7 @@ class DeviceControlInputForwarderTest {
           platform: String,
           deviceId: String?,
           duration: Int?,
+          frameContext: String?,
         ): InputActionResult = throw IllegalStateException("daemon socket closed")
       }
     var error: String? = null
@@ -144,6 +151,7 @@ class DeviceControlInputForwarderTest {
       platform = "ios",
       deviceId = "sim-udid",
       onError = { error("unexpected error: $it") },
+      frameContext = TEST_FRAME_CONTEXT,
     )
 
     assertEquals(
@@ -156,6 +164,7 @@ class DeviceControlInputForwarderTest {
           platform = "ios",
           deviceId = "sim-udid",
           durationMs = 300,
+          frameContext = TEST_FRAME_CONTEXT,
         )
       ),
       fake.inputSwipeCalls,
@@ -176,6 +185,7 @@ class DeviceControlInputForwarderTest {
       platform = "android",
       deviceId = "emulator-5554",
       onError = { error = it },
+      frameContext = TEST_FRAME_CONTEXT,
     )
     forwarder.forwardSwipe(
       start = DevicePoint(x = -4, y = 10, inBounds = false),
@@ -185,6 +195,7 @@ class DeviceControlInputForwarderTest {
       platform = "android",
       deviceId = "emulator-5554",
       onError = { error = it },
+      frameContext = TEST_FRAME_CONTEXT,
     )
 
     assertTrue(fake.inputSwipeCalls.isEmpty(), "an off-screen endpoint must not be sent")
@@ -213,6 +224,7 @@ class DeviceControlInputForwarderTest {
       platform = "android",
       deviceId = null,
       onError = { error = it },
+      frameContext = TEST_FRAME_CONTEXT,
     )
 
     assertEquals("No active android device to swipe", error)
@@ -230,6 +242,7 @@ class DeviceControlInputForwarderTest {
           platform: String,
           deviceId: String?,
           durationMs: Int?,
+          frameContext: String?,
         ): InputActionResult = throw IllegalStateException("daemon socket closed")
       }
     var error: String? = null
@@ -242,6 +255,7 @@ class DeviceControlInputForwarderTest {
       platform = "android",
       deviceId = null,
       onError = { error = it },
+      frameContext = TEST_FRAME_CONTEXT,
     )
 
     assertEquals("daemon socket closed", error)
@@ -259,6 +273,7 @@ class DeviceControlInputForwarderTest {
       platform = "android",
       deviceId = null,
       onError = { error = it },
+      frameContext = TEST_FRAME_CONTEXT,
     )
 
     assertNull(error)
@@ -276,6 +291,7 @@ class DeviceControlInputForwarderTest {
       platform = "android",
       deviceId = "emulator-5554",
       onError = { fail("empty text must not be an error, it must be a no-op: $it") },
+      frameContext = TEST_FRAME_CONTEXT,
     )
 
     assertEquals(emptyList(), client.inputTypeTextCalls)
@@ -286,9 +302,9 @@ class DeviceControlInputForwarderTest {
     var error: String? = null
     val onError: (String) -> Unit = { error = it }
 
-    forwarder.forwardPressButton("back", null, "android", null, onError)
-    forwarder.forwardTypeText("a", null, "android", null, onError)
-    forwarder.forwardKey("enter", null, "android", null, onError)
+    forwarder.forwardPressButton("back", null, "android", null, onError, TEST_FRAME_CONTEXT)
+    forwarder.forwardTypeText("a", null, "android", null, onError, TEST_FRAME_CONTEXT)
+    forwarder.forwardKey("enter", null, "android", null, onError, TEST_FRAME_CONTEXT)
 
     assertNull(error)
   }
@@ -300,8 +316,71 @@ class DeviceControlInputForwarderTest {
       InputActionResult(action = "input/key", success = false, error = "unsupported on ios")
     var error: String? = null
 
-    forwarder.forwardKey("enter", client, "ios", "iphone-1", onError = { error = it })
+    forwarder.forwardKey(
+      "enter",
+      client,
+      "ios",
+      "iphone-1",
+      onError = { error = it },
+      frameContext = TEST_FRAME_CONTEXT,
+    )
 
     assertEquals("unsupported on ios", error)
+  }
+
+  @Test
+  fun `every desktop input helper echoes the paired frame context`() {
+    val client = FakeAutoMobileClient()
+    val context = TEST_FRAME_CONTEXT
+    val onError: (String) -> Unit = { fail("unexpected error: $it") }
+
+    forwarder.forwardTap(
+      point = DevicePoint(x = 1, y = 2, inBounds = true),
+      client = client,
+      platform = "android",
+      deviceId = "emulator-5554",
+      frameContext = context,
+      onError = onError,
+    )
+    forwarder.forwardSwipe(
+      start = DevicePoint(x = 1, y = 2, inBounds = true),
+      end = DevicePoint(x = 3, y = 4, inBounds = true),
+      durationMs = 300,
+      client = client,
+      platform = "android",
+      deviceId = "emulator-5554",
+      frameContext = context,
+      onError = onError,
+    )
+    forwarder.forwardPressButton(
+      button = "back",
+      client = client,
+      platform = "android",
+      deviceId = "emulator-5554",
+      frameContext = context,
+      onError = onError,
+    )
+    forwarder.forwardTypeText(
+      text = "a",
+      client = client,
+      platform = "android",
+      deviceId = "emulator-5554",
+      frameContext = context,
+      onError = onError,
+    )
+    forwarder.forwardKey(
+      key = "enter",
+      client = client,
+      platform = "android",
+      deviceId = "emulator-5554",
+      frameContext = context,
+      onError = onError,
+    )
+
+    assertEquals(context, client.inputTapCalls.single().frameContext)
+    assertEquals(context, client.inputSwipeCalls.single().frameContext)
+    assertEquals(context, client.inputPressButtonCalls.single().frameContext)
+    assertEquals(context, client.inputTypeTextCalls.single().frameContext)
+    assertEquals(context, client.inputKeyCalls.single().frameContext)
   }
 }

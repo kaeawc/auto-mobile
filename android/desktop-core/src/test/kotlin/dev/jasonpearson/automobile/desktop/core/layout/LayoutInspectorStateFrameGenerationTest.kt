@@ -140,12 +140,14 @@ class LayoutInspectorStateFrameGenerationTest {
       deviceId = device,
       generation = state.frameGeneration,
       captureSequence = 1L,
+      frameContext = "epoch:1",
       rotation = 0,
     )
     state.updateHierarchy(
       rootBounds(),
       deviceId = device,
       captureSequence = 1L,
+      frameContext = "epoch:1",
       captureRotation = 0,
     )
     state.updateConnectionStatus(ConnectionStatus.Connected)
@@ -165,12 +167,14 @@ class LayoutInspectorStateFrameGenerationTest {
       deviceId = device,
       generation = state.frameGeneration,
       captureSequence = 2L,
+      frameContext = "epoch:2",
       rotation = 0,
     )
     state.updateHierarchy(
       rootBounds(),
       deviceId = device,
       captureSequence = 2L,
+      frameContext = "epoch:2",
       captureRotation = 0,
     )
     state.updateConnectionStatus(ConnectionStatus.Connected)

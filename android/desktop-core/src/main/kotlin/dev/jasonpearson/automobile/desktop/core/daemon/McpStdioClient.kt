@@ -353,6 +353,7 @@ class McpStdioClient(
     platform: String,
     deviceId: String?,
     duration: Int?,
+    frameContext: String?,
   ): InputActionResult = unsupportedInputAction(transportName, "input/tap")
 
   override fun inputSwipe(
@@ -363,12 +364,14 @@ class McpStdioClient(
     platform: String,
     deviceId: String?,
     durationMs: Int?,
+    frameContext: String?,
   ): InputActionResult = unsupportedInputAction(transportName, "input/swipe")
 
   override fun inputPressButton(
     button: String,
     platform: String,
     deviceId: String?,
+    frameContext: String?,
   ): InputActionResult = unsupportedInputAction(transportName, "input/pressButton")
 
   override fun inputTypeText(
@@ -377,12 +380,14 @@ class McpStdioClient(
     deviceId: String?,
     submit: Boolean?,
     append: Boolean,
+    frameContext: String?,
   ): InputActionResult = unsupportedInputAction(transportName, "input/typeText")
 
   override fun inputKey(
     key: String,
     platform: String,
     deviceId: String?,
+    frameContext: String?,
   ): InputActionResult = unsupportedInputAction(transportName, "input/key")
 
   override fun callTool(name: String, arguments: JsonObject): JsonElement {

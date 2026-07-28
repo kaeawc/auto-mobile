@@ -125,12 +125,15 @@ class ObservationStreamClientTest {
           "screenshotBase64": "aW1hZ2U=",
           "screenWidth": 1170,
           "screenHeight": 2532,
-          "coordinateSpace": "px"
+          "coordinateSpace": "px",
+          "frameContext": "ios:41"
         }
         """
           .trimIndent()
       )
-      assertEquals(CoordinateSpace.Pixels, awaitItem().coordinateSpace)
+      val update = awaitItem()
+      assertEquals(CoordinateSpace.Pixels, update.coordinateSpace)
+      assertEquals("ios:41", update.frameContext)
     }
 
     client.hierarchyUpdates.test {
@@ -141,12 +144,15 @@ class ObservationStreamClientTest {
           "deviceId": "emulator-5554",
           "timestamp": 2000,
           "data": { "packageName": "com.example" },
-          "coordinateSpace": "px"
+          "coordinateSpace": "px",
+          "frameContext": "ios:41"
         }
         """
           .trimIndent()
       )
-      assertEquals(CoordinateSpace.Pixels, awaitItem().coordinateSpace)
+      val update = awaitItem()
+      assertEquals(CoordinateSpace.Pixels, update.coordinateSpace)
+      assertEquals("ios:41", update.frameContext)
     }
   }
 

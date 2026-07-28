@@ -82,6 +82,7 @@ interface AutoMobileClient {
     platform: String = "android",
     deviceId: String? = null,
     duration: Int? = null,
+    frameContext: String? = null,
   ): InputActionResult
 
   fun inputSwipe(
@@ -92,12 +93,14 @@ interface AutoMobileClient {
     platform: String = "android",
     deviceId: String? = null,
     durationMs: Int? = null,
+    frameContext: String? = null,
   ): InputActionResult
 
   fun inputPressButton(
     button: String,
     platform: String = "android",
     deviceId: String? = null,
+    frameContext: String? = null,
   ): InputActionResult
 
   /**
@@ -113,12 +116,14 @@ interface AutoMobileClient {
     deviceId: String? = null,
     submit: Boolean? = null,
     append: Boolean = false,
+    frameContext: String? = null,
   ): InputActionResult
 
   fun inputKey(
     key: String,
     platform: String = "android",
     deviceId: String? = null,
+    frameContext: String? = null,
   ): InputActionResult
 
   fun setKeyValue(

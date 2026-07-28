@@ -166,6 +166,35 @@ class DeviceControlInputDispatcher(
     }
   }
 
+  /**
+   * Drop pending inputs bound to [frameContext], preserving inputs the user made through a newer
+   * paired frame. A stale-context response proves only its own snapshot unsafe; clearing every
+   * pending command here would silently discard an already queued gesture for a newer snapshot.
+   *
+   * Like [reset], this runs on the session's UI context. The consumer is suspended while its
+   * current command publishes the rejection, so retained commands can be put back in FIFO order
+   * before it reads the queue again.
+   */
+  fun discardFrameContext(frameContext: String): Long? {
+    val retained = mutableListOf<DeviceControlInputCommand>()
+    var newestDiscardedToken: Long? = null
+    while (true) {
+      val command = commands.tryReceive().getOrNull() ?: break
+      if (command.snapshot.frameContext == frameContext) {
+        command.client?.close()
+        newestDiscardedToken = maxOf(newestDiscardedToken ?: Long.MIN_VALUE, command.token)
+      } else {
+        retained += command
+      }
+    }
+    retained.forEach { command ->
+      check(commands.trySend(command).isSuccess) {
+        "A retained device-control command did not fit back into its drained queue"
+      }
+    }
+    return newestDiscardedToken
+  }
+
   companion object {
     /**
      * Bounded queue depth. Small: a human cannot out-gesture a working daemon by more than a few

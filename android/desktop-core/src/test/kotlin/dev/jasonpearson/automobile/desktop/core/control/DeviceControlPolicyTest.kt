@@ -67,6 +67,7 @@ class DeviceControlPolicyTest {
         width = 1080,
         height = 2340,
         data = null,
+        frameContext = "epoch:7",
         rotation = 0,
       ),
     hierarchy: HierarchyFrameFacts? =
@@ -78,6 +79,7 @@ class DeviceControlPolicyTest {
         hierarchy = hierarchyOf(1080, 2340),
         rootWidth = 1080,
         rootHeight = 2340,
+        frameContext = "epoch:7",
         rotation = 0,
       ),
     liveFrame: LiveFrameFacts? = null,
@@ -106,6 +108,7 @@ class DeviceControlPolicyTest {
     assertEquals(DeviceFrameSource.Screenshot, snapshot.source)
     assertEquals(1080, snapshot.deviceWidth)
     assertEquals(2340, snapshot.deviceHeight)
+    assertEquals("epoch:7", snapshot.frameContext)
     // Monotonic ordering: the newest contributing source sequence.
     assertEquals(11L, snapshot.sequence)
   }
@@ -207,6 +210,7 @@ class DeviceControlPolicyTest {
               width = 720,
               height = 1560,
               data = null,
+              frameContext = "epoch:pair",
               rotation = 0,
             ),
           hierarchy =
@@ -218,6 +222,7 @@ class DeviceControlPolicyTest {
               hierarchy = hierarchyOf(1080, 2340),
               rootWidth = 1080,
               rootHeight = 2340,
+              frameContext = "epoch:pair",
               rotation = 0,
             ),
         ),
@@ -248,8 +253,30 @@ class DeviceControlPolicyTest {
               hierarchy = hierarchyOf(720, 1560),
               rootWidth = 720,
               rootHeight = 1560,
+              frameContext = "epoch:7",
               rotation = 0,
             )
+        )
+      ),
+    )
+  }
+
+  @Test
+  fun `missing frame context keeps the client in inspector mode`() {
+    assertEquals(
+      DeviceControlBlockReason.FrameContextUnavailable,
+      blockedReason(inputs(screenshot = inputs().screenshot?.copy(frameContext = null))),
+    )
+  }
+
+  @Test
+  fun `mismatched frame contexts keep the client in inspector mode`() {
+    assertEquals(
+      DeviceControlBlockReason.FrameContextMismatch,
+      blockedReason(
+        inputs(
+          screenshot = inputs().screenshot?.copy(frameContext = "epoch:7"),
+          hierarchy = inputs().hierarchy?.copy(frameContext = "epoch:8"),
         )
       ),
     )
@@ -273,6 +300,7 @@ class DeviceControlPolicyTest {
               width = 2340,
               height = 1080,
               data = null,
+              frameContext = "epoch:7",
               rotation = 1,
             ),
           hierarchy =
@@ -284,6 +312,7 @@ class DeviceControlPolicyTest {
               hierarchy = hierarchyOf(1080, 2340),
               rootWidth = 1080,
               rootHeight = 2340,
+              frameContext = "epoch:7",
               rotation = 0,
             ),
         )
@@ -306,6 +335,7 @@ class DeviceControlPolicyTest {
               width = 1080,
               height = 2340,
               data = null,
+              frameContext = "epoch:7",
               rotation = 4,
             ),
           hierarchy =
@@ -317,6 +347,7 @@ class DeviceControlPolicyTest {
               hierarchy = hierarchyOf(1080, 2340),
               rootWidth = 1080,
               rootHeight = 2340,
+              frameContext = "epoch:7",
               rotation = 4,
             ),
         )
@@ -341,6 +372,7 @@ class DeviceControlPolicyTest {
                 width = 1170,
                 height = 2532,
                 data = null,
+                frameContext = "epoch:7",
                 rotation = 1,
               ),
             hierarchy =
@@ -352,6 +384,7 @@ class DeviceControlPolicyTest {
                 hierarchy = hierarchyOf(2532, 1170),
                 rootWidth = 2532,
                 rootHeight = 1170,
+                frameContext = "epoch:7",
                 rotation = 1,
               ),
           ),
@@ -499,6 +532,7 @@ class DeviceControlPolicyTest {
         width = 1080,
         height = 2340,
         data = null,
+        frameContext = "epoch:7",
         rotation = 0,
       )
     assertEquals(DeviceControlBlockReason.StaleFrame, blockedReason(inputs(screenshot = stale)))
@@ -613,6 +647,7 @@ class DeviceControlPolicyTest {
                   hierarchy = hierarchyOf(0, 0),
                   rootWidth = 0,
                   rootHeight = 0,
+                  frameContext = "epoch:7",
                   rotation = 0,
                 )
             ),
@@ -636,6 +671,7 @@ class DeviceControlPolicyTest {
       height = height,
       data = null,
       coordinateSpace = coordinateSpace,
+      frameContext = "epoch:7",
       // Proven rotation so the #4502 gate passes and these tests isolate the COORDINATE-SPACE
       // behavior they were written for. Rotation has its own dedicated tests.
       rotation = 0,
@@ -651,6 +687,7 @@ class DeviceControlPolicyTest {
       rootWidth = width,
       rootHeight = height,
       coordinateSpace = coordinateSpace,
+      frameContext = "epoch:7",
       rotation = 0,
     )
 

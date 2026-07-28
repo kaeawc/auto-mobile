@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.control
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -20,12 +21,16 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class DeviceControlInputDispatcherTest {
 
-  private fun command(token: Long = 0L, client: AutoMobileClient? = null) =
+  private fun command(
+    token: Long = 0L,
+    client: AutoMobileClient? = null,
+    snapshot: DeviceFrameSnapshot = testSnapshot(),
+  ) =
     DeviceControlInputCommand.Tap(
       point = DevicePoint(x = 0, y = 0, inBounds = true),
       client = client,
       platform = "android",
-      snapshot = testSnapshot(),
+      snapshot = snapshot,
       token = token,
     )
 
@@ -116,6 +121,34 @@ class DeviceControlInputDispatcherTest {
       "the in-flight tap's client is left to its own finally",
     )
     assertEquals(emptyList(), forwarded, "no pending tap forwards after reset")
+    scope.cancel()
+  }
+
+  @Test
+  fun `discarding a stale frame context preserves newer pending commands`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val stall = CompletableDeferred<Unit>()
+    val forwarded = mutableListOf<Long>()
+    val dispatcher =
+      DeviceControlInputDispatcher(scope) { cmd ->
+        if (cmd.token == 0L) stall.await() else forwarded += cmd.token
+      }
+    val staleSnapshot = testSnapshot(sequence = 7L)
+    val freshSnapshot = testSnapshot(sequence = 8L)
+    val staleClient = FakeAutoMobileClient()
+    val freshClient = FakeAutoMobileClient()
+
+    dispatcher.enqueue(command(token = 0L))
+    dispatcher.enqueue(command(token = 1L, client = staleClient, snapshot = staleSnapshot))
+    dispatcher.enqueue(command(token = 2L, client = freshClient, snapshot = freshSnapshot))
+
+    assertEquals(1L, dispatcher.discardFrameContext(staleSnapshot.frameContext))
+    stall.complete(Unit)
+    advanceUntilIdle()
+
+    assertTrue("close" in staleClient.calls, "stale pending command must be closed")
+    assertFalse("close" in freshClient.calls, "newer pending command must stay queued")
+    assertEquals(listOf(2L), forwarded)
     scope.cancel()
   }
 

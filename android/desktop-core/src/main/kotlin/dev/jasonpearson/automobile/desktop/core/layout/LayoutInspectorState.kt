@@ -265,6 +265,7 @@ class LayoutInspectorState(
     deviceId: String? = null,
     generation: Long? = null,
     captureSequence: Long? = null,
+    frameContext: String? = null,
     coordinateSpace: CoordinateSpace? = null,
     rotation: Int? = null,
   ) {
@@ -284,6 +285,7 @@ class LayoutInspectorState(
         deviceId = deviceId,
         sequence = nextSourceSequence(),
         captureSequence = captureSequence,
+        frameContext = frameContext,
         receivedAtMs = nowMs(),
         width = width,
         height = height,
@@ -305,6 +307,7 @@ class LayoutInspectorState(
     newRotation: Int = 0,
     deviceId: String? = null,
     captureSequence: Long? = null,
+    frameContext: String? = null,
     coordinateSpace: CoordinateSpace? = null,
     captureRotation: Int? = null,
   ) {
@@ -319,6 +322,7 @@ class LayoutInspectorState(
       changedIds,
       deviceId,
       captureSequence,
+      frameContext,
       coordinateSpace,
       captureRotation,
     )
@@ -338,6 +342,7 @@ class LayoutInspectorState(
     deviceId: String? = null,
     generation: Long? = null,
     captureSequence: Long? = null,
+    frameContext: String? = null,
     coordinateSpace: CoordinateSpace? = null,
     captureRotation: Int? = null,
   ) {
@@ -352,6 +357,7 @@ class LayoutInspectorState(
         changedIds,
         deviceId,
         captureSequence,
+        frameContext,
         coordinateSpace,
         captureRotation,
       )
@@ -368,6 +374,7 @@ class LayoutInspectorState(
     changedIds: Set<String>,
     deviceId: String? = null,
     captureSequence: Long? = null,
+    frameContext: String? = null,
     coordinateSpace: CoordinateSpace? = null,
     captureRotation: Int? = null,
   ) {
@@ -380,6 +387,7 @@ class LayoutInspectorState(
         deviceId = deviceId,
         sequence = nextSourceSequence(),
         captureSequence = captureSequence,
+        frameContext = frameContext,
         receivedAtMs = nowMs(),
         hierarchy = parsed,
         // The root commonly reports (0,0,0,0) on Android (accessibility service); 0 tells the

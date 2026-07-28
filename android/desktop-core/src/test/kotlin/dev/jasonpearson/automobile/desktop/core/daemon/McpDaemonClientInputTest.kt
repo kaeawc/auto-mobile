@@ -20,6 +20,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 
 class McpDaemonClientInputTest {
   private val json = Json { ignoreUnknownKeys = true }
@@ -79,6 +80,7 @@ class McpDaemonClientInputTest {
           platform = "android",
           deviceId = "emulator-5554",
           duration = 50,
+          frameContext = "android:41",
         )
       }
 
@@ -90,11 +92,22 @@ class McpDaemonClientInputTest {
         "x" to JsonPrimitive(240.5),
         "y" to JsonPrimitive(640.25),
         "duration" to JsonPrimitive(50),
+        "frameContext" to JsonPrimitive("android:41"),
       ),
       result.request.params,
     )
     assertEquals(true, result.response.success)
     assertEquals(InputCoordinates(x = 240.5, y = 640.25), result.response.coordinates)
+  }
+
+  @Test
+  fun `an input without a frame context omits the param for legacy daemons`() {
+    val result =
+      captureInputRequest("""{ "action": "input/tap", "success": true }""") { client ->
+        client.inputTap(x = 1.0, y = 2.0)
+      }
+
+    assertFalse("frameContext" in result.request.params)
   }
 
   @Test
@@ -123,6 +136,7 @@ class McpDaemonClientInputTest {
           platform = "android",
           deviceId = "emulator-5554",
           durationMs = 350,
+          frameContext = "android:42",
         )
       }
 
@@ -136,6 +150,7 @@ class McpDaemonClientInputTest {
         "endX" to JsonPrimitive(520.25),
         "endY" to JsonPrimitive(500.5),
         "durationMs" to JsonPrimitive(350),
+        "frameContext" to JsonPrimitive("android:42"),
       ),
       result.request.params,
     )
@@ -151,18 +166,34 @@ class McpDaemonClientInputTest {
       captureInputRequest(
         """{ "action": "input/pressButton", "success": true, "button": "back" }"""
       ) { client ->
-        client.inputPressButton(button = "back", platform = "android", deviceId = "device-1")
+        client.inputPressButton(
+          button = "back",
+          platform = "android",
+          deviceId = "device-1",
+          frameContext = "android:43",
+        )
       }
     val typeText =
       captureInputRequest(
         """{ "action": "input/typeText", "success": true, "textLength": 5, "submitted": true }"""
       ) { client ->
-        client.inputTypeText(text = "hello", platform = "ios", deviceId = "device-2", submit = true)
+        client.inputTypeText(
+          text = "hello",
+          platform = "ios",
+          deviceId = "device-2",
+          submit = true,
+          frameContext = "ios:43",
+        )
       }
     val key =
       captureInputRequest("""{ "action": "input/key", "success": true, "key": "enter" }""") { client
         ->
-        client.inputKey(key = "enter", platform = "android", deviceId = "device-3")
+        client.inputKey(
+          key = "enter",
+          platform = "android",
+          deviceId = "device-3",
+          frameContext = "android:44",
+        )
       }
 
     assertEquals("input/pressButton", pressButton.request.method)
@@ -171,6 +202,7 @@ class McpDaemonClientInputTest {
         "platform" to JsonPrimitive("android"),
         "deviceId" to JsonPrimitive("device-1"),
         "button" to JsonPrimitive("back"),
+        "frameContext" to JsonPrimitive("android:43"),
       ),
       pressButton.request.params,
     )
@@ -183,6 +215,7 @@ class McpDaemonClientInputTest {
         "deviceId" to JsonPrimitive("device-2"),
         "text" to JsonPrimitive("hello"),
         "submit" to JsonPrimitive(true),
+        "frameContext" to JsonPrimitive("ios:43"),
       ),
       typeText.request.params,
     )
@@ -195,6 +228,7 @@ class McpDaemonClientInputTest {
         "platform" to JsonPrimitive("android"),
         "deviceId" to JsonPrimitive("device-3"),
         "key" to JsonPrimitive("enter"),
+        "frameContext" to JsonPrimitive("android:44"),
       ),
       key.request.params,
     )

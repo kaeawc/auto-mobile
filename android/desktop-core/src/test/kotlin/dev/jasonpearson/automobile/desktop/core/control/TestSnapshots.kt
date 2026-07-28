@@ -11,6 +11,7 @@ internal fun testSnapshot(
   deviceWidth: Int = 1080,
   deviceHeight: Int = 2340,
   coordinateSpace: CoordinateSpace? = null,
+  frameContext: String = "epoch:$sequence",
 ): DeviceFrameSnapshot =
   DeviceFrameSnapshot(
     deviceId = deviceId,
@@ -25,6 +26,7 @@ internal fun testSnapshot(
     hierarchy = null,
     coordinateSpace = coordinateSpace,
     captureSequence = sequence,
+    frameContext = frameContext,
     screenshotSequence = sequence,
     hierarchySequence = sequence,
     liveFrameSequence = null,

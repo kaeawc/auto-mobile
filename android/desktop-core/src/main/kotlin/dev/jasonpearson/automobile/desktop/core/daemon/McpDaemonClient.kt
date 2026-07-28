@@ -296,6 +296,7 @@ class McpDaemonClient(
     platform: String,
     deviceId: String?,
     duration: Int?,
+    frameContext: String?,
   ): InputActionResult {
     return sendInputRequest(
       "input/tap",
@@ -305,6 +306,7 @@ class McpDaemonClient(
         put("x", JsonPrimitive(x))
         put("y", JsonPrimitive(y))
         putOptionalInt("duration", duration)
+        putOptionalString("frameContext", frameContext)
       },
     )
   }
@@ -317,6 +319,7 @@ class McpDaemonClient(
     platform: String,
     deviceId: String?,
     durationMs: Int?,
+    frameContext: String?,
   ): InputActionResult {
     return sendInputRequest(
       "input/swipe",
@@ -328,6 +331,7 @@ class McpDaemonClient(
         put("endX", JsonPrimitive(endX))
         put("endY", JsonPrimitive(endY))
         putOptionalInt("durationMs", durationMs)
+        putOptionalString("frameContext", frameContext)
       },
     )
   }
@@ -336,6 +340,7 @@ class McpDaemonClient(
     button: String,
     platform: String,
     deviceId: String?,
+    frameContext: String?,
   ): InputActionResult {
     return sendInputRequest(
       "input/pressButton",
@@ -343,6 +348,7 @@ class McpDaemonClient(
         put("platform", JsonPrimitive(platform))
         putOptionalString("deviceId", deviceId)
         put("button", JsonPrimitive(button))
+        putOptionalString("frameContext", frameContext)
       },
     )
   }
@@ -353,6 +359,7 @@ class McpDaemonClient(
     deviceId: String?,
     submit: Boolean?,
     append: Boolean,
+    frameContext: String?,
   ): InputActionResult {
     val appendSupportError = if (append) inputTypeTextAppendSupportError() else null
     if (appendSupportError != null) {
@@ -370,6 +377,7 @@ class McpDaemonClient(
             putOptionalString("deviceId", deviceId)
             put("text", JsonPrimitive(text))
             putOptionalBoolean("submit", submit)
+            putOptionalString("frameContext", frameContext)
             // Omitted entirely when false: the daemon rejects unknown/!append values, and older
             // daemons reject the param outright.
             if (append) put("mode", JsonPrimitive("append"))
@@ -393,6 +401,7 @@ class McpDaemonClient(
     key: String,
     platform: String,
     deviceId: String?,
+    frameContext: String?,
   ): InputActionResult {
     return sendInputRequest(
       "input/key",
@@ -400,6 +409,7 @@ class McpDaemonClient(
         put("platform", JsonPrimitive(platform))
         putOptionalString("deviceId", deviceId)
         put("key", JsonPrimitive(key))
+        putOptionalString("frameContext", frameContext)
       },
     )
   }

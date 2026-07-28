@@ -123,7 +123,8 @@
       "wire": {
         "type": "request_append_text",
         "requestId": "fixture-request-id",
-        "text": "a"
+        "text": "a",
+        "frameContext": "frame-context"
       }
     },
     {
@@ -167,7 +168,8 @@
       "wire": {
         "type": "request_press_button",
         "requestId": "fixture-request-id",
-        "action": "volume_up"
+        "action": "volume_up",
+        "frameContext": "frame-context"
       }
     },
     {
@@ -175,7 +177,8 @@
       "builder": "CtrlProxyNavigation.requestPressHome",
       "wire": {
         "type": "request_press_home",
-        "requestId": "fixture-request-id"
+        "requestId": "fixture-request-id",
+        "frameContext": "frame-context"
       }
     },
     {
@@ -183,7 +186,8 @@
       "builder": "CtrlProxyNavigation.requestPressBack",
       "wire": {
         "type": "request_press_back",
-        "requestId": "fixture-request-id"
+        "requestId": "fixture-request-id",
+        "frameContext": "frame-context"
       }
     },
     {
@@ -199,7 +203,8 @@
       "builder": "CtrlProxyNavigation.requestRecentApps",
       "wire": {
         "type": "request_recent_apps",
-        "requestId": "fixture-request-id"
+        "requestId": "fixture-request-id",
+        "frameContext": "frame-context"
       }
     },
     {

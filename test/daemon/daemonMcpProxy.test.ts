@@ -185,13 +185,17 @@ describe("DaemonMcpProxy", () => {
           ...(opts.daemonEntryScript !== undefined ? { entryScript: opts.daemonEntryScript } : {}),
         };
         fakeManager.statusResult = initialStatus;
+        const restartedStatus = {
+          ...initialStatus,
+          version: opts.statusAfterRestartVersion ?? CLIENT_VERSION,
+          startedAt: timer.now(),
+          ...(opts.daemonOptions !== undefined ? { options: opts.daemonOptions } : {}),
+        };
         fakeManager.statusResults = [
           initialStatus,
-          {
-            ...initialStatus,
-            version: opts.statusAfterRestartVersion ?? CLIENT_VERSION,
-            startedAt: timer.now(),
-          },
+          restartedStatus,
+          restartedStatus,
+          restartedStatus,
         ];
         if (opts.waitForReadyResult !== undefined) {
           fakeManager.waitForReadyResult = opts.waitForReadyResult;
@@ -479,6 +483,7 @@ describe("DaemonMcpProxy", () => {
 
     describe("startup option mismatch handling", () => {
       function runningStatus(options: {
+        debug?: boolean;
         embeddedSdk?: boolean;
         networkMockable?: boolean;
         safeAreaWarnings?: boolean;
@@ -520,6 +525,34 @@ describe("DaemonMcpProxy", () => {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(true);
           expect(fakeManager.restartOptions).toEqual({ embeddedSdk: true });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("restarts daemon when debug mode differs", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ debug: false }), // ensureVersionMatches
+          runningStatus({ debug: false }), // ensureBuildMatches
+          runningStatus({ debug: false }), // ensureStartupOptionsMatch (mismatch)
+          runningStatus({ debug: true }), // post-restart verify
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { debug: true },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({ debug: true });
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

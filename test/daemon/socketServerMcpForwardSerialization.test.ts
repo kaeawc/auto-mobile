@@ -166,6 +166,55 @@ function sendTwoToolsCallsOnOneSocket(socketPath: string, toolName: string): Pro
   });
 }
 
+class PersistentSocketClient {
+  private readonly socket = new Socket();
+  private buffer = "";
+  private readonly responses = new Map<string, DaemonResponse>();
+  private readonly waiters = new Map<string, (response: DaemonResponse) => void>();
+
+  async connect(socketPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      this.socket.connect(socketPath, resolve);
+      this.socket.on("error", reject);
+      this.socket.on("data", data => {
+        this.buffer += data.toString();
+        const lines = this.buffer.split("\n");
+        this.buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+          const response = JSON.parse(line) as DaemonResponse;
+          const waiter = this.waiters.get(response.id);
+          if (waiter) {
+            this.waiters.delete(response.id);
+            waiter(response);
+          } else {
+            this.responses.set(response.id, response);
+          }
+        }
+      });
+    });
+  }
+
+  request(method: string, params: Record<string, unknown>): Promise<DaemonResponse> {
+    const id = randomUUID();
+    this.socket.write(JSON.stringify({ id, type: "mcp_request", method, params }) + "\n");
+    const buffered = this.responses.get(id);
+    if (buffered) {
+      this.responses.delete(id);
+      return Promise.resolve(buffered);
+    }
+    return new Promise(resolve => {
+      this.waiters.set(id, resolve);
+    });
+  }
+
+  close(): void {
+    this.socket.destroy();
+  }
+}
+
 describe("UnixSocketServer MCP forward serialization", () => {
   let socketPath: string;
   let server: UnixSocketServer;
@@ -230,6 +279,53 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(b.success).toBe(true);
     expect(maxInFlight).toBe(1);
     expect(inFlight).toBe(0);
+  });
+
+  test("routes tools/list through the client bound by an earlier session-aware call on the same socket", async () => {
+    await server.close();
+    socketPath = join(tmpdir(), `mcp-session-list-${randomUUID()}.sock`);
+    fakeTimer = new FakeTimer();
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
+      fakeTimer,
+    );
+    await server.start();
+
+    const clients: FakeMcpClient[] = [];
+    server.mcpClientFactory = async () => {
+      const clientIndex = clients.length;
+      const client: FakeMcpClient = {
+        listTools: async () => ({ tools: [{ name: `client-${clientIndex}` }] }),
+        callTool: async () => ({ content: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      clients.push(client);
+      return client;
+    };
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const initialList = await client.request("tools/list", {});
+      const call = await client.request("tools/call", {
+        name: "observe",
+        arguments: { sessionUuid: "session-a" },
+      });
+      const refreshedList = await client.request("tools/list", {});
+
+      expect(initialList.success).toBe(true);
+      expect(initialList.result).toEqual({ tools: [{ name: "client-0" }] });
+      expect(call.success).toBe(true);
+      expect(refreshedList.success).toBe(true);
+      expect(refreshedList.result).toEqual({ tools: [{ name: "client-1" }] });
+    } finally {
+      client.close();
+    }
   });
 
   test("explicit device targets serialize even when session UUIDs differ", async () => {

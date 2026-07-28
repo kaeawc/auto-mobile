@@ -11,6 +11,7 @@ import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
+import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
 
 function createTestService(): FeatureFlagService {
   return new FeatureFlagService(
@@ -149,5 +150,44 @@ describe("UnixSocketServer feature flag handlers", () => {
 
     expect(response.success).toBe(false);
     expect(response.error).toContain("Unknown feature flag");
+  });
+
+  test("ide/setSessionToolCapability persists then broadcasts a tools list refresh", async () => {
+    const writes: Array<{ sessionUuid: string; capability: string; enabled: boolean }> = [];
+    const profileService = {
+      setEnabled: async (sessionUuid: string, capability: string, enabled: boolean) => {
+        writes.push({ sessionUuid, capability, enabled });
+      },
+    };
+    await server.close();
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      fakeTimer,
+      featureFlagService,
+      { sessionToolProfileService: profileService }
+    );
+    await server.start();
+
+    const emitted: string[] = [];
+    const unsubscribe = ListChangedBroadcaster.subscribe(kind => emitted.push(kind));
+    try {
+      const response = await sendRequest(socketPath, "ide/setSessionToolCapability", {
+        sessionUuid: "device-session-1",
+        capability: "clipboard",
+        enabled: false,
+      });
+
+      expect(response.success).toBe(true);
+      expect(writes).toEqual([{
+        sessionUuid: "device-session-1",
+        capability: "clipboard",
+        enabled: false,
+      }]);
+      expect(emitted).toEqual(["tools"]);
+    } finally {
+      unsubscribe();
+    }
   });
 });

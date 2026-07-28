@@ -39,7 +39,12 @@ import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers"
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinitions";
-import { getSessionToolProfileService, TOOL_CAPABILITIES, type ToolCapability } from "../features/toolCapabilities/SessionToolProfileService";
+import {
+  getSessionToolProfileService,
+  TOOL_CAPABILITIES,
+  type SessionToolProfileService,
+  type ToolCapability,
+} from "../features/toolCapabilities/SessionToolProfileService";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   IOS_CTRL_PROXY_APP_HASH,
@@ -162,6 +167,12 @@ export class UnixSocketServer {
   private daemonState: DaemonStateAccess;
   private mcpClients: Map<string, Client> = new Map();
   private mcpClientPromises: Map<string, Promise<Client>> = new Map();
+  /**
+   * The loopback MCP client that a socket transport most recently bound with a
+   * device session. `tools/list` carries no arguments, so this preserves the
+   * client-local session context selected by the preceding device-aware call.
+   */
+  private boundMcpClientKeysBySocketSession: Map<string, string> = new Map();
   /** Promise tails that serialize MCP HTTP forwards only within the same target key. */
   private mcpForwardTails: Map<string, Promise<void>> = new Map();
   private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -169,6 +180,7 @@ export class UnixSocketServer {
   private featureFlagService: FeatureFlagService | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
+  private readonly sessionToolProfileService?: Pick<SessionToolProfileService, "setEnabled">;
   /**
    * Factory that `getMcpClient()` calls to open the loopback MCP HTTP client.
    * Defaults to the real {@link createMcpClient}; tests assign a fake here to
@@ -212,7 +224,11 @@ export class UnixSocketServer {
     daemonState: DaemonStateAccess = DaemonState.getInstance(),
     timer: Timer = defaultTimer,
     featureFlagService: FeatureFlagService | null = null,
-    handshakeConfig: { identity?: DaemonSelfIdentity; enforce?: boolean } = {}
+    handshakeConfig: {
+      identity?: DaemonSelfIdentity;
+      enforce?: boolean;
+      sessionToolProfileService?: Pick<SessionToolProfileService, "setEnabled">;
+    } = {}
   ) {
     this.socketPath = socketPath;
     this.mcpEndpoint = mcpEndpoint;
@@ -220,6 +236,7 @@ export class UnixSocketServer {
     this.timer = timer;
     this.featureFlagService = featureFlagService;
     this.handshakeEnforced = handshakeConfig.enforce ?? DAEMON_HANDSHAKE_ENABLED;
+    this.sessionToolProfileService = handshakeConfig.sessionToolProfileService;
     this.daemonIdentity = handshakeConfig.identity ?? {
       version: DAEMON_VERSION,
       build: getCurrentBuildIdentity(),
@@ -326,6 +343,7 @@ export class UnixSocketServer {
       this.sessions.delete(sessionId);
       this.clientSockets.delete(sessionId);
       this.notificationSubscribers.delete(sessionId);
+      this.boundMcpClientKeysBySocketSession.delete(sessionId);
     });
 
     socket.on("error", error => {
@@ -333,6 +351,7 @@ export class UnixSocketServer {
       this.sessions.delete(sessionId);
       this.clientSockets.delete(sessionId);
       this.notificationSubscribers.delete(sessionId);
+      this.boundMcpClientKeysBySocketSession.delete(sessionId);
       if (!socket.destroyed) {
         socket.destroy();
       }
@@ -461,7 +480,9 @@ export class UnixSocketServer {
             const mcpClient = await this.getMcpClient(forwardKey);
 
             try {
-              return await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs, sessionId);
+              const response = await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs, sessionId);
+              this.recordBoundMcpClientKey(request, sessionId, forwardKey);
+              return response;
             } catch (ideError) {
               const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
               if (ideErrorMessage.includes("Session not found")) {
@@ -478,7 +499,9 @@ export class UnixSocketServer {
                     detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - forwardStartMs}ms)`,
                   });
                 }
-                return await this.handleIdeRequest(freshClient, request, retryRemainingMs, sessionId);
+                const response = await this.handleIdeRequest(freshClient, request, retryRemainingMs, sessionId);
+                this.recordBoundMcpClientKey(request, sessionId, forwardKey);
+                return response;
               }
               throw ideError;
             }
@@ -599,6 +622,10 @@ export class UnixSocketServer {
       return `socket:${socketSessionId}`;
     }
 
+    if (request.method === "tools/list") {
+      return this.boundMcpClientKeysBySocketSession.get(socketSessionId) ?? `method:${request.method}`;
+    }
+
     if (request.method === "ide/getNavigationGraph") {
       return this.getRequestArgumentScopeKey(request.params) ?? `method:${request.method}`;
     }
@@ -609,6 +636,28 @@ export class UnixSocketServer {
     }
 
     return `method:${request.method}`;
+  }
+
+  private recordBoundMcpClientKey(
+    request: DaemonRequest,
+    socketSessionId: string,
+    forwardKey: string
+  ): void {
+    if (request.method !== "tools/call") {
+      return;
+    }
+    const sessionUuid = this.getSessionUuid(request.params?.arguments);
+    if (sessionUuid) {
+      this.boundMcpClientKeysBySocketSession.set(socketSessionId, forwardKey);
+    }
+  }
+
+  private getSessionUuid(args: unknown): string | undefined {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return undefined;
+    }
+    const sessionUuid = (args as Record<string, unknown>).sessionUuid;
+    return typeof sessionUuid === "string" && sessionUuid.length > 0 ? sessionUuid : undefined;
   }
 
   private getRequestArgumentScopeKey(args: unknown): string | undefined {
@@ -773,7 +822,9 @@ export class UnixSocketServer {
         if (!args.sessionUuid || !TOOL_CAPABILITIES.includes(args.capability as ToolCapability) || typeof args.enabled !== "boolean") {
           throw new Error("setSessionToolCapability requires sessionUuid, a known capability, and enabled boolean params");
         }
-        await getSessionToolProfileService().setEnabled(args.sessionUuid, args.capability as ToolCapability, args.enabled);
+        await (this.sessionToolProfileService ?? getSessionToolProfileService())
+          .setEnabled(args.sessionUuid, args.capability as ToolCapability, args.enabled);
+        ListChangedBroadcaster.emit("tools");
         return { sessionUuid: args.sessionUuid, capability: args.capability, enabled: args.enabled };
       }
       case "ide/ping": {
@@ -2072,6 +2123,7 @@ export class UnixSocketServer {
     const clients = Array.from(this.mcpClients.entries());
     this.mcpClients.clear();
     this.mcpClientPromises.clear();
+    this.boundMcpClientKeysBySocketSession.clear();
     for (const timer of this.mcpClientIdleTimers.values()) {
       this.timer.clearTimeout(timer);
     }

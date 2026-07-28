@@ -60,6 +60,10 @@ class FakeAdbExecutor implements AdbExecutor {
     return null;
   }
 
+  async getDeviceTimestampMs(): Promise<number> {
+    return 0;
+  }
+
   async getAdbPathOnly(): Promise<string> {
     return "adb";
   }

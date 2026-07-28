@@ -61,6 +61,12 @@ export interface AdbExecutor {
   ): Promise<ExecResult>;
 
   /**
+   * Get the device time in milliseconds since the Unix epoch.
+   * Falls back to the host time when device time cannot be retrieved.
+   */
+  getDeviceTimestampMs(): Promise<number>;
+
+  /**
    * Get the list of booted Android devices
    * @returns Promise with array of booted devices
    */

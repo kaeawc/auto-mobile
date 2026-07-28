@@ -527,6 +527,11 @@ public class ElementLocator: ElementLocating {
             // Use the observed app's bundle identifier for packageName
             let bundleId = foregroundBundleId ?? "com.apple.springboard"
 
+            // Keep one monitor interval around every hierarchy-producing operation. The app and
+            // SpringBoard snapshots can each be internally stable while an A→B→A transition
+            // happens between them.
+            let beforeHierarchyCapture = try runOnMainThread { DeviceRotation.captureSample() }
+
             // Use snapshot() for fast hierarchy extraction - single IPC call captures everything
             // snapshot() captures all element data in ONE IPC call (fast!)
             // vs accessing properties individually which is extremely slow
@@ -644,26 +649,33 @@ public class ElementLocator: ElementLocating {
             // Display Zoom changes nativeScale while scale stays put, and
             // XCUIScreenshot.pngRepresentation renders at native scale (#4548). screenScale
             // (UIScreen.scale) is still reported unchanged for backward compatibility.
-            let currentScreenMetrics: ScreenMetrics = try runOnMainThread {
-                let scale = Float(UIScreen.main.scale)
-                let nativeScale = Float(UIScreen.main.nativeScale)
-                let bounds = UIScreen.main.bounds
-                return ScreenMetrics(
-                    scale: scale,
-                    nativeScale: nativeScale,
-                    fallbackWidth: Int(bounds.width),
-                    fallbackHeight: Int(bounds.height),
-                    rotation: DeviceRotation.current()
-                )
-            }
-            // SpringBoard contributes alert bounds through a second XCUI snapshot. Require its
-            // capture-time orientation and the final sample to agree with the app snapshot; this
-            // makes a rotation anywhere across either hierarchy-producing IPC fail closed.
-            let rotationAfterHierarchyCapture = try runOnMainThread { DeviceRotation.current() }
+            let (currentScreenMetrics, afterHierarchyCapture): (ScreenMetrics, RotationCaptureSample) =
+                try runOnMainThread {
+                    let scale = Float(UIScreen.main.scale)
+                    let nativeScale = Float(UIScreen.main.nativeScale)
+                    let bounds = UIScreen.main.bounds
+                    let captureSample = DeviceRotation.captureSample()
+                    return (
+                        ScreenMetrics(
+                            scale: scale,
+                            nativeScale: nativeScale,
+                            fallbackWidth: Int(bounds.width),
+                            fallbackHeight: Int(bounds.height),
+                            rotation: captureSample.rotation
+                        ),
+                        captureSample
+                    )
+                }
+            // SpringBoard contributes alert bounds through a second XCUI snapshot. Require each
+            // capture's rotation and the process-lifetime epoch to agree across the complete
+            // hierarchy assembly.
             let hierarchyRotation: Int?
             if screenMetrics.rotation == systemAlertCapture.rotation,
                screenMetrics.rotation == currentScreenMetrics.rotation,
-               screenMetrics.rotation == rotationAfterHierarchyCapture
+               screenMetrics.rotation == RotationCaptureSample.stableRotation(
+                   between: beforeHierarchyCapture,
+                   and: afterHierarchyCapture
+               )
             {
                 hierarchyRotation = screenMetrics.rotation
             } else {

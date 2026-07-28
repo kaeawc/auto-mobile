@@ -69,13 +69,17 @@ final class RotationChangeMonitor {
         }
     }
 
+    func captureSample(using sampler: RotationSampling) -> RotationCaptureSample {
+        changeGeneration.captureSample(rotation: sampler.currentRotation())
+    }
+
     func capture<T>(
         using sampler: RotationSampling,
         _ operation: () throws -> T
     ) rethrows -> (value: T, rotation: Int?) {
-        let beforeCapture = changeGeneration.captureSample(rotation: sampler.currentRotation())
+        let beforeCapture = captureSample(using: sampler)
         let value = try operation()
-        let afterCapture = changeGeneration.captureSample(rotation: sampler.currentRotation())
+        let afterCapture = captureSample(using: sampler)
         return (
             value,
             RotationCaptureSample.stableRotation(between: beforeCapture, and: afterCapture)
@@ -161,6 +165,10 @@ enum DeviceRotation {
 
         static func capture<T>(_ operation: () throws -> T) rethrows -> (value: T, rotation: Int?) {
             try changeMonitor.capture(using: rotationSampler, operation)
+        }
+
+        static func captureSample() -> RotationCaptureSample {
+            changeMonitor.captureSample(using: rotationSampler)
         }
 
         static func current() -> Int? {

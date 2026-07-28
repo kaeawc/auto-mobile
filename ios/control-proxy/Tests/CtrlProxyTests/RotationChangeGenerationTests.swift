@@ -26,7 +26,7 @@ private final class FakeRotationSampler: RotationSampling {
 }
 
 final class RotationChangeGenerationTests: XCTestCase {
-    func testUsesDeviceRotationSamplerInsteadOfAnyRunnerSceneValue() {
+    func testCapturesRotationUsingInjectedSampler() {
         let signal = FakeRotationChangeSignal()
         let sampler = FakeRotationSampler(rotation: 1)
         let monitor = RotationChangeMonitor(signal: signal)
@@ -52,6 +52,28 @@ final class RotationChangeGenerationTests: XCTestCase {
 
         XCTAssertEqual(capture.value, "capture")
         XCTAssertNil(capture.rotation, "A→B→A must invalidate capture rotation")
+    }
+
+    func testRejectsABARotationBetweenHierarchyCapturePhases() {
+        let signal = FakeRotationChangeSignal()
+        let sampler = FakeRotationSampler(rotation: 0)
+        let monitor = RotationChangeMonitor(signal: signal)
+
+        let beforeHierarchy = monitor.captureSample(using: sampler)
+        XCTAssertEqual(monitor.capture(using: sampler) { "app snapshot" }.rotation, 0)
+
+        sampler.rotation = 1
+        signal.sendOrientationChange()
+        sampler.rotation = 0
+        signal.sendOrientationChange()
+
+        XCTAssertEqual(monitor.capture(using: sampler) { "SpringBoard snapshot" }.rotation, 0)
+        let afterHierarchy = monitor.captureSample(using: sampler)
+
+        XCTAssertNil(
+            RotationCaptureSample.stableRotation(between: beforeHierarchy, and: afterHierarchy),
+            "A→B→A between the app and SpringBoard snapshots must invalidate hierarchy rotation"
+        )
     }
 
     func testKeepsRotationWhenNoOrientationChangeOccursDuringCapture() {

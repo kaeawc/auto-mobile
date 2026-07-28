@@ -283,11 +283,25 @@ describe("AndroidCtrlProxyClient", function() {
     );
   };
 
-  const setAdbPngScreenshotResponse = (): void => {
+  const setAdbPngScreenshotResponse = (screenshotBase64: string = "png-base64"): void => {
     fakeAdb.setCommandResponse("screencap -p", {
-      stdout: "png-base64\n",
+      stdout: `${screenshotBase64}\n`,
       stderr: "",
     });
+  };
+
+  const forwardScreenshotBinding = (
+    width: number = 1080,
+    height: number = 2340
+  ): { captureSequence: number; width: number; height: number } => {
+    (accessibilityServiceClient as any).handleHierarchyUpdate(
+      hierarchyWithScreenSize(width, height)
+    );
+    const binding = (accessibilityServiceClient as any).screenGeometry.bind();
+    if (!binding) {
+      throw new Error("Expected forwarded hierarchy to establish a screenshot binding");
+    }
+    return binding;
   };
 
   const startScreenshotBackoffAndFlush = async (): Promise<void> => {
@@ -367,17 +381,21 @@ describe("AndroidCtrlProxyClient", function() {
   test("reports websocket-unavailable backoff captures as ADB PNG fallback", async () => {
     await recreateClientForManualTimerTest();
     const streamSocket = await startStreamServerWithScreenshotSubscriber();
-    setAdbPngScreenshotResponse();
+    const screenshotBase64 = pngFrame(1080, 2340);
+    setAdbPngScreenshotResponse(screenshotBase64);
+    const binding = forwardScreenshotBinding();
+    streamSocket.reset();
 
     await startScreenshotBackoffAndFlush();
 
     expectSingleScreenshotUpdate(streamSocket, {
-      screenshotBase64: "png-base64",
+      screenshotBase64,
       screenshotMimeType: "image/png",
       screenshotFormat: "png",
       screenshotCaptureSource: "android_adb_screencap",
       screenshotFallback: true,
       screenshotFallbackReason: "websocket_unavailable",
+      captureSequence: binding.captureSequence,
     });
   });
 
@@ -414,24 +432,31 @@ describe("AndroidCtrlProxyClient", function() {
   test("reports unsupported a11y screenshots as emitted ADB PNG fallback frames", async () => {
     await recreateClientForManualTimerTest();
     const streamSocket = await startStreamServerWithScreenshotSubscriber();
-    setAdbPngScreenshotResponse();
+    const screenshotBase64 = pngFrame(1080, 2340);
+    setAdbPngScreenshotResponse(screenshotBase64);
+    const binding = forwardScreenshotBinding();
+    streamSocket.reset();
     (accessibilityServiceClient as any).a11yScreenshotSupported = false;
 
     await startScreenshotBackoffAndFlush();
 
     expectSingleScreenshotUpdate(streamSocket, {
-      screenshotBase64: "png-base64",
+      screenshotBase64,
       screenshotMimeType: "image/png",
       screenshotFormat: "png",
       screenshotCaptureSource: "android_adb_screencap",
       screenshotFallback: true,
       screenshotFallbackReason: "a11y_screenshot_unsupported",
+      captureSequence: binding.captureSequence,
     });
   });
 
   test("reports CtrlProxy screenshot errors as emitted ADB PNG fallback frames", async () => {
     const { streamSocket, ctrlProxySocket } = await startCapturingBackoffStreamTest();
-    setAdbPngScreenshotResponse();
+    const screenshotBase64 = pngFrame(1080, 2340);
+    setAdbPngScreenshotResponse(screenshotBase64);
+    const binding = forwardScreenshotBinding();
+    streamSocket.reset();
 
     const request = await startScreenshotBackoffAndReadRequest(ctrlProxySocket);
     ctrlProxySocket.emit("message", JSON.stringify({
@@ -442,12 +467,13 @@ describe("AndroidCtrlProxyClient", function() {
     await flushPromises();
 
     expectSingleScreenshotUpdate(streamSocket, {
-      screenshotBase64: "png-base64",
+      screenshotBase64,
       screenshotMimeType: "image/png",
       screenshotFormat: "png",
       screenshotCaptureSource: "android_adb_screencap",
       screenshotFallback: true,
       screenshotFallbackReason: "ctrlproxy_failed",
+      captureSequence: binding.captureSequence,
     });
   });
 
@@ -475,7 +501,10 @@ describe("AndroidCtrlProxyClient", function() {
 
   test("reports CtrlProxy screenshot exceptions as emitted ADB PNG fallback frames", async () => {
     const { streamSocket, ctrlProxySocket } = await startCapturingBackoffStreamTest();
-    setAdbPngScreenshotResponse();
+    const screenshotBase64 = pngFrame(1080, 2340);
+    setAdbPngScreenshotResponse(screenshotBase64);
+    const binding = forwardScreenshotBinding();
+    streamSocket.reset();
     ctrlProxySocket.send = () => {
       throw new Error("boom");
     };
@@ -483,12 +512,47 @@ describe("AndroidCtrlProxyClient", function() {
     await startScreenshotBackoffAndFlush();
 
     expectSingleScreenshotUpdate(streamSocket, {
-      screenshotBase64: "png-base64",
+      screenshotBase64,
       screenshotMimeType: "image/png",
       screenshotFormat: "png",
       screenshotCaptureSource: "android_adb_screencap",
       screenshotFallback: true,
       screenshotFallbackReason: "ctrlproxy_exception",
+      captureSequence: binding.captureSequence,
+    });
+  });
+
+  test("keeps an ADB fallback bound to the hierarchy present when the capture starts", async () => {
+    await recreateClientForManualTimerTest();
+    const streamSocket = await startStreamServerWithScreenshotSubscriber();
+    const initialBinding = forwardScreenshotBinding();
+    const screenshotBase64 = pngFrame(1080, 2340);
+    streamSocket.reset();
+    (accessibilityServiceClient as any).a11yScreenshotSupported = false;
+
+    let resolveAdbCapture: ((result: { stdout: string; stderr: string }) => void) | null = null;
+    const adbCapture = new Promise<{ stdout: string; stderr: string }>(resolve => {
+      resolveAdbCapture = resolve;
+    });
+    spyOn(fakeAdb, "executeCommand").mockImplementation(async command => {
+      if (command.includes("screencap -p")) {
+        return await adbCapture as any;
+      }
+      return { stdout: "", stderr: "" } as any;
+    });
+
+    const capturePromise = accessibilityServiceClient.captureScreenshotForObservationStream();
+    await flushPromises();
+
+    const laterBinding = forwardScreenshotBinding();
+    expect(laterBinding.captureSequence).toBeGreaterThan(initialBinding.captureSequence);
+    resolveAdbCapture?.({ stdout: `${screenshotBase64}\n`, stderr: "" });
+    const result = await capturePromise;
+
+    expect(result).toMatchObject({
+      success: true,
+      data: screenshotBase64,
+      captureBinding: initialBinding,
     });
   });
 

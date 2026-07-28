@@ -3111,6 +3111,36 @@ describe("AndroidCtrlProxyClient", function() {
     // hierarchy carrying it. Claiming it otherwise lets the daemon stamp an older capture's
     // identity onto fresh pixels, and a control client would map a tap through stale bounds.
 
+    test("binds an explicitly forwarded initial hierarchy for later static-screen screenshots", () => {
+      let backoffStarts = 0;
+      (accessibilityServiceClient as any).startScreenshotBackoff = () => { backoffStarts++; };
+
+      accessibilityServiceClient.recordInitialObservationStreamHierarchy(
+        hierarchyWithScreenSize(1080, 2340),
+        41
+      );
+
+      expect((accessibilityServiceClient as any).screenGeometry.bind()).toEqual({
+        captureSequence: 41,
+        width: 1080,
+        height: 2340,
+      });
+      expect(backoffStarts).toBe(1);
+    });
+
+    test("drops stale provenance when an initial hierarchy has no assigned identity", () => {
+      const geometry = (accessibilityServiceClient as any).screenGeometry;
+      geometry.update(1080, 2340);
+      geometry.markForwarded(40);
+
+      accessibilityServiceClient.recordInitialObservationStreamHierarchy(
+        hierarchyWithScreenSize(1080, 2340),
+        null
+      );
+
+      expect(geometry.bind()).toBeNull();
+    });
+
     test("claims provenance after a hierarchy is forwarded to the observation stream", async () => {
       const socket = await startStreamServerWithScreenshotSubscriber();
 

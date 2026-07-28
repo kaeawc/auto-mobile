@@ -938,6 +938,8 @@ export class Daemon {
       },
       convertToViewHierarchyResult: hierarchy =>
         client.convertToViewHierarchyResult(hierarchy as never),
+      recordInitialObservationStreamHierarchy: (hierarchy, captureSequence) =>
+        client.recordInitialObservationStreamHierarchy(hierarchy, captureSequence),
       requestScreenshotWithoutObservationStreamPush: (...args) =>
         client.requestScreenshotWithoutObservationStreamPush(...args),
     };

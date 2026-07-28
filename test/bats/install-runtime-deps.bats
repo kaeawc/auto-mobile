@@ -38,3 +38,21 @@ setup() {
 
   [ "$status" -eq 0 ]
 }
+
+@test "allows an interactive user to decline ffmpeg installation" {
+  detect_os() {
+    printf 'linux\n'
+  }
+  command_exists() {
+    [[ "$1" == "apt-get" ]]
+  }
+  gum() {
+    [[ "$1" == "confirm" ]]
+    return 1
+  }
+  NON_INTERACTIVE=false
+
+  run install_runtime_deps
+
+  [ "$status" -eq 0 ]
+}

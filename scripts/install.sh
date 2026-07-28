@@ -3264,7 +3264,8 @@ _install_system_package() {
     if [[ "${NON_INTERACTIVE}" != "true" ]]; then
         if ! gum confirm "Install ${pkg}? (${description})"; then
             log_info "Skipped ${pkg} — install later with: ${skip_hint}"
-            return 1
+            # A user-declined interactive install is a successful no-op.
+            return 0
         fi
     fi
 

@@ -170,7 +170,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   {
     name: "request_append_text",
     builder: "CtrlProxyText.requestAppendText",
-    invoke: h => new CtrlProxyText(h.context).requestAppendText("a"),
+    invoke: h => new CtrlProxyText(h.context).requestAppendText("a", 5000, undefined, "frame-context"),
   },
   {
     name: "request_clear_text",

@@ -123,7 +123,8 @@
       "wire": {
         "type": "request_append_text",
         "requestId": "fixture-request-id",
-        "text": "a"
+        "text": "a",
+        "frameContext": "frame-context"
       }
     },
     {

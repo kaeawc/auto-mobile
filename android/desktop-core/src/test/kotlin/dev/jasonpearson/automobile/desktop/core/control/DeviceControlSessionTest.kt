@@ -892,6 +892,9 @@ class DeviceControlSessionTest {
     // asynchronous application. This receipt-time hook closes that interval.
     session.onObservationFrameContextDeclared("epoch:8", captureSequence = 8L)
 
+    // The old paired facts are still available, but evaluating them must not restore the snapshot
+    // that receipt-time invalidation just retired.
+    assertNotNull(session.evaluate(current).snapshotOrNull)
     assertNull(session.interactionSnapshot)
     assertFalse(session.tap(clickedBeforeChange, point))
     advanceUntilIdle()

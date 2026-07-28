@@ -270,9 +270,11 @@ class DeviceControlSession(
       if (staleContextRejectedFrameContext != null) {
         null
       } else if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
-        retainedIfStillActionable(decision, inputs, now)
+        retainedIfStillActionable(decision, inputs, now)?.takeIf {
+          streamFrameContext.matches(it.frameContext)
+        }
       } else {
-        live
+        live?.takeIf { streamFrameContext.matches(it.frameContext) }
       }
     return decision
   }

@@ -228,7 +228,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   ): Promise<CtrlProxySetTextResult>;
 
   requestAppendText(
-    text: string, timeoutMs?: number, perf?: PerformanceTracker
+    text: string, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxySetTextResult>;
 
   requestClearText(
@@ -1747,9 +1747,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   async requestAppendText(
-    text: string, timeoutMs: number = 5000, perf?: PerformanceTracker
+    text: string, timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxySetTextResult> {
-    return this.text.requestAppendText(text, timeoutMs, perf);
+    return this.text.requestAppendText(text, timeoutMs, perf, frameContext);
   }
 
   async requestClearText(

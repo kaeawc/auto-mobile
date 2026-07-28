@@ -108,11 +108,13 @@ public struct RequestSetText: Decodable {
     public var requestId: String?
     public var text: String
     public var resourceId: String?
+    public var frameContext: String?
 }
 
 public struct RequestAppendText: Decodable {
     public var requestId: String?
     public var text: String
+    public var frameContext: String?
 }
 
 public struct RequestClearText: Decodable {

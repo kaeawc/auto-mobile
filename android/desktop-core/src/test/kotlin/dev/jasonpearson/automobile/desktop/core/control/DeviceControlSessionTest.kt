@@ -864,6 +864,28 @@ class DeviceControlSessionTest {
   }
 
   @Test
+  fun `a frame-context change retires control at stream receipt`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val current = paired(captureSequence = 7L, sourceSequence = 10L)
+
+    session.onObservationFrameContextDeclared("epoch:7", captureSequence = 7L)
+    assertNotNull(session.evaluate(current).snapshotOrNull)
+    val clickedBeforeChange = assertNotNull(session.interactionSnapshot)
+
+    // The new context has arrived, but the hierarchy/screenshot facts may still be awaiting their
+    // asynchronous application. This receipt-time hook closes that interval.
+    session.onObservationFrameContextDeclared("epoch:8", captureSequence = 8L)
+
+    assertNull(session.interactionSnapshot)
+    assertFalse(session.tap(clickedBeforeChange, point))
+    advanceUntilIdle()
+    assertTrue(client.inputTapCalls.isEmpty())
+    scope.cancel()
+  }
+
+  @Test
   fun `the receipt-time retirement invalidates Compose readers of the interaction snapshot`() =
     runTest {
       // Half (a) of the receipt fix. Retiring the snapshot early is only useful if the VIEW

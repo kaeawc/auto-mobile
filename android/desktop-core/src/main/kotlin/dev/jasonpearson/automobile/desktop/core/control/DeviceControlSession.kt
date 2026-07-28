@@ -123,15 +123,42 @@ class DeviceControlSession(
     }
   }
 
+  /** Records the newest frame context observed from the stream. */
+  private class FrameContextTracker {
+    private var seen: Boolean = false
+    private var last: String? = null
+
+    fun observe(frameContext: String?): Boolean {
+      val changed = seen && frameContext != last
+      seen = true
+      last = frameContext
+      return changed
+    }
+
+    fun matches(frameContext: String): Boolean = !seen || frameContext == last
+
+    fun forget() {
+      seen = false
+      last = null
+    }
+  }
+
   // The declaration seen at STREAM RECEIPT — the earliest point in the pipeline, ahead of hierarchy
   // parsing and the layout state's debounce. This is the one that matters (see
   // [onObservationSpaceDeclared]).
   private val streamSpace = SpaceTracker()
 
+  // Like [streamSpace], but carries the device-authored identity that makes input actionable.
+  private val streamFrameContext = FrameContextTracker()
+
   // Newest capture identity whose coordinate space has been observed at receipt, so a late frame
   // carrying an older binding cannot roll the tracked space backward (see
   // [onObservationSpaceDeclared]).
   private var lastObservedSpaceCapture: Long? = null
+
+  // A delayed screenshot may carry the context it had when capture began, so receipt-time context
+  // observations must use the same capture ordering as coordinate-space observations.
+  private var lastObservedFrameContextCapture: Long? = null
 
   // Newest device rotation any source has proven, for the dispatch-time gate. Null until one is
   // observed, which is why a session that has seen no rotation accepts every snapshot.
@@ -355,6 +382,20 @@ class DeviceControlSession(
   }
 
   /**
+   * Note the frame context declared by an observation message at stream receipt.
+   *
+   * Frame application can be delayed by hierarchy parsing and debounce, but the runner begins
+   * rejecting the previous context as soon as it publishes the new one. Retiring control here keeps
+   * the old pixels and queued inputs from remaining actionable in that window.
+   */
+  fun onObservationFrameContextDeclared(frameContext: String?, captureSequence: Long?) {
+    val lastSeen = lastObservedFrameContextCapture
+    if (captureSequence != null && lastSeen != null && captureSequence <= lastSeen) return
+    if (captureSequence != null) lastObservedFrameContextCapture = captureSequence
+    if (streamFrameContext.observe(frameContext)) resetPreservingSpaceBaseline()
+  }
+
+  /**
    * Whether [snapshot]'s coordinates can still be sent to the device: its declared
    * [CoordinateSpace] AND its capture rotation are both the ones the device is currently reporting
    * (issues #4550, #4502).
@@ -379,6 +420,7 @@ class DeviceControlSession(
   private fun coordinatesAreStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
     staleContextRejectedCaptureSequence == null &&
       streamSpace.matches(snapshot.coordinateSpace) &&
+      streamFrameContext.matches(snapshot.frameContext) &&
       lastProvenRotation.let { it == null || it == snapshot.rotation }
 
   /**
@@ -583,6 +625,8 @@ class DeviceControlSession(
     screenshotFactSpace.forget()
     hierarchyFactSpace.forget()
     lastObservedSpaceCapture = null
+    streamFrameContext.forget()
+    lastObservedFrameContextCapture = null
     lastProvenRotation = null
   }
 

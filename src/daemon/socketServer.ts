@@ -1452,7 +1452,7 @@ export class UnixSocketServer {
       appendCharsSent = textResult.charsSent;
     } else {
       const textResult = append
-        ? await (client as IOSCtrlProxyClient).requestAppendText(text, timeoutMs)
+        ? await (client as IOSCtrlProxyClient).requestAppendText(text, timeoutMs, undefined, frameContext)
         : await client.requestSetText(text, { timeoutMs, frameContext });
       if (!textResult.success) {
         return { success: false, error: textResult.error };

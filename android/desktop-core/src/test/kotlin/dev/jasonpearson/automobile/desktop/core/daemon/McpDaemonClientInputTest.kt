@@ -20,6 +20,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 
 class McpDaemonClientInputTest {
   private val json = Json { ignoreUnknownKeys = true }
@@ -97,6 +98,16 @@ class McpDaemonClientInputTest {
     )
     assertEquals(true, result.response.success)
     assertEquals(InputCoordinates(x = 240.5, y = 640.25), result.response.coordinates)
+  }
+
+  @Test
+  fun `an input without a frame context omits the param for legacy daemons`() {
+    val result =
+      captureInputRequest("""{ "action": "input/tap", "success": true }""") { client ->
+        client.inputTap(x = 1.0, y = 2.0)
+      }
+
+    assertFalse("frameContext" in result.request.params)
   }
 
   @Test

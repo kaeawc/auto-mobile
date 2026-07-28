@@ -841,6 +841,28 @@ describe("UnixSocketServer input/typeText", () => {
     expect(requestSetText).not.toHaveBeenCalled();
   });
 
+  test("forwards an iOS frame context to the CtrlProxy append primitive", async () => {
+    const requestAppendText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      requestAppendText,
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext = () => {};
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "ios",
+      deviceId: "ios-sim-1",
+      text: "a",
+      mode: "append",
+      frameContext: "ios:7",
+    });
+
+    expect(response.success).toBe(true);
+    expect(requestAppendText).toHaveBeenCalledWith("a", 30_000, undefined, "ios:7");
+  });
+
   test("uses the socket autolock device when deviceId is omitted", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));

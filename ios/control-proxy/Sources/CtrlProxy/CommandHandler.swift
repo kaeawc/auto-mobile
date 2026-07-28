@@ -612,13 +612,16 @@ public class CommandHandler: CommandHandling {
             )
 
         do {
-            if let resourceId = resourceId {
-                try perfProvider.track("setText.byResourceId") {
-                    try gesturePerformer.setText(resourceId: resourceId, text: text)
-                }
-            } else {
-                try perfProvider.track("typeText") {
-                    try gesturePerformer.typeText(text: text)
+            try requireCurrentFrameContext(request.frameContext)
+            try performContextCheckedGesture(expected: request.frameContext) {
+                if let resourceId = resourceId {
+                    try perfProvider.track("setText.byResourceId") {
+                        try gesturePerformer.setText(resourceId: resourceId, text: text)
+                    }
+                } else {
+                    try perfProvider.track("typeText") {
+                        try gesturePerformer.typeText(text: text)
+                    }
                 }
             }
         } catch {
@@ -646,8 +649,11 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handleAppendText")
         defer { perfProvider.end() }
 
-        try perfProvider.track("appendText") {
-            try gesturePerformer.appendText(text: request.text)
+        try requireCurrentFrameContext(request.frameContext)
+        try performContextCheckedGesture(expected: request.frameContext) {
+            try perfProvider.track("appendText") {
+                try gesturePerformer.appendText(text: request.text)
+            }
         }
 
         return WebSocketResponse.success(

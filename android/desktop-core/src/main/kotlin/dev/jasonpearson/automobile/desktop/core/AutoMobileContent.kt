@@ -914,6 +914,10 @@ fun AutoMobileContent(
     liveStreamClient.resetLayoutReplayCache()
     liveStreamClient.hierarchyUpdates.collect { update ->
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
+      deviceControlSession.onObservationFrameContextDeclared(
+        update.frameContext,
+        update.captureSequence,
+      )
       // AT RECEIPT, before the parse below and before the layout state's debounce: the daemon has
       // already switched to interpreting input under the new scale metadata by the time it
       // publishes a new declaration, so a flip has to invalidate control NOW. Detecting it from
@@ -971,6 +975,10 @@ fun AutoMobileContent(
     liveStreamClient.resetLayoutReplayCache()
     liveStreamClient.screenshotUpdates.collect { update ->
       if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
+      deviceControlSession.onObservationFrameContextDeclared(
+        update.frameContext,
+        update.captureSequence,
+      )
       // Same receipt-time gate as the hierarchy collector; see its comment (issue #4550).
       deviceControlSession.onObservationSpaceDeclared(
         update.coordinateSpace,
@@ -1695,7 +1703,10 @@ fun AutoMobileContent(
             DeviceScreenView(
               screenshotData =
                 renderSnapshot?.screenshotData ?: layoutInspectorState.screenshotData,
-              liveFrame = liveVideoFrame?.bitmap,
+              // WebRTC frames have no capture identity. In control mode render the paired
+              // observation screenshot instead, so the pixels the user clicks carry the same
+              // frameContext as the hierarchy and input request.
+              liveFrame = if (controlSnapshot == null) liveVideoFrame?.bitmap else null,
               screenWidth = renderSnapshot?.deviceWidth ?: layoutInspectorState.screenWidth,
               screenHeight = renderSnapshot?.deviceHeight ?: layoutInspectorState.screenHeight,
               rotation = layoutInspectorState.rotation,

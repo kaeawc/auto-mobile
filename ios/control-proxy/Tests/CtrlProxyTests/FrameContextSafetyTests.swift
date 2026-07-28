@@ -71,6 +71,11 @@ final class FrameContextSafetyTests: XCTestCase {
                 y2: 40,
                 frameContext: expected
             )),
+            .appendText(RequestAppendText(
+                requestId: "append",
+                text: "a",
+                frameContext: expected
+            )),
         ]
 
         for request in requests {
@@ -86,6 +91,7 @@ final class FrameContextSafetyTests: XCTestCase {
         XCTAssertTrue(fakeGesturePerformer.getTapHistory().isEmpty)
         XCTAssertTrue(fakeGesturePerformer.getSwipeHistory().isEmpty)
         XCTAssertTrue(fakeGesturePerformer.getDragHistory().isEmpty)
+        XCTAssertTrue(fakeGesturePerformer.getAppendTextHistory().isEmpty)
     }
 
     private func makeHierarchy(text: String) -> ViewHierarchy {

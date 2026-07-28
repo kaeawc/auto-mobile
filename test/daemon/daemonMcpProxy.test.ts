@@ -290,6 +290,23 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
+      test("restarts for a stamped client and a same-release plain daemon", async () => {
+        const clientVersion = "0.0.46+g8e5738e53463";
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          clientVersion,
+          runningVersion: "0.0.46",
+          statusAfterRestartVersion: clientVersion,
+          startedAt: ANCIENT_TIMESTAMP,
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
       test("self-heals same-release dev-build skew by restarting to this client's build", async () => {
         // Two checkouts at the same release (0.0.39) but different commits carry
         // different git stamps. The version gate must NOT hard-throw on the

@@ -511,9 +511,8 @@ export class DaemonMcpProxy {
     const clientBase = releaseVersion(this.clientVersion);
     const sameRelease = runningBase === clientBase;
     const clientDeclaresFullVersion = clientBase !== this.clientVersion;
-    const daemonDeclaresFullVersion = runningBase !== runningVersion;
 
-    if (sameRelease && (!clientDeclaresFullVersion || !daemonDeclaresFullVersion)) {
+    if (sameRelease && !clientDeclaresFullVersion) {
       return;
     }
 

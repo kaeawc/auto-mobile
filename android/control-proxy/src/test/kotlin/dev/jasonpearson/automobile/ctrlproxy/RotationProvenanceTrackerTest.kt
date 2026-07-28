@@ -11,7 +11,7 @@ import org.junit.Test
 class RotationProvenanceTrackerTest {
 
   @Test
-  fun `A to B to A display changes make the capture rotation unproven`() {
+  fun `queued A to B to A display changes make the capture rotation unproven`() {
     val changes = FakeRotationChangeSignal()
     val provenance = RotationProvenanceTracker(changes)
 
@@ -19,6 +19,7 @@ class RotationProvenanceTrackerTest {
     changes.emitRotationChanged(1)
     changes.emitRotationChanged(0)
 
+    assertEquals(2, changes.pendingChangeCount)
     assertNull(
       provenance.rotationIfUnchanged(
         capture,
@@ -26,6 +27,7 @@ class RotationProvenanceTrackerTest {
         rotationAtCaptureEnd = changes.rotation,
       )
     )
+    assertEquals(0, changes.pendingChangeCount)
   }
 
   @Test
@@ -55,6 +57,21 @@ class RotationProvenanceTrackerTest {
         capture,
         rotationAtCaptureStart = 0,
         rotationAtCaptureEnd = 1,
+      )
+    )
+  }
+
+  @Test
+  fun `a capture is unproven when its callback queue cannot be drained`() {
+    val provenance = RotationProvenanceTracker(FakeRotationChangeSignal(synchronizeResult = false))
+
+    val capture = provenance.beginCapture()
+
+    assertNull(
+      provenance.rotationIfUnchanged(
+        capture,
+        rotationAtCaptureStart = 0,
+        rotationAtCaptureEnd = 0,
       )
     )
   }
@@ -104,26 +121,40 @@ class RotationProvenanceTrackerTest {
     }
   }
 
-  private class FakeRotationChangeSignal : RotationChangeSignal {
+  private class FakeRotationChangeSignal(private val synchronizeResult: Boolean = true) :
+    RotationChangeSignal {
     private var listener: (() -> Unit)? = null
+    private val pendingListeners = mutableListOf<() -> Unit>()
     var rotation: Int = 0
       private set
 
     val isRegistered: Boolean
       get() = listener != null
 
+    val pendingChangeCount: Int
+      get() = pendingListeners.size
+
     override fun register(listener: () -> Unit): Boolean {
       this.listener = listener
       return true
     }
 
+    override fun synchronize(): Boolean {
+      if (!synchronizeResult) return false
+      val queuedListeners = pendingListeners.toList()
+      pendingListeners.clear()
+      queuedListeners.forEach { it.invoke() }
+      return true
+    }
+
     override fun unregister() {
       listener = null
+      pendingListeners.clear()
     }
 
     fun emitRotationChanged(rotation: Int) {
       this.rotation = rotation
-      requireNotNull(listener).invoke()
+      pendingListeners += requireNotNull(listener)
     }
   }
 

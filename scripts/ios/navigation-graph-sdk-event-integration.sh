@@ -35,24 +35,25 @@ ctrl_proxy_port_for_device() {
   # default and may already belong to another local service. `doctor` can exit
   # non-zero for unrelated diagnostics, but still emits the JSON round-trip
   # report that contains this ready runner's port.
-  local doctor_report
+  local doctor_report ctrl_proxy_port
   doctor_report="$(auto-mobile --cli doctor --ios --json || true)"
-  jq -er --arg device_id "${device_id}" '
-    .ios.checks[]
-    | select(.name == "iOS Observe Round Trip")
-    | .message
-    | split(" | ")
-    | map(select(contains("device=" + $device_id + ";")))
-    | .[0]
-    | capture("runnerPort=(?<port>[0-9]+)")
-    | .port
-  ' <<<"${doctor_report}"
+  if ! ctrl_proxy_port="$(jq -er --arg device_id "${device_id}" '
+      .ios.checks[]
+      | select(.name == "iOS Observe Round Trip")
+      | .message
+      | split(" | ")
+      | map(select(contains("device=" + $device_id + ";")))
+      | .[0]
+      | capture("runnerPort=(?<port>[0-9]+)")
+      | .port
+    ' <<<"${doctor_report}")"; then
+    echo "error: could not determine CtrlProxy port for simulator ${device_id}" >&2
+    return 1
+  fi
+  printf '%s\n' "${ctrl_proxy_port}"
 }
 
-ctrl_proxy_port="$(ctrl_proxy_port_for_device)" || {
-  echo "error: could not determine CtrlProxy port for simulator ${device_id}" >&2
-  exit 1
-}
+ctrl_proxy_port="$(ctrl_proxy_port_for_device)"
 
 curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null
 
@@ -66,10 +67,7 @@ fi
 
 # Requesting debug and embedded-SDK tools can restart the daemon. That restart
 # creates a new CtrlProxy client, so the prior daemon's reported port is stale.
-ctrl_proxy_port="$(ctrl_proxy_port_for_device)" || {
-  echo "error: could not determine CtrlProxy port after daemon restart for simulator ${device_id}" >&2
-  exit 1
-}
+ctrl_proxy_port="$(ctrl_proxy_port_for_device)"
 curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null
 
 event_payload() {

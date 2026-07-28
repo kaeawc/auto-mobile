@@ -27,6 +27,11 @@ export interface AdbExecuteOptions {
   maxBuffer?: number;
   noRetry?: boolean;
   signal?: AbortSignal;
+  /**
+   * Runs after ADB path resolution and immediately before a subprocess dispatch.
+   * Receives the remaining command budget, if one was supplied.
+   */
+  beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>;
 }
 
 export interface AdbSpawnOptions {
@@ -59,6 +64,12 @@ export interface AdbExecutor {
     noRetry?: boolean,
     signal?: AbortSignal
   ): Promise<ExecResult>;
+
+  /**
+   * Get the device time in milliseconds since the Unix epoch.
+   * Falls back to the host time when device time cannot be retrieved.
+   */
+  getDeviceTimestampMs(): Promise<number>;
 
   /**
    * Get the list of booted Android devices

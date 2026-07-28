@@ -69,16 +69,10 @@ src/features/accessibility/WcagAudit.ts: error TS2339: Property 'class' does not
 src/features/accessibility/WcagAudit.ts: error TS2352: Conversion of type 'ViewHierarchyNode[]' to type 'ViewHierarchyNode' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
 src/features/accessibility/WcagAudit.ts: error TS7053: Element implicitly has an 'any' type because expression of type '"resource-id"' can't be used to index type 'ViewHierarchyNode'.
 src/features/action/BaseVisualChange.ts: error TS2322: Type '{ warning: string; requestedAfter?: number; actualTimestamp?: number; isFresh?: boolean | undefined; staleDurationMs?: number; }' is not assignable to type '{ requestedAfter?: number | undefined; actualTimestamp?: number | undefined; isFresh: boolean; staleDurationMs?: number | undefined; warning?: string | undefined; }'.
-src/features/action/BaseVisualChange.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
-src/features/action/BaseVisualChange.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
 src/features/action/BaseVisualChange.ts: error TS2339: Property 'signal' does not exist on type '{ changeExpected: boolean; tolerancePercent?: number | undefined; queryOptions?: ViewHierarchyQueryOptions | undefined; gfxMetrics?: GfxMetrics | null | undefined; perf?: PerformanceTracker | undefined; actionStartTime?: number | undefined; predictionContext?: PredictionActionContext | undefined; }'.
 src/features/action/BaseVisualChange.ts: error TS2339: Property 'signal' does not exist on type '{ changeExpected: boolean; tolerancePercent?: number | undefined; queryOptions?: ViewHierarchyQueryOptions | undefined; gfxMetrics?: GfxMetrics | null | undefined; perf?: PerformanceTracker | undefined; actionStartTime?: number | undefined; predictionContext?: PredictionActionContext | undefined; }'.
 src/features/action/IosSimulatorPermissions.ts: error TS2352: Conversion of type 'TccPermissionRow' to type 'Record<string, null | number | string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
 src/features/action/LaunchApp.ts: error TS2322: Type 'boolean | null' is not assignable to type 'boolean'.
-src/features/action/LaunchApp.ts: error TS2322: Type 'unknown' is not assignable to type 'number'.
-src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
-src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
-src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
 src/features/action/OpenURL.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
 src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
 src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
@@ -187,8 +181,6 @@ src/server/observeTools.ts: error TS2322: Type 'TimingData' is not assignable to
 src/server/observeTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'IdentifyInteractionsOptions'.
 src/server/observeTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'IdentifyInteractionsOptions'.
 src/server/observeTools.ts: error TS2488: Type 'TimingData' must have a '[Symbol.iterator]()' method that returns an iterator.
-src/server/systemTrayHelpers.ts: error TS2322: Type 'SystemTrayDependencies | null' is not assignable to type 'SystemTrayDependencies'.
-src/server/systemTrayHelpers.ts: error TS2741: Property 'getDeviceTimestampMs' is missing in type 'AdbExecutor' but required in type 'SystemTrayAdb'.
 src/server/testRunResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"latestOnly" | "limit" | "lookbackDays" | "orderDirection" | "testClass" | "testMethod"'.
 src/server/testTimingResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"appVersion" | "deviceId" | "deviceName" | "devicePlatform" | "deviceType" | "gitCommit" | "jdkVersion" | "limit" | "sessionUuid" | "targetSdk" | "testClass" | "testMethod" | ... 6 more ... | "orderDirection"'.
 src/utils/Backoff.ts: error TS2322: Type 'BackoffPolicy | readonly number[]' is not assignable to type 'BackoffPolicy'.
@@ -211,7 +203,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-prop
 # swap-fp: 11 :: src/daemon/SocketServerRegistry.ts: error TS2345: Argument of type 'Promise<BaseSocketServer | void>' is not assignable to parameter of type 'Promise<void>'.
 # swap-fp: 11 :: src/daemon/socketServer.ts: error TS2322: Type 'unknown' is not assignable to type '{ [x: string]: unknown; } | undefined'.
 # swap-fp: 11 :: src/db/failureAnalyticsRepository.ts: error TS2322: Type 'FailureType' is not assignable to type '"anr" | "crash" | "tool_failure"'.
-# swap-fp: 11 :: src/features/action/LaunchApp.ts: error TS2322: Type 'unknown' is not assignable to type 'number'.
 # swap-fp: 11 :: src/features/action/TapAnyElement.ts: error TS2416: Property 'hashViewHierarchy' in type 'TapAnyElement' is not assignable to the same property in base type 'BaseVisualChange'.
 # swap-fp: 11 :: src/features/action/TapOnElement.ts: error TS2416: Property 'hashViewHierarchy' in type 'TapOnElement' is not assignable to the same property in base type 'BaseVisualChange'.
 # swap-fp: 11 :: src/features/action/swipeon/ScrollUntilVisible.ts: error TS2322: Type 'ViewHierarchyResult | undefined' is not assignable to type 'ViewHierarchyResult | null'.
@@ -242,19 +233,15 @@ src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-prop
 # swap-fp: 21,28 :: src/db/migrator.ts: error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
 # swap-fp: 23 :: src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'Map<string, number>' is not assignable to parameter of type 'Map<string, { timestamp: number; }>'.
 # swap-fp: 24 :: src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string | undefined>' is not assignable to type 'Promise<void>'.
-# swap-fp: 24,28,49 :: src/features/action/LaunchApp.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
 # swap-fp: 25 :: src/daemon/client.ts: error TS2345: Argument of type 'NonSharedBuffer | string' is not assignable to parameter of type 'Buffer<ArrayBufferLike>'.
-# swap-fp: 25,27 :: src/features/action/BaseVisualChange.ts: error TS2339: Property 'getDeviceTimestampMs' does not exist on type 'AdbExecutor'.
 # swap-fp: 27 :: src/db/migrator.ts: error TS7006: Parameter 'index' implicitly has an 'any' type.
 # swap-fp: 27,45 :: src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 # swap-fp: 28 :: src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'DataTypeExpression'.
-# swap-fp: 29 :: src/server/systemTrayHelpers.ts: error TS2741: Property 'getDeviceTimestampMs' is missing in type 'AdbExecutor' but required in type 'SystemTrayAdb'.
 # swap-fp: 3 :: src/daemon/failuresStreamSocketServer.ts: error TS2559: Type 'FailuresStreamSocketRequest' has no properties in common with type 'SocketRequest'.
 # swap-fp: 3 :: src/daemon/performanceStreamSocketServer.ts: error TS2559: Type 'PerformanceStreamSocketRequest' has no properties in common with type 'SocketRequest'.
 # swap-fp: 3 :: src/daemon/testRecordingSocketServer.ts: error TS2559: Type 'TestRecordingCommand' has no properties in common with type 'SocketRequest'.
 # swap-fp: 3 :: src/db/logEventRepository.ts: error TS2322: Type '{ deviceId: null | string; timestamp: number; applicationId: null | string; sessionId: null | string; level: number; tag: string; message: string; filterName: null | string; }[]' is not assignable to type 'RecordLogEventInput[]'.
 # swap-fp: 3 :: src/features/navigation/NavigateTo.ts: error TS2459: Module '"./NavigationGraphManager"' declares 'ToolCallInteraction' locally, but it is not exported.
-# swap-fp: 3 :: src/server/systemTrayHelpers.ts: error TS2322: Type 'SystemTrayDependencies | null' is not assignable to type 'SystemTrayDependencies'.
 # swap-fp: 3 :: src/utils/Backoff.ts: error TS2322: Type 'BackoffPolicy | readonly number[]' is not assignable to type 'BackoffPolicy'.
 # swap-fp: 30 :: src/features/action/IosSimulatorPermissions.ts: error TS2352: Conversion of type 'TccPermissionRow' to type 'Record<string, null | number | string>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
 # swap-fp: 30 :: src/server/appResources.ts: error TS2345: Argument of type 'string[]' is not assignable to parameter of type 'readonly ("deviceId" | "platform" | "profile" | "search" | "type")[]'.
@@ -293,6 +280,7 @@ src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-prop
 # swap-fp: 46 :: src/daemon/telemetryPushSocketServer.ts: error TS2345: Argument of type '"anr" | "crash" | "nonfatal"' is not assignable to parameter of type 'OperandValueExpressionOrList<Database, "failure_groups" | "failure_occurrences", "failure_groups.type">'.
 # swap-fp: 46 :: src/db/bunSqliteDialect.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
 # swap-fp: 46 :: src/server/observeTools.ts: error TS2488: Type 'TimingData' must have a '[Symbol.iterator]()' method that returns an iterator.
+# swap-fp: 47 :: src/features/navigation/NavigateTo.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
 # swap-fp: 47 :: src/features/observe/HierarchyPlatformValidator.ts: error TS2339: Property 'startsWith' does not exist on type '{}'.
 # swap-fp: 47 :: src/server/formTools.ts: error TS2345: Argument of type 'AdbExecutor | null' is not assignable to parameter of type 'AdbClient | null | undefined'.
 # swap-fp: 47,64 :: src/features/preferences/AppPreferences.ts: error TS2345: Argument of type 'PreferenceResultValue | null' is not assignable to parameter of type 'PreferenceValue | null'.
@@ -335,7 +323,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-prop
 # swap-fp: 7,7,7,7,9,9,9,9 :: src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
 # swap-fp: 74 :: src/features/utility/ElementParser.ts: error TS2339: Property 'hierarchy' does not exist on type '{ windowLayer: number; }'.
 # swap-fp: 74,75,76,77,77 :: src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
-# swap-fp: 78 :: src/features/navigation/NavigateTo.ts: error TS2345: Argument of type 'AdbExecutor' is not assignable to parameter of type 'AdbClient'.
 # swap-fp: 8,8 :: src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2339: Property 'raw' does not exist on type 'Kysely<unknown>'.
 # swap-fp: 85 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
 # swap-fp: 88 :: src/server/testRunResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"latestOnly" | "limit" | "lookbackDays" | "orderDirection" | "testClass" | "testMethod"'.

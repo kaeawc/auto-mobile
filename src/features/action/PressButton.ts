@@ -109,41 +109,16 @@ export class PressButton extends BaseVisualChange {
     // the (optional) global-action attempt and the ADB fallback so the caller's
     // timeout is not exceeded by the sum of the two per-transport defaults.
     const deadlineMs = timeoutMs !== undefined ? this.timer.now() + timeoutMs : undefined;
-    const remainingMs = (): number | undefined =>
-      deadlineMs !== undefined ? deadlineMs - this.timer.now() : undefined;
-
-    // Try accessibility service global action for supported buttons
-    if (PressButton.GLOBAL_ACTION_BUTTONS.has(normalized)) {
-      const budget = remainingMs();
-      // Skip straight to ADB if the deadline is already exhausted.
-      if (budget === undefined || budget > 0) {
-        const globalActionTimeout = budget === undefined
-          ? PressButton.GLOBAL_ACTION_TIMEOUT_MS
-          : Math.min(PressButton.GLOBAL_ACTION_TIMEOUT_MS, budget);
-        try {
-          const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-          const result = await client.requestGlobalAction(
-            normalized,
-            globalActionTimeout,
-            undefined,
-            frameContext
-          );
-          if (result.success) {
-            logger.debug(`[PRESS_BUTTON] Used accessibility service for ${button}`);
-            return { success: true, button, keyCode };
-          }
-          logger.debug(`[PRESS_BUTTON] Global action failed (${result.error}), falling back to ADB`);
-        } catch {
-          // Fall through to ADB
-        }
-      }
+    const globalActionResult = await this.tryAndroidGlobalAction(button, normalized, keyCode, deadlineMs, frameContext);
+    if (globalActionResult) {
+      return globalActionResult;
     }
 
     // Fail fast if the (optional) deadline was fully consumed by the global-action
-    // attempt above. Passing 0 to executeCommand would arm NO timeout (the
+    // attempt or frame-context validation above. Passing 0 to executeCommand would arm NO timeout (the
     // `if (timeoutMs)` check treats 0 as falsy), leaving the ADB keyevent
     // unbounded — the exact overrun this budget threading exists to prevent.
-    const adbBudget = remainingMs();
+    const adbBudget = this.remainingMs(deadlineMs);
     if (adbBudget !== undefined && adbBudget <= 0) {
       return {
         success: false,
@@ -153,8 +128,108 @@ export class PressButton extends BaseVisualChange {
       };
     }
 
-    await this.adb.executeCommand(`shell input keyevent ${keyCode}`, adbBudget);
+    let validationFailure: PressButtonResult | undefined;
+    try {
+      await this.adb.execute(
+        ["shell", "input", "keyevent", String(keyCode)],
+        {
+          timeoutMs: adbBudget,
+          noRetry: true,
+          beforeDispatch: frameContext === undefined
+            ? undefined
+            : async () => {
+              validationFailure = await this.validateFrameContextBeforeAdb(button, keyCode, deadlineMs, frameContext);
+              if (validationFailure) {
+                throw new Error(validationFailure.error);
+              }
+              const remainingMs = this.remainingMs(deadlineMs);
+              if (remainingMs !== undefined && remainingMs <= 0) {
+                validationFailure = {
+                  success: false,
+                  button,
+                  keyCode: -1,
+                  error: `Button press deadline exhausted before ADB keyevent for ${button}`
+                };
+                throw new Error(validationFailure.error);
+              }
+            },
+        }
+      );
+    } catch (error) {
+      if (validationFailure) {
+        return validationFailure;
+      }
+      throw error;
+    }
     return { success: true, button, keyCode };
+  }
+
+  private async tryAndroidGlobalAction(
+    button: string,
+    normalized: string,
+    keyCode: number,
+    deadlineMs: number | undefined,
+    frameContext: string | undefined
+  ): Promise<PressButtonResult | undefined> {
+    if (!PressButton.GLOBAL_ACTION_BUTTONS.has(normalized)) {
+      return undefined;
+    }
+    const budget = this.remainingMs(deadlineMs);
+    if (budget !== undefined && budget <= 0) {
+      return undefined;
+    }
+    const globalActionTimeout = budget === undefined
+      ? PressButton.GLOBAL_ACTION_TIMEOUT_MS
+      : Math.min(PressButton.GLOBAL_ACTION_TIMEOUT_MS, budget);
+    try {
+      const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+      const result = await client.requestGlobalAction(normalized, globalActionTimeout, undefined, frameContext);
+      if (result.success) {
+        logger.debug(`[PRESS_BUTTON] Used accessibility service for ${button}`);
+        return { success: true, button, keyCode };
+      }
+      logger.debug(`[PRESS_BUTTON] Global action failed (${result.error}), falling back to ADB`);
+    } catch (error) {
+      // The validated ADB fallback remains safe when the global-action RPC fails.
+      logger.debug(`[PRESS_BUTTON] Global action threw for ${button}, falling back to ADB: ${error}`);
+    }
+    return undefined;
+  }
+
+  private async validateFrameContextBeforeAdb(
+    button: string,
+    keyCode: number,
+    deadlineMs: number | undefined,
+    frameContext: string | undefined
+  ): Promise<PressButtonResult | undefined> {
+    if (frameContext === undefined) {
+      return undefined;
+    }
+    const validationBudget = this.remainingMs(deadlineMs);
+    if (validationBudget !== undefined && validationBudget <= 0) {
+      return {
+        success: false,
+        button,
+        keyCode: -1,
+        error: `Button press deadline exhausted before frame context validation for ${button}`
+      };
+    }
+
+    const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    const validation = await client.validateFrameContext(frameContext, validationBudget);
+    if (validation.success) {
+      return undefined;
+    }
+    return {
+      success: false,
+      button,
+      keyCode: -1,
+      error: validation.error ?? "Frame context is stale or unavailable; observe a fresh frame before retrying"
+    };
+  }
+
+  private remainingMs(deadlineMs: number | undefined): number | undefined {
+    return deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
   }
 
   /**

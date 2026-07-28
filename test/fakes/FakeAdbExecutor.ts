@@ -220,6 +220,7 @@ export class FakeAdbExecutor implements AdbExecutor {
    * command history so existing pattern-based stubs keep matching.
    */
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
+    await options.beforeDispatch?.(options.timeoutMs);
     this.executedArgv.push([...args]);
     return this.executeCommand(
       args.join(" "),

@@ -98,6 +98,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
    * a test can configure a result via {@link setCommandResult}.
    */
   async execute(args: string[], options?: AdbExecuteOptions): Promise<ExecResult> {
+    await options?.beforeDispatch?.(options.timeoutMs);
     const command = args.join(" ");
     return this.executeCommand(
       command,

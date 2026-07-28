@@ -29,6 +29,8 @@ import { Keyboard } from "./Keyboard";
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "eventOnly" | "append";
 
+export type AppendKeyEventValidator = (timeoutMs?: number) => Promise<{ success: boolean; error?: string }>;
+
 interface KeyboardCloser {
   close(): Promise<KeyboardResult>;
 }
@@ -338,9 +340,10 @@ export class InputText extends BaseVisualChange {
    */
   async appendText(
     text: string,
-    timeoutMs?: number
+    timeoutMs?: number,
+    beforeKeyEvents?: AppendKeyEventValidator
   ): Promise<SendTextResult & { method?: InputTextMode }> {
-    return this.executeAndroidAppendTextInput(text, undefined, false, timeoutMs);
+    return this.executeAndroidAppendTextInput(text, undefined, false, timeoutMs, beforeKeyEvents);
   }
 
   /**
@@ -370,7 +373,8 @@ export class InputText extends BaseVisualChange {
     text: string,
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
-    timeoutMs?: number
+    timeoutMs?: number,
+    beforeKeyEvents?: AppendKeyEventValidator
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const remaining = this.createBudget(timeoutMs);
     const planned = await this.planAppendKeyEvents(text, remaining, timeoutMs);
@@ -379,7 +383,7 @@ export class InputText extends BaseVisualChange {
       return this.appendFailure(text, planned.error, 0);
     }
 
-    const typed = await this.typeAppendKeyEvents(planned.plans, remaining, timeoutMs);
+    const typed = await this.typeAppendKeyEvents(planned.plans, remaining, timeoutMs, beforeKeyEvents);
     if (typed.error) {
       // A non-timeout failure leaves an exact confirmed prefix, while a timed-out
       // key event is ambiguous: Android may have accepted it before adb was killed.
@@ -470,7 +474,8 @@ export class InputText extends BaseVisualChange {
   private async typeAppendKeyEvents(
     plans: KeyEventPlan[],
     remaining: () => number | undefined,
-    timeoutMs: number | undefined
+    timeoutMs: number | undefined,
+    beforeKeyEvents?: AppendKeyEventValidator
   ): Promise<{ charsSent?: number; error?: string }> {
     let charsSent = 0;
     for (const plan of plans) {
@@ -478,6 +483,28 @@ export class InputText extends BaseVisualChange {
       if (budget !== undefined && budget <= 0) {
         return { charsSent, error: this.appendBudgetExceeded(timeoutMs, "typing") };
       }
+      let validationError: string | undefined;
+      const beforeDispatch = charsSent === 0 && beforeKeyEvents
+        ? async (remainingTimeoutMs?: number) => {
+          try {
+            const validation = await beforeKeyEvents(remainingTimeoutMs);
+            if (!validation.success) {
+              validationError = validation.error ??
+                "Frame context is stale or unavailable; observe a fresh frame before retrying";
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            validationError = `append frame context validation failed: ${message}`;
+          }
+          const budgetAfterValidation = remaining();
+          if (validationError === undefined && budgetAfterValidation !== undefined && budgetAfterValidation <= 0) {
+            validationError = this.appendBudgetExceeded(timeoutMs, "typing");
+          }
+          if (validationError) {
+            throw new Error(validationError);
+          }
+        }
+        : undefined;
       try {
         // noRetry: production AdbClient retries a timed-out command up to 4 total
         // attempts, each charged the SAME budget — and runInputOperationWithTimeout
@@ -485,8 +512,16 @@ export class InputText extends BaseVisualChange {
         // stalled key event would otherwise hold the queue for ~4x the request
         // deadline. A single attempt keeps this append's device operations within
         // one budget, including shared ADB-path discovery.
-        await this.executeKeyEventPlan(plan, budget, true);
+        await this.executeKeyEventPlan(
+          plan,
+          budget,
+          true,
+          beforeDispatch
+        );
       } catch (error) {
+        if (validationError) {
+          return { charsSent, error: validationError };
+        }
         const message = error instanceof Error ? error.message : String(error);
         logger.warn(`[InputText] append key event failed after ${charsSent} char(s): ${message}`, error);
         // An adb timeout kills the host child but cannot establish whether Android
@@ -714,10 +749,15 @@ export class InputText extends BaseVisualChange {
   private async executeKeyEventPlan(
     plan: KeyEventPlan,
     timeoutMs?: number,
-    noRetry: boolean = false
+    noRetry: boolean = false,
+    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>
   ): Promise<void> {
-    for (const command of plan.commands) {
-      await this.adb.executeCommand(command, timeoutMs, undefined, noRetry);
+    for (const [index, command] of plan.commands.entries()) {
+      await this.adb.execute(command.split(" "), {
+        timeoutMs,
+        noRetry,
+        beforeDispatch: index === 0 ? beforeDispatch : undefined,
+      });
     }
   }
 

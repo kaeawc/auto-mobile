@@ -59,17 +59,28 @@ export class SessionToolProfileService {
 
 let defaultService: SessionToolProfileService | undefined;
 
+export function getEnvironmentDefaultToolCapabilities(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): ReadonlySet<ToolCapability> {
+  const raw = environment.AUTOMOBILE_TOOLSET_DEFAULTS?.trim();
+  const defaults = raw
+    ? new Set(raw.split(",").map(value => value.trim()).filter((value): value is ToolCapability => TOOL_CAPABILITIES.includes(value as ToolCapability)))
+    : new Set(DEFAULT_TOOL_CAPABILITIES);
+  for (const capability of TOOL_CAPABILITIES) {
+    const env = `AUTOMOBILE_TOOLSET_${capability.toUpperCase().replace(/-/g, "_")}`;
+    if (environment[env] === "1") { defaults.add(capability); }
+  }
+  return defaults;
+}
+
 export function getSessionToolProfileService(): SessionToolProfileService {
   if (!defaultService) {
     // Lazy import avoids opening the production database until the server does.
     const { SqliteSessionToolProfileRepository } = require("./SqliteSessionToolProfileRepository");
-    const raw = process.env.AUTOMOBILE_TOOLSET_DEFAULTS ?? "";
-    const defaults = new Set(raw.split(",").map(value => value.trim()).filter(value => TOOL_CAPABILITIES.includes(value as ToolCapability)));
-    for (const capability of TOOL_CAPABILITIES) {
-      const env = `AUTOMOBILE_TOOLSET_${capability.toUpperCase().replace(/-/g, "_")}`;
-      if (process.env[env] === "1") { defaults.add(capability); }
-    }
-    defaultService = new SessionToolProfileService(new SqliteSessionToolProfileRepository(), defaults);
+    defaultService = new SessionToolProfileService(
+      new SqliteSessionToolProfileRepository(),
+      getEnvironmentDefaultToolCapabilities(),
+    );
   }
   return defaultService;
 }

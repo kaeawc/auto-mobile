@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_TOOL_CAPABILITIES,
+  getEnvironmentDefaultToolCapabilities,
   SessionToolProfileService,
   type SessionToolProfileRepository,
 } from "../../../src/features/toolCapabilities/SessionToolProfileService";
@@ -31,13 +32,31 @@ describe("SessionToolProfileService", () => {
     expect(await service.isEnabled("device-session-1", "clipboard")).toBe(true);
   });
 
-  test("persists a session override and restores it in a fresh service", async () => {
-    const repository = new FakeRepository();
-    const first = new SessionToolProfileService(repository);
-    await first.setEnabled("device-session-1", "clipboard", true);
+  test.each([
+    ["unset", {}],
+    ["empty", { AUTOMOBILE_TOOLSET_DEFAULTS: "  " }],
+  ])("uses the declared baseline when defaults are %s", (_description, environment) => {
+    expect(getEnvironmentDefaultToolCapabilities(environment)).toEqual(DEFAULT_TOOL_CAPABILITIES);
+  });
 
-    const restarted = new SessionToolProfileService(repository);
-    expect(await restarted.isEnabled("device-session-1", "clipboard")).toBe(true);
+  test("replaces the baseline with explicit defaults before adding individual capabilities", () => {
+    const defaults = getEnvironmentDefaultToolCapabilities({
+      AUTOMOBILE_TOOLSET_DEFAULTS: "clipboard",
+      AUTOMOBILE_TOOLSET_ADVANCED_INTERACTION: "1",
+    });
+
+    expect(defaults).toEqual(new Set(["clipboard", "advanced-interaction"]));
+    expect(defaults.has("device-settings")).toBe(false);
+  });
+
+  test("persists a disabled session override and restores it in a fresh service", async () => {
+    const repository = new FakeRepository();
+    const environmentDefaults = new Set(["clipboard"]);
+    const first = new SessionToolProfileService(repository, environmentDefaults);
+    await first.setEnabled("device-session-1", "clipboard", false);
+
+    const restarted = new SessionToolProfileService(repository, environmentDefaults);
+    expect(await restarted.isEnabled("device-session-1", "clipboard")).toBe(false);
   });
 
   test("lets a session profile narrow the default surface", async () => {

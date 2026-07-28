@@ -32,7 +32,7 @@ import {
   extractClientHandshake,
   type DaemonSelfIdentity,
 } from "./daemonHandshake";
-import { InputText } from "../features/action/InputText";
+import { InputText, type AppendKeyEventValidator } from "../features/action/InputText";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
@@ -125,7 +125,8 @@ export type McpClientFactory = () => Promise<Client>;
 export interface AppendTextInput {
   appendText(
     text: string,
-    timeoutMs?: number
+    timeoutMs?: number,
+    beforeKeyEvent?: AppendKeyEventValidator
   ): Promise<{ success: boolean; error?: string; charsSent?: number }>;
 }
 
@@ -1418,22 +1419,6 @@ export class UnixSocketServer {
     frameContext: string | undefined,
     client: AndroidCtrlProxyClient
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
-    if (frameContext !== undefined) {
-      const validationTimeoutMs = deadline - this.timer.now();
-      if (validationTimeoutMs <= 0) {
-        return {
-          success: false,
-          error: `input/typeText exceeded ${totalTimeoutMs}ms budget before append frame context validation`,
-        };
-      }
-      const validation = await client.validateFrameContext(frameContext, validationTimeoutMs);
-      if (!validation.success) {
-        return {
-          success: false,
-          error: validation.error ?? "Frame context is stale or unavailable; observe a fresh frame before retrying",
-        };
-      }
-    }
     const appendTimeoutMs = deadline - this.timer.now();
     if (appendTimeoutMs <= 0) {
       return {
@@ -1441,7 +1426,35 @@ export class UnixSocketServer {
         error: `input/typeText exceeded ${totalTimeoutMs}ms budget before append key events`,
       };
     }
-    return await this.getAppendTextInput(targetDevice).appendText(text, appendTimeoutMs);
+    return await this.getAppendTextInput(targetDevice).appendText(
+      text,
+      appendTimeoutMs,
+      frameContext === undefined
+        ? undefined
+        : () => this.validateAppendFrameContext(client, frameContext, deadline, totalTimeoutMs)
+    );
+  }
+
+  private async validateAppendFrameContext(
+    client: AndroidCtrlProxyClient,
+    frameContext: string,
+    deadline: number,
+    totalTimeoutMs: number
+  ): Promise<{ success: boolean; error?: string }> {
+    const validationTimeoutMs = deadline - this.timer.now();
+    if (validationTimeoutMs <= 0) {
+      return {
+        success: false,
+        error: `input/typeText exceeded ${totalTimeoutMs}ms budget before append frame context validation`,
+      };
+    }
+    const validation = await client.validateFrameContext(frameContext, validationTimeoutMs);
+    return validation.success
+      ? { success: true }
+      : {
+        success: false,
+        error: validation.error ?? "Frame context is stale or unavailable; observe a fresh frame before retrying",
+      };
   }
 
   private async runImeActionWithinBudget(

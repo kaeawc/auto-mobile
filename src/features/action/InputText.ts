@@ -29,6 +29,8 @@ import { Keyboard } from "./Keyboard";
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "eventOnly" | "append";
 
+export type AppendKeyEventValidator = () => Promise<{ success: boolean; error?: string }>;
+
 interface KeyboardCloser {
   close(): Promise<KeyboardResult>;
 }
@@ -338,9 +340,10 @@ export class InputText extends BaseVisualChange {
    */
   async appendText(
     text: string,
-    timeoutMs?: number
+    timeoutMs?: number,
+    beforeKeyEvent?: AppendKeyEventValidator
   ): Promise<SendTextResult & { method?: InputTextMode }> {
-    return this.executeAndroidAppendTextInput(text, undefined, false, timeoutMs);
+    return this.executeAndroidAppendTextInput(text, undefined, false, timeoutMs, beforeKeyEvent);
   }
 
   /**
@@ -370,7 +373,8 @@ export class InputText extends BaseVisualChange {
     text: string,
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
-    timeoutMs?: number
+    timeoutMs?: number,
+    beforeKeyEvent?: AppendKeyEventValidator
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const remaining = this.createBudget(timeoutMs);
     const planned = await this.planAppendKeyEvents(text, remaining, timeoutMs);
@@ -379,7 +383,7 @@ export class InputText extends BaseVisualChange {
       return this.appendFailure(text, planned.error, 0);
     }
 
-    const typed = await this.typeAppendKeyEvents(planned.plans, remaining, timeoutMs);
+    const typed = await this.typeAppendKeyEvents(planned.plans, remaining, timeoutMs, beforeKeyEvent);
     if (typed.error) {
       // A non-timeout failure leaves an exact confirmed prefix, while a timed-out
       // key event is ambiguous: Android may have accepted it before adb was killed.
@@ -470,10 +474,29 @@ export class InputText extends BaseVisualChange {
   private async typeAppendKeyEvents(
     plans: KeyEventPlan[],
     remaining: () => number | undefined,
-    timeoutMs: number | undefined
+    timeoutMs: number | undefined,
+    beforeKeyEvent?: AppendKeyEventValidator
   ): Promise<{ charsSent?: number; error?: string }> {
     let charsSent = 0;
     for (const plan of plans) {
+      if (beforeKeyEvent) {
+        let validation: { success: boolean; error?: string };
+        try {
+          validation = await beforeKeyEvent();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            charsSent,
+            error: `append frame context validation failed: ${message}`
+          };
+        }
+        if (!validation.success) {
+          return {
+            charsSent,
+            error: validation.error ?? "Frame context is stale or unavailable; observe a fresh frame before retrying"
+          };
+        }
+      }
       const budget = remaining();
       if (budget !== undefined && budget <= 0) {
         return { charsSent, error: this.appendBudgetExceeded(timeoutMs, "typing") };

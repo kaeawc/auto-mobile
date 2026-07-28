@@ -903,8 +903,8 @@ describe("UnixSocketServer input/typeText", () => {
     });
   });
 
-  test("rejects stale context before append mode emits Android key events", async () => {
-    const appendText = mock(async () => ({ success: true, charsSent: 1 }));
+  test("rejects stale context after append capability discovery and before key events", async () => {
+    const adb = new ProductionShapedAdbExecutor(fakeTimer, { probeApiLevel: 31 });
     const validateFrameContext = mock(async () => ({
       success: false,
       error: "Stale frame context; observe a fresh frame before retrying",
@@ -915,7 +915,38 @@ describe("UnixSocketServer input/typeText", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
-    server.appendTextFactory = () => ({ appendText });
+    server.appendTextFactory = device => createAppendTextInput(device, adb, fakeTimer);
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext = () => {};
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "A",
+      mode: "append",
+      frameContext: "epoch:2",
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("Stale frame context");
+    expect(validateFrameContext).toHaveBeenCalledWith("epoch:2", 30_000);
+    expect(adb.probeCalls).toEqual([30_000]);
+    expect(adb.inputCommands()).toEqual([]);
+  });
+
+  test("does not emit append key events when validation exhausts the shared deadline", async () => {
+    const adb = new ScriptedAdbExecutor(fakeTimer);
+    const validateFrameContext = mock(async () => {
+      fakeTimer.advanceTime(30_000);
+      return { success: true };
+    });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      validateFrameContext,
+      requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server.appendTextFactory = device => createAppendTextInput(device, adb, fakeTimer);
     (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext = () => {};
     await server.start();
 
@@ -924,13 +955,49 @@ describe("UnixSocketServer input/typeText", () => {
       deviceId: "emulator-5554",
       text: "a",
       mode: "append",
-      frameContext: "epoch:2",
+      frameContext: "epoch:3",
     });
 
     expect(response.success).toBe(false);
-    expect(response.error).toContain("Stale frame context");
-    expect(validateFrameContext).toHaveBeenCalledWith("epoch:2", 30_000);
-    expect(appendText).not.toHaveBeenCalled();
+    expect(response.error).toContain("input/typeText exceeded 30000ms");
+    expect(validateFrameContext).toHaveBeenCalledWith("epoch:3", 30_000);
+    expect(adb.inputCommands()).toEqual([]);
+  });
+
+  test("reports confirmed append progress when later frame validation throws", async () => {
+    const adb = new ScriptedAdbExecutor(fakeTimer);
+    let validationCount = 0;
+    const validateFrameContext = mock(async () => {
+      validationCount += 1;
+      if (validationCount === 2) {
+        throw new Error("CtrlProxy disconnected");
+      }
+      return { success: true };
+    });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      validateFrameContext,
+      requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    server.appendTextFactory = device => createAppendTextInput(device, adb, fakeTimer);
+    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext = () => {};
+    await server.start();
+
+    const response = await sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: "emulator-5554",
+      text: "ab",
+      mode: "append",
+      frameContext: "epoch:4",
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      error: "append frame context validation failed: CtrlProxy disconnected",
+      charsSent: 1,
+    });
+    expect(adb.inputCommands()).toEqual(["shell input keyevent KEYCODE_A"]);
   });
 
   test("serializes concurrent typeText calls for the same device", async () => {

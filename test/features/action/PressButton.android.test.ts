@@ -44,6 +44,15 @@ describe("PressButton Android keycode dispatch", () => {
 
     expect(result).toEqual({ success: true, button, keyCode });
     expect(fakeAdb.getExecutedCommands()).toEqual([`shell input keyevent ${keyCode}`]);
+    expect(fakeAdb.getCommandCalls()).toEqual([
+      {
+        command: `shell input keyevent ${keyCode}`,
+        timeoutMs: undefined,
+        maxBuffer: undefined,
+        noRetry: true,
+        signal: undefined,
+      },
+    ]);
   });
 
   test("normalizes the button name case before resolving the keycode", async () => {

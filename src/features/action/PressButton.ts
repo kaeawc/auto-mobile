@@ -133,7 +133,7 @@ export class PressButton extends BaseVisualChange {
       };
     }
 
-    await this.adb.executeCommand(`shell input keyevent ${keyCode}`, adbBudget);
+    await this.adb.executeCommand(`shell input keyevent ${keyCode}`, adbBudget, undefined, true);
     return { success: true, button, keyCode };
   }
 
@@ -162,8 +162,9 @@ export class PressButton extends BaseVisualChange {
         return { success: true, button, keyCode };
       }
       logger.debug(`[PRESS_BUTTON] Global action failed (${result.error}), falling back to ADB`);
-    } catch {
-      // Fall through to the validated ADB keyevent.
+    } catch (error) {
+      // The validated ADB fallback remains safe when the global-action RPC fails.
+      logger.debug(`[PRESS_BUTTON] Global action threw for ${button}, falling back to ADB: ${error}`);
     }
     return undefined;
   }

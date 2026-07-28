@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { InputText } from "../../src/features/action/InputText";
 import type { BootedDevice, ExecResult } from "../../src/models";
-import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbExecuteOptions, AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -57,6 +57,11 @@ class ScriptedAdbExecutor {
       trim: () => stdout.trim(),
       includes: (search: string) => stdout.includes(search),
     } as unknown as ExecResult;
+  }
+
+  async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
+    await options.beforeDispatch?.(options.timeoutMs);
+    return this.executeCommand(args.join(" "), options.timeoutMs);
   }
 
   /**
@@ -964,14 +969,11 @@ describe("UnixSocketServer input/typeText", () => {
     expect(adb.inputCommands()).toEqual([]);
   });
 
-  test("reports confirmed append progress when later frame validation throws", async () => {
+  test("validates a multi-character append once before the first key event", async () => {
     const adb = new ScriptedAdbExecutor(fakeTimer);
     let validationCount = 0;
     const validateFrameContext = mock(async () => {
       validationCount += 1;
-      if (validationCount === 2) {
-        throw new Error("CtrlProxy disconnected");
-      }
       return { success: true };
     });
     AndroidCtrlProxyClient.getInstance = mock(() => ({
@@ -993,11 +995,14 @@ describe("UnixSocketServer input/typeText", () => {
     });
 
     expect(response).toMatchObject({
-      success: false,
-      error: "append frame context validation failed: CtrlProxy disconnected",
-      charsSent: 1,
+      success: true,
+      result: { success: true, textLength: 2 },
     });
-    expect(adb.inputCommands()).toEqual(["shell input keyevent KEYCODE_A"]);
+    expect(validationCount).toBe(1);
+    expect(adb.inputCommands()).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_B",
+    ]);
   });
 
   test("serializes concurrent typeText calls for the same device", async () => {

@@ -27,6 +27,11 @@ export interface AdbExecuteOptions {
   maxBuffer?: number;
   noRetry?: boolean;
   signal?: AbortSignal;
+  /**
+   * Runs after ADB path resolution and immediately before a subprocess dispatch.
+   * Receives the remaining command budget, if one was supplied.
+   */
+  beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>;
 }
 
 export interface AdbSpawnOptions {

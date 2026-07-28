@@ -456,9 +456,9 @@ export class AdbClient implements AdbExecutor {
   }
 
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
-    const { timeoutMs, maxBuffer, noRetry, signal } = options;
+    const { timeoutMs, maxBuffer, noRetry, signal, beforeDispatch } = options;
     const startTime = this.timer.now();
-    const result = await this.executeArgsImpl(args, timeoutMs, maxBuffer, noRetry, signal);
+    const result = await this.executeArgsImpl(args, timeoutMs, maxBuffer, noRetry, signal, beforeDispatch);
     const duration = this.timer.now() - startTime;
     const command = args.join(" ");
 
@@ -692,7 +692,8 @@ export class AdbClient implements AdbExecutor {
     timeoutMs?: number,
     maxBuffer?: number,
     noRetry?: boolean,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>
   ): Promise<ExecResult> {
     const startTime = this.timer.now();
     const resolvedSignal = signal ?? getAbortSignal();
@@ -707,6 +708,7 @@ export class AdbClient implements AdbExecutor {
     if (noRetry) {
       // No retry - just execute once
       try {
+        await beforeDispatch?.(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
         const result = await this.execWithSignal(
           adbPath,
           fullArgs,
@@ -737,6 +739,7 @@ export class AdbClient implements AdbExecutor {
         if (resolvedSignal?.aborted) {
           throw this.getAbortError(resolvedSignal);
         }
+        await beforeDispatch?.(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
         const result = await this.execWithSignal(
           adbPath,
           fullArgs,

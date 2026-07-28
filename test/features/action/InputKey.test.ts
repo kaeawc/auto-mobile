@@ -86,7 +86,7 @@ describe("InputKey", () => {
         error: "Stale frame context for input/key; observe a fresh frame before retrying",
       }),
     };
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator);
+    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator, new FakeTimer());
 
     const result = await inputKey.press("enter", 1234, "epoch:2");
 
@@ -108,7 +108,7 @@ describe("InputKey", () => {
         return { success: true };
       },
     };
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator);
+    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator, new FakeTimer());
 
     await inputKey.press("tab", 1234, "epoch:3");
 
@@ -136,7 +136,7 @@ describe("InputKey", () => {
     expect(fakeAdb.getCommandCalls()).toEqual([
       {
         command: "shell input keyevent KEYCODE_TAB",
-        timeoutMs: 600,
+        timeoutMs: 1_000,
         maxBuffer: undefined,
         noRetry: true,
         signal: undefined,

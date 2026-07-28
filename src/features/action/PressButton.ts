@@ -114,11 +114,6 @@ export class PressButton extends BaseVisualChange {
       return globalActionResult;
     }
 
-    const validationFailure = await this.validateFrameContextBeforeAdb(button, keyCode, deadlineMs, frameContext);
-    if (validationFailure) {
-      return validationFailure;
-    }
-
     // Fail fast if the (optional) deadline was fully consumed by the global-action
     // attempt or frame-context validation above. Passing 0 to executeCommand would arm NO timeout (the
     // `if (timeoutMs)` check treats 0 as falsy), leaving the ADB keyevent
@@ -133,7 +128,39 @@ export class PressButton extends BaseVisualChange {
       };
     }
 
-    await this.adb.executeCommand(`shell input keyevent ${keyCode}`, adbBudget, undefined, true);
+    let validationFailure: PressButtonResult | undefined;
+    try {
+      await this.adb.execute(
+        ["shell", "input", "keyevent", String(keyCode)],
+        {
+          timeoutMs: adbBudget,
+          noRetry: true,
+          beforeDispatch: frameContext === undefined
+            ? undefined
+            : async () => {
+              validationFailure = await this.validateFrameContextBeforeAdb(button, keyCode, deadlineMs, frameContext);
+              if (validationFailure) {
+                throw new Error(validationFailure.error);
+              }
+              const remainingMs = this.remainingMs(deadlineMs);
+              if (remainingMs !== undefined && remainingMs <= 0) {
+                validationFailure = {
+                  success: false,
+                  button,
+                  keyCode: -1,
+                  error: `Button press deadline exhausted before ADB keyevent for ${button}`
+                };
+                throw new Error(validationFailure.error);
+              }
+            },
+        }
+      );
+    } catch (error) {
+      if (validationFailure) {
+        return validationFailure;
+      }
+      throw error;
+    }
     return { success: true, button, keyCode };
   }
 

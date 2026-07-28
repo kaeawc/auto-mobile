@@ -74,10 +74,6 @@ export class InputKey {
     const keyCode = INPUT_KEY_CODE_MAP[key];
     try {
       const deadlineMs = timeoutMs !== undefined ? this.timer.now() + timeoutMs : undefined;
-      const validationFailure = await this.validateFrameContext(key, keyCode, frameContext, deadlineMs);
-      if (validationFailure) {
-        return validationFailure;
-      }
       const adbTimeoutMs = this.remainingMs(deadlineMs);
       if (adbTimeoutMs !== undefined && adbTimeoutMs <= 0) {
         return {
@@ -87,7 +83,39 @@ export class InputKey {
           error: "input/key deadline exhausted before ADB keyevent",
         };
       }
-      await this.adb.executeCommand(`shell input keyevent ${keyCode}`, adbTimeoutMs, undefined, true);
+      let validationFailure: InputKeyResult | undefined;
+      try {
+        await this.adb.execute(
+          ["shell", "input", "keyevent", keyCode],
+          {
+            timeoutMs: adbTimeoutMs,
+            noRetry: true,
+            beforeDispatch: frameContext === undefined
+              ? undefined
+              : async () => {
+                validationFailure = await this.validateFrameContext(key, keyCode, frameContext, deadlineMs);
+                if (validationFailure) {
+                  throw new Error(validationFailure.error);
+                }
+                const remainingMs = this.remainingMs(deadlineMs);
+                if (remainingMs !== undefined && remainingMs <= 0) {
+                  validationFailure = {
+                    success: false,
+                    key,
+                    keyCode,
+                    error: "input/key deadline exhausted before ADB keyevent",
+                  };
+                  throw new Error(validationFailure.error);
+                }
+              },
+          }
+        );
+      } catch (error) {
+        if (validationFailure) {
+          return validationFailure;
+        }
+        throw error;
+      }
       return {
         success: true,
         key,

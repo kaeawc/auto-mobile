@@ -23,6 +23,62 @@ function ok(stdout: string): ExecResult {
 }
 
 describe("AdbClient retry contract", () => {
+  test("runs beforeDispatch after path resolution and before the ADB subprocess", async () => {
+    const events: string[] = [];
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        events.push("dispatch");
+        return ok("");
+      },
+      null,
+      defaultRetryExecutor,
+      new FakeTimer()
+    );
+    const internals = client as unknown as {
+      getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
+    };
+    internals.getBaseCommandParts = async () => {
+      events.push("path-resolved");
+      return { adbPath: "adb", baseArgs: [] };
+    };
+
+    await client.execute(["shell", "input", "keyevent", "KEYCODE_TAB"], {
+      timeoutMs: 1234,
+      noRetry: true,
+      beforeDispatch: async timeoutMs => {
+        events.push(`validated:${timeoutMs}`);
+      },
+    });
+
+    expect(events).toEqual(["path-resolved", "validated:1234", "dispatch"]);
+  });
+
+  test("does not dispatch when beforeDispatch rejects", async () => {
+    let dispatches = 0;
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        dispatches += 1;
+        return ok("");
+      },
+      null,
+      defaultRetryExecutor,
+      new FakeTimer()
+    );
+
+    await expect(
+      client.execute(["shell", "input", "keyevent", "KEYCODE_TAB"], {
+        noRetry: true,
+        beforeDispatch: async () => {
+          throw new Error("stale frame context");
+        },
+      })
+    ).rejects.toThrow("stale frame context");
+
+    expect(dispatches).toBe(0);
+  });
+
   test("retries a transient failure and succeeds within MAX_ADB_RETRIES", async () => {
     let calls = 0;
     const exec = (): Promise<ExecResult> => {

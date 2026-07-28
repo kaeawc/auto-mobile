@@ -994,6 +994,78 @@ class DeviceControlSessionTest {
     }
 
   @Test
+  fun `an unsequenced screenshot cannot roll back a sequenced coordinate space`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    session.onObservationSpaceDeclared(CoordinateSpace.Pixels, captureSequence = 8L)
+
+    // A screenshot whose declared dimensions do not match its PNG keeps this old binding but has
+    // its capture identity stripped before delivery. It cannot prove that the current stream space
+    // changed after the sequenced observation.
+    session.onObservationSpaceDeclared(null, captureSequence = null)
+
+    assertTrue(
+      session.tap(testSnapshot(coordinateSpace = CoordinateSpace.Pixels), point),
+      "the sequenced coordinate space remains current",
+    )
+    advanceUntilIdle()
+    assertFalse(
+      session.tap(testSnapshot(coordinateSpace = null), point),
+      "an unsequenced legacy declaration cannot resurrect the old space",
+    )
+    advanceUntilIdle()
+    assertEquals(1, client.inputTapCalls.size, "only the pixel-space tap reached the device")
+    scope.cancel()
+  }
+
+  @Test
+  fun `an unsequenced rollback cannot dispatch a pointer captured before a space flip`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    session.onObservationSpaceDeclared(null, captureSequence = 7L)
+    assertNotNull(
+      session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
+    )
+    val clickedBeforeFlip = assertNotNull(session.interactionSnapshot)
+
+    session.onObservationSpaceDeclared(CoordinateSpace.Pixels, captureSequence = 8L)
+    session.onObservationSpaceDeclared(null, captureSequence = null)
+
+    assertFalse(
+      session.tap(clickedBeforeFlip, point),
+      "a pre-flip legacy pointer must stay rejected after an unsequenced old-space screenshot",
+    )
+    advanceUntilIdle()
+    assertTrue(client.inputTapCalls.isEmpty(), "nothing reached the device")
+    scope.cancel()
+  }
+
+  @Test
+  fun `unsequenced-only sessions retain coordinate-space tracking`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    session.onObservationSpaceDeclared(null, captureSequence = null)
+    assertTrue(session.tap(testSnapshot(coordinateSpace = null), point))
+    advanceUntilIdle()
+
+    // Legacy runners never provide a capture sequence, so their later declaration must still
+    // advance the stream space and retire the previous coordinate unit.
+    session.onObservationSpaceDeclared(CoordinateSpace.Pixels, captureSequence = null)
+    assertTrue(session.tap(testSnapshot(coordinateSpace = CoordinateSpace.Pixels), point))
+    assertFalse(session.tap(testSnapshot(coordinateSpace = null), point))
+    advanceUntilIdle()
+
+    assertEquals(2, client.inputTapCalls.size)
+    scope.cancel()
+  }
+
+  @Test
   fun `a tap or swipe carrying a retired snapshot is rejected at dispatch`() = runTest {
     // Half (b): defence in depth. Even with the observable retirement, a pointer event that
     // CAPTURED the snapshot before the flip can reach dispatch after it — the view cannot

@@ -317,9 +317,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     if (!tool) {
       throw new ActionableError(`Unknown tool: ${name}`);
     }
-    if (!tool.deviceAwareHandler) {
-      await assertToolEnabledForSession(name, sessionUuid, options.sessionToolProfileService);
-    }
+    await assertToolEnabledForSession(name, sessionUuid, options.sessionToolProfileService);
 
     const requestMcpSessionId = extractInternalMcpSessionId(toolParams);
     const implicitAutolockMcpSessionId = requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);

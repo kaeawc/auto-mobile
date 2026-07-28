@@ -227,12 +227,15 @@ describe("PlanExecutor executeStep refactor", () => {
     }
   });
 
-  test("rejects a capability-disabled device-aware step before target resolution", async () => {
+  test("rejects a base-profile-disabled labeled device step before target resolution", async () => {
     const clipboardHandler = mock(async () => createStructuredToolResponse({ success: true }));
     ToolRegistry.registerDeviceAware(
       "clipboard",
       "clipboard",
-      z.object({ sessionUuid: z.string().optional() }),
+      z.object({
+        device: z.string(),
+        sessionUuid: z.string().optional(),
+      }),
       clipboardHandler
     );
     const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
@@ -249,7 +252,8 @@ describe("PlanExecutor executeStep refactor", () => {
       const result = await planExecutor.executePlan(
         {
           name: "capability-denied-step",
-          steps: [{ tool: "clipboard", params: {} }],
+          devices: ["B"],
+          steps: [{ tool: "clipboard", params: { device: "B" } }],
         },
         0,
         "android",

@@ -160,9 +160,10 @@ class DeviceControlSession(
   // observations must use the same capture ordering as coordinate-space observations.
   private var lastObservedFrameContextCapture: Long? = null
 
-  // Newest device rotation any source has proven, for the dispatch-time gate. Null until one is
-  // observed, which is why a session that has seen no rotation accepts every snapshot.
-  private var lastProvenRotation: Int? = null
+  // The latest proven device rotations, for the dispatch-time gate. Null until one is observed,
+  // one value when every proving source agrees, and multiple values latched during a disagreement
+  // until currently reported sources prove they agree again.
+  @Volatile private var lastProvenRotations: Set<Int>? = null
 
   // Backstop trackers on the frame FACTS, for updates that never came through the stream collectors
   // (see [resetOnCoordinateSpaceTransition]).
@@ -236,10 +237,7 @@ class DeviceControlSession(
   fun evaluate(inputs: DeviceControlInputs): DeviceControlDecision {
     val now = nowMs()
     resetOnCoordinateSpaceTransition(inputs)
-    // Newest PROVEN rotation, kept so dispatch can reject a snapshot the device has since rotated
-    // away from (issue #4502 + #4550). Only recorded — the retirement decisions themselves stay
-    // where each fix put them.
-    inputs.newestProvenRotation()?.let { lastProvenRotation = it }
+    updateProvenRotations(inputs)
     val decision = DeviceControlPolicy.evaluate(inputs, now)
     val live = decision.snapshotOrNull
     staleContextRejectedFrameContext?.let { rejectedContext ->
@@ -416,7 +414,7 @@ class DeviceControlSession(
    * Both properties are checked because both can invalidate a coordinate independently: a space
    * flip changes the UNIT the numbers are in, a rotation changes the AXES they are measured on, and
    * a frame is dispatchable only when both are current. Each reuses the value its own fix already
-   * records — the stream space tracker and the newest proven rotation — rather than introducing a
+   * records — the stream space tracker and the proven source rotations — rather than introducing a
    * third notion of "current". A session that has observed neither accepts everything: there is
    * nothing to contradict.
    */
@@ -424,7 +422,12 @@ class DeviceControlSession(
     staleContextRejectedFrameContext == null &&
       streamSpace.matches(snapshot.coordinateSpace) &&
       streamFrameContext.matches(snapshot.frameContext) &&
-      lastProvenRotation.let { it == null || it == snapshot.rotation }
+      rotationIsStillDispatchable(snapshot)
+
+  private fun rotationIsStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
+    lastProvenRotations.let { rotations ->
+      rotations == null || (rotations.size == 1 && snapshot.rotation in rotations)
+    }
 
   /**
    * A source can arrive before it pairs with its counterpart during a rotation. That unpaired
@@ -436,11 +439,29 @@ class DeviceControlSession(
       it in 0..3 && it != retainedRotation
     }
 
-  /** The newest rotation any source has PROVEN (a value in `0..3`), or null if none has yet. */
-  private fun DeviceControlInputs.newestProvenRotation(): Int? =
-    listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation).lastOrNull {
-      it in 0..3
-    }
+  /** All rotations any source has PROVEN (values in `0..3`), independent of source order. */
+  private fun DeviceControlInputs.provenRotations(): Set<Int> =
+    listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation)
+      .filter { it in 0..3 }
+      .toSet()
+
+  /**
+   * Keep a proven disagreement until every currently reported source can prove an agreeing
+   * rotation. A missing or malformed value cannot prove the device returned to the prior rotation.
+   */
+  private fun updateProvenRotations(inputs: DeviceControlInputs) {
+    val rotations = inputs.provenRotations()
+    if (rotations.isEmpty()) return
+    if ((lastProvenRotations?.size ?: 0) > 1 && inputs.hasUnprovenReportedRotation()) return
+    lastProvenRotations = rotations
+  }
+
+  private fun DeviceControlInputs.hasUnprovenReportedRotation(): Boolean =
+    screenshot?.let { !it.rotation.isProvenRotation() } == true ||
+      hierarchy?.let { !it.rotation.isProvenRotation() } == true ||
+      liveFrame?.let { !it.rotation.isProvenRotation() } == true
+
+  private fun Int?.isProvenRotation(): Boolean = this != null && this in 0..3
 
   /**
    * Enqueue a tap on [snapshot] at the mapped device coordinate [point], in click order.
@@ -630,7 +651,7 @@ class DeviceControlSession(
     lastObservedSpaceCapture = null
     streamFrameContext.forget()
     lastObservedFrameContextCapture = null
-    lastProvenRotation = null
+    lastProvenRotations = null
   }
 
   /**
@@ -652,12 +673,36 @@ class DeviceControlSession(
   }
 
   private suspend fun execute(command: DeviceControlInputCommand) {
-    var error: String? = null
-    try {
-      withContext(ioDispatcher) { forward(command) { message -> error = message } }
-    } finally {
+    // A command can wait behind another input while the sources rotate. Recheck at the FIFO
+    // consumer boundary so a coordinate captured before disagreement cannot reach the daemon.
+    if (
+      (command is DeviceControlInputCommand.Tap || command is DeviceControlInputCommand.Swipe) &&
+        !coordinatesAreStillDispatchable(command.snapshot)
+    ) {
       command.client?.close()
+      return
     }
+    var error: String? = null
+    val forwarded =
+      try {
+        withContext(ioDispatcher) {
+          // The main-to-IO dispatcher hop admits another observation before the daemon call.
+          // This volatile read is the final rotation gate before coordinates leave the process.
+          if (
+            (command is DeviceControlInputCommand.Tap ||
+              command is DeviceControlInputCommand.Swipe) &&
+              !rotationIsStillDispatchable(command.snapshot)
+          ) {
+            false
+          } else {
+            forward(command) { message -> error = message }
+            true
+          }
+        }
+      } finally {
+        command.client?.close()
+      }
+    if (!forwarded) return
     val message = error
     withContext(uiContext) {
       if (message == null) {

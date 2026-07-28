@@ -30,6 +30,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -1301,6 +1302,206 @@ class DeviceControlSessionTest {
     )
     assertEquals(retained, session.renderSnapshot, "the old frame can remain visible")
     assertNull(session.interactionSnapshot, "a proven incoming rotation must drop to Inspector")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a screenshot-first rotation with a stale hierarchy blocks dispatch`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val base = paired(captureSequence = 8L, sourceSequence = 11L)
+    val conflictingRotations = base.copy(screenshot = base.screenshot?.copy(rotation = 1))
+
+    session.evaluate(conflictingRotations)
+
+    assertFalse(
+      session.tap(testSnapshot().copy(rotation = 0), point),
+      "the stale hierarchy cannot make the disagreement dispatchable",
+    )
+    advanceUntilIdle()
+    assertTrue(client.inputTapCalls.isEmpty(), "nothing reaches the device during disagreement")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a hierarchy-first rotation with a stale screenshot blocks dispatch`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val base = paired(captureSequence = 8L, sourceSequence = 11L)
+    val conflictingRotations = base.copy(hierarchy = base.hierarchy?.copy(rotation = 1))
+
+    session.evaluate(conflictingRotations)
+
+    assertFalse(
+      session.tap(testSnapshot().copy(rotation = 1), point),
+      "the newer hierarchy cannot make the disagreement dispatchable",
+    )
+    advanceUntilIdle()
+    assertTrue(client.inputTapCalls.isEmpty(), "nothing reaches the device during disagreement")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a pointer captured before a rotation disagreement is not dispatched`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val clicked = assertNotNull(session.evaluate(initial).snapshotOrNull)
+    val conflictingRotations =
+      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
+
+    session.evaluate(conflictingRotations)
+
+    assertFalse(session.tap(clicked, point), "the in-flight pointer must fail closed")
+    advanceUntilIdle()
+    assertTrue(client.inputTapCalls.isEmpty(), "the captured pointer never reaches the device")
+    scope.cancel()
+  }
+
+  @Test
+  fun `queued coordinate commands are discarded after a rotation disagreement`() = runTest {
+    val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+    val clients = mutableListOf<FakeAutoMobileClient>()
+    val session =
+      DeviceControlSession(
+        scope = scope,
+        clientProvider = { FakeAutoMobileClient().also { clients += it } },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = {},
+        uiContext = StandardTestDispatcher(testScheduler),
+        ioDispatcher = StandardTestDispatcher(testScheduler),
+      )
+    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val snapshot = assertNotNull(session.evaluate(initial).snapshotOrNull)
+
+    assertTrue(session.tap(snapshot, point))
+    assertTrue(
+      session.swipe(
+        snapshot,
+        DevicePoint(x = 540, y = 1800, inBounds = true),
+        DevicePoint(x = 540, y = 400, inBounds = true),
+      )
+    )
+    assertEquals(2, clients.size, "each queued command captures its client")
+
+    session.evaluate(
+      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
+    )
+    advanceUntilIdle()
+
+    clients.forEach { client ->
+      assertTrue(client.inputTapCalls.isEmpty(), "a queued tap cannot survive disagreement")
+      assertTrue(client.inputSwipeCalls.isEmpty(), "a queued swipe cannot survive disagreement")
+      assertTrue("close" in client.calls, "a discarded command closes its captured client")
+    }
+    assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    scope.cancel()
+  }
+
+  @Test
+  fun `an unproven update cannot clear a rotation disagreement`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val snapshot = assertNotNull(session.evaluate(initial).snapshotOrNull)
+    val disagreement =
+      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
+
+    session.evaluate(disagreement)
+    val unproven =
+      disagreement.copy(screenshot = disagreement.screenshot?.copy(sequence = 12L, rotation = null))
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      (session.evaluate(unproven) as DeviceControlDecision.Blocked).reason,
+    )
+
+    assertFalse(
+      session.tap(snapshot, point),
+      "an unproven screenshot cannot prove that the earlier conflict resolved",
+    )
+    assertTrue(client.inputTapCalls.isEmpty())
+
+    val agreement =
+      unproven.copy(
+        screenshot = unproven.screenshot?.copy(sequence = 13L, rotation = 0),
+        hierarchy = unproven.hierarchy?.copy(sequence = 13L, rotation = 0),
+      )
+    val agreedSnapshot = assertNotNull(session.evaluate(agreement).snapshotOrNull)
+    assertTrue(session.tap(agreedSnapshot, point), "valid agreement restores coordinate dispatch")
+    advanceUntilIdle()
+    assertEquals(1, client.inputTapCalls.size)
+    scope.cancel()
+  }
+
+  @Test
+  fun `coordinate commands revalidate rotations after dispatching to io`() = runTest {
+    val ioScheduler = TestCoroutineScheduler()
+    val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session =
+      DeviceControlSession(
+        scope = scope,
+        clientProvider = { client },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = {},
+        uiContext = StandardTestDispatcher(testScheduler),
+        ioDispatcher = StandardTestDispatcher(ioScheduler),
+      )
+    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val snapshot = assertNotNull(session.evaluate(initial).snapshotOrNull)
+
+    assertTrue(session.tap(snapshot, point))
+    advanceUntilIdle()
+
+    // The consumer passed its pre-IO check but is suspended before the daemon call.
+    session.evaluate(
+      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
+    )
+    ioScheduler.advanceUntilIdle()
+    advanceUntilIdle()
+
+    assertTrue(
+      client.inputTapCalls.isEmpty(),
+      "the IO-boundary check must reject stale coordinates",
+    )
+    assertTrue("close" in client.calls, "the discarded command closes its captured client")
+    assertEquals(PostInputRefreshState.Idle, session.refreshState)
+    scope.cancel()
+  }
+
+  @Test
+  fun `single and unanimous proven rotations remain dispatchable`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val singleSourceBase = paired(captureSequence = 8L, sourceSequence = 11L)
+    val singleSource =
+      singleSourceBase.copy(
+        screenshot = singleSourceBase.screenshot?.copy(rotation = 1),
+        hierarchy = singleSourceBase.hierarchy?.copy(rotation = null),
+      )
+
+    session.evaluate(singleSource)
+    assertTrue(session.tap(testSnapshot().copy(rotation = 1), point))
+    advanceUntilIdle()
+
+    val unanimousBase = paired(captureSequence = 9L, sourceSequence = 12L)
+    val unanimous =
+      unanimousBase.copy(
+        screenshot = unanimousBase.screenshot?.copy(rotation = 2),
+        hierarchy = unanimousBase.hierarchy?.copy(rotation = 2),
+      )
+    session.evaluate(unanimous)
+    assertTrue(session.tap(testSnapshot().copy(rotation = 2), point))
+    advanceUntilIdle()
+
+    assertEquals(2, client.inputTapCalls.size)
     scope.cancel()
   }
 

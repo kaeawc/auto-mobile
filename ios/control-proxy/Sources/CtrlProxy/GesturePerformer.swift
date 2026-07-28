@@ -3,8 +3,10 @@ import ObjCExceptionCatcher
 #if canImport(os)
     import os
 #endif
-#if canImport(XCTest) && os(iOS)
+#if os(iOS)
     import UIKit
+#endif
+#if canImport(XCTest) && os(iOS)
     import XCTest
 #endif
 
@@ -142,16 +144,6 @@ enum DeviceRotation {
                 default: return nil
                 }
             }
-
-            func currentGestureInterfaceOrientation() -> UIInterfaceOrientation {
-                switch XCUIDevice.shared.orientation {
-                case .portrait: return .portrait
-                case .landscapeLeft: return .landscapeLeft
-                case .portraitUpsideDown: return .portraitUpsideDown
-                case .landscapeRight: return .landscapeRight
-                default: return .portrait
-                }
-            }
         }
 
         private static let rotationSampler = XCUIDeviceRotationSampler()
@@ -175,8 +167,53 @@ enum DeviceRotation {
             rotationSampler.currentRotation()
         }
 
+    #endif
+
+    #if os(iOS)
         static func currentGestureInterfaceOrientation() -> UIInterfaceOrientation {
-            rotationSampler.currentGestureInterfaceOrientation()
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            let activeSceneOrientation = scenes.first(where: {
+                $0.activationState == .foregroundActive && isCardinalInterfaceOrientation($0.interfaceOrientation)
+            })?.interfaceOrientation
+            let sceneOrientation = scenes.first(where: {
+                isCardinalInterfaceOrientation($0.interfaceOrientation)
+            })?.interfaceOrientation
+
+            return gestureInterfaceOrientation(
+                activeSceneOrientation: activeSceneOrientation,
+                sceneOrientation: sceneOrientation,
+                deviceOrientation: UIDevice.current.orientation
+            )
+        }
+
+        static func gestureInterfaceOrientation(
+            activeSceneOrientation: UIInterfaceOrientation?,
+            sceneOrientation: UIInterfaceOrientation?,
+            deviceOrientation: UIDeviceOrientation
+        ) -> UIInterfaceOrientation {
+            if let activeSceneOrientation, isCardinalInterfaceOrientation(activeSceneOrientation) {
+                return activeSceneOrientation
+            }
+            if let sceneOrientation, isCardinalInterfaceOrientation(sceneOrientation) {
+                return sceneOrientation
+            }
+
+            switch deviceOrientation {
+            case .portrait: return .portrait
+            case .portraitUpsideDown: return .portraitUpsideDown
+            case .landscapeLeft: return .landscapeLeft
+            case .landscapeRight: return .landscapeRight
+            default: return .portrait
+            }
+        }
+
+        private static func isCardinalInterfaceOrientation(_ orientation: UIInterfaceOrientation) -> Bool {
+            switch orientation {
+            case .portrait, .landscapeLeft, .portraitUpsideDown, .landscapeRight:
+                return true
+            default:
+                return false
+            }
         }
     #endif
 }

@@ -1,6 +1,10 @@
 @testable import CtrlProxy
 import XCTest
 
+#if os(iOS)
+    import UIKit
+#endif
+
 private final class FakeRotationChangeSignal: RotationChangeSignaling {
     private var handler: (() -> Void)?
 
@@ -83,4 +87,16 @@ final class RotationChangeGenerationTests: XCTestCase {
 
         XCTAssertEqual(monitor.capture(using: sampler) { "capture" }.rotation, 3)
     }
+
+    #if os(iOS)
+        func testGestureOrientationKeepsLandscapeSceneWhenDeviceIsFaceUp() {
+            let orientation = DeviceRotation.gestureInterfaceOrientation(
+                activeSceneOrientation: .landscapeLeft,
+                sceneOrientation: .portrait,
+                deviceOrientation: .faceUp
+            )
+
+            XCTAssertEqual(orientation, .landscapeLeft)
+        }
+    #endif
 }

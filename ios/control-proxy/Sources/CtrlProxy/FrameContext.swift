@@ -1,26 +1,49 @@
 import Foundation
 
-/// Stable, opaque identity for a device hierarchy. It deliberately hashes the encoded hierarchy
-/// rather than dimensions: same-size navigation must still invalidate a mirrored frame.
-enum FrameContext {
-    private static let lock = NSLock()
-    private static var generation: UInt64 = 0
+/// Stable, opaque identity for a device hierarchy. A tracker belongs to one CtrlProxy process,
+/// so a delayed context can never be reused after that process restarts.
+public final class FrameContext {
+    private let lock = NSLock()
+    private let epoch: UUID
+    private var generation: UInt64 = 0
 
-    /// Each pushed hierarchy advances a process-local generation. This detects an A→B→A change
-    /// while a screenshot is in flight even when its semantic hash returns to the same value.
-    static func recordHierarchy(_ hierarchy: ViewHierarchy) -> String? {
-        lock.lock()
-        generation &+= 1
-        let currentGeneration = generation
-        lock.unlock()
-        return semanticHash(hierarchy).map { "\(currentGeneration):\($0)" }
+    public init(epoch: UUID = UUID()) {
+        self.epoch = epoch
     }
 
-    static func forHierarchy(_ hierarchy: ViewHierarchy) -> String? {
+    /// Records a device-side UI transition, even when hierarchy publication is debounced.
+    public func recordTransition(to _: ViewHierarchy) {
+        lock.lock()
+        generation &+= 1
+        lock.unlock()
+    }
+
+    public func context(for hierarchy: ViewHierarchy) -> String? {
         lock.lock()
         let currentGeneration = generation
         lock.unlock()
-        return semanticHash(hierarchy).map { "\(currentGeneration):\($0)" }
+        return Self.semanticHash(hierarchy).map { "\(epoch.uuidString):\(currentGeneration):\($0)" }
+    }
+
+    /// Serializes transition recording with the final context check and gesture dispatch.
+    func performIfCurrent<T>(
+        expected: String?,
+        hierarchy: ViewHierarchy?,
+        operation: () throws -> T
+    )
+        throws -> T
+    {
+        guard let expected else { return try operation() }
+        guard let hierarchy else {
+            throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+        guard Self.semanticHash(hierarchy).map({ "\(epoch.uuidString):\(generation):\($0)" }) == expected else {
+            throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
+        }
+        return try operation()
     }
 
     private static func semanticHash(_ hierarchy: ViewHierarchy) -> String? {
@@ -30,10 +53,10 @@ enum FrameContext {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         guard let data = try? encoder.encode(SemanticHierarchy(hierarchy)) else { return nil }
-        var hash: UInt64 = 0xcbf29ce484222325
+        var hash: UInt64 = 0xCBF2_9CE4_8422_2325
         for byte in data {
             hash ^= UInt64(byte)
-            hash &*= 0x100000001b3
+            hash &*= 0x1000_0000_01B3
         }
         return String(hash, radix: 16)
     }

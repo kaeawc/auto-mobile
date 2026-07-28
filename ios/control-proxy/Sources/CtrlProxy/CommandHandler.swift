@@ -24,6 +24,7 @@ public class CommandHandler: CommandHandling {
     private let sdkDatabaseClient: (any SdkDatabaseFetching)?
     private let hierarchyDebouncer: (any HierarchyDebouncing)?
     private let voiceOverStateProvider: any VoiceOverStateProviding
+    private let frameContext: FrameContext
 
     public init(
         elementLocator: ElementLocating,
@@ -34,7 +35,8 @@ public class CommandHandler: CommandHandling {
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
         sdkDatabaseClient: (any SdkDatabaseFetching)? = nil,
         hierarchyDebouncer: (any HierarchyDebouncing)? = nil,
-        voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider()
+        voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider(),
+        frameContext: FrameContext = FrameContext()
     ) {
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
@@ -45,6 +47,7 @@ public class CommandHandler: CommandHandling {
         self.sdkDatabaseClient = sdkDatabaseClient
         self.hierarchyDebouncer = hierarchyDebouncer
         self.voiceOverStateProvider = voiceOverStateProvider
+        self.frameContext = frameContext
     }
 
     /// Factory for testing - allows injecting fakes
@@ -57,7 +60,8 @@ public class CommandHandler: CommandHandling {
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
         sdkDatabaseClient: (any SdkDatabaseFetching)? = nil,
         hierarchyDebouncer: (any HierarchyDebouncing)? = nil,
-        voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider()
+        voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider(),
+        frameContext: FrameContext = FrameContext()
     )
         -> CommandHandler
     {
@@ -70,7 +74,8 @@ public class CommandHandler: CommandHandling {
             sdkHierarchyCache: sdkHierarchyCache,
             sdkDatabaseClient: sdkDatabaseClient,
             hierarchyDebouncer: hierarchyDebouncer,
-            voiceOverStateProvider: voiceOverStateProvider
+            voiceOverStateProvider: voiceOverStateProvider,
+            frameContext: frameContext
         )
     }
 
@@ -312,7 +317,7 @@ public class CommandHandler: CommandHandling {
             requestId: request.requestId,
             data: enriched,
             perfTiming: perfTimings?.first,
-            frameContext: FrameContext.forHierarchy(enriched)
+            frameContext: frameContext.context(for: enriched)
         )
     }
 
@@ -415,7 +420,7 @@ public class CommandHandler: CommandHandling {
         guard let hierarchy = try? elementLocator.getViewHierarchy(disableAllFiltering: false) else {
             return nil
         }
-        return FrameContext.forHierarchy(enrichWithMatchingSdkHierarchy(hierarchy))
+        return frameContext.context(for: enrichWithMatchingSdkHierarchy(hierarchy))
     }
 
     private func requireCurrentFrameContext(_ expected: String?) throws {
@@ -423,6 +428,20 @@ public class CommandHandler: CommandHandling {
         guard currentFrameContext() == expected else {
             throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
         }
+    }
+
+    private func performContextCheckedGesture<T>(
+        expected: String?,
+        operation: () throws -> T
+    )
+        throws -> T
+    {
+        let hierarchy = try? elementLocator.getViewHierarchy(disableAllFiltering: false)
+        return try frameContext.performIfCurrent(
+            expected: expected,
+            hierarchy: hierarchy.map(enrichWithMatchingSdkHierarchy),
+            operation: operation
+        )
     }
 
     // MARK: - Gestures
@@ -453,7 +472,9 @@ public class CommandHandler: CommandHandling {
         try requireFinite(request.x, field: "x")
         try requireFinite(request.y, field: "y")
         let duration = request.duration ?? 0
-        try gesturePerformer.tap(x: request.x, y: request.y, duration: TimeInterval(duration) / 1000.0)
+        try performContextCheckedGesture(expected: request.frameContext) {
+            try gesturePerformer.tap(x: request.x, y: request.y, duration: TimeInterval(duration) / 1000.0)
+        }
 
         return WebSocketResponse.success(
             type: ResponseType.tapCoordinatesResult.rawValue,
@@ -469,11 +490,13 @@ public class CommandHandler: CommandHandling {
         try requireFinite(request.x2, field: "x2")
         try requireFinite(request.y2, field: "y2")
         let duration = request.duration ?? 300
-        try gesturePerformer.swipe(
-            startX: request.x1, startY: request.y1,
-            endX: request.x2, endY: request.y2,
-            duration: TimeInterval(duration) / 1000.0
-        )
+        try performContextCheckedGesture(expected: request.frameContext) {
+            try gesturePerformer.swipe(
+                startX: request.x1, startY: request.y1,
+                endX: request.x2, endY: request.y2,
+                duration: TimeInterval(duration) / 1000.0
+            )
+        }
 
         return WebSocketResponse.success(
             type: ResponseType.swipeResult.rawValue,
@@ -529,13 +552,15 @@ public class CommandHandler: CommandHandling {
         let dragDuration = request.dragDurationMs ?? 300
         let holdDuration = request.holdDurationMs ?? 100
 
-        try gesturePerformer.drag(
-            startX: request.x1, startY: request.y1,
-            endX: request.x2, endY: request.y2,
-            pressDuration: TimeInterval(pressDuration) / 1000.0,
-            dragDuration: TimeInterval(dragDuration) / 1000.0,
-            holdDuration: TimeInterval(holdDuration) / 1000.0
-        )
+        try performContextCheckedGesture(expected: request.frameContext) {
+            try gesturePerformer.drag(
+                startX: request.x1, startY: request.y1,
+                endX: request.x2, endY: request.y2,
+                pressDuration: TimeInterval(pressDuration) / 1000.0,
+                dragDuration: TimeInterval(dragDuration) / 1000.0,
+                holdDuration: TimeInterval(holdDuration) / 1000.0
+            )
+        }
 
         return WebSocketResponse.success(
             type: ResponseType.dragResult.rawValue,

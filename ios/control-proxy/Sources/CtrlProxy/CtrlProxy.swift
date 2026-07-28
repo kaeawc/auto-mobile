@@ -15,6 +15,7 @@ public class CtrlProxy {
     private let hierarchyDebouncer: HierarchyDebouncer
     private let fpsMonitor: DisplayLinkFPSMonitor
     private let sdkHierarchyCache: SdkHierarchyCache
+    private let frameContext: FrameContext
     private let sdkHierarchyClient: SdkHierarchyClient
     private let sdkDatabaseClient: SdkDatabaseClient
     private let sdkHierarchyRefreshPublisher: SdkHierarchyRefreshPublisher
@@ -31,6 +32,7 @@ public class CtrlProxy {
     ) {
         elementLocator = ElementLocator()
         gesturePerformer = GesturePerformer(elementLocator: elementLocator)
+        frameContext = FrameContext()
         sdkHierarchyCache = SdkHierarchyCache()
         sdkHierarchyClient = SdkHierarchyClient()
         sdkDatabaseClient = SdkDatabaseClient()
@@ -42,9 +44,15 @@ public class CtrlProxy {
             sdkHierarchyClient: sdkHierarchyClient,
             sdkHierarchyCache: sdkHierarchyCache,
             sdkDatabaseClient: sdkDatabaseClient,
-            hierarchyDebouncer: hierarchyDebouncer
+            hierarchyDebouncer: hierarchyDebouncer,
+            frameContext: frameContext
         )
-        server = WebSocketServer(port: port, commandHandler: commandHandler, sdkHierarchyCache: sdkHierarchyCache)
+        server = WebSocketServer(
+            port: port,
+            commandHandler: commandHandler,
+            sdkHierarchyCache: sdkHierarchyCache,
+            frameContext: frameContext
+        )
         fpsMonitor = DisplayLinkFPSMonitor()
         sdkHierarchyRefreshPublisher = SdkHierarchyRefreshPublisher(
             hierarchyProvider: { [weak hierarchyDebouncer] in
@@ -59,6 +67,9 @@ public class CtrlProxy {
         )
         server.onSdkHierarchyUpdated = { [weak self] in
             self?.sdkHierarchyRefreshPublisher.publish()
+        }
+        hierarchyDebouncer.setOnTransition { [weak self] hierarchy in
+            self?.frameContext.recordTransition(to: hierarchy)
         }
     }
 

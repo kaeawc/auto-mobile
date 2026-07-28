@@ -12,9 +12,12 @@ final class ModelsTests: XCTestCase {
             hierarchy: UIElementInfo(text: "B")
         )
 
-        let firstScreenAContext = FrameContext.recordHierarchy(screenA)
-        _ = FrameContext.recordHierarchy(screenB)
-        let returnedScreenAContext = FrameContext.recordHierarchy(screenA)
+        let frameContext = FrameContext()
+        frameContext.recordTransition(to: screenA)
+        let firstScreenAContext = frameContext.context(for: screenA)
+        frameContext.recordTransition(to: screenB)
+        frameContext.recordTransition(to: screenA)
+        let returnedScreenAContext = frameContext.context(for: screenA)
 
         XCTAssertNotEqual(firstScreenAContext, returnedScreenAContext)
     }

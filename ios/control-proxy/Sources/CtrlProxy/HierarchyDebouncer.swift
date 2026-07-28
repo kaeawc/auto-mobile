@@ -35,6 +35,9 @@ public protocol HierarchyDebouncing {
     /// Set callback for hierarchy results
     func setOnResult(_ callback: @escaping (HierarchyResult) -> Void)
 
+    /// Set callback for each newly observed structural UI state, including debounced changes.
+    func setOnTransition(_ callback: @escaping (ViewHierarchy) -> Void)
+
     /// Get the last extracted hierarchy without triggering a new extraction
     func getLastHierarchy() -> ViewHierarchy?
 
@@ -74,6 +77,7 @@ public class HierarchyDebouncer: HierarchyDebouncing {
     // MARK: - State
 
     private var lastStructuralHash = 0
+    private var lastObservedStructuralHash = 0
     private var inAnimationMode = false
     private var animationModeEndTime: Int64 = 0
     private var skippedPollCount = 0
@@ -85,6 +89,7 @@ public class HierarchyDebouncer: HierarchyDebouncing {
     private var pollScheduled = false
     private var pollGeneration = 0
     private var onResult: ((HierarchyResult) -> Void)?
+    private var onTransition: ((ViewHierarchy) -> Void)?
 
     public var isRunning: Bool {
         lock.lock()
@@ -110,6 +115,12 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         lock.lock()
         defer { lock.unlock() }
         onResult = callback
+    }
+
+    public func setOnTransition(_ callback: @escaping (ViewHierarchy) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        onTransition = callback
     }
 
     public func setPollIntervalMs(_ intervalMs: Int64) {
@@ -192,6 +203,7 @@ public class HierarchyDebouncer: HierarchyDebouncing {
     public func reset() {
         lock.lock()
         lastStructuralHash = 0
+        lastObservedStructuralHash = 0
         inAnimationMode = false
         animationModeEndTime = 0
         skippedPollCount = 0
@@ -241,6 +253,7 @@ public class HierarchyDebouncer: HierarchyDebouncing {
 
             lock.lock()
             lastStructuralHash = hash
+            lastObservedStructuralHash = hash
             lastHierarchy = hierarchy
             lastBroadcastTime = timer.now()
             let callback = onResult
@@ -298,9 +311,18 @@ public class HierarchyDebouncer: HierarchyDebouncing {
 
             lock.lock()
             let oldHash = lastStructuralHash
+            let oldObservedHash = lastObservedStructuralHash
             let callback = onResult
+            let transitionCallback = onTransition
             let lastBroadcast = lastBroadcastTime
             lock.unlock()
+
+            if newHash != oldObservedHash {
+                lock.lock()
+                lastObservedStructuralHash = newHash
+                lock.unlock()
+                transitionCallback?(hierarchy)
+            }
 
             if newHash == oldHash {
                 // Structure unchanged - likely animation
@@ -440,6 +462,7 @@ public class FakeHierarchyDebouncer: HierarchyDebouncing {
     // State
     private var _isRunning = false
     private var onResult: ((HierarchyResult) -> Void)?
+    private var onTransition: ((ViewHierarchy) -> Void)?
     private var lastHierarchy: ViewHierarchy?
     private let lock = NSLock()
 
@@ -498,6 +521,12 @@ public class FakeHierarchyDebouncer: HierarchyDebouncing {
         lock.unlock()
     }
 
+    public func setOnTransition(_ callback: @escaping (ViewHierarchy) -> Void) {
+        lock.lock()
+        onTransition = callback
+        lock.unlock()
+    }
+
     public func getLastHierarchy() -> ViewHierarchy? {
         lock.lock()
         defer { lock.unlock() }
@@ -522,6 +551,9 @@ public class FakeHierarchyDebouncer: HierarchyDebouncing {
         }
         lock.unlock()
         callback?(result)
+        if case let .changed(hierarchy, _, _) = result {
+            onTransition?(hierarchy)
+        }
     }
 
     /// Reset all call counts for fresh test assertions

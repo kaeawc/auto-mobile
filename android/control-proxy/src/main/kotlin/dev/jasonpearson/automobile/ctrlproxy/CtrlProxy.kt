@@ -1372,7 +1372,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun validateFrameContext(requestId: String?, frameContext: String) {
     val matches = frameContext == currentFrameContext()
     asyncActionRunner.launch(requestId, "validate_frame_context") {
-      webSocketServer?.broadcast(
+      webSocketServer.broadcast(
         dev.jasonpearson.automobile.protocol.FrameContextValidationResult(
           timestamp = System.currentTimeMillis(),
           requestId = requestId,

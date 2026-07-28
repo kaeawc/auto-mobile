@@ -3,34 +3,34 @@ import {
   COORDINATE_SPACE_PX,
   canonicalPixelsToPoints,
   convertHierarchyToCanonicalPixels,
-  roundHalfEven,
+  roundHalfAwayFromZero,
 } from "../../src/daemon/canonicalPixels";
 import type { ViewHierarchyResult } from "../../src/models";
 import { loadCoordinateMappingVectors } from "../parity/coordinateMappingGoldenVectors";
 
-describe("roundHalfEven", () => {
-  it("rounds ties to the even neighbour (not away from zero like Math.round)", () => {
-    expect(roundHalfEven(0.5)).toBe(0);
-    expect(roundHalfEven(1.5)).toBe(2);
-    expect(roundHalfEven(2.5)).toBe(2);
-    expect(roundHalfEven(3.5)).toBe(4);
-    expect(roundHalfEven(-0.5)).toBe(0);
-    expect(roundHalfEven(-1.5)).toBe(-2);
-    expect(roundHalfEven(-2.5)).toBe(-2);
+describe("roundHalfAwayFromZero", () => {
+  it("rounds ties away from zero like Swift Double.rounded()", () => {
+    expect(roundHalfAwayFromZero(0.5)).toBe(1);
+    expect(roundHalfAwayFromZero(1.5)).toBe(2);
+    expect(roundHalfAwayFromZero(2.5)).toBe(3);
+    expect(roundHalfAwayFromZero(3.5)).toBe(4);
+    expect(roundHalfAwayFromZero(-0.5)).toBe(-1);
+    expect(roundHalfAwayFromZero(-1.5)).toBe(-2);
+    expect(roundHalfAwayFromZero(-2.5)).toBe(-3);
   });
 
   it("rounds non-ties to the nearest integer", () => {
-    expect(roundHalfEven(0.49)).toBe(0);
-    expect(roundHalfEven(0.51)).toBe(1);
-    expect(roundHalfEven(937.5)).toBe(938); // floor 937 (odd) -> up to even 938
-    expect(roundHalfEven(1667.5)).toBe(1668); // floor 1667 (odd) -> up to even 1668
-    expect(roundHalfEven(-937.4)).toBe(-937);
+    expect(roundHalfAwayFromZero(0.49)).toBe(0);
+    expect(roundHalfAwayFromZero(0.51)).toBe(1);
+    expect(roundHalfAwayFromZero(937.5)).toBe(938);
+    expect(roundHalfAwayFromZero(1667.5)).toBe(1668);
+    expect(roundHalfAwayFromZero(-937.4)).toBe(-937);
   });
 
   it("normalizes -0 to 0 and passes non-finite values through", () => {
-    expect(Object.is(roundHalfEven(-0.4), 0)).toBe(true);
-    expect(roundHalfEven(Number.NaN)).toBeNaN();
-    expect(roundHalfEven(Number.POSITIVE_INFINITY)).toBe(Number.POSITIVE_INFINITY);
+    expect(Object.is(roundHalfAwayFromZero(-0.4), 0)).toBe(true);
+    expect(roundHalfAwayFromZero(Number.NaN)).toBeNaN();
+    expect(roundHalfAwayFromZero(Number.POSITIVE_INFINITY)).toBe(Number.POSITIVE_INFINITY);
   });
 });
 
@@ -78,14 +78,14 @@ describe("convertHierarchyToCanonicalPixels", () => {
     expect(hierarchy.hierarchy.bounds).toEqual({ left: 0, top: 0, right: 1170, bottom: 2532 });
   });
 
-  it("uses round-half-even for fractional nativeScale (Display Zoom / Plus downsampling)", () => {
+  it("uses round-half-away-from-zero for fractional nativeScale (Display Zoom / Plus downsampling)", () => {
     const hierarchy: ViewHierarchyResult = {
       hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: 375, bottom: 812 } } } },
       screenWidth: 375,
       screenHeight: 812,
     };
     convertHierarchyToCanonicalPixels(hierarchy, { nativeScale: 2.5, pixelWidth: 938, pixelHeight: 2030 });
-    // 375*2.5 = 937.5 -> 938 (even); 812*2.5 = 2030 (integral)
+    // 375*2.5 = 937.5 -> 938; 812*2.5 = 2030 (integral)
     expect(hierarchy.hierarchy.node!.$["bounds"]).toEqual({ left: 0, top: 0, right: 938, bottom: 2030 });
   });
 
@@ -142,7 +142,7 @@ describe("convertHierarchyToCanonicalPixels", () => {
   });
 
   describe("golden iosPointToPixel: point -> pixel -> point round-trip", () => {
-    // The publish path converts a point bound to pixels (roundHalfEven(point * nativeScale), integer
+    // The publish path converts a point bound to pixels (roundHalfAwayFromZero(point * nativeScale), integer
     // pixel coords); the input path converts a client pixel coordinate back to points by an EXACT
     // divide (/ nativeScale). Because the divide adds no rounding, the round-trip error is only the
     // single publish-side integer-pixel quantization: at most 0.5/nativeScale <= 0.5 of a point.
@@ -151,17 +151,17 @@ describe("convertHierarchyToCanonicalPixels", () => {
       if (vector.scale === 0) { continue; }
       it(`row ${index}: nativeScale ${vector.scale}`, () => {
         for (const point of [0, 1, vector.pointWidth / 2, vector.pointWidth - 1, vector.pointWidth]) {
-          const pixels = roundHalfEven(point * vector.scale);
+          const pixels = roundHalfAwayFromZero(point * vector.scale);
           const back = canonicalPixelsToPoints(pixels, vector.scale);
-          expect(Math.abs(back - point)).toBeLessThanOrEqual(0.5 / vector.scale);
+          expect(Math.abs(back - point)).toBeLessThanOrEqual((0.5 / vector.scale) + 1e-12);
         }
       });
     }
 
     it("is EXACT when the pixel product is integral (no divide-side rounding)", () => {
       // 390pt @ 3x -> 1170px -> 390.000pt exactly; 375pt @ 2x -> 750px -> 375pt exactly.
-      expect(canonicalPixelsToPoints(roundHalfEven(390 * 3), 3)).toBe(390);
-      expect(canonicalPixelsToPoints(roundHalfEven(375 * 2), 2)).toBe(375);
+      expect(canonicalPixelsToPoints(roundHalfAwayFromZero(390 * 3), 3)).toBe(390);
+      expect(canonicalPixelsToPoints(roundHalfAwayFromZero(375 * 2), 2)).toBe(375);
     });
   });
 

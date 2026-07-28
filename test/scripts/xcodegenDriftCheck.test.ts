@@ -64,6 +64,7 @@ function createTempRepo(): string {
   mkdirSync(join(tempDir, "ios/control-proxy/CtrlProxy.xcodeproj"), { recursive: true });
   mkdirSync(join(tempDir, "baseline"), { recursive: true });
   mkdirSync(join(tempDir, "bin"), { recursive: true });
+  writeFileSync(join(tempDir, "ios/control-proxy/project.yml"), "name: CtrlProxy\n");
   writeFileSync(
     join(tempDir, "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"),
     "committed project\n"
@@ -219,6 +220,7 @@ describe("xcodegen drift check", () => {
       encoding: "utf8",
       env: {
         ...process.env,
+        HOME: repoDir,
         FAKE_REPO_ROOT: repoDir,
         FAKE_XCODEGEN_BEHAVIOR: "modify",
         PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
@@ -237,6 +239,7 @@ describe("xcodegen drift check", () => {
       encoding: "utf8",
       env: {
         ...process.env,
+        HOME: repoDir,
         FAKE_REPO_ROOT: repoDir,
         FAKE_XCODEGEN_BEHAVIOR: "recreate",
         FAKE_GIT_STATUS_OUTPUT: "?? ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj\n",
@@ -260,6 +263,7 @@ describe("xcodegen drift check", () => {
       encoding: "utf8",
       env: {
         ...process.env,
+        HOME: repoDir,
         FAKE_REPO_ROOT: repoDir,
         FAKE_XCODEGEN_VERSION: "2.45.4",
         FAKE_XCODEGEN_BEHAVIOR: "modify",
@@ -285,6 +289,7 @@ describe("xcodegen drift check", () => {
       encoding: "utf8",
       env: {
         ...process.env,
+        HOME: repoDir,
         FAKE_REPO_ROOT: repoDir,
         PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
       },
@@ -309,6 +314,7 @@ describe("xcodegen drift check", () => {
       encoding: "utf8",
       env: {
         ...process.env,
+        HOME: repoDir,
         FAKE_REPO_ROOT: repoDir,
         FAKE_XCODEGEN_BEHAVIOR: "reorder",
         FAKE_REORDERED_PROJECT: alphabeticalOrderProject,
@@ -330,6 +336,7 @@ describe("xcodegen drift check", () => {
       encoding: "utf8",
       env: {
         ...process.env,
+        HOME: repoDir,
         FAKE_REPO_ROOT: repoDir,
         FAKE_REPO_WIDE_GENERATOR_BEHAVIOR: "modify",
         PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
@@ -348,6 +355,7 @@ describe("xcodegen drift check", () => {
       encoding: "utf8",
       env: {
         ...process.env,
+        HOME: repoDir,
         FAKE_REPO_ROOT: repoDir,
         PATH: `${join(repoDir, "bin")}:${process.env.PATH ?? ""}`,
       },

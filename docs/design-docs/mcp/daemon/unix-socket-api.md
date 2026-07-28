@@ -325,7 +325,7 @@ runner addresses the screen in **logical points**, so for iOS the daemon divides
 each incoming pixel coordinate by the runner-reported `nativeScale` before
 dispatch. That divide is an **exact fractional quotient** — it is NOT rounded —
 because XCUITest accepts fractional (`Double`) points and quantizing would discard
-sub-point precision. (Round-half-even applies only on the publish side, where
+sub-point precision. (Round-half-away-from-zero applies only on the publish side, where
 points are converted to integer physical pixels; the input divide is its exact
 inverse, so the round-trip carries only that single publish-side quantization.)
 Android runners already take physical pixels, so nothing is converted. If the iOS

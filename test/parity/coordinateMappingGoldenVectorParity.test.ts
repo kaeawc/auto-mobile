@@ -31,6 +31,7 @@ import {
   parseKotlinDeviceToViewportTable,
   parseKotlinFitScaleTable,
   parseKotlinFitToViewportTable,
+  parseKotlinScaleReportingTable,
   parseKotlinScreenshotRotationTable,
   parseKotlinViewportToDeviceTable,
   referenceDetectScreenshotRotation,
@@ -55,6 +56,7 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
   const kotlinFitToViewport = parseKotlinFitToViewportTable();
   const kotlinFitScale = parseKotlinFitScaleTable();
   const kotlinScreenshotRotation = parseKotlinScreenshotRotationTable();
+  const kotlinScaleReporting = parseKotlinScaleReportingTable();
   const swiftScaleReporting = parseSwiftScaleReportingTable();
 
   test("canonical JSON exposes non-trivial tables for every section", function() {
@@ -71,6 +73,10 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
 
   test("B1: Swift scaleReporting literals are verified against the single source (issue #4548)", function() {
     expect(diffNumericRows(swiftScaleReporting, canonical.scaleReporting, SCALE_REPORTING_FIELDS)).toEqual([]);
+  });
+
+  test("B1: Kotlin scaleReporting literals are verified against the single source", function() {
+    expect(diffNumericRows(kotlinScaleReporting, canonical.scaleReporting, SCALE_REPORTING_FIELDS)).toEqual([]);
   });
 
   test("B1: every scaleReporting row's expected pixels are DERIVABLE from its inputs", function() {

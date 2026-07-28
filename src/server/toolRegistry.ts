@@ -857,13 +857,14 @@ export class ToolRegistryClass {
           deviceSessionManager: this.deviceSessionManager,
         });
         sessionUuid = resolvedTarget.sessionUuid;
+        const capabilitySessionUuid = resolvedTarget.baseSessionUuid ?? resolvedTarget.sessionUuid;
         await assertToolEnabledForSession(
           name,
-          resolvedTarget.sessionUuid,
+          capabilitySessionUuid,
           getToolCapabilityContext()?.sessionToolProfileService,
         );
         return await runWithToolCapabilityContext(
-          { sessionUuid: resolvedTarget.sessionUuid },
+          { sessionUuid: capabilitySessionUuid },
           async () => {
             try {
               let response: any | undefined;

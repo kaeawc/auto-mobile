@@ -327,7 +327,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       "sessionUuid" in toolParams
         ? (toolParams as { sessionUuid?: string }).sessionUuid
         : undefined;
-    const providedSessionUuid = typeof rawSessionUuid === "string" ? rawSessionUuid : undefined;
+    const providedSessionUuid = typeof rawSessionUuid === "string" && rawSessionUuid.trim().length > 0
+      ? rawSessionUuid
+      : undefined;
     if (sessionToolBinding.bind(sessionId, providedSessionUuid)) {
       ToolRegistry.notifyToolListChanged();
     }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Explore } from "../../src/features/navigation/Explore";
 import { NavigateTo } from "../../src/features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
+import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { registerNavigationTools } from "../../src/server/navigationTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { setDebugModeEnabled } from "../../src/utils/debug";
@@ -84,6 +85,54 @@ describe("navigation tool session graph selection", () => {
       sessionManagerSpy.mockRestore();
       navigateExecuteSpy.mockRestore();
       exploreExecuteSpy.mockRestore();
+    }
+  });
+
+  test("reports the target iOS device's observed app instead of a stale graph app", async () => {
+    const staleGraph = new FakeNavigationGraphManager();
+    staleGraph.setCurrentAppId("com.google.android.settings.intelligence");
+    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
+      staleGraph as unknown as NavigationGraphManager
+    );
+    const observationSpy = spyOn(RealObserveScreen, "getRecentCachedResultForDevice").mockReturnValue({
+      viewHierarchy: { packageName: "com.apple.Preferences" }
+    } as never);
+
+    try {
+      const handler = (ToolRegistry as unknown as {
+        tools: Map<string, { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }>;
+      }).tools.get("getNavigationGraph")?.deviceAwareHandler;
+
+      const response = await handler!(device, { platform: "ios" });
+
+      expect(JSON.parse(response.content[0].text).message).toBe(
+        "Navigation graph for app: com.apple.Preferences"
+      );
+    } finally {
+      observationSpy.mockRestore();
+      managerSpy.mockRestore();
+    }
+  });
+
+  test("reports none when the target device has no cached observation", async () => {
+    const staleGraph = new FakeNavigationGraphManager();
+    staleGraph.setCurrentAppId("com.google.android.settings.intelligence");
+    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
+      staleGraph as unknown as NavigationGraphManager
+    );
+    const observationSpy = spyOn(RealObserveScreen, "getRecentCachedResultForDevice").mockReturnValue(undefined);
+
+    try {
+      const handler = (ToolRegistry as unknown as {
+        tools: Map<string, { deviceAwareHandler?: (device: BootedDevice, args: any) => Promise<any> }>;
+      }).tools.get("getNavigationGraph")?.deviceAwareHandler;
+
+      const response = await handler!(device, { platform: "ios" });
+
+      expect(JSON.parse(response.content[0].text).message).toBe("Navigation graph for app: none");
+    } finally {
+      observationSpy.mockRestore();
+      managerSpy.mockRestore();
     }
   });
 });

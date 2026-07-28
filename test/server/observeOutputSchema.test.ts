@@ -243,7 +243,14 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
   });
 
   test("advertises requested scope dimensions gated off by server flags", () => {
-    expect(JSON.stringify(flattenTopLevelUnion(toJSONSchema(observeResultSchema)))).toContain("\"gatedOff\"");
+    const schema = flattenTopLevelUnion(toJSONSchema(observeResultSchema));
+    const properties = schema.properties as Record<string, unknown>;
+    const observeScope = properties.observeScope as { properties: Record<string, unknown> };
+    const gatedOff = observeScope.properties.gatedOff as {
+      items: { enum: string[] };
+    };
+
+    expect(gatedOff.items.enum).toEqual(["focus", "region", "overview"]);
   });
 });
 

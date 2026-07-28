@@ -299,6 +299,16 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     let served: ObserveResult = sanitized;
     if (resolveObserveProjection(ctx.args) === "skeleton") {
       served = sanitizeObserveResult(observeResult, { ...cfg, project: "skeleton" });
+      // Skeleton replaces the hierarchy, so scope's structural transforms cannot
+      // run afterward. Preserve only the requested dimensions withheld by flags.
+      if ((scopeConfig.gatedOff?.length ?? 0) > 0) {
+        served = applyObserveScopeExperiments(served, {
+          focus: false,
+          overview: false,
+          region: false,
+          gatedOff: scopeConfig.gatedOff,
+        });
+      }
     } else if (scopeActive) {
       served = applyObserveScopeExperiments(sanitized, scopeConfig);
     }

@@ -33,12 +33,14 @@ export class CtrlProxyNavigation {
    */
   async requestPressHome(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    frameContext?: string
   ): Promise<CtrlProxyPressHomeResult> {
     return sendCommand<CtrlProxyPressHomeResult>(this.context, {
       idPrefix: "pressHome",
       responseType: "press_home",
       messageType: "request_press_home",
+      params: frameContext === undefined ? undefined : { frameContext },
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,
@@ -52,12 +54,14 @@ export class CtrlProxyNavigation {
    */
   async requestPressBack(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    frameContext?: string
   ): Promise<CtrlProxyPressBackResult> {
     return sendCommand<CtrlProxyPressBackResult>(this.context, {
       idPrefix: "pressBack",
       responseType: "press_back",
       messageType: "request_press_back",
+      params: frameContext === undefined ? undefined : { frameContext },
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,
@@ -91,13 +95,14 @@ export class CtrlProxyNavigation {
   async requestPressButton(
     button: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    frameContext?: string
   ): Promise<CtrlProxyPressButtonResult> {
     return sendCommand<CtrlProxyPressButtonResult>(this.context, {
       idPrefix: "pressButton",
       responseType: "press_button",
       messageType: "request_press_button",
-      params: { action: button },
+      params: frameContext === undefined ? { action: button } : { action: button, frameContext },
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,
@@ -179,12 +184,14 @@ export class CtrlProxyNavigation {
    */
   async requestRecentApps(
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    frameContext?: string
   ): Promise<CtrlProxyRecentAppsResult> {
     return sendCommand<CtrlProxyRecentAppsResult>(this.context, {
       idPrefix: "recentApps",
       responseType: "recent_apps",
       messageType: "request_recent_apps",
+      params: frameContext === undefined ? undefined : { frameContext },
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,

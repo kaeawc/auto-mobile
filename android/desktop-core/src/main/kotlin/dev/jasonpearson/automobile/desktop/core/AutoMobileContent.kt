@@ -160,7 +160,6 @@ import dev.jasonpearson.automobile.desktop.core.video.toImageBitmap
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
-import dev.jasonpearson.automobile.desktop.domain.LiveFrameFacts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
@@ -551,10 +550,10 @@ fun AutoMobileContent(
       }
     }
   val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId, MONOTONIC_NOW_MS)
-  // Forces the control-availability decision to be re-evaluated on a timer, not only when a source
-  // produces an update (issue #3348). A stalled relay produces nothing at all — its staleness is
-  // visible only as time passing — so without this a frozen mirror would stay clickable until some
-  // unrelated recomposition happened to run.
+  // Forces the control-availability decision to be re-evaluated on a timer, not only when an
+  // observation source produces an update (issue #3348). A stalled observation stream produces
+  // nothing at all — its staleness is visible only as time passing — so without this a frozen
+  // screenshot would stay clickable until some unrelated recomposition happened to run.
   val controlFreshnessTick = rememberControlFreshnessTick(enableDeviceControl && isLiveLayoutMode)
 
   // Pending failure ID for deep linking from notifications
@@ -1655,8 +1654,9 @@ fun AutoMobileContent(
           // view then maps clicks through that snapshot and hands it back with each tap, so a
           // snapshot swap between click and dispatch cannot change what the daemon receives.
           //
-          // Re-evaluated on a slow ticker as well as on source updates, because a stalled live
-          // relay produces no updates at all — its staleness is only visible as time passing.
+          // Re-evaluated on a slow ticker as well as on source updates, because a stalled
+          // observation stream produces no updates at all — its staleness is only visible as time
+          // passing.
           controlFreshnessTick
           val deviceControlDecision =
             deviceControlSession.evaluate(
@@ -1670,17 +1670,10 @@ fun AutoMobileContent(
                   layoutInspectorState.connectionStatus == ConnectionStatus.Connected,
                 screenshot = layoutInspectorState.screenshotFacts,
                 hierarchy = layoutInspectorState.hierarchyFacts,
-                liveFrame =
-                  liveVideoFrame?.let { frame ->
-                    LiveFrameFacts(
-                      deviceId = activeDeviceId,
-                      sequence = frame.sequence,
-                      receivedAtMs = frame.receivedAtMs,
-                      width = frame.bitmap.width,
-                      height = frame.bitmap.height,
-                      rotation = frame.rotation,
-                    )
-                  },
+                // Control maps and renders the paired observation screenshot. WebRTC has no
+                // capture identity, so it is only an Inspector-mode rendering source and must not
+                // decide whether the independently paired screenshot is actionable.
+                liveFrame = null,
               )
             )
           // What a CLICK acts through. While a post-input refresh is pending this is the retained

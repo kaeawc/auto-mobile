@@ -61,7 +61,7 @@ export class PressButton extends BaseVisualChange {
         case "android":
           return await this.executeAndroidButtonPress(button, timeoutMs, frameContext);
         case "ios":
-          return await this.executeiOSButtonPress(button, timeoutMs);
+          return await this.executeiOSButtonPress(button, timeoutMs, frameContext);
         default:
           throw new Error(`Unsupported platform: ${this.device.platform}`);
       }
@@ -237,11 +237,20 @@ export class PressButton extends BaseVisualChange {
    * @param button - Button name to press
    * @returns Result of the button press operation
    */
-  private async executeiOSButtonPress(button: string, timeoutMs?: number): Promise<PressButtonResult> {
+  private async executeiOSButtonPress(
+    button: string,
+    timeoutMs?: number,
+    frameContext?: string
+  ): Promise<PressButtonResult> {
     const normalizedButton = button.toLowerCase();
     if (PressButton.IOS_NAVIGATION_BUTTONS.has(normalizedButton)) {
       const client = IOSCtrlProxyClient.getInstance(this.device);
-      const result = await this.executeiOSNavigationButton(client, normalizedButton, timeoutMs);
+      const result = await this.executeiOSNavigationButton(
+        client,
+        normalizedButton,
+        timeoutMs,
+        frameContext
+      );
 
       if (!result.success) {
         return {
@@ -270,7 +279,7 @@ export class PressButton extends BaseVisualChange {
       }
 
       const client = IOSCtrlProxyClient.getInstance(this.device);
-      const result = await client.requestPressButton(normalizedButton, timeoutMs);
+      const result = await client.requestPressButton(normalizedButton, timeoutMs, undefined, frameContext);
 
       if (!result.success) {
         return {
@@ -304,15 +313,16 @@ export class PressButton extends BaseVisualChange {
   private async executeiOSNavigationButton(
     client: IOSCtrlProxyClient,
     button: string,
-    timeoutMs?: number
+    timeoutMs?: number,
+    frameContext?: string
   ): Promise<{ success: boolean; error?: string }> {
     switch (button) {
       case "home":
-        return client.requestPressHome(timeoutMs);
+        return client.requestPressHome(timeoutMs, undefined, frameContext);
       case "back":
-        return client.requestPressBack(timeoutMs);
+        return client.requestPressBack(timeoutMs, undefined, frameContext);
       case "recent":
-        return client.requestRecentApps(timeoutMs);
+        return client.requestRecentApps(timeoutMs, undefined, frameContext);
       default:
         return { success: false, error: `Unsupported iOS button: ${button}` };
     }

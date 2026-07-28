@@ -220,11 +220,11 @@ class DeviceControlSession(
     private set
 
   /**
-   * Capture identity of a snapshot the daemon rejected as stale. The rendered snapshot remains
-   * useful for inspection, but its coordinates are no longer actionable until a later paired
-   * capture arrives.
+   * Frame context of a snapshot the daemon rejected as stale. The rendered snapshot remains useful
+   * for inspection, but its coordinates are no longer actionable until the device reports a
+   * different context.
    */
-  private var staleContextRejectedCaptureSequence: Long? = null
+  private var staleContextRejectedFrameContext: String? = null
 
   /**
    * Evaluate control availability for [inputs] and, on the way, offer the resulting snapshot to the
@@ -242,9 +242,9 @@ class DeviceControlSession(
     inputs.newestProvenRotation()?.let { lastProvenRotation = it }
     val decision = DeviceControlPolicy.evaluate(inputs, now)
     val live = decision.snapshotOrNull
-    staleContextRejectedCaptureSequence?.let { rejectedCapture ->
-      if (live != null && live.captureSequence > rejectedCapture) {
-        staleContextRejectedCaptureSequence = null
+    staleContextRejectedFrameContext?.let { rejectedContext ->
+      if (live != null && live.frameContext != rejectedContext) {
+        staleContextRejectedFrameContext = null
       }
     }
     if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
@@ -267,7 +267,7 @@ class DeviceControlSession(
     // view in Control for the rest of the 3s wait, and each successful tap restarts that wait, so
     // stale content could stay actionable indefinitely.
     interactionSnapshot =
-      if (staleContextRejectedCaptureSequence != null) {
+      if (staleContextRejectedFrameContext != null) {
         null
       } else if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
         retainedIfStillActionable(decision, inputs, now)
@@ -418,7 +418,7 @@ class DeviceControlSession(
    * nothing to contradict.
    */
   private fun coordinatesAreStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
-    staleContextRejectedCaptureSequence == null &&
+    staleContextRejectedFrameContext == null &&
       streamSpace.matches(snapshot.coordinateSpace) &&
       streamFrameContext.matches(snapshot.frameContext) &&
       lastProvenRotation.let { it == null || it == snapshot.rotation }
@@ -642,7 +642,7 @@ class DeviceControlSession(
     dispatcher.reset()
     errorToken.incrementAndGet()
     refreshTracker.reset()
-    staleContextRejectedCaptureSequence = null
+    staleContextRejectedFrameContext = null
     renderSnapshot = null
     interactionSnapshot = null
     publishError(null)
@@ -669,13 +669,14 @@ class DeviceControlSession(
           // but a user can receive a newer paired frame and enqueue a valid command while this
           // one is in flight. Reject only this context so that newer command stays in gesture
           // order and can still reach the device.
-          dispatcher.discardFrameContext(command.snapshot.frameContext)
-          if (!hasNewerInteractionSnapshotThan(command.snapshot)) {
-            staleContextRejectedCaptureSequence =
-              maxOf(
-                staleContextRejectedCaptureSequence ?: Long.MIN_VALUE,
-                command.snapshot.captureSequence,
-              )
+          val newestDiscardedToken = dispatcher.discardFrameContext(command.snapshot.frameContext)
+          if (newestDiscardedToken == errorToken.get()) {
+            // A discarded retry owned the current claim. Its removal must not also suppress the
+            // stale rejection that explains why control is unavailable.
+            errorToken.set(command.token)
+          }
+          if (!hasDifferentInteractionFrameContextThan(command.snapshot)) {
+            staleContextRejectedFrameContext = command.snapshot.frameContext
             interactionSnapshot = null
           }
         }
@@ -742,8 +743,8 @@ class DeviceControlSession(
     }
   }
 
-  private fun hasNewerInteractionSnapshotThan(snapshot: DeviceFrameSnapshot): Boolean =
-    interactionSnapshot?.captureSequence?.let { it > snapshot.captureSequence } == true
+  private fun hasDifferentInteractionFrameContextThan(snapshot: DeviceFrameSnapshot): Boolean =
+    interactionSnapshot?.frameContext?.let { it != snapshot.frameContext } == true
 
   companion object {
     private fun isStaleFrameContextError(message: String): Boolean =

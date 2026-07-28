@@ -801,8 +801,11 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handlePressButton")
         defer { perfProvider.end() }
 
-        try perfProvider.track("pressButton") {
-            try gesturePerformer.pressButton(button)
+        try requireCurrentFrameContext(request.frameContext)
+        try performContextCheckedGesture(expected: request.frameContext) {
+            try perfProvider.track("pressButton") {
+                try gesturePerformer.pressButton(button)
+            }
         }
 
         if button.lowercased() == "home" || button.lowercased() == "recent" {
@@ -825,8 +828,11 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handlePressHome")
         defer { perfProvider.end() }
 
-        try perfProvider.track("pressHome") {
-            try gesturePerformer.pressHome()
+        try requireCurrentFrameContext(request.frameContext)
+        try performContextCheckedGesture(expected: request.frameContext) {
+            try perfProvider.track("pressHome") {
+                try gesturePerformer.pressHome()
+            }
         }
 
         // Explicit state transition: home screen means springboard is now foreground
@@ -848,8 +854,11 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handlePressBack")
         defer { perfProvider.end() }
 
-        try perfProvider.track("pressBack") {
-            try gesturePerformer.pressBack()
+        try requireCurrentFrameContext(request.frameContext)
+        try performContextCheckedGesture(expected: request.frameContext) {
+            try perfProvider.track("pressBack") {
+                try gesturePerformer.pressBack()
+            }
         }
 
         return WebSocketResponse.success(
@@ -878,8 +887,11 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handleRecentApps")
         defer { perfProvider.end() }
 
-        let didOpen = try perfProvider.track("openRecentApps") {
-            try gesturePerformer.openRecentApps()
+        try requireCurrentFrameContext(request.frameContext)
+        let didOpen = try performContextCheckedGesture(expected: request.frameContext) {
+            try perfProvider.track("openRecentApps") {
+                try gesturePerformer.openRecentApps()
+            }
         }
 
         guard didOpen else {

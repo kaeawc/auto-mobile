@@ -175,12 +175,14 @@ class DeviceControlInputDispatcher(
    * current command publishes the rejection, so retained commands can be put back in FIFO order
    * before it reads the queue again.
    */
-  fun discardFrameContext(frameContext: String) {
+  fun discardFrameContext(frameContext: String): Long? {
     val retained = mutableListOf<DeviceControlInputCommand>()
+    var newestDiscardedToken: Long? = null
     while (true) {
       val command = commands.tryReceive().getOrNull() ?: break
       if (command.snapshot.frameContext == frameContext) {
         command.client?.close()
+        newestDiscardedToken = maxOf(newestDiscardedToken ?: Long.MIN_VALUE, command.token)
       } else {
         retained += command
       }
@@ -190,6 +192,7 @@ class DeviceControlInputDispatcher(
         "A retained device-control command did not fit back into its drained queue"
       }
     }
+    return newestDiscardedToken
   }
 
   companion object {

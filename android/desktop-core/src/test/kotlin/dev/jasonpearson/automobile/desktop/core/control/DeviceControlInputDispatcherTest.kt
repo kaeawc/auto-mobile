@@ -142,7 +142,7 @@ class DeviceControlInputDispatcherTest {
     dispatcher.enqueue(command(token = 1L, client = staleClient, snapshot = staleSnapshot))
     dispatcher.enqueue(command(token = 2L, client = freshClient, snapshot = freshSnapshot))
 
-    dispatcher.discardFrameContext(staleSnapshot.frameContext)
+    assertEquals(1L, dispatcher.discardFrameContext(staleSnapshot.frameContext))
     stall.complete(Unit)
     advanceUntilIdle()
 

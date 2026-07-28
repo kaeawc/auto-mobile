@@ -130,7 +130,7 @@ class DeviceControlSessionTest {
   }
 
   @Test
-  fun `a stale frame-context rejection preserves rendering but blocks retry until a newer pair`() =
+  fun `a stale frame-context rejection preserves rendering but blocks retry until context changes`() =
     runTest {
       val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
       val client =
@@ -157,7 +157,15 @@ class DeviceControlSessionTest {
         "the rejected snapshot must not retry automatically",
       )
 
-      val fresh = paired(captureSequence = 8L, sourceSequence = 12L)
+      val delayedSameContext =
+        paired(captureSequence = 8L, sourceSequence = 12L, frameContext = rejected.frameContext)
+      assertNotNull(session.evaluate(delayedSameContext).snapshotOrNull)
+      assertNull(
+        session.interactionSnapshot,
+        "a later capture under the rejected context must not restore control",
+      )
+
+      val fresh = paired(captureSequence = 9L, sourceSequence = 13L)
       val freshSnapshot = assertNotNull(session.evaluate(fresh).snapshotOrNull)
 
       assertEquals(freshSnapshot, session.interactionSnapshot)
@@ -165,7 +173,7 @@ class DeviceControlSessionTest {
     }
 
   @Test
-  fun `a stale frame-context rejection drops queued retries`() = runTest {
+  fun `a stale frame-context rejection drops queued retries and publishes its error`() = runTest {
     val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
     val client =
       FakeAutoMobileClient().apply {
@@ -177,13 +185,14 @@ class DeviceControlSessionTest {
               "input/tap frameContext is stale or unavailable; observe a fresh frame before retrying",
           )
       }
+    val published = mutableListOf<String?>()
     val session =
       DeviceControlSession(
         scope = scope,
         clientProvider = { client },
         platform = { "android" },
         nowMs = { 1_000L },
-        publishError = {},
+        publishError = { published += it },
         uiContext = StandardTestDispatcher(testScheduler),
         ioDispatcher = StandardTestDispatcher(testScheduler),
       )
@@ -197,6 +206,11 @@ class DeviceControlSessionTest {
       1,
       client.inputTapCalls.size,
       "the queued gesture must not retry stale coordinates",
+    )
+    assertEquals(
+      "input/tap frameContext is stale or unavailable; observe a fresh frame before retrying",
+      published.last(),
+      "the discarded retry cannot suppress the rejection that removed it",
     )
     assertNull(session.interactionSnapshot)
     scope.cancel()
@@ -1224,6 +1238,7 @@ class DeviceControlSessionTest {
     data: ByteArray? = null,
     receivedAtMs: Long = 1_000L,
     coordinateSpace: CoordinateSpace? = null,
+    frameContext: String = "epoch:$captureSequence",
   ) =
     DeviceControlInputs(
       enabled = true,
@@ -1241,7 +1256,7 @@ class DeviceControlSessionTest {
           height = height,
           data = data,
           coordinateSpace = coordinateSpace,
-          frameContext = "epoch:$captureSequence",
+          frameContext = frameContext,
           rotation = 0,
         ),
       hierarchy =
@@ -1254,7 +1269,7 @@ class DeviceControlSessionTest {
           rootWidth = width,
           rootHeight = height,
           coordinateSpace = coordinateSpace,
-          frameContext = "epoch:$captureSequence",
+          frameContext = frameContext,
           rotation = 0,
         ),
       liveFrame = null,

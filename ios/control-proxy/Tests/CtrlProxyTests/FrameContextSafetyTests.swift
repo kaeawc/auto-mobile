@@ -76,11 +76,31 @@ final class FrameContextSafetyTests: XCTestCase {
                 text: "a",
                 frameContext: expected
             )),
+            .pressButton(RequestPressButton(
+                requestId: "button",
+                action: "volume_up",
+                frameContext: expected
+            )),
+            .pressHome(RequestEnvelope(
+                requestId: "home",
+                frameContext: expected
+            )),
+            .pressBack(RequestEnvelope(
+                requestId: "back",
+                frameContext: expected
+            )),
+            .recentApps(RequestEnvelope(
+                requestId: "recent",
+                frameContext: expected
+            )),
         ]
 
         for request in requests {
             fakeElementLocator.setHierarchy(screenA)
             fakeElementLocator.onHierarchyRead = { [fakeElementLocator] in
+                // FakeElementLocator invokes this after returning the first hierarchy, so the
+                // initial requireCurrentFrameContext sees A and the serialized execution check
+                // sees B.
                 fakeElementLocator?.setHierarchy(screenB)
                 fakeElementLocator?.onHierarchyRead = nil
             }
@@ -92,6 +112,10 @@ final class FrameContextSafetyTests: XCTestCase {
         XCTAssertTrue(fakeGesturePerformer.getSwipeHistory().isEmpty)
         XCTAssertTrue(fakeGesturePerformer.getDragHistory().isEmpty)
         XCTAssertTrue(fakeGesturePerformer.getAppendTextHistory().isEmpty)
+        XCTAssertTrue(fakeGesturePerformer.getPressButtonHistory().isEmpty)
+        XCTAssertEqual(fakeGesturePerformer.getPressHomeCallCount(), 0)
+        XCTAssertEqual(fakeGesturePerformer.getPressBackCallCount(), 0)
+        XCTAssertEqual(fakeGesturePerformer.getOpenRecentAppsCallCount(), 0)
     }
 
     private func makeHierarchy(text: String) -> ViewHierarchy {

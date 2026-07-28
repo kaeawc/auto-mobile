@@ -161,7 +161,8 @@ class DeviceControlSession(
   private var lastObservedFrameContextCapture: Long? = null
 
   // The latest proven device rotations, for the dispatch-time gate. Null until one is observed,
-  // one value when every proving source agrees, and multiple values during a disagreement.
+  // one value when every proving source agrees, and multiple values latched during a disagreement
+  // until currently reported sources prove they agree again.
   @Volatile private var lastProvenRotations: Set<Int>? = null
 
   // Backstop trackers on the frame FACTS, for updates that never came through the stream collectors
@@ -236,10 +237,7 @@ class DeviceControlSession(
   fun evaluate(inputs: DeviceControlInputs): DeviceControlDecision {
     val now = nowMs()
     resetOnCoordinateSpaceTransition(inputs)
-    // Keep all current PROVEN rotations so dispatch can reject a snapshot the device has since
-    // rotated away from, or any input while sources disagree (issues #4502, #4550, #4604). Only
-    // recorded — the retirement decisions themselves stay where each fix put them.
-    inputs.provenRotations().takeIf { it.isNotEmpty() }?.let { lastProvenRotations = it }
+    updateProvenRotations(inputs)
     val decision = DeviceControlPolicy.evaluate(inputs, now)
     val live = decision.snapshotOrNull
     staleContextRejectedFrameContext?.let { rejectedContext ->
@@ -446,6 +444,24 @@ class DeviceControlSession(
     listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation)
       .filter { it in 0..3 }
       .toSet()
+
+  /**
+   * Keep a proven disagreement until every currently reported source can prove an agreeing
+   * rotation. A missing or malformed value cannot prove the device returned to the prior rotation.
+   */
+  private fun updateProvenRotations(inputs: DeviceControlInputs) {
+    val rotations = inputs.provenRotations()
+    if (rotations.isEmpty()) return
+    if ((lastProvenRotations?.size ?: 0) > 1 && inputs.hasUnprovenReportedRotation()) return
+    lastProvenRotations = rotations
+  }
+
+  private fun DeviceControlInputs.hasUnprovenReportedRotation(): Boolean =
+    screenshot?.let { !it.rotation.isProvenRotation() } == true ||
+      hierarchy?.let { !it.rotation.isProvenRotation() } == true ||
+      liveFrame?.let { !it.rotation.isProvenRotation() } == true
+
+  private fun Int?.isProvenRotation(): Boolean = this != null && this in 0..3
 
   /**
    * Enqueue a tap on [snapshot] at the mapped device coordinate [point], in click order.

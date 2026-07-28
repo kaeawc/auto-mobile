@@ -1403,6 +1403,42 @@ class DeviceControlSessionTest {
   }
 
   @Test
+  fun `an unproven update cannot clear a rotation disagreement`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+    val initial = paired(captureSequence = 7L, sourceSequence = 10L)
+    val snapshot = assertNotNull(session.evaluate(initial).snapshotOrNull)
+    val disagreement =
+      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
+
+    session.evaluate(disagreement)
+    val unproven =
+      disagreement.copy(screenshot = disagreement.screenshot?.copy(sequence = 12L, rotation = null))
+    assertEquals(
+      DeviceControlBlockReason.RotationMismatch,
+      (session.evaluate(unproven) as DeviceControlDecision.Blocked).reason,
+    )
+
+    assertFalse(
+      session.tap(snapshot, point),
+      "an unproven screenshot cannot prove that the earlier conflict resolved",
+    )
+    assertTrue(client.inputTapCalls.isEmpty())
+
+    val agreement =
+      unproven.copy(
+        screenshot = unproven.screenshot?.copy(sequence = 13L, rotation = 0),
+        hierarchy = unproven.hierarchy?.copy(sequence = 13L, rotation = 0),
+      )
+    val agreedSnapshot = assertNotNull(session.evaluate(agreement).snapshotOrNull)
+    assertTrue(session.tap(agreedSnapshot, point), "valid agreement restores coordinate dispatch")
+    advanceUntilIdle()
+    assertEquals(1, client.inputTapCalls.size)
+    scope.cancel()
+  }
+
+  @Test
   fun `coordinate commands revalidate rotations after dispatching to io`() = runTest {
     val ioScheduler = TestCoroutineScheduler()
     val scope = CoroutineScope(StandardTestDispatcher(testScheduler))

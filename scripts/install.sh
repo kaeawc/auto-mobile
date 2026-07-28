@@ -3281,7 +3281,7 @@ _install_system_package() {
 install_runtime_deps() {
     # ffmpeg — required for video recording features
     if ! command_exists ffmpeg; then
-        _install_system_package "ffmpeg" "required for video recording" || true
+        _install_system_package "ffmpeg" "required for video recording"
     fi
 }
 

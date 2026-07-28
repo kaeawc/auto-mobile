@@ -1,0 +1,40 @@
+#!/usr/bin/env bats
+
+# Regression coverage for #4636: a required runtime dependency must not let
+# the installer report success when its package installation fails.
+
+setup() {
+  export INSTALL_SH_SOURCE_ONLY=true
+  # shellcheck source=/dev/null
+  source scripts/install.sh
+
+  log_info() { :; }
+  log_warn() { :; }
+}
+
+@test "fails when the required ffmpeg installation fails" {
+  command_exists() {
+    [[ "$1" != "ffmpeg" ]]
+  }
+  _install_system_package() {
+    [[ "$1" == "ffmpeg" ]]
+    return 1
+  }
+
+  run install_runtime_deps
+
+  [ "$status" -eq 1 ]
+}
+
+@test "succeeds when ffmpeg is already installed" {
+  command_exists() {
+    [[ "$1" == "ffmpeg" ]]
+  }
+  _install_system_package() {
+    return 1
+  }
+
+  run install_runtime_deps
+
+  [ "$status" -eq 0 ]
+}

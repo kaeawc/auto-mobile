@@ -139,8 +139,7 @@ class DeviceControlSessionTest {
             InputActionResult(
               action = "input/tap",
               success = false,
-              error =
-                "input/tap frameContext is stale or unavailable; observe a fresh frame before retrying",
+              error = "Stale frame context for input/tap; observe a fresh frame before retrying",
             )
         }
       val session = session(scope, client)

@@ -691,8 +691,9 @@ class DeviceControlSession(
 
   companion object {
     private fun isStaleFrameContextError(message: String): Boolean =
-      message.contains("frameContext", ignoreCase = true) &&
-        message.contains("stale or unavailable", ignoreCase = true)
+      message.contains("stale frame context", ignoreCase = true) ||
+        (message.contains("frameContext", ignoreCase = true) &&
+          message.contains("stale or unavailable", ignoreCase = true))
 
     /**
      * Shown when the bounded dispatch queue rejects an input because the daemon is not draining it.

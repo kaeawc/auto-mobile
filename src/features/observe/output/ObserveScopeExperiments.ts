@@ -55,6 +55,8 @@ export type {
 export interface ObserveScopeConfig {
   /** FOCUS on. */
   focus: boolean;
+  /** Requested dimensions withheld because their server experiment flags are off. */
+  gatedOff?: ObserveScopeKind[];
   /** Optional FOCUS anchor; when absent, FOCUS scopes to the foreground app. */
   focusAnchor?: FocusAnchor;
   /** OVERVIEW on. */
@@ -553,12 +555,19 @@ function runOverviewStage(run: ScopeRun): void {
   run.applied.push("overview");
 }
 
-function buildScopeMetadata(run: ScopeRun, nodesBefore: number): ObserveScopeMetadata {
+function buildScopeMetadata(
+  run: ScopeRun,
+  nodesBefore: number,
+  gatedOff: ObserveScopeKind[]
+): ObserveScopeMetadata {
   const metadata: ObserveScopeMetadata = {
     applied: run.applied,
     nodesBefore,
     nodesAfter: countNodes(rootNodes(run.current)),
   };
+  if (gatedOff.length > 0) {
+    metadata.gatedOff = gatedOff;
+  }
   if (run.regionPx) {
     metadata.regionPx = run.regionPx;
   }
@@ -570,14 +579,17 @@ function buildScopeMetadata(run: ScopeRun, nodesBefore: number): ObserveScopeMet
 
 /**
  * Apply the enabled scope transforms in order (focus -> region -> overview) and
- * annotate `observeScope`. Pure: the input is never mutated. When nothing is
- * enabled, returns the input unchanged (no clone, no metadata).
+ * annotate `observeScope`. Pure: the input is never mutated. Requested
+ * dimensions gated off by server flags are recorded without changing the tree.
+ * When no transform is enabled and nothing was gated off, returns the input
+ * unchanged (no clone, no metadata).
  */
 export function applyObserveScopeExperiments(
   input: ObserveResult,
   cfg: ObserveScopeConfig
 ): ObserveResult {
-  if (!cfg.focus && !cfg.region && !cfg.overview) {
+  const gatedOff = cfg.gatedOff ?? [];
+  if (!cfg.focus && !cfg.region && !cfg.overview && gatedOff.length === 0) {
     return input;
   }
 
@@ -597,7 +609,7 @@ export function applyObserveScopeExperiments(
   // Every stage returns a fresh clone, so `run.current` is never the input here;
   // guard the theoretically-unreachable no-op case anyway.
   const out = run.current === input ? clone(input) : run.current;
-  out.observeScope = buildScopeMetadata({ ...run, current: out }, nodesBefore);
+  out.observeScope = buildScopeMetadata({ ...run, current: out }, nodesBefore, gatedOff);
   return out;
 }
 
@@ -611,6 +623,23 @@ export interface ObserveScopeFlags {
 /** A dimension is requested when the call set it to `true` or an object (not `false`/absent). */
 function isDimensionRequested(dim: boolean | object | undefined): boolean {
   return dim !== undefined && dim !== false;
+}
+
+function gatedOffDimensions(
+  flags: ObserveScopeFlags,
+  scope: ObserveScopeInput | undefined
+): ObserveScopeKind[] {
+  const gatedOff: ObserveScopeKind[] = [];
+  if (!flags.focus && isDimensionRequested(scope?.focus)) {
+    gatedOff.push("focus");
+  }
+  if (!flags.region && isDimensionRequested(scope?.region)) {
+    gatedOff.push("region");
+  }
+  if (!flags.overview && scope?.overview === true) {
+    gatedOff.push("overview");
+  }
+  return gatedOff;
 }
 
 /** The anchor object of a `focus` request, or undefined for the `true` (foreground) form. */
@@ -640,5 +669,6 @@ export function buildObserveScopeConfig(
     overview: flags.overview && scope?.overview === true,
     region: flags.region && isDimensionRequested(scope?.region),
     regionBox: regionBoxOf(scope?.region),
+    gatedOff: gatedOffDimensions(flags, scope),
   };
 }

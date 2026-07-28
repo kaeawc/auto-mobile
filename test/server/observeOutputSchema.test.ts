@@ -241,6 +241,10 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       observeResultSchema.parse({ deviceLock: { locked: "yes", keyguardShowing: true } })
     ).toThrow();
   });
+
+  test("advertises requested scope dimensions gated off by server flags", () => {
+    expect(JSON.stringify(flattenTopLevelUnion(toJSONSchema(observeResultSchema)))).toContain("\"gatedOff\"");
+  });
 });
 
 describe("observeToolResultSchema: artifact metadata (#3480)", () => {

@@ -1814,12 +1814,29 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
     } as ObserveResult;
   }
 
-  test("no scope flags: observe payload is untouched even when the call requests scope", () => {
+  test("no scope flags: reports requested dimensions gated off", () => {
     const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
       name: "observe",
-      args: { scope: { focus: true } },
+      args: { scope: { focus: true, region: true, overview: true } },
     });
-    expect((finalized.structuredContent as ObserveResult).observeScope).toBeUndefined();
+    const out = finalized.structuredContent as ObserveResult;
+    expect(out.observeScope).toMatchObject({
+      applied: [],
+      gatedOff: ["focus", "region", "overview"],
+    });
+    expect(out.observeScope!.nodesAfter).toBe(out.observeScope!.nodesBefore);
+  });
+
+  test("reports a disabled requested dimension alongside enabled scope transforms", () => {
+    serverConfig.setObserveFocusScopeEnabled(true);
+    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
+      name: "observe",
+      args: { scope: { focus: true, region: true } },
+    });
+    expect((finalized.structuredContent as ObserveResult).observeScope).toMatchObject({
+      applied: ["focus"],
+      gatedOff: ["region"],
+    });
   });
 
   test("flag on but no scope in the call: payload is untouched", () => {

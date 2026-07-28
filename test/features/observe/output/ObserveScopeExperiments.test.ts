@@ -205,6 +205,7 @@ describe("buildObserveScopeConfig", () => {
     expect(cfg.focus).toBe(false);
     expect(cfg.region).toBe(false);
     expect(cfg.overview).toBe(false);
+    expect(cfg.gatedOff).toEqual(["focus", "region", "overview"]);
   });
 
   test("no scope input yields an all-off config", () => {

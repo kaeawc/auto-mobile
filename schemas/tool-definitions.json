@@ -6152,6 +6152,17 @@
                 ]
               }
             },
+            "gatedOff": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "focus",
+                  "region",
+                  "overview"
+                ]
+              }
+            },
             "nodesBefore": {
               "type": "integer",
               "minimum": 0,

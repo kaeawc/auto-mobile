@@ -253,7 +253,16 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     overview: serverConfig.isObserveOverviewEnabled(),
     region: serverConfig.isObserveRegionEnabled(),
   };
-  const scopeActive = !ctx.internal && (scopeFlags.focus || scopeFlags.overview || scopeFlags.region);
+  const scopeConfig = buildObserveScopeConfig(
+    scopeFlags,
+    ctx.args?.scope as ObserveScopeInput | undefined
+  );
+  const scopeActive = !ctx.internal && (
+    scopeFlags.focus ||
+    scopeFlags.overview ||
+    scopeFlags.region ||
+    (scopeConfig.gatedOff?.length ?? 0) > 0
+  );
 
   // Internal tool-to-tool calls (#3053) always get the full sanitized observation:
   // the diff/strip transforms are for the agent-facing wire only, so an internal
@@ -291,10 +300,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     if (resolveObserveProjection(ctx.args) === "skeleton") {
       served = sanitizeObserveResult(observeResult, { ...cfg, project: "skeleton" });
     } else if (scopeActive) {
-      served = applyObserveScopeExperiments(
-        sanitized,
-        buildObserveScopeConfig(scopeFlags, ctx.args?.scope as ObserveScopeInput | undefined)
-      );
+      served = applyObserveScopeExperiments(sanitized, scopeConfig);
     }
     sanitizedPayload = served as unknown as Record<string, unknown>;
     hasArtifactableObservation = true;

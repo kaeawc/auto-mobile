@@ -330,8 +330,9 @@ export interface ObserveResult {
   /**
    * Progressive-disclosure scoping metadata (issue #4344), present only when an
    * `--observe-focus-scope` / `--observe-overview` / `--observe-region`
-   * experiment scoped this observe payload. Records which transforms ran and the
-   * node-count reduction so the experiment is measurable on the wire. See
+   * experiment scoped this observe payload, or withheld a requested dimension.
+   * Records which transforms ran and the node-count reduction so the experiment
+   * is measurable on the wire. See
    * `features/observe/output/ObserveScopeExperiments.ts`.
    */
   observeScope?: ObserveScopeMetadata;

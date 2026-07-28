@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   registerInteractionTools,
   resetSystemTrayDependencies,
@@ -19,9 +19,12 @@ import type { SystemTrayIosClient } from "../../src/server/systemTrayHelpers";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
+import { logger } from "../../src/utils/logger";
 import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
 
 const POLL_INTERVAL_MS = 250;
+// Mirrors the private SYSTEM_TRAY_REEXPAND_INTERVAL_MS in systemTrayHelpers.ts.
+const REEXPAND_INTERVAL_MS = 1000;
 const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
 
 class SequencedFakeAdbExecutor extends FakeAdbExecutor {
@@ -305,6 +308,223 @@ describe("systemTray find", () => {
     expect(result.match).not.toBeNull();
     expect(result.match!.match.matches.title?.text).toBe("Target Notification");
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// Issue #4614: a re-posting high-importance notification (e.g. a persistent
+// connection push) can collapse the shade mid-wait. waitForNotificationMatch
+// must re-issue the expand while polling, throttled to at most once per
+// REEXPAND_INTERVAL_MS, rather than sitting on a closed shade until timeout.
+describe("systemTray re-expand on closed shade during wait", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+  });
+
+  test("re-expands once the shade has been closed for a full throttle interval, then matches", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    // Starts already open (ensureSystemTrayOpen takes the skip branch, so the
+    // only expand-notifications call possible here is our in-loop re-expand).
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Other Notification")),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createTrayHierarchy("Target Notification"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = waitForNotificationMatch(
+      device,
+      { title: "Target Notification" },
+      [],
+      REEXPAND_INTERVAL_MS * 5
+    );
+
+    // 5 poll ticks: shade stays closed through t=250..1000, crossing the
+    // throttle interval on the 4th closed observation (t=1000), then reopens.
+    await advancePendingSleeps(fakeTimer, 5);
+
+    const result = await resultPromise;
+
+    expect(result.match).not.toBeNull();
+    expect(result.match!.match.matches.title?.text).toBe("Target Notification");
+    expect(
+      fakeAdb.getExecutedCommands().filter(cmd => cmd.includes("expand-notifications")).length
+    ).toBe(1);
+  });
+
+  test("does not re-expand before a full throttle interval has elapsed", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Other Notification")),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy())
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    // Deadline elapses strictly before the shade has been closed for a full
+    // REEXPAND_INTERVAL_MS, so the loop should time out without ever
+    // re-issuing the expand.
+    const resultPromise = waitForNotificationMatch(
+      device,
+      { title: "Target Notification" },
+      [],
+      REEXPAND_INTERVAL_MS - 300
+    );
+
+    await advancePendingSleeps(fakeTimer, 3);
+
+    const result = await resultPromise;
+
+    expect(result.match).toBeNull();
+    expect(
+      fakeAdb.getExecutedCommands().filter(cmd => cmd.includes("expand-notifications")).length
+    ).toBe(0);
+  });
+
+  test("swallows a failed re-expand attempt and keeps polling until it matches", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    fakeAdb.setCommandError("expand-notifications", new Error("boom"));
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Other Notification")),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createTrayHierarchy("Target Notification"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const resultPromise = waitForNotificationMatch(
+        device,
+        { title: "Target Notification" },
+        [],
+        5000
+      );
+
+      await advancePendingSleeps(fakeTimer, 5);
+
+      const result = await resultPromise;
+
+      expect(result.match).not.toBeNull();
+      expect(result.match!.match.matches.title?.text).toBe("Target Notification");
+      const swallowedLogs = debugSpy.mock.calls.filter(call =>
+        String(call[0]).includes("re-expand while waiting for notification failed")
+      );
+      expect(swallowedLogs.length).toBe(1);
+    } finally {
+      debugSpy.mockRestore();
+    }
+  });
+});
+
+// Diagnostic logging added alongside the #4614 fix: when a wait fails to
+// match, the logs should reveal whether the shade was open-but-unmatched or
+// never detected as open, deduped so a long poll doesn't spam identical lines.
+describe("systemTray unmatched-notification diagnostics", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+  });
+
+  test("logs the open-but-unmatched candidate breakdown once, deduped across identical polls", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Other Notification")),
+      createObservation(createTrayHierarchy("Other Notification")),
+      createObservation(createTrayHierarchy("Other Notification")),
+      createObservation(createTrayHierarchy("Target Notification"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      const resultPromise = waitForNotificationMatch(
+        device,
+        { title: "Target Notification" },
+        [],
+        5000
+      );
+
+      await advancePendingSleeps(fakeTimer, 3);
+
+      const result = await resultPromise;
+
+      expect(result.match).not.toBeNull();
+      const diagLogs = infoSpy.mock.calls.filter(call =>
+        String(call[0]).includes("[systemTray][diag] shade open but no notification matched")
+      );
+      expect(diagLogs.length).toBe(1);
+      expect(String(diagLogs[0][0])).toContain("Other Notification");
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  test("logs the shade-not-open diagnostic once, deduped across identical closed polls", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Other Notification")),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createTrayHierarchy("Target Notification"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      const resultPromise = waitForNotificationMatch(
+        device,
+        { title: "Target Notification" },
+        [],
+        5000
+      );
+
+      await advancePendingSleeps(fakeTimer, 3);
+
+      const result = await resultPromise;
+
+      expect(result.match).not.toBeNull();
+      const diagLogs = infoSpy.mock.calls.filter(call =>
+        String(call[0]).includes("shade NOT detected open during notification wait")
+      );
+      expect(diagLogs.length).toBe(1);
+    } finally {
+      infoSpy.mockRestore();
+    }
   });
 });
 

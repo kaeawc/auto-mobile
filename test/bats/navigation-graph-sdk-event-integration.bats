@@ -8,6 +8,7 @@ setup() {
   export GRAPH_ATTEMPTS_FILE="${MOCK_BIN}/graph-attempts"
   export CURL_URL_FILE="${MOCK_BIN}/curl-urls"
   export SESSION_OBSERVE_FILE="${MOCK_BIN}/session-observe"
+  export DOCTOR_CALLS_FILE="${MOCK_BIN}/doctor-calls"
 }
 
 teardown() {
@@ -43,13 +44,21 @@ if [ "$1" = "-cn" ]; then
   exit 0
 fi
 if [ "$1" = "-er" ]; then
-  printf "8768\\n"
+  doctor_calls="$(cat "$DOCTOR_CALLS_FILE")"
+  if [ "$doctor_calls" -eq 1 ]; then
+    printf "8768\\n"
+  else
+    printf "8769\\n"
+  fi
   exit 0
 fi
 exit 0
 '
   make_mock auto-mobile '
 if [ "$1" = "--cli" ] && [ "$2" = "doctor" ]; then
+  doctor_calls=0
+  [ -f "$DOCTOR_CALLS_FILE" ] && doctor_calls="$(cat "$DOCTOR_CALLS_FILE")"
+  printf "%s\\n" "$((doctor_calls + 1))" > "$DOCTOR_CALLS_FILE"
   printf "{\"ios\":{\"checks\":[]}}\\n"
   exit 0
 fi
@@ -73,7 +82,8 @@ fi
 
   [ "$status" -eq 0 ]
   [ "$(cat "$GRAPH_ATTEMPTS_FILE")" = "2" ]
+  [ "$(cat "$DOCTOR_CALLS_FILE")" = "2" ]
   [[ "$output" == *"getNavigationGraph attempt 1 failed"* ]]
-  grep -qx "http://127.0.0.1:8768/health" "$CURL_URL_FILE"
-  grep -qx "http://127.0.0.1:8768/sdk-events" "$CURL_URL_FILE"
+  grep -qx "http://127.0.0.1:8769/health" "$CURL_URL_FILE"
+  grep -qx "http://127.0.0.1:8769/sdk-events" "$CURL_URL_FILE"
 }

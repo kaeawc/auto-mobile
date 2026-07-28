@@ -30,22 +30,26 @@ require_command xcrun
 
 xcrun simctl getenv "${device_id}" HOME >/dev/null
 
-# CtrlProxy allocates a per-device host port; 8765 is only its preferred default
-# and may already belong to another local service. Ask the daemon that warmed the
-# runner for the selected simulator's reported port instead of probing a stale
-# default. `doctor` can exit non-zero for unrelated diagnostics, but still emits
-# the JSON report that contains this ready runner's round-trip result.
-doctor_report="$(auto-mobile --cli doctor --ios --json || true)"
-ctrl_proxy_port="$(jq -er --arg device_id "${device_id}" '
-  .ios.checks[]
-  | select(.name == "iOS Observe Round Trip")
-  | .message
-  | split(" | ")
-  | map(select(contains("device=" + $device_id + ";")))
-  | .[0]
-  | capture("runnerPort=(?<port>[0-9]+)")
-  | .port
-' <<<"${doctor_report}")" || {
+ctrl_proxy_port_for_device() {
+  # CtrlProxy allocates a per-device host port; 8765 is only its preferred
+  # default and may already belong to another local service. `doctor` can exit
+  # non-zero for unrelated diagnostics, but still emits the JSON round-trip
+  # report that contains this ready runner's port.
+  local doctor_report
+  doctor_report="$(auto-mobile --cli doctor --ios --json || true)"
+  jq -er --arg device_id "${device_id}" '
+    .ios.checks[]
+    | select(.name == "iOS Observe Round Trip")
+    | .message
+    | split(" | ")
+    | map(select(contains("device=" + $device_id + ";")))
+    | .[0]
+    | capture("runnerPort=(?<port>[0-9]+)")
+    | .port
+  ' <<<"${doctor_report}"
+}
+
+ctrl_proxy_port="$(ctrl_proxy_port_for_device)" || {
   echo "error: could not determine CtrlProxy port for simulator ${device_id}" >&2
   exit 1
 }
@@ -59,6 +63,14 @@ if ! auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" o
   echo "error: could not bind iOS SDK events to navigation graph session" >&2
   exit 1
 fi
+
+# Requesting debug and embedded-SDK tools can restart the daemon. That restart
+# creates a new CtrlProxy client, so the prior daemon's reported port is stale.
+ctrl_proxy_port="$(ctrl_proxy_port_for_device)" || {
+  echo "error: could not determine CtrlProxy port after daemon restart for simulator ${device_id}" >&2
+  exit 1
+}
+curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null
 
 event_payload() {
   local destination="$1"

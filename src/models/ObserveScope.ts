@@ -45,6 +45,8 @@ export type ObserveScopeKind = "focus" | "region" | "overview";
 export interface ObserveScopeMetadata {
   /** Transforms that actually changed the tree, in application order. */
   applied: ObserveScopeKind[];
+  /** Requested dimensions withheld because their server experiment flags are off. */
+  gatedOff?: ObserveScopeKind[];
   /** Hierarchy node count before any scoping. */
   nodesBefore: number;
   /** Hierarchy node count after all scoping. */

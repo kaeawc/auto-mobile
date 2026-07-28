@@ -451,6 +451,7 @@ export const skeletonElementSchema = z.object({
  */
 export const observeScopeMetadataSchema = z.object({
   applied: z.array(z.enum(["focus", "region", "overview"])),
+  gatedOff: z.array(z.enum(["focus", "region", "overview"])).optional(),
   nodesBefore: z.number().int().nonnegative(),
   nodesAfter: z.number().int().nonnegative(),
   regionPx: elementBoundsSchema.optional(),

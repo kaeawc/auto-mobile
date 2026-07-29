@@ -998,7 +998,7 @@ export class DaemonMcpProxy {
 
     try {
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("resources/list", {})
+        this.client!.callDaemonMethod("resources/list", this.withBoundSessionUuid({}))
       );
       const resources = result?.resources ?? [];
       this.cachedResources = resources;
@@ -1020,7 +1020,7 @@ export class DaemonMcpProxy {
 
     try {
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("resources/list-templates", {})
+        this.client!.callDaemonMethod("resources/list-templates", this.withBoundSessionUuid({}))
       );
       const templates = result?.resourceTemplates ?? [];
       this.cachedResourceTemplates = templates;

@@ -18,12 +18,14 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import {
+  CLAMPED_TO_FIELDS,
   COORDINATE_KOTLIN_TEST_PATH,
   DEVICE_TO_VIEWPORT_FIELDS,
   diffNumericRows,
   FIT_SCALE_FIELDS,
   FIT_TO_VIEWPORT_FIELDS,
   loadCoordinateMappingVectors,
+  parseKotlinClampedToTable,
   parseSwiftScaleReportingTable,
   parseKotlinDeviceToViewportTable,
   parseKotlinFitScaleTable,
@@ -32,6 +34,7 @@ import {
   parseKotlinScreenshotRotationTable,
   parseKotlinViewportToDeviceTable,
   referenceDetectScreenshotRotation,
+  referenceClampedTo,
   referenceDeviceToViewport,
   referenceFitScale,
   referenceFitToViewport,
@@ -50,6 +53,7 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
   const canonical = loadCoordinateMappingVectors();
   const kotlinViewportToDevice = parseKotlinViewportToDeviceTable();
   const kotlinDeviceToViewport = parseKotlinDeviceToViewportTable();
+  const kotlinClampedTo = parseKotlinClampedToTable();
   const kotlinFitToViewport = parseKotlinFitToViewportTable();
   const kotlinFitScale = parseKotlinFitScaleTable();
   const kotlinScreenshotRotation = parseKotlinScreenshotRotationTable();
@@ -60,12 +64,75 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
     // Guards against an empty/renamed fixture silently making every parity assertion vacuous.
     expect(canonical.viewportToDevice.length).toBeGreaterThanOrEqual(10);
     expect(canonical.deviceToViewport.length).toBeGreaterThanOrEqual(3);
+    expect(canonical.clampedTo.length).toBeGreaterThanOrEqual(4);
     expect(canonical.fitToViewport.length).toBeGreaterThanOrEqual(4);
     expect(canonical.fitScale.length).toBeGreaterThanOrEqual(3);
     expect(canonical.screenshotRotation.length).toBeGreaterThanOrEqual(6);
     expect(canonical.geometryPairing.length).toBeGreaterThanOrEqual(6);
     expect(canonical.iosPointToPixel.length).toBeGreaterThanOrEqual(4);
     expect(canonical.scaleReporting.length).toBeGreaterThanOrEqual(5);
+  });
+
+  test("issue #4569: the canonical source covers the deferred coordinate-mapping gaps", function() {
+    expect(
+      canonical.clampedTo.some(row =>
+        row.x === -5 &&
+        row.y === 102 &&
+        row.width === 100 &&
+        row.height === 100 &&
+        row.expectedX === 0 &&
+        row.expectedY === 99 &&
+        row.expectedInBounds === 1
+      ),
+    ).toBe(true);
+    expect(
+      canonical.clampedTo.some(row =>
+        row.x === 5 &&
+        row.y === 5 &&
+        row.width === 0 &&
+        row.height === 100 &&
+        row.expectedX === 0 &&
+        row.expectedY === 5 &&
+        row.expectedInBounds === 0
+      ),
+    ).toBe(true);
+    expect(
+      canonical.geometryPairing.some(row =>
+        row.measuredHeight === row.claimedWidth &&
+        row.measuredWidth !== row.claimedHeight &&
+        row.expectedMatch === 0
+      ),
+    ).toBe(true);
+    expect(
+      canonical.fitScale.some(row =>
+        row.viewportWidth === row.frameWidthPx + row.padding * 2 &&
+        row.viewportHeight === row.frameHeightPx + row.padding * 2 &&
+        row.expected === 1
+      ),
+    ).toBe(true);
+    expect(
+      canonical.fitScale.some(row =>
+        row.viewportWidth / (row.frameWidthPx + row.padding * 2) === 0.3 &&
+        row.expected === 0.3
+      ),
+    ).toBe(true);
+    expect(
+      canonical.iosPointToPixel.some(row =>
+        row.pointWidth === 450 &&
+        row.pointHeight === 750 &&
+        row.scale === 2.61 &&
+        row.expectedPixelWidth === 1175 &&
+        row.expectedPixelHeight === 1958
+      ),
+    ).toBe(true);
+    expect(
+      canonical.deviceToViewport.some(row =>
+        row.deviceWidth === 0 &&
+        row.scale === 2 &&
+        row.offsetX === 10 &&
+        row.offsetY === 20
+      ),
+    ).toBe(true);
   });
 
   test("B1: Swift scaleReporting literals are verified against the single source (issue #4548)", function() {
@@ -110,6 +177,10 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
 
   test("AC1: Kotlin deviceToViewport literals are verified against the single source", function() {
     expect(diffNumericRows(kotlinDeviceToViewport, canonical.deviceToViewport, DEVICE_TO_VIEWPORT_FIELDS)).toEqual([]);
+  });
+
+  test("AC1: Kotlin clampedTo literals are verified against the single source", function() {
+    expect(diffNumericRows(kotlinClampedTo, canonical.clampedTo, CLAMPED_TO_FIELDS)).toEqual([]);
   });
 
   test("AC1: Kotlin fitToViewport literals are verified against the single source", function() {
@@ -201,6 +272,19 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
     ]) {
       expect(kotlinSource).toContain(symbol);
     }
+    for (const methodName of [
+      "viewportToDevice matches the golden vectors",
+      "deviceToViewport matches the golden vectors",
+      "clampedTo matches the golden vectors",
+      "fitToViewport matches the golden vectors",
+      "fitScale matches the golden vectors",
+      "detectScreenshotRotation matches the golden vectors",
+      "scale reporting matches the golden vectors",
+    ]) {
+      expect(kotlinSource).toMatch(
+        new RegExp(String.raw`@Test\s+fun \`${methodName}\`\(\)`),
+      );
+    }
   });
 
   test("every viewportToDevice row's expected outputs are DERIVABLE from its inputs", function() {
@@ -218,6 +302,15 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
       const computed = referenceDeviceToViewport(row);
       expect(Math.abs(computed.x - row.expectedX)).toBeLessThanOrEqual(1e-3);
       expect(Math.abs(computed.y - row.expectedY)).toBeLessThanOrEqual(1e-3);
+    }
+  });
+
+  test("every clampedTo row's expected output is DERIVABLE from its inputs", function() {
+    for (let i = 0; i < canonical.clampedTo.length; i++) {
+      const row = canonical.clampedTo[i];
+      const computed = referenceClampedTo(row);
+      expect(`${i}:${computed.x},${computed.y},${computed.inBounds}`)
+        .toBe(`${i}:${row.expectedX},${row.expectedY},${row.expectedInBounds}`);
     }
   });
 

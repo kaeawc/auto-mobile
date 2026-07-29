@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.layout
 
+import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenCoordinateMapper
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenGeometry
 import dev.jasonpearson.automobile.desktop.domain.ViewportPoint
@@ -13,7 +14,7 @@ import org.junit.Test
  *
  * The canonical single source is `test/fixtures/coordinate-mapping-golden-vectors.json` at the repo
  * root. The inline tables below are committed copies of its five [DeviceScreenCoordinateMapper]
- * sections plus the shared scale-reporting contract;
+ * sections, [DevicePoint.clampedTo], and the shared scale-reporting contract;
  * `test/parity/coordinateMappingGoldenVectorParity.test.ts` parses these literals out of this
  * file's source and verifies them against the JSON (the same drift-guard mechanism as
  * `PinchGeometryTest.kt` / `pinch-golden-vectors.json`), so a one-sided edit of either side fails
@@ -117,6 +118,31 @@ class CoordinateMappingGoldenVectorTest {
       // Width-derived-ratio invariant (inverse): aspect-MISMATCHED frame (width ratio 0.5,
       // height ratio 0.25). Pins BOTH axes scale by frameWidthPx/deviceWidth (height y = 100).
       DeviceToViewportVector(200, 400, 500f, 500f, 1f, 0f, 0f, 1000, 2000, 100f, 200f),
+      // Degenerate zero device width still applies the current pan and zoom after the identity
+      // fallback.
+      DeviceToViewportVector(7, 9, 540f, 1170f, 2f, 10f, 20f, 0, 2340, 24f, 38f),
+    )
+
+  private data class ClampedToVector(
+    val x: Int,
+    val y: Int,
+    val width: Int,
+    val height: Int,
+    val expectedX: Int,
+    val expectedY: Int,
+    val expectedInBounds: Int,
+  )
+
+  private val clampedToVectors =
+    listOf(
+      // Negative x and past-bottom y pin independently to the first and last addressable pixels.
+      ClampedToVector(-5, 102, 100, 100, 0, 99, 1),
+      // Past-right x and negative y pin independently to the opposite two edges.
+      ClampedToVector(200, -5, 100, 100, 99, 0, 1),
+      // A zero-width screen has no addressable point, even though the non-zero axis still clamps.
+      ClampedToVector(5, 5, 0, 100, 0, 5, 0),
+      // The mirror zero-height screen preserves the same empty-rect contract.
+      ClampedToVector(5, 5, 100, 0, 5, 0, 0),
     )
 
   private data class FitToViewportVector(
@@ -166,6 +192,10 @@ class CoordinateMappingGoldenVectorTest {
       FitScaleVector(336f, 736f, 800f, 400f, 32f, 0.5f),
       // Non-default padding 20: 400/(760+40)=0.5 (default padding would give 400/824=0.4854).
       FitScaleVector(760f, 760f, 400f, 800f, 20f, 0.5f),
+      // Exact cap boundary: both padded dimensions equal the viewport, so raw scale is exactly 1.
+      FitScaleVector(736f, 736f, 800f, 800f, 32f, 1f),
+      // Exact floor boundary: width candidate is exactly 240/(736+64)=0.3.
+      FitScaleVector(736f, 736f, 240f, 800f, 32f, 0.3f),
     )
 
   private data class ScreenshotRotationVector(
@@ -265,6 +295,17 @@ class CoordinateMappingGoldenVectorTest {
       val point = mapper.deviceToViewport(vector.deviceX, vector.deviceY, geometry(vector))
       assertEquals(vector.expectedX, point.x, TOLERANCE, "row $index x")
       assertEquals(vector.expectedY, point.y, TOLERANCE, "row $index y")
+    }
+  }
+
+  @Test
+  fun `clampedTo matches the golden vectors`() {
+    for ((index, vector) in clampedToVectors.withIndex()) {
+      val point =
+        DevicePoint(vector.x, vector.y, inBounds = false).clampedTo(vector.width, vector.height)
+      assertEquals(vector.expectedX, point.x, "row $index x")
+      assertEquals(vector.expectedY, point.y, "row $index y")
+      assertEquals(vector.expectedInBounds == 1, point.inBounds, "row $index inBounds")
     }
   }
 

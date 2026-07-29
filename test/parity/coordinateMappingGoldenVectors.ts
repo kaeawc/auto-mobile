@@ -4,9 +4,10 @@
  *
  * Canonical source: `test/fixtures/coordinate-mapping-golden-vectors.json`. Consumers:
  * - Kotlin `CoordinateMappingGoldenVectorTest.kt` (desktop-core) holds inline copies of the five
- *   `DeviceScreenCoordinateMapper` sections plus the scale-reporting contract; this module parses those committed literals out of
- *   the Kotlin source (the pinch-vector mechanism, see `pinchGoldenVectors.ts`) and the parity
- *   test verifies them against the JSON.
+ *   `DeviceScreenCoordinateMapper` sections, `DevicePoint.clampedTo`, and the scale-reporting
+ *   contract; this module parses those committed literals out of the Kotlin source (the
+ *   pinch-vector mechanism, see `pinchGoldenVectors.ts`) and the parity test verifies them against
+ *   the JSON.
  * - TypeScript daemon tests read the JSON directly: `geometryPairing` drives the daemon's
  *   `pixelsMatchClaimedGeometry` pairing (`test/daemon/deviceDataStreamSocketServer.test.ts`) and
  *   `iosPointToPixel` drives the iOS point->pixel conversion
@@ -88,6 +89,16 @@ export interface DeviceToViewportVector {
   willChangeUnderCanonicalPixels?: boolean;
 }
 
+export interface ClampedToVector {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  expectedX: number;
+  expectedY: number;
+  expectedInBounds: number;
+}
+
 export interface FitToViewportVector {
   imageWidth: number;
   imageHeight: number;
@@ -152,6 +163,7 @@ export interface ScaleReportingVector {
 export interface CoordinateMappingGoldenVectors {
   viewportToDevice: ViewportToDeviceVector[];
   deviceToViewport: DeviceToViewportVector[];
+  clampedTo: ClampedToVector[];
   fitToViewport: FitToViewportVector[];
   fitScale: FitScaleVector[];
   screenshotRotation: ScreenshotRotationVector[];
@@ -163,6 +175,7 @@ export interface CoordinateMappingGoldenVectors {
 const SECTION_NAMES = [
   "viewportToDevice",
   "deviceToViewport",
+  "clampedTo",
   "fitToViewport",
   "fitScale",
   "screenshotRotation",
@@ -296,6 +309,18 @@ export function parseKotlinDeviceToViewportTable(): DeviceToViewportVector[] {
   }));
 }
 
+export function parseKotlinClampedToTable(): ClampedToVector[] {
+  return parseKotlinSection("val clampedToVectors =", 7).map(row => ({
+    x: row[0],
+    y: row[1],
+    width: row[2],
+    height: row[3],
+    expectedX: row[4],
+    expectedY: row[5],
+    expectedInBounds: row[6],
+  }));
+}
+
 export function parseKotlinFitToViewportTable(): FitToViewportVector[] {
   return parseKotlinSection("val fitToViewportVectors =", 7).map(row => ({
     imageWidth: row[0],
@@ -372,6 +397,17 @@ export function referenceDeviceToViewport(
   return {
     x: f(f(frameX * vector.scale) + vector.offsetX),
     y: f(f(frameY * vector.scale) + vector.offsetY),
+  };
+}
+
+/** Mirrors `DevicePoint.clampedTo`: pin to an addressable edge without inventing a point in an empty rect. */
+export function referenceClampedTo(
+  vector: ClampedToVector,
+): { x: number; y: number; inBounds: number } {
+  return {
+    x: Math.min(Math.max(vector.x, 0), Math.max(vector.width - 1, 0)),
+    y: Math.min(Math.max(vector.y, 0), Math.max(vector.height - 1, 0)),
+    inBounds: vector.width > 0 && vector.height > 0 ? 1 : 0,
   };
 }
 
@@ -527,6 +563,16 @@ export const DEVICE_TO_VIEWPORT_FIELDS = [
   "expectedY",
 ] as const;
 
+export const CLAMPED_TO_FIELDS = [
+  "x",
+  "y",
+  "width",
+  "height",
+  "expectedX",
+  "expectedY",
+  "expectedInBounds",
+] as const;
+
 export const FIT_TO_VIEWPORT_FIELDS = [
   "imageWidth",
   "imageHeight",
@@ -582,6 +628,7 @@ export const SCALE_REPORTING_FIELDS = [
 const SECTION_NUMERIC_FIELDS: Record<(typeof SECTION_NAMES)[number], readonly string[]> = {
   viewportToDevice: VIEWPORT_TO_DEVICE_FIELDS,
   deviceToViewport: DEVICE_TO_VIEWPORT_FIELDS,
+  clampedTo: CLAMPED_TO_FIELDS,
   fitToViewport: FIT_TO_VIEWPORT_FIELDS,
   fitScale: FIT_SCALE_FIELDS,
   screenshotRotation: SCREENSHOT_ROTATION_FIELDS,

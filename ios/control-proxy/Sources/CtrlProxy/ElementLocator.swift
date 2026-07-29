@@ -121,7 +121,7 @@ final class ForegroundTracker {
 public class ElementLocator: ElementLocating {
     private struct ScreenMetrics {
         let scale: Float
-        let nativeScale: Float
+        let nativeScale: Double
         let fallbackWidth: Int
         let fallbackHeight: Int
         let rotation: Int?
@@ -560,7 +560,7 @@ public class ElementLocator: ElementLocating {
                         capture.value.2,
                         ScreenMetrics(
                             scale: Float(UIScreen.main.scale),
-                            nativeScale: Float(UIScreen.main.nativeScale),
+                            nativeScale: Double(UIScreen.main.nativeScale),
                             fallbackWidth: Int(capture.value.3.width),
                             fallbackHeight: Int(capture.value.3.height),
                             rotation: capture.rotation
@@ -672,7 +672,7 @@ public class ElementLocator: ElementLocating {
             let (currentScreenMetrics, afterHierarchyCapture): (ScreenMetrics, RotationCaptureSample) =
                 try runOnMainThread {
                     let scale = Float(UIScreen.main.scale)
-                    let nativeScale = Float(UIScreen.main.nativeScale)
+                    let nativeScale = Double(UIScreen.main.nativeScale)
                     let bounds = UIScreen.main.bounds
                     let captureSample = DeviceRotation.captureSample()
                     return (
@@ -709,7 +709,7 @@ public class ElementLocator: ElementLocating {
             let pixelDimensions = ElementLocator.computePixelDimensions(
                 pointWidth: screenWidth,
                 pointHeight: screenHeight,
-                nativeScale: Double(currentScreenMetrics.nativeScale)
+                nativeScale: currentScreenMetrics.nativeScale
             )
 
             return ViewHierarchy(

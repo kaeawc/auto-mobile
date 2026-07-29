@@ -967,13 +967,15 @@ final class ElementLocatorTests: XCTestCase {
         // Row 2 is the Display Zoom case: nativeScale 3.144 while UIScreen.scale stays 3.0 —
         // using scale would report 2436 instead of the screenshot's true 2553 pixels.
         // Row 3 is the iPhone Plus downsampling case: scale 3.0 but nativeScale 2.608696.
-        // Row 5 pins the .5 rounding tie (round half away from zero == JS Math.round here,
-        // all values positive). Row 6 is the Android identity contract (nativeScale 1).
+        // Row 5 pins the Float-vs-Double precision boundary at 2.61. Row 6 pins the .5
+        // rounding tie (round half away from zero == JS Math.round here, all values positive).
+        // Row 7 is the Android identity contract (nativeScale 1).
         let scaleReportingVectors: [[Double]] = [
             [393, 852, 3.0, 1179, 2556],
             [375, 812, 3.144, 1179, 2553],
             [414, 736, 2.608696, 1080, 1920],
             [320, 568, 2.0, 640, 1136],
+            [450, 750, 2.61, 1175, 1958],
             [375, 811, 3.5, 1313, 2839],
             [1080, 2340, 1.0, 1080, 2340],
         ]

@@ -6,7 +6,8 @@
     "",
     "Consumers:",
     "- Kotlin: android/desktop-core .../layout/CoordinateMappingGoldenVectorTest.kt holds inline",
-    "  copies of the five mapper sections and drives DeviceScreenCoordinateMapper against them.",
+    "  copies of the five mapper sections, DevicePoint.clampedTo, and scale reporting, then drives",
+    "  the production methods against them.",
     "  test/parity/coordinateMappingGoldenVectorParity.test.ts parses those inline literals out of",
     "  the Kotlin source and verifies them against this file (the pinch drift-guard mechanism).",
     "- TypeScript: test/daemon/deviceDataStreamSocketServer.test.ts drives the daemon's",
@@ -191,6 +192,34 @@
       "deviceX": 200, "deviceY": 400, "frameWidthPx": 500, "frameHeightPx": 500, "scale": 1,
       "offsetX": 0, "offsetY": 0, "deviceWidth": 1000, "deviceHeight": 2000,
       "expectedX": 100, "expectedY": 200
+    },
+    {
+      "comment": "zero deviceWidth with pan + zoom: the ratio falls back to identity first, then the normal viewport transform still applies (7*2+10, 9*2+20)",
+      "deviceX": 7, "deviceY": 9, "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 2,
+      "offsetX": 10, "offsetY": 20, "deviceWidth": 0, "deviceHeight": 2340,
+      "expectedX": 24, "expectedY": 38
+    }
+  ],
+  "clampedTo": [
+    {
+      "comment": "negative x and past-bottom y clamp independently to the first and last addressable pixels",
+      "x": -5, "y": 102, "width": 100, "height": 100,
+      "expectedX": 0, "expectedY": 99, "expectedInBounds": 1
+    },
+    {
+      "comment": "past-right x and negative y clamp independently to the opposite two edges",
+      "x": 200, "y": -5, "width": 100, "height": 100,
+      "expectedX": 99, "expectedY": 0, "expectedInBounds": 1
+    },
+    {
+      "comment": "zero-width screen: the non-zero axis still clamps, but no point is in bounds",
+      "x": 5, "y": 5, "width": 0, "height": 100,
+      "expectedX": 0, "expectedY": 5, "expectedInBounds": 0
+    },
+    {
+      "comment": "zero-height screen: mirror of the zero-width contract",
+      "x": 5, "y": 5, "width": 100, "height": 0,
+      "expectedX": 5, "expectedY": 0, "expectedInBounds": 0
     }
   ],
   "fitToViewport": [
@@ -250,6 +279,16 @@
       "comment": "non-default padding 20 (not the 32 default): padded sides 800, width candidate 400/800=0.5 — substituting DEFAULT_PADDING would give 400/824=0.4854",
       "frameWidthPx": 760, "frameHeightPx": 760, "viewportWidth": 400, "viewportHeight": 800,
       "padding": 20, "expected": 0.5
+    },
+    {
+      "comment": "exact cap boundary: padded frame is exactly 800x800 in an 800x800 viewport, so raw scale is exactly 1.0",
+      "frameWidthPx": 736, "frameHeightPx": 736, "viewportWidth": 800, "viewportHeight": 800,
+      "padding": 32, "expected": 1
+    },
+    {
+      "comment": "exact floor boundary: width candidate is exactly 240/(736+64)=0.3 while height candidate is 1.0",
+      "frameWidthPx": 736, "frameHeightPx": 736, "viewportWidth": 240, "viewportHeight": 800,
+      "padding": 32, "expected": 0.3
     }
   ],
   "screenshotRotation": [
@@ -356,6 +395,11 @@
       "comment": "ONE-axis swap rejected: measured.width == claimedHeight (1170) but measured.height != claimedWidth (2532 vs 2500) — the swap acceptance is a conjunction, so a frame matching only one opposite axis must never receive a capture identity",
       "measuredWidth": 1170, "measuredHeight": 2532, "claimedWidth": 2500, "claimedHeight": 1170,
       "expectedMatch": 0
+    },
+    {
+      "comment": "mirror ONE-axis swap rejected: measured.height == claimedWidth (1170) but measured.width != claimedHeight (2532 vs 2500), so the swapped orientation conjunction remains false",
+      "measuredWidth": 2532, "measuredHeight": 1170, "claimedWidth": 1170, "claimedHeight": 2500,
+      "expectedMatch": 0
     }
   ],
   "iosPointToPixel": [
@@ -382,6 +426,12 @@
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 375, "pointHeight": 812, "scale": 2.5,
       "expectedPixelWidth": 938, "expectedPixelHeight": 2030
+    },
+    {
+      "comment": "iPhone Plus-like nativeScale precision: runner-reported Float metadata is widened to float64 in the daemon, then 450*2.61 = 1174.5 -> 1175 and 750*2.61 = 1957.5 -> 1958",
+      "willChangeUnderCanonicalPixels": true,
+      "pointWidth": 450, "pointHeight": 750, "scale": 2.61,
+      "expectedPixelWidth": 1175, "expectedPixelHeight": 1958
     },
     {
       "comment": "no runner metadata (0 sentinel = pre-#4548 runner): the daemon does NOT convert — bounds stay point-space and the frame is not stamped coordinateSpace:px (legacy fallback), so the identity 390x844 is preserved",
@@ -422,6 +472,11 @@
       "comment": "2x device: 320x568 points -> 640x1136 pixels",
       "pointWidth": 320, "pointHeight": 568, "nativeScale": 2.0,
       "expectedPixelWidth": 640, "expectedPixelHeight": 1136
+    },
+    {
+      "comment": "iPhone Plus-like nativeScale precision: retaining 2.61 as a Double gives 450*2.61 = 1174.5 -> 1175 and 750*2.61 = 1957.5 -> 1958; a Float narrowing would produce 1174x1957",
+      "pointWidth": 450, "pointHeight": 750, "nativeScale": 2.61,
+      "expectedPixelWidth": 1175, "expectedPixelHeight": 1958
     },
     {
       "comment": "rounding tie on both axes: 375*3.5=1312.5 and 811*3.5=2838.5 round half away from zero (== JS Math.round for positive values)",

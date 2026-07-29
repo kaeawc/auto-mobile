@@ -1209,7 +1209,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     duration: Long,
     frameContext: String?,
   ) {
-    if (rejectStaleFrameContext(requestId, frameContext, "swipe")) return
+    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE)) return
     performSwipe(requestId, x1, y1, x2, y2, duration, frameContext)
   }
 
@@ -1223,7 +1223,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     duration: Long,
     frameContext: String?,
   ) {
-    if (rejectStaleFrameContext(requestId, frameContext, "tap")) return
+    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
     performTapCoordinates(requestId, x, y, duration, frameContext)
   }
 
@@ -1259,7 +1259,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     holdDurationMs: Long,
     frameContext: String?,
   ) {
-    if (rejectStaleFrameContext(requestId, frameContext, "drag")) return
+    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG)) return
     performDrag(
       requestId,
       x1,
@@ -1273,30 +1273,41 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
 
+  private enum class StaleFrameContextAction(val wireName: String) {
+    TAP("tap"),
+    SWIPE("swipe"),
+    DRAG("drag"),
+    SET_TEXT("set_text"),
+    IME_ACTION("ime_action"),
+    GLOBAL_ACTION("global_action"),
+  }
+
   /**
    * Rejects an input that was mapped through a screen state the service has since observed change.
    */
   private fun rejectStaleFrameContext(
     requestId: String?,
     expected: String?,
-    action: String,
+    action: StaleFrameContextAction,
   ): Boolean {
     if (expected == null || expected == currentFrameContext()) return false
-    val error = "Stale frame context for input/$action; observe a fresh frame before retrying"
+    val error =
+      "Stale frame context for input/${action.wireName}; observe a fresh frame before retrying"
     launchRequestScope(requestId) {
       when (action) {
-        "tap" -> broadcastTapCoordinatesResult(requestId, false, error, 0)
-        "swipe" -> broadcastSwipeResult(requestId, false, error, 0, null)
-        "drag" -> broadcastDragResult(requestId, false, error, 0, null)
-        "set_text" -> broadcastSetTextResult(requestId, false, error, 0)
-        "ime_action" -> broadcastImeActionResult(requestId, action, false, error, 0)
-        "global_action" ->
+        StaleFrameContextAction.TAP -> broadcastTapCoordinatesResult(requestId, false, error, 0)
+        StaleFrameContextAction.SWIPE -> broadcastSwipeResult(requestId, false, error, 0, null)
+        StaleFrameContextAction.DRAG -> broadcastDragResult(requestId, false, error, 0, null)
+        StaleFrameContextAction.SET_TEXT -> broadcastSetTextResult(requestId, false, error, 0)
+        StaleFrameContextAction.IME_ACTION ->
+          broadcastImeActionResult(requestId, action.wireName, false, error, 0)
+        StaleFrameContextAction.GLOBAL_ACTION ->
           webSocketServer.broadcast(
             dev.jasonpearson.automobile.protocol.GlobalActionResult(
               timestamp = System.currentTimeMillis(),
               requestId = requestId,
               success = false,
-              action = action,
+              action = action.wireName,
               totalTimeMs = 0,
               error = error,
             )
@@ -1339,7 +1350,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     dismissKeyboard: Boolean,
     frameContext: String?,
   ) {
-    if (rejectStaleFrameContext(requestId, frameContext, "set_text")) return
+    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SET_TEXT)) return
     performSetText(requestId, text, resourceId, dismissKeyboard)
   }
 
@@ -1347,7 +1358,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performImeAction(requestId, action)
 
   override fun requestImeAction(requestId: String?, action: String, frameContext: String?) {
-    if (rejectStaleFrameContext(requestId, frameContext, "ime_action")) return
+    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.IME_ACTION)) return
     performImeAction(requestId, action)
   }
 
@@ -1376,7 +1387,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performGlobalActionRequest(requestId, action)
 
   override fun requestGlobalAction(requestId: String?, action: String, frameContext: String?) {
-    if (rejectStaleFrameContext(requestId, frameContext, "global_action")) return
+    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.GLOBAL_ACTION))
+      return
     performGlobalActionRequest(requestId, action)
   }
 

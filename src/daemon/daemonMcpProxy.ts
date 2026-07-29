@@ -904,14 +904,14 @@ export class DaemonMcpProxy {
       this.rememberSessionUuid(name, forwardedArgs);
       return result;
     } catch (error) {
-      if (name === "executePlan") {
-        // A rejected executePlan still triggers the daemon-side session release in
-        // DefaultPlanLifecycleManager.afterExecution()'s finally, so the remembered
-        // binding is stale whether the plan resolved or threw. The success path
-        // clears it via rememberSessionUuid; clear it on failure too so a later
-        // sessionless call cannot resurrect the released session (issue #4610).
-        this.clearBoundSessionUuid();
-      }
+      // Do NOT clear the binding on a rejected executePlan. A plan can reject
+      // *before* the handler runs — capability enforcement or schema parsing in
+      // src/server/index.ts — in which case DefaultPlanLifecycleManager
+      // .afterExecution() never runs and the daemon session stays LIVE. Forgetting
+      // it here would strand a still-live session after a reconnect. The binding is
+      // now cleared authoritatively by the daemon's session-released signal
+      // (handleDaemonNotification) whenever the session is *actually* released —
+      // whether the plan succeeded or failed inside the handler (issue #4610).
       // withRecoverableReconnect already reconciled build identity and retried once.
       // A still-"Unknown tool" failure means the daemon genuinely cannot provide a
       // tool this frontend advertises — surface an actionable error naming both

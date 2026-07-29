@@ -1434,12 +1434,15 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("clears the binding when an executePlan rejects, so its released session is not resurrected", async () => {
-      // A rejected executePlan still triggers daemon-side session release in
-      // DefaultPlanLifecycleManager.afterExecution()'s finally. The success-only
-      // clear is never reached on rejection, so without clearing on failure the
-      // stale UUID would be replayed on the next sessionless call and recreate the
-      // released session (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+    test("preserves the binding when an executePlan rejects (a pre-handler rejection leaves the session live)", async () => {
+      // An executePlan can reject BEFORE the handler runs — capability enforcement
+      // or schema parsing in src/server/index.ts — in which case
+      // DefaultPlanLifecycleManager.afterExecution() never runs and the daemon
+      // session stays LIVE. The proxy must NOT forget the binding on rejection, or
+      // a later sessionless call after a reconnect would strand that still-live
+      // session. The binding is cleared only by the daemon's real session-released
+      // signal (see the release-signal tests), never by a bare plan rejection
+      // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
       const client = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
         toolErrorByName: new Map([["executePlan", new Error("plan boom")]]),
@@ -1456,10 +1459,12 @@ describe("DaemonMcpProxy", () => {
         await expect(proxy.callTool("executePlan", { deviceId: "device-a" })).rejects.toThrow("plan boom");
         await proxy.callTool("observe", { deviceId: "device-a" });
 
+        // The third call is still rewritten to session-a: the binding survived the
+        // rejection because nothing proved the session was released.
         expect(client.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
           { toolName: "executePlan", params: { deviceId: "device-a", sessionUuid: "session-a" } },
-          { toolName: "observe", params: { deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();

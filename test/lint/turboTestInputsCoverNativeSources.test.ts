@@ -89,7 +89,11 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   function nativePathCandidates(source: string): string[] {
     const paths = new Set<string>();
     const sourceFile = ts.createSourceFile("native-path-scan.ts", source, ts.ScriptTarget.Latest, true);
-    const bindings = new Map<string, ts.Expression>();
+    interface ConstBinding {
+      readonly declaration: ts.VariableDeclaration;
+      readonly scope: ts.Node;
+    }
+    const bindings = new Map<string, ConstBinding[]>();
 
     const isPathCharacter = (character: string): boolean => {
       const code = character.charCodeAt(0);
@@ -106,17 +110,65 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
 
     const isIdentifierCharacter = (character: string): boolean => character !== "/" && isPathCharacter(character);
 
-    const addPathsFromText = (text: string): void => {
+    const nativeRootInText = (text: string): string | undefined => {
+      const normalized = text.replaceAll("\\", "/");
       for (const root of ["android/", "ios/"]) {
-        let index = text.indexOf(root);
+        let index = normalized.indexOf(root);
         while (index >= 0) {
-          const previous = text[index - 1];
+          const previous = normalized[index - 1];
+          if (previous === undefined || !isIdentifierCharacter(previous)) {
+            return root.slice(0, -1);
+          }
+          index = normalized.indexOf(root, index + root.length);
+        }
+      }
+      return undefined;
+    };
+
+    const hasNativePathInText = (text: string): boolean => {
+      const normalized = text.replaceAll("\\", "/");
+      for (const root of ["android/", "ios/"]) {
+        let index = normalized.indexOf(root);
+        while (index >= 0) {
+          const previous = normalized[index - 1];
+          const next = normalized[index + root.length];
+          if (
+            (previous === undefined || !isIdentifierCharacter(previous)) &&
+            next !== undefined &&
+            next !== "/" &&
+            isPathCharacter(next)
+          ) {
+            return true;
+          }
+          index = normalized.indexOf(root, index + root.length);
+        }
+      }
+      return false;
+    };
+
+    const nativeRootInUnresolvedTemplate = (node: ts.Expression): string | undefined => {
+      if (!ts.isTemplateExpression(node)) {
+        return undefined;
+      }
+      const texts = [node.head.text, ...node.templateSpans.map(span => span.literal.text)];
+      if (texts.some(hasNativePathInText)) {
+        return undefined;
+      }
+      return texts.map(nativeRootInText).find(Boolean);
+    };
+
+    const addPathsFromText = (text: string): void => {
+      const normalized = text.replaceAll("\\", "/");
+      for (const root of ["android/", "ios/"]) {
+        let index = normalized.indexOf(root);
+        while (index >= 0) {
+          const previous = normalized[index - 1];
           if (previous === undefined || !isIdentifierCharacter(previous)) {
             let end = index + root.length;
-            while (end < text.length && isPathCharacter(text[end])) {
+            while (end < normalized.length && isPathCharacter(normalized[end])) {
               end += 1;
             }
-            let path = text.slice(index, end);
+            let path = normalized.slice(index, end);
             while (path.endsWith("/")) {
               path = path.slice(0, -1);
             }
@@ -124,20 +176,58 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
               paths.add(path);
             }
           }
-          index = text.indexOf(root, index + root.length);
+          index = normalized.indexOf(root, index + root.length);
         }
       }
     };
 
+    const lexicalScope = (node: ts.Node): ts.Node => {
+      for (let current = node.parent; current; current = current.parent) {
+        if (ts.isSourceFile(current) || ts.isBlock(current) || ts.isModuleBlock(current) || ts.isCaseBlock(current)) {
+          return current;
+        }
+      }
+      return sourceFile;
+    };
+
     const collectBindings = (node: ts.Node): void => {
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
-        bindings.set(node.name.text, node.initializer);
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.initializer &&
+        ts.isVariableDeclarationList(node.parent) &&
+        (node.parent.flags & ts.NodeFlags.Const) !== 0
+      ) {
+        const entries = bindings.get(node.name.text) ?? [];
+        entries.push({ declaration: node, scope: lexicalScope(node) });
+        bindings.set(node.name.text, entries);
       }
       ts.forEachChild(node, collectBindings);
     };
     collectBindings(sourceFile);
 
-    const resolveStaticText = (node: ts.Expression, resolving = new Set<string>()): string | undefined => {
+    const isJoinCall = (node: ts.CallExpression): boolean =>
+      (ts.isIdentifier(node.expression) && node.expression.text === "join") ||
+      (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "join");
+
+    const bindingFor = (node: ts.Identifier): ConstBinding | undefined => {
+      const position = node.getStart(sourceFile);
+      return (bindings.get(node.text) ?? [])
+        .filter(binding =>
+          binding.scope.pos <= position &&
+          position < binding.scope.end &&
+          binding.declaration.getStart(sourceFile) < position
+        )
+        .sort((left, right) =>
+          (left.scope.end - left.scope.pos) - (right.scope.end - right.scope.pos) ||
+          right.declaration.getStart(sourceFile) - left.declaration.getStart(sourceFile)
+        )[0];
+    };
+
+    const resolveStaticText = (
+      node: ts.Expression,
+      resolving = new Set<ts.VariableDeclaration>()
+    ): string | undefined => {
       if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
         return node.text;
       }
@@ -155,12 +245,16 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
         }
         return text;
       }
-      if (ts.isIdentifier(node) && !resolving.has(node.text)) {
-        const initializer = bindings.get(node.text);
-        if (initializer) {
+      if (ts.isCallExpression(node) && isJoinCall(node)) {
+        const segments = node.arguments.map(argument => resolveStaticText(argument, resolving));
+        return segments.every((segment): segment is string => segment !== undefined) ? segments.join("/") : undefined;
+      }
+      if (ts.isIdentifier(node)) {
+        const binding = bindingFor(node);
+        if (binding && !resolving.has(binding.declaration)) {
           const nested = new Set(resolving);
-          nested.add(node.text);
-          return resolveStaticText(initializer, nested);
+          nested.add(binding.declaration);
+          return resolveStaticText(binding.declaration.initializer!, nested);
         }
       }
       return undefined;
@@ -181,21 +275,37 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
         addPathsFromText(node.text);
       } else if (ts.isTemplateExpression(node)) {
-        addPathsFromText(node.head.text);
-        for (const span of node.templateSpans) {
-          addPathsFromText(span.literal.text);
+        const resolved = resolveStaticText(node);
+        if (resolved !== undefined) {
+          addPathsFromText(resolved);
+        } else {
+          addPathsFromText(node.head.text);
+          for (const span of node.templateSpans) {
+            addPathsFromText(span.literal.text);
+          }
+          const nativeRoot = nativeRootInUnresolvedTemplate(node);
+          if (nativeRoot) {
+            paths.add(nativeRoot);
+          }
         }
-      } else if (
-        ts.isCallExpression(node) &&
-        ts.isIdentifier(node.expression) &&
-        node.expression.text === "join"
-      ) {
+      } else if (ts.isCallExpression(node) && isJoinCall(node) && !(ts.isCallExpression(node.parent) && isJoinCall(node.parent))) {
         const segments = node.arguments.map(argument => {
           const leaves = stringLeaves(argument);
           return leaves.length === 1 ? leaves[0] : undefined;
         });
-        const start = segments.findIndex(segment => segment === "android" || segment === "ios");
-        if (start >= 0 && segments.length - start >= 2) {
+        const start = segments.findIndex(segment =>
+          segment === "android" ||
+          segment === "ios" ||
+          segment?.startsWith("android/") ||
+          segment?.startsWith("ios/")
+        );
+        const unresolvedTemplateRoot = node.arguments
+          .filter((_, index) => segments[index] === undefined)
+          .map(nativeRootInUnresolvedTemplate)
+          .find(Boolean);
+        if (start < 0 && unresolvedTemplateRoot) {
+          paths.add(unresolvedTemplateRoot);
+        } else if (start >= 0 && segments.length - start >= 2) {
           const nativeSegments = segments.slice(start);
           if (nativeSegments.every((segment): segment is string => segment !== undefined)) {
             addPathsFromText(nativeSegments.join("/"));
@@ -294,6 +404,17 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     expect(nativePathCandidates(source)).toContain("android/control-proxy/src/main/kotlin");
   });
 
+  test("finds a native path in a property-access join call", () => {
+    const source = 'path.join(ROOT, "android", "control-proxy", "src", "main", "kotlin");';
+    expect(nativePathCandidates(source)).toContain("android/control-proxy/src/main/kotlin");
+  });
+
+  test("resolves nested join calls without reporting their partial parent path", () => {
+    const source = 'join(ROOT, join("android", "desktop-core"), "src", "test", "kotlin");';
+    expect(nativePathCandidates(source)).toContain("android/desktop-core/src/test/kotlin");
+    expect(nativePathCandidates(source)).not.toContain("android/desktop-core");
+  });
+
   test("finds native paths formed by template literals", () => {
     const source = [
       "join(ROOT, `android`, `desktop-core`, `src`, `test`, `kotlin`);",
@@ -305,6 +426,14 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     ]));
   });
 
+  test("resolves a template literal with a constant interpolation", () => {
+    const source = [
+      'const moduleName = "control-proxy";',
+      "const target = `android/${moduleName}/src/main/kotlin`;",
+    ].join("\n");
+    expect(nativePathCandidates(source)).toContain("android/control-proxy/src/main/kotlin");
+  });
+
   test("resolves a constant computed join segment", () => {
     const source = [
       'const moduleName = "desktop-core";',
@@ -313,10 +442,46 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     expect(nativePathCandidates(source)).toContain("android/desktop-core/src/test/kotlin");
   });
 
+  test("does not resolve a mutable join segment as static", () => {
+    const source = [
+      'let moduleName = "desktop-core";',
+      'join(ROOT, "android", moduleName, "src", "test", "kotlin");',
+    ].join("\n");
+    expect(nativePathCandidates(source)).toContain("android");
+    expect(nativePathCandidates(source)).not.toContain("android/desktop-core/src/test/kotlin");
+  });
+
+  test("resolves a constant join segment in its lexical scope", () => {
+    const source = [
+      "{",
+      '  const moduleName = "control-proxy";',
+      '  join(ROOT, "android", moduleName, "src", "main", "kotlin");',
+      "}",
+      'const moduleName = "desktop-core";',
+    ].join("\n");
+    expect(nativePathCandidates(source)).toContain("android/control-proxy/src/main/kotlin");
+  });
+
   test("keeps an unresolved native join segment from shortening the candidate path", () => {
     const source = 'join(ROOT, "android", moduleName, "src", "test", "kotlin");';
     expect(nativePathCandidates(source)).toContain("android");
     expect(nativePathCandidates(source)).not.toContain("android/src/test/kotlin");
+  });
+
+  test("keeps an unresolved native template join segment from disappearing", () => {
+    const source = "join(ROOT, `android/${moduleName}/src/main/kotlin`);";
+    expect(nativePathCandidates(source)).toContain("android");
+  });
+
+  test("normalizes Windows separators in literals and comments", () => {
+    const source = String.raw`
+      const target = "android\\control-proxy\\src\\main\\kotlin";
+      // ios\control-proxy\Sources
+    `;
+    expect(nativePathCandidates(source)).toEqual(expect.arrayContaining([
+      "android/control-proxy/src/main/kotlin",
+      "ios/control-proxy/Sources",
+    ]));
   });
 
   /** Prefixes a declared glob matches, i.e. `foo/bar/**` covers `foo/bar` and below. */

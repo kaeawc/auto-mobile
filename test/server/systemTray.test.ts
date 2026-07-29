@@ -19,7 +19,7 @@ import type { SystemTrayIosClient } from "../../src/server/systemTrayHelpers";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
-import { logger } from "../../src/utils/logger";
+import { logger, LogLevel } from "../../src/utils/logger";
 import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
 
 const POLL_INTERVAL_MS = 250;
@@ -360,6 +360,48 @@ describe("systemTray re-expand on closed shade during wait", () => {
     ).toBe(1);
   });
 
+  test("re-expands again after a second throttle interval while the shade remains closed", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Other Notification")),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createTrayHierarchy("Target Notification"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = waitForNotificationMatch(
+      device,
+      { title: "Target Notification" },
+      [],
+      REEXPAND_INTERVAL_MS * 5
+    );
+
+    // At t=1000 and t=2000, the closed shade crosses the re-expand throttle
+    // interval. The target appears after the second best-effort retry.
+    await advancePendingSleeps(fakeTimer, 9);
+
+    const result = await resultPromise;
+
+    expect(result.match).not.toBeNull();
+    expect(result.match!.match.matches.title?.text).toBe("Target Notification");
+    expect(
+      fakeAdb.getExecutedCommands().filter(cmd => cmd.includes("expand-notifications")).length
+    ).toBe(2);
+  });
+
   test("does not re-expand before a full throttle interval has elapsed", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
@@ -448,28 +490,43 @@ describe("systemTray unmatched-notification diagnostics", () => {
     resetSystemTrayDependencies();
   });
 
-  test("logs the open-but-unmatched candidate breakdown once, deduped across identical polls", async () => {
-    const fakeTimer = new FakeTimer();
-    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
-    const fakeObserveScreen = new SequencedObserveScreen([
-      createObservation(createTrayHierarchy("Other Notification")),
-      createObservation(createTrayHierarchy("Other Notification")),
-      createObservation(createTrayHierarchy("Other Notification")),
-      createObservation(createTrayHierarchy("Target Notification"))
-    ]);
+  test("keeps payload-bearing diagnostics out of the INFO sink and emits them at DEBUG", async () => {
+    const notificationPreview = "Alice: Project secret";
+    const criteria = {
+      title: "Alice private target",
+      body: "Confidential body",
+      tapActionLabel: "Open Alice private target"
+    };
+    const appMatchTexts = ["Alice work profile"];
+    const payloads = [
+      notificationPreview,
+      criteria.title,
+      criteria.body,
+      criteria.tapActionLabel,
+      appMatchTexts[0]
+    ];
+    const waitForTarget = async (): Promise<void> => {
+      const fakeTimer = new FakeTimer();
+      const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+      const fakeObserveScreen = new SequencedObserveScreen([
+        createObservation(createTrayHierarchy(notificationPreview)),
+        createObservation(createTrayHierarchy(notificationPreview)),
+        createObservation(createTrayHierarchy(notificationPreview)),
+        createObservation(createTrayHierarchy(
+          `${criteria.title} ${criteria.body} ${criteria.tapActionLabel}`
+        ))
+      ]);
 
-    setSystemTrayDependencies({
-      timer: fakeTimer,
-      adbFactory: () => fakeAdb,
-      observeScreenFactory: () => fakeObserveScreen
-    });
+      setSystemTrayDependencies({
+        timer: fakeTimer,
+        adbFactory: () => fakeAdb,
+        observeScreenFactory: () => fakeObserveScreen
+      });
 
-    const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
-    try {
       const resultPromise = waitForNotificationMatch(
         device,
-        { title: "Target Notification" },
-        [],
+        criteria,
+        appMatchTexts,
         5000
       );
 
@@ -478,13 +535,52 @@ describe("systemTray unmatched-notification diagnostics", () => {
       const result = await resultPromise;
 
       expect(result.match).not.toBeNull();
-      const diagLogs = infoSpy.mock.calls.filter(call =>
-        String(call[0]).includes("[systemTray][diag] shade open but no notification matched")
-      );
-      expect(diagLogs.length).toBe(1);
-      expect(String(diagLogs[0][0])).toContain("Other Notification");
+      expect(result.match!.match.matches.title?.text).toBe(criteria.title);
+    };
+
+    const previousLevel = logger.getLogLevel();
+    const stdoutSpy = spyOn(process.stdout, "write").mockImplementation(() => true);
+    logger.enableStdoutLogging();
+    try {
+      // The singleton logger may still have writes queued by earlier tests.
+      // Drain them before this test begins counting its own sink output.
+      await logger.flush();
+      stdoutSpy.mockClear();
+      logger.setLogLevel(LogLevel.INFO);
+      await waitForTarget();
+
+      // Prove the asynchronous sink is live at INFO so the absence checks cannot
+      // pass merely because logger output was never flushed.
+      const infoSentinel = "__system_tray_info_sink_4614__";
+      logger.info(infoSentinel);
+      await logger.flush();
+      expect(stdoutSpy.mock.calls.some(call => String(call[0] ?? "").includes(infoSentinel))).toBe(true);
+
+      const infoDiagnostics = stdoutSpy.mock.calls
+        .map(call => String(call[0] ?? ""))
+        .filter(line => line.includes("[INFO] [systemTray][diag] shade open but no notification matched"));
+      expect(infoDiagnostics).toHaveLength(1);
+      expect(infoDiagnostics[0]).toContain("candidateCount=1");
+      for (const payload of payloads) {
+        expect(infoDiagnostics[0]).not.toContain(payload);
+      }
+
+      stdoutSpy.mockClear();
+      logger.setLogLevel(LogLevel.DEBUG);
+      await waitForTarget();
+      await logger.flush();
+
+      const debugDiagnostics = stdoutSpy.mock.calls
+        .map(call => String(call[0] ?? ""))
+        .filter(line => line.includes("[DEBUG] [systemTray][diag] shade open but no notification matched"));
+      expect(debugDiagnostics).toHaveLength(1);
+      for (const payload of payloads) {
+        expect(debugDiagnostics[0]).toContain(payload);
+      }
     } finally {
-      infoSpy.mockRestore();
+      logger.setLogLevel(previousLevel);
+      logger.disableStdoutLogging();
+      stdoutSpy.mockRestore();
     }
   });
 

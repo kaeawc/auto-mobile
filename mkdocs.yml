@@ -208,6 +208,7 @@ nav:
   - 'Contributing':
       - 'Overview': contributing.md
       - 'Standard Library First': contributing/stdlib-first.md
+      - 'Apple Signing & Notarization': release/apple-signing-setup.md
       - 'Dependency Decisions':
           - 'fast-check': decisions/fast-check.md
       - 'Codex Automation Thread Report': codex-automation-thread-spam-report.md

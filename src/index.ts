@@ -96,7 +96,7 @@ async function main() {
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { createMcpServer } = await import("./server");
   const { createProxyMcpServer } = await import("./server/proxyServer");
-  const { logger } = await import("./utils/logger");
+  const { logger, LogLevel } = await import("./utils/logger");
   fatalLogger = logger;
   const { runCliCommand } = await import("./cli");
   const { runDaemonCommand } = await import("./daemon/manager");
@@ -176,6 +176,10 @@ async function main() {
       outputReduction,
       toolOutputsDir,
     } = parseArgs(process.argv.slice(2), logger);
+
+    if (debug) {
+      logger.setLogLevel(LogLevel.DEBUG);
+    }
 
     serverConfig.setPlanExecutionLockScope(planExecutionLockScope);
     serverConfig.setVideoRecordingDefaults(videoRecordingDefaults);

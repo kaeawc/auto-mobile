@@ -4,7 +4,6 @@ import { DefaultElementParser } from "../features/utility/ElementParser";
 import { ResourceRegistry } from "./resourceRegistry";
 import type { ResourceContent } from "./resourceRegistry";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { getLatestScreenshotDataUri } from "./observationResources";
 import { logger } from "../utils/logger";
 
 /**
@@ -156,11 +155,16 @@ export interface ObserveAppDataSource {
   getLatestScreenshotDataUri(): Promise<string | undefined>;
 }
 
-// Production source: the in-memory observe cache + the cached screenshot,
-// reusing the existing injectable screenshot filesystem seam.
+// Production source: the in-memory observe cache. The screenshot is deliberately
+// NOT embedded yet: `getRecentCachedResult()` (hierarchy) and the cached
+// screenshot are independent process-global getters with no capture-identity
+// link and no deviceId on `ObserveResult`, so pairing them could overlay bounds
+// on a stale — or, under multi-device, a different device's — image. The overlay
+// renders on the themed backdrop until a correlated screenshot source exists;
+// the renderer already accepts a `data:` URI for when it does. Follow-up: #4682.
 const defaultDataSource: ObserveAppDataSource = {
   getLatestObserve: async () => RealObserveScreen.getRecentCachedResult(),
-  getLatestScreenshotDataUri: async () => getLatestScreenshotDataUri(),
+  getLatestScreenshotDataUri: async () => undefined,
 };
 
 async function buildAppContent(dataSource: ObserveAppDataSource): Promise<ResourceContent> {

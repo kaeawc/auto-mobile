@@ -143,20 +143,6 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
   }
 }
 
-/**
- * The latest screenshot as a self-contained `data:` URI, or undefined when none
- * is cached. Reuses `getLatestScreenshot` (and its injectable screenshot
- * filesystem seam) so the MCP App resource (#4669) can inline the image without
- * a second filesystem path.
- */
-export async function getLatestScreenshotDataUri(): Promise<string | undefined> {
-  const content = await getLatestScreenshot();
-  if (content.blob && content.mimeType?.startsWith("image/")) {
-    return `data:${content.mimeType};base64,${content.blob}`;
-  }
-  return undefined;
-}
-
 // Device-scoped handler for observation (with deviceId parameter)
 async function getDeviceObservation(params: Record<string, string>): Promise<ResourceContent> {
   const { deviceId } = params;

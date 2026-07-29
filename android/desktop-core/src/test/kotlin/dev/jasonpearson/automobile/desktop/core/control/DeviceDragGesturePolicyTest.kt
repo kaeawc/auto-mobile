@@ -19,10 +19,10 @@ class DeviceDragGesturePolicyTest {
   private val height = 2340
 
   private fun at(x: Int, y: Int) =
-    DevicePoint(x, y, inBounds = x in 0 until width && y in 0 until height)
+      DevicePoint(x, y, inBounds = x in 0 until width && y in 0 until height)
 
   private fun evaluate(start: DevicePoint, end: DevicePoint) =
-    DeviceDragGesturePolicy.evaluate(start, end, width, height)
+      DeviceDragGesturePolicy.evaluate(start, end, width, height)
 
   @Test
   fun `a drag past the threshold becomes one swipe with both mapped endpoints`() {
@@ -39,12 +39,12 @@ class DeviceDragGesturePolicyTest {
   @Test
   fun `a drag shorter than the threshold sends nothing`() {
     val decision =
-      evaluate(at(100, 200), at(100, 200 + DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE - 1))
+        evaluate(at(100, 200), at(100, 200 + DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE - 1))
 
     assertEquals(
-      DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
-      decision,
-      "one pixel below the threshold must not swipe",
+        DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
+        decision,
+        "one pixel below the threshold must not swipe",
     )
   }
 
@@ -97,42 +97,43 @@ class DeviceDragGesturePolicyTest {
   @Test
   fun `a screen with no addressable pixel sends nothing`() {
     val decision =
-      DeviceDragGesturePolicy.evaluate(
-        DevicePoint(0, 0, inBounds = false),
-        DevicePoint(0, 500, inBounds = false),
-        deviceWidth = 0,
-        deviceHeight = 0,
-      )
+        DeviceDragGesturePolicy.evaluate(
+            DevicePoint(0, 0, inBounds = false),
+            DevicePoint(0, 500, inBounds = false),
+            deviceWidth = 0,
+            deviceHeight = 0,
+        )
 
     assertEquals(DeviceDragDecision.Ignored(DeviceDragRejection.NoAddressableScreen), decision)
   }
 
   @Test
   fun `the canonical-pixel threshold is pinned from both sides`() {
-    // Issue #4550: the threshold is a PHYSICAL distance, and canonical pixels changed the unit it
-    // is measured in. Pin the px value from both directions, exactly as the legacy one is.
-    val pxThreshold = DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE_PX
+    val nativeScale = 3.0
+    val pxThreshold = (DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE * nativeScale).toInt()
 
     assertEquals(
-      DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
-      DeviceDragGesturePolicy.evaluate(
-        at(100, 200),
-        at(100, 200 + pxThreshold - 1),
-        width,
-        height,
-        CoordinateSpace.Pixels,
-      ),
-      "one pixel below the bar sends nothing",
+        DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
+        DeviceDragGesturePolicy.evaluate(
+            at(100, 200),
+            at(100, 200 + pxThreshold - 1),
+            width,
+            height,
+            CoordinateSpace.Pixels,
+            nativeScale,
+        ),
+        "one pixel below the bar sends nothing",
     )
     assertIs<DeviceDragDecision.Swipe>(
-      DeviceDragGesturePolicy.evaluate(
-        at(100, 200),
-        at(100, 200 + pxThreshold),
-        width,
-        height,
-        CoordinateSpace.Pixels,
-      ),
-      "exactly at the bar swipes",
+        DeviceDragGesturePolicy.evaluate(
+            at(100, 200),
+            at(100, 200 + pxThreshold),
+            width,
+            height,
+            CoordinateSpace.Pixels,
+            nativeScale,
+        ),
+        "exactly at the bar swipes",
     )
   }
 
@@ -147,74 +148,81 @@ class DeviceDragGesturePolicyTest {
     val end = at(100, 200 + 24)
 
     assertIs<DeviceDragDecision.Swipe>(
-      DeviceDragGesturePolicy.evaluate(start, end, width, height, coordinateSpace = null),
-      "the legacy path keeps its 24-unit behavior exactly",
+        DeviceDragGesturePolicy.evaluate(start, end, width, height, coordinateSpace = null),
+        "the legacy path keeps its 24-unit behavior exactly",
     )
     assertEquals(
-      DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
-      DeviceDragGesturePolicy.evaluate(start, end, width, height, CoordinateSpace.Pixels),
+        DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
+        DeviceDragGesturePolicy.evaluate(start, end, width, height, CoordinateSpace.Pixels, 3.0),
     )
     // A movement scaled up for the pixel space is a swipe again.
     assertIs<DeviceDragDecision.Swipe>(
-      DeviceDragGesturePolicy.evaluate(
-        start,
-        at(100, 200 + 72),
-        width,
-        height,
-        CoordinateSpace.Pixels,
-      )
+        DeviceDragGesturePolicy.evaluate(
+            start,
+            at(100, 200 + 72),
+            width,
+            height,
+            CoordinateSpace.Pixels,
+            3.0,
+        )
     )
   }
 
   @Test
-  fun `the canonical-pixel threshold clears iOS touch slop at every covered scale`() {
-    // The arithmetic the constant is chosen for, asserted rather than left in a comment. The daemon
-    // divides an incoming pixel coordinate by nativeScale before dispatch, so the threshold has to
-    // survive that division at every scale this project carries.
-    //
-    // Only the BOUND is checked here, and that is sufficient rather than lazy: threshold / scale is
-    // strictly decreasing in scale, so clearing the slop at the largest covered scale clears it at
-    // every smaller one. The bound itself is tied to the fixture mechanically — the parity suite
-    // (`coordinateMappingGoldenVectorParity.test.ts`) asserts MAX_COVERED_NATIVE_SCALE equals the
-    // largest scale in coordinate-mapping-golden-vectors.json, parsed from THIS source's constant.
-    // Enumerating the fixture's scales here as well would be a hand-copy that goes stale silently,
-    // which is the failure this pair of tests exists to prevent.
-    val slop = DeviceDragGesturePolicy.IOS_TOUCH_SLOP_POINTS
-    val threshold = DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE_PX
-    val bound = DeviceDragGesturePolicy.MAX_COVERED_NATIVE_SCALE
+  fun `the canonical-pixel threshold scales exactly with the published native scale`() {
+    val scale = 3.5
+    val threshold = DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE * scale
 
-    // The assertion that would have caught the previous 32px value: 32 / 3.5 is 9.14 points, below
-    // the slop, even though the fixture already carried a 3.5x row.
     assertEquals(
-      true,
-      threshold / bound > slop,
-      "$threshold px at the ${bound}x bound is ${threshold / bound} points, below the ~${slop}pt slop",
+        DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
+        DeviceDragGesturePolicy.evaluate(
+            at(100, 200),
+            at(100, 200 + threshold.toInt() - 1),
+            width,
+            height,
+            CoordinateSpace.Pixels,
+            scale,
+        ),
     )
-    // And the bound is a real ceiling, not a universal claim: readScreenScaleMetadata accepts any
-    // finite positive scale, and beyond the bound this constant under-shoots. That is what #4582
-    // exists to fix, and pinning it here stops the docs from drifting back to "worst case".
-    assertEquals(
-      false,
-      threshold / (bound * 2) > slop,
-      "a scale beyond the bound is expected to under-shoot — this is a floor, not a guarantee",
+    assertIs<DeviceDragDecision.Swipe>(
+        DeviceDragGesturePolicy.evaluate(
+            at(100, 200),
+            at(100, 200 + threshold.toInt()),
+            width,
+            height,
+            CoordinateSpace.Pixels,
+            scale,
+        ),
     )
 
-    // And it must not regress the legacy space, which is unchanged.
+    // The legacy point space is unchanged.
     assertEquals(24, DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE)
     assertEquals(
-      DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE,
-      DeviceDragGesturePolicy.minSwipeDistance(null),
+        DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE.toDouble(),
+        DeviceDragGesturePolicy.minSwipeDistance(null),
     )
-    assertEquals(
-      DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE_PX,
-      DeviceDragGesturePolicy.minSwipeDistance(CoordinateSpace.Pixels),
-    )
-    // An unrecognized space never reaches a dispatch (control is blocked), but if a direct caller
-    // asks, the conservative legacy value is the answer — never the smaller of the two by accident.
-    assertEquals(
-      DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE,
-      DeviceDragGesturePolicy.minSwipeDistance(CoordinateSpace.Unrecognized("pt")),
-    )
+    assertEquals(threshold, DeviceDragGesturePolicy.minSwipeDistance(CoordinateSpace.Pixels, scale))
+  }
+
+  @Test
+  fun `a canonical-pixel frame without a valid scale fails closed`() {
+    val start = at(100, 200)
+    val end = at(100, 1_000)
+
+    for (invalidScale in listOf<Double?>(null, 0.0, -1.0, Double.NaN, Double.POSITIVE_INFINITY)) {
+      assertEquals(
+          DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
+          DeviceDragGesturePolicy.evaluate(
+              start,
+              end,
+              width,
+              height,
+              CoordinateSpace.Pixels,
+              invalidScale,
+          ),
+          "nativeScale=$invalidScale must not authorize a px swipe",
+      )
+    }
   }
 
   @Test

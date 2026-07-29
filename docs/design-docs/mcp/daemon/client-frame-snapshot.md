@@ -20,8 +20,8 @@ several sources that update independently:
 
 | Source | Carries | Updates |
 | --- | --- | --- |
-| observation stream `screenshot_update` | pixels, reported screen size, `captureSequence`, `coordinateSpace`, device `frameContext` | continuously while subscribed |
-| observation stream `hierarchy_update` | element tree with `bounds`, `captureSequence`, `coordinateSpace`, device `frameContext` | continuously, usually debounced client-side |
+| observation stream `screenshot_update` | pixels, reported screen size, `captureSequence`, `coordinateSpace`, `nativeScale`, device `frameContext` | continuously while subscribed |
+| observation stream `hierarchy_update` | element tree with `bounds`, `captureSequence`, `coordinateSpace`, `nativeScale`, device `frameContext` | continuously, usually debounced client-side |
 | live mirror relay (optional) | decoded video frames | at the mirror's frame rate |
 | daemon connection state | transport liveness | on connect/disconnect |
 | device selection | which device the user chose | on user action |
@@ -113,6 +113,8 @@ converted the runner's logical points using the runner-reported `nativeScale`
 and the hierarchy that describes it share one unit and compare **exactly** (the
 rotation W/H swap for native-portrait screenshots is still accepted). Android
 bounds are already physical pixels (`nativeScale` 1), so it declares `"px"` too.
+Both messages in a controllable pixel snapshot must carry the same finite,
+positive `nativeScale`; missing or mismatched metadata fails control closed.
 
 The field is **absent** when the runner supplied no scale metadata (a pre-#4548
 runner). That is the **legacy fallback**: `bounds` stay in logical points while
@@ -136,7 +138,7 @@ message paired with one undeclared message is precisely the mixed-unit state the
 exact check must not be applied to, so it takes the legacy path
 ([#4550](https://github.com/kaeawc/auto-mobile/issues/4550)).
 
-**Bind the space to the frame, and retire a retained frame when it changes.** The
+**Bind the space and scale to the frame, and retire a retained frame when either changes.** The
 daemon converts an incoming `input/tap` or `input/swipe` coordinate using the
 runner's **current** scale metadata, not the frame's. That is safe while a client
 acts on the frame it is rendering, but the [post-input refresh](#post-input-refresh-policy)
@@ -145,9 +147,9 @@ scale metadata appears (or a runner downgrade removes it) during that window, a
 coordinate mapped in one space would be converted as though it were in the other
 and land in the wrong physical place. So a client must:
 
-- record the agreed space **on the snapshot**, alongside its capture identity, and
+- record the agreed space and `nativeScale` **on the snapshot**, alongside its capture identity, and
 - stop acting through a retained snapshot as soon as an incoming `hierarchy_update`
-  or `screenshot_update` declares a different space — retire it exactly like a
+  or `screenshot_update` declares a different space or `nativeScale` — retire it exactly like a
   stale one and drop to inspector behavior until a fresh, agreed frame arrives.
   Both messages are checked independently, and a move into (or out of) an
   *unrecognized* space counts as a change like any other.

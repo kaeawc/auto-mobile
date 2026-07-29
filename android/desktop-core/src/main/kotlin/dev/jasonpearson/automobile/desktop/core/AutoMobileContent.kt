@@ -925,6 +925,7 @@ fun AutoMobileContent(
       deviceControlSession.onObservationSpaceDeclared(
         update.coordinateSpace,
         update.captureSequence,
+        update.nativeScale,
       )
       // Capture the generation before the async parse so a frame decoded across an invalidation
       // (device change / stream disconnect) is dropped instead of restoring stale bounds (#3347).
@@ -961,6 +962,7 @@ fun AutoMobileContent(
             // policy only compares dimensions exactly when the paired screenshot declared the same
             // thing (issue #4550).
             coordinateSpace = update.coordinateSpace,
+            nativeScale = update.nativeScale,
             captureRotation = update.rotation,
           )
         }
@@ -982,6 +984,7 @@ fun AutoMobileContent(
       deviceControlSession.onObservationSpaceDeclared(
         update.coordinateSpace,
         update.captureSequence,
+        update.nativeScale,
       )
       // Capture the generation before the async decode so a screenshot decoded across an
       // invalidation (device change / stream disconnect) is dropped rather than restoring a stale
@@ -1014,6 +1017,7 @@ fun AutoMobileContent(
           // Same reasoning as the hierarchy collector: the declared unit travels with the frame
           // (issue #4550).
           coordinateSpace = update.coordinateSpace,
+          nativeScale = update.nativeScale,
           rotation = update.rotation,
         )
       }

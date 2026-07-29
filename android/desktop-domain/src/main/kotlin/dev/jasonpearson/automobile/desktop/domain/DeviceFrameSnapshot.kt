@@ -39,21 +39,24 @@ public enum class DeviceFrameSource {
  *   (issue #4550). [CoordinateSpace.Pixels] when the message carried `coordinateSpace: "px"`; null
  *   for a legacy frame that declared nothing. Travels per message rather than per session because
  *   the declaration is per message: a runner can start reporting scale metadata mid-stream.
+ * @param nativeScale point-to-physical-pixel ratio on a canonical-pixel frame; null on a legacy
+ *   frame.
  * @param frameContext opaque device-authored identity for the UI state that produced these pixels.
  *   A controllable snapshot requires this to agree with [HierarchyFrameFacts.frameContext].
  */
 public data class ScreenshotFrameFacts(
-  val deviceId: String?,
-  val sequence: Long,
-  val captureSequence: Long?,
-  val receivedAtMs: Long,
-  val width: Int,
-  val height: Int,
-  val data: ByteArray?,
-  val coordinateSpace: CoordinateSpace? = null,
-  val frameContext: String? = null,
-  /** Device display rotation reported for this capture; null means legacy/unproven provenance. */
-  val rotation: Int? = null,
+    val deviceId: String?,
+    val sequence: Long,
+    val captureSequence: Long?,
+    val receivedAtMs: Long,
+    val width: Int,
+    val height: Int,
+    val data: ByteArray?,
+    val coordinateSpace: CoordinateSpace? = null,
+    val nativeScale: Double? = null,
+    val frameContext: String? = null,
+    /** Device display rotation reported for this capture; null means legacy/unproven provenance. */
+    val rotation: Int? = null,
 ) {
   // ByteArray uses reference equality, which would make every copy of an otherwise-identical facts
   // object unequal. Identity is exactly what we want here — a snapshot is tied to the specific
@@ -63,15 +66,16 @@ public data class ScreenshotFrameFacts(
     if (this === other) return true
     if (other !is ScreenshotFrameFacts) return false
     return deviceId == other.deviceId &&
-      sequence == other.sequence &&
-      captureSequence == other.captureSequence &&
-      receivedAtMs == other.receivedAtMs &&
-      frameContext == other.frameContext &&
-      width == other.width &&
-      height == other.height &&
-      rotation == other.rotation &&
-      data === other.data &&
-      coordinateSpace == other.coordinateSpace
+        sequence == other.sequence &&
+        captureSequence == other.captureSequence &&
+        receivedAtMs == other.receivedAtMs &&
+        frameContext == other.frameContext &&
+        width == other.width &&
+        height == other.height &&
+        rotation == other.rotation &&
+        data === other.data &&
+        coordinateSpace == other.coordinateSpace &&
+        nativeScale == other.nativeScale
   }
 
   override fun hashCode(): Int {
@@ -85,6 +89,7 @@ public data class ScreenshotFrameFacts(
     result = 31 * result + (rotation ?: 0)
     result = 31 * result + System.identityHashCode(data)
     result = 31 * result + (coordinateSpace?.hashCode() ?: 0)
+    result = 31 * result + (nativeScale?.hashCode() ?: 0)
     return result
   }
 }
@@ -104,20 +109,22 @@ public data class ScreenshotFrameFacts(
  *   [ScreenshotFrameFacts.coordinateSpace][ScreenshotFrameFacts]. Only when this AND the paired
  *   screenshot both declare [CoordinateSpace.Pixels] do the two describe one unit, which is the
  *   precondition [DeviceControlPolicy] requires before comparing absolute dimensions.
+ * @param nativeScale point-to-physical-pixel ratio declared with a canonical-pixel frame.
  * @param frameContext opaque device-authored identity for this hierarchy capture.
  */
 public data class HierarchyFrameFacts(
-  val deviceId: String?,
-  val sequence: Long,
-  val captureSequence: Long?,
-  val receivedAtMs: Long,
-  val hierarchy: ParsedHierarchy?,
-  val rootWidth: Int,
-  val rootHeight: Int,
-  val coordinateSpace: CoordinateSpace? = null,
-  val frameContext: String? = null,
-  /** Device display rotation reported for this hierarchy capture. */
-  val rotation: Int? = null,
+    val deviceId: String?,
+    val sequence: Long,
+    val captureSequence: Long?,
+    val receivedAtMs: Long,
+    val hierarchy: ParsedHierarchy?,
+    val rootWidth: Int,
+    val rootHeight: Int,
+    val coordinateSpace: CoordinateSpace? = null,
+    val nativeScale: Double? = null,
+    val frameContext: String? = null,
+    /** Device display rotation reported for this hierarchy capture. */
+    val rotation: Int? = null,
 )
 
 /**
@@ -128,13 +135,15 @@ public data class HierarchyFrameFacts(
  * nothing about the pixels reveals that they are frozen. A recency bound on [receivedAtMs] does.
  */
 public data class LiveFrameFacts(
-  val deviceId: String?,
-  val sequence: Long,
-  val receivedAtMs: Long,
-  val width: Int,
-  val height: Int,
-  /** Device display rotation proven for these live-video pixels; absent provenance fails closed. */
-  val rotation: Int? = null,
+    val deviceId: String?,
+    val sequence: Long,
+    val receivedAtMs: Long,
+    val width: Int,
+    val height: Int,
+    /**
+     * Device display rotation proven for these live-video pixels; absent provenance fails closed.
+     */
+    val rotation: Int? = null,
 )
 
 /**
@@ -179,6 +188,8 @@ public data class LiveFrameFacts(
  *   coordinate mapped in one space would be converted as though it were in the other and land in
  *   the wrong physical place. Carrying the space lets the session notice the transition and fail
  *   closed; see `DeviceControlSession`.
+ * @param nativeScale the screenshot and hierarchy's agreed point-to-physical-pixel ratio. It is
+ *   bound with [coordinateSpace] so a retained snapshot cannot dispatch after a scale change.
  * @param captureSequence the daemon capture identity the screenshot and hierarchy agreed on.
  * @param frameContext the device-authored UI identity the screenshot and hierarchy agreed on.
  * @param rotation the device rotation the contributing sources agreed on when this snapshot was
@@ -189,23 +200,24 @@ public data class LiveFrameFacts(
  * @param liveFrameSequence provenance of the live frame, or null when none is displayed.
  */
 public data class DeviceFrameSnapshot(
-  val deviceId: String,
-  val sequence: Long,
-  val capturedAtMs: Long,
-  val source: DeviceFrameSource,
-  val frameWidth: Int,
-  val frameHeight: Int,
-  val deviceWidth: Int,
-  val deviceHeight: Int,
-  val screenshotData: ByteArray?,
-  val hierarchy: ParsedHierarchy?,
-  val coordinateSpace: CoordinateSpace?,
-  val captureSequence: Long,
-  val frameContext: String,
-  val rotation: Int = 0,
-  val screenshotSequence: Long,
-  val hierarchySequence: Long,
-  val liveFrameSequence: Long?,
+    val deviceId: String,
+    val sequence: Long,
+    val capturedAtMs: Long,
+    val source: DeviceFrameSource,
+    val frameWidth: Int,
+    val frameHeight: Int,
+    val deviceWidth: Int,
+    val deviceHeight: Int,
+    val screenshotData: ByteArray?,
+    val hierarchy: ParsedHierarchy?,
+    val coordinateSpace: CoordinateSpace?,
+    val captureSequence: Long,
+    val frameContext: String,
+    val rotation: Int = 0,
+    val screenshotSequence: Long,
+    val hierarchySequence: Long,
+    val liveFrameSequence: Long?,
+    val nativeScale: Double? = null,
 ) {
   /**
    * The device-coordinate bounds a click through this snapshot must be mapped with. Callers build
@@ -230,14 +242,15 @@ public data class DeviceFrameSnapshot(
     if (this === other) return true
     if (other !is DeviceFrameSnapshot) return false
     return deviceId == other.deviceId &&
-      sequence == other.sequence &&
-      captureSequence == other.captureSequence &&
-      frameContext == other.frameContext &&
-      rotation == other.rotation &&
-      screenshotSequence == other.screenshotSequence &&
-      hierarchySequence == other.hierarchySequence &&
-      liveFrameSequence == other.liveFrameSequence &&
-      coordinateSpace == other.coordinateSpace
+        sequence == other.sequence &&
+        captureSequence == other.captureSequence &&
+        frameContext == other.frameContext &&
+        rotation == other.rotation &&
+        screenshotSequence == other.screenshotSequence &&
+        hierarchySequence == other.hierarchySequence &&
+        liveFrameSequence == other.liveFrameSequence &&
+        coordinateSpace == other.coordinateSpace &&
+        nativeScale == other.nativeScale
   }
 
   override fun hashCode(): Int {
@@ -250,6 +263,7 @@ public data class DeviceFrameSnapshot(
     result = 31 * result + hierarchySequence.hashCode()
     result = 31 * result + (liveFrameSequence?.hashCode() ?: 0)
     result = 31 * result + (coordinateSpace?.hashCode() ?: 0)
+    result = 31 * result + (nativeScale?.hashCode() ?: 0)
     return result
   }
 }

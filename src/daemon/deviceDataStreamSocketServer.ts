@@ -129,6 +129,11 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
    * checks) can tell converted frames from a pre-#4548 runner's and fall back accordingly.
    */
   coordinateSpace?: CoordinateSpace;
+  /**
+   * Point-to-physical-pixel ratio for a canonical-pixel frame. Present exactly with
+   * `coordinateSpace: "px"` so clients can scale physical gesture thresholds precisely.
+   */
+  nativeScale?: number;
   /** Opaque device-authored UI identity used by input validation. */
   frameContext?: string;
 }
@@ -188,6 +193,11 @@ interface PushScreenshotOptions {
    * omitted for a pre-#4548 runner, keeping the frame legacy point-space.
    */
   coordinateSpace?: CoordinateSpace;
+  /**
+   * Native scale bound when the screenshot request was initiated. It travels with the frame for
+   * the same reason as `coordinateSpace`: a later hierarchy must not relabel in-flight pixels.
+   */
+  nativeScale?: number;
   frameContext?: string;
   /** Device rotation reported by the platform when this screenshot was captured. */
   rotation?: number;
@@ -407,7 +417,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       data: annotated,
       hierarchyDiff: summary,
       captureSequence,
-      ...(scaleMetadata ? { coordinateSpace: COORDINATE_SPACE_PX } : {}),
+      ...(scaleMetadata
+        ? { coordinateSpace: COORDINATE_SPACE_PX, nativeScale: scaleMetadata.nativeScale }
+        : {}),
       frameContext,
       rotation: hierarchy.rotation,
     };
@@ -469,6 +481,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       // against mapping bounds that may not describe these pixels.
       captureSequence: claimMatchesPixels ? options.captureSequence : undefined,
       ...(options.coordinateSpace ? { coordinateSpace: options.coordinateSpace } : {}),
+      ...(options.nativeScale === undefined ? {} : { nativeScale: options.nativeScale }),
       frameContext: options.frameContext,
       rotation: options.rotation,
       screenshotMimeType,

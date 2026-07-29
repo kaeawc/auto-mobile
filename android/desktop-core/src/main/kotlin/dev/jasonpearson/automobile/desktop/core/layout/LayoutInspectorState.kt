@@ -267,6 +267,7 @@ class LayoutInspectorState(
     captureSequence: Long? = null,
     frameContext: String? = null,
     coordinateSpace: CoordinateSpace? = null,
+    nativeScale: Double? = null,
     rotation: Int? = null,
   ) {
     if (generation != null && generation != this.generation) return
@@ -293,6 +294,7 @@ class LayoutInspectorState(
         // describes and a retained snapshot can render its own bytes (issue #3348).
         data = data,
         coordinateSpace = coordinateSpace,
+        nativeScale = nativeScale,
         rotation = rotation,
       )
   }
@@ -309,6 +311,7 @@ class LayoutInspectorState(
     captureSequence: Long? = null,
     frameContext: String? = null,
     coordinateSpace: CoordinateSpace? = null,
+    nativeScale: Double? = null,
     captureRotation: Int? = null,
   ) {
     // Cancel any queued debounced update so a stale, later-firing job can't overwrite this
@@ -324,6 +327,7 @@ class LayoutInspectorState(
       captureSequence,
       frameContext,
       coordinateSpace,
+      nativeScale,
       captureRotation,
     )
   }
@@ -344,6 +348,7 @@ class LayoutInspectorState(
     captureSequence: Long? = null,
     frameContext: String? = null,
     coordinateSpace: CoordinateSpace? = null,
+    nativeScale: Double? = null,
     captureRotation: Int? = null,
   ) {
     debounceJob?.cancel()
@@ -359,6 +364,7 @@ class LayoutInspectorState(
         captureSequence,
         frameContext,
         coordinateSpace,
+        nativeScale,
         captureRotation,
       )
     }
@@ -376,6 +382,7 @@ class LayoutInspectorState(
     captureSequence: Long? = null,
     frameContext: String? = null,
     coordinateSpace: CoordinateSpace? = null,
+    nativeScale: Double? = null,
     captureRotation: Int? = null,
   ) {
     changedElementIds = changedIds
@@ -396,6 +403,7 @@ class LayoutInspectorState(
         rootWidth = parsed.root.bounds.width.takeIf { it > 0 } ?: 0,
         rootHeight = parsed.root.bounds.height.takeIf { it > 0 } ?: 0,
         coordinateSpace = coordinateSpace,
+        nativeScale = nativeScale,
         rotation = captureRotation,
       )
 

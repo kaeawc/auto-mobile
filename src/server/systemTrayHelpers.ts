@@ -1083,15 +1083,19 @@ const collectNotificationSubtreeTexts = (node: any): string[] => {
   return texts;
 };
 
+type UnmatchedNotificationDiagnostics = {
+  info: string;
+  debug: string;
+};
+
 // Diagnostic: when the shade is open but no notification matched the criteria,
-// summarize every notification-row candidate and the text found inside each so a
-// failing run reveals whether the target text is present-but-unmatched vs. absent
-// from the captured hierarchy (issue: persistent-push notification "not found").
+// keep the state summary safe for default logs and place notification payloads
+// in the debug-only detail.
 const buildUnmatchedNotificationDiagnostics = (
   viewHierarchy: ViewHierarchyResult,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[]
-): string => {
+): UnmatchedNotificationDiagnostics => {
   const candidates = collectNotificationCandidates(viewHierarchy);
   const lines: string[] = [];
   for (let index = 0; index < candidates.length; index++) {
@@ -1108,13 +1112,15 @@ const buildUnmatchedNotificationDiagnostics = (
     appId: criteria.appId,
     tapActionLabel: criteria.tapActionLabel
   });
-  const header =
+  const info =
     `[systemTray][diag] shade open but no notification matched. ` +
-    `criteria=${criteriaSummary} appMatchTexts=${JSON.stringify(appMatchTexts)} ` +
     `candidateCount=${candidates.length}`;
-  return candidates.length > 0
-    ? `${header}\n${lines.join("\n")}`
-    : `${header} (no notification-row candidates detected in the open shade)`;
+  const debug =
+    `${info} criteria=${criteriaSummary} appMatchTexts=${JSON.stringify(appMatchTexts)}` +
+    (candidates.length > 0
+      ? `\n${lines.join("\n")}`
+      : " (no notification-row candidates detected in the open shade)");
+  return { info, debug };
 };
 
 export const waitForNotificationMatch = async (
@@ -1143,7 +1149,8 @@ export const waitForNotificationMatch = async (
     observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
   }
 
-  let lastDiagSignature = "";
+  let lastInfoDiagSignature = "";
+  let lastDebugDiagSignature = "";
   let lastReexpandAtMs = timer.now();
   while (true) {
     const viewHierarchy = observation.viewHierarchy;
@@ -1155,9 +1162,13 @@ export const waitForNotificationMatch = async (
       // Diagnostic: log the candidate breakdown when the shade is open but nothing
       // matched, deduped so a 120s poll loop does not emit identical lines each tick.
       const diagnostics = buildUnmatchedNotificationDiagnostics(viewHierarchy, criteria, appMatchTexts);
-      if (diagnostics !== lastDiagSignature) {
-        lastDiagSignature = diagnostics;
-        logger.info(diagnostics);
+      if (diagnostics.info !== lastInfoDiagSignature) {
+        lastInfoDiagSignature = diagnostics.info;
+        logger.info(diagnostics.info);
+      }
+      if (diagnostics.debug !== lastDebugDiagSignature) {
+        lastDebugDiagSignature = diagnostics.debug;
+        logger.debug(diagnostics.debug);
       }
     } else {
       // The shade is not open. ensureSystemTrayOpen expanded it once, but a
@@ -1176,10 +1187,11 @@ export const waitForNotificationMatch = async (
       const trayDiag =
         `[systemTray][diag] shade NOT detected open during notification wait ` +
         `(hasHierarchy=${Boolean(observation.viewHierarchy)})`;
-      if (trayDiag !== lastDiagSignature) {
-        lastDiagSignature = trayDiag;
+      if (trayDiag !== lastInfoDiagSignature) {
+        lastInfoDiagSignature = trayDiag;
         logger.info(trayDiag);
       }
+      lastDebugDiagSignature = "";
     }
 
     if (timer.now() >= deadlineMs) {

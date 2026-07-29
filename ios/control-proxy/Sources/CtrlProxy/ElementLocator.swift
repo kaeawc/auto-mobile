@@ -143,7 +143,7 @@ public class ElementLocator: ElementLocating {
         /// Element types whose internal UIKit subviews produce same-type nested children
         /// in the XCUITest accessibility tree. These are collapsed during hierarchy building
         /// to avoid exposing non-interactive internal subviews (e.g. _UITextFieldRoundedRectBackgroundViewNeue).
-        private static let textInputElementTypes: Set<XCUIElement.ElementType> = [
+        private static let textInputElementTypes: [XCUIElement.ElementType] = [
             .textField,        // UITextField internal subviews
             .secureTextField,  // Same internals as UITextField with isSecureTextEntry
             .textView,         // TextKit 2 internal views (_UITextLayoutCanvasView)
@@ -538,11 +538,12 @@ public class ElementLocator: ElementLocating {
             // IMPORTANT: Create a FRESH XCUIApplication instance for each snapshot to avoid
             // stale accessibility cache. Cached instances may not reflect system-presented
             // alerts like permission dialogs.
-            let (snapshot, keyboardFocusFrame, screenMetrics) = try perfProvider.track("snapshot") {
+            let (snapshot, typedTextInputSnapshots, keyboardFocusFrame, screenMetrics) = try perfProvider.track("snapshot") {
                 try runOnMainThread {
                     let capture = try DeviceRotation.capture {
                         let freshApp = XCUIApplication(bundleIdentifier: bundleId)
                         let snap = try freshApp.snapshot()
+                        let typedInputs = Self.visibleHittableTextInputSnapshots(in: freshApp)
 
                         // Query keyboard focus via predicate — snapshot.hasFocus reflects
                         // UIKit focus (tvOS/iPad), not keyboard input focus on iPhone.
@@ -550,17 +551,18 @@ public class ElementLocator: ElementLocating {
                             .matching(NSPredicate(format: "hasKeyboardFocus == true"))
                             .firstMatch
                         let focusFrame: CGRect? = focused.exists ? focused.frame : nil
-                        return (snap, focusFrame, UIScreen.main.bounds)
+                        return (snap, typedInputs, focusFrame, UIScreen.main.bounds)
                     }
 
                     return (
                         capture.value.0,
                         capture.value.1,
+                        capture.value.2,
                         ScreenMetrics(
                             scale: Float(UIScreen.main.scale),
                             nativeScale: Float(UIScreen.main.nativeScale),
-                            fallbackWidth: Int(capture.value.2.width),
-                            fallbackHeight: Int(capture.value.2.height),
+                            fallbackWidth: Int(capture.value.3.width),
+                            fallbackHeight: Int(capture.value.3.height),
                             rotation: capture.rotation
                         )
                     )
@@ -581,15 +583,33 @@ public class ElementLocator: ElementLocating {
                 )
             }
 
+            let hierarchyWithTypedTextInputs = perfProvider.track("mergeTypedTextInputs") {
+                let candidates = typedTextInputSnapshots.enumerated().map { index, textInputSnapshot in
+                    buildElementInfoFromSnapshot(
+                        textInputSnapshot,
+                        depth: 1,
+                        screenBounds: screenBounds,
+                        parentPath: "typed-text-input",
+                        childIndex: index,
+                        keyboardFocusFrame: keyboardFocusFrame,
+                        disableAllFiltering: disableAllFiltering
+                    )
+                }
+                return ElementLocator.mergeMissingTextInputCandidates(
+                    into: rawElement,
+                    candidates: candidates
+                )
+            }
+
             // Apply optimization - flatten structural wrappers and filter empty nodes
             // Skip optimization when disableAllFiltering is true (for raw hierarchy debugging)
             let rootElement: UIElementInfo
             if disableAllFiltering {
-                rootElement = rawElement
+                rootElement = hierarchyWithTypedTextInputs
             } else {
                 rootElement = perfProvider.track("optimize") {
-                    let optimizedElements = optimizeHierarchy(rawElement, isRoot: true)
-                    return optimizedElements.first ?? rawElement
+                    let optimizedElements = optimizeHierarchy(hierarchyWithTypedTextInputs, isRoot: true)
+                    return optimizedElements.first ?? hierarchyWithTypedTextInputs
                 }
             }
 
@@ -706,6 +726,28 @@ public class ElementLocator: ElementLocating {
                 rotation: hierarchyRotation,
                 fallbackToSpringboard: tracker.didFallbackToSpringboard ? true : nil
             )
+        }
+
+        /// Snapshot the text inputs whose typed XCTest queries can expose controls
+        /// absent from the application's recursive snapshot tree.
+        private static func visibleHittableTextInputSnapshots(in app: XCUIApplication) -> [XCUIElementSnapshot] {
+            var snapshots: [XCUIElementSnapshot] = []
+
+            for type in textInputElementTypes {
+                let candidates = app.descendants(matching: type).allElementsBoundByIndex
+                for candidate in candidates {
+                    guard candidate.exists,
+                          candidate.isHittable,
+                          !candidate.frame.isEmpty,
+                          let snapshot = try? candidate.snapshot()
+                    else {
+                        continue
+                    }
+                    snapshots.append(snapshot)
+                }
+            }
+
+            return snapshots
         }
 
         /// Get system alerts from the app snapshot and springboard.
@@ -929,6 +971,7 @@ public class ElementLocator: ElementLocating {
                 let isTextInput = snapshot.elementType == .textField
                     || snapshot.elementType == .textView
                     || snapshot.elementType == .secureTextField
+                    || snapshot.elementType == .searchField
                 hasFocus = framesMatch && isTextInput
             } else {
                 hasFocus = snapshot.hasFocus
@@ -938,7 +981,7 @@ public class ElementLocator: ElementLocating {
             // Only include actions for text input elements (click is implied by clickable)
             var actions: [String]?
             if isEnabled && (snapshot.elementType == .textField || snapshot.elementType == .textView ||
-                snapshot.elementType == .secureTextField)
+                snapshot.elementType == .secureTextField || snapshot.elementType == .searchField)
             {
                 actions = ["set_text", "clear_text"]
             }
@@ -1178,7 +1221,7 @@ public class ElementLocator: ElementLocating {
             case .checkBox: return "checkbox"
             case .radioButton: return "radio"
             case .slider: return "slider"
-            case .textField, .textView, .secureTextField: return "textfield"
+            case .textField, .textView, .secureTextField, .searchField: return "textfield"
             case .image: return "image"
             case .staticText: return "text"
             case .table, .collectionView: return "list"
@@ -1464,6 +1507,80 @@ public class ElementLocator: ElementLocating {
         "UITextView",
         "UISearchBar",
     ]
+
+    /// Adds typed XCTest text-input candidates that the recursive application
+    /// snapshot did not contain. Fallback nodes are leaves below the application
+    /// root because XCTest does not expose a reliable parent for this path.
+    static func mergeMissingTextInputCandidates(
+        into root: UIElementInfo,
+        candidates: [UIElementInfo]
+    ) -> UIElementInfo {
+        var existing = allNodes(in: root)
+        var rootChildren = root.node ?? []
+
+        for candidate in candidates {
+            guard !existing.contains(where: { isSameTextInput($0, candidate) }) else {
+                continue
+            }
+
+            let leaf = copying(candidate, node: nil)
+            rootChildren.append(leaf)
+            existing.append(leaf)
+        }
+
+        return copying(root, node: rootChildren.isEmpty ? nil : rootChildren)
+    }
+
+    private static func allNodes(in element: UIElementInfo) -> [UIElementInfo] {
+        [element] + (element.node ?? []).flatMap(allNodes)
+    }
+
+    private static func isSameTextInput(_ lhs: UIElementInfo, _ rhs: UIElementInfo) -> Bool {
+        guard lhs.resourceId == rhs.resourceId,
+              lhs.className == rhs.className,
+              let lhsBounds = lhs.bounds,
+              let rhsBounds = rhs.bounds
+        else {
+            return false
+        }
+
+        return lhsBounds.left == rhsBounds.left
+            && lhsBounds.top == rhsBounds.top
+            && lhsBounds.right == rhsBounds.right
+            && lhsBounds.bottom == rhsBounds.bottom
+    }
+
+    private static func copying(_ element: UIElementInfo, node: [UIElementInfo]?) -> UIElementInfo {
+        UIElementInfo(
+            text: element.text,
+            value: element.value,
+            textSize: element.textSize,
+            contentDesc: element.contentDesc,
+            resourceId: element.resourceId,
+            className: element.className,
+            bounds: element.bounds,
+            clickable: element.clickable,
+            enabled: element.enabled,
+            focusable: element.focusable,
+            focused: element.focused,
+            accessibilityFocused: element.accessibilityFocused,
+            scrollable: element.scrollable,
+            password: element.password,
+            checkable: element.checkable,
+            checked: element.checked,
+            selected: element.selected,
+            longClickable: element.longClickable,
+            testTag: element.testTag,
+            role: element.role,
+            stateDescription: element.stateDescription,
+            errorMessage: element.errorMessage,
+            hintText: element.hintText,
+            viewId: element.viewId,
+            extras: element.extras,
+            actions: element.actions,
+            node: node
+        )
+    }
 
     /// Check whether a UIElementInfo carries any unique identifying information
     /// (text, resourceId, contentDesc, hintText). Elements without these are

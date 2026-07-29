@@ -1758,7 +1758,8 @@ jobs:
             -xctestrun "${XCTESTRUN}" \
             -destination "id=${SIMULATOR_UDID}" \
             -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests \
-            -only-testing:CtrlProxyTests/RotationChangeGenerationTests/testGestureOrientationKeepsLandscapeSceneWhenDeviceIsFaceUp
+            -only-testing:CtrlProxyTests/RotationChangeGenerationTests/testGestureOrientationKeepsLandscapeSceneWhenDeviceIsFaceUp \
+            -only-testing:CtrlProxyUITests/CtrlProxyUITests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree
 
       # Re-sync the backgrounded ffmpeg install before its only consumer. With the
       # install hoisted out, this step's 10-minute cap now covers the test alone.

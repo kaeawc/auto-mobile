@@ -105,6 +105,7 @@ nav:
           - 'Overview': design-docs/mcp/index.md
           - 'Tools': design-docs/mcp/tools.md
           - 'App File Service': design-docs/mcp/app-file-service.md
+          - 'SDK v2 / Stateless Migration': design-docs/mcp/sdk-v2-stateless-migration.md
           - 'Observe':
              - 'Overview': design-docs/mcp/observe/index.md
              - 'Appearance Sync': design-docs/mcp/observe/appearance.md

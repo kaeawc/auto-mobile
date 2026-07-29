@@ -21,7 +21,7 @@ public sealed interface DeviceDragDecision {
    * [durationMs] is the client policy duration.
    */
   public data class Swipe(val start: DevicePoint, val end: DevicePoint, val durationMs: Int) :
-      DeviceDragDecision
+    DeviceDragDecision
 
   /** Send nothing. [reason] is diagnostic only; no daemon request or error is produced. */
   public data class Ignored(val reason: DeviceDragRejection) : DeviceDragDecision
@@ -56,15 +56,15 @@ public object DeviceDragGesturePolicy {
    * unreachable distance. Legacy frames remain in logical points.
    */
   public fun minSwipeDistance(
-      coordinateSpace: CoordinateSpace?,
-      nativeScale: Double? = null,
+    coordinateSpace: CoordinateSpace?,
+    nativeScale: Double? = null,
   ): Double =
-      if (coordinateSpace == CoordinateSpace.Pixels) {
-        nativeScale?.takeIf { it.isFinite() && it > 0.0 }?.let { MIN_SWIPE_DISTANCE * it }
-            ?: Double.POSITIVE_INFINITY
-      } else {
-        MIN_SWIPE_DISTANCE.toDouble()
-      }
+    if (coordinateSpace == CoordinateSpace.Pixels) {
+      nativeScale?.takeIf { it.isFinite() && it > 0.0 }?.let { MIN_SWIPE_DISTANCE * it }
+        ?: Double.POSITIVE_INFINITY
+    } else {
+      MIN_SWIPE_DISTANCE.toDouble()
+    }
 
   /**
    * The duration handed to `input/swipe`, in milliseconds.
@@ -81,12 +81,12 @@ public object DeviceDragGesturePolicy {
    * Missing canonical-pixel scale metadata fails closed.
    */
   public fun evaluate(
-      start: DevicePoint,
-      end: DevicePoint,
-      deviceWidth: Int,
-      deviceHeight: Int,
-      coordinateSpace: CoordinateSpace? = null,
-      nativeScale: Double? = null,
+    start: DevicePoint,
+    end: DevicePoint,
+    deviceWidth: Int,
+    deviceHeight: Int,
+    coordinateSpace: CoordinateSpace? = null,
+    nativeScale: Double? = null,
   ): DeviceDragDecision {
     if (deviceWidth <= 0 || deviceHeight <= 0) {
       return DeviceDragDecision.Ignored(DeviceDragRejection.NoAddressableScreen)
@@ -100,9 +100,9 @@ public object DeviceDragGesturePolicy {
       return DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold)
     }
     return DeviceDragDecision.Swipe(
-        start = start,
-        end = clampedEnd,
-        durationMs = SWIPE_DURATION_MS,
+      start = start,
+      end = clampedEnd,
+      durationMs = SWIPE_DURATION_MS,
     )
   }
 }

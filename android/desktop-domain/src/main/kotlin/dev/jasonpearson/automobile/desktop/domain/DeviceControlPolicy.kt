@@ -95,14 +95,14 @@ public sealed interface DeviceControlDecision {
  * decision needs, so the decision itself is a pure function of its inputs.
  */
 public data class DeviceControlInputs(
-    val enabled: Boolean,
-    val realDeviceMode: Boolean,
-    val selectedDeviceId: String?,
-    val transportSupportsInput: Boolean,
-    val observationStreamConnected: Boolean,
-    val screenshot: ScreenshotFrameFacts?,
-    val hierarchy: HierarchyFrameFacts?,
-    val liveFrame: LiveFrameFacts?,
+  val enabled: Boolean,
+  val realDeviceMode: Boolean,
+  val selectedDeviceId: String?,
+  val transportSupportsInput: Boolean,
+  val observationStreamConnected: Boolean,
+  val screenshot: ScreenshotFrameFacts?,
+  val hierarchy: HierarchyFrameFacts?,
+  val liveFrame: LiveFrameFacts?,
 )
 
 /**
@@ -164,7 +164,7 @@ public object DeviceControlPolicy {
     if (!inputs.enabled) return blocked(DeviceControlBlockReason.NotEnabled)
     if (!inputs.realDeviceMode) return blocked(DeviceControlBlockReason.NotRealDeviceMode)
     val selected =
-        inputs.selectedDeviceId ?: return blocked(DeviceControlBlockReason.NoDeviceSelected)
+      inputs.selectedDeviceId ?: return blocked(DeviceControlBlockReason.NoDeviceSelected)
     if (!inputs.transportSupportsInput) {
       return blocked(DeviceControlBlockReason.TransportCannotCarryInput)
     }
@@ -194,8 +194,8 @@ public object DeviceControlPolicy {
     // there is nothing to pair and nothing safe to dispatch. An ABSENT declaration is untouched:
     // that is the legacy point-space fallback, and it continues below.
     if (
-        screenshot.coordinateSpace is CoordinateSpace.Unrecognized ||
-            hierarchy.coordinateSpace is CoordinateSpace.Unrecognized
+      screenshot.coordinateSpace is CoordinateSpace.Unrecognized ||
+        hierarchy.coordinateSpace is CoordinateSpace.Unrecognized
     ) {
       return blocked(DeviceControlBlockReason.UnsupportedCoordinateSpace)
     }
@@ -242,11 +242,11 @@ public object DeviceControlPolicy {
     val screenshotRotation = screenshot.rotation
     val hierarchyRotation = hierarchy.rotation
     if (
-        screenshotRotation == null ||
-            hierarchyRotation == null ||
-            screenshotRotation !in 0..3 ||
-            hierarchyRotation !in 0..3 ||
-            screenshotRotation != hierarchyRotation
+      screenshotRotation == null ||
+        hierarchyRotation == null ||
+        screenshotRotation !in 0..3 ||
+        hierarchyRotation !in 0..3 ||
+        screenshotRotation != hierarchyRotation
     ) {
       return blocked(DeviceControlBlockReason.RotationMismatch)
     }
@@ -270,10 +270,10 @@ public object DeviceControlPolicy {
       return blocked(DeviceControlBlockReason.StaleFrame)
     }
     if (
-        liveFrame != null &&
-            (liveFrame.rotation == null ||
-                liveFrame.rotation !in 0..3 ||
-                liveFrame.rotation != screenshotRotation)
+      liveFrame != null &&
+        (liveFrame.rotation == null ||
+          liveFrame.rotation !in 0..3 ||
+          liveFrame.rotation != screenshotRotation)
     ) {
       // A WebRTC frame has no observation capture identity, so its own rotation provenance is the
       // only evidence that the displayed pixels still match the hierarchy bounds. In particular,
@@ -314,58 +314,57 @@ public object DeviceControlPolicy {
         return blocked(DeviceControlBlockReason.LiveFrameGeometryUnverifiable)
       }
     } else if (
-        !isGeometryConsistent(
-            frameWidth = frameWidth,
-            frameHeight = frameHeight,
-            deviceWidth = deviceWidth,
-            deviceHeight = deviceHeight,
-            // A polled screenshot may arrive in native pixel orientation (notably iOS) and the
-            // renderer
-            // rotates it, so an orientation difference there is expected.
-            allowRotation = true,
-            coordinateSpace = pairedSpace,
-        )
+      !isGeometryConsistent(
+        frameWidth = frameWidth,
+        frameHeight = frameHeight,
+        deviceWidth = deviceWidth,
+        deviceHeight = deviceHeight,
+        // A polled screenshot may arrive in native pixel orientation (notably iOS) and the
+        // renderer
+        // rotates it, so an orientation difference there is expected.
+        allowRotation = true,
+        coordinateSpace = pairedSpace,
+      )
     ) {
       return blocked(DeviceControlBlockReason.GeometryMismatch)
     }
 
     return DeviceControlDecision.Available(
-        DeviceFrameSnapshot(
-            deviceId = selected,
-            // Ordered by the OBSERVATION-source counter alone. The live frame's sequence comes from
-            // a
-            // different counter domain entirely (a per-mirror-connection counter), so folding it in
-            // with maxOf would let the snapshot sequence jump to the mirror's value while a live
-            // frame
-            // is present and then go BACKWARDS when it clears — breaking both the monotonicity this
-            // field promises and the refresh policy's "strictly greater sequence" settle condition.
-            // The live frame's provenance is carried separately in liveFrameSequence.
-            sequence = maxOf(screenshot.sequence, hierarchy.sequence),
-            capturedAtMs = liveFrame?.receivedAtMs ?: screenshot.receivedAtMs,
-            source =
-                if (liveFrame != null) DeviceFrameSource.LiveVideo
-                else DeviceFrameSource.Screenshot,
-            frameWidth = frameWidth,
-            frameHeight = frameHeight,
-            deviceWidth = deviceWidth,
-            deviceHeight = deviceHeight,
-            screenshotData = screenshot.data,
-            hierarchy = hierarchy.hierarchy,
-            // Bind the agreed space to the snapshot, exactly as captureSequence is bound: a
-            // snapshot
-            // outlives the facts it was built from (the post-input refresh retains it), and the
-            // unit
-            // its
-            // coordinates are in must travel with it rather than be re-derived at dispatch time.
-            coordinateSpace = pairedSpace,
-            captureSequence = captureSequence,
-            frameContext = frameContext,
-            rotation = screenshotRotation,
-            screenshotSequence = screenshot.sequence,
-            hierarchySequence = hierarchy.sequence,
-            liveFrameSequence = liveFrame?.sequence,
-            nativeScale = pairedNativeScale,
-        )
+      DeviceFrameSnapshot(
+        deviceId = selected,
+        // Ordered by the OBSERVATION-source counter alone. The live frame's sequence comes from
+        // a
+        // different counter domain entirely (a per-mirror-connection counter), so folding it in
+        // with maxOf would let the snapshot sequence jump to the mirror's value while a live
+        // frame
+        // is present and then go BACKWARDS when it clears — breaking both the monotonicity this
+        // field promises and the refresh policy's "strictly greater sequence" settle condition.
+        // The live frame's provenance is carried separately in liveFrameSequence.
+        sequence = maxOf(screenshot.sequence, hierarchy.sequence),
+        capturedAtMs = liveFrame?.receivedAtMs ?: screenshot.receivedAtMs,
+        source =
+          if (liveFrame != null) DeviceFrameSource.LiveVideo else DeviceFrameSource.Screenshot,
+        frameWidth = frameWidth,
+        frameHeight = frameHeight,
+        deviceWidth = deviceWidth,
+        deviceHeight = deviceHeight,
+        screenshotData = screenshot.data,
+        hierarchy = hierarchy.hierarchy,
+        // Bind the agreed space to the snapshot, exactly as captureSequence is bound: a
+        // snapshot
+        // outlives the facts it was built from (the post-input refresh retains it), and the
+        // unit
+        // its
+        // coordinates are in must travel with it rather than be re-derived at dispatch time.
+        coordinateSpace = pairedSpace,
+        captureSequence = captureSequence,
+        frameContext = frameContext,
+        rotation = screenshotRotation,
+        screenshotSequence = screenshot.sequence,
+        hierarchySequence = hierarchy.sequence,
+        liveFrameSequence = liveFrame?.sequence,
+        nativeScale = pairedNativeScale,
+      )
     )
   }
 
@@ -379,10 +378,10 @@ public object DeviceControlPolicy {
    */
   public fun isSnapshotFresh(snapshot: DeviceFrameSnapshot, nowMs: Long): Boolean {
     val maxAgeMs =
-        when (snapshot.source) {
-          DeviceFrameSource.LiveVideo -> LIVE_FRAME_MAX_AGE_MS
-          DeviceFrameSource.Screenshot -> SCREENSHOT_MAX_AGE_MS
-        }
+      when (snapshot.source) {
+        DeviceFrameSource.LiveVideo -> LIVE_FRAME_MAX_AGE_MS
+        DeviceFrameSource.Screenshot -> SCREENSHOT_MAX_AGE_MS
+      }
     return nowMs - snapshot.capturedAtMs <= maxAgeMs
   }
 
@@ -398,19 +397,19 @@ public object DeviceControlPolicy {
    * a transition is in flight, and a transition should take the conservative path.
    */
   private fun pairedCoordinateSpace(
-      screenshot: ScreenshotFrameFacts,
-      hierarchy: HierarchyFrameFacts,
+    screenshot: ScreenshotFrameFacts,
+    hierarchy: HierarchyFrameFacts,
   ): CoordinateSpace? =
-      screenshot.coordinateSpace.takeIf { it != null && it == hierarchy.coordinateSpace }
+    screenshot.coordinateSpace.takeIf { it != null && it == hierarchy.coordinateSpace }
 
   /**
    * Native scale is meaningful only for canonical-pixel frames. A controllable snapshot requires
    * both messages to carry the same finite, positive value.
    */
   private fun pairedNativeScale(
-      screenshot: ScreenshotFrameFacts,
-      hierarchy: HierarchyFrameFacts,
-      coordinateSpace: CoordinateSpace?,
+    screenshot: ScreenshotFrameFacts,
+    hierarchy: HierarchyFrameFacts,
+    coordinateSpace: CoordinateSpace?,
   ): Double? {
     if (coordinateSpace != CoordinateSpace.Pixels) return null
     val scale = screenshot.nativeScale ?: return null
@@ -449,12 +448,12 @@ public object DeviceControlPolicy {
    * the displayed frame itself and the two are consistent by construction.
    */
   public fun isGeometryConsistent(
-      frameWidth: Int,
-      frameHeight: Int,
-      deviceWidth: Int,
-      deviceHeight: Int,
-      allowRotation: Boolean = true,
-      coordinateSpace: CoordinateSpace? = null,
+    frameWidth: Int,
+    frameHeight: Int,
+    deviceWidth: Int,
+    deviceHeight: Int,
+    allowRotation: Boolean = true,
+    coordinateSpace: CoordinateSpace? = null,
   ): Boolean {
     if (frameWidth <= 0 || frameHeight <= 0) return false
     if (deviceWidth <= 0 || deviceHeight <= 0) return true
@@ -469,10 +468,10 @@ public object DeviceControlPolicy {
     if (!allowRotation) return matchesDirect
     val rotatedAspect = 1f / deviceAspect
     val matchesRotated =
-        abs(frameAspect - rotatedAspect) <= GEOMETRY_ASPECT_TOLERANCE * rotatedAspect
+      abs(frameAspect - rotatedAspect) <= GEOMETRY_ASPECT_TOLERANCE * rotatedAspect
     return matchesDirect || matchesRotated
   }
 
   private fun blocked(reason: DeviceControlBlockReason): DeviceControlDecision =
-      DeviceControlDecision.Blocked(reason)
+    DeviceControlDecision.Blocked(reason)
 }

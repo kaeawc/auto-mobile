@@ -29,14 +29,14 @@ class CoordinateSpaceReceiptWiringTest {
    * matches on a normalized form rather than on one particular line breaking.
    */
   private val hook =
-      "deviceControlSession.onObservationSpaceDeclared(update.coordinateSpace,update.captureSequence,update.nativeScale)"
+    "deviceControlSession.onObservationSpaceDeclared(update.coordinateSpace,update.captureSequence,update.nativeScale)"
 
   /**
    * Collapse whitespace and drop the trailing comma ktfmt adds when it wraps an argument list, so
    * only the CALL matters and not how it happens to be laid out.
    */
   private fun normalize(source: String): String =
-      source.replace(Regex("\\s+"), "").replace(",)", ")")
+    source.replace(Regex("\\s+"), "").replace(",)", ")")
 
   /**
    * One collector's source region: from where it starts consuming the flow to where it writes the
@@ -50,18 +50,18 @@ class CoordinateSpaceReceiptWiringTest {
   private data class CollectorSpan(val name: String, val start: String, val apply: String)
 
   private val collectors =
-      listOf(
-          CollectorSpan(
-              name = "hierarchy",
-              start = "liveStreamClient.hierarchyUpdates.collect { update ->",
-              apply = "layoutInspectorState.applyHierarchyUpdate(",
-          ),
-          CollectorSpan(
-              name = "screenshot",
-              start = "liveStreamClient.screenshotUpdates.collect { update ->",
-              apply = "layoutInspectorState.updateScreenshot(",
-          ),
-      )
+    listOf(
+      CollectorSpan(
+        name = "hierarchy",
+        start = "liveStreamClient.hierarchyUpdates.collect { update ->",
+        apply = "layoutInspectorState.applyHierarchyUpdate(",
+      ),
+      CollectorSpan(
+        name = "screenshot",
+        start = "liveStreamClient.screenshotUpdates.collect { update ->",
+        apply = "layoutInspectorState.updateScreenshot(",
+      ),
+    )
 
   @Test
   fun `the hierarchy collector declares the coordinate space before applying the update`() {
@@ -84,23 +84,23 @@ class CoordinateSpaceReceiptWiringTest {
     val source = readAutoMobileContentSource()
     val start = source.indexOf(span.start)
     assertTrue(
-        start >= 0,
-        "could not find the ${span.name} collector (`${span.start}`) in AutoMobileContent.kt — if it " +
-            "was renamed, update this guard rather than deleting it (issue #4550)",
+      start >= 0,
+      "could not find the ${span.name} collector (`${span.start}`) in AutoMobileContent.kt — if it " +
+        "was renamed, update this guard rather than deleting it (issue #4550)",
     )
     val applyIndex = source.indexOf(span.apply, start)
     assertTrue(
-        applyIndex > start,
-        "could not find `${span.apply}` after the ${span.name} collector in AutoMobileContent.kt",
+      applyIndex > start,
+      "could not find `${span.apply}` after the ${span.name} collector in AutoMobileContent.kt",
     )
 
     val region = normalize(source.substring(start, applyIndex))
     assertTrue(
-        region.contains(normalize(hook)),
-        "The ${span.name} collector must call `$hook` at RECEIPT — inside its own body and BEFORE " +
-            "`${span.apply}` (issue #4550). Detecting the transition from the frame facts instead is " +
-            "one debounce interval too late, and a tap in that window is mapped in the old coordinate " +
-            "space while the daemon already converts under the new one.",
+      region.contains(normalize(hook)),
+      "The ${span.name} collector must call `$hook` at RECEIPT — inside its own body and BEFORE " +
+        "`${span.apply}` (issue #4550). Detecting the transition from the frame facts instead is " +
+        "one debounce interval too late, and a tap in that window is mapped in the old coordinate " +
+        "space while the daemon already converts under the new one.",
     )
   }
 
@@ -112,20 +112,20 @@ class CoordinateSpaceReceiptWiringTest {
     // Try the common anchors, then walk up as a fallback. Path separators are normalized by File.
     val anchors = listOf(rel, "desktop-core/$rel", "android/desktop-core/$rel")
     anchors
-        .map(::File)
-        .firstOrNull { it.isFile }
-        ?.let {
-          return it
-        }
+      .map(::File)
+      .firstOrNull { it.isFile }
+      ?.let {
+        return it
+      }
 
     var dir: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
     while (dir != null) {
       anchors
-          .map { File(dir, it) }
-          .firstOrNull { it.isFile }
-          ?.let {
-            return it
-          }
+        .map { File(dir, it) }
+        .firstOrNull { it.isFile }
+        ?.let {
+          return it
+        }
       dir = dir.parentFile
     }
     fail("Could not locate AutoMobileContent.kt from ${System.getProperty("user.dir")}")

@@ -71,15 +71,15 @@ import kotlinx.coroutines.withContext
  * @param ioDispatcher where the blocking daemon call runs.
  */
 class DeviceControlSession(
-    scope: CoroutineScope,
-    private val clientProvider: () -> AutoMobileClient?,
-    private val platform: () -> String,
-    private val nowMs: () -> Long,
-    private val publishError: (String?) -> Unit,
-    private val uiContext: CoroutineContext = Dispatchers.Main,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-    private val forwarder: DeviceControlInputForwarder = DeviceControlInputForwarder(),
-    private val refreshTracker: PostInputRefreshTracker = PostInputRefreshTracker(),
+  scope: CoroutineScope,
+  private val clientProvider: () -> AutoMobileClient?,
+  private val platform: () -> String,
+  private val nowMs: () -> Long,
+  private val publishError: (String?) -> Unit,
+  private val uiContext: CoroutineContext = Dispatchers.Main,
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  private val forwarder: DeviceControlInputForwarder = DeviceControlInputForwarder(),
+  private val refreshTracker: PostInputRefreshTracker = PostInputRefreshTracker(),
 ) {
   /**
    * Newest-attempt claim, folded in from the former `ControlTapErrorGate`. Actions are
@@ -271,7 +271,7 @@ class DeviceControlSession(
     if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
       // Hold the clicked snapshot on screen until something supersedes it (or the wait times out).
       val settled =
-          if (live != null) refreshTracker.onSnapshot(live, now) else refreshTracker.onTick(now)
+        if (live != null) refreshTracker.onSnapshot(live, now) else refreshTracker.onTick(now)
       // On settle, adopt whatever is live — INCLUDING null. A wait can time out with no live
       // snapshot at all (screenshots keep arriving but hierarchy updates stall, so nothing pairs),
       // and holding the pre-input frame in that case would pin the view to it indefinitely,
@@ -288,15 +288,15 @@ class DeviceControlSession(
     // view in Control for the rest of the 3s wait, and each successful tap restarts that wait, so
     // stale content could stay actionable indefinitely.
     interactionSnapshot =
-        if (staleContextRejectedFrameContext != null) {
-          null
-        } else if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
-          retainedIfStillActionable(decision, inputs, now)?.takeIf {
-            streamFrameContext.matches(it.frameContext)
-          }
-        } else {
-          live?.takeIf { streamFrameContext.matches(it.frameContext) }
+      if (staleContextRejectedFrameContext != null) {
+        null
+      } else if (refreshTracker.state == PostInputRefreshState.AwaitingSnapshot) {
+        retainedIfStillActionable(decision, inputs, now)?.takeIf {
+          streamFrameContext.matches(it.frameContext)
         }
+      } else {
+        live?.takeIf { streamFrameContext.matches(it.frameContext) }
+      }
     return decision
   }
 
@@ -320,9 +320,9 @@ class DeviceControlSession(
    * when both are current — and neither subsumes the other.
    */
   private fun retainedIfStillActionable(
-      decision: DeviceControlDecision,
-      inputs: DeviceControlInputs,
-      nowMs: Long,
+    decision: DeviceControlDecision,
+    inputs: DeviceControlInputs,
+    nowMs: Long,
   ): DeviceFrameSnapshot? {
     val retained = renderSnapshot ?: return null
     when ((decision as? DeviceControlDecision.Blocked)?.reason) {
@@ -357,19 +357,19 @@ class DeviceControlSession(
    */
   private fun resetOnCoordinateSpaceTransition(inputs: DeviceControlInputs) {
     val screenshotFlipped =
-        inputs.screenshot?.let { screenshotFactSpace.observe(it.coordinateSpace) }
+      inputs.screenshot?.let { screenshotFactSpace.observe(it.coordinateSpace) }
     val hierarchyFlipped = inputs.hierarchy?.let { hierarchyFactSpace.observe(it.coordinateSpace) }
     val screenshotScaleChanged =
-        inputs.screenshot?.let { screenshotFactNativeScale.observe(it.nativeScale) }
+      inputs.screenshot?.let { screenshotFactNativeScale.observe(it.nativeScale) }
     val hierarchyScaleChanged =
-        inputs.hierarchy?.let { hierarchyFactNativeScale.observe(it.nativeScale) }
+      inputs.hierarchy?.let { hierarchyFactNativeScale.observe(it.nativeScale) }
     // The trackers already hold the new space, so this reset must NOT forget them — otherwise the
     // very next evaluate would re-establish a baseline and could see the same flip twice.
     if (
-        screenshotFlipped == true ||
-            hierarchyFlipped == true ||
-            screenshotScaleChanged == true ||
-            hierarchyScaleChanged == true
+      screenshotFlipped == true ||
+        hierarchyFlipped == true ||
+        screenshotScaleChanged == true ||
+        hierarchyScaleChanged == true
     ) {
       resetPreservingSpaceBaseline()
     }
@@ -409,9 +409,9 @@ class DeviceControlSession(
    * so a hierarchy's id is always the newest at the time it is sent and can never be rejected here.
    */
   fun onObservationSpaceDeclared(
-      coordinateSpace: CoordinateSpace?,
-      captureSequence: Long?,
-      nativeScale: Double? = null,
+    coordinateSpace: CoordinateSpace?,
+    captureSequence: Long?,
+    nativeScale: Double? = null,
   ) {
     val lastSeen = lastObservedSpaceCapture
     if (captureSequence == null && lastSeen != null) return
@@ -461,16 +461,16 @@ class DeviceControlSession(
    * nothing to contradict.
    */
   private fun coordinatesAreStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
-      staleContextRejectedFrameContext == null &&
-          streamSpace.matches(snapshot.coordinateSpace) &&
-          streamNativeScale.matches(snapshot.nativeScale) &&
-          streamFrameContext.matches(snapshot.frameContext) &&
-          rotationIsStillDispatchable(snapshot)
+    staleContextRejectedFrameContext == null &&
+      streamSpace.matches(snapshot.coordinateSpace) &&
+      streamNativeScale.matches(snapshot.nativeScale) &&
+      streamFrameContext.matches(snapshot.frameContext) &&
+      rotationIsStillDispatchable(snapshot)
 
   private fun rotationIsStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
-      lastProvenRotations.let { rotations ->
-        rotations == null || (rotations.size == 1 && snapshot.rotation in rotations)
-      }
+    lastProvenRotations.let { rotations ->
+      rotations == null || (rotations.size == 1 && snapshot.rotation in rotations)
+    }
 
   /**
    * A source can arrive before it pairs with its counterpart during a rotation. That unpaired
@@ -478,15 +478,15 @@ class DeviceControlSession(
    * useful but never retain their old coordinate mapping for a second input.
    */
   private fun DeviceControlInputs.hasProvenRotationDifferentFrom(retainedRotation: Int): Boolean =
-      listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation).any {
-        it in 0..3 && it != retainedRotation
-      }
+    listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation).any {
+      it in 0..3 && it != retainedRotation
+    }
 
   /** All rotations any source has PROVEN (values in `0..3`), independent of source order. */
   private fun DeviceControlInputs.provenRotations(): Set<Int> =
-      listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation)
-          .filter { it in 0..3 }
-          .toSet()
+    listOfNotNull(screenshot?.rotation, hierarchy?.rotation, liveFrame?.rotation)
+      .filter { it in 0..3 }
+      .toSet()
 
   /**
    * Keep a proven disagreement until every currently reported source can prove an agreeing
@@ -500,9 +500,9 @@ class DeviceControlSession(
   }
 
   private fun DeviceControlInputs.hasUnprovenReportedRotation(): Boolean =
-      screenshot?.let { !it.rotation.isProvenRotation() } == true ||
-          hierarchy?.let { !it.rotation.isProvenRotation() } == true ||
-          liveFrame?.let { !it.rotation.isProvenRotation() } == true
+    screenshot?.let { !it.rotation.isProvenRotation() } == true ||
+      hierarchy?.let { !it.rotation.isProvenRotation() } == true ||
+      liveFrame?.let { !it.rotation.isProvenRotation() } == true
 
   private fun Int?.isProvenRotation(): Boolean = this != null && this in 0..3
 
@@ -524,11 +524,11 @@ class DeviceControlSession(
     if (!coordinatesAreStillDispatchable(snapshot)) return false
     return enqueue { client, platformName, token ->
       DeviceControlInputCommand.Tap(
-          point = point,
-          client = client,
-          platform = platformName,
-          snapshot = snapshot,
-          token = token,
+        point = point,
+        client = client,
+        platform = platformName,
+        snapshot = snapshot,
+        token = token,
       )
     }
   }
@@ -551,28 +551,28 @@ class DeviceControlSession(
   fun swipe(snapshot: DeviceFrameSnapshot, start: DevicePoint, end: DevicePoint): Boolean {
     if (!coordinatesAreStillDispatchable(snapshot)) return false
     val decision =
-        DeviceDragGesturePolicy.evaluate(
-            start = start,
-            end = end,
-            deviceWidth = snapshot.deviceWidth,
-            deviceHeight = snapshot.deviceHeight,
-            // The threshold is a PHYSICAL distance, so its numeric value depends on the unit these
-            // endpoints are in. Read from the clicked snapshot, never from current stream state.
-            coordinateSpace = snapshot.coordinateSpace,
-            nativeScale = snapshot.nativeScale,
-        )
+      DeviceDragGesturePolicy.evaluate(
+        start = start,
+        end = end,
+        deviceWidth = snapshot.deviceWidth,
+        deviceHeight = snapshot.deviceHeight,
+        // The threshold is a PHYSICAL distance, so its numeric value depends on the unit these
+        // endpoints are in. Read from the clicked snapshot, never from current stream state.
+        coordinateSpace = snapshot.coordinateSpace,
+        nativeScale = snapshot.nativeScale,
+      )
     // Ignored is not a failure: it means the gesture was never a swipe. Nothing is sent, nothing is
     // surfaced, and the refresh tracker is left alone.
     if (decision !is DeviceDragDecision.Swipe) return false
     return enqueue { client, platformName, token ->
       DeviceControlInputCommand.Swipe(
-          start = decision.start,
-          end = decision.end,
-          durationMs = decision.durationMs,
-          client = client,
-          platform = platformName,
-          snapshot = snapshot,
-          token = token,
+        start = decision.start,
+        end = decision.end,
+        durationMs = decision.durationMs,
+        client = client,
+        platform = platformName,
+        snapshot = snapshot,
+        token = token,
       )
     }
   }
@@ -600,35 +600,35 @@ class DeviceControlSession(
     if (!coordinatesAreStillDispatchable(snapshot)) return false
     when (val decision = decide(stroke)) {
       is DeviceKeyboardDecision.PressButton ->
-          enqueue { client, platformName, token ->
-            DeviceControlInputCommand.PressButton(
-                button = decision.button,
-                client = client,
-                platform = platformName,
-                snapshot = snapshot,
-                token = token,
-            )
-          }
+        enqueue { client, platformName, token ->
+          DeviceControlInputCommand.PressButton(
+            button = decision.button,
+            client = client,
+            platform = platformName,
+            snapshot = snapshot,
+            token = token,
+          )
+        }
       is DeviceKeyboardDecision.SendKey ->
-          enqueue { client, platformName, token ->
-            DeviceControlInputCommand.SendKey(
-                key = decision.key,
-                client = client,
-                platform = platformName,
-                snapshot = snapshot,
-                token = token,
-            )
-          }
+        enqueue { client, platformName, token ->
+          DeviceControlInputCommand.SendKey(
+            key = decision.key,
+            client = client,
+            platform = platformName,
+            snapshot = snapshot,
+            token = token,
+          )
+        }
       is DeviceKeyboardDecision.TypeText ->
-          enqueue { client, enqueuePlatform, token ->
-            DeviceControlInputCommand.TypeText(
-                text = decision.text,
-                client = client,
-                platform = enqueuePlatform,
-                snapshot = snapshot,
-                token = token,
-            )
-          }
+        enqueue { client, enqueuePlatform, token ->
+          DeviceControlInputCommand.TypeText(
+            text = decision.text,
+            client = client,
+            platform = enqueuePlatform,
+            snapshot = snapshot,
+            token = token,
+          )
+        }
       // Not ours: send nothing, surface nothing, and leave the event for the host.
       is DeviceKeyboardDecision.Ignored -> return false
     }
@@ -649,7 +649,7 @@ class DeviceControlSession(
    * cannot disagree.
    */
   fun wouldForwardKey(stroke: DeviceKeyStroke): Boolean =
-      decide(stroke) !is DeviceKeyboardDecision.Ignored
+    decide(stroke) !is DeviceKeyboardDecision.Ignored
 
   /**
    * The one policy consultation both [key] and [wouldForwardKey] share.
@@ -658,7 +658,7 @@ class DeviceControlSession(
    * events; iOS realizes it through CtrlProxy's focused-field insert primitive.
    */
   private fun decide(stroke: DeviceKeyStroke): DeviceKeyboardDecision =
-      DeviceKeyboardInputPolicy.evaluate(stroke = stroke)
+    DeviceKeyboardInputPolicy.evaluate(stroke = stroke)
 
   /**
    * Claim the newest-attempt error token, clear the banner, and enqueue the command [build] makes
@@ -666,7 +666,7 @@ class DeviceControlSession(
    * through the one error claim and the one bounded queue rather than each re-deriving them.
    */
   private inline fun enqueue(
-      build: (client: AutoMobileClient?, platform: String, token: Long) -> DeviceControlInputCommand
+    build: (client: AutoMobileClient?, platform: String, token: Long) -> DeviceControlInputCommand
   ): Boolean {
     val token = errorToken.incrementAndGet()
     publishError(null)
@@ -723,32 +723,32 @@ class DeviceControlSession(
     // A command can wait behind another input while the sources rotate. Recheck at the FIFO
     // consumer boundary so a coordinate captured before disagreement cannot reach the daemon.
     if (
-        (command is DeviceControlInputCommand.Tap || command is DeviceControlInputCommand.Swipe) &&
-            !coordinatesAreStillDispatchable(command.snapshot)
+      (command is DeviceControlInputCommand.Tap || command is DeviceControlInputCommand.Swipe) &&
+        !coordinatesAreStillDispatchable(command.snapshot)
     ) {
       command.client?.close()
       return
     }
     var error: String? = null
     val forwarded =
-        try {
-          withContext(ioDispatcher) {
-            // The main-to-IO dispatcher hop admits another observation before the daemon call.
-            // This volatile read is the final rotation gate before coordinates leave the process.
-            if (
-                (command is DeviceControlInputCommand.Tap ||
-                    command is DeviceControlInputCommand.Swipe) &&
-                    !rotationIsStillDispatchable(command.snapshot)
-            ) {
-              false
-            } else {
-              forward(command) { message -> error = message }
-              true
-            }
+      try {
+        withContext(ioDispatcher) {
+          // The main-to-IO dispatcher hop admits another observation before the daemon call.
+          // This volatile read is the final rotation gate before coordinates leave the process.
+          if (
+            (command is DeviceControlInputCommand.Tap ||
+              command is DeviceControlInputCommand.Swipe) &&
+              !rotationIsStillDispatchable(command.snapshot)
+          ) {
+            false
+          } else {
+            forward(command) { message -> error = message }
+            true
           }
-        } finally {
-          command.client?.close()
         }
+      } finally {
+        command.client?.close()
+      }
     if (!forwarded) return
     val message = error
     withContext(uiContext) {
@@ -789,63 +789,63 @@ class DeviceControlSession(
   private fun forward(command: DeviceControlInputCommand, onError: (String) -> Unit) {
     when (command) {
       is DeviceControlInputCommand.Tap ->
-          forwarder.forwardTap(
-              point = command.point,
-              client = command.client,
-              platform = command.platform,
-              deviceId = command.snapshot.deviceId,
-              frameContext = command.snapshot.frameContext,
-              onError = onError,
-          )
+        forwarder.forwardTap(
+          point = command.point,
+          client = command.client,
+          platform = command.platform,
+          deviceId = command.snapshot.deviceId,
+          frameContext = command.snapshot.frameContext,
+          onError = onError,
+        )
       is DeviceControlInputCommand.Swipe ->
-          forwarder.forwardSwipe(
-              start = command.start,
-              end = command.end,
-              durationMs = command.durationMs,
-              client = command.client,
-              platform = command.platform,
-              deviceId = command.snapshot.deviceId,
-              frameContext = command.snapshot.frameContext,
-              onError = onError,
-          )
+        forwarder.forwardSwipe(
+          start = command.start,
+          end = command.end,
+          durationMs = command.durationMs,
+          client = command.client,
+          platform = command.platform,
+          deviceId = command.snapshot.deviceId,
+          frameContext = command.snapshot.frameContext,
+          onError = onError,
+        )
       is DeviceControlInputCommand.PressButton ->
-          forwarder.forwardPressButton(
-              button = command.button,
-              client = command.client,
-              platform = command.platform,
-              deviceId = command.snapshot.deviceId,
-              frameContext = command.snapshot.frameContext,
-              onError = onError,
-          )
+        forwarder.forwardPressButton(
+          button = command.button,
+          client = command.client,
+          platform = command.platform,
+          deviceId = command.snapshot.deviceId,
+          frameContext = command.snapshot.frameContext,
+          onError = onError,
+        )
       is DeviceControlInputCommand.TypeText ->
-          forwarder.forwardTypeText(
-              text = command.text,
-              client = command.client,
-              platform = command.platform,
-              deviceId = command.snapshot.deviceId,
-              frameContext = command.snapshot.frameContext,
-              onError = onError,
-          )
+        forwarder.forwardTypeText(
+          text = command.text,
+          client = command.client,
+          platform = command.platform,
+          deviceId = command.snapshot.deviceId,
+          frameContext = command.snapshot.frameContext,
+          onError = onError,
+        )
       is DeviceControlInputCommand.SendKey ->
-          forwarder.forwardKey(
-              key = command.key,
-              client = command.client,
-              platform = command.platform,
-              deviceId = command.snapshot.deviceId,
-              frameContext = command.snapshot.frameContext,
-              onError = onError,
-          )
+        forwarder.forwardKey(
+          key = command.key,
+          client = command.client,
+          platform = command.platform,
+          deviceId = command.snapshot.deviceId,
+          frameContext = command.snapshot.frameContext,
+          onError = onError,
+        )
     }
   }
 
   private fun hasDifferentInteractionFrameContextThan(snapshot: DeviceFrameSnapshot): Boolean =
-      interactionSnapshot?.frameContext?.let { it != snapshot.frameContext } == true
+    interactionSnapshot?.frameContext?.let { it != snapshot.frameContext } == true
 
   companion object {
     private fun isStaleFrameContextError(message: String): Boolean =
-        message.contains("stale frame context", ignoreCase = true) ||
-            (message.contains("frameContext", ignoreCase = true) &&
-                message.contains("stale or unavailable", ignoreCase = true))
+      message.contains("stale frame context", ignoreCase = true) ||
+        (message.contains("frameContext", ignoreCase = true) &&
+          message.contains("stale or unavailable", ignoreCase = true))
 
     /**
      * Shown when the bounded dispatch queue rejects an input because the daemon is not draining it.

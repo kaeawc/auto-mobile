@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.0.47] - 2026-07-29
+### Fixed
+- release: screen-capture-helper asset name/format 404s for the client ([#4688](https://github.com/kaeawc/auto-mobile/issues/4688)) (release engineering)
+- release: mint-side checksum steps pipe sha256sum without pipefail (fail open) ([#4684](https://github.com/kaeawc/auto-mobile/issues/4684)) (ci, release engineering)
+- release: checksum bake never refreshes apkSha256/ipaSha256 for an already-registered version ([#4683](https://github.com/kaeawc/auto-mobile/issues/4683)) (release engineering)
+### Other
+- Desktop workspace: emulator controls on each device pane (rotate · screenshot · snapshot + contextual Unlock) ([#4690](https://github.com/kaeawc/auto-mobile/issues/4690))
+- Desktop workspace: full-screen device picker with filter rail (state/platform/os/form-factor/architecture) + fuzzy search + multi-select observe ([#4676](https://github.com/kaeawc/auto-mobile/issues/4676))
+- feat(mcp): render observe output as an MCP App (inline screenshot + view hierarchy) ([#4669](https://github.com/kaeawc/auto-mobile/issues/4669))
+- spike: MCP 2026-07-28 SDK v2 migration + stateless-core impact assessment ([#4666](https://github.com/kaeawc/auto-mobile/issues/4666))
+- Desktop: replace ThreePaneShell root with WorkspaceShell scaffolding (device-column model + empty state) ([#4663](https://github.com/kaeawc/auto-mobile/issues/4663))
+
 ## [v0.0.46] - 2026-07-24
 ### Added
 - feat(observe): wire settleObserve + waitForCondition into MCP tools + waitFor DSL ([#4398](https://github.com/kaeawc/auto-mobile/issues/4398))

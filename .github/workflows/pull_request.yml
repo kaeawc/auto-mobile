@@ -1746,11 +1746,17 @@ jobs:
 
       - name: "Run selected CtrlProxy iOS tests (Xcode 26.5)"
         timeout-minutes: 5
+        env:
+          SIMULATOR_UDID: ${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}
         run: |
+          if [[ ! "${SIMULATOR_UDID}" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]]; then
+            echo "::error::Invalid simulator UDID" >&2
+            exit 1
+          fi
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
           xcodebuild test-without-building \
             -xctestrun "${XCTESTRUN}" \
-            -destination "id=${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}" \
+            -destination "id=${SIMULATOR_UDID}" \
             -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests \
             -only-testing:CtrlProxyTests/RotationChangeGenerationTests/testGestureOrientationKeepsLandscapeSceneWhenDeviceIsFaceUp
 

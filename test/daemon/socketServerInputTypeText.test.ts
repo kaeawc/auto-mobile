@@ -564,6 +564,40 @@ describe("UnixSocketServer input/typeText", () => {
     ]);
   });
 
+  test("evicts the cached append helper after the direct device queue is idle", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([{ ...androidDevice, transportId: "1" }]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    const adb = new ProductionShapedAdbExecutor(fakeTimer);
+    let factoryCalls = 0;
+    server.appendTextFactory = device => {
+      factoryCalls += 1;
+      return createAppendTextInput(device, adb, fakeTimer);
+    };
+    await server.start();
+
+    const append = (text: string) =>
+      sendRequest(socketPath, "input/typeText", {
+        platform: "android",
+        deviceId: "emulator-5554",
+        text,
+        mode: "append",
+      });
+
+    expect((await append("A")).success).toBe(true);
+    expect(factoryCalls).toBe(1);
+
+    await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
+
+    expect((await append("B")).success).toBe(true);
+    expect(factoryCalls).toBe(2);
+  });
+
   // Issue #3351: an emulator replaced under a reused serial (emulator-5554) must not
   // inherit the previous device's cached API-level capability. The daemon's
   // disconnect monitor calls evictDeviceInputCache on a confirmed disconnect; after

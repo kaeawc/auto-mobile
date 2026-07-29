@@ -601,9 +601,16 @@ export class UnixSocketServer {
    * Run one MCP forward at a time for a single execution target. Calls for different devices or
    * sessions can proceed concurrently while their loopback transports remain session-local.
    */
-  private runKeyedMcpForward<T>(executionKey: string, fn: () => Promise<T>): Promise<T> {
+  private runKeyedMcpForward<T>(
+    executionKey: string,
+    fn: () => Promise<T>,
+    idleCloseKey?: string
+  ): Promise<T> {
     const previous = this.mcpForwardTails.get(executionKey) ?? Promise.resolve();
     const run = previous.then(() => {
+      if (idleCloseKey) {
+        this.clearMcpClientIdleTimer(idleCloseKey);
+      }
       return fn();
     });
     const tail = run.then(
@@ -614,6 +621,9 @@ export class UnixSocketServer {
     void tail.finally(() => {
       if (this.mcpForwardTails.get(executionKey) === tail) {
         this.mcpForwardTails.delete(executionKey);
+        if (idleCloseKey) {
+          this.scheduleMcpClientIdleClose(idleCloseKey);
+        }
       }
     });
     return run;
@@ -1322,7 +1332,7 @@ export class UnixSocketServer {
       return args.frameContext === undefined
         ? await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs)
         : await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs, undefined, args.frameContext);
-    });
+    }, `device:${targetDevice.deviceId}`);
 
     if (!gestureResult.success) {
       throw new Error(gestureResult.error ?? `input/tap failed on ${args.platform}`);
@@ -1399,7 +1409,7 @@ export class UnixSocketServer {
           gestureTimeoutMs,
           args.frameContext
         );
-    });
+    }, `device:${targetDevice.deviceId}`);
 
     if (!gestureResult.success) {
       throw new Error(gestureResult.error ?? `input/swipe failed on ${args.platform}`);
@@ -1480,7 +1490,7 @@ export class UnixSocketServer {
             ? new InputTypeTextAppendError(timeoutError.message, confirmedAppendCharsSent)
             : undefined
       );
-    });
+    }, `device:${targetDevice.deviceId}`);
 
     if (!inputResult.success) {
       if (args.append && inputResult.charsSent !== undefined) {
@@ -1532,7 +1542,7 @@ export class UnixSocketServer {
       return args.frameContext === undefined
         ? await pressButton.press(args.button, remainingTimeoutMs)
         : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext);
-    });
+    }, `device:${targetDevice.deviceId}`);
 
     if (!buttonResult.success) {
       throw new Error(buttonResult.error ?? `input/pressButton failed on ${args.platform}`);
@@ -1580,7 +1590,7 @@ export class UnixSocketServer {
       return args.frameContext === undefined
         ? await inputKey.press(args.key, remainingTimeoutMs)
         : await inputKey.press(args.key, remainingTimeoutMs, args.frameContext);
-    });
+    }, `device:${targetDevice.deviceId}`);
 
     if (!keyResult.success) {
       throw new Error(keyResult.error ?? `input/key failed on ${args.platform}`);

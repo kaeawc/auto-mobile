@@ -1830,6 +1830,121 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    // Issue #4611 (follow-up P1): a release observed WHILE a callTool is in flight
+    // must survive the call's completion. The in-flight call's post-call
+    // remember/refresh previously re-established the released UUID unconditionally,
+    // so the next sessionless call would inject it and recreate the freed session.
+    test("a release during a fulfilled in-flight call is not undone by the post-call remember", async () => {
+      let callCount = 0;
+      const fakeClient: FakeDaemonClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        onCallTool: () => {
+          callCount += 1;
+          // Fire the release DURING the second (sessionless, bound) call — after the
+          // bound UUID was injected into forwardedArgs but before the call resolves.
+          if (callCount === 2) {
+            fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // Call 2 injects session-a, then the release lands mid-flight.
+        await proxy.callTool("observe", { deviceId: "device-a" });
+        // Call 3 must NOT be rewritten to the released UUID.
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a release during an admitted-then-rejected in-flight call is not undone by the refresh", async () => {
+      let callCount = 0;
+      const fakeClient: FakeDaemonClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        onCallTool: () => {
+          callCount += 1;
+          if (callCount === 2) {
+            // Admitted (recorded + reached the daemon handler), then released
+            // mid-flight, then rejected by the handler (non-recoverable error).
+            fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+            throw new Error("handler rejected the admitted call");
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toThrow(
+          "handler rejected the admitted call"
+        );
+        // The admitted-failure refresh must not resurrect the released UUID's lease.
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "tapOn", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("with NO release mid-call, the in-flight call still remembers the binding normally", async () => {
+      // Positive control: the mid-flight guard must not over-fire. With the
+      // onCallTool seam present but emitting nothing, the binding persists and the
+      // next sessionless call is still rewritten (issue #4611).
+      let observed = 0;
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        onCallTool: () => {
+          observed += 1;
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+        expect(observed).toBe(2);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("the TTL backstop still expires the binding when no signal arrives", async () => {
       // Dropped-frame path: no released signal is delivered, so the replay TTL
       // must still retire the binding on its own.

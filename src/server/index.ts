@@ -314,13 +314,23 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // then leave that tool callable but never discovered. The base's label map is
     // a read-only lookup (no device allocation); a session with no labels collapses
     // to the base, preserving prior single-session filtering.
-    const candidateSessions = sessionUuid
-      ? [sessionUuid, ...Object.values(getDeviceLabelMap(sessionUuid) ?? {})]
-      : [sessionUuid];
+    //
+    // The union is per-tool and DEVICE-AWARE only, mirroring the call gate: a
+    // plain (non-`requiresDevice`) tool runs under the base session regardless of
+    // any `device` argument, so its discovery must be base-only. Advertising a
+    // plain tool that only a label enables would leave it listed but rejected by
+    // the base-only call gate — a label-only grant must not surface a plain tool.
+    const labelSessionUuids = sessionUuid
+      ? Object.values(getDeviceLabelMap(sessionUuid) ?? {})
+      : [];
     return {
-      tools: (await Promise.all(definitions.map(async definition =>
-        await isToolEnabledForAnySession(definition.name, candidateSessions, options.sessionToolProfileService) ? definition : undefined
-      ))).filter((definition): definition is typeof definitions[number] => definition !== undefined)
+      tools: (await Promise.all(definitions.map(async definition => {
+        const deviceAware = ToolRegistry.getTool(definition.name)?.requiresDevice ?? false;
+        const candidateSessions = deviceAware
+          ? [sessionUuid, ...labelSessionUuids]
+          : [sessionUuid];
+        return await isToolEnabledForAnySession(definition.name, candidateSessions, options.sessionToolProfileService) ? definition : undefined;
+      }))).filter((definition): definition is typeof definitions[number] => definition !== undefined)
     };
   });
 
@@ -371,10 +381,18 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // label candidate from the base session's label map (a read-only lookup, no
     // device allocation). Non-labeled and non-device-aware calls collapse to the
     // base, preserving prior single-session behavior and `tools/list` filtering.
+    //
+    // Gate the derived-label candidate to DEVICE-AWARE tools only. A plain tool
+    // (registered via `register`, not `registerDeviceAware`) strips the `device`
+    // field via its `z.object` schema and always executes under the base session,
+    // so it never runs on the labeled device — consulting `base:label`'s profile
+    // would let a caller borrow the label's grants for a base-disabled plain tool
+    // with `{ sessionUuid: base, device: label }`. For a plain tool, enforcement
+    // is base-only; only a `requiresDevice` tool actually uses the device field.
     const requestedDeviceLabel = typeof (toolParams as Record<string, unknown>).device === "string"
       ? (toolParams as Record<string, unknown>).device as string
       : undefined;
-    const derivedLabelSessionUuid = requestedDeviceLabel && sessionUuid
+    const derivedLabelSessionUuid = tool.requiresDevice && requestedDeviceLabel && sessionUuid
       ? getDeviceLabelMap(sessionUuid)?.[requestedDeviceLabel]
       : undefined;
     await assertToolEnabledForAnySession(

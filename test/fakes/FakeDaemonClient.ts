@@ -6,6 +6,11 @@ export interface FakeDaemonClientOptions {
   toolResult?: any;
   resourceResult?: any;
   daemonMethodResults?: Map<string, any>;
+  // Invoked inside callTool AFTER the call is recorded but BEFORE it resolves, so
+  // a test can simulate a daemon push (e.g. a session-released notification)
+  // arriving WHILE the call is in flight. May throw to simulate an
+  // admitted-then-rejected call.
+  onCallTool?: (toolName: string, params: Record<string, any>) => void | Promise<void>;
 }
 
 export class FakeDaemonClient implements DaemonClientLike {
@@ -16,6 +21,7 @@ export class FakeDaemonClient implements DaemonClientLike {
   private toolResult: any;
   private resourceResult: any;
   private daemonMethodResults: Map<string, any>;
+  private readonly onCallTool?: (toolName: string, params: Record<string, any>) => void | Promise<void>;
   private readonly notificationHandlers = new Set<(notification: DaemonNotification) => void>();
   subscribeToNotificationsCalls = 0;
   shouldFailConnect = false;
@@ -25,6 +31,7 @@ export class FakeDaemonClient implements DaemonClientLike {
     this.toolResult = options.toolResult ?? { content: [{ type: "text", text: "success" }] };
     this.resourceResult = options.resourceResult ?? { contents: [{ uri: "test", text: "test" }] };
     this.daemonMethodResults = options.daemonMethodResults ?? new Map();
+    this.onCallTool = options.onCallTool;
   }
 
   async connect(): Promise<void> {
@@ -40,6 +47,9 @@ export class FakeDaemonClient implements DaemonClientLike {
 
   async callTool(toolName: string, params: Record<string, any>): Promise<any> {
     this.callToolCalls.push({ toolName, params });
+    if (this.onCallTool) {
+      await this.onCallTool(toolName, params);
+    }
     return this.toolResult;
   }
 

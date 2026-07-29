@@ -380,4 +380,96 @@ describe("capability union at the MCP boundary (#4611)", () => {
     const toolNames = await listToolsForBase(async () => false);
     expect(toolNames).not.toContain("clipboard");
   });
+
+  // Issue #4611 (follow-up P1): the derived-label union must be gated to
+  // DEVICE-AWARE tools only. A PLAIN tool (`register`, not `registerDeviceAware`)
+  // strips the `device` field via its schema and always runs under the base
+  // session, so it never runs on the labeled device — it must NOT borrow a
+  // label-only grant. `exportPlan` is a real plain tool and `startTestRecording`
+  // a real device-aware tool; both map to the `test-authoring` capability, so the
+  // ONLY difference exercised here is device-awareness.
+  const callPlainExportPlan = async (
+    isEnabled: (sessionUuid: string | undefined, capability: string) => Promise<boolean>,
+  ) => {
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled };
+    fixture = new McpTestFixture({
+      sessionContext: { sessionId: "mcp-session-1" },
+      sessionToolProfileService: profileService,
+    });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    const handler = mock(async () => ({ content: [{ type: "text", text: "ok" }] }));
+    // A plain tool: registered via `register`, its schema omits `device` (stripped
+    // for real plain tools). The raw `device: "B"` argument still reaches the
+    // call-gate, which must ignore it for a non-device-aware tool.
+    ToolRegistry.register(
+      "exportPlan",
+      "exportPlan",
+      z.object({ sessionUuid: z.string().optional() }),
+      handler,
+    );
+    const call = fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "exportPlan", arguments: { sessionUuid: "base", device: "B" } },
+      },
+      z.any(),
+    );
+    return { call, handler };
+  };
+
+  test("plain tool: base disables, label enables -> REJECTED (no label borrowing)", async () => {
+    const { call, handler } = await callPlainExportPlan(
+      async (sessionUuid, capability) => capability === "test-authoring" && sessionUuid === "base:B",
+    );
+    await expect(call).rejects.toThrow("requires the 'test-authoring' capability");
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  test("plain tool: base enables -> allowed (base-only enforcement still works)", async () => {
+    const { call, handler } = await callPlainExportPlan(
+      async (sessionUuid, capability) => capability === "test-authoring" && sessionUuid === "base",
+    );
+    await call;
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  const listToolsForBasePlain = async (
+    isEnabled: (sessionUuid: string | undefined, capability: string) => Promise<boolean>,
+  ): Promise<string[]> => {
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled };
+    fixture = new McpTestFixture({
+      sessionContext: { sessionId: "mcp-session-1", initialSessionToolBinding: "base" },
+      sessionToolProfileService: profileService,
+    });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "exportPlan",
+      "exportPlan",
+      z.object({ sessionUuid: z.string().optional() }),
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+    );
+    const result = await fixture.client.request(
+      { method: "tools/list", params: {} },
+      z.any(),
+    );
+    return (result.tools as Array<{ name: string }>).map(tool => tool.name);
+  };
+
+  test("plain tool: only a label enables -> tool is NOT advertised (base-only discovery)", async () => {
+    // The base-only call gate would reject a plain-tool call, so discovery must not
+    // advertise a plain tool that only a label enables.
+    const toolNames = await listToolsForBasePlain(
+      async (sessionUuid, capability) => capability === "test-authoring" && sessionUuid === "base:B",
+    );
+    expect(toolNames).not.toContain("exportPlan");
+  });
+
+  test("plain tool: base enables -> tool IS advertised (base-only discovery)", async () => {
+    const toolNames = await listToolsForBasePlain(
+      async (sessionUuid, capability) => capability === "test-authoring" && sessionUuid === "base",
+    );
+    expect(toolNames).toContain("exportPlan");
+  });
 });

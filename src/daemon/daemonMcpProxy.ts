@@ -348,6 +348,13 @@ export class DaemonMcpProxy {
   // refreshing it, the remembered UUID is treated as retired so a sessionless
   // call is not rewritten to a released session (issue #4610).
   private boundSessionUuidAt: number | undefined;
+  // Monotonic counter bumped every time the binding is cleared — including a
+  // mid-flight release/heartbeat clear via handleDaemonNotification (issue #4611).
+  // A callTool captures this at forward time; if it has advanced by the time the
+  // call completes, a release for the bound UUID landed WHILE the call was in
+  // flight, so the post-call remember/refresh must NOT resurrect the released
+  // UUID (which would let the next sessionless call recreate the freed session).
+  private bindingGeneration: number = 0;
 
   // Cached definitions from daemon
   private cachedTools: ProxiedToolDefinition[] | null = null;
@@ -893,6 +900,11 @@ export class DaemonMcpProxy {
     args: Record<string, unknown>
   ): Promise<any> {
     const forwardedArgs = this.withBoundSessionUuid(args);
+    // Snapshot the binding generation at forward time. If a session-released
+    // signal (or any other clear) lands WHILE this call is in flight, the
+    // generation advances and the completion path below declines to resurrect the
+    // released UUID (issue #4611).
+    const callBindingGeneration = this.bindingGeneration;
     try {
       const result = await this.withRecoverableReconnect(() => this.client!.callTool(name, forwardedArgs));
       // Remember what was actually forwarded, not the caller's raw args. An
@@ -901,7 +913,7 @@ export class DaemonMcpProxy {
       // replay lease off forwardedArgs keeps continuous implicit activity from
       // being mistaken for idleness, so a later reconnect re-seeds the still-live
       // session instead of creating an unseeded transport (issue #4610).
-      this.rememberSessionUuid(name, forwardedArgs);
+      this.rememberSessionUuid(name, forwardedArgs, callBindingGeneration);
       return result;
     } catch (error) {
       // The success-only rememberSessionUuid above never runs when the handler
@@ -910,7 +922,7 @@ export class DaemonMcpProxy {
       // refreshing the replay lease here too, repeated admitted-but-failed calls
       // let the proxy lease silently expire while the daemon session stays alive,
       // so a later reconnect can no longer replay it (issue #4610).
-      this.refreshReplayLeaseAfterAdmittedFailure(name, forwardedArgs, error);
+      this.refreshReplayLeaseAfterAdmittedFailure(name, forwardedArgs, error, callBindingGeneration);
       // Do NOT clear the binding on a rejected executePlan. A plan can reject
       // *before* the handler runs — capability enforcement or schema parsing in
       // src/server/index.ts — in which case DefaultPlanLifecycleManager
@@ -962,15 +974,31 @@ export class DaemonMcpProxy {
   private clearBoundSessionUuid(): void {
     this.boundSessionUuid = undefined;
     this.boundSessionUuidAt = undefined;
+    // Advance the generation so any callTool that captured the prior value before
+    // this clear (e.g. a release observed mid-flight) declines to re-establish the
+    // now-released UUID on completion (issue #4611).
+    this.bindingGeneration += 1;
   }
 
   // Called with the FORWARDED args (post-withBoundSessionUuid), so an implicit
   // sessionless call that had the bound UUID injected refreshes the replay lease
   // just like an explicit-sessionUuid call, matching the daemon session it just
   // extended (issue #4610).
-  private rememberSessionUuid(name: string, forwardedArgs: Record<string, unknown>): void {
+  private rememberSessionUuid(
+    name: string,
+    forwardedArgs: Record<string, unknown>,
+    callBindingGeneration: number,
+  ): void {
     if (name === "executePlan") {
       this.clearBoundSessionUuid();
+      return;
+    }
+    // A release for the bound UUID observed WHILE this call was in flight already
+    // cleared the binding (handleDaemonNotification). Re-remembering the forwarded
+    // UUID now would resurrect the freed session and let the next sessionless call
+    // recreate it (issue #4611). The generation advancing since forward time is the
+    // signal; a later explicit call re-binds normally.
+    if (this.bindingGeneration !== callBindingGeneration) {
       return;
     }
     if (typeof forwardedArgs.sessionUuid === "string" && forwardedArgs.sessionUuid.trim().length > 0) {
@@ -993,9 +1021,17 @@ export class DaemonMcpProxy {
   private refreshReplayLeaseAfterAdmittedFailure(
     name: string,
     forwardedArgs: Record<string, unknown>,
-    error: unknown
+    error: unknown,
+    callBindingGeneration: number,
   ): void {
     if (name === "executePlan" || this.isRecoverableDaemonSessionError(error)) {
+      return;
+    }
+    // As in rememberSessionUuid: a release observed mid-flight already cleared the
+    // binding, so an admitted-then-rejected call must not re-refresh the released
+    // UUID's lease (issue #4611). The session is gone; resurrecting the lease would
+    // replay it on the next sessionless call.
+    if (this.bindingGeneration !== callBindingGeneration) {
       return;
     }
     if (typeof forwardedArgs.sessionUuid === "string" && forwardedArgs.sessionUuid.trim().length > 0) {

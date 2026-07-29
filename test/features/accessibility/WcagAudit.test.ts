@@ -4,26 +4,26 @@
  */
 
 import { expect, describe, it, beforeEach } from "bun:test";
-import { WcagAudit } from "../../../src/features/accessibility/WcagAudit";
-import { BaselineManager } from "../../../src/features/accessibility/BaselineManager";
+import { WcagAudit, type WcagBaselineStore } from "../../../src/features/accessibility/WcagAudit";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { Element } from "../../../src/models/Element";
 import type { ViewHierarchyNode } from "../../../src/models/ViewHierarchyResult";
-import type { AccessibilityAuditConfig } from "../../../src/models/AccessibilityAudit";
+import type { AccessibilityAuditConfig, WcagViolation } from "../../../src/models/AccessibilityAudit";
 
 /**
- * BaselineManager double that returns a canned baseline without touching any
- * database. Construction alone never resolves the file-backed singleton (the DB
- * handle is resolved lazily), and getBaseline is overridden so the query path is
- * never reached (issue #3067).
+ * Baseline-store fake that returns a canned baseline without touching persistence.
  */
-class StubBaselineManager extends BaselineManager {
-  constructor(private readonly stub: Awaited<ReturnType<BaselineManager["getBaseline"]>>) {
-    super();
+class StubBaselineManager implements WcagBaselineStore {
+  constructor(private readonly stub: { violations: Pick<WcagViolation, "fingerprint">[] } | null) {
   }
-  async getBaseline(): Promise<Awaited<ReturnType<BaselineManager["getBaseline"]>>> {
+
+  async getBaseline(_screenId: string): Promise<{ violations: Pick<WcagViolation, "fingerprint">[] } | null> {
     return this.stub;
   }
+
+  async saveBaseline(_screenId: string, _violations: WcagViolation[]): Promise<void> {}
+
+  async clearBaseline(_screenId: string): Promise<void> {}
 }
 
 describe("WcagAudit", function() {
@@ -473,9 +473,7 @@ describe("WcagAudit", function() {
       const suppressed = seedResult.violations[0];
 
       const stub = new StubBaselineManager({
-        screenId: seedResult.screenId,
         violations: [suppressed],
-        updatedAt: new Date().toISOString(),
       });
       const withBaseline = new WcagAudit(new FakeTimer(), stub);
       const result = await withBaseline.audit(elements, hierarchy, undefined, "com.test", {
@@ -494,9 +492,7 @@ describe("WcagAudit", function() {
       const seedResult = await baselineAndFindings();
 
       const stub = new StubBaselineManager({
-        screenId: seedResult.screenId,
         violations: seedResult.violations,
-        updatedAt: new Date().toISOString(),
       });
       const withBaseline = new WcagAudit(new FakeTimer(), stub);
       const result = await withBaseline.audit(elements, hierarchy, undefined, "com.test", {

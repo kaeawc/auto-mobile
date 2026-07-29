@@ -17,14 +17,20 @@ import { ContrastChecker } from "./ContrastChecker";
 import { BaselineManager } from "./BaselineManager";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
+export interface WcagBaselineStore {
+  getBaseline(screenId: string): Promise<{ violations: Pick<WcagViolation, "fingerprint">[] } | null>;
+  saveBaseline(screenId: string, violations: WcagViolation[]): Promise<void>;
+  clearBaseline(screenId: string): Promise<void>;
+}
+
 export class WcagAudit {
   private contrastChecker: ContrastChecker;
-  private baselineManager: BaselineManager;
+  private baselineStore: WcagBaselineStore;
   private timer: Timer;
 
-  constructor(timer: Timer = defaultTimer, baselineManager: BaselineManager = new BaselineManager()) {
+  constructor(timer: Timer = defaultTimer, baselineStore: WcagBaselineStore = new BaselineManager()) {
     this.contrastChecker = new ContrastChecker({}, timer);
-    this.baselineManager = baselineManager;
+    this.baselineStore = baselineStore;
     this.timer = timer;
   }
 
@@ -71,7 +77,7 @@ export class WcagAudit {
     let baselinedCount = 0;
 
     if (config.useBaseline) {
-      const baseline = await this.baselineManager.getBaseline(screenId);
+      const baseline = await this.baselineStore.getBaseline(screenId);
       if (baseline) {
         const baselineFingerprints = new Set(baseline.violations.map(v => v.fingerprint));
         filteredViolations = violations.filter(v => !baselineFingerprints.has(v.fingerprint));
@@ -100,14 +106,14 @@ export class WcagAudit {
    * Save current violations as baseline
    */
   async saveBaseline(result: AccessibilityAuditResult): Promise<void> {
-    await this.baselineManager.saveBaseline(result.screenId, result.violations);
+    await this.baselineStore.saveBaseline(result.screenId, result.violations);
   }
 
   /**
    * Clear baseline for a screen
    */
   async clearBaseline(screenId: string): Promise<void> {
-    await this.baselineManager.clearBaseline(screenId);
+    await this.baselineStore.clearBaseline(screenId);
   }
 
   /**

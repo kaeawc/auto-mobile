@@ -135,12 +135,16 @@ class ViewHierarchyScaleMetadataTest {
     val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
 
     assertTrue(
-      "ADB fallback must sample rotation before hierarchy inputs",
-      "val rotationBeforeExtraction = getRotationOrNull()" in body,
+      "ADB fallback must capture the display-change generation before hierarchy inputs",
+      "val rotationCapture = rotationProvenance.beginCapture()" in body,
     )
     assertTrue(
-      "ADB fallback must sample rotation after hierarchy extraction",
-      "val rotationAfterExtraction = getRotationOrNull()" in body,
+      "ADB fallback must retain rotation only when the display-change generation is stable",
+      "rotationProvenance.rotationIfUnchanged(" in body,
+    )
+    assertTrue(
+      "ADB fallback must retain the prior endpoint guard until display callbacks arrive",
+      "rotationAtCaptureStart" in body,
     )
     assertTrue(
       "ADB fallback must stamp only a stable rotation onto its hierarchy",

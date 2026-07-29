@@ -6,7 +6,9 @@ import dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClient
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val LOG = LoggerFactory.getLogger("DevicePickerViewModel")
 private const val BOOTED_URI = "automobile:devices/booted"
@@ -66,6 +69,7 @@ sealed interface DevicePickerEffect {
 class DevicePickerViewModel(
   private val resourceClient: McpResourceClient,
   private val scope: CoroutineScope,
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
   private val _state = MutableStateFlow<DevicePickerUiState>(DevicePickerUiState.Loading)
   val state: StateFlow<DevicePickerUiState> = _state.asStateFlow()
@@ -100,16 +104,20 @@ class DevicePickerViewModel(
     _state.value = DevicePickerUiState.Loading
     scope.launch {
       try {
-        val booted =
-          (resourceClient.readResource(BOOTED_URI) as? ResourceReadResult.Success)?.let {
-            DeviceResourceParser.parseBootedDevices(it.content)?.devices
-          } ?: emptyList()
-        val images =
-          (resourceClient.readResource(IMAGES_URI) as? ResourceReadResult.Success)?.let {
-            DeviceResourceParser.parseDeviceImages(it.content)?.images
-          } ?: emptyList()
-        val devices = buildPickerDevices(booted, images)
-        LOG.info("Picker loaded ${devices.size} devices (${booted.size} booted)")
+        // Resource reads hit the daemon (blocking) — keep them off the UI thread.
+        val devices =
+          withContext(ioDispatcher) {
+            val booted =
+              (resourceClient.readResource(BOOTED_URI) as? ResourceReadResult.Success)?.let {
+                DeviceResourceParser.parseBootedDevices(it.content)?.devices
+              } ?: emptyList()
+            val images =
+              (resourceClient.readResource(IMAGES_URI) as? ResourceReadResult.Success)?.let {
+                DeviceResourceParser.parseDeviceImages(it.content)?.images
+              } ?: emptyList()
+            buildPickerDevices(booted, images)
+          }
+        LOG.info("Picker loaded ${devices.size} devices")
         _state.value = DevicePickerUiState.Content(devices)
       } catch (e: Exception) {
         LOG.warn("Failed to load picker devices: ${e.message}", e)

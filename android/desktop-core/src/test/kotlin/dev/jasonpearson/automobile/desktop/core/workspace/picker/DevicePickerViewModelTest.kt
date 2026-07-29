@@ -42,7 +42,7 @@ class DevicePickerViewModelTest {
 
   @Test
   fun `loads and unifies booted + images with dedupe and iOS architecture`() = testScope.runTest {
-    val vm = DevicePickerViewModel(fake(), this)
+    val vm = DevicePickerViewModel(fake(), this, UnconfinedTestDispatcher())
     val c = content(vm)
     assertEquals(listOf("emulator-5554", "Pixel_6_API_33", "iphone-15"), c.devices.map { it.id })
     val pixel8 = c.devices.first { it.id == "emulator-5554" }
@@ -56,7 +56,7 @@ class DevicePickerViewModelTest {
 
   @Test
   fun `toggling a platform updates the filters`() = testScope.runTest {
-    val vm = DevicePickerViewModel(fake(), this)
+    val vm = DevicePickerViewModel(fake(), this, UnconfinedTestDispatcher())
     vm.onAction(DevicePickerAction.TogglePlatform(Platform.Ios))
     assertEquals(setOf(Platform.Ios), content(vm).filters.platforms)
     vm.onAction(DevicePickerAction.TogglePlatform(Platform.Ios))
@@ -65,7 +65,7 @@ class DevicePickerViewModelTest {
 
   @Test
   fun `only booted devices can be selected`() = testScope.runTest {
-    val vm = DevicePickerViewModel(fake(), this)
+    val vm = DevicePickerViewModel(fake(), this, UnconfinedTestDispatcher())
     vm.onAction(DevicePickerAction.ToggleSelect("iphone-15")) // shutdown — ignored
     assertTrue(content(vm).selectedIds.isEmpty())
     vm.onAction(DevicePickerAction.ToggleSelect("emulator-5554")) // booted
@@ -74,7 +74,7 @@ class DevicePickerViewModelTest {
 
   @Test
   fun `observe selected emits one column per selected booted device`() = testScope.runTest {
-    val vm = DevicePickerViewModel(fake(), this)
+    val vm = DevicePickerViewModel(fake(), this, UnconfinedTestDispatcher())
     vm.effect.test {
       vm.onAction(DevicePickerAction.ToggleSelect("emulator-5554"))
       vm.onAction(DevicePickerAction.ObserveSelected)
@@ -89,7 +89,7 @@ class DevicePickerViewModelTest {
 
   @Test
   fun `clear filter resets that dimension`() = testScope.runTest {
-    val vm = DevicePickerViewModel(fake(), this)
+    val vm = DevicePickerViewModel(fake(), this, UnconfinedTestDispatcher())
     vm.onAction(DevicePickerAction.TogglePlatform(Platform.Android))
     vm.onAction(DevicePickerAction.ToggleOs("35"))
     vm.onAction(DevicePickerAction.ClearFilter(FilterDimension.Platform))

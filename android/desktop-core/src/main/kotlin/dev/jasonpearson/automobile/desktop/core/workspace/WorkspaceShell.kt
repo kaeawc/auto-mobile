@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,13 +60,17 @@ fun WorkspaceShell(
       is WorkspaceUiState.Content ->
         Row(Modifier.weight(1f).fillMaxWidth()) {
           state.columns.forEach { column ->
-            DeviceColumnView(
-              column = column,
-              focused = column.deviceId == state.focusedDeviceId,
-              onAction = onAction,
-              facetContent = facetContent,
-              modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
+            // Key by deviceId so a surviving pane keeps its own remembered state + facet
+            // connection when another pane closes (unkeyed = positional identity churns survivors).
+            key(column.deviceId) {
+              DeviceColumnView(
+                column = column,
+                focused = column.deviceId == state.focusedDeviceId,
+                onAction = onAction,
+                facetContent = facetContent,
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+              )
+            }
           }
         }
     }

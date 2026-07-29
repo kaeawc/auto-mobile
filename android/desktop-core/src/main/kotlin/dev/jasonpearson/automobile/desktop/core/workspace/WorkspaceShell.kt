@@ -135,19 +135,72 @@ private fun DeviceColumnView(
       )
   ) {
     DeviceColumnHeader(column, onAction)
-    // placeholder stream area — the real WebRTC stream lands in a later PR; the emulator controls
-    // float over it now.
-    Box(
-      modifier =
-        Modifier.weight(1f).fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant),
-      contentAlignment = Alignment.Center,
+    val tool = column.activeTool
+    if (tool == null) {
+      StreamArea(column, onAction, Modifier.weight(1f))
+    } else {
+      // With a tool active the pane splits stream + docked facet; ⤡ shrink flips the split so the
+      // stream collapses to grow the facet.
+      val facetFraction = facetHeightFraction(column.shrunk)
+      StreamArea(column, onAction, Modifier.weight(1f - facetFraction))
+      DockedFacet(column, tool, onAction, Modifier.weight(facetFraction))
+    }
+  }
+}
+
+/**
+ * Placeholder device stream with the emulator controls floating on it. The real WebRTC stream lands
+ * in a later PR.
+ */
+@Composable
+private fun StreamArea(
+  column: DeviceColumn,
+  onAction: (WorkspaceAction) -> Unit,
+  modifier: Modifier,
+) {
+  Box(
+    modifier = modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant),
+    contentAlignment = Alignment.Center,
+  ) {
+    Text("stream", color = MaterialTheme.colorScheme.outline)
+    EmulatorControls(
+      column = column,
+      onAction = onAction,
+      modifier = Modifier.align(Alignment.TopCenter).padding(6.dp),
+    )
+  }
+}
+
+/**
+ * The docked facet (tool window) for a pane's active [tool]: a header with the tool icon + label
+ * and a ✕ that deselects the tool, over a placeholder body. Real per-tool dashboard content is
+ * deferred — the existing dashboards target a single active device, not a per-pane one.
+ */
+@Composable
+private fun DockedFacet(
+  column: DeviceColumn,
+  tool: Tool,
+  onAction: (WorkspaceAction) -> Unit,
+  modifier: Modifier,
+) {
+  Column(modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+    Row(
+      modifier = Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
-      Text("stream", color = MaterialTheme.colorScheme.outline)
-      EmulatorControls(
-        column = column,
-        onAction = onAction,
-        modifier = Modifier.align(Alignment.TopCenter).padding(6.dp),
+      Text(tool.icon)
+      Spacer(Modifier.width(6.dp))
+      Text(tool.label, style = MaterialTheme.typography.labelLarge)
+      Spacer(Modifier.weight(1f))
+      Glyph(
+        text = "✕",
+        description = "Close ${tool.label} facet on ${column.name}",
+        active = false,
+        onClick = { onAction(WorkspaceAction.SelectTool(column.deviceId, null)) },
       )
+    }
+    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+      Text("${tool.label} — coming soon", color = MaterialTheme.colorScheme.outline)
     }
   }
 }
@@ -196,11 +249,15 @@ private fun DeviceColumnHeader(column: DeviceColumn, onAction: (WorkspaceAction)
     ModeToggle(column, onAction)
     Spacer(Modifier.weight(1f))
     Tool.entries.forEach { tool ->
+      val active = column.activeTool == tool
       Glyph(
         text = tool.icon,
         description = tool.label,
-        active = column.activeTool == tool,
-        onClick = { onAction(WorkspaceAction.SelectTool(column.deviceId, tool)) },
+        active = active,
+        // Re-tapping the active tool closes its facet.
+        onClick = {
+          onAction(WorkspaceAction.SelectTool(column.deviceId, if (active) null else tool))
+        },
       )
     }
     Spacer(Modifier.width(4.dp))

@@ -121,4 +121,65 @@ class WorkspaceShellUiTest {
     onNodeWithContentDescription("Screenshot Pixel 8").performClick()
     assertEquals(WorkspaceAction.RunControl("a", EmulatorControl.Screenshot), action)
   }
+
+  @Test
+  fun `active tool renders a docked facet with a close control`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel 8").copy(activeTool = Tool.Logs)),
+        focusedDeviceId = "a",
+      )
+    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    onNodeWithContentDescription("Close Logs facet on Pixel 8").assertIsDisplayed()
+  }
+
+  @Test
+  fun `no active tool renders no facet`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    onNodeWithContentDescription("Close Logs facet on Pixel 8").assertDoesNotExist()
+  }
+
+  @Test
+  fun `facet close deselects the active tool`() = runComposeUiTest {
+    var action: WorkspaceAction? = null
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel 8").copy(activeTool = Tool.Logs)),
+        focusedDeviceId = "a",
+      )
+    setContent {
+      MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
+    }
+    onNodeWithContentDescription("Close Logs facet on Pixel 8").performClick()
+    assertEquals(WorkspaceAction.SelectTool("a", null), action)
+  }
+
+  @Test
+  fun `re-tapping the active tool toggles it off`() = runComposeUiTest {
+    var action: WorkspaceAction? = null
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel 8").copy(activeTool = Tool.Logs)),
+        focusedDeviceId = "a",
+      )
+    setContent {
+      MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
+    }
+    onNodeWithContentDescription("Logs").performClick()
+    assertEquals(WorkspaceAction.SelectTool("a", null), action)
+  }
+
+  @Test
+  fun `tapping an inactive tool selects it`() = runComposeUiTest {
+    var action: WorkspaceAction? = null
+    val state =
+      WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+    setContent {
+      MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
+    }
+    onNodeWithContentDescription("Storage").performClick()
+    assertEquals(WorkspaceAction.SelectTool("a", Tool.Storage), action)
+  }
 }

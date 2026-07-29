@@ -61,3 +61,11 @@ data class DeviceColumn(
   val shrunk: Boolean = false,
   val locked: Boolean = false,
 )
+
+/**
+ * Fraction of a pane's content height given to the docked facet when a tool is active. Shrinking
+ * the pane (⤡) collapses the stream to grow the facet, so the shrunk fraction is the larger one.
+ * The complement `1 - fraction` is the stream's share; both stay strictly within (0, 1) so they are
+ * valid Compose weights.
+ */
+internal fun facetHeightFraction(shrunk: Boolean): Float = if (shrunk) 0.8f else 0.35f

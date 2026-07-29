@@ -1360,6 +1360,31 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("does not replay an executePlan session after its successful release", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("executePlan", { sessionUuid: "session-a", deviceId: "device-a" });
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "executePlan", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("readResource recovers when a sibling's socket dropped", async () => {
       const recoveredResult = { contents: [{ uri: "automobile:devices/booted", text: "[]" }] };
       const staleClient = new ScriptedDaemonClient({

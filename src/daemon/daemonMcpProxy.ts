@@ -867,7 +867,7 @@ export class DaemonMcpProxy {
     try {
       const forwardedArgs = this.withBoundSessionUuid(args);
       const result = await this.withRecoverableReconnect(() => this.client!.callTool(name, forwardedArgs));
-      this.rememberSessionUuid(args);
+      this.rememberSessionUuid(name, args);
       return result;
     } catch (error) {
       // withRecoverableReconnect already reconciled build identity and retried once.
@@ -892,7 +892,11 @@ export class DaemonMcpProxy {
     return { ...args, sessionUuid: this.boundSessionUuid };
   }
 
-  private rememberSessionUuid(args: Record<string, unknown>): void {
+  private rememberSessionUuid(name: string, args: Record<string, unknown>): void {
+    if (name === "executePlan") {
+      this.boundSessionUuid = undefined;
+      return;
+    }
     if (typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0) {
       this.boundSessionUuid = args.sessionUuid;
     }

@@ -1744,14 +1744,15 @@ jobs:
       # booted sim's UDID.
       - wait: ctrlproxy-simulator
 
-      - name: "Run CtrlProxy privacy resource mapping UI test (Xcode 26.5)"
+      - name: "Run selected CtrlProxy iOS tests (Xcode 26.5)"
         timeout-minutes: 5
         run: |
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
           xcodebuild test-without-building \
             -xctestrun "${XCTESTRUN}" \
             -destination "id=${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}" \
-            -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests
+            -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests \
+            -only-testing:CtrlProxyTests/RotationChangeGenerationTests/testGestureOrientationKeepsLandscapeSceneWhenDeviceIsFaceUp
 
       # Re-sync the backgrounded ffmpeg install before its only consumer. With the
       # install hoisted out, this step's 10-minute cap now covers the test alone.

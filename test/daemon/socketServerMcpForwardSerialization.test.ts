@@ -446,6 +446,87 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
+  test("retains a disconnected socket's transport while its device call is active", async () => {
+    await server.close();
+    socketPath = join(tmpdir(), `mcp-active-client-${randomUUID()}.sock`);
+    fakeTimer = new FakeTimer();
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
+      fakeTimer,
+    );
+    await server.start();
+    sessionDevices.set("session-a", "device-a");
+    let closeCalls = 0;
+    let releaseLongCall: () => void = () => {};
+    let signalLongCallStarted: () => void = () => {};
+    let signalLongCallFinished: () => void = () => {};
+    const longCallStarted = new Promise<void>(resolve => {
+      signalLongCallStarted = resolve;
+    });
+    const longCallReleased = new Promise<void>(resolve => {
+      releaseLongCall = resolve;
+    });
+    const longCallFinished = new Promise<void>(resolve => {
+      signalLongCallFinished = resolve;
+    });
+    let callCount = 0;
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => {
+        callCount++;
+        if (callCount === 2) {
+          signalLongCallStarted();
+          await longCallReleased;
+          signalLongCallFinished();
+        }
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {
+        closeCalls++;
+      },
+    } as FakeMcpClient);
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const boundCall = await client.request("tools/call", {
+        name: "observe",
+        arguments: { sessionUuid: "session-a" },
+      });
+      const longCall = client.request("tools/call", {
+        name: "executePlan",
+        arguments: { sessionUuid: "session-a" },
+      });
+      await longCallStarted;
+      const boundClientKeysBySocketSession = (server as unknown as {
+        boundMcpClientKeysBySocketSession: Map<string, unknown>;
+      }).boundMcpClientKeysBySocketSession;
+      const socketSessionId = boundClientKeysBySocketSession.keys().next().value;
+      expect(socketSessionId).toBeDefined();
+      (server as unknown as {
+        clearBoundMcpClientKey(socketSessionId: string): void;
+      }).clearBoundMcpClientKey(socketSessionId);
+      await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
+
+      try {
+        expect(boundCall.success).toBe(true);
+        expect(closeCalls).toBe(0);
+      } finally {
+        releaseLongCall();
+        await longCallFinished;
+        await longCall;
+      }
+    } finally {
+      releaseLongCall();
+      client.close();
+    }
+  });
+
   test("keeps the successful session binding when a later explicit session call fails", async () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-session-list-error-${randomUUID()}.sock`);

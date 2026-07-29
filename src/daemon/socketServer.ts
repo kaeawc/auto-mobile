@@ -197,6 +197,8 @@ export class UnixSocketServer {
   private boundMcpClientKeysBySocketSession: Map<string, BoundMcpClient> = new Map();
   /** Promise tails that serialize MCP HTTP forwards only within the same execution target. */
   private mcpForwardTails: Map<string, Promise<void>> = new Map();
+  /** Active forwards by loopback MCP client, which can differ from the execution target. */
+  private activeMcpClientForwardCounts: Map<string, number> = new Map();
   private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
   private timer: Timer;
   private featureFlagService: FeatureFlagService | null;
@@ -596,9 +598,8 @@ export class UnixSocketServer {
   }
 
   /**
-   * Run one MCP forward at a time for a single target key. Each key owns a separate MCP client,
-   * so calls for different devices or sessions can proceed concurrently without sharing one
-   * Streamable HTTP session.
+   * Run one MCP forward at a time for a single execution target. Calls for different devices or
+   * sessions can proceed concurrently while their loopback transports remain session-local.
    */
   private runKeyedMcpForward<T>(executionKey: string, fn: () => Promise<T>): Promise<T> {
     const previous = this.mcpForwardTails.get(executionKey) ?? Promise.resolve();
@@ -618,6 +619,24 @@ export class UnixSocketServer {
     return run;
   }
 
+  private async runWithActiveMcpClient<T>(clientKey: string, fn: () => Promise<T>): Promise<T> {
+    this.clearMcpClientIdleTimer(clientKey);
+    this.activeMcpClientForwardCounts.set(
+      clientKey,
+      (this.activeMcpClientForwardCounts.get(clientKey) ?? 0) + 1
+    );
+    try {
+      return await fn();
+    } finally {
+      const remainingForClient = (this.activeMcpClientForwardCounts.get(clientKey) ?? 1) - 1;
+      if (remainingForClient === 0) {
+        this.activeMcpClientForwardCounts.delete(clientKey);
+      } else {
+        this.activeMcpClientForwardCounts.set(clientKey, remainingForClient);
+      }
+    }
+  }
+
   private runMcpForwardForCurrentRoute<T>(
     initialRoute: McpForwardRoute,
     request: DaemonRequest,
@@ -632,7 +651,7 @@ export class UnixSocketServer {
         );
         return await this.runMcpForwardForCurrentRoute(currentRoute, request, socketSessionId, fn);
       }
-      return await fn(currentRoute);
+      return await this.runWithActiveMcpClient(currentRoute.clientKey, () => fn(currentRoute));
     });
   }
 
@@ -2239,7 +2258,11 @@ export class UnixSocketServer {
 
   private async closeIdleMcpClient(key: string): Promise<void> {
     this.mcpClientIdleTimers.delete(key);
-    if (this.mcpForwardTails.has(key) || this.isMcpClientKeyBound(key)) {
+    if (
+      this.mcpForwardTails.has(key)
+      || this.activeMcpClientForwardCounts.has(key)
+      || this.isMcpClientKeyBound(key)
+    ) {
       return;
     }
     // The append helper shares the device's idle lifecycle: once nothing has

@@ -7,7 +7,7 @@ import {
 } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike } from "../../src/daemon/client";
 import { ActionableError } from "../../src/models";
-import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../src/daemon/constants";
+import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS, DAEMON_BOUND_SESSION_REPLAY_TTL_MS } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -1378,6 +1378,98 @@ describe("DaemonMcpProxy", () => {
         expect(client.callToolCalls).toEqual([
           { toolName: "executePlan", params: { sessionUuid: "session-a", deviceId: "device-a" } },
           { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("stops replaying a bound session after the daemon session idle window elapses", async () => {
+      // The daemon's heartbeat/idle cleanup can release an ordinary session while
+      // this proxy stays connected. Once the replay window elapses with no
+      // explicit-sessionUuid call refreshing the binding, a later device-aware
+      // call that omits sessionUuid must NOT be rewritten to the retired UUID —
+      // otherwise createToolExecutionContext silently recreates the session
+      // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("still replays a bound session before the idle window elapses", async () => {
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("injects the bound UUID when a later call carries a non-string sessionUuid", async () => {
+      // A null/number/object sessionUuid is not an explicit session selection, so
+      // the retained binding must still be injected rather than bypassed
+      // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await proxy.callTool("observe", { deviceId: "device-a", sessionUuid: null as unknown as string });
+        await proxy.callTool("observe", { deviceId: "device-a", sessionUuid: 42 as unknown as string });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();

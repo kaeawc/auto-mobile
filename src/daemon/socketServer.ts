@@ -546,7 +546,9 @@ export class UnixSocketServer {
             logger.debug(
               `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`
             );
-            this.scheduleMcpClientIdleClose(route.clientKey);
+            // The idle close is scheduled by runWithActiveMcpClient's wrapper once
+            // this client's active-forward count reaches zero, so it is re-armed
+            // even when a forward throws before reaching this finally (issue #4610).
           }
         });
 
@@ -650,6 +652,13 @@ export class UnixSocketServer {
       const remainingForClient = (this.activeMcpClientForwardCounts.get(clientKey) ?? 1) - 1;
       if (remainingForClient === 0) {
         this.activeMcpClientForwardCounts.delete(clientKey);
+        // Re-arm the idle close around the whole active-client wrapper. A forward
+        // can throw before its own cleanup runs (e.g. the pre-forward queue
+        // timeout deadline throws before the forward-body finally), and this
+        // wrapper cleared the client's idle timer on entry. Without this re-arm
+        // the inactive transport would stay cached until another request or
+        // daemon shutdown (issue #4610).
+        this.scheduleMcpClientIdleClose(clientKey);
       } else {
         this.activeMcpClientForwardCounts.set(clientKey, remainingForClient);
       }
@@ -670,7 +679,14 @@ export class UnixSocketServer {
         );
         return await this.runMcpForwardForCurrentRoute(currentRoute, request, socketSessionId, fn);
       }
-      return await this.runWithActiveMcpClient(currentRoute.clientKey, () => fn(currentRoute));
+      // The execution target is unchanged, so this request keeps the client and
+      // session it was admitted with. Re-resolving may replace a session-specific
+      // clientKey with the shared unbound client (e.g. a mid-flight disconnect
+      // cleared the binding before this recompute) under the same executionKey;
+      // that would run the admitted tool with no capability profile. Only the
+      // execution target may be re-resolved, never the admitted client/session
+      // (issue #4610).
+      return await this.runWithActiveMcpClient(initialRoute.clientKey, () => fn(initialRoute));
     });
   }
 

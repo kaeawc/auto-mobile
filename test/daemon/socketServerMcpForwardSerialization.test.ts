@@ -349,6 +349,190 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
+  test("keeps the admitted bound client when the socket disconnects before a queued sessionless device call runs", async () => {
+    // Socket B binds session-a → device-a, then submits a sessionless device-a
+    // call that queues behind socket A's long-running op on the same device
+    // (cross-socket, since one socket serializes its own frames). Socket B then
+    // disconnects, so its close handler clears the binding before the queued
+    // route is recomputed. The recompute keeps the same executionKey
+    // (device:device-a) but would otherwise swap B's session-specific client for
+    // the shared unbound client, running the admitted tool with no capability
+    // profile. The admitted client/session must be preserved (issue #4610). The
+    // disconnect is driven deterministically via the same clearBoundMcpClientKey
+    // seam the socket "close" handler uses.
+    await server.close();
+    socketPath = join(tmpdir(), `mcp-disconnect-admit-${randomUUID()}.sock`);
+    fakeTimer = new FakeTimer();
+    sessionDevices.set("session-a", "device-a");
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
+      fakeTimer,
+    );
+    await server.start();
+
+    let releaseBlocker: () => void = () => {};
+    const blockerReleased = new Promise<void>(resolve => { releaseBlocker = resolve; });
+    let signalBlockerStarted: () => void = () => {};
+    const blockerStarted = new Promise<void>(resolve => { signalBlockerStarted = resolve; });
+
+    const forwardedCalls: Array<{ createdWith: string | undefined; toolName: string | undefined }> = [];
+    server.mcpClientFactory = async (createdWith?: string) => {
+      const client: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async (...args: unknown[]) => {
+          const request = args[0] as { name?: string };
+          // Socket A's blocker holds the device:device-a queue until released.
+          if (request.name === "tapOn") {
+            signalBlockerStarted();
+            await blockerReleased;
+          }
+          forwardedCalls.push({ createdWith, toolName: request.name });
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return client;
+    };
+
+    const socketB = new PersistentSocketClient();
+    const socketA = new PersistentSocketClient();
+    await Promise.all([socketB.connect(socketPath), socketA.connect(socketPath)]);
+    try {
+      // Socket B binds session-a → device-a (awaited so the binding is set).
+      const boundCall = await socketB.request("tools/call", {
+        name: "observe",
+        arguments: { sessionUuid: "session-a" },
+      });
+      expect(boundCall.success).toBe(true);
+
+      // Socket A's long-running SESSIONLESS op occupies the device:device-a queue.
+      const blockerCall = socketA.request("tools/call", {
+        name: "tapOn",
+        arguments: { deviceId: "device-a" },
+      });
+      await blockerStarted;
+
+      // Socket B's sessionless device-a call: admitted with B's bound client,
+      // queued behind socket A's op (same executionKey device:device-a).
+      const queuedCall = socketB.request("tools/call", {
+        name: "videoRecording",
+        arguments: { action: "stop", recordingId: "recording-1", deviceId: "device-a" },
+      });
+      // Let socket B read the frame and compute its initial (bound) route while
+      // the binding still exists.
+      for (let i = 0; i < 30; i++) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+
+      // Simulate socket B's "close" handler: clear its bound client key while the
+      // sessionless call is still queued behind socket A's op.
+      const boundClientKeysBySocketSession = (server as unknown as {
+        boundMcpClientKeysBySocketSession: Map<string, unknown>;
+      }).boundMcpClientKeysBySocketSession;
+      const socketSessionId = boundClientKeysBySocketSession.keys().next().value as string;
+      expect(socketSessionId).toBeDefined();
+      (server as unknown as {
+        clearBoundMcpClientKey(socketSessionId: string): void;
+      }).clearBoundMcpClientKey(socketSessionId);
+
+      // Release socket A's op so socket B's queued call runs post-disconnect.
+      releaseBlocker();
+      await Promise.all([blockerCall, queuedCall]);
+
+      const queued = forwardedCalls.find(call => call.toolName === "videoRecording");
+      expect(queued).toBeDefined();
+      // The admitted request must still run through B's session-a bound client
+      // (created with sessionUuid "session-a"), not the shared unbound client
+      // socket A created for device:device-a (created with undefined).
+      expect(queued?.createdWith).toBe("session-a");
+    } finally {
+      releaseBlocker();
+      socketB.close();
+      socketA.close();
+    }
+  });
+
+  test("re-arms the idle close after a queued forward times out in the queue", async () => {
+    // An unbound forward that waits behind another request for the same shared
+    // route until its timeout budget is exhausted throws the pre-forward
+    // deadline BEFORE the forward body's own cleanup. The active-client wrapper
+    // cleared the cached client's idle timer on entry, so without a re-arm the
+    // inactive transport would stay cached until another request or shutdown
+    // (issue #4610).
+    await server.close();
+    socketPath = join(tmpdir(), `mcp-queue-timeout-idle-${randomUUID()}.sock`);
+    fakeTimer = new FakeTimer();
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
+      fakeTimer,
+    );
+    await server.start();
+
+    let callCount = 0;
+    let closeCalls = 0;
+    let releaseBlockingRequest: () => void = () => {};
+    const blockingPromise = new Promise<void>(resolve => { releaseBlockingRequest = resolve; });
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          await blockingPromise;
+        }
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => { closeCalls += 1; },
+    } as FakeMcpClient);
+
+    // First request blocks in callTool. tapOn has no per-tool timeout floor so
+    // the second request's short timeout is honored verbatim.
+    const first = sendToolsCallWithArgs(socketPath, "tapOn", { deviceId: "device-1" });
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+
+    const second = sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "tapOn", arguments: { deviceId: "device-1" } },
+      timeoutMs: 500,
+    });
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+
+    // Advance past the queued request's timeout, then release the blocker.
+    fakeTimer.advanceTime(600);
+    releaseBlockingRequest();
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult.success).toBe(true);
+    expect(secondResult.success).toBe(false);
+    expect(secondResult.error).toContain("waiting in queue");
+
+    // Nothing has closed the shared transport yet.
+    expect(closeCalls).toBe(0);
+
+    // Advancing the idle window must close the cached transport — proving a
+    // replacement idle timer was scheduled after the queued-timeout throw.
+    await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
+    for (let i = 0; i < 20 && closeCalls === 0; i++) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    expect(closeCalls).toBe(1);
+  });
+
   test("keeps tools/list isolated when two sockets bind different sessions on one device", async () => {
     sessionDevices.set("session-a", "device-a");
     sessionDevices.set("session-b", "device-a");

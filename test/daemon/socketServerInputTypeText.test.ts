@@ -661,6 +661,12 @@ describe("UnixSocketServer input/typeText", () => {
     expect((await firstAppend).success).toBe(true);
     expect((await queuedMcpForward).success).toBe(true);
 
+    // The helper was built exactly once and is still cached: the queued session
+    // MCP forward has NOT evicted it yet. Asserting this before advancing time
+    // proves the later rebuild is caused by the idle-window eviction rather than
+    // the helper never being cached or being evicted immediately.
+    expect(factoryCalls).toBe(1);
+
     await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
 
     expect((await append("B")).success).toBe(true);

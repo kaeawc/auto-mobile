@@ -1,7 +1,7 @@
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike, type DaemonClientFactory } from "./client";
 import { DaemonManager, type DaemonManagerLike } from "./manager";
 import { logger } from "../utils/logger";
-import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "./constants";
+import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS, DAEMON_BOUND_SESSION_REPLAY_TTL_MS } from "./constants";
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
@@ -342,6 +342,11 @@ export class DaemonMcpProxy {
   // proxy's successful explicit binding so subsequent sessionless calls can seed
   // a replacement socket without sharing the binding with other proxies.
   private boundSessionUuid: string | undefined;
+  // When the binding above was last set/refreshed, on the injected clock. Once
+  // the daemon's session idle window elapses with no explicit-sessionUuid call
+  // refreshing it, the remembered UUID is treated as retired so a sessionless
+  // call is not rewritten to a released session (issue #4610).
+  private boundSessionUuidAt: number | undefined;
 
   // Cached definitions from daemon
   private cachedTools: ProxiedToolDefinition[] | null = null;
@@ -882,23 +887,46 @@ export class DaemonMcpProxy {
   }
 
   private withBoundSessionUuid(args: Record<string, unknown>): Record<string, unknown> {
+    // A daemon session released by ordinary heartbeat/idle expiry leaves this
+    // remembered binding dangling; replaying its UUID on a later sessionless call
+    // would silently recreate the session and reacquire a device without the
+    // caller asking for it (issue #4610). Once the replay window has elapsed with
+    // no explicit-sessionUuid call refreshing the binding, treat it as retired.
+    if (this.isBoundSessionReplayExpired()) {
+      this.clearBoundSessionUuid();
+    }
+    // Only a caller-provided NON-EMPTY STRING sessionUuid counts as an explicit
+    // session selection that bypasses the retained binding. A blank/null/number/
+    // object sessionUuid is not explicit, so the bound UUID is still injected.
     if (
       !this.boundSessionUuid ||
-      (args.sessionUuid !== undefined &&
-        (typeof args.sessionUuid !== "string" || args.sessionUuid.trim().length > 0))
+      (typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0)
     ) {
       return args;
     }
     return { ...args, sessionUuid: this.boundSessionUuid };
   }
 
+  private isBoundSessionReplayExpired(): boolean {
+    if (this.boundSessionUuid === undefined || this.boundSessionUuidAt === undefined) {
+      return false;
+    }
+    return this.timer.now() - this.boundSessionUuidAt >= DAEMON_BOUND_SESSION_REPLAY_TTL_MS;
+  }
+
+  private clearBoundSessionUuid(): void {
+    this.boundSessionUuid = undefined;
+    this.boundSessionUuidAt = undefined;
+  }
+
   private rememberSessionUuid(name: string, args: Record<string, unknown>): void {
     if (name === "executePlan") {
-      this.boundSessionUuid = undefined;
+      this.clearBoundSessionUuid();
       return;
     }
     if (typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0) {
       this.boundSessionUuid = args.sessionUuid;
+      this.boundSessionUuidAt = this.timer.now();
     }
   }
 
@@ -995,7 +1023,7 @@ export class DaemonMcpProxy {
     this.notificationUnsubscribe?.();
     this.notificationUnsubscribe = null;
     this.connected = false;
-    this.boundSessionUuid = undefined;
+    this.clearBoundSessionUuid();
     this.invalidateCache();
     logger.debug("[DaemonMcpProxy] Disconnected from daemon");
   }

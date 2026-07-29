@@ -27,6 +27,19 @@ enum class Tool(val icon: String, val label: String) {
   Performance("⚡", "Performance"), // ⚡
 }
 
+/**
+ * Emulator controls that float on each device stream. These are one-shot device actions: the
+ * workspace emits an intent and the host runs it against the device. [Unlock] is contextual — shown
+ * only when the column is `locked`. The non-one-shot `locale` (needs a target picker) and `more`
+ * (overflow menu) controls are a follow-up.
+ */
+enum class EmulatorControl(val icon: String, val label: String) {
+  Rotate("🔄", "Rotate"), // 🔄
+  Screenshot("📸", "Screenshot"), // 📸
+  Snapshot("🗂", "Snapshot"), // 🗂
+  Unlock("🔓", "Unlock"), // 🔓
+}
+
 /** High-level health rollup shown as the single status dot in the top bar. */
 enum class WorkspaceStatus {
   Green,

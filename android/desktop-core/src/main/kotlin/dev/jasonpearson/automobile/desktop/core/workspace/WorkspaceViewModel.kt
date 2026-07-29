@@ -36,12 +36,25 @@ sealed interface WorkspaceAction {
   data class ToggleShrink(val deviceId: String) : WorkspaceAction
 
   data class SelectTool(val deviceId: String, val tool: Tool?) : WorkspaceAction
+
+  /** Run an emulator control against a device pane (rotate, screenshot, snapshot, unlock). */
+  data class RunControl(val deviceId: String, val control: EmulatorControl) : WorkspaceAction
 }
 
 /** One-shot effects emitted by the workspace. */
 sealed interface WorkspaceEffect {
   /** Open the device picker. Wired to a real screen in a later PR. */
   data object OpenPicker : WorkspaceEffect
+
+  /**
+   * Run an emulator [control] against the device. Carries the resolved [platform] so the host can
+   * dispatch the right device call without re-reading workspace state.
+   */
+  data class RunControl(
+    val deviceId: String,
+    val platform: Platform,
+    val control: EmulatorControl,
+  ) : WorkspaceEffect
 }
 
 /**
@@ -64,6 +77,7 @@ class WorkspaceViewModel(private val scope: CoroutineScope) {
       is WorkspaceAction.SetMode -> mutate(action.deviceId) { it.copy(mode = action.mode) }
       is WorkspaceAction.ToggleShrink -> mutate(action.deviceId) { it.copy(shrunk = !it.shrunk) }
       is WorkspaceAction.SelectTool -> mutate(action.deviceId) { it.copy(activeTool = action.tool) }
+      is WorkspaceAction.RunControl -> runControl(action.deviceId, action.control)
     }
   }
 
@@ -97,6 +111,13 @@ class WorkspaceViewModel(private val scope: CoroutineScope) {
         WorkspaceUiState.Content(remaining, focusedDeviceId = focus)
       }
     }
+  }
+
+  /** Emit a [WorkspaceEffect.RunControl] for the targeted column; unknown ids are a no-op. */
+  private fun runControl(deviceId: String, control: EmulatorControl) {
+    val content = _state.value as? WorkspaceUiState.Content ?: return
+    val column = content.columns.firstOrNull { it.deviceId == deviceId } ?: return
+    scope.launch { _effect.send(WorkspaceEffect.RunControl(deviceId, column.platform, control)) }
   }
 
   private fun focus(deviceId: String) {

@@ -13,6 +13,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
@@ -25,6 +26,8 @@ import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAct
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
+
+private val LOG = LoggerFactory.getLogger("AutoMobileDesktopApp")
 
 /**
  * Wraps a [SettingsProvider] so that [themeMode] is backed by Compose snapshot state, enabling
@@ -61,9 +64,18 @@ fun AutoMobileDesktopApp(
   // devices turns them into workspace columns.
   LaunchedEffect(workspaceViewModel) {
     workspaceViewModel.effect.collect { effect ->
-      if (effect is WorkspaceEffect.OpenPicker) {
-        pickerViewModel.onAction(DevicePickerAction.Refresh)
-        pickerOpen = true
+      when (effect) {
+        is WorkspaceEffect.OpenPicker -> {
+          pickerViewModel.onAction(DevicePickerAction.Refresh)
+          pickerOpen = true
+        }
+        // Emulator-control execution is deferred to #4694; drain + log the intent for now so the
+        // effect channel doesn't back up. The control UI + intent contract ships in this PR.
+        is WorkspaceEffect.RunControl ->
+          LOG.info(
+            "Emulator control ${effect.control} requested for ${effect.deviceId} " +
+              "(${effect.platform}); execution deferred to #4694"
+          )
       }
     }
   }

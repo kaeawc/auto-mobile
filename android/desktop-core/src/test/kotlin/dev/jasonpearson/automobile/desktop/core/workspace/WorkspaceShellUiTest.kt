@@ -80,4 +80,45 @@ class WorkspaceShellUiTest {
     onNodeWithText("Pixel 8").assertIsDisplayed()
     onNodeWithText("iPhone 15").assertIsDisplayed()
   }
+
+  @Test
+  fun `pane renders rotate screenshot and snapshot controls`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    onNodeWithContentDescription("Rotate Pixel 8").assertIsDisplayed()
+    onNodeWithContentDescription("Screenshot Pixel 8").assertIsDisplayed()
+    onNodeWithContentDescription("Snapshot Pixel 8").assertIsDisplayed()
+  }
+
+  @Test
+  fun `Unlock control appears only when the device is locked`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel 8").copy(locked = true)),
+        focusedDeviceId = "a",
+      )
+    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    onNodeWithContentDescription("Unlock Pixel 8").assertIsDisplayed()
+  }
+
+  @Test
+  fun `Unlock control is absent when the device is unlocked`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    onNodeWithContentDescription("Unlock Pixel 8").assertDoesNotExist()
+  }
+
+  @Test
+  fun `clicking a control dispatches RunControl for that column`() = runComposeUiTest {
+    var action: WorkspaceAction? = null
+    val state =
+      WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+    setContent {
+      MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
+    }
+    onNodeWithContentDescription("Screenshot Pixel 8").performClick()
+    assertEquals(WorkspaceAction.RunControl("a", EmulatorControl.Screenshot), action)
+  }
 }

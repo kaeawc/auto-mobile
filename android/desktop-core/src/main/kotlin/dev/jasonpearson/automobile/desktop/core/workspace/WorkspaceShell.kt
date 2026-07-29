@@ -135,14 +135,44 @@ private fun DeviceColumnView(
       )
   ) {
     DeviceColumnHeader(column, onAction)
-    // placeholder stream area — real WebRTC stream + emulator controls land in a later PR
+    // placeholder stream area — the real WebRTC stream lands in a later PR; the emulator controls
+    // float over it now.
     Box(
       modifier =
         Modifier.weight(1f).fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant),
       contentAlignment = Alignment.Center,
     ) {
       Text("stream", color = MaterialTheme.colorScheme.outline)
+      EmulatorControls(
+        column = column,
+        onAction = onAction,
+        modifier = Modifier.align(Alignment.TopCenter).padding(6.dp),
+      )
     }
+  }
+}
+
+/**
+ * Emulator controls floating on a device stream: rotate · screenshot · snapshot, plus a contextual
+ * 🔓 Unlock shown only when the device is locked. Each is a one-shot [WorkspaceAction.RunControl].
+ */
+@Composable
+private fun EmulatorControls(
+  column: DeviceColumn,
+  onAction: (WorkspaceAction) -> Unit,
+  modifier: Modifier,
+) {
+  Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    EmulatorControl.entries
+      .filter { it != EmulatorControl.Unlock || column.locked }
+      .forEach { control ->
+        Glyph(
+          text = control.icon,
+          description = "${control.label} ${column.name}",
+          active = false,
+          onClick = { onAction(WorkspaceAction.RunControl(column.deviceId, control)) },
+        )
+      }
   }
 }
 

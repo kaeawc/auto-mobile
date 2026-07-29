@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import app.cash.turbine.test
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -105,5 +106,32 @@ class WorkspaceViewModelTest {
     assertEquals(InteractionMode.Input, b.mode)
     assertTrue(!b.shrunk)
     assertNull(b.activeTool)
+  }
+
+  @Test
+  fun `RunControl emits an effect carrying the target device platform`() = testScope.runTest {
+    val vm = WorkspaceViewModel(this)
+    vm.onAction(WorkspaceAction.ObserveDevice(column("a", Platform.Ios)))
+    vm.effect.test {
+      vm.onAction(WorkspaceAction.RunControl("a", EmulatorControl.Rotate))
+      val effect = awaitItem()
+      assertTrue("Expected RunControl but was $effect", effect is WorkspaceEffect.RunControl)
+      effect as WorkspaceEffect.RunControl
+      assertEquals("a", effect.deviceId)
+      assertEquals(Platform.Ios, effect.platform)
+      assertEquals(EmulatorControl.Rotate, effect.control)
+      cancelAndIgnoreRemainingEvents()
+    }
+  }
+
+  @Test
+  fun `RunControl for an unknown device emits nothing`() = testScope.runTest {
+    val vm = WorkspaceViewModel(this)
+    vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+    vm.effect.test {
+      vm.onAction(WorkspaceAction.RunControl("nope", EmulatorControl.Screenshot))
+      expectNoEvents()
+      cancelAndIgnoreRemainingEvents()
+    }
   }
 }

@@ -11,6 +11,10 @@ export interface FakeDaemonClientOptions {
   // arriving WHILE the call is in flight. May throw to simulate an
   // admitted-then-rejected call.
   onCallTool?: (toolName: string, params: Record<string, any>) => void | Promise<void>;
+  // Same seam for callDaemonMethod (tools/list, resources/list, ...), so a test
+  // can simulate a list_changed / session-released push arriving WHILE a
+  // session-scoped discovery request is in flight (issue #4655).
+  onCallDaemonMethod?: (method: string, params: Record<string, any>) => void | Promise<void>;
 }
 
 export class FakeDaemonClient implements DaemonClientLike {
@@ -22,6 +26,7 @@ export class FakeDaemonClient implements DaemonClientLike {
   private resourceResult: any;
   private daemonMethodResults: Map<string, any>;
   private readonly onCallTool?: (toolName: string, params: Record<string, any>) => void | Promise<void>;
+  private readonly onCallDaemonMethod?: (method: string, params: Record<string, any>) => void | Promise<void>;
   private readonly notificationHandlers = new Set<(notification: DaemonNotification) => void>();
   subscribeToNotificationsCalls = 0;
   shouldFailConnect = false;
@@ -32,6 +37,7 @@ export class FakeDaemonClient implements DaemonClientLike {
     this.resourceResult = options.resourceResult ?? { contents: [{ uri: "test", text: "test" }] };
     this.daemonMethodResults = options.daemonMethodResults ?? new Map();
     this.onCallTool = options.onCallTool;
+    this.onCallDaemonMethod = options.onCallDaemonMethod;
   }
 
   async connect(): Promise<void> {
@@ -60,6 +66,9 @@ export class FakeDaemonClient implements DaemonClientLike {
 
   async callDaemonMethod(method: string, params: Record<string, any>): Promise<any> {
     this.callDaemonMethodCalls.push({ method, params });
+    if (this.onCallDaemonMethod) {
+      await this.onCallDaemonMethod(method, params);
+    }
     return this.daemonMethodResults.get(method) ?? {};
   }
 

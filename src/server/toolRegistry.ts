@@ -1137,10 +1137,19 @@ export class ToolRegistryClass {
   /**
    * Assert a tool is enabled under UNION capability semantics (issue #4611): a
    * tool is enabled when EITHER the base OR the derived `${base}:${label}`
-   * device-label session grants it. The base is resolved from the derived label
-   * session via the shared resolver unless the caller already knows it. Applied
-   * at every enforcement gate — the device-aware wrapper and the nested
-   * internal-call pre-gate — so no gate can reject a call the union should allow.
+   * device-label session grants it. Applied at every enforcement gate — the
+   * device-aware wrapper and the nested internal-call pre-gate — so no gate can
+   * reject a call the union should allow.
+   *
+   * The REAL base is always resolved through the shared resolver, even when the
+   * caller supplies `explicitBaseSessionUuid` (issue #4655). For an internal
+   * device-aware step whose routing session is already the derived `${base}:B`,
+   * the wrapper's resolver reports `baseSessionUuid = ${base}:B` — the derived
+   * value, not the true base. Trusting it verbatim would collapse the union to
+   * `[${base}:B, ${base}:B]` and lose the base grant. Passing the supplied base
+   * (or the derived session when none is supplied) back through
+   * `resolveCapabilityBaseSessionUuid` strips a `:label` when present and is a
+   * no-op for a genuine base, so the union is genuinely `[base, ${base}:B]`.
    */
   private async assertToolEnabledUnion(
     toolName: string,
@@ -1151,8 +1160,10 @@ export class ToolRegistryClass {
     const sessionManager = DaemonState.getInstance().isInitialized()
       ? DaemonState.getInstance().getSessionManager()
       : undefined;
-    const baseSessionUuid = explicitBaseSessionUuid
-      ?? resolveCapabilityBaseSessionUuid(derivedSessionUuid, sessionManager);
+    const baseSessionUuid = resolveCapabilityBaseSessionUuid(
+      explicitBaseSessionUuid ?? derivedSessionUuid,
+      sessionManager,
+    );
     await assertToolEnabledForAnySession(
       toolName,
       [baseSessionUuid, derivedSessionUuid],

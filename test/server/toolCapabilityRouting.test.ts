@@ -262,6 +262,52 @@ describe("ToolRegistry capability routing and enforcement (#4611)", () => {
     }
   });
 
+  test("Gap B wrapper union (#4655): a device-aware internal step routed as the derived `base:B` is allowed when the base enables it", async () => {
+    // The device-aware wrapper's resolver reports `baseSessionUuid = args.sessionUuid`.
+    // For an internal step whose routing session is ALREADY the derived
+    // `base-session:B`, that is the DERIVED value, not the true base. A wrapper
+    // gate that trusted it verbatim as the union's base collapsed the union to
+    // `[base-session:B, base-session:B]` and lost the base grant. The wrapper must
+    // resolve the REAL base from the derived routing session so the union is
+    // genuinely `[base-session, base-session:B]`.
+    const sessionManager = await initializeDaemonWithLabeledBase();
+    try {
+      const isEnabled = mock(
+        async (sessionUuid: string | undefined, capability: string) =>
+          capability === "clipboard" && sessionUuid === "base-session",
+      );
+      const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled };
+      const handler = mock(async () => ({ success: true }));
+      restorePipelineOverrides = passthroughPipeline(async input => ({
+        args: input.args,
+        // Simulates the resolver on a step already routed to the derived session.
+        baseSessionUuid: "base-session:B",
+        device,
+        internalCall: false,
+        sessionUuid: "base-session:B",
+        shouldResolveDevice: true,
+      }));
+      ToolRegistry.registerDeviceAware(
+        "clipboard",
+        "clipboard",
+        z.object({ sessionUuid: z.string().optional() }),
+        handler,
+      );
+
+      const response = await runWithToolCapabilityContext(
+        { routingSessionUuid: "base-session:B", sessionToolProfileService: profileService },
+        () => ToolRegistry.callInternal("clipboard", {}),
+      );
+
+      expect(response).toEqual({ success: true });
+      expect(handler).toHaveBeenCalledTimes(1);
+      // The wrapper gate resolved the REAL base from the derived routing session.
+      expect(isEnabled).toHaveBeenCalledWith("base-session", "clipboard");
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("Gap B nested union: rejected only when both base and derived label disable the tool", async () => {
     const sessionManager = await initializeDaemonWithLabeledBase();
     try {

@@ -1872,6 +1872,51 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("a release of an UNRELATED session mid-call does not block remembering the forwarded session (#4655)", async () => {
+      // Regression for the global-generation guard: the proxy is bound to
+      // session-a while an EXPLICIT session-b call is in flight; session-a (NOT
+      // the session this call forwarded) is released mid-flight. The old guard
+      // bumped one global counter on ANY binding clear, so the completing
+      // session-b call saw "a binding changed" and declined to remember session-b
+      // — even though session-b was never released. Scoped to the forwarded UUID,
+      // the release of the unrelated session-a must NOT block remembering
+      // session-b.
+      let callCount = 0;
+      const fakeClient: FakeDaemonClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        onCallTool: () => {
+          callCount += 1;
+          if (callCount === 2) {
+            fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        // Bind session-a.
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // Explicit session-b call; the unrelated session-a is released mid-flight.
+        await proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" });
+        // The next sessionless call must be rewritten to session-b (never released).
+        await proxy.callTool("observe", { deviceId: "device-b" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { sessionUuid: "session-b", deviceId: "device-b" } },
+          { toolName: "observe", params: { deviceId: "device-b", sessionUuid: "session-b" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("a release during an admitted-then-rejected in-flight call is not undone by the refresh", async () => {
       let callCount = 0;
       const fakeClient: FakeDaemonClient = new FakeDaemonClient({
@@ -1969,6 +2014,71 @@ describe("DaemonMcpProxy", () => {
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
           { toolName: "observe", params: { deviceId: "device-a" } },
         ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a tools/list invalidated mid-flight is not cached; the next listTools refetches (#4655)", async () => {
+      // A list_changed (or bound-session release) lands WHILE a session-scoped
+      // tools/list is pending. The handler nulls the cache immediately, but the
+      // eventual (now-stale) response used to repopulate cachedTools
+      // unconditionally, resurrecting the list the invalidation just cleared. The
+      // response must NOT be cached, so the next listTools() refetches.
+      let methodCallCount = 0;
+      const fakeClient: FakeDaemonClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "t", inputSchema: {} }] }],
+        ]),
+        onCallDaemonMethod: method => {
+          if (method === "tools/list") {
+            methodCallCount += 1;
+            if (methodCallCount === 1) {
+              fakeClient.emitNotification("notifications/tools/list_changed");
+            }
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        const first = await proxy.listTools();
+        expect(first).toEqual([{ name: "t", inputSchema: {} }]);
+        // The mid-flight invalidation prevented caching, so a second call refetches.
+        const second = await proxy.listTools();
+        expect(second).toEqual([{ name: "t", inputSchema: {} }]);
+        expect(fakeClient.callDaemonMethodCalls).toHaveLength(2);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a tools/list with NO mid-flight invalidation caches normally (positive control, #4655)", async () => {
+      // The discovery guard must not over-fire: with no push during the pending
+      // call, the response is cached and the second listTools() serves the cache.
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "t", inputSchema: {} }] }],
+        ]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        await proxy.listTools();
+        expect(fakeClient.callDaemonMethodCalls).toHaveLength(1);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

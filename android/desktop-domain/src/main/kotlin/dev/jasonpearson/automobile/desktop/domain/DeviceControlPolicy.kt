@@ -145,14 +145,6 @@ public object DeviceControlPolicy {
   public const val LIVE_FRAME_MAX_AGE_MS: Long = 1_000L
 
   /**
-   * Relative aspect-ratio tolerance for the LEGACY branch of [isGeometryConsistent].
-   *
-   * Only reachable for frames that declare no [CoordinateSpace]; a `"px"` frame is compared
-   * exactly. See [isGeometryConsistent] for why the tolerance existed at all.
-   */
-  private const val GEOMETRY_ASPECT_TOLERANCE = 0.05f
-
-  /**
    * Evaluate control availability for [inputs] at client wall-clock [nowMs].
    *
    * Checks run cheapest-and-most-decisive first; the first failure short-circuits with its reason,

@@ -2,11 +2,18 @@
 name: Release
 
 "on":
-  create:
-  # prepare-release dispatches this explicitly after pushing the tag. The `create`
-  # event above did not fire for CI-pushed tags (see v0.0.42/v0.0.44: the tag push
-  # succeeded and no Release run was ever queued), so the tag event alone cannot be
-  # relied on to start a release.
+  # Tag pushes only. Replaces the former `create:` trigger, which also fired on
+  # every branch creation and queued a Release run that immediately skipped
+  # (ref_type != tag) -- noise on the Actions list. `push.tags` fires only for
+  # tag refs, so no branch-creation runs are ever queued.
+  push:
+    tags:
+      - "*"
+  # prepare-release dispatches this explicitly after pushing the tag. A tag pushed
+  # by CI with GITHUB_TOKEN does not trigger the `push` event above (Actions does
+  # not re-trigger workflows from the default token; see v0.0.42/v0.0.44, where the
+  # tag push queued no Release run), so the push trigger alone cannot be relied on
+  # to start a release. The push trigger is the fallback for a hand-pushed tag.
   workflow_dispatch:
     inputs:
       tag:
@@ -14,13 +21,16 @@ name: Release
         required: true
         type: string
 
-# `create:` is retained as a fallback for a hand-pushed tag, so one tag could in
-# principle arrive by both routes. This serializes them; it does NOT dedupe them
-# -- with cancel-in-progress false the second run queues and then starts once the
-# first finishes. What makes that second run harmless is the already-published.sh
-# guard on each non-idempotent publish step, not this block. Both are required.
+# A hand-pushed tag can arrive by both `push` and a subsequent dispatch, so one
+# tag could start two runs. This serializes them; it does NOT dedupe them -- with
+# cancel-in-progress false the second run queues and then starts once the first
+# finishes. What makes that second run harmless is the already-published.sh guard
+# on each non-idempotent publish step, not this block. Both are required.
+# github.ref_name (not github.event.ref) is used so the push path -- where
+# github.event.ref is the full "refs/tags/X" -- lands in the same group as the
+# dispatch path, which keys on the short tag from inputs.tag.
 concurrency:
-  group: release-${{ inputs.tag || github.event.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -33,8 +43,9 @@ jobs:
   validate-release-tag:
     name: "Validate Release Tag"
     runs-on: ubuntu-latest
-    # workflow_dispatch carries no ref_type; only the create path needs the tag gate.
-    if: github.event_name == 'workflow_dispatch' || github.event.ref_type == 'tag'
+    # The push trigger is already tag-filtered, so any push event here is a tag;
+    # workflow_dispatch is the explicit release path. Both should run.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     outputs:
       is_release_tag: ${{ steps.validate.outputs.is_release_tag }}
       tag: ${{ steps.validate.outputs.tag }}
@@ -43,7 +54,7 @@ jobs:
         id: validate
         shell: bash
         env:
-          TAG: ${{ inputs.tag || github.event.ref }}
+          TAG: ${{ inputs.tag || github.ref_name }}
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}

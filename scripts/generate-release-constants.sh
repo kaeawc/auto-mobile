@@ -163,11 +163,12 @@ if [ -n "$release_version" ]; then
 
   if grep -q "version: \"${release_version}\"" "$constants_path"; then
     # Version already registered — do NOT duplicate the entry, but fall through
-    # to the per-entry runner-sha update below. The release
+    # to the per-entry checksum refresh below. The release
     # job re-runs this after prepare-release already added the entry; skipping
     # entirely would leave runnerSha256 empty (verification disabled) whenever
-    # prepare-release predates the runner-sha wiring.
-    echo "INFO: Version ${release_version} already in registry — refreshing scalar constants only"
+    # prepare-release predates the runner-sha wiring, and would keep stale
+    # apk/ipa checksums from the earlier prepare run (#4683).
+    echo "INFO: Version ${release_version} already in registry — refreshing artifact checksums"
   else
     new_entry="  {
     version: \"${release_version}\",
@@ -261,6 +262,26 @@ fi
 if [ -n "$ios_app_hash" ]; then
   sed_inplace_extended "s/^export const IOS_CTRL_PROXY_APP_HASH: string = \".*\";/export const IOS_CTRL_PROXY_APP_HASH: string = \"${ios_app_hash}\";/" "$tmp_file"
   echo "   iOS app hash: ${ios_app_hash}"
+fi
+
+# Refresh the artifact checksums for an already-registered version (#4683).
+# prepare-release adds the entry, then the release job re-runs this script for the
+# same version; without these the entry keeps the apk/ipa values from the earlier
+# prepare run and release.yml's "Verify APK SHA256 matches source" gate can never
+# pass. The new-entry template above already writes both, so these only matter on
+# the already-registered path — mirroring how runnerSha256 is refreshed below.
+if [ -n "$apk_checksum" ]; then
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "apkSha256" "$apk_checksum"
+  fi
+  echo "   APK SHA256: ${apk_checksum}"
+fi
+
+if [ -n "$ios_checksum" ]; then
+  if [ -n "$release_version" ]; then
+    update_registry_field "$tmp_file" "$release_version" "ipaSha256" "$ios_checksum"
+  fi
+  echo "   iOS CtrlProxy SHA256: ${ios_checksum}"
 fi
 
 if [ -n "$ios_runner_sha256" ]; then

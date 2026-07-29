@@ -386,3 +386,40 @@ PY
   [ "$status" -ne 0 ]
   [[ "$output" == *"SCREEN_CAPTURE_HELPER_SHA256 must be a valid SHA256"* ]]
 }
+
+# Regression guard for #4683. prepare-release adds the registry entry first, then
+# the release job re-runs this script for the same version. That already-registered
+# path refreshed only runnerSha256/videoJarSha256/screenCaptureHelperSha256, so
+# apkSha256/ipaSha256 kept stale values from an earlier prepare run and the release
+# job's "Verify APK SHA256 matches source" gate could never pass.
+@test "refreshes apkSha256 and ipaSha256 for an already-registered version" {
+  local constants="${TEST_ROOT}/src/constants/release.ts"
+
+  apk_before="$(read_field_for_version 0.0.46 apkSha256 "$constants")"
+  ipa_before="$(read_field_for_version 0.0.46 ipaSha256 "$constants")"
+  [ -n "$apk_before" ]
+  [ -n "$ipa_before" ]
+  # Guard the guard: the fixture must not already hold the values we write.
+  [ "$apk_before" != "$APK_SHA" ]
+  [ "$ipa_before" != "$IPA_SHA" ]
+
+  run env \
+    RELEASE_VERSION="0.0.46" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
+    VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already in registry"* ]]
+
+  [ "$(read_field_for_version 0.0.46 apkSha256 "$constants")" = "$APK_SHA" ]
+  [ "$(read_field_for_version 0.0.46 ipaSha256 "$constants")" = "$IPA_SHA" ]
+
+  # The three fields that already worked must keep working.
+  [ "$(read_field_for_version 0.0.46 runnerSha256 "$constants")" = "$RUNNER_SHA" ]
+  [ "$(read_field_for_version 0.0.46 videoJarSha256 "$constants")" = "$VIDEO_JAR_SHA" ]
+  [ "$(read_field_for_version 0.0.46 screenCaptureHelperSha256 "$constants")" = "$HELPER_SHA" ]
+}

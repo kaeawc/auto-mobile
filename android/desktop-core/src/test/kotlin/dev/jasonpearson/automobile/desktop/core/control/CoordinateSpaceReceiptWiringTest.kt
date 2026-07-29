@@ -29,7 +29,7 @@ class CoordinateSpaceReceiptWiringTest {
    * matches on a normalized form rather than on one particular line breaking.
    */
   private val hook =
-    "deviceControlSession.onObservationSpaceDeclared(update.coordinateSpace,update.captureSequence)"
+    "deviceControlSession.onObservationSpaceDeclared(update.coordinateSpace,update.captureSequence,update.nativeScale)"
 
   /**
    * Collapse whitespace and drop the trailing comma ktfmt adds when it wraps an argument list, so

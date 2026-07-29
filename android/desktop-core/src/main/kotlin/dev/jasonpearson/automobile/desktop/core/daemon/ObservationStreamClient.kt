@@ -319,6 +319,7 @@ class ObservationStreamClient {
             captureSequence = response.captureSequence,
             frameContext = response.frameContext,
             coordinateSpace = CoordinateSpace.fromWire(response.coordinateSpace),
+            nativeScale = response.nativeScale,
             rotation = response.rotation,
           )
         _hierarchyUpdates.emit(update)
@@ -347,6 +348,7 @@ class ObservationStreamClient {
             captureSequence = response.captureSequence,
             frameContext = response.frameContext,
             coordinateSpace = CoordinateSpace.fromWire(response.coordinateSpace),
+            nativeScale = response.nativeScale,
             rotation = response.rotation,
           )
         _screenshotUpdates.emit(update)
@@ -590,6 +592,8 @@ data class StreamResponse(
    * narrowed to the typed [CoordinateSpace] (unknown -> null -> legacy) at the emit boundary.
    */
   val coordinateSpace: String? = null,
+  /** Point-to-physical-pixel ratio for a canonical-pixel frame. */
+  val nativeScale: Double? = null,
   /** Device display rotation for this captured frame. */
   val rotation: Int? = null,
 )
@@ -682,6 +686,8 @@ data class HierarchyStreamUpdate(
    * [StreamResponse.coordinateSpace]. Null means the daemon declared none (legacy point-space).
    */
   val coordinateSpace: CoordinateSpace? = null,
+  /** Point-to-physical-pixel ratio for a canonical-pixel frame. */
+  val nativeScale: Double? = null,
   /** Device display rotation for this captured hierarchy. */
   val rotation: Int? = null,
 )
@@ -710,6 +716,8 @@ data class ScreenshotStreamUpdate(
    * [StreamResponse.coordinateSpace]. Null means the daemon declared none (legacy point-space).
    */
   val coordinateSpace: CoordinateSpace? = null,
+  /** Point-to-physical-pixel ratio for a canonical-pixel frame. */
+  val nativeScale: Double? = null,
   /** Device display rotation for this captured screenshot. */
   val rotation: Int? = null,
 )

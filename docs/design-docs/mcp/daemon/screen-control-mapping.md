@@ -164,7 +164,7 @@ the drag-shaped case of the rule in
 
 | Rule | Value |
 | --- | --- |
-| Minimum travelled distance, frame declares `coordinateSpace: "px"` | **36 device coordinates** (physical pixels) |
+| Minimum travelled distance, frame declares `coordinateSpace: "px"` | **`24 * nativeScale` device coordinates** (physical pixels) |
 | Minimum travelled distance, legacy frame (no declaration) | **24 device coordinates** (logical points) |
 | Measurement | straight-line (Euclidean), in **device** coordinates, **after** the end is clamped |
 | Below the threshold | send **nothing** — not a swipe, and **not** a tap either |
@@ -176,52 +176,17 @@ threshold would send a swipe for one hand movement at one zoom and not at
 another, and would let a few pixels of pointer jitter become a large device
 gesture when zoomed out.
 
-**Why two numbers.** The threshold is a *physical* distance — "far enough that
-the device itself reads the gesture as a drag rather than a tap" — so its numeric
-value depends on the unit the frame declares. In the legacy point space, `24`
-sits just above both platforms' touch slop (Android's 8dp is ~24px at the ~3x
-density of a 1080p-class phone; iOS's is ~10 logical points). Under canonical
-pixels the unit changed underneath it: the daemon divides an incoming pixel
-coordinate by `nativeScale` before dispatch, so on a 3× iOS device 24 physical
-pixels arrives as **8 logical points** — *below* the slop the value was chosen to
-clear, and movements the device reads as taps would be forwarded as swipes.
+**One physical intent in two coordinate spaces.** In the legacy point space,
+`24` sits just above both platforms' touch slop. A canonical-pixel frame publishes
+the matching finite, positive `nativeScale` on both its hierarchy and screenshot
+messages, so the client uses `24 * nativeScale`. The daemon divides those pixels
+by the same scale before sending an iOS gesture to the point-based runner, which
+preserves a 24-point threshold at every supported scale. Android publishes
+`nativeScale: 1`, so it keeps the 24-pixel threshold.
 
-`36` is a **conservative floor covering every `nativeScale` up to and including
-3.5×**, chosen from the scales this project actually carries rather than from a
-guess. The cross-language golden vectors pin `1.0` (Android), `2.0`, `2.608696`
-(the Plus-family downsampling panel), `3.0`, `3.144` and `3.5`; divided out, `36`
-clears the ~10-point slop at every one:
-
-| `nativeScale` | 36px arrives as |
-| --- | --- |
-| 2.0 | 18.0 pt |
-| 2.608696 | 13.8 pt |
-| 3.0 | 12.0 pt |
-| 3.144 | 11.5 pt |
-| 3.5 | 10.29 pt |
-
-**The bound is a floor, not a guarantee.** The protocol accepts any finite
-positive `nativeScale`, so a device reporting more than 3.5× would divide `36`
-back below the slop and the under-shoot returns. That is exactly why per-frame
-scaling matters (below), not a reason to read this constant as universal.
-
-The cost, stated rather than glossed: one constant cannot be tight at every
-scale, so it over-shoots at the low end — 18 points at 2×, where ~10 would do,
-means a slightly longer drag than strictly necessary on those devices. Two things
-make that acceptable. It stays well inside the legacy point-space bar of 24
-points at *every* covered scale, so no iOS user is asked for a longer drag than
-before canonical pixels. And on Android (`nativeScale` 1) it is a straight raise
-from 24 to 36 physical pixels — ~12dp at a 3× density, up from ~8dp — which errs
-toward *not* sending a gesture the user did not intend, the correct direction for
-a threshold whose failure mode is actuating real hardware.
-
-A single canonical-pixel constant rather than `24 × nativeScale` because the
-observation stream **does not publish `nativeScale`** — the daemon keeps it
-internal, and a `"px"` frame's screenshot dimensions and bounds are equal by
-construction, so a client cannot recover the scale either. Scaling exactly would
-require the daemon to publish it, tracked as
-[#4582](https://github.com/kaeawc/auto-mobile/issues/4582). Until then this
-constant is a conservative floor over the scales we know of.
+A pixel frame without matching finite, positive scale metadata is not safe for
+control. The client must fail closed rather than guess a threshold or retain a
+frame after its scale changes.
 
 A below-threshold drag is **not** promoted to a tap. Actuating an input the user
 did not ask for is worse than ignoring an ambiguous one, and a click that barely

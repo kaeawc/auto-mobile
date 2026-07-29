@@ -280,6 +280,10 @@ public object DeviceControlPolicy {
     // is
     // judged in and the space it is later dispatched in cannot diverge.
     val pairedSpace = pairedCoordinateSpace(screenshot, hierarchy)
+    val pairedNativeScale = pairedNativeScale(screenshot, hierarchy, pairedSpace)
+    if (pairedSpace == CoordinateSpace.Pixels && pairedNativeScale == null) {
+      return blocked(DeviceControlBlockReason.GeometryMismatch)
+    }
 
     if (liveFrame != null) {
       // The live mirror carries NO capture identity — it is a separate WebRTC transport with no
@@ -307,7 +311,8 @@ public object DeviceControlPolicy {
         frameHeight = frameHeight,
         deviceWidth = deviceWidth,
         deviceHeight = deviceHeight,
-        // A polled screenshot may arrive in native pixel orientation (notably iOS) and the renderer
+        // A polled screenshot may arrive in native pixel orientation (notably iOS) and the
+        // renderer
         // rotates it, so an orientation difference there is expected.
         allowRotation = true,
         coordinateSpace = pairedSpace,
@@ -319,9 +324,11 @@ public object DeviceControlPolicy {
     return DeviceControlDecision.Available(
       DeviceFrameSnapshot(
         deviceId = selected,
-        // Ordered by the OBSERVATION-source counter alone. The live frame's sequence comes from a
+        // Ordered by the OBSERVATION-source counter alone. The live frame's sequence comes from
+        // a
         // different counter domain entirely (a per-mirror-connection counter), so folding it in
-        // with maxOf would let the snapshot sequence jump to the mirror's value while a live frame
+        // with maxOf would let the snapshot sequence jump to the mirror's value while a live
+        // frame
         // is present and then go BACKWARDS when it clears — breaking both the monotonicity this
         // field promises and the refresh policy's "strictly greater sequence" settle condition.
         // The live frame's provenance is carried separately in liveFrameSequence.
@@ -335,8 +342,10 @@ public object DeviceControlPolicy {
         deviceHeight = deviceHeight,
         screenshotData = screenshot.data,
         hierarchy = hierarchy.hierarchy,
-        // Bind the agreed space to the snapshot, exactly as captureSequence is bound: a snapshot
-        // outlives the facts it was built from (the post-input refresh retains it), and the unit
+        // Bind the agreed space to the snapshot, exactly as captureSequence is bound: a
+        // snapshot
+        // outlives the facts it was built from (the post-input refresh retains it), and the
+        // unit
         // its
         // coordinates are in must travel with it rather than be re-derived at dispatch time.
         coordinateSpace = pairedSpace,
@@ -346,6 +355,7 @@ public object DeviceControlPolicy {
         screenshotSequence = screenshot.sequence,
         hierarchySequence = hierarchy.sequence,
         liveFrameSequence = liveFrame?.sequence,
+        nativeScale = pairedNativeScale,
       )
     )
   }
@@ -383,6 +393,20 @@ public object DeviceControlPolicy {
     hierarchy: HierarchyFrameFacts,
   ): CoordinateSpace? =
     screenshot.coordinateSpace.takeIf { it != null && it == hierarchy.coordinateSpace }
+
+  /**
+   * Native scale is meaningful only for canonical-pixel frames. A controllable snapshot requires
+   * both messages to carry the same finite, positive value.
+   */
+  private fun pairedNativeScale(
+    screenshot: ScreenshotFrameFacts,
+    hierarchy: HierarchyFrameFacts,
+    coordinateSpace: CoordinateSpace?,
+  ): Double? {
+    if (coordinateSpace != CoordinateSpace.Pixels) return null
+    val scale = screenshot.nativeScale ?: return null
+    return scale.takeIf { it.isFinite() && it > 0.0 && it == hierarchy.nativeScale }
+  }
 
   /**
    * Whether the displayed frame and the effective device bounds used for mapping describe a

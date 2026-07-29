@@ -126,6 +126,7 @@ class ObservationStreamClientTest {
           "screenWidth": 1170,
           "screenHeight": 2532,
           "coordinateSpace": "px",
+          "nativeScale": 3.5,
           "frameContext": "ios:41"
         }
         """
@@ -133,6 +134,7 @@ class ObservationStreamClientTest {
       )
       val update = awaitItem()
       assertEquals(CoordinateSpace.Pixels, update.coordinateSpace)
+      assertEquals(3.5, update.nativeScale)
       assertEquals("ios:41", update.frameContext)
     }
 
@@ -145,6 +147,7 @@ class ObservationStreamClientTest {
           "timestamp": 2000,
           "data": { "packageName": "com.example" },
           "coordinateSpace": "px",
+          "nativeScale": 3.5,
           "frameContext": "ios:41"
         }
         """
@@ -152,6 +155,7 @@ class ObservationStreamClientTest {
       )
       val update = awaitItem()
       assertEquals(CoordinateSpace.Pixels, update.coordinateSpace)
+      assertEquals(3.5, update.nativeScale)
       assertEquals("ios:41", update.frameContext)
     }
   }

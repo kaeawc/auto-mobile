@@ -11,6 +11,7 @@ internal fun testSnapshot(
   deviceWidth: Int = 1080,
   deviceHeight: Int = 2340,
   coordinateSpace: CoordinateSpace? = null,
+  nativeScale: Double? = if (coordinateSpace == CoordinateSpace.Pixels) 1.0 else null,
   frameContext: String = "epoch:$sequence",
 ): DeviceFrameSnapshot =
   DeviceFrameSnapshot(
@@ -30,4 +31,5 @@ internal fun testSnapshot(
     screenshotSequence = sequence,
     hierarchySequence = sequence,
     liveFrameSequence = null,
+    nativeScale = nativeScale,
   )

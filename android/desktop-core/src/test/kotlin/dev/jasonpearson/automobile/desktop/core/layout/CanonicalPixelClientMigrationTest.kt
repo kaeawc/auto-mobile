@@ -38,9 +38,11 @@ class CanonicalPixelClientMigrationTest {
       deviceId = "sim-udid",
       captureSequence = 7L,
       coordinateSpace = CoordinateSpace.Pixels,
+      nativeScale = 3.5,
     )
 
     assertEquals(CoordinateSpace.Pixels, state.screenshotFacts?.coordinateSpace)
+    assertEquals(3.5, state.screenshotFacts?.nativeScale)
   }
 
   @Test
@@ -52,9 +54,11 @@ class CanonicalPixelClientMigrationTest {
       deviceId = "sim-udid",
       captureSequence = 7L,
       coordinateSpace = CoordinateSpace.Pixels,
+      nativeScale = 3.5,
     )
 
     assertEquals(CoordinateSpace.Pixels, state.hierarchyFacts?.coordinateSpace)
+    assertEquals(3.5, state.hierarchyFacts?.nativeScale)
   }
 
   @Test

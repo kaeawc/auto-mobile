@@ -128,7 +128,8 @@ CtrlProxy runners, a device-authored `frameContext`.
   "hierarchyDiff": { "…": "optional per-frame diff summary" },
   "captureSequence": 42,
   "frameContext": "android-generation-42",
-  "coordinateSpace": "px"
+  "coordinateSpace": "px",
+  "nativeScale": 1
 }
 ```
 
@@ -145,8 +146,9 @@ field is **absent** and a control client must fail closed for that frame.
   "screenWidth": 1080,
   "screenHeight": 2340,
   "captureSequence": 42,
-  "frameContext": "android-generation-42"
-  "coordinateSpace": "px"
+  "frameContext": "android-generation-42",
+  "coordinateSpace": "px",
+  "nativeScale": 1
 }
 ```
 
@@ -163,9 +165,10 @@ physical pixels** in the current device orientation — the element `bounds`, th
 `screenWidth`/`screenHeight`, and the screenshot's own pixels are all that one unit, on **both**
 platforms. That is the whole contract:
 
-- **Reading.** Take `bounds` and `screenWidth`/`screenHeight` as pixels. Nothing to convert, nothing
-  to look up, no platform branch. Because both sides are the same unit, the frame's dimensions and
-  the mapping bounds are comparable **exactly** — see the geometry rule in
+- **Reading.** Take `bounds` and `screenWidth`/`screenHeight` as pixels. A controllable px frame
+  also carries a matching finite, positive `nativeScale` on both messages. Nothing else to convert
+  or look up, and no platform branch is needed. Because both sides are the same unit, the frame's
+  dimensions and the mapping bounds are comparable **exactly** — see the geometry rule in
   [Client Frame Snapshot](client-frame-snapshot.md#coordinate-space-canonical-pixels).
 - **Writing.** Send `input/tap` and `input/swipe` coordinates in those same pixels. The daemon does
   any runner-specific conversion itself (it divides by the runner-reported `nativeScale` for the iOS
@@ -253,7 +256,8 @@ Subscribe to the daemon observation stream (wire protocol below:
 - the device **frame identity** — `screenshot.frameContext == hierarchy.frameContext`, with both
   values non-null.
 - the declared **coordinate space** of both messages, which decides whether the snapshot's geometry
-  check is the exact one or the legacy aspect-only one
+  check is the exact one or the legacy aspect-only one, and, for `"px"`, their matching finite
+  positive `nativeScale`
   ([Coordinates](#coordinates-one-unit-no-platform-knowledge-required)).
 
 Control is available **only when a snapshot exists**. If any
@@ -290,10 +294,9 @@ executes whatever it is handed, so convergence on one policy is what keeps clien
 
 - **Tap** — an in-bounds click → one [`input/tap`](unix-socket-api.md#inputtap) at the mapped
   coordinate.
-- **Drag → swipe** — a drag is a swipe only if it travels far enough to be deliberate: **≥ 36
-  device coordinates** on a `coordinateSpace: "px"` frame, **≥ 24** on a legacy one (the threshold
-  is a physical distance, so its number depends on the frame's unit; the pixel value is a
-  conservative floor covering `nativeScale` up to 3.5× — see
+- **Drag → swipe** — a drag is a swipe only if it travels far enough to be deliberate:
+  **≥ `24 * nativeScale` device coordinates** on a `coordinateSpace: "px"` frame, **≥ 24** on a
+  legacy one (the threshold preserves the same physical distance in each frame's unit; see
   [Drag-to-swipe policy](screen-control-mapping.md#threshold)), measured after the end is
   clamped. Below that, send **nothing** — not a swipe and *not* a tap. Map both
   endpoints through the **one** snapshot pinned when the drag began. A drag that *started*

@@ -46,6 +46,7 @@ class FakeObservationStreamServer {
     options?: {
       captureSequence?: number;
       coordinateSpace?: "px";
+      nativeScale?: number;
       frameContext?: string;
       rotation?: number;
     }
@@ -60,6 +61,7 @@ class FakeObservationStreamServer {
       screenHeight,
       ...(metadata === undefined ? {} : { metadata }),
       ...(options?.coordinateSpace === undefined ? {} : { coordinateSpace: options.coordinateSpace }),
+      ...(options?.nativeScale === undefined ? {} : { nativeScale: options.nativeScale }),
       ...(screenshotOptions === undefined ? {} : { options: screenshotOptions }),
       ...(options?.frameContext === undefined ? {} : { frameContext: options.frameContext }),
     });
@@ -73,6 +75,7 @@ interface ScreenshotUpdate {
   screenHeight: number;
   metadata?: Record<string, unknown>;
   coordinateSpace?: "px";
+  nativeScale?: number;
   options?: { captureSequence?: number; rotation?: number };
   frameContext?: string;
 }
@@ -926,6 +929,9 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         // The px declaration is gated on runner metadata: present == canonical pixels declared,
         // absent (legacy runner) == no field so the client keeps its point-space fallback.
         expect(streamServer.screenshotUpdates[0].coordinateSpace).toBe(hasMetadata ? "px" : undefined);
+        expect(streamServer.screenshotUpdates[0].nativeScale).toBe(
+          hasMetadata ? vector.scale : undefined
+        );
       });
     }
   });

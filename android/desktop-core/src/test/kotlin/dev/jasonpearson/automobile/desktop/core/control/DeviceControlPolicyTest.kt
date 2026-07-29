@@ -661,7 +661,12 @@ class DeviceControlPolicyTest {
 
   // ---- Canonical pixels: exact vs legacy geometry (issue #4550) -------------
 
-  private fun screenshotFacts(width: Int, height: Int, coordinateSpace: CoordinateSpace?) =
+  private fun screenshotFacts(
+    width: Int,
+    height: Int,
+    coordinateSpace: CoordinateSpace?,
+    nativeScale: Double? = if (coordinateSpace == CoordinateSpace.Pixels) 3.0 else null,
+  ) =
     ScreenshotFrameFacts(
       deviceId = device,
       sequence = 10L,
@@ -671,13 +676,19 @@ class DeviceControlPolicyTest {
       height = height,
       data = null,
       coordinateSpace = coordinateSpace,
+      nativeScale = nativeScale,
       frameContext = "epoch:7",
       // Proven rotation so the #4502 gate passes and these tests isolate the COORDINATE-SPACE
       // behavior they were written for. Rotation has its own dedicated tests.
       rotation = 0,
     )
 
-  private fun hierarchyFacts(width: Int, height: Int, coordinateSpace: CoordinateSpace?) =
+  private fun hierarchyFacts(
+    width: Int,
+    height: Int,
+    coordinateSpace: CoordinateSpace?,
+    nativeScale: Double? = if (coordinateSpace == CoordinateSpace.Pixels) 3.0 else null,
+  ) =
     HierarchyFrameFacts(
       deviceId = device,
       sequence = 11L,
@@ -687,6 +698,7 @@ class DeviceControlPolicyTest {
       rootWidth = width,
       rootHeight = height,
       coordinateSpace = coordinateSpace,
+      nativeScale = nativeScale,
       frameContext = "epoch:7",
       rotation = 0,
     )
@@ -744,6 +756,24 @@ class DeviceControlPolicyTest {
     // The agreed space is BOUND to the snapshot, not re-derived later: a snapshot outlives the
     // facts it was built from, and the unit its coordinates are in has to travel with it.
     assertEquals(CoordinateSpace.Pixels, snapshot.coordinateSpace)
+    assertEquals(3.0, snapshot.nativeScale)
+  }
+
+  @Test
+  fun `px mode fails closed when native scale is missing or differs between sources`() {
+    val missing =
+      inputs(
+        screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels, nativeScale = null),
+        hierarchy = hierarchyFacts(1170, 2532, CoordinateSpace.Pixels, nativeScale = 3.0),
+      )
+    val mismatched =
+      inputs(
+        screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels, nativeScale = 3.0),
+        hierarchy = hierarchyFacts(1170, 2532, CoordinateSpace.Pixels, nativeScale = 3.5),
+      )
+
+    assertEquals(DeviceControlBlockReason.GeometryMismatch, blockedReason(missing))
+    assertEquals(DeviceControlBlockReason.GeometryMismatch, blockedReason(mismatched))
   }
 
   @Test

@@ -3089,7 +3089,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.screenGeometry.update(
         bestDimensions.width,
         bestDimensions.height,
-        this.reportedScaleMetadata ? COORDINATE_SPACE_PX : undefined
+        this.reportedScaleMetadata ? COORDINATE_SPACE_PX : undefined,
+        this.reportedScaleMetadata?.nativeScale
       );
     } else {
       // No usable window bounds in this hierarchy. Clearing (rather than keeping the previous

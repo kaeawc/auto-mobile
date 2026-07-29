@@ -1418,6 +1418,7 @@ describe("DeviceDataStreamSocketServer", () => {
       const [message] = socket.getWrittenMessages<any>();
       expect(message.type).toBe("hierarchy_update");
       expect(message.coordinateSpace).toBe("px");
+      expect(message.nativeScale).toBe(3);
       expect(message.data.screenWidth).toBe(1170);
       expect(message.data.screenHeight).toBe(2532);
       expect(message.data.hierarchy.node.$.bounds).toEqual({ left: 0, top: 0, right: 1170, bottom: 2532 });
@@ -1444,6 +1445,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       const [message] = socket.getWrittenMessages<any>();
       expect(message.coordinateSpace).toBeUndefined();
+      expect(message.nativeScale).toBeUndefined();
       // Point-space bounds and dims pass through unchanged.
       expect(message.data.screenWidth).toBe(390);
       expect(message.data.hierarchy.node.node[0].$.bounds).toEqual({ left: 10, top: 20, right: 100, bottom: 60 });
@@ -1472,9 +1474,11 @@ describe("DeviceDataStreamSocketServer", () => {
       server.pushScreenshotUpdate("ios-1", pngFrame(1170, 2532), 1170, 2532, {}, {
         captureSequence: seq ?? undefined,
         coordinateSpace: "px",
+        nativeScale: 3,
       });
       const shot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
       expect(shot.coordinateSpace).toBe("px");
+      expect(shot.nativeScale).toBe(3);
       expect(shot.captureSequence).toBe(seq);
     });
 
@@ -1483,6 +1487,7 @@ describe("DeviceDataStreamSocketServer", () => {
       server.pushScreenshotUpdate("ios-legacy", pngFrame(1170, 2532), 1170, 2532, {}, {});
       const shot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
       expect(shot.coordinateSpace).toBeUndefined();
+      expect(shot.nativeScale).toBeUndefined();
     });
   });
 

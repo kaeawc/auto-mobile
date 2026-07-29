@@ -2113,6 +2113,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     metadata: ScreenshotMetadata = IOS_CTRLPROXY_SCREENSHOT_METADATA,
     captureSequence?: number,
     coordinateSpace?: CoordinateSpace,
+    nativeScale?: number,
     frameContext?: string,
     rotation?: number,
   ): void {
@@ -2122,15 +2123,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     try {
-      // The identity AND the coordinate space travel with the frame from the moment it was
-      // requested (issues #3348, #4549) — both are read from the binding taken at request
-      // initiation, NEVER from the client's LATEST scale metadata at delivery time. A hierarchy
-      // that flips the metadata (canonical<->legacy) while this frame is in flight must not
-      // relabel it: the declared space must match the geometry the frame was captured under. The
-      // daemon still verifies the declared dimensions against the frame's real pixels.
+      // Identity, coordinate space, and native scale travel with the frame from request initiation,
+      // never from the latest metadata at delivery time. A hierarchy that flips scale metadata
+      // while pixels are in flight must not relabel their geometry or their swipe threshold.
       server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight, metadata, {
         captureSequence,
         ...(coordinateSpace ? { coordinateSpace } : {}),
+        ...(nativeScale === undefined ? {} : { nativeScale }),
         frameContext,
         rotation,
       });
@@ -2182,6 +2181,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
             result,
             binding?.captureSequence,
             binding?.coordinateSpace,
+            binding?.nativeScale,
             result.frameContext,
             result.rotation
           );
@@ -2268,9 +2268,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     // A change clears the forwarded flag: the geometry becomes capture-tracked only once a
     // hierarchy carrying it is forwarded (see pushHierarchyToObservationStream) — which will NOT
     // happen while hierarchy pushes are suppressed, or when there is no stream server. The
-    // coordinate space is bound here too (#4549), from the metadata present for THIS hierarchy, so
-    // a later metadata flip cannot restamp a frame whose request was bound now.
-    this.screenGeometry.update(pixelWidth, pixelHeight, metadata ? COORDINATE_SPACE_PX : undefined);
+    // Coordinate space and native scale are bound here from THIS hierarchy, so a later metadata
+    // flip cannot restamp a frame whose request was bound now.
+    this.screenGeometry.update(
+      pixelWidth,
+      pixelHeight,
+      metadata ? COORDINATE_SPACE_PX : undefined,
+      metadata?.nativeScale
+    );
   }
 
   /**

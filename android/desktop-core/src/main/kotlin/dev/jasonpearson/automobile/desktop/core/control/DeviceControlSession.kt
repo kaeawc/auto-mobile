@@ -123,6 +123,26 @@ class DeviceControlSession(
     }
   }
 
+  /** Same transition and dispatch-time agreement rules as [SpaceTracker], for native scale. */
+  private class NativeScaleTracker {
+    private var seen: Boolean = false
+    private var last: Double? = null
+
+    fun observe(nativeScale: Double?): Boolean {
+      val changed = seen && nativeScale != last
+      seen = true
+      last = nativeScale
+      return changed
+    }
+
+    fun matches(nativeScale: Double?): Boolean = !seen || nativeScale == last
+
+    fun forget() {
+      seen = false
+      last = null
+    }
+  }
+
   /** Records the newest frame context observed from the stream. */
   private class FrameContextTracker {
     private var seen: Boolean = false
@@ -147,6 +167,7 @@ class DeviceControlSession(
   // parsing and the layout state's debounce. This is the one that matters (see
   // [onObservationSpaceDeclared]).
   private val streamSpace = SpaceTracker()
+  private val streamNativeScale = NativeScaleTracker()
 
   // Like [streamSpace], but carries the device-authored identity that makes input actionable.
   private val streamFrameContext = FrameContextTracker()
@@ -169,6 +190,8 @@ class DeviceControlSession(
   // (see [resetOnCoordinateSpaceTransition]).
   private val screenshotFactSpace = SpaceTracker()
   private val hierarchyFactSpace = SpaceTracker()
+  private val screenshotFactNativeScale = NativeScaleTracker()
+  private val hierarchyFactNativeScale = NativeScaleTracker()
 
   /** The post-input refresh state a client should be rendering; see [PostInputRefreshTracker]. */
   val refreshState: PostInputRefreshState
@@ -336,9 +359,20 @@ class DeviceControlSession(
     val screenshotFlipped =
       inputs.screenshot?.let { screenshotFactSpace.observe(it.coordinateSpace) }
     val hierarchyFlipped = inputs.hierarchy?.let { hierarchyFactSpace.observe(it.coordinateSpace) }
+    val screenshotScaleChanged =
+      inputs.screenshot?.let { screenshotFactNativeScale.observe(it.nativeScale) }
+    val hierarchyScaleChanged =
+      inputs.hierarchy?.let { hierarchyFactNativeScale.observe(it.nativeScale) }
     // The trackers already hold the new space, so this reset must NOT forget them — otherwise the
     // very next evaluate would re-establish a baseline and could see the same flip twice.
-    if (screenshotFlipped == true || hierarchyFlipped == true) resetPreservingSpaceBaseline()
+    if (
+      screenshotFlipped == true ||
+        hierarchyFlipped == true ||
+        screenshotScaleChanged == true ||
+        hierarchyScaleChanged == true
+    ) {
+      resetPreservingSpaceBaseline()
+    }
   }
 
   /**
@@ -374,12 +408,20 @@ class DeviceControlSession(
    * ignored. The hierarchy path is unaffected: the daemon assigns the id on every hierarchy push,
    * so a hierarchy's id is always the newest at the time it is sent and can never be rejected here.
    */
-  fun onObservationSpaceDeclared(coordinateSpace: CoordinateSpace?, captureSequence: Long?) {
+  fun onObservationSpaceDeclared(
+    coordinateSpace: CoordinateSpace?,
+    captureSequence: Long?,
+    nativeScale: Double? = null,
+  ) {
     val lastSeen = lastObservedSpaceCapture
     if (captureSequence == null && lastSeen != null) return
     if (captureSequence != null && lastSeen != null && captureSequence <= lastSeen) return
     if (captureSequence != null) lastObservedSpaceCapture = captureSequence
-    if (streamSpace.observe(coordinateSpace)) resetPreservingSpaceBaseline()
+    val spaceChanged = streamSpace.observe(coordinateSpace)
+    val nativeScaleChanged = streamNativeScale.observe(nativeScale)
+    if (spaceChanged || nativeScaleChanged) {
+      resetPreservingSpaceBaseline()
+    }
   }
 
   /**
@@ -421,6 +463,7 @@ class DeviceControlSession(
   private fun coordinatesAreStillDispatchable(snapshot: DeviceFrameSnapshot): Boolean =
     staleContextRejectedFrameContext == null &&
       streamSpace.matches(snapshot.coordinateSpace) &&
+      streamNativeScale.matches(snapshot.nativeScale) &&
       streamFrameContext.matches(snapshot.frameContext) &&
       rotationIsStillDispatchable(snapshot)
 
@@ -516,6 +559,7 @@ class DeviceControlSession(
         // The threshold is a PHYSICAL distance, so its numeric value depends on the unit these
         // endpoints are in. Read from the clicked snapshot, never from current stream state.
         coordinateSpace = snapshot.coordinateSpace,
+        nativeScale = snapshot.nativeScale,
       )
     // Ignored is not a failure: it means the gesture was never a swipe. Nothing is sent, nothing is
     // surfaced, and the refresh tracker is left alone.
@@ -646,8 +690,11 @@ class DeviceControlSession(
   fun reset() {
     resetPreservingSpaceBaseline()
     streamSpace.forget()
+    streamNativeScale.forget()
     screenshotFactSpace.forget()
     hierarchyFactSpace.forget()
+    screenshotFactNativeScale.forget()
+    hierarchyFactNativeScale.forget()
     lastObservedSpaceCapture = null
     streamFrameContext.forget()
     lastObservedFrameContextCapture = null

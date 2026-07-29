@@ -24,16 +24,17 @@ import type { CoordinateSpace } from "../../daemon/canonicalPixels";
  * request-send time and used when the response is pushed, so an intervening hierarchy cannot
  * relabel the in-flight frame with a capture it does not belong to.
  *
- * `coordinateSpace` travels with the binding for the same reason as the dimensions (#4549): whether
- * this frame's geometry is canonical pixels is fixed the moment the request is initiated, so an
- * intervening hierarchy that flips the client's latest scale metadata (legacy<->canonical) cannot
- * stamp the in-flight frame with a space its geometry does not describe.
+ * `coordinateSpace` and `nativeScale` travel with the binding for the same reason as the
+ * dimensions: whether this frame's geometry is canonical pixels, and the physical threshold that
+ * applies to it, are fixed when the request is initiated. An intervening hierarchy cannot relabel
+ * in-flight pixels with different scale metadata.
  */
 export interface ScreenGeometryBinding {
   captureSequence: number;
   width: number;
   height: number;
   coordinateSpace?: CoordinateSpace;
+  nativeScale?: number;
 }
 
 /**
@@ -44,10 +45,11 @@ export interface ScreenGeometryBinding {
  */
 export function screenshotBindingPushOptions(
   binding: ScreenGeometryBinding | undefined
-): { captureSequence?: number; coordinateSpace?: CoordinateSpace } {
+): { captureSequence?: number; coordinateSpace?: CoordinateSpace; nativeScale?: number } {
   return {
     captureSequence: binding?.captureSequence,
     ...(binding?.coordinateSpace ? { coordinateSpace: binding.coordinateSpace } : {}),
+    ...(binding?.nativeScale === undefined ? {} : { nativeScale: binding.nativeScale }),
   };
 }
 
@@ -57,6 +59,7 @@ export class TrackedScreenGeometry {
     height: number;
     captureSequence: number | null;
     coordinateSpace?: CoordinateSpace;
+    nativeScale?: number;
   } | null = null;
 
   /** Current width, or null when no hierarchy has produced dimensions yet. */
@@ -104,6 +107,7 @@ export class TrackedScreenGeometry {
       width: current.width,
       height: current.height,
       ...(current.coordinateSpace ? { coordinateSpace: current.coordinateSpace } : {}),
+      ...(current.nativeScale === undefined ? {} : { nativeScale: current.nativeScale }),
     };
   }
 
@@ -112,7 +116,12 @@ export class TrackedScreenGeometry {
    * already established; a change replaces the entry as NOT forwarded, because the daemon has not
    * yet seen a hierarchy carrying the new geometry.
    */
-  update(width: number, height: number, coordinateSpace?: CoordinateSpace): void {
+  update(
+    width: number,
+    height: number,
+    coordinateSpace?: CoordinateSpace,
+    nativeScale?: number
+  ): void {
     // Unusable geometry CLEARS rather than leaving the previous entry intact: keeping stale
     // forwarded dimensions here would let a later hierarchy push vouch for geometry that no longer
     // describes the device. Non-finite values are rejected for the same reason — they can only come
@@ -128,11 +137,12 @@ export class TrackedScreenGeometry {
     if (
       this.current?.width === width &&
       this.current.height === height &&
-      this.current.coordinateSpace === coordinateSpace
+      this.current.coordinateSpace === coordinateSpace &&
+      this.current.nativeScale === nativeScale
     ) {
       return;
     }
-    this.current = { width, height, captureSequence: null, coordinateSpace };
+    this.current = { width, height, captureSequence: null, coordinateSpace, nativeScale };
   }
 
   /**

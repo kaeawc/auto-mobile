@@ -39,6 +39,8 @@ public enum class DeviceFrameSource {
  *   (issue #4550). [CoordinateSpace.Pixels] when the message carried `coordinateSpace: "px"`; null
  *   for a legacy frame that declared nothing. Travels per message rather than per session because
  *   the declaration is per message: a runner can start reporting scale metadata mid-stream.
+ * @param nativeScale point-to-physical-pixel ratio on a canonical-pixel frame; null on a legacy
+ *   frame.
  * @param frameContext opaque device-authored identity for the UI state that produced these pixels.
  *   A controllable snapshot requires this to agree with [HierarchyFrameFacts.frameContext].
  */
@@ -51,6 +53,7 @@ public data class ScreenshotFrameFacts(
   val height: Int,
   val data: ByteArray?,
   val coordinateSpace: CoordinateSpace? = null,
+  val nativeScale: Double? = null,
   val frameContext: String? = null,
   /** Device display rotation reported for this capture; null means legacy/unproven provenance. */
   val rotation: Int? = null,
@@ -71,7 +74,8 @@ public data class ScreenshotFrameFacts(
       height == other.height &&
       rotation == other.rotation &&
       data === other.data &&
-      coordinateSpace == other.coordinateSpace
+      coordinateSpace == other.coordinateSpace &&
+      nativeScale == other.nativeScale
   }
 
   override fun hashCode(): Int {
@@ -85,6 +89,7 @@ public data class ScreenshotFrameFacts(
     result = 31 * result + (rotation ?: 0)
     result = 31 * result + System.identityHashCode(data)
     result = 31 * result + (coordinateSpace?.hashCode() ?: 0)
+    result = 31 * result + (nativeScale?.hashCode() ?: 0)
     return result
   }
 }
@@ -104,6 +109,7 @@ public data class ScreenshotFrameFacts(
  *   [ScreenshotFrameFacts.coordinateSpace][ScreenshotFrameFacts]. Only when this AND the paired
  *   screenshot both declare [CoordinateSpace.Pixels] do the two describe one unit, which is the
  *   precondition [DeviceControlPolicy] requires before comparing absolute dimensions.
+ * @param nativeScale point-to-physical-pixel ratio declared with a canonical-pixel frame.
  * @param frameContext opaque device-authored identity for this hierarchy capture.
  */
 public data class HierarchyFrameFacts(
@@ -115,6 +121,7 @@ public data class HierarchyFrameFacts(
   val rootWidth: Int,
   val rootHeight: Int,
   val coordinateSpace: CoordinateSpace? = null,
+  val nativeScale: Double? = null,
   val frameContext: String? = null,
   /** Device display rotation reported for this hierarchy capture. */
   val rotation: Int? = null,
@@ -179,6 +186,8 @@ public data class LiveFrameFacts(
  *   coordinate mapped in one space would be converted as though it were in the other and land in
  *   the wrong physical place. Carrying the space lets the session notice the transition and fail
  *   closed; see `DeviceControlSession`.
+ * @param nativeScale the screenshot and hierarchy's agreed point-to-physical-pixel ratio. It is
+ *   bound with [coordinateSpace] so a retained snapshot cannot dispatch after a scale change.
  * @param captureSequence the daemon capture identity the screenshot and hierarchy agreed on.
  * @param frameContext the device-authored UI identity the screenshot and hierarchy agreed on.
  * @param rotation the device rotation the contributing sources agreed on when this snapshot was
@@ -206,6 +215,7 @@ public data class DeviceFrameSnapshot(
   val screenshotSequence: Long,
   val hierarchySequence: Long,
   val liveFrameSequence: Long?,
+  val nativeScale: Double? = null,
 ) {
   /**
    * The device-coordinate bounds a click through this snapshot must be mapped with. Callers build
@@ -237,7 +247,8 @@ public data class DeviceFrameSnapshot(
       screenshotSequence == other.screenshotSequence &&
       hierarchySequence == other.hierarchySequence &&
       liveFrameSequence == other.liveFrameSequence &&
-      coordinateSpace == other.coordinateSpace
+      coordinateSpace == other.coordinateSpace &&
+      nativeScale == other.nativeScale
   }
 
   override fun hashCode(): Int {
@@ -250,6 +261,7 @@ public data class DeviceFrameSnapshot(
     result = 31 * result + hierarchySequence.hashCode()
     result = 31 * result + (liveFrameSequence?.hashCode() ?: 0)
     result = 31 * result + (coordinateSpace?.hashCode() ?: 0)
+    result = 31 * result + (nativeScale?.hashCode() ?: 0)
     return result
   }
 }

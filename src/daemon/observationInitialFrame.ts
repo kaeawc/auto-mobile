@@ -191,8 +191,11 @@ async function pushAndroidInitialScreenshot(
  */
 function canonicalPixelScreenshotOptions(
   hierarchy: ViewHierarchyResult
-): { coordinateSpace: typeof COORDINATE_SPACE_PX } | Record<string, never> {
-  return readScreenScaleMetadata(hierarchy) ? { coordinateSpace: COORDINATE_SPACE_PX } : {};
+): { coordinateSpace: typeof COORDINATE_SPACE_PX; nativeScale: number } | Record<string, never> {
+  const metadata = readScreenScaleMetadata(hierarchy);
+  return metadata
+    ? { coordinateSpace: COORDINATE_SPACE_PX, nativeScale: metadata.nativeScale }
+    : {};
 }
 
 /**

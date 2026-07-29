@@ -2964,6 +2964,7 @@ describe("IOSCtrlProxyClient", function() {
         });
         const boundPx = geometry.bind();
         expect(boundPx.coordinateSpace).toBe("px");
+        expect(boundPx.nativeScale).toBe(3);
 
         // A legacy hierarchy arrives while the frame is in flight, flipping the LATEST metadata to
         // null. Reading it at delivery would DROP the px declaration from a canonical-bound frame.
@@ -2971,10 +2972,12 @@ describe("IOSCtrlProxyClient", function() {
         socket.reset();
 
         (ctrlProxyClient as any).pushScreenshotToObservationStream(
-          "c2hvdA==", boundPx.width, boundPx.height, undefined, boundPx.captureSequence, boundPx.coordinateSpace
+          "c2hvdA==", boundPx.width, boundPx.height, undefined, boundPx.captureSequence,
+          boundPx.coordinateSpace, boundPx.nativeScale
         );
         const pxShot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
         expect(pxShot.coordinateSpace).toBe("px"); // the bound value, NOT the flipped-to-null metadata
+        expect(pxShot.nativeScale).toBe(3);
 
         // Reverse: a LEGACY-bound capture must not gain px just because metadata later appeared.
         (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
@@ -2982,15 +2985,18 @@ describe("IOSCtrlProxyClient", function() {
         });
         const boundLegacy = geometry.bind();
         expect(boundLegacy.coordinateSpace).toBeUndefined();
+        expect(boundLegacy.nativeScale).toBeUndefined();
 
         (ctrlProxyClient as any).reportedScaleMetadata = { nativeScale: 3, pixelWidth: 960, pixelHeight: 2079 };
         socket.reset();
 
         (ctrlProxyClient as any).pushScreenshotToObservationStream(
-          "c2hvdA==", boundLegacy.width, boundLegacy.height, undefined, boundLegacy.captureSequence, boundLegacy.coordinateSpace
+          "c2hvdA==", boundLegacy.width, boundLegacy.height, undefined, boundLegacy.captureSequence,
+          boundLegacy.coordinateSpace, boundLegacy.nativeScale
         );
         const legacyShot = socket.getWrittenMessages<any>().find(m => m.type === "screenshot_update");
         expect(legacyShot.coordinateSpace).toBeUndefined(); // bound legacy, NOT the flipped-to-px metadata
+        expect(legacyShot.nativeScale).toBeUndefined();
       });
     });
 

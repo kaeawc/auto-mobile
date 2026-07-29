@@ -326,7 +326,7 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
   test("every fitScale row's expected output is DERIVABLE from its inputs", function() {
     for (let i = 0; i < canonical.fitScale.length; i++) {
       const row = canonical.fitScale[i];
-      expect(Math.abs(referenceFitScale(row) - row.expected)).toBeLessThanOrEqual(1e-3);
+      expect(referenceFitScale(row)).toBe(Math.fround(row.expected));
     }
   });
 

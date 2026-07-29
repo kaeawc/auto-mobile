@@ -336,7 +336,7 @@ class CoordinateMappingGoldenVectorTest {
           vector.viewportHeight,
           vector.padding,
         )
-      assertEquals(vector.expected, scale, TOLERANCE, "row $index")
+      assertEquals(vector.expected, scale, FIT_SCALE_TOLERANCE, "row $index")
     }
   }
 
@@ -372,5 +372,6 @@ class CoordinateMappingGoldenVectorTest {
 
   private companion object {
     const val TOLERANCE = 0.001f
+    const val FIT_SCALE_TOLERANCE = 0f
   }
 }

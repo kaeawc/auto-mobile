@@ -84,6 +84,9 @@ data class DeviceImageInfo(
   val isAvailable: Boolean? = null,
   val iosVersion: String? = null,
   val deviceType: String? = null,
+  // CPU architecture (e.g. "arm64", "x86_64"). Already emitted by the iOS images resource;
+  // Android abi is not yet plumbed through the daemon (tracked as a follow-up).
+  val architecture: String? = null,
 )
 
 /** Parser for device resource responses */

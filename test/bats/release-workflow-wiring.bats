@@ -128,10 +128,27 @@
   [[ "$output" == *"verify-artifact-sha256.sh"* ]]
   [[ "$output" == *"verify-release-integrity.sh"* ]]
 
-  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Create and push verified release tag") | .run' "$workflow"
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Promote verified release and create tag") | .run' "$workflow"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"main moved after the release artifacts were verified"* ]]
+  [[ "$output" == *'git push origin "$EXPECTED_RELEASE_COMMIT":main'* ]]
   [[ "$output" == *'git tag "$TAG" "$EXPECTED_RELEASE_COMMIT"'* ]]
+}
+
+@test "prepare-release keeps intermediate version commits on a run-scoped staging ref (#4686)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/prepare-release.yml"
+
+  run yq -r '.jobs."prepare-version".outputs.base_main_commit' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ steps.commit.outputs.base_main_commit }}' ]
+
+  local prepare_commit final_commit
+  prepare_commit="$(yq -r '.jobs."prepare-version".steps[] | select(.id == "commit") | .run' "$workflow")"
+  final_commit="$(yq -r '.jobs."finalize-release".steps[] | select(.id == "commit") | .run' "$workflow")"
+  [[ "$prepare_commit" == *'git push --force origin "HEAD:refs/heads/$STAGING_REF"'* ]]
+  [[ "$prepare_commit" != *'git push origin HEAD:main'* ]]
+  [[ "$final_commit" == *'git push --force origin "HEAD:refs/heads/$STAGING_REF"'* ]]
+  [[ "$final_commit" != *'git push origin HEAD:main'* ]]
 }
 
 @test "prepare-release validates the finalized tree before tagging and can rerun provenance upload (#4686)" {

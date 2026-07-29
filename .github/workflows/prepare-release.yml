@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_commit: ${{ steps.commit.outputs.release_commit }}
+      base_main_commit: ${{ steps.commit.outputs.base_main_commit }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -52,16 +53,18 @@ jobs:
           GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
         run: scripts/changelog/update_changelog_from_issues.sh
 
-      - name: Commit versioned release tree to main
+      - name: Commit versioned release tree to staging ref
         id: commit
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
+          STAGING_REF: release-prepare/${{ github.run_id }}
         run: |
           set -euo pipefail
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          base_main_commit="$(git rev-parse HEAD)"
 
           mapfile -t changed_files < <(
             { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u
@@ -93,10 +96,13 @@ jobs:
           if ((${#changed_files[@]} > 0)); then
             git add -- "${changed_files[@]}"
             git commit -m "chore: bump versions to v$VERSION [skip ci]"
-            git push origin HEAD:main
           fi
 
+          # Reusable workflows need a remote ref to check out this candidate,
+          # but main must not advertise an unverified release version.
+          git push --force origin "HEAD:refs/heads/$STAGING_REF"
           echo "release_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "base_main_commit=$base_main_commit" >> "$GITHUB_OUTPUT"
 
   build-candidate-ctrl-proxy-ios-ipa:
     needs: prepare-version
@@ -149,8 +155,8 @@ jobs:
     outputs:
       release_commit: ${{ steps.commit.outputs.release_commit }}
     # Restates the workflow-level grant because a job-level block replaces it
-    # wholesale. This job is the only one that writes the finalized constants
-    # commit to main; the candidate builders remain read-only.
+    # wholesale. This job writes the finalized constants only to the run-scoped
+    # staging ref; the verified job promotes it to main.
     permissions:
       contents: write
       issues: read
@@ -176,11 +182,12 @@ jobs:
           SCREEN_CAPTURE_HELPER_SHA256: ${{ needs.build-candidate-screen-capture-helper.outputs.sha256 }}
         run: bash scripts/generate-release-constants.sh
 
-      - name: Commit release constants to main
+      - name: Commit release constants to staging ref
         id: commit
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
+          STAGING_REF: release-prepare/${{ github.run_id }}
         run: |
           set -euo pipefail
 
@@ -218,25 +225,12 @@ jobs:
               exit 1
             fi
 
-            expected_parent="${{ needs.prepare-version.outputs.release_commit }}"
-            remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-            if [[ "$remote_main" != "$expected_parent" ]]; then
-              echo "main moved after the candidate artifacts were built; refusing to finalize a different release tree" >&2
-              exit 1
-            fi
-
             git add -- "${changed_files[@]}"
             git commit -m "chore: bump versions to v$VERSION [skip ci]"
-            git push origin HEAD:main
           fi
 
-          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
           local_head="$(git rev-parse HEAD)"
-          if [[ "$local_head" != "$remote_main" ]]; then
-            echo "Current HEAD is not on origin/main; refusing to verify a different release tree" >&2
-            exit 1
-          fi
-
+          git push --force origin "HEAD:refs/heads/$STAGING_REF"
           echo "release_commit=$local_head" >> "$GITHUB_OUTPUT"
 
   validate-finalized-release:
@@ -294,7 +288,7 @@ jobs:
 
   verify-prepared-release:
     runs-on: ubuntu-latest
-    needs: [finalize-release, validate-finalized-release, build-candidate-ctrl-proxy-ios-ipa, build-candidate-control-proxy-apk, build-candidate-video-server-jar, build-candidate-screen-capture-helper]
+    needs: [prepare-version, finalize-release, validate-finalized-release, build-candidate-ctrl-proxy-ios-ipa, build-candidate-control-proxy-apk, build-candidate-video-server-jar, build-candidate-screen-capture-helper]
     permissions:
       contents: write
       actions: write
@@ -342,17 +336,20 @@ jobs:
           bash scripts/ci/verify-artifact-sha256.sh /tmp/screen-capture-helper-macos-universal.zip screencapturehelper
           bash scripts/ci/verify-release-integrity.sh "$VERSION" /tmp/control-proxy.ipa
 
-      - name: Create and push verified release tag
+      - name: Promote verified release and create tag
         shell: bash
         env:
           TAG: ${{ inputs.version }}
           EXPECTED_RELEASE_COMMIT: ${{ needs.finalize-release.outputs.release_commit }}
+          BASE_MAIN_COMMIT: ${{ needs.prepare-version.outputs.base_main_commit }}
         run: |
           set -euo pipefail
 
           remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          if [[ "$remote_main" != "$EXPECTED_RELEASE_COMMIT" ]]; then
-            echo "main moved after the release artifacts were verified; refusing to tag a different tree" >&2
+          if [[ "$remote_main" == "$BASE_MAIN_COMMIT" ]]; then
+            git push origin "$EXPECTED_RELEASE_COMMIT":main
+          elif [[ "$remote_main" != "$EXPECTED_RELEASE_COMMIT" ]]; then
+            echo "main moved while the release was being verified; refusing to promote a different tree" >&2
             exit 1
           fi
 

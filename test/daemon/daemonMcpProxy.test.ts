@@ -45,6 +45,7 @@ class ScriptedDaemonClient implements DaemonClientLike {
     private readonly behavior: {
       toolResult?: any;
       toolError?: Error;
+      toolErrorByName?: Map<string, Error>;
       resourceResult?: any;
       resourceError?: Error;
       daemonMethodResults?: Map<string, any>;
@@ -62,6 +63,10 @@ class ScriptedDaemonClient implements DaemonClientLike {
 
   async callTool(toolName: string, params: Record<string, any>): Promise<any> {
     this.callToolCalls.push({ toolName, params });
+    const perToolError = this.behavior.toolErrorByName?.get(toolName);
+    if (perToolError) {
+      throw perToolError;
+    }
     if (this.behavior.toolError) {
       throw this.behavior.toolError;
     }
@@ -1377,6 +1382,39 @@ describe("DaemonMcpProxy", () => {
 
         expect(client.callToolCalls).toEqual([
           { toolName: "executePlan", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("clears the binding when an executePlan rejects, so its released session is not resurrected", async () => {
+      // A rejected executePlan still triggers daemon-side session release in
+      // DefaultPlanLifecycleManager.afterExecution()'s finally. The success-only
+      // clear is never reached on rejection, so without clearing on failure the
+      // stale UUID would be replayed on the next sessionless call and recreate the
+      // released session (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        toolErrorByName: new Map([["executePlan", new Error("plan boom")]]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await expect(proxy.callTool("executePlan", { deviceId: "device-a" })).rejects.toThrow("plan boom");
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "executePlan", params: { deviceId: "device-a", sessionUuid: "session-a" } },
           { toolName: "observe", params: { deviceId: "device-a" } },
         ]);
       } finally {

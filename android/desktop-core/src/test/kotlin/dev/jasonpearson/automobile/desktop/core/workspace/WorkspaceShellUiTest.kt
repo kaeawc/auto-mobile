@@ -52,8 +52,8 @@ class WorkspaceShellUiTest {
     onNodeWithText("Pixel 8").assertIsDisplayed()
     onNodeWithContentDescription("Input mode").assertIsDisplayed()
     onNodeWithContentDescription("Inspect mode").assertIsDisplayed()
-    onNodeWithContentDescription("Navigation").assertIsDisplayed()
-    onNodeWithContentDescription("Performance").assertIsDisplayed()
+    onNodeWithContentDescription("Navigation Pixel 8").assertIsDisplayed()
+    onNodeWithContentDescription("Performance Pixel 8").assertIsDisplayed()
     onNodeWithContentDescription("Close Pixel 8").assertIsDisplayed()
   }
 
@@ -167,7 +167,7 @@ class WorkspaceShellUiTest {
     setContent {
       MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
     }
-    onNodeWithContentDescription("Logs").performClick()
+    onNodeWithContentDescription("Logs Pixel 8").performClick()
     assertEquals(WorkspaceAction.SelectTool("a", null), action)
   }
 
@@ -179,7 +179,7 @@ class WorkspaceShellUiTest {
     setContent {
       MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
     }
-    onNodeWithContentDescription("Storage").performClick()
+    onNodeWithContentDescription("Storage Pixel 8").performClick()
     assertEquals(WorkspaceAction.SelectTool("a", Tool.Storage), action)
   }
 }

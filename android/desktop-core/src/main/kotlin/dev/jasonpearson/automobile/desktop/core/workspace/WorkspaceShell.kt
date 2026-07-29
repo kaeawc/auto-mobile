@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 private val StatusGreen = Color(0xFF40C057)
@@ -120,6 +121,14 @@ private fun EmptyState(onOpenPicker: () -> Unit, modifier: Modifier) {
   }
 }
 
+/**
+ * Fraction of a pane's content height given to the docked facet when a tool is active. Shrinking
+ * the pane (⤡) collapses the stream to grow the facet, so the shrunk fraction is the larger one.
+ * The complement `1 - fraction` is the stream's share; both stay strictly within (0, 1) so they are
+ * valid Compose weights. `internal` (not `private`) so the same-module pure test can pin the ratio.
+ */
+internal fun facetHeightFraction(shrunk: Boolean): Float = if (shrunk) 0.8f else 0.35f
+
 @Composable
 private fun DeviceColumnView(
   column: DeviceColumn,
@@ -190,8 +199,16 @@ private fun DockedFacet(
     ) {
       Text(tool.icon)
       Spacer(Modifier.width(6.dp))
-      Text(tool.label, style = MaterialTheme.typography.labelLarge)
-      Spacer(Modifier.weight(1f))
+      // Weighted + ellipsized so a long label on a narrow pane yields space to the close control
+      // instead of pushing it off-screen.
+      Text(
+        tool.label,
+        style = MaterialTheme.typography.labelLarge,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.weight(1f),
+      )
+      Spacer(Modifier.width(6.dp))
       Glyph(
         text = "✕",
         description = "Close ${tool.label} facet on ${column.name}",
@@ -252,7 +269,8 @@ private fun DeviceColumnHeader(column: DeviceColumn, onAction: (WorkspaceAction)
       val active = column.activeTool == tool
       Glyph(
         text = tool.icon,
-        description = tool.label,
+        // Device name disambiguates identical tool labels across panes for a11y / automation.
+        description = "${tool.label} ${column.name}",
         active = active,
         // Re-tapping the active tool closes its facet.
         onClick = {

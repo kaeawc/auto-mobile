@@ -163,6 +163,9 @@ private fun EmulatorControls(
   modifier: Modifier,
 ) {
   Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    // Unlock is gated on the pane's lock state; rotate/screenshot/snapshot always show. Production
+    // does not yet feed DeviceColumn.locked (that needs device-state plumbing), so Unlock only
+    // becomes reachable once #4694 wires the observed lock state in.
     EmulatorControl.entries
       .filter { it != EmulatorControl.Unlock || column.locked }
       .forEach { control ->

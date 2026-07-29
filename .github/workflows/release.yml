@@ -98,8 +98,64 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Wait for successful Prepare Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREPARE_RUN_ID: ${{ inputs.prepare_run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          for _ in $(seq 1 12); do
+            run="$(gh api "repos/$REPO/actions/runs/$PREPARE_RUN_ID")"
+            status="$(jq -r '.status' <<<"$run")"
+            if [[ "$status" != completed ]]; then
+              sleep 5
+              continue
+            fi
+
+            conclusion="$(jq -r '.conclusion' <<<"$run")"
+            workflow_path="$(jq -r '.path' <<<"$run")"
+            if [[ "$conclusion" != success ]] \
+              || [[ "$workflow_path" != ".github/workflows/prepare-release.yml" ]]; then
+              echo "prepare_run_id must identify a successful Prepare Release run" >&2
+              exit 1
+            fi
+            exit 0
+          done
+
+          echo "Prepare Release run $PREPARE_RUN_ID did not complete within 60 seconds" >&2
+          exit 1
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: "Download release artifact provenance"
+        uses: actions/download-artifact@v7
+        with:
+          name: release-artifact-provenance
+          path: /tmp
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
+
+      - name: Validate prepared release provenance
+        env:
+          TAG: ${{ needs.validate-release-tag.outputs.tag }}
+          PREPARE_RUN_ID: ${{ inputs.prepare_run_id }}
+        run: |
+          set -euo pipefail
+
+          tag_sha="$(git rev-parse HEAD)"
+          jq -e \
+            --arg tag "$TAG" \
+            --arg tag_sha "$tag_sha" \
+            --arg prepare_run_id "$PREPARE_RUN_ID" \
+            '.tag == $tag
+              and .tag_sha == $tag_sha
+              and .prepare_run_id == $prepare_run_id
+              and .artifacts == ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper"]' \
+            /tmp/release-artifact-provenance.json >/dev/null
 
       - name: "Download CtrlProxy APK"
         uses: actions/download-artifact@v7
@@ -146,22 +202,34 @@ jobs:
             import { appendFileSync } from "node:fs";
             import { RELEASE_CHECKSUM_REGISTRY } from "./src/constants/release";
             const entry = RELEASE_CHECKSUM_REGISTRY.find(({ version }) => version === process.env.VERSION);
-            if (!entry?.videoJarSha256 || !entry.screenCaptureHelperSha256) {
-              throw new Error(`Missing prepared checksums for ${process.env.VERSION}`);
+            if (!entry) {
+              throw new Error(`No prepared checksum registry entry for ${process.env.VERSION}`);
             }
-            const output = process.env.GITHUB_OUTPUT;
-            for (const [key, value] of Object.entries({
+            const checksums = {
               apk: entry.apkSha256,
               ipa: entry.ipaSha256,
               video_jar: entry.videoJarSha256,
               screen_capture_helper: entry.screenCaptureHelperSha256,
-            })) {
+            };
+            const missing = Object.entries(checksums)
+              .filter(([, value]) => !value)
+              .map(([name]) => name);
+            if (missing.length > 0) {
+              throw new Error(`Missing prepared checksums for ${process.env.VERSION}: ${missing.join(", ")}`);
+            }
+            const output = process.env.GITHUB_OUTPUT;
+            for (const [key, value] of Object.entries(checksums)) {
               appendFileSync(output, `${key}=${value}\n`);
             }
           '
 
       - name: Create release notes
         id: release_notes
+        env:
+          APK_CHECKSUM: ${{ steps.prepared_checksums.outputs.apk }}
+          IPA_CHECKSUM: ${{ steps.prepared_checksums.outputs.ipa }}
+          VIDEO_JAR_CHECKSUM: ${{ steps.prepared_checksums.outputs.video_jar }}
+          SCREEN_CAPTURE_HELPER_CHECKSUM: ${{ steps.prepared_checksums.outputs.screen_capture_helper }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
@@ -180,10 +248,6 @@ jobs:
           fi
 
           # Add checksum to notes
-          APK_CHECKSUM="${{ steps.prepared_checksums.outputs.apk }}"
-          IPA_CHECKSUM="${{ steps.prepared_checksums.outputs.ipa }}"
-          VIDEO_JAR_CHECKSUM="${{ steps.prepared_checksums.outputs.video_jar }}"
-          SCREEN_CAPTURE_HELPER_CHECKSUM="${{ steps.prepared_checksums.outputs.screen_capture_helper }}"
           NOTES="${NOTES}"$'\n\n'"## CtrlProxy APK"$'\n\n'\
             '"**SHA256 Checksum:** \`${APK_CHECKSUM}\`"$'\n\n'\
             '"Download the APK from the release assets below."
@@ -204,6 +268,9 @@ jobs:
           echo "notes<<EOF" >> $GITHUB_OUTPUT
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Build TypeScript package
+        run: bun run build
 
       - name: Publish to npm
         env:

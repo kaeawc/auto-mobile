@@ -14,47 +14,10 @@ permissions:
   issues: read
 
 jobs:
-  build-ctrl-proxy-ios-ipa:
-    uses: ./.github/workflows/build-ctrl-proxy-ios-ipa.yml
-
-  build-control-proxy-apk:
-    uses: ./.github/workflows/build-control-proxy-apk.yml
-    secrets:
-      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-      RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-
-  build-video-server-jar:
-    uses: ./.github/workflows/build-video-server-jar.yml
-    with:
-      verify-reproducible: true
-    secrets:
-      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-  build-screen-capture-helper:
-    uses: ./.github/workflows/build-screen-capture-helper.yml
-    secrets:
-      MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
-      MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
-      MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
-      MACOS_DEVELOPER_ID_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_SIGNING_IDENTITY }}
-      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
-      APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
-
-  prepare:
+  prepare-version:
     runs-on: ubuntu-latest
-    needs: [build-ctrl-proxy-ios-ipa, build-control-proxy-apk, build-video-server-jar, build-screen-capture-helper]
-    # Restates the workflow-level grant because a job-level block replaces it
-    # wholesale. actions: write is for the "Start the release" fallback dispatch,
-    # and is scoped here so the reusable APK/IPA/jar builders do not inherit it.
-    permissions:
-      contents: write
-      issues: read
-      actions: write
-
+    outputs:
+      release_commit: ${{ steps.commit.outputs.release_commit }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -87,71 +50,128 @@ jobs:
           GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
         run: scripts/changelog/update_changelog_from_issues.sh
 
-      - name: "Download CtrlProxy iOS IPA"
-        uses: actions/download-artifact@v7
-        with:
-          name: ctrl-proxy-ios-ipa
-          path: /tmp
-
-      - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@v7
-        with:
-          name: control-proxy-apk
-          path: /tmp
-
-      - name: "Download video-server jar"
-        uses: actions/download-artifact@v7
-        with:
-          name: video-server-jar
-          path: /tmp
-
-      - name: "Download screen-capture-helper"
-        uses: actions/download-artifact@v7
-        with:
-          name: screen-capture-helper
-          path: /tmp
-
-      - name: Calculate SHA256 checksums
-        id: checksum
+      - name: Commit versioned release tree to main
+        id: commit
+        shell: bash
         run: |
-          # pipefail so a failing sha256sum is not masked by a succeeding cut,
-          # which would record an empty checksum and bake it into the registry (#4684).
           set -euo pipefail
-          APK_SHA256=$(sha256sum /tmp/control-proxy-debug.apk | cut -d' ' -f1)
-          echo "apk_sha256=$APK_SHA256" >> "$GITHUB_OUTPUT"
-          echo "APK SHA256: $APK_SHA256"
 
-          IPA_SHA256=$(sha256sum /tmp/control-proxy.ipa | cut -d' ' -f1)
-          echo "ipa_sha256=$IPA_SHA256" >> "$GITHUB_OUTPUT"
-          echo "IPA SHA256: $IPA_SHA256"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          VIDEO_JAR_SHA256=$(sha256sum /tmp/automobile-video.jar | cut -d' ' -f1)
-          echo "video_jar_sha256=$VIDEO_JAR_SHA256" >> "$GITHUB_OUTPUT"
-          echo "video-server jar SHA256: $VIDEO_JAR_SHA256"
+          mapfile -t changed_files < <(git diff --name-only)
+          unexpected_files=()
+          for path in "${changed_files[@]}"; do
+            case "$path" in
+              .claude-plugin/marketplace.json | \
+              .claude-plugin/plugin.json | \
+              CHANGELOG.md | \
+              android/gradle.properties | \
+              android/*/build.gradle.kts | \
+              ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift | \
+              package.json | \
+              server.json)
+                ;;
+              *)
+                unexpected_files+=("$path")
+                ;;
+            esac
+          done
 
-          SCREEN_CAPTURE_HELPER_SHA256=$(sha256sum /tmp/screen-capture-helper-macos-universal.zip | cut -d' ' -f1)
-          echo "screen_capture_helper_sha256=$SCREEN_CAPTURE_HELPER_SHA256" >> "$GITHUB_OUTPUT"
-          echo "screen-capture-helper SHA256: $SCREEN_CAPTURE_HELPER_SHA256"
+          if ((${#unexpected_files[@]} > 0)); then
+            printf 'Unexpected versioned release file changes:\n' >&2
+            printf '  %s\n' "${unexpected_files[@]}" >&2
+            exit 1
+          fi
+
+          if ((${#changed_files[@]} > 0)); then
+            git add -- "${changed_files[@]}"
+            git commit -m "chore: bump versions to v${{ inputs.version }} [skip ci]"
+            git push origin HEAD:main
+          fi
+
+          echo "release_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build-candidate-ctrl-proxy-ios-ipa:
+    needs: prepare-version
+    uses: ./.github/workflows/build-ctrl-proxy-ios-ipa.yml
+    with:
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: false
+
+  build-candidate-control-proxy-apk:
+    needs: prepare-version
+    uses: ./.github/workflows/build-control-proxy-apk.yml
+    with:
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: false
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+  build-candidate-video-server-jar:
+    needs: prepare-version
+    uses: ./.github/workflows/build-video-server-jar.yml
+    with:
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: false
+      verify-reproducible: true
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+  build-candidate-screen-capture-helper:
+    needs: prepare-version
+    uses: ./.github/workflows/build-screen-capture-helper.yml
+    with:
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: false
+    secrets:
+      MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
+      MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
+      MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+      MACOS_DEVELOPER_ID_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_SIGNING_IDENTITY }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+
+  finalize-release:
+    runs-on: ubuntu-latest
+    needs: [prepare-version, build-candidate-ctrl-proxy-ios-ipa, build-candidate-control-proxy-apk, build-candidate-video-server-jar, build-candidate-screen-capture-helper]
+    outputs:
+      release_commit: ${{ steps.commit.outputs.release_commit }}
+    # Restates the workflow-level grant because a job-level block replaces it
+    # wholesale. This job is the only one that writes the finalized constants
+    # commit to main; the candidate and tagged builders remain read-only.
+    permissions:
+      contents: write
+      issues: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          ref: ${{ needs.prepare-version.outputs.release_commit }}
+          fetch-depth: 0
+          token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
 
       - name: Update release constants
         env:
           RELEASE_VERSION: ${{ inputs.version }}
-          APK_SHA256_CHECKSUM: ${{ steps.checksum.outputs.apk_sha256 }}
+          APK_SHA256_CHECKSUM: ${{ needs.build-candidate-control-proxy-apk.outputs.sha256 }}
           IOS_CTRL_PROXY_SHA256_CHECKSUM:
-            ${{ steps.checksum.outputs.ipa_sha256 }}
+            ${{ needs.build-candidate-ctrl-proxy-ios-ipa.outputs.sha256 }}
           IOS_CTRL_PROXY_RUNNER_SHA256:
-            ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
-          VIDEO_JAR_SHA256: ${{ steps.checksum.outputs.video_jar_sha256 }}
-          SCREEN_CAPTURE_HELPER_SHA256: ${{ steps.checksum.outputs.screen_capture_helper_sha256 }}
+            ${{ needs.build-candidate-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
+          VIDEO_JAR_SHA256: ${{ needs.build-candidate-video-server-jar.outputs.sha256 }}
+          SCREEN_CAPTURE_HELPER_SHA256: ${{ needs.build-candidate-screen-capture-helper.outputs.sha256 }}
         run: bash scripts/generate-release-constants.sh
 
-      - name: Verify release integrity
-        run: >
-          bash scripts/ci/verify-release-integrity.sh
-          "${{ inputs.version }}"
-          /tmp/control-proxy.ipa
-
-      - name: Commit release changes to main
+      - name: Commit release constants to main
+        id: commit
         shell: bash
         run: |
           set -euo pipefail
@@ -188,25 +208,16 @@ jobs:
               exit 1
             fi
 
-            # "[skip ci]" avoids triggering the push-to-main merge workflow for
-            # release bookkeeping that has already been verified above.
+            expected_parent="${{ needs.prepare-version.outputs.release_commit }}"
+            remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+            if [[ "$remote_main" != "$expected_parent" ]]; then
+              echo "main moved after the candidate artifacts were built; refusing to tag a different tree" >&2
+              exit 1
+            fi
+
             git add -- "${changed_files[@]}"
             git commit -m "chore: bump versions to v${{ inputs.version }} [skip ci]"
-
-            # AUTO_MOBILE_PR_TOKEN is an admin actor and bypasses the green-main
-            # ruleset, so this pushes straight to main with no release PR.
-            # Rebase-and-retry guards against losing a race with a concurrent push.
-            for attempt in 1 2 3; do
-              if git pull --rebase origin main && git push origin HEAD:main; then
-                echo "Pushed release commit to main"
-                exit 0
-              fi
-              echo "Push attempt ${attempt} failed; retrying..."
-              sleep 5
-            done
-
-            echo "Failed to push release commit to main after 3 attempts" >&2
-            exit 1
+            git push origin HEAD:main
           fi
 
           # The clean-tree path lets a rerun recover if the release commit was
@@ -218,7 +229,10 @@ jobs:
             exit 1
           fi
 
+          echo "release_commit=$local_head" >> "$GITHUB_OUTPUT"
+
       - name: Create and push release tag
+        id: tag
         shell: bash
         run: |
           set -euo pipefail
@@ -227,14 +241,125 @@ jobs:
 
           git fetch --tags origin
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists. Skipping."
-            exit 0
+            existing_tag_commit="$(git rev-parse "$TAG^{commit}")"
+            if [[ "$existing_tag_commit" != "$(git rev-parse HEAD)" ]]; then
+              echo "Tag $TAG already exists on a different commit" >&2
+              exit 1
+            fi
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
           fi
 
-          git tag "$TAG"
-          git push origin "$TAG"
+          echo "tag_sha=$(git rev-parse "$TAG^{commit}")" >> "$GITHUB_OUTPUT"
 
-          echo "Successfully created and pushed tag: $TAG"
+  build-ctrl-proxy-ios-ipa:
+    needs: finalize-release
+    uses: ./.github/workflows/build-ctrl-proxy-ios-ipa.yml
+    with:
+      checkout-ref: ${{ needs.finalize-release.outputs.release_commit }}
+
+  build-control-proxy-apk:
+    needs: finalize-release
+    uses: ./.github/workflows/build-control-proxy-apk.yml
+    with:
+      checkout-ref: ${{ needs.finalize-release.outputs.release_commit }}
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+  build-video-server-jar:
+    needs: finalize-release
+    uses: ./.github/workflows/build-video-server-jar.yml
+    with:
+      checkout-ref: ${{ needs.finalize-release.outputs.release_commit }}
+      verify-reproducible: true
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+  build-screen-capture-helper:
+    needs: finalize-release
+    uses: ./.github/workflows/build-screen-capture-helper.yml
+    with:
+      checkout-ref: ${{ needs.finalize-release.outputs.release_commit }}
+    secrets:
+      MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
+      MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
+      MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+      MACOS_DEVELOPER_ID_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_SIGNING_IDENTITY }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+
+  verify-prepared-release:
+    runs-on: ubuntu-latest
+    needs: [finalize-release, build-ctrl-proxy-ios-ipa, build-control-proxy-apk, build-video-server-jar, build-screen-capture-helper]
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout tagged release
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          ref: refs/tags/${{ inputs.version }}
+
+      - name: "Download CtrlProxy APK"
+        uses: actions/download-artifact@v7
+        with:
+          name: control-proxy-apk
+          path: /tmp
+
+      - name: "Download CtrlProxy iOS IPA"
+        uses: actions/download-artifact@v7
+        with:
+          name: ctrl-proxy-ios-ipa
+          path: /tmp
+
+      - name: "Download video-server jar"
+        uses: actions/download-artifact@v7
+        with:
+          name: video-server-jar
+          path: /tmp
+
+      - name: "Download screen-capture-helper"
+        uses: actions/download-artifact@v7
+        with:
+          name: screen-capture-helper
+          path: /tmp
+
+      - name: Verify prepared release artifacts
+        run: |
+          set -euo pipefail
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/control-proxy-debug.apk android
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/control-proxy.ipa ios
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-video.jar videojar
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/screen-capture-helper-macos-universal.zip screencapturehelper
+          bash scripts/ci/verify-release-integrity.sh "${{ inputs.version }}" /tmp/control-proxy.ipa
+
+      - name: Create release artifact provenance
+        env:
+          TAG: ${{ inputs.version }}
+          TAG_SHA: ${{ needs.finalize-release.outputs.release_commit }}
+          PREPARE_RUN_ID: ${{ github.run_id }}
+        run: |
+          jq -n \
+            --arg tag "$TAG" \
+            --arg tag_sha "$TAG_SHA" \
+            --arg prepare_run_id "$PREPARE_RUN_ID" \
+            '{tag: $tag, tag_sha: $tag_sha, prepare_run_id: $prepare_run_id,
+              artifacts: ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper"]}' \
+            > /tmp/release-artifact-provenance.json
+
+      - name: Upload release artifact provenance
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-artifact-provenance
+          path: /tmp/release-artifact-provenance.json
+          retention-days: 7
 
       - name: Start the release
         shell: bash

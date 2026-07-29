@@ -4,8 +4,18 @@
 # integrity gate, while Release publishes the artifacts from that successful run.
 
 @test "release.yml reads the checksums baked by prepare-release" {
-  grep -q "RELEASE_CHECKSUM_REGISTRY" ".github/workflows/release.yml"
-  grep -q "prepared_checksums" ".github/workflows/release.yml"
+  wiring_requires_yq
+  local script
+  script="$(yq -r '.jobs."verify-and-release".steps[]
+    | select(.id == "prepared_checksums") | .run' ".github/workflows/release.yml" \
+    | grep -v '^[[:space:]]*#')"
+  [ -n "$script" ]
+  [ "$script" != "null" ]
+  [[ "$script" == *"RELEASE_CHECKSUM_REGISTRY"* ]]
+  [[ "$script" == *"apkSha256"* ]]
+  [[ "$script" == *"ipaSha256"* ]]
+  [[ "$script" == *"videoJarSha256"* ]]
+  [[ "$script" == *"screenCaptureHelperSha256"* ]]
 }
 
 @test "prepare-release.yml passes runner sha256 into generate-release-constants" {
@@ -64,13 +74,14 @@
   [ "$status" -eq 0 ]
   [ "$output" = "absent" ]
 
+  run yq -r '
+    .jobs."verify-and-release".steps[]
+    | select(.uses == "actions/download-artifact@v7")
+    | .with.name + "\t" + .with."run-id" + "\t" + .with."github-token" + "\t" + .with.repository' "$workflow"
+  [ "$status" -eq 0 ]
+
   local artifact_name
   for artifact_name in control-proxy-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper; do
-    run yq -r '
-      .jobs."verify-and-release".steps[]
-      | select(.uses == "actions/download-artifact@v7")
-      | .with.name + "\t" + .with."run-id" + "\t" + .with."github-token" + "\t" + .with.repository' "$workflow"
-    [ "$status" -eq 0 ]
     [[ "$output" == *"${artifact_name}"$'\t''${{ inputs.prepare_run_id }}'$'\t''${{ secrets.GITHUB_TOKEN }}'$'\t''${{ github.repository }}'* ]]
   done
 
@@ -85,6 +96,55 @@
   [ "$status" -eq 0 ]
   [[ "$output" != *"verify-artifact-sha256.sh"* ]]
   [[ "$output" != *"verify-release-integrity.sh"* ]]
+}
+
+@test "prepare-release builds and verifies the final tagged tree before dispatching release (#4686)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/prepare-release.yml"
+  local builder
+  for builder in build-ctrl-proxy-ios-ipa build-control-proxy-apk build-video-server-jar build-screen-capture-helper; do
+    run yq -r ".jobs.\"$builder\".needs" "$workflow"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"finalize-release"* ]]
+
+    run yq -r ".jobs.\"$builder\".with.checkout-ref" "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = '${{ needs.finalize-release.outputs.release_commit }}' ]
+  done
+
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Verify prepared release artifacts") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verify-artifact-sha256.sh"* ]]
+  [[ "$output" == *"verify-release-integrity.sh"* ]]
+}
+
+@test "release.yml requires successful prepared-release provenance before downloading artifacts (#4686)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/release.yml"
+
+  run yq -r '.jobs."verify-and-release".steps[] | select(.name == "Wait for successful Prepare Release") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"conclusion"* ]]
+  [[ "$output" == *"prepare-release.yml"* ]]
+
+  run yq -r '.jobs."verify-and-release".steps[] | select(.name == "Validate prepared release provenance") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"release-artifact-provenance"* ]]
+  [[ "$output" == *"tag_sha"* ]]
+  [[ "$output" == *"prepare_run_id"* ]]
+}
+
+@test "release.yml builds the package before publishing npm" {
+  wiring_requires_yq
+  local steps
+  steps="$(yq -r '.jobs."verify-and-release".steps[] | (.name // "") + "\t" + (.run // "")' ".github/workflows/release.yml")"
+  [[ "$steps" == *$'Build TypeScript package\tbun run build'* ]]
+  [[ "$steps" == *$'Publish to npm\t'* ]]
+
+  local notes_env
+  notes_env="$(yq -r '.jobs."verify-and-release".steps[] | select(.id == "release_notes") | .env' ".github/workflows/release.yml")"
+  [[ "$notes_env" == *"prepared_checksums.outputs.apk"* ]]
+  [[ "$notes_env" == *"prepared_checksums.outputs.ipa"* ]]
 }
 
 @test "prepare-release.yml records the video-server jar checksum (#3832)" {
@@ -205,7 +265,7 @@ wiring_requires_yq() {
   # Pull the one step's run script out of the parsed YAML, so comments elsewhere
   # in the file cannot satisfy these assertions.
   local script
-  script="$(yq -r '.jobs.prepare.steps[] | select(.name == "Start the release") | .run' \
+  script="$(yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Start the release") | .run' \
     ".github/workflows/prepare-release.yml")"
   [ -n "$script" ]
   [ "$script" != "null" ]
@@ -218,25 +278,24 @@ wiring_requires_yq() {
   [[ "$code" != *"--ref main"* ]]
   [[ "$code" == *'prepare_run_id="$PREPARE_RUN_ID"'* ]]
 
-  run yq -r '.jobs.prepare.steps[] | select(.name == "Start the release") | .env.PREPARE_RUN_ID' \
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Start the release") | .env.PREPARE_RUN_ID' \
     ".github/workflows/prepare-release.yml"
   [ "$status" -eq 0 ]
   [ "$output" = '${{ github.run_id }}' ]
 }
 
 # The dispatch API rejects a token without actions: write, and the job-level
-# block replaces the workflow-level grant wholesale -- so dropping either half
-# turns the fallback into the 403 that failed Prepare Release #204.
+# block replaces the workflow-level grant wholesale.
 @test "prepare-release can dispatch and still push (#4157)" {
   wiring_requires_yq
   local perms
-  perms="$(yq -r '.jobs.prepare.permissions' ".github/workflows/prepare-release.yml")"
+  perms="$(yq -r '.jobs."verify-prepared-release".permissions' ".github/workflows/prepare-release.yml")"
   [ "$perms" != "null" ]
 
-  run yq -r '.jobs.prepare.permissions.actions' ".github/workflows/prepare-release.yml"
+  run yq -r '.jobs."verify-prepared-release".permissions.actions' ".github/workflows/prepare-release.yml"
   [ "$output" = "write" ]
-  run yq -r '.jobs.prepare.permissions.contents' ".github/workflows/prepare-release.yml"
-  [ "$output" = "write" ]
+  run yq -r '.jobs."verify-prepared-release".permissions.contents' ".github/workflows/prepare-release.yml"
+  [ "$output" = "read" ]
 }
 
 # action-gh-release throws "GitHub Releases requires a tag" when github.ref is not

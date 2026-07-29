@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -12,13 +13,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
+import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
+import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
+import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDashboard
+import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
+import dev.jasonpearson.automobile.desktop.core.workspace.Tool
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceAction
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceEffect
+import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceFacetPlaceholder
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
@@ -107,8 +115,45 @@ fun AutoMobileDesktopApp(
           state = workspaceState,
           onAction = workspaceViewModel::onAction,
           onOpenPicker = workspaceViewModel::openPicker,
+          facetContent = { column, tool -> WorkspaceFacet(column, tool) },
         )
       }
     }
   }
+}
+
+/**
+ * Real docked-facet content for a pane. Only Logs is wired so far (per-device telemetry); every
+ * other tool falls back to the shared placeholder until its dashboard gains per-device targeting.
+ */
+@Composable
+private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
+  when (tool) {
+    Tool.Logs -> LogsFacet(column)
+    else -> WorkspaceFacetPlaceholder(tool)
+  }
+}
+
+/**
+ * Logs facet: the telemetry dashboard scoped to this pane's device. A [TelemetryPushSocketClient]
+ * is connected per device while the facet is shown and disposed when it closes or the device
+ * changes.
+ */
+@Composable
+private fun LogsFacet(column: DeviceColumn) {
+  var client by remember(column.deviceId) { mutableStateOf<TelemetryPushClient?>(null) }
+  DisposableEffect(column.deviceId) {
+    val socket = TelemetryPushSocketClient()
+    socket.connect(deviceId = column.deviceId)
+    client = socket
+    onDispose {
+      socket.dispose()
+      client = null
+    }
+  }
+  TelemetryDashboard(
+    telemetryPushClient = client,
+    dataSourceMode = DataSourceMode.Real,
+    activeDeviceId = column.deviceId,
+  )
 }

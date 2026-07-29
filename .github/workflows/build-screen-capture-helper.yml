@@ -66,6 +66,8 @@ jobs:
       - name: "Calculate helper archive SHA256"
         id: checksum
         run: |
+          # pipefail so a failing shasum is not masked by a succeeding cut (#4684).
+          set -euo pipefail
           SHA256=$(shasum -a 256 /tmp/screen-capture-helper-macos-universal.zip | cut -d' ' -f1)
           echo "sha256=${SHA256}" >> "${GITHUB_OUTPUT}"
           echo "screen-capture-helper SHA256: ${SHA256}"

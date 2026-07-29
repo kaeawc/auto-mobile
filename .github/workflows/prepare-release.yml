@@ -114,6 +114,9 @@ jobs:
       - name: Calculate SHA256 checksums
         id: checksum
         run: |
+          # pipefail so a failing sha256sum is not masked by a succeeding cut,
+          # which would record an empty checksum and bake it into the registry (#4684).
+          set -euo pipefail
           APK_SHA256=$(sha256sum /tmp/control-proxy-debug.apk | cut -d' ' -f1)
           echo "apk_sha256=$APK_SHA256" >> "$GITHUB_OUTPUT"
           echo "APK SHA256: $APK_SHA256"

@@ -328,7 +328,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
         name: "videoRecording",
         arguments: { action: "stop", recordingId: "recording-1", deviceId: "device-a" },
       });
-      const navigationGraph = await client.request("ide/getNavigationGraph", {});
+      const navigationGraph = await client.request("ide/getNavigationGraph", { deviceId: "device-a" });
       const refreshedList = await client.request("tools/list", {});
 
       expect(initialList.success).toBe(true);

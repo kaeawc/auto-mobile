@@ -598,6 +598,75 @@ describe("UnixSocketServer input/typeText", () => {
     expect(factoryCalls).toBe(2);
   });
 
+  test("evicts the cached append helper after a session MCP forward succeeds it in the device queue", async () => {
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([{ ...androidDevice, transportId: "1" }]));
+    const sessions = new Map([
+      ["session-a", createFakeSession("session-a", androidDevice.deviceId, "android")],
+    ]);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessions),
+      fakeTimer
+    );
+    let factoryCalls = 0;
+    let releaseAppend: () => void = () => {};
+    let signalAppendStarted: () => void = () => {};
+    const appendStarted = new Promise<void>(resolve => {
+      signalAppendStarted = resolve;
+    });
+    const appendReleased = new Promise<void>(resolve => {
+      releaseAppend = resolve;
+    });
+    server.appendTextFactory = () => {
+      factoryCalls += 1;
+      return {
+        appendText: async () => {
+          signalAppendStarted();
+          await appendReleased;
+          return { success: true, charsSent: 1 };
+        },
+      };
+    };
+    server.mcpClientFactory = async () => ({
+      callTool: async () => ({ content: [] }),
+      listTools: async () => ({ tools: [] }),
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    }) as any;
+    await server.start();
+
+    const append = (text: string) =>
+      sendRequest(socketPath, "input/typeText", {
+        platform: "android",
+        deviceId: androidDevice.deviceId,
+        text,
+        mode: "append",
+      });
+
+    const firstAppend = append("A");
+    await appendStarted;
+    const queuedMcpForward = sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: {
+        sessionUuid: "session-a",
+        deviceId: androidDevice.deviceId,
+      },
+    });
+    await flushMicrotasks();
+    releaseAppend();
+
+    expect((await firstAppend).success).toBe(true);
+    expect((await queuedMcpForward).success).toBe(true);
+
+    await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
+
+    expect((await append("B")).success).toBe(true);
+    expect(factoryCalls).toBe(2);
+  });
+
   // Issue #3351: an emulator replaced under a reused serial (emulator-5554) must not
   // inherit the previous device's cached API-level capability. The daemon's
   // disconnect monitor calls evictDeviceInputCache on a confirmed disconnect; after

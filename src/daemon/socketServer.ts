@@ -197,6 +197,8 @@ export class UnixSocketServer {
   private boundMcpClientKeysBySocketSession: Map<string, BoundMcpClient> = new Map();
   /** Promise tails that serialize MCP HTTP forwards only within the same execution target. */
   private mcpForwardTails: Map<string, Promise<void>> = new Map();
+  /** Direct device forwards that need cleanup after every successor tail has settled. */
+  private mcpForwardIdleCloseKeys: Map<string, Set<string>> = new Map();
   /** Active forwards by loopback MCP client, which can differ from the execution target. */
   private activeMcpClientForwardCounts: Map<string, number> = new Map();
   private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -606,6 +608,11 @@ export class UnixSocketServer {
     fn: () => Promise<T>,
     idleCloseKey?: string
   ): Promise<T> {
+    if (idleCloseKey) {
+      const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey) ?? new Set<string>();
+      idleCloseKeys.add(idleCloseKey);
+      this.mcpForwardIdleCloseKeys.set(executionKey, idleCloseKeys);
+    }
     const previous = this.mcpForwardTails.get(executionKey) ?? Promise.resolve();
     const run = previous.then(() => {
       if (idleCloseKey) {
@@ -621,8 +628,10 @@ export class UnixSocketServer {
     void tail.finally(() => {
       if (this.mcpForwardTails.get(executionKey) === tail) {
         this.mcpForwardTails.delete(executionKey);
-        if (idleCloseKey) {
-          this.scheduleMcpClientIdleClose(idleCloseKey);
+        const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey);
+        this.mcpForwardIdleCloseKeys.delete(executionKey);
+        for (const key of idleCloseKeys ?? []) {
+          this.scheduleMcpClientIdleClose(key);
         }
       }
     });
@@ -678,6 +687,9 @@ export class UnixSocketServer {
     if (request.method === "ide/getNavigationGraph") {
       const executionKey = this.getRequestArgumentScopeKey(request.params);
       if (executionKey) {
+        if (boundRoute) {
+          return { ...boundRoute, executionKey };
+        }
         return this.sharedMcpForwardRoute(executionKey);
       }
       return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
@@ -2407,6 +2419,7 @@ export class UnixSocketServer {
       }
     }
     this.mcpForwardTails.clear();
+    this.mcpForwardIdleCloseKeys.clear();
     this.appendTextInputs.clear();
 
     // Clear sessions

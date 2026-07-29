@@ -60,7 +60,7 @@ targets:
         embed: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.framework
         DEFINES_MODULE: YES
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES

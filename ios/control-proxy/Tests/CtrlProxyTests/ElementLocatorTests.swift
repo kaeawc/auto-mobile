@@ -827,6 +827,108 @@ final class ElementLocatorTests: XCTestCase {
         _ = cache.count
     }
 
+    // MARK: - Typed text input fallback (#4644)
+
+    func testMergeMissingTextInputCandidates_appendsIdentifierlessTextViewWithNativeFields() {
+        let root = UIElementInfo(
+            className: "XCUIApplication",
+            bounds: ElementBounds(left: 0, top: 0, right: 393, bottom: 852),
+            node: [
+                UIElementInfo(
+                    resourceId: "standard-field",
+                    className: "UITextField",
+                    bounds: ElementBounds(left: 20, top: 100, right: 373, bottom: 144),
+                    clickable: "true",
+                    role: "textfield"
+                ),
+            ]
+        )
+        let missingTextView = UIElementInfo(
+            text: "Message #sample",
+            value: "draft",
+            className: "UITextView",
+            bounds: ElementBounds(left: 20, top: 180, right: 373, bottom: 260),
+            clickable: "true",
+            focused: "true",
+            role: "textfield",
+            hintText: "Write a message",
+            viewId: "generated-view-id",
+            actions: ["set_text", "clear_text"]
+        )
+
+        let result = ElementLocator.mergeMissingTextInputCandidates(
+            into: root,
+            candidates: [missingTextView]
+        )
+
+        let appended = result.node?.last
+        XCTAssertEqual(result.node?.count, 2)
+        XCTAssertEqual(appended?.resourceId, nil)
+        XCTAssertEqual(appended?.className, "UITextView")
+        XCTAssertEqual(appended?.bounds?.left, 20)
+        XCTAssertEqual(appended?.bounds?.top, 180)
+        XCTAssertEqual(appended?.bounds?.right, 373)
+        XCTAssertEqual(appended?.bounds?.bottom, 260)
+        XCTAssertEqual(appended?.clickable, "true")
+        XCTAssertEqual(appended?.focused, "true")
+        XCTAssertEqual(appended?.role, "textfield")
+        XCTAssertEqual(appended?.hintText, "Write a message")
+        XCTAssertEqual(appended?.value, "draft")
+        XCTAssertEqual(appended?.actions, ["set_text", "clear_text"])
+    }
+
+    func testMergeMissingTextInputCandidates_doesNotDuplicateExistingStandardTextField() {
+        let standardField = UIElementInfo(
+            resourceId: "standard-field",
+            className: "UITextField",
+            bounds: ElementBounds(left: 20, top: 100, right: 373, bottom: 144),
+            clickable: "true",
+            role: "textfield"
+        )
+        let root = UIElementInfo(
+            className: "XCUIApplication",
+            bounds: ElementBounds(left: 0, top: 0, right: 393, bottom: 852),
+            node: [standardField]
+        )
+
+        let result = ElementLocator.mergeMissingTextInputCandidates(
+            into: root,
+            candidates: [standardField]
+        )
+
+        XCTAssertEqual(result.node?.count, 1)
+        XCTAssertEqual(result.node?.first?.resourceId, "standard-field")
+    }
+
+    func testMergeMissingTextInputCandidates_preservesMaskedSecureValue() {
+        let maskedValue = String(repeating: "\u{2022}", count: 6)
+        let secureField = UIElementInfo(
+            text: "Password",
+            value: maskedValue,
+            resourceId: "password-field",
+            className: "UISecureTextField",
+            bounds: ElementBounds(left: 20, top: 280, right: 373, bottom: 324),
+            clickable: "true",
+            password: "true",
+            role: "textfield",
+            actions: ["set_text", "clear_text"]
+        )
+        let root = UIElementInfo(
+            className: "XCUIApplication",
+            bounds: ElementBounds(left: 0, top: 0, right: 393, bottom: 852)
+        )
+
+        let result = ElementLocator.mergeMissingTextInputCandidates(
+            into: root,
+            candidates: [secureField]
+        )
+
+        let appended = result.node?.first
+        XCTAssertEqual(appended?.value, maskedValue)
+        XCTAssertNotEqual(appended?.value, "secret")
+        XCTAssertEqual(appended?.password, "true")
+    }
+
     // MARK: - ForegroundTracker (#3614)
 
     func testForegroundTrackerSetAndSwitch() {

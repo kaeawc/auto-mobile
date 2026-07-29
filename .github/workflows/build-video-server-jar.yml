@@ -51,6 +51,8 @@ jobs:
       - name: "Calculate jar SHA256"
         id: checksum
         run: |
+          # pipefail so a failing sha256sum is not masked by a succeeding cut (#4684).
+          set -euo pipefail
           JAR_PATH="android/video-server/build/libs/automobile-video.jar"
           SHA256=$(sha256sum "$JAR_PATH" | cut -d' ' -f1)
           echo "sha256=$SHA256" >> $GITHUB_OUTPUT
@@ -59,6 +61,9 @@ jobs:
       - name: "Verify reproducible build"
         if: ${{ inputs.verify-reproducible }}
         run: |
+          # pipefail so a failing sha256sum is not masked by a succeeding cut — an
+          # empty SECOND_SHA would otherwise read as a reproducibility failure (#4684).
+          set -euo pipefail
           JAR_PATH="android/video-server/build/libs/automobile-video.jar"
           FIRST_SHA="${{ steps.checksum.outputs.sha256 }}"
           # Clean the module output and rebuild from scratch. A byte-identical

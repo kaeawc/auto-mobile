@@ -45,6 +45,8 @@ jobs:
       - name: "Calculate APK SHA256"
         id: checksum
         run: |
+          # pipefail so a failing sha256sum is not masked by a succeeding cut (#4684).
+          set -euo pipefail
           APK_PATH="android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
           SHA256=$(sha256sum "$APK_PATH" | cut -d' ' -f1)
           echo "sha256=$SHA256" >> $GITHUB_OUTPUT

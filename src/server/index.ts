@@ -73,7 +73,7 @@ import {
 } from "../features/toolCapabilities/SessionToolProfileService";
 import {
   assertToolEnabledForAnySession,
-  isToolEnabledForSession,
+  isToolEnabledForAnySession,
 } from "../features/toolCapabilities/toolCapabilityPolicy";
 import { getDeviceLabelMap } from "./deviceLabelMapping";
 import { runWithToolCapabilityContext } from "../features/toolCapabilities/toolCapabilityContext";
@@ -306,9 +306,20 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     const sessionUuid = sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId);
     const definitions = ToolRegistry.getToolDefinitions();
+    // Advertise a tool when EITHER the bound base session OR any of its derived
+    // `${base}:${label}` device-label sessions enables it — the same UNION the
+    // `tools/call` gate applies (issue #4611). The call-gate accepts a
+    // `{ sessionUuid: base, device: label }` call whenever a label re-enables a
+    // tool the base narrowed away; filtering discovery on the base alone would
+    // then leave that tool callable but never discovered. The base's label map is
+    // a read-only lookup (no device allocation); a session with no labels collapses
+    // to the base, preserving prior single-session filtering.
+    const candidateSessions = sessionUuid
+      ? [sessionUuid, ...Object.values(getDeviceLabelMap(sessionUuid) ?? {})]
+      : [sessionUuid];
     return {
       tools: (await Promise.all(definitions.map(async definition =>
-        await isToolEnabledForSession(definition.name, sessionUuid, options.sessionToolProfileService) ? definition : undefined
+        await isToolEnabledForAnySession(definition.name, candidateSessions, options.sessionToolProfileService) ? definition : undefined
       ))).filter((definition): definition is typeof definitions[number] => definition !== undefined)
     };
   });

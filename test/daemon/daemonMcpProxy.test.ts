@@ -1573,6 +1573,85 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("refreshes the replay lease when an admitted bound call is rejected by the handler", async () => {
+      // An implicit sessionless call has the bound UUID injected and reaches the
+      // daemon, which refreshes the LIVE session in getOrCreateSession(). The
+      // handler then rejects (e.g. a tool failure), so the success-only
+      // rememberSessionUuid never runs. Without refreshing the lease in the catch
+      // path, crossing one TTL retires the still-live session and a later reconnect
+      // would seed an unbound transport (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        toolErrorByName: new Map([["tapOn", new ActionableError("tap failed after admission")]]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // An admitted-then-rejected implicit call within the TTL. It must renew the
+        // lease off the injected UUID even though it throws.
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toThrow("tap failed after admission");
+        // Cumulatively past one TTL from the initial bind; only the refreshed lease
+        // keeps the binding alive for this final implicit call.
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "tapOn", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does NOT refresh the replay lease when the failing call never reached the daemon", async () => {
+      // A transport/connect failure (DaemonUnavailableError) never reached the
+      // handler, so the live session was not refreshed. The lease must be allowed
+      // to expire — refreshing it would replay a UUID whose session may be gone
+      // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        toolErrorByName: new Map([
+          ["tapOn", new DaemonUnavailableError("Daemon socket connection lost: connection closed")],
+        ]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toBeInstanceOf(DaemonUnavailableError);
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        // The final implicit observe must NOT carry an injected sessionUuid: the
+        // lease expired because the transport failure did not refresh it.
+        const lastCall = client.callToolCalls[client.callToolCalls.length - 1];
+        expect(lastCall).toEqual({ toolName: "observe", params: { deviceId: "device-a" } });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("injects the bound UUID when a later call carries a non-string sessionUuid", async () => {
       // A null/number/object sessionUuid is not an explicit session selection, so
       // the retained binding must still be injected rather than bypassed

@@ -892,8 +892,8 @@ export class DaemonMcpProxy {
     name: string,
     args: Record<string, unknown>
   ): Promise<any> {
+    const forwardedArgs = this.withBoundSessionUuid(args);
     try {
-      const forwardedArgs = this.withBoundSessionUuid(args);
       const result = await this.withRecoverableReconnect(() => this.client!.callTool(name, forwardedArgs));
       // Remember what was actually forwarded, not the caller's raw args. An
       // implicit sessionless call injects the bound UUID into forwardedArgs and
@@ -904,6 +904,13 @@ export class DaemonMcpProxy {
       this.rememberSessionUuid(name, forwardedArgs);
       return result;
     } catch (error) {
+      // The success-only rememberSessionUuid above never runs when the handler
+      // rejects, but an admitted-then-rejected call still reached
+      // getOrCreateSession() and refreshed the LIVE daemon session. Without
+      // refreshing the replay lease here too, repeated admitted-but-failed calls
+      // let the proxy lease silently expire while the daemon session stays alive,
+      // so a later reconnect can no longer replay it (issue #4610).
+      this.refreshReplayLeaseAfterAdmittedFailure(name, forwardedArgs, error);
       // Do NOT clear the binding on a rejected executePlan. A plan can reject
       // *before* the handler runs — capability enforcement or schema parsing in
       // src/server/index.ts — in which case DefaultPlanLifecycleManager
@@ -964,6 +971,31 @@ export class DaemonMcpProxy {
   private rememberSessionUuid(name: string, forwardedArgs: Record<string, unknown>): void {
     if (name === "executePlan") {
       this.clearBoundSessionUuid();
+      return;
+    }
+    if (typeof forwardedArgs.sessionUuid === "string" && forwardedArgs.sessionUuid.trim().length > 0) {
+      this.boundSessionUuid = forwardedArgs.sessionUuid;
+      this.boundSessionUuidAt = this.timer.now();
+    }
+  }
+
+  // Refresh the replay lease for a call that was ADMITTED and forwarded to the
+  // daemon handler but then REJECTED. getOrCreateSession() already refreshed the
+  // live daemon session before the handler ran, so the proxy lease must track
+  // that liveness even on failure — otherwise repeated admitted-but-failed calls
+  // retire a still-live session and a reconnect seeds an unbound transport
+  // (issue #4610). Excluded, because none of them refreshed a live session:
+  //   - executePlan owns its own binding lifecycle via the release signal; leave
+  //     it untouched so a pre-handler plan rejection does not strand the binding.
+  //   - a recoverable error (DaemonUnavailableError transport/connect failure,
+  //     "Session not found", or an unknown-tool build-skew) never reached the
+  //     handler with a live session, so the lease must be allowed to expire.
+  private refreshReplayLeaseAfterAdmittedFailure(
+    name: string,
+    forwardedArgs: Record<string, unknown>,
+    error: unknown
+  ): void {
+    if (name === "executePlan" || this.isRecoverableDaemonSessionError(error)) {
       return;
     }
     if (typeof forwardedArgs.sessionUuid === "string" && forwardedArgs.sessionUuid.trim().length > 0) {

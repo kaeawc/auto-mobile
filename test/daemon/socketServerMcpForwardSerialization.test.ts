@@ -457,6 +457,108 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
+  test("re-resolves a queued sessionless device call when its bound session is RELEASED mid-queue", async () => {
+    // Mirror of the disconnect test above, but the admitted session is genuinely
+    // RELEASED (heartbeat/idle/explicit) while the sessionless device call is
+    // queued — not merely a socket disconnect. Invoking the stale session-scoped
+    // client would re-seed the released UUID and resurrect the session
+    // (getOrCreateSession recreates it and reacquires a device). The daemon
+    // session no longer being active is exactly what distinguishes this from the
+    // disconnect case, so the queued call must re-resolve to the shared, UNSEEDED
+    // client (created with `undefined`) instead of replaying session-a
+    // (issue #4610). The release is driven deterministically by removing the
+    // session from the fake session manager, the same observable state a real
+    // releaseSession produces.
+    await server.close();
+    socketPath = join(tmpdir(), `mcp-release-requeue-${randomUUID()}.sock`);
+    fakeTimer = new FakeTimer();
+    sessionDevices.set("session-a", "device-a");
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
+      fakeTimer,
+    );
+    await server.start();
+
+    let releaseBlocker: () => void = () => {};
+    const blockerReleased = new Promise<void>(resolve => { releaseBlocker = resolve; });
+    let signalBlockerStarted: () => void = () => {};
+    const blockerStarted = new Promise<void>(resolve => { signalBlockerStarted = resolve; });
+
+    const forwardedCalls: Array<{ createdWith: string | undefined; toolName: string | undefined }> = [];
+    server.mcpClientFactory = async (createdWith?: string) => {
+      const client: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async (...args: unknown[]) => {
+          const request = args[0] as { name?: string };
+          if (request.name === "tapOn") {
+            signalBlockerStarted();
+            await blockerReleased;
+          }
+          forwardedCalls.push({ createdWith, toolName: request.name });
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return client;
+    };
+
+    const socketB = new PersistentSocketClient();
+    const socketA = new PersistentSocketClient();
+    await Promise.all([socketB.connect(socketPath), socketA.connect(socketPath)]);
+    try {
+      // Socket B binds session-a → device-a (awaited so the binding is set).
+      const boundCall = await socketB.request("tools/call", {
+        name: "observe",
+        arguments: { sessionUuid: "session-a" },
+      });
+      expect(boundCall.success).toBe(true);
+
+      // Socket A's long-running SESSIONLESS op occupies the device:device-a queue.
+      const blockerCall = socketA.request("tools/call", {
+        name: "tapOn",
+        arguments: { deviceId: "device-a" },
+      });
+      await blockerStarted;
+
+      // Socket B's sessionless device-a call: admitted with B's bound client,
+      // queued behind socket A's op (same executionKey device:device-a).
+      const queuedCall = socketB.request("tools/call", {
+        name: "videoRecording",
+        arguments: { action: "stop", recordingId: "recording-1", deviceId: "device-a" },
+      });
+      // Let socket B read the frame and compute its initial (bound) route while
+      // session-a is still active.
+      for (let i = 0; i < 30; i++) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+
+      // Release session-a while the sessionless call is still queued: the fake
+      // session manager now reports it gone, so hasActiveDaemonSession(session-a)
+      // is false when the queued route recomputes.
+      sessionDevices.delete("session-a");
+
+      // Release socket A's op so socket B's queued call runs post-release.
+      releaseBlocker();
+      await Promise.all([blockerCall, queuedCall]);
+
+      const queued = forwardedCalls.find(call => call.toolName === "videoRecording");
+      expect(queued).toBeDefined();
+      // The released session must NOT be replayed: the call re-resolves to the
+      // shared unbound client socket A created for device:device-a (created with
+      // undefined), never B's session-a bound client.
+      expect(queued?.createdWith).toBeUndefined();
+    } finally {
+      releaseBlocker();
+      socketB.close();
+      socketA.close();
+    }
+  });
+
   test("re-arms the idle close after a queued forward times out in the queue", async () => {
     // An unbound forward that waits behind another request for the same shared
     // route until its timeout budget is exhausted throws the pre-forward

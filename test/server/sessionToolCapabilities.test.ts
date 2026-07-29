@@ -338,4 +338,46 @@ describe("capability union at the MCP boundary (#4611)", () => {
     await expect(call).rejects.toThrow("requires the 'clipboard' capability");
     expect(handler).not.toHaveBeenCalled();
   });
+
+  const listToolsForBase = async (
+    isEnabled: (sessionUuid: string | undefined, capability: string) => Promise<boolean>,
+  ): Promise<string[]> => {
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled };
+    fixture = new McpTestFixture({
+      // Seed the transport binding to the base session so tools/list resolves the
+      // same base UUID (and its label map) the call-gate sees.
+      sessionContext: { sessionId: "mcp-session-1", initialSessionToolBinding: "base" },
+      sessionToolProfileService: profileService,
+    });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "clipboard",
+      "clipboard",
+      z.object({ sessionUuid: z.string().optional(), device: z.string().optional() }),
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+    );
+    const result = await fixture.client.request(
+      { method: "tools/list", params: {} },
+      z.any(),
+    );
+    return (result.tools as Array<{ name: string }>).map(tool => tool.name);
+  };
+
+  test("base disables, derived label enables -> tool IS advertised (union discovery)", async () => {
+    // The call-gate accepts a `{ sessionUuid: base, device: B }` clipboard call
+    // because base:B re-enables it, so tools/list must advertise it too — otherwise
+    // the tool is callable but never discovered (issue #4611).
+    const toolNames = await listToolsForBase(
+      async (sessionUuid, capability) => capability === "clipboard" && sessionUuid === "base:B",
+    );
+    expect(toolNames).toContain("clipboard");
+  });
+
+  test("neither base nor any derived label enables -> tool is NOT advertised", async () => {
+    // Union discovery must not over-advertise: a tool no candidate session enables
+    // stays filtered out, matching the call-gate rejection.
+    const toolNames = await listToolsForBase(async () => false);
+    expect(toolNames).not.toContain("clipboard");
+  });
 });

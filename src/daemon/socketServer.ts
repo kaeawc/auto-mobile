@@ -724,6 +724,27 @@ export class UnixSocketServer {
       // that would run the admitted tool with no capability profile. Only the
       // execution target may be re-resolved, never the admitted client/session
       // (issue #4610).
+      //
+      // Exception: when the admitted route was seeded for a specific daemon
+      // session and that session was RELEASED while this request waited in the
+      // queue, invoking the stale session-scoped client would re-seed the released
+      // UUID and RESURRECT the session (getOrCreateSession recreates it and
+      // reacquires a device the caller never asked for). A mid-flight socket
+      // disconnect, by contrast, leaves the daemon session live — so the daemon
+      // session still being active is exactly what distinguishes a disconnect
+      // (keep the admitted client, preserving the capability profile above) from a
+      // real release (re-resolve to the current, unseeded route). Only re-resolve
+      // when the recompute actually points somewhere else (issue #4610).
+      if (
+        initialRoute.sessionUuid !== undefined &&
+        currentRoute.clientKey !== initialRoute.clientKey &&
+        !this.hasActiveDaemonSession(initialRoute.sessionUuid)
+      ) {
+        logger.debug(
+          `[McpForward] released-session re-resolve requestId=${request.id} releasedSession=${initialRoute.sessionUuid} clientKey=${initialRoute.clientKey} -> ${currentRoute.clientKey}`
+        );
+        return await this.runWithActiveMcpClient(currentRoute.clientKey, () => fn(currentRoute));
+      }
       return await this.runWithActiveMcpClient(initialRoute.clientKey, () => fn(initialRoute));
     });
   }
@@ -735,6 +756,16 @@ export class UnixSocketServer {
 
     const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
     if (request.method === "tools/list") {
+      // A reconnected restricted discovery re-sends `{sessionUuid}` (see
+      // daemonMcpProxy.listTools). A fresh socket has no boundRoute, so without
+      // honoring the request's session the shared UNSEEDED client would return the
+      // full, unfiltered tool list. Route to the session-scoped client so the
+      // seeded loopback transport advertises the session-scoped list, completing
+      // the proxy-side reconnect seeding (issue #4610).
+      const listSessionUuid = this.getSessionUuid(request.params);
+      if (listSessionUuid) {
+        return this.sessionScopedForwardRoute(socketSessionId, listSessionUuid, undefined);
+      }
       return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
     }
 

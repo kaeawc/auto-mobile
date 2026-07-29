@@ -283,6 +283,29 @@ describe("UnixSocketServer MCP session reconnect", () => {
     }
   });
 
+  test("seeds a session-scoped client for a reconnected tools/list carrying {sessionUuid}", async () => {
+    // After a reconnect the proxy re-sends `{sessionUuid}` on tools/list
+    // (daemonMcpProxy.listTools). A FRESH socket has no bound route, so the route
+    // must honor the request's session and build a SESSION-SEEDED client —
+    // otherwise the shared UNSEEDED client returns the full, unfiltered list
+    // instead of the session-scoped one (issue #4610).
+    const clientBindings: Array<string | undefined> = [];
+    server.mcpClientFactory = async boundSessionUuid => {
+      clientBindings.push(boundSessionUuid);
+      return createFakeMcpClient({
+        listTools: async () => ({ tools: [{ name: boundSessionUuid ?? "unbound" }] }),
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/list", { sessionUuid: "session-a" });
+
+    expect(response.success).toBe(true);
+    // The loopback transport was seeded with the requested session, not left unbound.
+    expect(clientBindings).toEqual(["session-a"]);
+    const result = response.result as { tools: Array<{ name: string }> };
+    expect(result.tools).toEqual([{ name: "session-a" }]);
+  });
+
   test("closes idle per-key MCP clients after the idle timeout", async () => {
     let closeCalls = 0;
 

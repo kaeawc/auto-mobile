@@ -130,6 +130,12 @@ export const READINESS_PROBE_BACKOFF_MS = 150;
 export const MCP_STREAMABLE_PATH = "/auto-mobile/streamable";
 
 /**
+ * Internal loopback header used to restore a daemon socket's capability
+ * profile when its Streamable HTTP MCP transport is recreated.
+ */
+export const DAEMON_SESSION_TOOL_BINDING_HEADER = "x-auto-mobile-session-uuid";
+
+/**
  * Control-socket method a client sends to opt in to server-pushed
  * `DaemonNotification` frames (tools/resources list_changed forwarding,
  * issue #3223). Opt-in keeps the push invisible to Kotlin/Swift/legacy

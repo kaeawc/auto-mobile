@@ -349,6 +349,103 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
+  test("keeps tools/list isolated when two sockets bind different sessions on one device", async () => {
+    sessionDevices.set("session-a", "device-a");
+    sessionDevices.set("session-b", "device-a");
+    const clients: FakeMcpClient[] = [];
+    server.mcpClientFactory = async () => {
+      let boundSessionUuid: string | undefined;
+      const client: FakeMcpClient = {
+        listTools: async () => ({
+          tools: [{ name: boundSessionUuid ?? "unbound" }],
+        }),
+        callTool: async (...args: unknown[]) => {
+          const request = args[0] as { arguments?: { sessionUuid?: string } };
+          boundSessionUuid = request.arguments?.sessionUuid;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      clients.push(client);
+      return client;
+    };
+
+    const firstSocket = new PersistentSocketClient();
+    const secondSocket = new PersistentSocketClient();
+    await Promise.all([
+      firstSocket.connect(socketPath),
+      secondSocket.connect(socketPath),
+    ]);
+    try {
+      const firstBoundCall = await firstSocket.request("tools/call", {
+        name: "observe",
+        arguments: { sessionUuid: "session-a" },
+      });
+      const secondBoundCall = await secondSocket.request("tools/call", {
+        name: "observe",
+        arguments: { sessionUuid: "session-b" },
+      });
+      const [firstList, secondList] = await Promise.all([
+        firstSocket.request("tools/list", {}),
+        secondSocket.request("tools/list", {}),
+      ]);
+
+      expect(firstBoundCall.success).toBe(true);
+      expect(secondBoundCall.success).toBe(true);
+      expect(firstList.result).toEqual({ tools: [{ name: "session-a" }] });
+      expect(secondList.result).toEqual({ tools: [{ name: "session-b" }] });
+      expect(clients).toHaveLength(2);
+    } finally {
+      firstSocket.close();
+      secondSocket.close();
+    }
+  });
+
+  test("retains a bound socket transport past the idle client deadline", async () => {
+    sessionDevices.set("session-a", "device-a");
+    let closeCalls = 0;
+    server.mcpClientFactory = async () => {
+      let boundSessionUuid: string | undefined;
+      return {
+        listTools: async () => ({
+          tools: [{ name: boundSessionUuid ?? "unbound" }],
+        }),
+        callTool: async (...args: unknown[]) => {
+          const request = args[0] as { arguments?: { sessionUuid?: string } };
+          boundSessionUuid = request.arguments?.sessionUuid;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {
+          closeCalls++;
+        },
+      } as FakeMcpClient;
+    };
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const boundCall = await client.request("tools/call", {
+        name: "observe",
+        arguments: { sessionUuid: "session-a" },
+      });
+      fakeTimer.advanceTime(5 * 60 * 1000);
+      await Promise.resolve();
+      const list = await client.request("tools/list", {});
+
+      expect(boundCall.success).toBe(true);
+      expect(closeCalls).toBe(0);
+      expect(list.result).toEqual({ tools: [{ name: "session-a" }] });
+    } finally {
+      client.close();
+    }
+  });
+
   test("keeps the successful session binding when a later explicit session call fails", async () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-session-list-error-${randomUUID()}.sock`);

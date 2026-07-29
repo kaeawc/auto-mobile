@@ -78,7 +78,7 @@ import { runWithToolCapabilityContext } from "../features/toolCapabilities/toolC
 
 export interface McpServerOptions {
   debug?: boolean;
-  sessionContext?: { sessionId?: string };
+  sessionContext?: { sessionId?: string; initialSessionToolBinding?: string };
   planExecutionLock?: PlanExecutionLock;
   daemonMode?: boolean;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
@@ -163,7 +163,7 @@ export function formatToolParamError(toolName: string, error: unknown): string {
 }
 
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
-  const sessionToolBinding = new SessionToolBinding();
+  const sessionToolBinding = new SessionToolBinding(options.sessionContext?.initialSessionToolBinding);
   // Plan execution lock with per-session scope to prevent interference during executePlan
   // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
   const planExecutionLock = options.planExecutionLock ?? createDefaultPlanExecutionLock();

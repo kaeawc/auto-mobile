@@ -19,6 +19,15 @@ describe("session-scoped tool discovery", () => {
     expect(binding.bind("transport", "device-session-b")).toBe(true);
   });
 
+  test("seeds only a recreated transport's initial session binding", () => {
+    const binding = new SessionToolBinding("device-session-a");
+
+    expect(binding.effectiveSessionUuid("recreated-transport")).toBe("device-session-a");
+    expect(binding.bind("recreated-transport", "device-session-a")).toBe(false);
+    expect(binding.bind("recreated-transport", "device-session-b")).toBe(true);
+    expect(binding.effectiveSessionUuid("recreated-transport")).toBe("device-session-b");
+  });
+
   test.each(["", "   "])("uses the bound session when an explicit session UUID is %p", sessionUuid => {
     const binding = new SessionToolBinding();
     binding.bind("transport", "disabled-session");

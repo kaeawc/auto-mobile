@@ -87,6 +87,55 @@ function sendRequest(socketPath: string, method: string, params: Record<string, 
   });
 }
 
+class PersistentSocketClient {
+  private readonly socket = new Socket();
+  private buffer = "";
+  private readonly responses = new Map<string, DaemonResponse>();
+  private readonly waiters = new Map<string, (response: DaemonResponse) => void>();
+
+  async connect(socketPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      this.socket.connect(socketPath, resolve);
+      this.socket.on("error", reject);
+      this.socket.on("data", data => {
+        this.buffer += data.toString();
+        const lines = this.buffer.split("\n");
+        this.buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+          const response = JSON.parse(line) as DaemonResponse;
+          const waiter = this.waiters.get(response.id);
+          if (waiter) {
+            this.waiters.delete(response.id);
+            waiter(response);
+          } else {
+            this.responses.set(response.id, response);
+          }
+        }
+      });
+    });
+  }
+
+  request(method: string, params: Record<string, unknown>): Promise<DaemonResponse> {
+    const id = randomUUID();
+    this.socket.write(JSON.stringify({ id, type: "mcp_request", method, params }) + "\n");
+    const buffered = this.responses.get(id);
+    if (buffered) {
+      this.responses.delete(id);
+      return Promise.resolve(buffered);
+    }
+    return new Promise(resolve => {
+      this.waiters.set(id, resolve);
+    });
+  }
+
+  close(): void {
+    this.socket.destroy();
+  }
+}
+
 describe("UnixSocketServer MCP session reconnect", () => {
   let socketPath: string;
   let server: UnixSocketServer;
@@ -200,6 +249,38 @@ describe("UnixSocketServer MCP session reconnect", () => {
     const second = await sendRequest(socketPath, "tools/list");
     expect(second.success).toBe(true);
     expect(clientsCreated).toBe(2);
+  });
+
+  test("replays a bound session when tools/list reconnects its MCP client", async () => {
+    const clientBindings: Array<string | undefined> = [];
+    server.mcpClientFactory = async boundSessionUuid => {
+      clientBindings.push(boundSessionUuid);
+      const isFirstClient = clientBindings.length === 1;
+      return createFakeMcpClient({
+        listTools: async () => {
+          if (isFirstClient) {
+            throw new Error("Session not found");
+          }
+          return { tools: [{ name: boundSessionUuid ?? "unbound" }] };
+        },
+      });
+    };
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const boundCall = await client.request("tools/call", {
+        name: "observe",
+        arguments: { sessionUuid: "session-a" },
+      });
+      const list = await client.request("tools/list", {});
+
+      expect(boundCall.success).toBe(true);
+      expect(clientBindings).toEqual(["session-a", "session-a"]);
+      expect(list.result).toEqual({ tools: [{ name: "session-a" }] });
+    } finally {
+      client.close();
+    }
   });
 
   test("closes idle per-key MCP clients after the idle timeout", async () => {

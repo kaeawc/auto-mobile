@@ -12,6 +12,7 @@ import {
   DEFAULT_DAEMON_PORT,
   SOCKET_PATH,
   MCP_STREAMABLE_PATH,
+  DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_PORT_RANGE_START,
   DAEMON_PORT_RANGE_END,
 } from "./constants";
@@ -608,7 +609,12 @@ export class Daemon {
           streamableTransport = this.transports.get(sessionId)!;
         } else if (isInitializeRequest || !sessionId) {
           // Create new transport for initialization or when no session ID
-          const sessionContext: { sessionId?: string } = {};
+          const boundSessionUuid = req.headers[DAEMON_SESSION_TOOL_BINDING_HEADER];
+          const sessionContext: { sessionId?: string; initialSessionToolBinding?: string } = {
+            ...(typeof boundSessionUuid === "string" && boundSessionUuid.trim().length > 0
+              ? { initialSessionToolBinding: boundSessionUuid }
+              : {}),
+          };
           streamableTransport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => this.idGenerator.next(),
             onsessioninitialized: newSessionId => {

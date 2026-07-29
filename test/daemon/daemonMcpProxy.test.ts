@@ -1299,6 +1299,67 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("replays a successful session binding on later sessionless calls after reconnect", async () => {
+      const staleClient = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "bound" }] },
+      });
+      const originalCallTool = staleClient.callTool.bind(staleClient);
+      staleClient.callTool = async (toolName, params) => {
+        if (staleClient.callToolCalls.length === 1) {
+          staleClient.callToolCalls.push({ toolName, params });
+          throw new DaemonUnavailableError("Daemon socket connection lost: connection closed");
+        }
+        return await originalCallTool(toolName, params);
+      };
+      const freshClient = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "recovered" }] },
+      });
+      const clients = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        const result = await proxy.callTool("videoRecording", {
+          action: "stop",
+          deviceId: "device-a",
+          recordingId: "recording-a",
+        });
+
+        expect(result).toEqual({ content: [{ type: "text", text: "recovered" }] });
+        expect(staleClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          {
+            toolName: "videoRecording",
+            params: {
+              action: "stop",
+              deviceId: "device-a",
+              recordingId: "recording-a",
+              sessionUuid: "session-a",
+            },
+          },
+        ]);
+        expect(freshClient.callToolCalls).toEqual([
+          {
+            toolName: "videoRecording",
+            params: {
+              action: "stop",
+              deviceId: "device-a",
+              recordingId: "recording-a",
+              sessionUuid: "session-a",
+            },
+          },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("readResource recovers when a sibling's socket dropped", async () => {
       const recoveredResult = { contents: [{ uri: "automobile:devices/booted", text: "[]" }] };
       const staleClient = new ScriptedDaemonClient({

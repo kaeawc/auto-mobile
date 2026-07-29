@@ -338,6 +338,10 @@ export class DaemonMcpProxy {
   private readonly clientAssetVersion: string | null;
   private connecting: Promise<void> | null = null;
   private connected: boolean = false;
+  // The daemon clears socket-local state when its RPC connection drops. Keep this
+  // proxy's successful explicit binding so subsequent sessionless calls can seed
+  // a replacement socket without sharing the binding with other proxies.
+  private boundSessionUuid: string | undefined;
 
   // Cached definitions from daemon
   private cachedTools: ProxiedToolDefinition[] | null = null;
@@ -861,7 +865,10 @@ export class DaemonMcpProxy {
     args: Record<string, unknown>
   ): Promise<any> {
     try {
-      return await this.withRecoverableReconnect(() => this.client!.callTool(name, args));
+      const forwardedArgs = this.withBoundSessionUuid(args);
+      const result = await this.withRecoverableReconnect(() => this.client!.callTool(name, forwardedArgs));
+      this.rememberSessionUuid(args);
+      return result;
     } catch (error) {
       // withRecoverableReconnect already reconciled build identity and retried once.
       // A still-"Unknown tool" failure means the daemon genuinely cannot provide a
@@ -871,6 +878,23 @@ export class DaemonMcpProxy {
         throw await this.toolUnavailableError(name);
       }
       throw error;
+    }
+  }
+
+  private withBoundSessionUuid(args: Record<string, unknown>): Record<string, unknown> {
+    if (
+      !this.boundSessionUuid ||
+      (args.sessionUuid !== undefined &&
+        (typeof args.sessionUuid !== "string" || args.sessionUuid.trim().length > 0))
+    ) {
+      return args;
+    }
+    return { ...args, sessionUuid: this.boundSessionUuid };
+  }
+
+  private rememberSessionUuid(args: Record<string, unknown>): void {
+    if (typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0) {
+      this.boundSessionUuid = args.sessionUuid;
     }
   }
 
@@ -967,6 +991,7 @@ export class DaemonMcpProxy {
     this.notificationUnsubscribe?.();
     this.notificationUnsubscribe = null;
     this.connected = false;
+    this.boundSessionUuid = undefined;
     this.invalidateCache();
     logger.debug("[DaemonMcpProxy] Disconnected from daemon");
   }

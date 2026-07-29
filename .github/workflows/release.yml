@@ -44,8 +44,14 @@ jobs:
     name: "Validate Release Tag"
     runs-on: ubuntu-latest
     # The push trigger is already tag-filtered, so any push event here is a tag;
-    # workflow_dispatch is the explicit release path. Both should run.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    # workflow_dispatch is the explicit release path. Both should run. A tag
+    # *deletion* also arrives as a push (github.event.deleted == true) with the
+    # deleted tag still in github.ref_name, which would otherwise pass validation
+    # and start the build/publish jobs against a tag that no longer exists -- the
+    # former create: trigger never fired on deletion, so guard it explicitly.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.event.deleted == false)
     outputs:
       is_release_tag: ${{ steps.validate.outputs.is_release_tag }}
       tag: ${{ steps.validate.outputs.tag }}

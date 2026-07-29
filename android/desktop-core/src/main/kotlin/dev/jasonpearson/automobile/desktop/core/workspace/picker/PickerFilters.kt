@@ -93,10 +93,13 @@ fun options(
         }
       FilterDimension.OsVersion -> {
         if (f.platforms.isEmpty()) return emptyList()
-        visible
-          .filter { it.osKey != null }
-          .groupBy { it.osKey!! }
-          .toSortedMap(compareByDescending { it.toIntOrNull() ?: 0 })
+        val grouped = LinkedHashMap<String, MutableList<PickerDevice>>()
+        for (device in visible) {
+          val key = device.osKey ?: continue
+          grouped.getOrPut(key) { mutableListOf() }.add(device)
+        }
+        grouped.entries
+          .sortedByDescending { it.key.toIntOrNull() ?: 0 }
           .map { (key, group) ->
             FilterOption(key, group.first().osLabel ?: key, group.size, key in f.osKeys)
           }

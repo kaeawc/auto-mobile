@@ -134,6 +134,31 @@
   [[ "$output" == *'git tag "$TAG" "$EXPECTED_RELEASE_COMMIT"'* ]]
 }
 
+@test "prepare-release validates the finalized tree before tagging and can rerun provenance upload (#4686)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/prepare-release.yml"
+
+  run yq -r '.jobs."validate-finalized-release".needs' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"finalize-release"* ]]
+
+  run yq -r '.jobs."verify-prepared-release".needs' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"validate-finalized-release"* ]]
+
+  local step_names
+  step_names="$(yq -r '.jobs."validate-finalized-release".steps[].name' "$workflow")"
+  [[ "$step_names" == *"Run tests"* ]]
+  [[ "$step_names" == *"Run lint"* ]]
+  [[ "$step_names" == *"Build TypeScript"* ]]
+  [[ "$step_names" == *"Run Bun MCP startup smoke"* ]]
+  [[ "$step_names" == *"Run Bun image runtime smoke"* ]]
+
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Upload release artifact provenance") | .with.overwrite' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
 @test "release.yml requires successful prepared-release provenance before downloading artifacts (#4686)" {
   wiring_requires_yq
   local workflow=".github/workflows/release.yml"

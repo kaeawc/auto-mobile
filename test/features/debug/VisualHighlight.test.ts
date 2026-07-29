@@ -94,17 +94,25 @@ describe("VisualHighlight", () => {
     ]);
   });
 
-  test("addHighlight rejects an invalid shape with the zod validation message before contacting the client", async () => {
-    const invalidShape: HighlightShape = {
-      type: "box",
-      bounds: {
-        x: 10,
-        y: 20,
-        width: 0,
-        height: 80
+  test.each([
+    {
+      dimension: "width",
+      invalidShape: {
+        type: "box" as const,
+        bounds: { x: 10, y: 20, width: 0, height: 80 }
       }
-    };
-
+    },
+    {
+      dimension: "height",
+      invalidShape: {
+        type: "box" as const,
+        bounds: { x: 10, y: 20, width: 100, height: 0 }
+      }
+    }
+  ])("addHighlight names the invalid bounds $dimension before contacting the client", async ({
+    dimension,
+    invalidShape
+  }) => {
     let requests = 0;
     const fakeClient = {
       requestAddHighlight: async () => {
@@ -117,9 +125,7 @@ describe("VisualHighlight", () => {
     const error = await highlight.addHighlight("highlight-1", invalidShape).catch(caught => caught);
 
     expect(error).toBeInstanceOf(ActionableError);
-    // The zod message reports the constraint but NOT the offending field name.
-    expect((error as Error).message).toContain("Too small: expected number to be >0");
-    // Validation happens before the wire call, so the client is never contacted.
+    expect((error as Error).message).toContain(`bounds.${dimension}`);
     expect(requests).toBe(0);
   });
 

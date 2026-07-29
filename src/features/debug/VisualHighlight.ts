@@ -37,8 +37,8 @@ const normalizeNullableString = (value: string | null | undefined): string | und
 const highlightBoundsSchema: z.ZodType<HighlightBounds> = z.object({
   x: z.number().int(),
   y: z.number().int(),
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
+  width: z.number().int().positive("bounds.width must be a positive integer"),
+  height: z.number().int().positive("bounds.height must be a positive integer"),
   sourceWidth: z.number().int().positive().nullable().optional(),
   sourceHeight: z.number().int().positive().nullable().optional()
 }).superRefine((value, ctx) => {

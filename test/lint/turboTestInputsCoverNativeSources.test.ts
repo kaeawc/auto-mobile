@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import ts from "typescript";
 
 /**
  * `turbo run test` cache-key guard (issue #4351).
@@ -85,6 +86,141 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     return abs.slice(ROOT.length + 1).replace(/\\/g, "/");
   }
 
+  function nativePathCandidates(source: string): string[] {
+    const paths = new Set<string>();
+    const sourceFile = ts.createSourceFile("native-path-scan.ts", source, ts.ScriptTarget.Latest, true);
+    const bindings = new Map<string, ts.Expression>();
+
+    const isPathCharacter = (character: string): boolean => {
+      const code = character.charCodeAt(0);
+      return (
+        (code >= 48 && code <= 57) ||
+        (code >= 65 && code <= 90) ||
+        (code >= 97 && code <= 122) ||
+        character === "." ||
+        character === "_" ||
+        character === "-" ||
+        character === "/"
+      );
+    };
+
+    const isIdentifierCharacter = (character: string): boolean => character !== "/" && isPathCharacter(character);
+
+    const addPathsFromText = (text: string): void => {
+      for (const root of ["android/", "ios/"]) {
+        let index = text.indexOf(root);
+        while (index >= 0) {
+          const previous = text[index - 1];
+          if (previous === undefined || !isIdentifierCharacter(previous)) {
+            let end = index + root.length;
+            while (end < text.length && isPathCharacter(text[end])) {
+              end += 1;
+            }
+            let path = text.slice(index, end);
+            while (path.endsWith("/")) {
+              path = path.slice(0, -1);
+            }
+            if (path !== root.slice(0, -1)) {
+              paths.add(path);
+            }
+          }
+          index = text.indexOf(root, index + root.length);
+        }
+      }
+    };
+
+    const collectBindings = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+        bindings.set(node.name.text, node.initializer);
+      }
+      ts.forEachChild(node, collectBindings);
+    };
+    collectBindings(sourceFile);
+
+    const resolveStaticText = (node: ts.Expression, resolving = new Set<string>()): string | undefined => {
+      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+        return node.text;
+      }
+      if (ts.isParenthesizedExpression(node)) {
+        return resolveStaticText(node.expression, resolving);
+      }
+      if (ts.isTemplateExpression(node)) {
+        let text = node.head.text;
+        for (const span of node.templateSpans) {
+          const expression = resolveStaticText(span.expression, resolving);
+          if (expression === undefined) {
+            return undefined;
+          }
+          text += expression + span.literal.text;
+        }
+        return text;
+      }
+      if (ts.isIdentifier(node) && !resolving.has(node.text)) {
+        const initializer = bindings.get(node.text);
+        if (initializer) {
+          const nested = new Set(resolving);
+          nested.add(node.text);
+          return resolveStaticText(initializer, nested);
+        }
+      }
+      return undefined;
+    };
+
+    const stringLeaves = (node: ts.Expression): string[] => {
+      const resolved = resolveStaticText(node);
+      if (resolved !== undefined) {
+        return [resolved];
+      }
+      if (ts.isCallExpression(node)) {
+        return node.arguments.flatMap(stringLeaves);
+      }
+      return [];
+    };
+
+    const visit = (node: ts.Node): void => {
+      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+        addPathsFromText(node.text);
+      } else if (ts.isTemplateExpression(node)) {
+        addPathsFromText(node.head.text);
+        for (const span of node.templateSpans) {
+          addPathsFromText(span.literal.text);
+        }
+      } else if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "join"
+      ) {
+        const segments = node.arguments.map(argument => {
+          const leaves = stringLeaves(argument);
+          return leaves.length === 1 ? leaves[0] : undefined;
+        });
+        const start = segments.findIndex(segment => segment === "android" || segment === "ios");
+        if (start >= 0 && segments.length - start >= 2) {
+          const nativeSegments = segments.slice(start);
+          if (nativeSegments.every((segment): segment is string => segment !== undefined)) {
+            addPathsFromText(nativeSegments.join("/"));
+          } else {
+            // An unresolved segment must not disappear and shorten the candidate
+            // to a potentially unrelated existing parent path. Treating the
+            // native root as a candidate keeps the cache-input guard fail-closed.
+            paths.add(segments[start]!);
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+
+    const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source);
+    for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
+      if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
+        addPathsFromText(scanner.getTokenText());
+      }
+    }
+
+    return [...paths];
+  }
+
   for (const taskName of CACHED_TASKS) {
     describe(`tasks.${taskName}.inputs`, () => {
       test("declares every native source tree a guard reads", () => {
@@ -143,25 +279,8 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
             }
             found.get(path)!.add(rel);
           };
-          for (const match of source.matchAll(/(?<![A-Za-z0-9_.-])(android|ios)\/[A-Za-z0-9._/-]+/g)) {
-            record(match[0].replace(/\/+$/, ""));
-          }
-          // ALSO reconstruct `join(..., "android", "desktop-core", ...)`-style
-          // segmented paths: the golden-vector parity guards build their Kotlin/
-          // Swift read targets this way, which the literal regex above cannot
-          // see — exactly how the coordinate-mapping guard's cross-tree read
-          // initially slipped past this lint (issue #4547 follow-up). Single-
-          // segment reconstructions ("ios" alone) are skipped: they are always
-          // temp-dir fixtures or prose, and the bare repo dir is never a read.
-          // Known regex miss cases (nested calls in join args, template
-          // literals, computed segments) are tracked in #4568 (AST promotion);
-          // REQUIRED_NATIVE_GLOBS still enforces every declared read meanwhile.
-          for (const call of source.matchAll(/\bjoin\(([^)]*)\)/gs)) {
-            const literals = [...call[1].matchAll(/"([^"]+)"/g)].map(m => m[1]);
-            const start = literals.findIndex(l => l === "android" || l === "ios");
-            if (start >= 0 && literals.length - start >= 2) {
-              record(literals.slice(start).join("/"));
-            }
+          for (const path of nativePathCandidates(source)) {
+            record(path);
           }
         }
       }
@@ -169,6 +288,36 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     walk(join(ROOT, "test"));
     return found;
   }
+
+  test("finds a native path nested inside a join argument", () => {
+    const source = 'join(ROOT, dirFor("android"), "control-proxy", "src", "main", "kotlin");';
+    expect(nativePathCandidates(source)).toContain("android/control-proxy/src/main/kotlin");
+  });
+
+  test("finds native paths formed by template literals", () => {
+    const source = [
+      "join(ROOT, `android`, `desktop-core`, `src`, `test`, `kotlin`);",
+      "const path = `${ROOT}/ios/control-proxy/Sources`;",
+    ].join("\n");
+    expect(nativePathCandidates(source)).toEqual(expect.arrayContaining([
+      "android/desktop-core/src/test/kotlin",
+      "ios/control-proxy/Sources",
+    ]));
+  });
+
+  test("resolves a constant computed join segment", () => {
+    const source = [
+      'const moduleName = "desktop-core";',
+      'join(ROOT, "android", moduleName, "src", "test", "kotlin");',
+    ].join("\n");
+    expect(nativePathCandidates(source)).toContain("android/desktop-core/src/test/kotlin");
+  });
+
+  test("keeps an unresolved native join segment from shortening the candidate path", () => {
+    const source = 'join(ROOT, "android", moduleName, "src", "test", "kotlin");';
+    expect(nativePathCandidates(source)).toContain("android");
+    expect(nativePathCandidates(source)).not.toContain("android/src/test/kotlin");
+  });
 
   /** Prefixes a declared glob matches, i.e. `foo/bar/**` covers `foo/bar` and below. */
   function coveredBy(inputs: readonly string[], path: string): boolean {

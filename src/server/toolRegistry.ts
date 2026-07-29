@@ -100,6 +100,12 @@ interface ToolRegistrationOptions {
   outputSchema?: any;
   /** Accept the plan executor's internal coordination namespace. */
   acceptsPlanLockNamespace?: boolean;
+  /**
+   * MCP Apps UI resource this tool renders through (issue #4669). When set, the
+   * tool definition advertises it as `_meta.ui.resourceUri`; additive and
+   * ignored by non-Apps hosts.
+   */
+  appUiResourceUri?: string;
 }
 
 interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
@@ -137,6 +143,7 @@ export interface RegisteredTool {
   planOnly?: boolean;
   acceptsPlanLockNamespace?: boolean;
   outputSchema?: any;
+  appUiResourceUri?: string;
 }
 
 /**
@@ -819,7 +826,8 @@ export class ToolRegistryClass {
       debugOnly: options.debugOnly ?? false,
       embeddedSdkOnly: false,
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
-      outputSchema: options.outputSchema
+      outputSchema: options.outputSchema,
+      appUiResourceUri: options.appUiResourceUri
     });
   }
 
@@ -941,7 +949,8 @@ export class ToolRegistryClass {
       planExecutable: options.planExecutable ?? false,
       planOnly: options.planOnly ?? false,
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
-      outputSchema: options.outputSchema
+      outputSchema: options.outputSchema,
+      appUiResourceUri: options.appUiResourceUri
     });
   }
 
@@ -1212,7 +1221,7 @@ export class ToolRegistryClass {
         description: string;
         inputSchema: Record<string, unknown>;
         outputSchema?: Record<string, unknown>;
-        _meta?: { "anthropic/alwaysLoad": boolean };
+        _meta?: { "anthropic/alwaysLoad"?: boolean; ui?: { resourceUri: string } };
       } = {
         name: tool.name,
         description: tool.description,
@@ -1222,7 +1231,11 @@ export class ToolRegistryClass {
         definition.outputSchema = outputSchema;
       }
       if (alwaysLoad) {
-        definition._meta = { "anthropic/alwaysLoad": true };
+        definition._meta = { ...definition._meta, "anthropic/alwaysLoad": true };
+      }
+      // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.
+      if (tool.appUiResourceUri) {
+        definition._meta = { ...definition._meta, ui: { resourceUri: tool.appUiResourceUri } };
       }
       return definition;
     });

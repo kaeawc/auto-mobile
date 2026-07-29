@@ -212,11 +212,15 @@ class ResourceRegistryClass {
       const { uri } = request.params;
       logger.info(`[ResourceRegistry] ReadResource request for URI: ${uri}`);
 
-      // Check for common incorrect URI schemes and provide helpful error messages
+      // Check for common incorrect URI schemes and provide helpful error
+      // messages. `automobile:` is the data-resource scheme; `ui:` is the MCP
+      // Apps UI-resource scheme (issue #4669). Anything else is a typo — but
+      // only reject when no resource is actually registered under that exact
+      // URI, so a future scheme that registers real resources still resolves.
       const schemeMatch = uri.match(/^([a-z][a-z0-9+.-]*):\/?\/?/i);
       if (schemeMatch) {
         const scheme = schemeMatch[1].toLowerCase();
-        if (scheme !== "automobile") {
+        if (scheme !== "automobile" && scheme !== "ui" && !this.getResource(uri)) {
           const suggestedUri = uri.replace(/^[a-z][a-z0-9+.-]*:\/?\/?/i, "automobile:");
           throw new Error(
             `Unknown URI scheme '${scheme}://'. AutoMobile resources use the 'automobile:' prefix. ` +

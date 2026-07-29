@@ -6266,6 +6266,11 @@
           "additionalProperties": {}
         }
       }
+    },
+    "_meta": {
+      "ui": {
+        "resourceUri": "ui://automobile/observe"
+      }
     }
   },
   {

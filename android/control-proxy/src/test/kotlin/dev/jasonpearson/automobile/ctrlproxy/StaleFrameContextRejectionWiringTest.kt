@@ -19,6 +19,16 @@ class StaleFrameContextRejectionWiringTest {
   private val staleFrameActions =
     setOf("TAP", "SWIPE", "DRAG", "SET_TEXT", "IME_ACTION", "GLOBAL_ACTION")
 
+  private val responseEmitterByAction =
+    mapOf(
+      "TAP" to "broadcastTapCoordinatesResult",
+      "SWIPE" to "broadcastSwipeResult",
+      "DRAG" to "broadcastDragResult",
+      "SET_TEXT" to "broadcastSetTextResult",
+      "IME_ACTION" to "broadcastImeActionResult",
+      "GLOBAL_ACTION" to "GlobalActionResult",
+    )
+
   @Test
   fun `stale frame rejection accepts a typed action and dispatches every action`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
@@ -38,6 +48,12 @@ class StaleFrameContextRejectionWiringTest {
       staleFrameActions,
       routedActions(body),
     )
+    responseEmitterByAction.forEach { (action, emitter) ->
+      assertTrue(
+        "$action must emit its established correlated stale-frame response",
+        emitter in actionBranch(body, action),
+      )
+    }
   }
 
   @Test
@@ -72,6 +88,14 @@ class StaleFrameContextRejectionWiringTest {
       .findAll(body)
       .map { it.groupValues[1] }
       .toSet()
+
+  private fun actionBranch(body: String, action: String): String {
+    val marker = "StaleFrameContextAction.$action ->"
+    val start = body.indexOf(marker)
+    if (start < 0) return ""
+    val next = body.indexOf("StaleFrameContextAction.", start + marker.length)
+    return body.substring(start, if (next >= 0) next else body.length)
+  }
 
   private fun typedActionCallSites(source: String): Set<String> =
     Regex(

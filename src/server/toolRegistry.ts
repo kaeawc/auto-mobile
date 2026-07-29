@@ -233,6 +233,20 @@ const AUTOMATIC_TOOL_OUTPUT_RETENTION: ToolOutputArtifactRetention = {
   overflowMinAgeMs: 60 * 60 * 1000,
 };
 
+/**
+ * Server-side session-binding teardown seam (issue #4611 Gap D). A daemon
+ * session release (e.g. an executePlan auto-release) frees the session in the
+ * SessionManager/DevicePool but cannot, by itself, reach the per-transport
+ * `SessionToolBinding` held in `createMcpServer` (index.ts) — that binding still
+ * resolves the released session as the transport's effective session, so a later
+ * sessionless `tools/list`/`tools/call` keeps enforcing the released (stale)
+ * profile. `createMcpServer` registers a handler here (interface + fake per DI
+ * convention) so the actual release path can clear its transport binding.
+ */
+export interface SessionBindingReleaseHandler {
+  onSessionReleased(sessionUuid: string): void;
+}
+
 export interface PlanLifecycleInput {
   name: string;
   args: any;
@@ -241,6 +255,10 @@ export interface PlanLifecycleInput {
   device: BootedDevice | undefined;
   sessionUuid: string | undefined;
   shouldResolveDevice: boolean;
+  // Injected teardown for the server-side per-transport SessionToolBinding
+  // (issue #4611 Gap D). Invoked AFTER a real release for every session freed —
+  // base and derived label sessions alike — never optimistically.
+  sessionBindingReleaseHandler?: SessionBindingReleaseHandler;
 }
 
 interface PlanLifecycleManager {
@@ -744,7 +762,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 // executePlan cleanup and the auto-release guard without a live daemon session.
 export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
   async afterExecution(input: PlanLifecycleInput): Promise<void> {
-    const { name, args, baseSessionUuid, cleanupService, device, sessionUuid, shouldResolveDevice } = input;
+    const { name, args, baseSessionUuid, cleanupService, device, sessionUuid, shouldResolveDevice, sessionBindingReleaseHandler } = input;
     if (device && name === "executePlan" && args?.cleanupAppId) {
       await cleanupService.cleanup(device, {
         appId: args.cleanupAppId,
@@ -757,8 +775,12 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         const sessionManager = DaemonState.getInstance().getSessionManager();
         const devicePool = DaemonState.getInstance().getDevicePool();
         const releaseSessionUuid = baseSessionUuid ?? sessionUuid;
+        // Track exactly which sessions this release actually frees so the
+        // server-side transport binding is torn down for each (issue #4611 Gap
+        // D) — coupled to the REAL release, never cleared optimistically.
+        const releasedSessionUuids: string[] = [];
         if (releaseSessionUuid) {
-          await releaseDeviceLabelSessions(releaseSessionUuid);
+          releasedSessionUuids.push(...await releaseDeviceLabelSessions(releaseSessionUuid));
         }
 
         const session = releaseSessionUuid ? sessionManager.getSession(releaseSessionUuid) : null;
@@ -768,7 +790,18 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
           await devicePool.releaseDevice(deviceId);
           NavigationGraphManager.releaseSession(releaseSessionUuid);
           RealObserveScreen.clearCache(deviceId);
+          releasedSessionUuids.push(releaseSessionUuid);
           logger.info(`Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`);
+        }
+
+        // Clear the per-transport SessionToolBinding for every freed session so a
+        // later sessionless tools/list or tools/call stops enforcing a released
+        // profile (issue #4611 Gap D). Best-effort: the handler swallows its own
+        // failures, but the release itself has already succeeded regardless.
+        if (sessionBindingReleaseHandler) {
+          for (const releasedUuid of releasedSessionUuids) {
+            sessionBindingReleaseHandler.onSessionReleased(releasedUuid);
+          }
         }
       } catch (releaseError) {
         logger.warn(`Failed to auto-release session ${sessionUuid}: ${releaseError}`);
@@ -786,6 +819,17 @@ export class ToolRegistryClass {
   // last-writer-wins (issue #3223). Entries are pruned via the underlying
   // server's onclose hook when a session's transport closes.
   private servers: Set<McpServer> = new Set();
+  // Per-transport server-side session-binding teardown handlers (issue #4611 Gap
+  // D). `createMcpServer` registers one per loopback transport; the plan-release
+  // path fans a released session UUID out to all of them so each transport's
+  // SessionToolBinding drops the stale session. Pruned via the returned
+  // unsubscribe on transport close, mirroring the `servers` set above.
+  private sessionBindingReleaseHandlers: Set<SessionBindingReleaseHandler> = new Set();
+  // Stable aggregate handed to the plan-lifecycle input so afterExecution can
+  // fan a released session out to every registered transport handler.
+  private readonly sessionBindingReleaseNotifier: SessionBindingReleaseHandler = {
+    onSessionReleased: sessionUuid => this.notifySessionBindingReleased(sessionUuid),
+  };
   private deviceSessionManager: DeviceSessionManager;
   private cleanupService: AppCleanupService;
   private toolCallRepository: ToolCallRepository;
@@ -958,6 +1002,7 @@ export class ToolRegistryClass {
                 device: resolvedTarget.device,
                 sessionUuid: resolvedTarget.sessionUuid,
                 shouldResolveDevice: resolvedTarget.shouldResolveDevice,
+                sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
               });
             }
           }
@@ -1204,6 +1249,38 @@ export class ToolRegistryClass {
   // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
   clearServersForTesting(): void {
     this.servers.clear();
+  }
+
+  // Register a per-transport server-side session-binding teardown handler (issue
+  // #4611 Gap D) and return its unsubscribe. `createMcpServer` calls this once per
+  // loopback transport and drops it on transport close, so a released session's
+  // stale binding is cleared on every live transport but a closed transport's
+  // handler never lingers.
+  registerSessionBindingReleaseHandler(handler: SessionBindingReleaseHandler): () => void {
+    this.sessionBindingReleaseHandlers.add(handler);
+    return () => {
+      this.sessionBindingReleaseHandlers.delete(handler);
+    };
+  }
+
+  // Fan a released session UUID out to every registered transport handler. Called
+  // from the plan-release path (via the injected notifier) after a session is
+  // actually freed. Best-effort: one throwing handler never blocks the others or
+  // the release that triggered it.
+  notifySessionBindingReleased(sessionUuid: string): void {
+    for (const handler of this.sessionBindingReleaseHandlers) {
+      try {
+        handler.onSessionReleased(sessionUuid);
+      } catch (error) {
+        logger.warn(`[ToolRegistry] session-binding release handler failed for ${sessionUuid}: ${error}`);
+      }
+    }
+  }
+
+  // Test-only: drop registered session-binding release handlers so suites sharing
+  // the singleton stay hermetic.
+  clearSessionBindingReleaseHandlersForTesting(): void {
+    this.sessionBindingReleaseHandlers.clear();
   }
 
   // Emit notifications/tools/list_changed so caching clients re-fetch tools/list

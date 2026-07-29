@@ -120,3 +120,49 @@ describe("ToolRegistry.notifyToolListChanged", () => {
     }
   });
 });
+
+describe("ToolRegistry session-binding release fan-out (issue #4611 Gap D)", () => {
+  test("fans a released session UUID out to every registered handler and honors unsubscribe", () => {
+    const first: string[] = [];
+    const second: string[] = [];
+    const unsubscribeFirst = ToolRegistry.registerSessionBindingReleaseHandler({
+      onSessionReleased: uuid => first.push(uuid),
+    });
+    const unsubscribeSecond = ToolRegistry.registerSessionBindingReleaseHandler({
+      onSessionReleased: uuid => second.push(uuid),
+    });
+    try {
+      ToolRegistry.notifySessionBindingReleased("session-1");
+      expect(first).toEqual(["session-1"]);
+      expect(second).toEqual(["session-1"]);
+
+      unsubscribeFirst();
+      ToolRegistry.notifySessionBindingReleased("session-2");
+      // The unsubscribed handler stops receiving events; the survivor keeps going.
+      expect(first).toEqual(["session-1"]);
+      expect(second).toEqual(["session-1", "session-2"]);
+    } finally {
+      unsubscribeFirst();
+      unsubscribeSecond();
+    }
+  });
+
+  test("one throwing handler does not block sibling handlers", () => {
+    const healthy: string[] = [];
+    const unsubscribeThrowing = ToolRegistry.registerSessionBindingReleaseHandler({
+      onSessionReleased: () => {
+        throw new Error("teardown boom");
+      },
+    });
+    const unsubscribeHealthy = ToolRegistry.registerSessionBindingReleaseHandler({
+      onSessionReleased: uuid => healthy.push(uuid),
+    });
+    try {
+      expect(() => ToolRegistry.notifySessionBindingReleased("session-1")).not.toThrow();
+      expect(healthy).toEqual(["session-1"]);
+    } finally {
+      unsubscribeThrowing();
+      unsubscribeHealthy();
+    }
+  });
+});

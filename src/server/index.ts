@@ -11,6 +11,7 @@ import { executionTracker } from "./executionTracker";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 
 // Import the tool registry
 import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
@@ -269,6 +270,36 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   // Register all resources with the server
   ResourceRegistry.registerWithServer(server);
+
+  // Tear down this transport's server-side SessionToolBinding when the daemon
+  // actually releases a session (issue #4611 Gap D). Two release sources funnel
+  // through the same idempotent `unbindSession`:
+  //   - the plan-release path, via ToolRegistry's injected teardown handler
+  //     (executePlan auto-release, deterministic, works in stdio mode too); and
+  //   - heartbeat/idle/explicit releases, via the process-wide
+  //     SessionReleaseBroadcaster (issue #4610), active in daemon mode.
+  // Clearing the binding stops a later sessionless tools/list or tools/call on
+  // this same MCP transport from enforcing the released session's stale profile.
+  // A list-changed notification is emitted only when a binding actually changed,
+  // so a duplicate release signal for the same session is a no-op.
+  const clearReleasedSessionBinding = (sessionUuid: string): void => {
+    if (sessionToolBinding.unbindSession(sessionUuid)) {
+      ToolRegistry.notifyToolListChanged();
+    }
+  };
+  const unregisterSessionBindingRelease = ToolRegistry.registerSessionBindingReleaseHandler({
+    onSessionReleased: clearReleasedSessionBinding,
+  });
+  const unsubscribeSessionReleaseBroadcast = SessionReleaseBroadcaster.subscribe(clearReleasedSessionBinding);
+  // Chain onto the existing onclose (set by ToolRegistry.registerWithServer's
+  // server tracking) so the per-transport teardown subscriptions are dropped when
+  // the transport closes, and no other lifecycle hook is clobbered.
+  const existingServerOnClose = server.server.onclose;
+  server.server.onclose = () => {
+    unregisterSessionBindingRelease();
+    unsubscribeSessionReleaseBroadcast();
+    existingServerOnClose?.();
+  };
 
   // Register tool definitions using the lower-level interface
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {

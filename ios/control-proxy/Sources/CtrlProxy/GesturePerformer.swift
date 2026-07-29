@@ -3,8 +3,10 @@ import ObjCExceptionCatcher
 #if canImport(os)
     import os
 #endif
-#if canImport(XCTest) && os(iOS)
+#if os(iOS)
     import UIKit
+#endif
+#if canImport(XCTest) && os(iOS)
     import XCTest
 #endif
 
@@ -49,6 +51,44 @@ final class RotationChangeGeneration {
     }
 }
 
+protocol RotationSampling {
+    func currentRotation() -> Int?
+}
+
+protocol RotationChangeSignaling: AnyObject {
+    func startObserving(_ handler: @escaping () -> Void)
+}
+
+/// Keeps a process-lifetime rotation epoch separate from synchronous XCUI capture work.
+final class RotationChangeMonitor {
+    private let changeGeneration = RotationChangeGeneration()
+    private let signal: RotationChangeSignaling
+
+    init(signal: RotationChangeSignaling) {
+        self.signal = signal
+        signal.startObserving { [weak self] in
+            self?.changeGeneration.recordOrientationChange()
+        }
+    }
+
+    func captureSample(using sampler: RotationSampling) -> RotationCaptureSample {
+        changeGeneration.captureSample(rotation: sampler.currentRotation())
+    }
+
+    func capture<T>(
+        using sampler: RotationSampling,
+        _ operation: () throws -> T
+    ) rethrows -> (value: T, rotation: Int?) {
+        let beforeCapture = captureSample(using: sampler)
+        let value = try operation()
+        let afterCapture = captureSample(using: sampler)
+        return (
+            value,
+            RotationCaptureSample.stableRotation(between: beforeCapture, and: afterCapture)
+        )
+    }
+}
+
 /// Maps platform orientation observations to the rotation epoch shared by hierarchy and screenshot
 /// frames. A value is intentionally absent when the platform cannot identify an interface rotation.
 enum DeviceRotation {
@@ -63,73 +103,116 @@ enum DeviceRotation {
     }
 
     #if canImport(XCTest) && os(iOS)
-        /// Captures a value while observing every orientation transition that occurs in the capture
-        /// interval. The observer is deliberately scoped to this operation: it detects an A→B→A
-        /// cycle without keeping a process-lifetime notification registration alive.
-        static func capture<T>(_ operation: () throws -> T) rethrows -> (value: T, rotation: Int?) {
-            let changeGeneration = RotationChangeGeneration()
-            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-            let orientationChangeObserver = NotificationCenter.default.addObserver(
-                forName: UIDevice.orientationDidChangeNotification,
-                object: UIDevice.current,
-                queue: nil
-            ) { _ in
-                changeGeneration.recordOrientationChange()
-            }
-            let beforeCapture = changeGeneration.captureSample(rotation: current())
-            defer {
-                NotificationCenter.default.removeObserver(orientationChangeObserver)
-                UIDevice.current.endGeneratingDeviceOrientationNotifications()
+        private final class DeviceOrientationChangeSignal: RotationChangeSignaling {
+            private let deliveryQueue: OperationQueue = {
+                let queue = OperationQueue()
+                queue.name = "dev.jasonpearson.automobile.ctrlproxy.device-orientation"
+                queue.maxConcurrentOperationCount = 1
+                return queue
+            }()
+            private var observer: NSObjectProtocol?
+
+            init() {
+                UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             }
 
-            let value = try operation()
-            let afterCapture = changeGeneration.captureSample(rotation: current())
-            return (
-                value,
-                RotationCaptureSample.stableRotation(between: beforeCapture, and: afterCapture)
-            )
+            func startObserving(_ handler: @escaping () -> Void) {
+                observer = NotificationCenter.default.addObserver(
+                    forName: UIDevice.orientationDidChangeNotification,
+                    object: UIDevice.current,
+                    queue: deliveryQueue
+                ) { _ in
+                    handler()
+                }
+            }
+
+            deinit {
+                if let observer {
+                    NotificationCenter.default.removeObserver(observer)
+                }
+                UIDevice.current.endGeneratingDeviceOrientationNotifications()
+            }
+        }
+
+        private final class XCUIDeviceRotationSampler: RotationSampling {
+            func currentRotation() -> Int? {
+                switch XCUIDevice.shared.orientation {
+                case .portrait: return 0
+                case .landscapeLeft: return 1
+                case .portraitUpsideDown: return 2
+                case .landscapeRight: return 3
+                default: return nil
+                }
+            }
+        }
+
+        private static let rotationSampler = XCUIDeviceRotationSampler()
+        private static let changeMonitor = RotationChangeMonitor(signal: DeviceOrientationChangeSignal())
+
+        /// Must be called while constructing the capture owners, before any synchronous XCUI work
+        /// can block the runner's main thread.
+        static func startMonitoring() {
+            _ = changeMonitor
+        }
+
+        static func capture<T>(_ operation: () throws -> T) rethrows -> (value: T, rotation: Int?) {
+            try changeMonitor.capture(using: rotationSampler, operation)
+        }
+
+        static func captureSample() -> RotationCaptureSample {
+            changeMonitor.captureSample(using: rotationSampler)
         }
 
         static func current() -> Int? {
-            fromInterfaceOrientation(currentInterfaceOrientation(fallback: .unknown))
+            rotationSampler.currentRotation()
         }
 
-        static func fromInterfaceOrientation(_ orientation: UIInterfaceOrientation) -> Int? {
-            switch orientation {
-            case .portrait: return 0
-            case .landscapeLeft: return 1
-            case .portraitUpsideDown: return 2
-            case .landscapeRight: return 3
-            default: return nil
-            }
-        }
+    #endif
 
+    #if os(iOS)
         static func currentGestureInterfaceOrientation() -> UIInterfaceOrientation {
-            currentInterfaceOrientation(fallback: .portrait)
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            let activeSceneOrientation = scenes.first(where: {
+                $0.activationState == .foregroundActive && isCardinalInterfaceOrientation($0.interfaceOrientation)
+            })?.interfaceOrientation
+            let sceneOrientation = scenes.first(where: {
+                isCardinalInterfaceOrientation($0.interfaceOrientation)
+            })?.interfaceOrientation
+
+            return gestureInterfaceOrientation(
+                activeSceneOrientation: activeSceneOrientation,
+                sceneOrientation: sceneOrientation,
+                deviceOrientation: UIDevice.current.orientation
+            )
         }
 
-        private static func currentInterfaceOrientation(fallback: UIInterfaceOrientation) -> UIInterfaceOrientation {
-            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            if let activeScene = scenes.first(where: {
-                $0.activationState == .foregroundActive && fromInterfaceOrientation($0.interfaceOrientation) != nil
-            }) {
-                return activeScene.interfaceOrientation
+        static func gestureInterfaceOrientation(
+            activeSceneOrientation: UIInterfaceOrientation?,
+            sceneOrientation: UIInterfaceOrientation?,
+            deviceOrientation: UIDeviceOrientation
+        ) -> UIInterfaceOrientation {
+            if let activeSceneOrientation, isCardinalInterfaceOrientation(activeSceneOrientation) {
+                return activeSceneOrientation
             }
-            if let scene = scenes.first(where: { fromInterfaceOrientation($0.interfaceOrientation) != nil }) {
-                return scene.interfaceOrientation
+            if let sceneOrientation, isCardinalInterfaceOrientation(sceneOrientation) {
+                return sceneOrientation
             }
 
-            switch UIDevice.current.orientation {
-            case .portrait:
-                return .portrait
-            case .portraitUpsideDown:
-                return .portraitUpsideDown
-            case .landscapeLeft:
-                return .landscapeLeft
-            case .landscapeRight:
-                return .landscapeRight
+            switch deviceOrientation {
+            case .portrait: return .portrait
+            case .portraitUpsideDown: return .portraitUpsideDown
+            case .landscapeLeft: return .landscapeLeft
+            case .landscapeRight: return .landscapeRight
+            default: return .portrait
+            }
+        }
+
+        private static func isCardinalInterfaceOrientation(_ orientation: UIInterfaceOrientation) -> Bool {
+            switch orientation {
+            case .portrait, .landscapeLeft, .portraitUpsideDown, .landscapeRight:
+                return true
             default:
-                return fallback
+                return false
             }
         }
     #endif
@@ -251,6 +334,7 @@ public class GesturePerformer: GesturePerforming {
         private lazy var springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
         public init(application: XCUIApplication? = nil, elementLocator: ElementLocating) {
+            DeviceRotation.startMonitoring()
             self.application = application
             self.elementLocator = elementLocator
         }

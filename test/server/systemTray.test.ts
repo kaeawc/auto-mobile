@@ -360,6 +360,48 @@ describe("systemTray re-expand on closed shade during wait", () => {
     ).toBe(1);
   });
 
+  test("re-expands again after a second throttle interval while the shade remains closed", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Other Notification")),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+      createObservation(createTrayHierarchy("Target Notification"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = waitForNotificationMatch(
+      device,
+      { title: "Target Notification" },
+      [],
+      REEXPAND_INTERVAL_MS * 5
+    );
+
+    // At t=1000 and t=2000, the closed shade crosses the re-expand throttle
+    // interval. The target appears after the second best-effort retry.
+    await advancePendingSleeps(fakeTimer, 9);
+
+    const result = await resultPromise;
+
+    expect(result.match).not.toBeNull();
+    expect(result.match!.match.matches.title?.text).toBe("Target Notification");
+    expect(
+      fakeAdb.getExecutedCommands().filter(cmd => cmd.includes("expand-notifications")).length
+    ).toBe(2);
+  });
+
   test("does not re-expand before a full throttle interval has elapsed", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
@@ -448,13 +490,14 @@ describe("systemTray unmatched-notification diagnostics", () => {
     resetSystemTrayDependencies();
   });
 
-  test("logs the open-but-unmatched candidate breakdown once, deduped across identical polls", async () => {
+  test("keeps the candidate count at info and sends notification previews to debug", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const notificationPreview = "Alice: Project secret";
     const fakeObserveScreen = new SequencedObserveScreen([
-      createObservation(createTrayHierarchy("Other Notification")),
-      createObservation(createTrayHierarchy("Other Notification")),
-      createObservation(createTrayHierarchy("Other Notification")),
+      createObservation(createTrayHierarchy(notificationPreview)),
+      createObservation(createTrayHierarchy(notificationPreview)),
+      createObservation(createTrayHierarchy(notificationPreview)),
       createObservation(createTrayHierarchy("Target Notification"))
     ]);
 
@@ -465,6 +508,7 @@ describe("systemTray unmatched-notification diagnostics", () => {
     });
 
     const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
     try {
       const resultPromise = waitForNotificationMatch(
         device,
@@ -482,9 +526,16 @@ describe("systemTray unmatched-notification diagnostics", () => {
         String(call[0]).includes("[systemTray][diag] shade open but no notification matched")
       );
       expect(diagLogs.length).toBe(1);
-      expect(String(diagLogs[0][0])).toContain("Other Notification");
+      expect(String(diagLogs[0][0])).toContain("candidateCount=1");
+      expect(String(diagLogs[0][0])).not.toContain(notificationPreview);
+      const debugDiagLogs = debugSpy.mock.calls.filter(call =>
+        String(call[0]).includes("[systemTray][diag] shade open but no notification matched")
+      );
+      expect(debugDiagLogs.length).toBe(1);
+      expect(String(debugDiagLogs[0][0])).toContain(notificationPreview);
     } finally {
       infoSpy.mockRestore();
+      debugSpy.mockRestore();
     }
   });
 

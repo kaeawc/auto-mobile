@@ -193,4 +193,93 @@ describe("ToolRegistry capability routing and enforcement (#4611)", () => {
     expect(nestedHandler).toHaveBeenCalledTimes(1);
     expect(nestedSessionUuid).toBe("base-session:B");
   });
+
+  // Gap B union at the NESTED internal-call pre-gate (issue #4611). A labeled
+  // criticalSection/executePlan step routes through `callInternal` with the
+  // derived `${base}:${label}` session as the ambient routing session. Before
+  // the fix `invokeInternalTool` asserted that single derived session, rejecting
+  // a step the base session enables but the label narrowed away. The pre-gate
+  // must resolve the base from the derived label and apply the union — including
+  // on the `targetDevice` path, which bypasses the device-aware wrapper's own
+  // union gate entirely.
+  const initializeDaemonWithLabeledBase = async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer);
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [device]);
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    await pool.initializeWithDevices([device]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await sessionManager.createSession("base-session", device.deviceId, "android");
+    sessionManager.setDeviceLabels("base-session", { A: "base-session", B: "base-session:B" });
+    return sessionManager;
+  };
+
+  const baseEnabledDerivedDisabled = mock(
+    async (sessionUuid: string | undefined, capability: string) =>
+      capability === "clipboard" && sessionUuid === "base-session",
+  );
+
+  test("Gap B nested union: a labeled internal step is allowed when the base enables it but the derived label narrowed it away", async () => {
+    const sessionManager = await initializeDaemonWithLabeledBase();
+    try {
+      const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled: baseEnabledDerivedDisabled };
+      const handler = mock(async () => ({ success: true }));
+      // A plain-registered tool: its handler is the raw handler with no wrapper
+      // union, so `invokeInternalTool`'s pre-gate is the ONLY enforcement point.
+      ToolRegistry.register("clipboard", "clipboard", z.object({}), handler);
+
+      const response = await runWithToolCapabilityContext(
+        { routingSessionUuid: "base-session:B", sessionToolProfileService: profileService },
+        () => ToolRegistry.callInternal("clipboard", {}),
+      );
+
+      expect(response).toEqual({ success: true });
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("Gap B nested union: the targetDevice path also honors the union (bypasses the wrapper)", async () => {
+    const sessionManager = await initializeDaemonWithLabeledBase();
+    try {
+      const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled: baseEnabledDerivedDisabled };
+      const deviceAwareHandler = mock(async () => ({ success: true }));
+      ToolRegistry.registerDeviceAware("clipboard", "clipboard", z.object({}), deviceAwareHandler);
+
+      const response = await runWithToolCapabilityContext(
+        { routingSessionUuid: "base-session:B", sessionToolProfileService: profileService },
+        () => ToolRegistry.callInternal("clipboard", {}, undefined, undefined, { targetDevice: device }),
+      );
+
+      expect(response).toEqual({ success: true });
+      // Invoked directly with the target device, bypassing the device-aware wrapper.
+      expect(deviceAwareHandler).toHaveBeenCalledTimes(1);
+      expect(deviceAwareHandler.mock.calls[0][0]).toEqual(device);
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("Gap B nested union: rejected only when both base and derived label disable the tool", async () => {
+    const sessionManager = await initializeDaemonWithLabeledBase();
+    try {
+      const isEnabled = mock(async () => false);
+      const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled };
+      const handler = mock(async () => ({ success: true }));
+      ToolRegistry.register("clipboard", "clipboard", z.object({}), handler);
+
+      await expect(runWithToolCapabilityContext(
+        { routingSessionUuid: "base-session:B", sessionToolProfileService: profileService },
+        () => ToolRegistry.callInternal("clipboard", {}),
+      )).rejects.toThrow("requires the 'clipboard' capability");
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(isEnabled).toHaveBeenCalledWith("base-session", "clipboard");
+      expect(isEnabled).toHaveBeenCalledWith("base-session:B", "clipboard");
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
 });

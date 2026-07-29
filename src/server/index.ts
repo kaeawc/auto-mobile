@@ -72,9 +72,10 @@ import {
   type SessionToolProfileService,
 } from "../features/toolCapabilities/SessionToolProfileService";
 import {
-  assertToolEnabledForSession,
+  assertToolEnabledForAnySession,
   isToolEnabledForSession,
 } from "../features/toolCapabilities/toolCapabilityPolicy";
+import { getDeviceLabelMap } from "./deviceLabelMapping";
 import { runWithToolCapabilityContext } from "../features/toolCapabilities/toolCapabilityContext";
 
 export interface McpServerOptions {
@@ -348,7 +349,28 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     if (!tool) {
       throw new ActionableError(`Unknown tool: ${name}`);
     }
-    await assertToolEnabledForSession(name, sessionUuid, options.sessionToolProfileService);
+    // Capability enforcement honors the UNION of the base and the derived
+    // `${base}:${label}` device-label sessions (issue #4611): a tool is enabled
+    // when EITHER grants it. This public MCP boundary is an EARLIER gate than the
+    // authoritative union in `registerDeviceAware` (which rejects a
+    // capability-denied tool before allocating a device), so it must apply the
+    // same union — otherwise a base session that narrowed a tool away would
+    // reject a `{ sessionUuid: base, device: label }` call here before the deeper
+    // gate could observe that `base:label` re-enables it. Resolve the derived
+    // label candidate from the base session's label map (a read-only lookup, no
+    // device allocation). Non-labeled and non-device-aware calls collapse to the
+    // base, preserving prior single-session behavior and `tools/list` filtering.
+    const requestedDeviceLabel = typeof (toolParams as Record<string, unknown>).device === "string"
+      ? (toolParams as Record<string, unknown>).device as string
+      : undefined;
+    const derivedLabelSessionUuid = requestedDeviceLabel && sessionUuid
+      ? getDeviceLabelMap(sessionUuid)?.[requestedDeviceLabel]
+      : undefined;
+    await assertToolEnabledForAnySession(
+      name,
+      [sessionUuid, derivedLabelSessionUuid],
+      options.sessionToolProfileService,
+    );
 
     const requestMcpSessionId = extractInternalMcpSessionId(toolParams);
     const implicitAutolockMcpSessionId = requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);

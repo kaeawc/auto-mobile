@@ -40,7 +40,6 @@ import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 import type { SessionToolProfileService } from "../features/toolCapabilities/SessionToolProfileService";
 import {
   assertToolEnabledForAnySession,
-  assertToolEnabledForSession,
 } from "../features/toolCapabilities/toolCapabilityPolicy";
 import { resolveCapabilityBaseSessionUuid } from "../features/toolCapabilities/capabilitySessionResolver";
 import {
@@ -939,14 +938,10 @@ export class ToolRegistryClass {
         // product decision): a tool is enabled if EITHER grants it, so a derived
         // label may re-enable a tool the base narrowed away.
         const capabilityDerivedSessionUuid = resolvedTarget.capabilitySessionUuid ?? resolvedTarget.sessionUuid;
-        const capabilitySessionManager = DaemonState.getInstance().isInitialized()
-          ? DaemonState.getInstance().getSessionManager()
-          : undefined;
-        const capabilityBaseSessionUuid = resolvedTarget.baseSessionUuid
-          ?? resolveCapabilityBaseSessionUuid(capabilityDerivedSessionUuid, capabilitySessionManager);
-        await assertToolEnabledForAnySession(
+        await this.assertToolEnabledUnion(
           name,
-          [capabilityBaseSessionUuid, capabilityDerivedSessionUuid],
+          capabilityDerivedSessionUuid,
+          resolvedTarget.baseSessionUuid,
           getToolCapabilityContext()?.sessionToolProfileService,
         );
         return await runWithToolCapabilityContext(
@@ -1125,11 +1120,44 @@ export class ToolRegistryClass {
     sessionUuid: string | undefined,
     sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
   ): Promise<any> {
-    await assertToolEnabledForSession(tool.name, sessionUuid, sessionToolProfileService);
+    // Honor the UNION of the base + derived `${base}:${label}` sessions here too
+    // (issue #4611). `sessionUuid` is the ambient ROUTING session — a derived
+    // label session for a labeled `criticalSection`/`executePlan` step — so a
+    // single-session assert would reject a tool the base enables but the label
+    // narrowed away. The `targetDevice` path below bypasses the device-aware
+    // wrapper's own union gate entirely, so this pre-gate is the ONLY enforcement
+    // point for it and must apply the union as well.
+    await this.assertToolEnabledUnion(tool.name, sessionUuid, undefined, sessionToolProfileService);
     if (targetDevice && tool.deviceAwareHandler) {
       return tool.deviceAwareHandler(targetDevice, markInternalToolCall(args), progress, signal);
     }
     return tool.handler(markInternalToolCall(args), progress, signal);
+  }
+
+  /**
+   * Assert a tool is enabled under UNION capability semantics (issue #4611): a
+   * tool is enabled when EITHER the base OR the derived `${base}:${label}`
+   * device-label session grants it. The base is resolved from the derived label
+   * session via the shared resolver unless the caller already knows it. Applied
+   * at every enforcement gate — the device-aware wrapper and the nested
+   * internal-call pre-gate — so no gate can reject a call the union should allow.
+   */
+  private async assertToolEnabledUnion(
+    toolName: string,
+    derivedSessionUuid: string | undefined,
+    explicitBaseSessionUuid: string | undefined,
+    sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
+  ): Promise<void> {
+    const sessionManager = DaemonState.getInstance().isInitialized()
+      ? DaemonState.getInstance().getSessionManager()
+      : undefined;
+    const baseSessionUuid = explicitBaseSessionUuid
+      ?? resolveCapabilityBaseSessionUuid(derivedSessionUuid, sessionManager);
+    await assertToolEnabledForAnySession(
+      toolName,
+      [baseSessionUuid, derivedSessionUuid],
+      sessionToolProfileService,
+    );
   }
 
   // Typed variant of `callInternal` for the handful of internally-consumed tools

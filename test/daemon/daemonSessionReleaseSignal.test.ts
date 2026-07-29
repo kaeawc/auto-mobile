@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import { createTestDatabase } from "../db/testDbHelper";
 
 // Issue #4610: the daemon registers a release callback (next to the nav-graph /
 // observe-cache cleanup) that fans the released session key out to the
@@ -19,7 +21,12 @@ describe("Daemon session-release signal wiring", () => {
   });
 
   test("emits the released session key to the broadcaster on releaseSession", async () => {
-    const daemon = new Daemon({});
+    // Inject an in-memory migrated DB so createSession/releaseSession persist
+    // through DeviceSessionRepository without resolving the real ~/.auto-mobile
+    // file DB (CLAUDE.md unit-test guard, issue #3067). The Daemon threads this
+    // repository straight into its SessionManager (daemon.ts).
+    const db = await createTestDatabase();
+    const daemon = new Daemon({}, undefined, undefined, new DeviceSessionRepository(db));
     const sessionManager = daemon.getSessionManager();
 
     const emitted: string[] = [];

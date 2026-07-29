@@ -12,6 +12,8 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import { createTestDatabase } from "../db/testDbHelper";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -282,7 +284,9 @@ describe("DefaultPlanLifecycleManager server-side binding teardown (issue #4611 
 
   beforeEach(async () => {
     const timer = new FakeTimer();
-    sessionManager = new SessionManager(timer);
+    // In-memory migrated DB so createSession persists without resolving the real
+    // ~/.auto-mobile file DB (CLAUDE.md unit-test guard, issue #3067).
+    sessionManager = new SessionManager(timer, new DeviceSessionRepository(await createTestDatabase()));
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);

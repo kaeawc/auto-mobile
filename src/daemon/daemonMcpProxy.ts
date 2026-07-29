@@ -867,8 +867,14 @@ export class DaemonMcpProxy {
     }
 
     try {
+      // Bind discovery to the session like callTool does. Without this, a
+      // recoverable reconnect INSIDE withRecoverableReconnect retries tools/list
+      // with empty params against the fresh UNSEEDED transport, which returns the
+      // full unfiltered tool list instead of the session-scoped one. Computing the
+      // forwarded params inside the operation closure re-seeds the retry after a
+      // reconnect (issue #4610).
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("tools/list", {})
+        this.client!.callDaemonMethod("tools/list", this.withBoundSessionUuid({}))
       );
       const tools = result?.tools ?? [];
       this.cachedTools = tools;

@@ -1366,6 +1366,49 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("listTools re-seeds the bound session on a reconnect so discovery stays session-scoped", async () => {
+      // listTools forwards to a shared transport. A reconnect mid-listTools would
+      // otherwise retry tools/list with empty params against the fresh unseeded
+      // transport, returning the full unfiltered tool list instead of the
+      // session-scoped one. Binding discovery like callTool re-seeds the retried
+      // tools/list so it returns the session-scoped list (issue #4610).
+      const staleClient = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "bound" }] },
+        daemonMethodError: new Error("Session not found"),
+      });
+      const freshClient = new ScriptedDaemonClient({
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "scopedTool", inputSchema: {} }] }],
+        ]),
+      });
+      const clients = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        // Bind the proxy to session-a via a successful tool call.
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+
+        const tools = await proxy.listTools();
+
+        expect(tools).toEqual([{ name: "scopedTool", inputSchema: {} }]);
+        // The stale attempt and the reconnect retry both carry the bound session.
+        expect(staleClient.callDaemonMethodCalls).toEqual([
+          { method: "tools/list", params: { sessionUuid: "session-a" } },
+        ]);
+        expect(freshClient.callDaemonMethodCalls).toEqual([
+          { method: "tools/list", params: { sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("does not replay an executePlan session after its successful release", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },

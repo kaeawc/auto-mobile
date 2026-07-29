@@ -739,14 +739,7 @@ export class UnixSocketServer {
     }
 
     if (request.method === "ide/getNavigationGraph") {
-      const executionKey = this.getRequestArgumentScopeKey(request.params);
-      if (executionKey) {
-        if (boundRoute) {
-          return { ...boundRoute, executionKey };
-        }
-        return this.sharedMcpForwardRoute(executionKey);
-      }
-      return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
+      return this.getNavigationGraphForwardRoute(request, socketSessionId, boundRoute);
     }
 
     if (request.method === "resources/read") {
@@ -757,15 +750,33 @@ export class UnixSocketServer {
     return this.sharedMcpForwardRoute(`method:${request.method}`);
   }
 
+  private getNavigationGraphForwardRoute(
+    request: DaemonRequest,
+    socketSessionId: string,
+    boundRoute: McpForwardRoute | undefined
+  ): McpForwardRoute {
+    const sessionUuid = this.getSessionUuid(request.params);
+    const executionKey = this.getRequestArgumentScopeKey(request.params);
+    if (sessionUuid) {
+      // An explicit read session routes to its OWN session-specific client so a
+      // cross-session IDE read never repurposes the socket's bound transport. If
+      // it reused the bound client, the loopback SessionToolBinding would be
+      // rebound to this UUID while recordBoundMcpClientKey early-returns for
+      // non-tools/call methods, leaving the daemon route labeled the bound
+      // session and the transport filtering by a different profile (issue #4610).
+      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, executionKey);
+    }
+    if (executionKey) {
+      return boundRoute ? { ...boundRoute, executionKey } : this.sharedMcpForwardRoute(executionKey);
+    }
+    return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
+  }
+
   private getToolsCallForwardRoute(args: unknown, socketSessionId: string): McpForwardRoute {
     const scopedKey = this.getRequestArgumentScopeKey(args);
     const sessionUuid = this.getSessionUuid(args);
     if (sessionUuid) {
-      return {
-        executionKey: scopedKey ?? `session:${sessionUuid}`,
-        clientKey: this.sessionMcpClientKey(socketSessionId, sessionUuid),
-        sessionUuid,
-      };
+      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, scopedKey);
     }
 
     const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
@@ -796,6 +807,21 @@ export class UnixSocketServer {
 
   private sessionMcpClientKey(socketSessionId: string, sessionUuid: string): string {
     return `socket:${socketSessionId}:session:${sessionUuid}`;
+  }
+
+  // Route an explicit-session request (tools/call or an IDE read) to its OWN
+  // session-specific loopback client so it never repurposes the socket's bound
+  // transport to a different session (issue #4610).
+  private sessionScopedForwardRoute(
+    socketSessionId: string,
+    sessionUuid: string,
+    scopedKey: string | undefined
+  ): McpForwardRoute {
+    return {
+      executionKey: scopedKey ?? `session:${sessionUuid}`,
+      clientKey: this.sessionMcpClientKey(socketSessionId, sessionUuid),
+      sessionUuid,
+    };
   }
 
   private recordBoundMcpClientKey(

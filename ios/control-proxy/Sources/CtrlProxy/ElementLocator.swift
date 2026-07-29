@@ -736,14 +736,18 @@ public class ElementLocator: ElementLocating {
             for type in textInputElementTypes {
                 let candidates = app.descendants(matching: type).allElementsBoundByIndex
                 for candidate in candidates {
-                    guard candidate.exists,
-                          candidate.isHittable,
-                          !candidate.frame.isEmpty,
-                          let snapshot = try? candidate.snapshot()
-                    else {
-                        continue
+                    let snapshot: XCUIElementSnapshot? = runOnMainThreadNonThrowing({
+                        guard candidate.exists,
+                              candidate.isHittable,
+                              !candidate.frame.isEmpty
+                        else {
+                            return nil
+                        }
+                        return try? candidate.snapshot()
+                    }, fallback: nil)
+                    if let snapshot {
+                        snapshots.append(snapshot)
                     }
-                    snapshots.append(snapshot)
                 }
             }
 

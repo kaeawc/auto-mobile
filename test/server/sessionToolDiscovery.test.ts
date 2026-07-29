@@ -23,6 +23,7 @@ describe("session-scoped tool discovery", () => {
     const binding = new SessionToolBinding("device-session-a");
 
     expect(binding.effectiveSessionUuid("recreated-transport")).toBe("device-session-a");
+    expect(binding.bind("recreated-transport", "device-session-a")).toBe(true);
     expect(binding.bind("recreated-transport", "device-session-a")).toBe(false);
     expect(binding.bind("recreated-transport", "device-session-b")).toBe(true);
     expect(binding.effectiveSessionUuid("recreated-transport")).toBe("device-session-b");

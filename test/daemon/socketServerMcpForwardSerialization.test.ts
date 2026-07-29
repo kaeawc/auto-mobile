@@ -326,7 +326,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       });
       const sessionlessCall = await client.request("tools/call", {
         name: "videoRecording",
-        arguments: { action: "stop", recordingId: "recording-1" },
+        arguments: { action: "stop", recordingId: "recording-1", deviceId: "device-a" },
       });
       const navigationGraph = await client.request("ide/getNavigationGraph", {});
       const refreshedList = await client.request("tools/list", {});

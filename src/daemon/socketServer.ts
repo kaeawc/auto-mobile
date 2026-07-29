@@ -692,11 +692,14 @@ export class UnixSocketServer {
       };
     }
 
+    const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
     if (scopedKey) {
+      if (boundRoute) {
+        return { ...boundRoute, executionKey: scopedKey };
+      }
       return this.sharedMcpForwardRoute(scopedKey);
     }
 
-    const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
     if (boundRoute) {
       return boundRoute;
     }

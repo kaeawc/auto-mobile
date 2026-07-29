@@ -15,7 +15,11 @@ export class SessionToolBinding {
   }
 
   bind(mcpSessionId: string | undefined, sessionUuid: string | undefined): boolean {
-    if (!mcpSessionId || !sessionUuid?.trim() || this.effectiveSessionUuid(mcpSessionId) === sessionUuid) {
+    if (
+      !mcpSessionId
+      || !sessionUuid?.trim()
+      || this.boundDeviceSessions.get(mcpSessionId) === sessionUuid
+    ) {
       return false;
     }
     this.boundDeviceSessions.set(mcpSessionId, sessionUuid);

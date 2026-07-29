@@ -275,11 +275,16 @@ describe("criticalSection tool", () => {
     expect(nestedHandler).not.toHaveBeenCalled();
   });
 
-  test("uses the base profile for a labeled critical-section nested step", async () => {
+  test("routes a labeled critical-section nested step with the derived session (union re-enables)", async () => {
+    // Issue #4611 Gaps B/C: a `${base}:${label}` label session carries its own
+    // routing identity into nested steps, and capability enforcement is the
+    // UNION of base + derived. Here the base narrows clipboard away but the
+    // derived label re-enables it, so the nested step must run AND route with
+    // the derived session (previously it collapsed to the base and was denied).
     const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();
     const nestedHandler = mock(async () => ({ success: true }));
-    ToolRegistry.register("clipboard", "clipboard", z.object({ device: z.string() }), nestedHandler);
+    ToolRegistry.register("clipboard", "clipboard", z.object({ device: z.string(), sessionUuid: z.string().optional() }), nestedHandler);
     const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
       isEnabled: async (sessionUuid, capability) => sessionUuid !== "base-session" || capability === "test-authoring",
     };
@@ -311,10 +316,67 @@ describe("criticalSection tool", () => {
     });
 
     try {
-      await expect(runWithToolCapabilityContext(
-        { sessionUuid: "base-session", sessionToolProfileService: profileService },
+      await runWithToolCapabilityContext(
+        { routingSessionUuid: "base-session", sessionToolProfileService: profileService },
         () => tool!.handler({
           lock: "base-profile-lock",
+          device: "B",
+          deviceCount: 1,
+          steps: [{ tool: "clipboard", params: { device: "B" } }],
+        }),
+      );
+
+      expect(nestedHandler).toHaveBeenCalledTimes(1);
+      const nestedArgs = nestedHandler.mock.calls[0][0] as { sessionUuid?: string };
+      expect(nestedArgs.sessionUuid).toBe("base-session:B");
+    } finally {
+      restorePipelineOverrides();
+    }
+  });
+
+  test("denies a labeled critical-section nested step when base and derived both narrow it away", async () => {
+    // Union semantics remain restrictive when NEITHER session grants the
+    // capability (issue #4611 Gap B, the "both narrow" direction).
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
+    expect(tool).toBeDefined();
+    const nestedHandler = mock(async () => ({ success: true }));
+    ToolRegistry.register("clipboard", "clipboard", z.object({ device: z.string(), sessionUuid: z.string().optional() }), nestedHandler);
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
+      // Only test-authoring is granted; clipboard is denied for every session.
+      isEnabled: async (_sessionUuid, capability) => capability === "test-authoring",
+    };
+    const fakeDevice: BootedDevice = {
+      platform: "android",
+      deviceId: "test-device-both-narrow",
+      name: "Test Device Both Narrow",
+    };
+    const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async input => ({
+          args: input.args,
+          baseSessionUuid: "base-session",
+          device: fakeDevice,
+          internalCall: false,
+          sessionUuid: "base-session:B",
+          shouldResolveDevice: true,
+        }),
+      },
+      auditRunner: {
+        run: async input => input.handler(input.device, input.args, input.progress, input.signal),
+      },
+      afterToolCall: {
+        handle: async input => ({ durationMs: 0, finalizedResponse: input.response }),
+      },
+      planLifecycleManager: {
+        afterExecution: async () => {},
+      },
+    });
+
+    try {
+      await expect(runWithToolCapabilityContext(
+        { routingSessionUuid: "base-session", sessionToolProfileService: profileService },
+        () => tool!.handler({
+          lock: "both-narrow-lock",
           device: "B",
           deviceCount: 1,
           steps: [{ tool: "clipboard", params: { device: "B" } }],

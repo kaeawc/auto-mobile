@@ -384,7 +384,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       const result = await runWithAbortSignal(
         execution.abortController.signal,
         () => runWithToolCapabilityContext(
-          { sessionUuid, sessionToolProfileService: options.sessionToolProfileService },
+          { routingSessionUuid: sessionUuid, sessionToolProfileService: options.sessionToolProfileService },
           () => tool.handler(handlerParams, progressCallback, execution.abortController.signal)
         )
       );

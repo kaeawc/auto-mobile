@@ -50,7 +50,8 @@ import {
   type SessionToolProfileService,
   type ToolCapability,
 } from "../features/toolCapabilities/SessionToolProfileService";
-import { assertToolEnabledForSession } from "../features/toolCapabilities/toolCapabilityPolicy";
+import { assertToolEnabledForAnySession } from "../features/toolCapabilities/toolCapabilityPolicy";
+import { resolveCapabilityBaseSessionUuid } from "../features/toolCapabilities/capabilitySessionResolver";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   IOS_CTRL_PROXY_APP_HASH,
@@ -1204,32 +1205,22 @@ export class UnixSocketServer {
   }
 
   private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {
-    const sessionUuid = this.daemonState.isInitialized()
-      ? this.getCapabilityProfileSessionUuid(
-        this.daemonState.getSessionManager().getSessionForDevice?.(deviceId) ?? undefined
-      )
-      : undefined;
-    await assertToolEnabledForSession(toolName, sessionUuid, this.sessionToolProfileService);
-  }
-
-  private getCapabilityProfileSessionUuid(sessionUuid: string | undefined): string | undefined {
-    if (!sessionUuid || !this.daemonState.isInitialized()) {
-      return sessionUuid;
+    if (!this.daemonState.isInitialized()) {
+      await assertToolEnabledForAnySession(toolName, [undefined], this.sessionToolProfileService);
+      return;
     }
-
     const sessionManager = this.daemonState.getSessionManager();
-    for (
-      let separatorIndex = sessionUuid.lastIndexOf(":");
-      separatorIndex >= 0;
-      separatorIndex = sessionUuid.lastIndexOf(":", separatorIndex - 1)
-    ) {
-      const candidateBaseSessionUuid = sessionUuid.slice(0, separatorIndex);
-      const deviceLabels = sessionManager.getDeviceLabels(candidateBaseSessionUuid);
-      if (deviceLabels && Object.values(deviceLabels).includes(sessionUuid)) {
-        return candidateBaseSessionUuid;
-      }
-    }
-    return sessionUuid;
+    // The device's owning session may be a derived `${base}:${label}` label
+    // session. Enforce the UNION of base + derived (issue #4611 Gap B, product
+    // decision) so a tool is enabled when EITHER grants it — symmetric with the
+    // MCP `registerDeviceAware` path. The shared helper resolves the base.
+    const derivedSessionUuid = sessionManager.getSessionForDevice?.(deviceId) ?? undefined;
+    const baseSessionUuid = resolveCapabilityBaseSessionUuid(derivedSessionUuid, sessionManager);
+    await assertToolEnabledForAnySession(
+      toolName,
+      [baseSessionUuid, derivedSessionUuid],
+      this.sessionToolProfileService,
+    );
   }
 
   /**

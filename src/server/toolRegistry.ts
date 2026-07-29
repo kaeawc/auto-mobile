@@ -38,7 +38,11 @@ import {
 import { JsonToolOutputArtifactWriter, type ToolOutputArtifactRetention } from "./toolOutputArtifactWriter";
 import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 import type { SessionToolProfileService } from "../features/toolCapabilities/SessionToolProfileService";
-import { assertToolEnabledForSession } from "../features/toolCapabilities/toolCapabilityPolicy";
+import {
+  assertToolEnabledForAnySession,
+  assertToolEnabledForSession,
+} from "../features/toolCapabilities/toolCapabilityPolicy";
+import { resolveCapabilityBaseSessionUuid } from "../features/toolCapabilities/capabilitySessionResolver";
 import {
   getToolCapabilityContext,
   runWithToolCapabilityContext,
@@ -86,7 +90,7 @@ interface InternalToolCallOptions {
 
 interface InternalToolInvocationContext {
   args: Record<string, unknown>;
-  sessionUuid?: string;
+  routingSessionUuid?: string;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
 }
 
@@ -161,6 +165,13 @@ interface ExecutionTargetInput {
 interface ExecutionTargetContext {
   args: any;
   baseSessionUuid: string | undefined;
+  // Capability enforcement session (issue #4611 Gap A). Distinct from the
+  // routing `sessionUuid`: for a deviceId-only call there is no routing session,
+  // so this is derived from the device's owning session and enforcement still
+  // applies. May be a derived `${base}:${label}` label session. Optional so
+  // test pipeline overrides need not set it (the assert falls back to
+  // `sessionUuid`).
+  capabilitySessionUuid?: string | undefined;
   device: BootedDevice | undefined;
   internalCall: boolean;
   sessionUuid: string | undefined;
@@ -386,9 +397,25 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       }
     }
 
+    // Capability enforcement session (issue #4611 Gap A). A deviceId-only call
+    // has no routing sessionUuid, so a narrowed profile on the device's owning
+    // session would otherwise be silently bypassed (the policy treats an
+    // undefined session as fully enabled). When a routing session exists it IS
+    // the capability session (possibly a derived `${base}:${label}` label
+    // session); otherwise derive the device's owning session so enforcement
+    // still applies. Guarded on an initialized daemon — outside the daemon
+    // there is no session registry to consult. This mirrors the socket path,
+    // which already resolves deviceId -> session before enforcing.
+    let capabilitySessionUuid = sessionUuid;
+    if (!capabilitySessionUuid && device && DaemonState.getInstance().isInitialized()) {
+      capabilitySessionUuid =
+        DaemonState.getInstance().getSessionManager().getSessionForDevice?.(device.deviceId) ?? undefined;
+    }
+
     return {
       args,
       baseSessionUuid,
+      capabilitySessionUuid,
       device,
       internalCall,
       sessionUuid,
@@ -841,8 +868,11 @@ export class ToolRegistryClass {
     // Create a wrapper that handles device ID injection
     const wrappedHandler: ToolHandler = async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
       const capabilityContext = getToolCapabilityContext();
-      const handlerArgs = capabilityContext?.sessionUuid && args.sessionUuid !== capabilityContext.sessionUuid
-        ? { ...args, sessionUuid: capabilityContext.sessionUuid }
+      // Re-inject the ambient ROUTING session (issue #4611 Gap C) so a nested
+      // device-aware call keeps the outer call's derived/label routing identity
+      // rather than reverting to the base session.
+      const handlerArgs = capabilityContext?.routingSessionUuid && args.sessionUuid !== capabilityContext.routingSessionUuid
+        ? { ...args, sessionUuid: capabilityContext.routingSessionUuid }
         : args;
       const toolStartMs = this.timer.now();
       const toolCallTimestamp = new Date().toISOString();
@@ -857,14 +887,28 @@ export class ToolRegistryClass {
           deviceSessionManager: this.deviceSessionManager,
         });
         sessionUuid = resolvedTarget.sessionUuid;
-        const capabilitySessionUuid = resolvedTarget.baseSessionUuid ?? resolvedTarget.sessionUuid;
-        await assertToolEnabledForSession(
+        // Capability enforcement is resolved independently of the routing
+        // session (issue #4611 Gaps A/B/C). The derived capability session is
+        // the resolver-derived device session (Gap A) or the routing session;
+        // the base is the caller-supplied base or the label's base resolved via
+        // the shared helper. Enforcement is the UNION of base + derived (Gap B,
+        // product decision): a tool is enabled if EITHER grants it, so a derived
+        // label may re-enable a tool the base narrowed away.
+        const capabilityDerivedSessionUuid = resolvedTarget.capabilitySessionUuid ?? resolvedTarget.sessionUuid;
+        const capabilitySessionManager = DaemonState.getInstance().isInitialized()
+          ? DaemonState.getInstance().getSessionManager()
+          : undefined;
+        const capabilityBaseSessionUuid = resolvedTarget.baseSessionUuid
+          ?? resolveCapabilityBaseSessionUuid(capabilityDerivedSessionUuid, capabilitySessionManager);
+        await assertToolEnabledForAnySession(
           name,
-          capabilitySessionUuid,
+          [capabilityBaseSessionUuid, capabilityDerivedSessionUuid],
           getToolCapabilityContext()?.sessionToolProfileService,
         );
         return await runWithToolCapabilityContext(
-          { sessionUuid: capabilitySessionUuid },
+          // Bind the ROUTING session (Gap C), not the base/capability session, so
+          // nested calls re-inject the correct derived routing UUID.
+          { routingSessionUuid: resolvedTarget.sessionUuid },
           async () => {
             try {
               let response: any | undefined;
@@ -1001,7 +1045,7 @@ export class ToolRegistryClass {
         progress,
         signal,
         options.targetDevice,
-        invocation.sessionUuid,
+        invocation.routingSessionUuid,
         invocation.sessionToolProfileService,
       ),
     );
@@ -1012,14 +1056,17 @@ export class ToolRegistryClass {
     options: InternalToolCallOptions,
   ): InternalToolInvocationContext {
     const context = getToolCapabilityContext();
+    // An internal call inherits the ambient ROUTING session (issue #4611 Gap C)
+    // so a plan step or navigation replay routes to the same derived/label
+    // session the outer call resolved to, not the base session.
     const sessionUuid = options.sessionUuid
-      ?? context?.sessionUuid
+      ?? context?.routingSessionUuid
       ?? (typeof args.sessionUuid === "string" ? args.sessionUuid : undefined);
     return {
       args: sessionUuid && args.sessionUuid !== sessionUuid
         ? { ...args, sessionUuid }
         : args,
-      sessionUuid,
+      routingSessionUuid: sessionUuid,
       sessionToolProfileService: options.sessionToolProfileService ?? context?.sessionToolProfileService,
     };
   }

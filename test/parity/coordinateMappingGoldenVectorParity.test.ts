@@ -126,6 +126,15 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
       ),
     ).toBe(true);
     expect(
+      canonical.scaleReporting.some(row =>
+        row.pointWidth === 450 &&
+        row.pointHeight === 750 &&
+        row.nativeScale === 2.61 &&
+        row.expectedPixelWidth === 1175 &&
+        row.expectedPixelHeight === 1958
+      ),
+    ).toBe(true);
+    expect(
       canonical.deviceToViewport.some(row =>
         row.deviceWidth === 0 &&
         row.scale === 2 &&
@@ -265,6 +274,7 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
     for (const symbol of [
       "viewportToDevice(",
       "deviceToViewport(",
+      "clampedTo(",
       "fitToViewport(",
       "fitScale(",
       "detectScreenshotRotation(",
@@ -284,6 +294,23 @@ describe("coordinate-mapping golden vector parity (issue #4547)", function() {
       expect(kotlinSource).toMatch(
         new RegExp(String.raw`@Test\s+fun \`${methodName}\`\(\)`),
       );
+    }
+    for (const [methodName, productionCall] of [
+      ["viewportToDevice matches the golden vectors", "mapper.viewportToDevice("],
+      ["deviceToViewport matches the golden vectors", "mapper.deviceToViewport("],
+      ["clampedTo matches the golden vectors", "DevicePoint(vector.x, vector.y, inBounds = false).clampedTo("],
+      ["fitToViewport matches the golden vectors", "mapper.fitToViewport("],
+      ["fitScale matches the golden vectors", "mapper.fitScale("],
+      ["detectScreenshotRotation matches the golden vectors", "mapper.detectScreenshotRotation("],
+      ["scale reporting matches the golden vectors", "(vector.pointWidth * vector.nativeScale).roundToInt()"],
+    ]) {
+      const methodStart = kotlinSource.indexOf(`fun \`${methodName}\`()`);
+      const bodyStart = kotlinSource.indexOf("{", methodStart);
+      const nextTest = kotlinSource.indexOf("\n  @Test", bodyStart);
+      const body = kotlinSource.slice(bodyStart, nextTest === -1 ? kotlinSource.length : nextTest);
+      expect(methodStart).toBeGreaterThanOrEqual(0);
+      expect(body).toContain(productionCall);
+      expect(body).toContain("assertEquals(");
     }
   });
 

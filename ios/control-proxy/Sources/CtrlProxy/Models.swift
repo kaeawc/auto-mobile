@@ -948,7 +948,7 @@ public struct ViewHierarchy: Codable {
     /// (`UIScreen.scale`): Display Zoom changes `nativeScale` but not `scale`, and
     /// `XCUIScreenshot.pngRepresentation` is rendered at native scale, so this is the
     /// value that actually converts reported bounds to screenshot pixels (#4548).
-    public let nativeScale: Float?
+    public let nativeScale: Double?
     /// Physical screenshot pixel width: `round(screenWidth * nativeScale)` (#4548).
     public let pixelWidth: Int?
     /// Physical screenshot pixel height: `round(screenHeight * nativeScale)` (#4548).
@@ -969,7 +969,7 @@ public struct ViewHierarchy: Codable {
         screenScale: Float? = nil,
         screenWidth: Int? = nil,
         screenHeight: Int? = nil,
-        nativeScale: Float? = nil,
+        nativeScale: Double? = nil,
         pixelWidth: Int? = nil,
         pixelHeight: Int? = nil,
         rotation: Int? = nil,

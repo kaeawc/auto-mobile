@@ -106,6 +106,20 @@ final class ModelsTests: XCTestCase {
         XCTAssertFalse(encodedWithout.contains("pixelHeight"))
     }
 
+    func testViewHierarchyRetainsNativeScaleDoublePrecision() throws {
+        let hierarchy = ViewHierarchy(
+            updatedAt: 1,
+            screenWidth: 450,
+            screenHeight: 750,
+            nativeScale: 2.61,
+            pixelWidth: 1175,
+            pixelHeight: 1958
+        )
+
+        let nativeScale = try XCTUnwrap(hierarchy.nativeScale)
+        XCTAssertEqual(Double(nativeScale), 2.61, accuracy: 0)
+    }
+
     // MARK: - WebSocketRequest Tests
 
     func testWebSocketRequestDecoding() throws {

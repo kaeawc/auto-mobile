@@ -428,7 +428,7 @@
       "expectedPixelWidth": 938, "expectedPixelHeight": 2030
     },
     {
-      "comment": "iPhone Plus-like nativeScale precision: 450*2.61 = 1174.5 -> 1175 and 750*2.61 = 1957.5 -> 1958, pinning the daemon's float64 multiply at a non-integer scale",
+      "comment": "iPhone Plus-like nativeScale precision: runner-reported Float metadata is widened to float64 in the daemon, then 450*2.61 = 1174.5 -> 1175 and 750*2.61 = 1957.5 -> 1958",
       "willChangeUnderCanonicalPixels": true,
       "pointWidth": 450, "pointHeight": 750, "scale": 2.61,
       "expectedPixelWidth": 1175, "expectedPixelHeight": 1958
@@ -472,6 +472,11 @@
       "comment": "2x device: 320x568 points -> 640x1136 pixels",
       "pointWidth": 320, "pointHeight": 568, "nativeScale": 2.0,
       "expectedPixelWidth": 640, "expectedPixelHeight": 1136
+    },
+    {
+      "comment": "iPhone Plus-like nativeScale precision: retaining 2.61 as a Double gives 450*2.61 = 1174.5 -> 1175 and 750*2.61 = 1957.5 -> 1958; a Float narrowing would produce 1174x1957",
+      "pointWidth": 450, "pointHeight": 750, "nativeScale": 2.61,
+      "expectedPixelWidth": 1175, "expectedPixelHeight": 1958
     },
     {
       "comment": "rounding tie on both axes: 375*3.5=1312.5 and 811*3.5=2838.5 round half away from zero (== JS Math.round for positive values)",

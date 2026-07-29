@@ -250,6 +250,7 @@ class CoordinateMappingGoldenVectorTest {
       ScaleReportingVector(375.0, 812.0, 3.144, 1179, 2553),
       ScaleReportingVector(414.0, 736.0, 2.608696, 1080, 1920),
       ScaleReportingVector(320.0, 568.0, 2.0, 640, 1136),
+      ScaleReportingVector(450.0, 750.0, 2.61, 1175, 1958),
       // Exact-half dimensions use the same round-half-away-from-zero rule as the iOS runner.
       ScaleReportingVector(375.0, 811.0, 3.5, 1313, 2839),
       // Android's production contract is the scale-1 identity: it has no point-to-pixel conversion.

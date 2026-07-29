@@ -19,14 +19,30 @@ class StaleFrameContextRejectionWiringTest {
   private val staleFrameActions =
     setOf("TAP", "SWIPE", "DRAG", "SET_TEXT", "IME_ACTION", "GLOBAL_ACTION")
 
-  private val responseEmitterByAction =
+  private val correlatedResponsePatternByAction =
     mapOf(
-      "TAP" to "broadcastTapCoordinatesResult",
-      "SWIPE" to "broadcastSwipeResult",
-      "DRAG" to "broadcastDragResult",
-      "SET_TEXT" to "broadcastSetTextResult",
-      "IME_ACTION" to "broadcastImeActionResult",
-      "GLOBAL_ACTION" to "GlobalActionResult",
+      "TAP" to
+        Regex(
+          """broadcastTapCoordinatesResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*\)"""
+        ),
+      "SWIPE" to
+        Regex(
+          """broadcastSwipeResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*,\s*null\s*\)"""
+        ),
+      "DRAG" to
+        Regex(
+          """broadcastDragResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*,\s*null\s*\)"""
+        ),
+      "SET_TEXT" to
+        Regex("""broadcastSetTextResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*\)"""),
+      "IME_ACTION" to
+        Regex(
+          """broadcastImeActionResult\(\s*requestId\s*,\s*action\.wireName\s*,\s*false\s*,\s*error\s*,\s*0\s*\)"""
+        ),
+      "GLOBAL_ACTION" to
+        Regex(
+          """(?s)GlobalActionResult\(\s*timestamp\s*=\s*System\.currentTimeMillis\(\)\s*,\s*requestId\s*=\s*requestId\s*,\s*success\s*=\s*false\s*,.*?\berror\s*=\s*error\s*,"""
+        ),
     )
 
   @Test
@@ -48,10 +64,10 @@ class StaleFrameContextRejectionWiringTest {
       staleFrameActions,
       routedActions(body),
     )
-    responseEmitterByAction.forEach { (action, emitter) ->
+    correlatedResponsePatternByAction.forEach { (action, responsePattern) ->
       assertTrue(
-        "$action must emit its established correlated stale-frame response",
-        emitter in actionBranch(body, action),
+        "$action must retain its established correlated stale-frame response",
+        responsePattern.containsMatchIn(actionBranch(body, action)),
       )
     }
   }

@@ -139,8 +139,8 @@ export const DAEMON_SESSION_TOOL_BINDING_HEADER = "x-auto-mobile-session-uuid";
  * How long the proxy will keep replaying a remembered session binding on
  * sessionless calls before treating it as retired (issue #4610). It mirrors the
  * daemon's session idle timeout (`SessionManager.SESSION_TIMEOUT_MS`, 30 min):
- * once this window elapses with no explicit-`sessionUuid` call refreshing the
- * binding, the daemon session has certainly idle/heartbeat-expired, and
+ * once this window elapses with no forwarded call (explicit or implicit)
+ * refreshing the binding, the daemon session has certainly idle/heartbeat-expired, and
  * replaying its UUID would silently recreate the released session and reacquire
  * a device without the caller asking for it.
  */

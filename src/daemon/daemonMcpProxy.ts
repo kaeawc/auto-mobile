@@ -872,7 +872,13 @@ export class DaemonMcpProxy {
     try {
       const forwardedArgs = this.withBoundSessionUuid(args);
       const result = await this.withRecoverableReconnect(() => this.client!.callTool(name, forwardedArgs));
-      this.rememberSessionUuid(name, args);
+      // Remember what was actually forwarded, not the caller's raw args. An
+      // implicit sessionless call injects the bound UUID into forwardedArgs and
+      // extends the live daemon session in getOrCreateSession(); refreshing the
+      // replay lease off forwardedArgs keeps continuous implicit activity from
+      // being mistaken for idleness, so a later reconnect re-seeds the still-live
+      // session instead of creating an unseeded transport (issue #4610).
+      this.rememberSessionUuid(name, forwardedArgs);
       return result;
     } catch (error) {
       // withRecoverableReconnect already reconciled build identity and retried once.
@@ -891,7 +897,8 @@ export class DaemonMcpProxy {
     // remembered binding dangling; replaying its UUID on a later sessionless call
     // would silently recreate the session and reacquire a device without the
     // caller asking for it (issue #4610). Once the replay window has elapsed with
-    // no explicit-sessionUuid call refreshing the binding, treat it as retired.
+    // no forwarded call (explicit or implicit) refreshing the binding, treat it
+    // as retired.
     if (this.isBoundSessionReplayExpired()) {
       this.clearBoundSessionUuid();
     }
@@ -919,13 +926,17 @@ export class DaemonMcpProxy {
     this.boundSessionUuidAt = undefined;
   }
 
-  private rememberSessionUuid(name: string, args: Record<string, unknown>): void {
+  // Called with the FORWARDED args (post-withBoundSessionUuid), so an implicit
+  // sessionless call that had the bound UUID injected refreshes the replay lease
+  // just like an explicit-sessionUuid call, matching the daemon session it just
+  // extended (issue #4610).
+  private rememberSessionUuid(name: string, forwardedArgs: Record<string, unknown>): void {
     if (name === "executePlan") {
       this.clearBoundSessionUuid();
       return;
     }
-    if (typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0) {
-      this.boundSessionUuid = args.sessionUuid;
+    if (typeof forwardedArgs.sessionUuid === "string" && forwardedArgs.sessionUuid.trim().length > 0) {
+      this.boundSessionUuid = forwardedArgs.sessionUuid;
       this.boundSessionUuidAt = this.timer.now();
     }
   }

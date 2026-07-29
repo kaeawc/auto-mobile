@@ -1447,6 +1447,45 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("keeps replaying a bound session across continuous implicit activity beyond one TTL", async () => {
+      // Continuous implicit (sessionless) calls forward the bound UUID and extend
+      // the live daemon session, so the replay lease must refresh off the forwarded
+      // args. Otherwise total elapsed time crossing one TTL retires a still-live
+      // session, and a later reconnect would seed an unbound transport that treats
+      // session-disabled capabilities as enabled
+      // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // Two implicit calls, each within the TTL, but cumulatively past it. Each
+        // forwarded implicit call must renew the lease so the binding survives.
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("injects the bound UUID when a later call carries a non-string sessionUuid", async () => {
       // A null/number/object sessionUuid is not an explicit session selection, so
       // the retained binding must still be injected rather than bypassed

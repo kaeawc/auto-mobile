@@ -14,4 +14,6 @@ java {
 dependencies {
   implementation(libs.kotlinx.coroutines)
   implementation(libs.kotlinx.serialization)
+
+  testImplementation(libs.kotlin.test)
 }

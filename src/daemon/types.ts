@@ -60,6 +60,12 @@ export interface DaemonNotification {
   type: "daemon_notification";
   /** MCP notification method, e.g. "notifications/tools/list_changed". */
   method: string;
+  /**
+   * Released session key for `notifications/session/released` frames (issue
+   * #4610). Absent for list-changed frames. The proxy clears its remembered
+   * binding only when this exactly equals its bound (base) session UUID.
+   */
+  sessionId?: string;
 }
 
 /** Discriminates a daemon socket frame as a server-pushed notification. */

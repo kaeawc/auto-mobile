@@ -12,6 +12,7 @@ import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 
 const OLDER_VERSION = "0.0.1";
 const NEWER_VERSION = "9999.0.0";
@@ -1632,6 +1633,127 @@ describe("DaemonMcpProxy", () => {
         await expect(proxy.callTool("sendSms", {})).rejects.toThrow("ECONNREFUSED");
         expect(client.callToolCalls).toHaveLength(1);
         expect(client.closeCallCount).toBe(0);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+  });
+
+  describe("session-released signal (issue #4610)", () => {
+    // A real daemon->proxy "session released" push clears the remembered binding
+    // the moment the daemon releases the session (heartbeat / idle / plan),
+    // instead of waiting out the replay-TTL guess. The TTL stays as a
+    // dropped-frame backstop.
+
+    test("a released signal for the bound UUID clears the binding", async () => {
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        // Bind session-a via an explicit call, then the daemon releases it.
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+        // The next sessionless call must NOT be rewritten to the retired UUID.
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a released signal for a different session leaves the binding intact", async () => {
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // A derived-only release (`${base}:${label}`) or an unrelated session key
+        // must NOT clear a base binding matched by exact equality.
+        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a:device-a");
+        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-b");
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("the TTL backstop still expires the binding when no signal arrives", async () => {
+      // Dropped-frame path: no released signal is delivered, so the replay TTL
+      // must still retire the binding on its own.
+      const timer = new FakeTimer();
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("an unknown pushed method is still logged and ignored", async () => {
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // A future notification family must not touch the binding.
+        expect(() => fakeClient.emitNotification("notifications/some/future_thing")).not.toThrow();
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

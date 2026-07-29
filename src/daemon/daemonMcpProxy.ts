@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS, DAEMON_BOUND_SESSION_REPLAY_TTL_MS } from "./constants";
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
@@ -472,6 +473,22 @@ export class DaemonMcpProxy {
   }
 
   private handleDaemonNotification(notification: DaemonNotification): void {
+    if (notification.method === SESSION_RELEASED_NOTIFICATION_METHOD) {
+      // The daemon actually released a session. If it is the one this proxy
+      // remembers, drop the binding NOW so a later sessionless call is not
+      // rewritten to the retired UUID (issue #4610). A non-matching key —
+      // including a derived `${base}:${label}` release when we hold the base —
+      // leaves the binding intact. The replay TTL stays as a dropped-frame
+      // backstop for when this signal never arrives.
+      if (
+        this.boundSessionUuid !== undefined &&
+        notification.sessionId === this.boundSessionUuid
+      ) {
+        this.clearBoundSessionUuid();
+      }
+      return;
+    }
+
     const kind = listChangedKindForMethod(notification.method);
     if (kind === undefined) {
       // Unknown pushed methods are expected as the daemon grows new

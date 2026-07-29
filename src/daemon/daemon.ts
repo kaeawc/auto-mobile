@@ -23,6 +23,7 @@ import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
+import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import {
   awaitInFlightMigrations,
   closeDatabase,
@@ -192,6 +193,14 @@ export class Daemon {
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
       NavigationGraphManager.releaseSession(sessionId);
       RealObserveScreen.clearCache(deviceId);
+    });
+    // Emit a real "session released" signal so a connected DaemonMcpProxy clears
+    // its remembered session binding the moment the daemon releases the session
+    // (heartbeat / idle / plan), rather than guessing with the replay TTL. Fires
+    // for every released key — base and derived `${base}:${label}` alike; the
+    // proxy matches its bound (base) UUID by exact equality (issue #4610).
+    this.sessionManager.onSessionRelease(sessionId => {
+      SessionReleaseBroadcaster.emit(sessionId);
     });
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     this.devicePool = new DevicePool(

@@ -29,6 +29,10 @@ import {
   type ListChangedKind,
 } from "../server/listChangedBroadcast";
 import {
+  SessionReleaseBroadcaster,
+  SESSION_RELEASED_NOTIFICATION_METHOD,
+} from "../server/sessionReleaseBroadcast";
+import {
   evaluateClientHandshake,
   extractClientHandshake,
   type DaemonSelfIdentity,
@@ -184,6 +188,7 @@ export class UnixSocketServer {
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
   private listChangedUnsubscribe: (() => void) | null = null;
+  private sessionReleaseUnsubscribe: (() => void) | null = null;
   private socketPath: string;
   private mcpEndpoint: string;
   private daemonState: DaemonStateAccess;
@@ -294,6 +299,15 @@ export class UnixSocketServer {
       this.broadcastListChanged(kind);
     });
 
+    // Fan session-release events out to subscribed proxy clients (issue #4610),
+    // so a proxy clears its remembered binding on a real release instead of the
+    // replay-TTL guess. Subscribed here (not in the daemon) for the same
+    // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
+    this.sessionReleaseUnsubscribe?.();
+    this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(sessionId => {
+      this.broadcastSessionReleased(sessionId);
+    });
+
     return new Promise((resolve, reject) => {
       this.server!.listen(this.socketPath, () => {
         this.socketFileIdentity = this.readSocketFileIdentity();
@@ -393,6 +407,29 @@ export class UnixSocketServer {
     const notification: DaemonNotification = {
       type: "daemon_notification",
       method: LIST_CHANGED_NOTIFICATION_METHODS[kind],
+    };
+    for (const sessionId of this.notificationSubscribers) {
+      const socket = this.clientSockets.get(sessionId);
+      if (!socket) {
+        continue;
+      }
+      this.writeFrame(socket, sessionId, notification);
+    }
+  }
+
+  /**
+   * Push a session-released notification frame to every subscribed client socket
+   * (issue #4610). `releasedSessionId` is the daemon session key that was just
+   * released (base or derived `${base}:${label}`); the proxy matches it against
+   * its bound UUID by exact equality. Best-effort per socket, like
+   * {@link broadcastListChanged}. Note `sessionId` here is the socket-client id,
+   * distinct from the released daemon session carried in the frame.
+   */
+  private broadcastSessionReleased(releasedSessionId: string): void {
+    const notification: DaemonNotification = {
+      type: "daemon_notification",
+      method: SESSION_RELEASED_NOTIFICATION_METHOD,
+      sessionId: releasedSessionId,
     };
     for (const sessionId of this.notificationSubscribers) {
       const socket = this.clientSockets.get(sessionId);
@@ -2417,6 +2454,10 @@ export class UnixSocketServer {
     // Stop receiving list-changed events (mirrors the subscribe in start()).
     this.listChangedUnsubscribe?.();
     this.listChangedUnsubscribe = null;
+
+    // Stop receiving session-release events (mirrors the subscribe in start()).
+    this.sessionReleaseUnsubscribe?.();
+    this.sessionReleaseUnsubscribe = null;
 
     // Close MCP clients
     const clients = Array.from(this.mcpClients.entries());

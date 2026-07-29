@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ToolRegistry } from "./toolRegistry";
 import { ResourceRegistry } from "./resourceRegistry";
 import { RESOURCE_URIS } from "./observationResources";
+import { OBSERVE_APP_RESOURCE_URI } from "./observeAppResource";
 import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
@@ -1151,7 +1152,7 @@ export function registerObserveTools() {
     "Get screen view hierarchy",
     observeSchema,
     observeHandler,
-    { outputSchema: observeToolResultSchema }
+    { outputSchema: observeToolResultSchema, appUiResourceUri: OBSERVE_APP_RESOURCE_URI }
   );
 
   ToolRegistry.registerDeviceAware("identifyInteractions", "Suggest likely interactions", identifyInteractionsSchema, identifyInteractionsHandler, { debugOnly: true });

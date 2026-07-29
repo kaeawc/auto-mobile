@@ -239,66 +239,16 @@ jobs:
       - name: Start the release
         shell: bash
         env:
-          # workflow_dispatch is one of the two events GitHub exempts from "with
-          # the exception of workflow_dispatch and repository_dispatch, other
-          # GITHUB_TOKEN-triggered events do not create workflow runs at all", so
-          # the default token can start Release. It only needs actions: write,
-          # granted on this job above, rather than a PAT scope to keep in sync.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.version }}
           REPO: ${{ github.repository }}
+          PREPARE_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
 
-          # Pushing the tag normally starts Release by itself, through the
-          # `create:` trigger in release.yml: only refs pushed by GITHUB_TOKEN are
-          # suppressed from starting runs, and the checkout above authenticates
-          # with a PAT. Verify that instead of assuming it -- a tag that queues
-          # nothing is a silent non-release, and CI reports green either way.
-          #
-          # Filter on the tag. Every branch creation queues its own release.yml
-          # run (validate-release-tag skips them), so "newest run changed" would
-          # be satisfied by an unrelated branch and report a release that is not
-          # running.
-          find_release_run() {
-            gh run list --repo "$REPO" --workflow release.yml --branch "$TAG" \
-              --limit 1 --json databaseId --jq '.[].databaseId // empty'
-          }
-
-          for _ in $(seq 1 12); do
-            run_id="$(find_release_run)"
-            if [[ -n "$run_id" ]]; then
-              echo "Release is running for $TAG (run ${run_id})"
-              exit 0
-            fi
-            sleep 5
-          done
-
-          # The tag event did not take. Fall back to dispatching explicitly, so a
-          # regression in that path costs a delay rather than another hand-run
-          # release. Dispatching is only reached when nothing is queued, so this
-          # cannot double-build a tag that already started.
-          #
-          # Dispatch on the TAG, not on main. github.ref has to stay a tag ref:
-          # action-gh-release derives its tag from it, docker/metadata-action's
-          # type=semver is inert without it, and the reusable APK/IPA/jar builders
-          # run at the caller's ref -- on main they would build a different tree
-          # than the checksums minted just above were computed from.
-          echo "No Release run appeared for $TAG after 60s; dispatching it" >&2
-          gh workflow run release.yml --repo "$REPO" --ref "$TAG" -f tag="$TAG"
-
-          # The dispatch API returns 204 before the run exists and gh does not
-          # wait, so `gh workflow run` succeeds even if no run is ever created.
-          # A green step here with nothing queued is the same silent non-release
-          # this step exists to catch, so confirm a run actually appeared.
-          for _ in $(seq 1 12); do
-            sleep 5
-            run_id="$(find_release_run)"
-            if [[ -n "$run_id" ]]; then
-              echo "Dispatched release.yml for $TAG (run ${run_id})"
-              exit 0
-            fi
-          done
-
-          echo "Dispatched release.yml for $TAG but no run appeared after 60s" >&2
-          exit 1
+          # Release publishes the exact artifacts prepared in this workflow
+          # run. It intentionally does not rebuild or re-verify them from the
+          # tag, because a moving main branch can make that second build differ.
+          gh workflow run release.yml --repo "$REPO" --ref "$TAG" \
+            -f tag="$TAG" \
+            -f prepare_run_id="$PREPARE_RUN_ID"

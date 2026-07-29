@@ -98,24 +98,40 @@
   [[ "$output" != *"verify-release-integrity.sh"* ]]
 }
 
-@test "prepare-release builds and verifies the final tagged tree before dispatching release (#4686)" {
+@test "prepare-release verifies and tags the single prepared artifact set before dispatching release (#4686)" {
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"
   local builder
-  for builder in build-ctrl-proxy-ios-ipa build-control-proxy-apk build-video-server-jar build-screen-capture-helper; do
+  for builder in build-candidate-ctrl-proxy-ios-ipa build-candidate-control-proxy-apk build-candidate-video-server-jar build-candidate-screen-capture-helper; do
     run yq -r ".jobs.\"$builder\".needs" "$workflow"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"finalize-release"* ]]
+    [[ "$output" == *"prepare-version"* ]]
 
     run yq -r ".jobs.\"$builder\".with.checkout-ref" "$workflow"
     [ "$status" -eq 0 ]
-    [ "$output" = '${{ needs.finalize-release.outputs.release_commit }}' ]
+    [ "$output" = '${{ needs.prepare-version.outputs.release_commit }}' ]
+
+    run yq -r ".jobs.\"$builder\".with.upload-artifact" "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "true" ]
   done
+
+  run yq -r '.jobs | keys[]' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"build-ctrl-proxy-ios-ipa"* ]]
+  [[ "$output" != *"build-control-proxy-apk"* ]]
+  [[ "$output" != *"build-video-server-jar"* ]]
+  [[ "$output" != *"build-screen-capture-helper"* ]]
 
   run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Verify prepared release artifacts") | .run' "$workflow"
   [ "$status" -eq 0 ]
   [[ "$output" == *"verify-artifact-sha256.sh"* ]]
   [[ "$output" == *"verify-release-integrity.sh"* ]]
+
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Create and push verified release tag") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"main moved after the release artifacts were verified"* ]]
+  [[ "$output" == *'git tag "$TAG" "$EXPECTED_RELEASE_COMMIT"'* ]]
 }
 
 @test "release.yml requires successful prepared-release provenance before downloading artifacts (#4686)" {
@@ -285,7 +301,8 @@ wiring_requires_yq() {
 }
 
 # The dispatch API rejects a token without actions: write, and the job-level
-# block replaces the workflow-level grant wholesale.
+# block replaces the workflow-level grant wholesale. This job also creates the
+# tag only after artifact verification, so it needs contents: write.
 @test "prepare-release can dispatch and still push (#4157)" {
   wiring_requires_yq
   local perms
@@ -295,7 +312,7 @@ wiring_requires_yq() {
   run yq -r '.jobs."verify-prepared-release".permissions.actions' ".github/workflows/prepare-release.yml"
   [ "$output" = "write" ]
   run yq -r '.jobs."verify-prepared-release".permissions.contents' ".github/workflows/prepare-release.yml"
-  [ "$output" = "read" ]
+  [ "$output" = "write" ]
 }
 
 # action-gh-release throws "GitHub Releases requires a tag" when github.ref is not

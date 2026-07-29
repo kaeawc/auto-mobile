@@ -41,6 +41,7 @@ jobs:
         with:
           lfs: false
           ref: ${{ inputs.checkout-ref || github.sha }}
+          persist-credentials: false
 
       - uses: ./.github/actions/gradle-task-run
         with:

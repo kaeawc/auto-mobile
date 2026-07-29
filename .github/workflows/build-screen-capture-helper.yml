@@ -45,6 +45,7 @@ jobs:
         with:
           lfs: false
           ref: ${{ inputs.checkout-ref || github.sha }}
+          persist-credentials: false
 
       - name: "Select Xcode 26.5"
         uses: maxim-lobanov/setup-xcode@v1

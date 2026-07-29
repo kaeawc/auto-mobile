@@ -4,6 +4,7 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -28,6 +29,7 @@ describe("InputText.execute", () => {
   let fakeWindow: FakeWindow;
   let fakeAwaitIdle: FakeAwaitIdle;
   let fakeA11yService: FakeCtrlProxy;
+  let fakeIosCtrlProxy: FakeIOSCtrlProxy;
   let fakeTimer: FakeTimer;
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
   let iosGetInstanceSpy: ReturnType<typeof spyOn> | null = null;
@@ -59,6 +61,7 @@ describe("InputText.execute", () => {
     fakeWindow.configureActiveWindow({ appId: "com.test.app", activityName: "MainActivity", layoutSeqSum: 1 });
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeA11yService = new FakeCtrlProxy();
+    fakeIosCtrlProxy = new FakeIOSCtrlProxy();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
   });
@@ -119,11 +122,8 @@ describe("InputText.execute", () => {
   });
 
   test("routes iOS input through the CtrlProxy client and ignores Android modes", async () => {
-    const fakeIosClient = {
-      requestSetText: async () => ({ success: true, totalTimeMs: 5 })
-    };
     iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIosClient as unknown as IOSCtrlProxyClient
+      fakeIosCtrlProxy as unknown as IOSCtrlProxyClient
     );
 
     const inputText = new InputText(iosDevice, fakeAdb as any);
@@ -134,6 +134,7 @@ describe("InputText.execute", () => {
     expect(result.success).toBe(true);
     // iOS always reports the a11y method regardless of the requested Android mode.
     expect(result.method).toBe("a11y");
+    expect(fakeIosCtrlProxy.getTextInputHistory()).toEqual([{ text: "hello", resourceId: undefined }]);
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 });

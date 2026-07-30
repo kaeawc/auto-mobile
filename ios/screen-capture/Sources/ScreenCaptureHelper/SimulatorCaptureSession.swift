@@ -51,6 +51,14 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     var audioEnabled = false
     var windowID: UInt32 = 0
 
+    /// Upper bound on `stream.startCapture()`. ScreenCaptureKit cold-start on
+    /// hosted `macos26` runners is slow-but-finite (measured 2.6–13s); this
+    /// deadline sits above that healthy window yet below the parent supervisor's
+    /// 15s first-frame SIGTERM (`IOS_FIRST_FRAME_TIMEOUT_MS`), so a genuinely
+    /// hung start is surfaced as a specific `error:` line rather than silent
+    /// frame starvation. See issues #4350 / #4764.
+    static let startCaptureDeadlineSeconds: TimeInterval = 14.0
+
     init(
         writer: FrameWriter,
         makeStream: @escaping StreamFactory = { filter, config, delegate in
@@ -88,8 +96,40 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         if audio {
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         }
-        try await stream.startCapture()
+        try await SimulatorCaptureSession.startCapture(stream)
         self.stream = stream
+    }
+
+    /// Races `stream.startCapture()` against `startCaptureDeadlineSeconds`.
+    ///
+    /// A hung `startCapture()` does not honor Swift task cancellation, so a
+    /// structured `withThrowingTaskGroup` would block on teardown awaiting the
+    /// very task we are trying to abandon. Instead the two arms run as
+    /// unstructured tasks and the first to finish wins; on timeout the stalled
+    /// capture task is left to be reaped by process exit, which the parent
+    /// triggers immediately after seeing the `error:` diagnostic.
+    private static func startCapture(_ stream: CaptureStream) async throws {
+        let race = StartRaceState()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let capture = Task {
+                do {
+                    try await stream.startCapture()
+                    if race.finish() { continuation.resume() }
+                } catch {
+                    if race.finish() { continuation.resume(throwing: error) }
+                }
+            }
+            Task {
+                let deadlineNanos = UInt64(startCaptureDeadlineSeconds * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: deadlineNanos)
+                if race.finish() {
+                    capture.cancel()
+                    continuation.resume(
+                        throwing: StartCaptureTimeoutError(deadlineSeconds: startCaptureDeadlineSeconds)
+                    )
+                }
+            }
+        }
     }
 
     func stop() async {
@@ -229,6 +269,36 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
             return nil
         }
         return status
+    }
+}
+
+/// Thrown when `SimulatorCaptureSession` gives up waiting on `startCapture()`.
+/// Conforms to `CustomStringConvertible` so `main.swift`'s `error:` line names
+/// the stalled startup stage (`starting-capture` seen, `capture-started`
+/// absent), letting the parent supervisor fail fast with a specific cause
+/// instead of frame starvation. See issues #4350 / #4764.
+struct StartCaptureTimeoutError: Error, CustomStringConvertible {
+    let deadlineSeconds: TimeInterval
+
+    var description: String {
+        "startCapture() exceeded \(deadlineSeconds)s deadline "
+            + "(stage: starting-capture seen, capture-started absent)"
+    }
+}
+
+/// Single-winner guard for the `startCapture()` deadline race. `finish()`
+/// returns `true` exactly once, so the checked continuation is resumed by
+/// whichever arm — capture or timeout — completes first.
+final class StartRaceState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var finished = false
+
+    func finish() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if finished { return false }
+        finished = true
+        return true
     }
 }
 

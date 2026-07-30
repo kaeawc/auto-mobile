@@ -32,8 +32,8 @@ function nal(type: number, size: number, fill: number): Buffer {
 /** A keyframe access unit (SPS + PPS + large IDR) followed by the next start code. */
 function keyframeStream(): Buffer {
   return Buffer.concat([
-    // Constrained-baseline Level 4.2, matching the publisher's SDP contract.
-    START, Buffer.from([0x67, 0x42, 0xe0, 0x2a, 0x11, 0x11, 0x11, 0x11]),
+    // Main profile Level 4.2, matching the publisher's SDP contract.
+    START, Buffer.from([0x67, 0x4d, 0x00, 0x2a, 0x11, 0x11, 0x11, 0x11]),
     START, nal(8, 6, 0x22), // PPS
     START, nal(5, 4000, 0x33), // IDR large enough to force FU-A fragmentation
     START, // trailing start code so the IDR NAL is emitted immediately

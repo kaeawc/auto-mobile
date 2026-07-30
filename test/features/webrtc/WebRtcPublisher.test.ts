@@ -12,7 +12,7 @@ const ACCEPTED_VIDEO_ANSWER = [
   "m=video 9 UDP/TLS/RTP/SAVPF 102",
   "a=recvonly",
   "a=rtpmap:102 H264/90000",
-  "a=fmtp:102 packetization-mode=1;profile-level-id=42e02a",
+  "a=fmtp:102 packetization-mode=1;profile-level-id=4d002a",
 ].join("\r\n");
 const ACCEPTED_VIDEO_AND_AUDIO_ANSWER = [
   ACCEPTED_VIDEO_ANSWER,
@@ -186,11 +186,11 @@ describe("WebRtcPublisher WHIP answer validation", () => {
     await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("a=recvonly", "a=sendrecv"));
   });
 
-  test("rejects an H.264 profile incompatible with the constrained-baseline sender", async () => {
-    await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("42e02a", "64001f"));
+  test("rejects an H.264 profile incompatible with the Main-profile sender", async () => {
+    await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("4d002a", "64001f"));
   });
 
-  test("accepts every RFC 6184 constrained-baseline profile representation", async () => {
+  test("accepts every RFC 6184 Main profile representation", async () => {
     const pc = new FakePeerConnection();
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
@@ -198,7 +198,7 @@ describe("WebRtcPublisher WHIP answer validation", () => {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () => ({
           publish: async () => ({
-            answerSdp: ACCEPTED_VIDEO_ANSWER.replace("42e02a", "42c02a"),
+            answerSdp: ACCEPTED_VIDEO_ANSWER.replace("4d002a", "4dc02a"),
             resourceUrl: "https://coord/whip/s",
           }),
           delete: async () => {},
@@ -211,7 +211,7 @@ describe("WebRtcPublisher WHIP answer validation", () => {
     await publisher.stop();
   });
 
-  test("accepts a conforming Baseline level-1b profile variation with a sufficient receive ceiling", async () => {
+  test("accepts a conforming Main level-1b profile variation with a sufficient receive ceiling", async () => {
     const pc = new FakePeerConnection();
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
@@ -220,8 +220,8 @@ describe("WebRtcPublisher WHIP answer validation", () => {
         createWhipClient: () => ({
           publish: async () => ({
             answerSdp: ACCEPTED_VIDEO_ANSWER.replace(
-              "profile-level-id=42e02a",
-              "profile-level-id=42f00b;level-asymmetry-allowed=1;max-recv-level=f02a"
+              "profile-level-id=4d002a",
+              "profile-level-id=4df00b;level-asymmetry-allowed=1;max-recv-level=f02a"
             ),
             resourceUrl: "https://coord/whip/s",
           }),
@@ -236,7 +236,7 @@ describe("WebRtcPublisher WHIP answer validation", () => {
   });
 
   test("rejects an answer whose receive level is below AutoMobile's source capability", async () => {
-    await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("42e02a", "42e01f"));
+    await expectRejectedAnswer(ACCEPTED_VIDEO_ANSWER.replace("4d002a", "4d001f"));
   });
 
   test("accepts an asymmetric answer that explicitly supports the source level", async () => {
@@ -250,8 +250,8 @@ describe("WebRtcPublisher WHIP answer validation", () => {
             publish: async () => ({
               resourceUrl: "https://coord/resource",
               answerSdp: ACCEPTED_VIDEO_ANSWER.replace(
-                "profile-level-id=42e02a",
-                "profile-level-id=42e01f;level-asymmetry-allowed=1;max-recv-level=e02a"
+                "profile-level-id=4d002a",
+                "profile-level-id=4d001f;level-asymmetry-allowed=1;max-recv-level=002a"
               ),
             }),
             delete: async () => {},
@@ -266,8 +266,8 @@ describe("WebRtcPublisher WHIP answer validation", () => {
   test("rejects a decimal max-recv-level because RFC 6184 requires hexadecimal SPS bytes", async () => {
     await expectRejectedAnswer(
       ACCEPTED_VIDEO_ANSWER.replace(
-        "profile-level-id=42e02a",
-        "profile-level-id=42e01f;level-asymmetry-allowed=1;max-recv-level=42"
+        "profile-level-id=4d002a",
+        "profile-level-id=4d001f;level-asymmetry-allowed=1;max-recv-level=42"
       )
     );
   });
@@ -337,7 +337,7 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
     let recoveries = 0;
     internals.notifySourceFailed = () => { recoveries++; };
 
-    // A High-profile SPS must not be forwarded under the constrained-baseline
+    // A High-profile SPS must not be forwarded under the Main-profile
     // profile-level-id advertised in the negotiated SDP.
     publisher.writeH264Chunk(Buffer.from([0, 0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 0, 1]));
 
@@ -365,7 +365,7 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
 
     publisher.writeH264Chunk(Buffer.from([0, 0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 0, 1]));
 
-    expect(failure?.message).toContain("incompatible with negotiated constrained baseline");
+    expect(failure?.message).toContain("incompatible with negotiated Main profile");
     await publisher.stop();
   });
 
@@ -389,7 +389,7 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
     const pFrame = Buffer.from([0x41, 0x80]);
 
     publisher.writeH264Chunk(Buffer.concat([
-      startCode, Buffer.from([0x67, 0x42, 0xe0, 0x2a]),
+      startCode, Buffer.from([0x67, 0x4d, 0x00, 0x2a]),
       startCode, Buffer.from([0x68, 0xce, 0x3c, 0x80]),
       startCode, Buffer.from([0x65, 0x80, 0x00]),
       startCode, pFrame,
@@ -463,7 +463,7 @@ describe("WebRtcPublisher keyframe requests", () => {
     const start = Buffer.from([0, 0, 0, 1]);
     publisher.writeH264Chunk(
       Buffer.concat([
-        start, Buffer.from([0x67, 0x42, 0xe0, 0x2a]),
+        start, Buffer.from([0x67, 0x4d, 0x00, 0x2a]),
         start, Buffer.from([0x68, 0xce, 0x3c, 0x80]),
         start, Buffer.from([0x65, 0x80, 0x00]),
         start, Buffer.from([0x41, 0x80, 0x01]),
@@ -551,10 +551,10 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
 
     await publisher.start();
     const START = Buffer.from([0, 0, 0, 1]);
-    // SPS(42e02a) + PPS + IDR — a real keyframe the writer accepts.
+    // SPS(4d002a) + PPS + IDR — a real keyframe the writer accepts.
     publisher.writeH264Chunk(
       Buffer.concat([
-        START, Buffer.from([0x67, 0x42, 0xe0, 0x2a]),
+        START, Buffer.from([0x67, 0x4d, 0x00, 0x2a]),
         START, Buffer.from([0x68, 0xce, 0x3c, 0x80]),
         START, Buffer.from([0x65, 0x80, 0x00]),
       ])

@@ -133,8 +133,10 @@ val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width
         setInteger(KEY_LOW_LATENCY, 1)
     }
 
-    // H.264 Baseline profile for maximum compatibility
-    setInteger(KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
+    // H.264 Main profile (CABAC) for ~10-30% bitrate savings over Baseline at
+    // equal quality; both decode targets (werift, Chromium) support it. Kept in
+    // lockstep with the negotiated SDP profile-level-id (4d002a).
+    setInteger(KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileMain)
     setInteger(KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel31)
 
     // CBR for consistent bitrate

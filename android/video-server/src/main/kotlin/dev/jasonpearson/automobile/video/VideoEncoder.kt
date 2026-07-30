@@ -55,13 +55,16 @@ class VideoEncoder(
         // Repeat frame after 100ms of no changes (reduces idle bandwidth)
         setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000)
 
-        // Request baseline profile but let MediaCodec choose a supported level
-        // for this device and capture size. The publisher validates the emitted
-        // SPS before forwarding it, so an unsupported encoder level reconnects
-        // safely instead of making MediaCodec.configure() fail up front.
+        // Request Main profile (CABAC entropy coding, no B-frames requested) for
+        // ~10-30% bitrate savings over Baseline at equal quality, but let
+        // MediaCodec choose a supported level for this device and capture size.
+        // The publisher validates the emitted SPS before forwarding it, so an
+        // unsupported encoder profile/level reconnects safely instead of making
+        // MediaCodec.configure() fail up front. Kept in lockstep with the
+        // negotiated SDP profile-level-id (4d002a) in h264Level.ts.
         setInteger(
           MediaFormat.KEY_PROFILE,
-          MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline,
+          MediaCodecInfo.CodecProfileLevel.AVCProfileMain,
         )
 
         // CBR for consistent bitrate

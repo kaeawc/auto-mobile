@@ -9,6 +9,7 @@ import type {
   FrameQueueMetrics,
   IosScreenCaptureHelperOptions,
   IosScreenCaptureReadiness,
+  IosScreenCaptureReadinessPhase,
   MalformedFrameError,
   NativeFrameMetrics,
 } from "../screen-stream";
@@ -256,6 +257,7 @@ export class IosH264Source implements H264CaptureSource {
   private cancelFirstAudioWait: (() => void) | null = null;
   private rejectFirstAudioWait: ((error: Error) => void) | null = null;
   private lastHelperStderr: string | null = null;
+  private lastReadinessPhase: IosScreenCaptureReadinessPhase | null = null;
   private lastEncoderStderr: string | null = null;
   private lastForcedKeyFrameMs = Number.NEGATIVE_INFINITY;
   private lastOutputWriteDurationMs: number | null = null;
@@ -318,6 +320,7 @@ export class IosH264Source implements H264CaptureSource {
     await this.teardownPromise;
     this.phase = "starting";
     this.lastHelperStderr = null;
+    this.lastReadinessPhase = null;
     this.helperFrameMetrics = null;
     this.nativeFrameMetrics = null;
     this.lastHelperFrame = null;
@@ -576,6 +579,7 @@ export class IosH264Source implements H264CaptureSource {
 
   private async startCaptureAttempt(helperPath: string, target: CaptureTarget): Promise<void> {
     logger.info(`[IosH264Source] starting screen-capture-helper for ${describeCaptureTarget(target)}`);
+    this.lastReadinessPhase = null;
     const helper = this.createCaptureHelper({ binaryPath: helperPath, target });
     this.helper = helper;
     this.wireHelperFrames(helper);
@@ -604,7 +608,7 @@ export class IosH264Source implements H264CaptureSource {
         finish(resolve);
       };
       const timeout = this.timer.setTimeout(() => {
-        finish(() => reject(makeNoFramesError(target)));
+        finish(() => reject(makeNoFramesError(target, this.lastReadinessPhase)));
       }, this.firstFrameTimeoutMs);
       this.cancelFirstFrameWait = cancel;
 
@@ -621,7 +625,7 @@ export class IosH264Source implements H264CaptureSource {
           return;
         }
         if (isNoFramesPermissionWarning(line)) {
-          finish(() => reject(makeNoFramesError(target)));
+          finish(() => reject(makeNoFramesError(target, this.lastReadinessPhase)));
         } else if (isHelperError(line)) {
           finish(() => reject(new Error(`screen-capture-helper reported an error: ${line}`)));
         }
@@ -730,6 +734,11 @@ export class IosH264Source implements H264CaptureSource {
       }
     });
     helper.on("readiness", status => {
+      if (this.helper === helper && this.isActive()) {
+        // Track the furthest startup stage reached so a first-frame timeout can
+        // name exactly where capture stalled (issue #4766).
+        this.lastReadinessPhase = status.phase;
+      }
       logger.debug(
         `[IosH264Source] capture readiness phase=${status.phase} atMs=${status.atMs}${status.detail ? ` detail=${status.detail}` : ""}`
       );
@@ -1130,11 +1139,47 @@ function clampMacroblockAxis(value: number): number {
   return Math.min(WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME, Math.max(1, value));
 }
 
-function makeNoFramesError(target: CaptureTarget): NoFirstFrameError {
-  const hint = target.kind === "simulator"
-    ? " Grant Screen Recording permission to your terminal/IDE in System Settings > Privacy & Security > Screen Recording."
-    : "";
-  return new NoFirstFrameError(`iOS screen capture did not produce a first frame.${hint}`);
+function makeNoFramesError(
+  target: CaptureTarget,
+  lastPhase: IosScreenCaptureReadinessPhase | null
+): NoFirstFrameError {
+  const stage = lastPhase === null ? "" : ` (last stage: ${lastPhase})`;
+  const hint = hintForNoFrames(target, lastPhase);
+  return new NoFirstFrameError(
+    `iOS screen capture did not produce a first frame${stage}.${hint}`
+  );
+}
+
+// Map the furthest startup stage reached to a targeted hint so the surfaced
+// error distinguishes a permission stall from window discovery vs a hung start
+// (issue #4766).
+function hintForNoFrames(
+  target: CaptureTarget,
+  lastPhase: IosScreenCaptureReadinessPhase | null
+): string {
+  const permissionHint =
+    " Grant Screen Recording permission to your terminal/IDE in System Settings > Privacy & Security > Screen Recording.";
+  switch (lastPhase) {
+    case null:
+    case "helper-executable-found":
+    case "helper-process-spawned":
+      // The helper never confirmed permission; the likeliest cause is a missing
+      // Screen Recording grant.
+      return target.kind === "simulator" ? permissionHint : "";
+    case "permission-ready":
+      // Permission is granted but the target Simulator window never resolved.
+      return " The Simulator window could not be resolved; ensure the Simulator is booted and visible.";
+    case "target-resolved":
+      // The window resolved but ScreenCaptureKit never confirmed the session
+      // started — a hung start (see issue #4350).
+      return " Capture never started after the window resolved (hung start); retry or restart the Simulator.";
+    case "capture-started":
+      // The session started but delivered no frames — usually a permission gate
+      // that lets the session begin without producing pixels.
+      return target.kind === "simulator" ? permissionHint : "";
+    case "first-frame":
+      return "";
+  }
 }
 
 function isNoFramesPermissionWarning(line: string): boolean {

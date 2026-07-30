@@ -170,7 +170,10 @@ private fun TopBar(
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier =
-          Modifier.widthIn(max = 260.dp)
+          // weight(fill = false): when the window narrows, the detail ellipsizes and yields space
+          // rather than measuring first and pushing the fixed-size status dot off the row.
+          Modifier.weight(1f, fill = false)
+            .widthIn(max = 260.dp)
             .clickable { onStatusClick() }
             .semantics { contentDescription = "Status detail: $statusDetail" }
             .padding(horizontal = 8.dp, vertical = 4.dp),

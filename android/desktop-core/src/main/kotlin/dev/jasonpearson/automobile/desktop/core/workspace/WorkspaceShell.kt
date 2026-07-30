@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -35,10 +36,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.jasonpearson.automobile.desktop.core.McpProcessesPanel
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.diagnostics.DiagnosticsDashboard
+import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
+import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val StatusGreen = Color(0xFF40C057)
 private val StatusYellow = Color(0xFFF0C000)
@@ -235,25 +239,23 @@ private fun HealthSheetOverlay(onDismiss: () -> Unit, content: @Composable () ->
  */
 @Composable
 private fun DefaultHealthSheetBody() {
-  var connectedProcess by remember { mutableStateOf<McpProcess?>(null) }
-  Column(Modifier.fillMaxSize()) {
-    // suppressAutoSelect: opening a diagnostic overlay must not mutate device selection. Without
-    // it,
-    // McpProcessesPanel calls setActiveDevice when exactly one device is booted.
-    // Both children are weighted so a tall process list can't push the dashboard out of view.
-    Box(Modifier.weight(1f)) {
-      McpProcessesPanel(
-        useRealData = true,
-        suppressAutoSelect = true,
-        onProcessConnected = { connectedProcess = it },
-      )
-    }
-    DiagnosticsDashboard(
-      connectedMcpProcess = connectedProcess,
-      dataSourceMode = DataSourceMode.Real,
-      modifier = Modifier.weight(1f),
-    )
+  var daemonProcess by remember { mutableStateOf<McpProcess?>(null) }
+  // Read-only detection only. We deliberately do NOT use McpProcessesPanel here: its auto-connect
+  // effect can call setActiveDevice and DesktopDaemonLifecycle.ensureVersionMatchedDaemon (which
+  // may
+  // restart the daemon), and merely opening a diagnostic overlay must never mutate daemon or device
+  // state. RealMcpProcessDetector.detectProcesses() just inspects the process/socket table.
+  LaunchedEffect(Unit) {
+    val detected = withContext(Dispatchers.IO) { RealMcpProcessDetector().detectProcesses() }
+    daemonProcess =
+      detected.firstOrNull { it.connectionType == McpConnectionType.UnixSocket }
+        ?: detected.firstOrNull()
   }
+  DiagnosticsDashboard(
+    connectedMcpProcess = daemonProcess,
+    dataSourceMode = DataSourceMode.Real,
+    modifier = Modifier.fillMaxSize(),
+  )
 }
 
 @Composable

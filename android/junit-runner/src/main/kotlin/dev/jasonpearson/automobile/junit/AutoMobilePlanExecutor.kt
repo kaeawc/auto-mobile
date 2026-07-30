@@ -366,8 +366,13 @@ internal object AutoMobilePlanExecutor {
         // Treat the prerequisite like executePlan itself: the retry classifier
         // below handles transient daemon responses rather than throwing before
         // it has a chance to retry the attempt.
-        outputPayload = response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
-        parsed = ParsedToolResult(false, response.error ?: "Unable to enable the test-authoring capability")
+        outputPayload =
+          response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
+        parsed =
+          ParsedToolResult(
+            false,
+            response.error ?: "Unable to enable the test-authoring capability",
+          )
         toolResults = emptyList()
       } else {
         if (options.debugMode) {

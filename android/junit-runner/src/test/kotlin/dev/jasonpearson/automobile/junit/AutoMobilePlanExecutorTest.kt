@@ -241,7 +241,7 @@ class AutoMobilePlanExecutorTest {
   }
 
   private fun executePlan(
-    options: AutoMobilePlanExecutionOptions = AutoMobilePlanExecutionOptions(),
+    options: AutoMobilePlanExecutionOptions = AutoMobilePlanExecutionOptions()
   ): AutoMobilePlanExecutionResult {
     return AutoMobilePlanExecutor.execute(
       "test-plans/launch-clock-app.yaml",

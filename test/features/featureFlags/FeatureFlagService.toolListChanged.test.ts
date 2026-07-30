@@ -118,8 +118,9 @@ describe("FeatureFlagService tools/list_changed notifications", () => {
         throw new Error("notifier boom");
       },
     };
+    const repository = new FakeFeatureFlagRepository();
     const service = new FeatureFlagService(
-      new FakeFeatureFlagRepository(),
+      repository,
       new FakeFeatureFlagApplier(),
       TEST_DEFINITIONS,
       throwingNotifier
@@ -131,5 +132,13 @@ describe("FeatureFlagService tools/list_changed notifications", () => {
     // actually corrupts state — e.g. the notify moves BEFORE the commit.
     await service.setFlag("debug", true).catch(() => undefined);
     expect(service.isEnabled("debug")).toBe(true);
+
+    // Assert PERSISTENCE, not only the in-memory flag: if `setFlag` were
+    // reordered to notify before it persists, a throwing notifier would skip
+    // `upsertFlag` while `isEnabled()` (in-memory) still passed. Reading the
+    // repository record makes the row red on that notify-before-persist ordering
+    // too, not just notify-before-in-memory-commit.
+    const persisted = (await repository.listFlags()).find(record => record.key === "debug");
+    expect(persisted?.enabled).toBe(true);
   });
 });

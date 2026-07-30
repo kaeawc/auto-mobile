@@ -29,8 +29,14 @@ archive_path="${!#}"
 mkdir -p "$(dirname "${archive_path}")"
 printf 'archive\n' > "${archive_path}"
 SCRIPT
+  # notarytool submit emits a JSON verdict; the status is controlled per-test
+  # via SCREEN_CAPTURE_HELPER_TEST_NOTARY_STATUS (default Accepted).
   cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
 #!/usr/bin/env bash
+if [[ "$1" == "notarytool" && "$2" == "submit" ]]; then
+  printf '{"id":"sub-123","status":"%s"}\n' \
+    "${SCREEN_CAPTURE_HELPER_TEST_NOTARY_STATUS:-Accepted}"
+fi
 exit 0
 SCRIPT
   chmod +x "${MOCK_BIN}/"{swift,lipo,codesign,ditto,xcrun}
@@ -49,4 +55,16 @@ SCRIPT
 
   [ "${status}" -eq 0 ]
   [ -f "${CALLER_DIR}/artifacts/screen-capture-helper.zip" ]
+}
+
+@test "fails and leaves no output when notarization is rejected" {
+  export SCREEN_CAPTURE_HELPER_TEST_NOTARY_STATUS="Invalid"
+
+  run bash -c 'cd "$1" && "$2" "$3"' _ \
+    "${CALLER_DIR}" "${SCRIPT}" "artifacts/screen-capture-helper.zip"
+
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"Notarization verdict: Invalid (submission sub-123)"* ]]
+  # The rejected archive must not be promoted to the final output path.
+  [ ! -f "${CALLER_DIR}/artifacts/screen-capture-helper.zip" ]
 }

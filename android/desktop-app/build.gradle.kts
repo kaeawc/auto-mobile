@@ -29,6 +29,10 @@ sourceSets {
 // `-PdesktopPackageVersion=<version>` (plain semver, no leading v); local builds
 // fall back to VERSION_NAME. jpackage accepts only MAJOR.MINOR.PATCH, so any
 // `-SNAPSHOT`/build-metadata suffix is stripped and missing parts default to 0.
+// Accepted limitation: jpackage has no field for a prerelease qualifier, so a
+// prerelease (0.1.0-rc.1) packages with the same OS-level version as its 0.1.0
+// final. Prereleases are rare and the npm/tag identity still distinguishes them;
+// revisit if desktop RCs ship regularly.
 val desktopReleaseVersion: String =
   (findProperty("desktopPackageVersion") as String?)
     ?: (findProperty("VERSION_NAME") as String?)

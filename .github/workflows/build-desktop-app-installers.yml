@@ -83,9 +83,32 @@ jobs:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
+          # persist-credentials stays enabled (default) so the Git LFS step below
+          # can authenticate; a full `lfs: true` would pull every LFS object in
+          # the repo (videos, archives), so fetch only the icons instead.
           lfs: false
           ref: ${{ inputs.checkout-ref || github.sha }}
-          persist-credentials: false
+
+      # app-icon.png (Linux) and app-icon.ico (Windows) are Git LFS-tracked
+      # (.gitattributes), so a non-LFS checkout leaves them as pointer files that
+      # jpackage would embed as invalid icon data. Materialize just the icons.
+      - name: "Materialize desktop app icons (Git LFS)"
+        shell: bash
+        run: git lfs pull --include="android/desktop-app/src/main/resources/icons/**"
+
+      # Fail closed on a malformed version before packaging. Also prevents any
+      # `${{ inputs.version }}` from carrying shell metacharacters into later run
+      # steps. Mirrors the semver shape accepted by bump-versions.sh.
+      - name: "Validate installer version"
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid installer version: $VERSION (expected MAJOR.MINOR.PATCH semver)" >&2
+            exit 1
+          fi
 
       # jpackage builds the .deb with dpkg-deb under fakeroot; fakeroot is not
       # preinstalled on the ubuntu runner image.
@@ -167,6 +190,10 @@ jobs:
       - name: "Stage installer"
         shell: bash
         working-directory: android
+        env:
+          # Consumed through the environment, not interpolated into the script
+          # body, so the version can never expand into runner-side shell code.
+          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           SRC=$(find "desktop-app/build/compose/binaries/main/${{ matrix.format }}" \
@@ -177,7 +204,7 @@ jobs:
           fi
           DEST_DIR="desktop-app/build/desktop-dist"
           mkdir -p "$DEST_DIR"
-          DEST="${DEST_DIR}/AutoMobile-${{ inputs.version }}-${{ matrix.platform }}.${{ matrix.format }}"
+          DEST="${DEST_DIR}/AutoMobile-${VERSION}-${{ matrix.platform }}.${{ matrix.format }}"
           cp "$SRC" "$DEST"
           echo "Staged $SRC -> $DEST"
 

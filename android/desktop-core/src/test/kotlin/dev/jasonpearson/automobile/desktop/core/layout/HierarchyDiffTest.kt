@@ -181,6 +181,42 @@ class HierarchyDiffTest {
   }
 
   @Test
+  fun `same-platform trees with realistic class names yield a mixed non-disjoint diff`() {
+    // Real Android class names on BOTH sides: the shared structure matches by key, so the diff is a
+    // meaningful mix of equal/changed/only-in rather than the all-disjoint result a cross-platform
+    // pair (android.widget.* vs XCUIElementType*) would produce.
+    val a =
+      node(
+        "android.widget.FrameLayout",
+        "content",
+        children =
+          listOf(
+            node("android.widget.TextView", "title", text = "Home"),
+            node("android.widget.Button", "submit", isClickable = true),
+          ),
+      )
+    val b =
+      node(
+        "android.widget.FrameLayout",
+        "content",
+        children =
+          listOf(
+            node("android.widget.TextView", "title", text = "Home"), // equal
+            node("android.widget.Button", "submit", isClickable = false), // changed flag
+            node("android.widget.ProgressBar", "loading"), // only in B
+          ),
+      )
+    val diff = diffHierarchies(a, b)
+
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "TextView:title"))
+    assertEquals(NodeDiffStatus.Changed, statusOf(diff, "Button:submit"))
+    assertEquals(NodeDiffStatus.OnlyInB, statusOf(diff, "ProgressBar:loading"))
+    assertEquals(0, diff.onlyInA)
+    // Not all-disjoint: the shared FrameLayout + TextView remain equal.
+    assertTrue(diff.equal >= 2)
+  }
+
+  @Test
   fun `entries preorder lists A nodes before B-only nodes`() {
     val a = node("Root", "root", children = listOf(node("A", "a")))
     val b = node("Root", "root", children = listOf(node("A", "a"), node("Bonly", "bo")))

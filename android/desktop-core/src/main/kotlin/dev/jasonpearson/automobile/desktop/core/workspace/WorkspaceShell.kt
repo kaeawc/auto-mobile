@@ -145,17 +145,26 @@ fun WorkspaceShell(
 }
 
 /**
- * Pick the two device columns to compare: the focused column plus the first other observed column.
- * Returns null when fewer than two devices are observed, so the ⧉ Compare entry stays hidden and
- * the overlay never opens with an incomplete pair. If more than two devices are observed, only the
- * focused device and one other are compared (N-way compare is deferred).
+ * Pick the two device columns to compare: the focused column plus the first other observed column
+ * **of the same platform**. Returns null when there is no same-platform second device, so the ⧉
+ * Compare entry stays hidden and the overlay never opens with an incomparable pair. If more than
+ * two same-platform devices are observed, only the focused device and one other are compared (N-way
+ * compare is deferred).
+ *
+ * Same-platform only because the structural diff key embeds `className`, which is platform-specific
+ * (`android.widget.FrameLayout` vs `XCUIElementTypeApplication`): an Android-to-iOS pair would
+ * share no keys and every node would read as only-in-one, a meaningless diff. Cross-platform
+ * structural-role normalization is deferred to issue #4872.
  */
 internal fun compareColumns(content: WorkspaceUiState.Content): Pair<DeviceColumn, DeviceColumn>? {
-  if (content.columns.size < 2) return null
   val focused =
     content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
-      ?: content.columns.first()
-  val other = content.columns.firstOrNull { it.deviceId != focused.deviceId } ?: return null
+      ?: content.columns.firstOrNull()
+      ?: return null
+  val other =
+    content.columns.firstOrNull {
+      it.deviceId != focused.deviceId && it.platform == focused.platform
+    } ?: return null
   return focused to other
 }
 

@@ -32,6 +32,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
@@ -122,6 +124,12 @@ fun TwoDeviceCompareView(
  * One device's pane in the compare view. Owns a per-device [ObservationStream] with the same
  * connect/dispose lifecycle as [LayoutFacet], collects its hierarchy updates into a parsed tree
  * reported via [onHierarchy], and renders the pane body via [sideContent].
+ *
+ * Device loss and confirmed disconnection are surfaced out-of-band (via
+ * [ObservationStream. deviceEvents] and [ObservationStream.connectionState]), NOT as a null
+ * hierarchy update, so this side also watches those signals and clears its hierarchy (reports null)
+ * on loss/disconnect. Otherwise the last parsed hierarchy would linger and the still-live device
+ * would keep diffing against a stale snapshot forever.
  */
 @Composable
 private fun CompareSide(
@@ -146,6 +154,22 @@ private fun CompareSide(
       val json = update.data ?: return@collect
       val parsed = withContext(Dispatchers.Default) { parseHierarchyFromJson(json) }
       if (parsed != null) onHierarchy(parsed)
+    }
+  }
+  LaunchedEffect(activeStream) {
+    activeStream.deviceEvents.collect { event ->
+      when (event) {
+        // Device unplugged/offline: retire the snapshot so the diff shows "waiting" until a fresh
+        // frame arrives, rather than diffing the live device against a dead one's stale tree.
+        is DeviceStreamEvent.DeviceConnectionLost -> onHierarchy(null)
+      }
+    }
+  }
+  LaunchedEffect(activeStream) {
+    activeStream.connectionState.collect { state ->
+      // Only a confirmed disconnect clears; Connecting/Reconnecting/Error keep the last snapshot so
+      // a brief stream blip does not flush a still-valid hierarchy.
+      if (state is ConnectionState.Disconnected) onHierarchy(null)
     }
   }
   Box(modifier) { sideContent(column, activeStream) }

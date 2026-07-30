@@ -4,9 +4,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.HierarchyStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
@@ -123,4 +125,40 @@ class TwoDeviceCompareViewTest {
     onNodeWithContentDescription("Only in Pixel: onlyA").assertExists()
     onNodeWithContentDescription("Only in iPhone: onlyB").assertExists()
   }
+
+  @Test
+  fun `device loss on one side clears its hierarchy so no stale diff persists`() =
+    runComposeUiTest {
+      val fakeA = FakeObservationStream()
+      val fakeB = FakeObservationStream()
+      setContent {
+        MaterialTheme {
+          TwoDeviceCompareView(
+            columnA = columnA(),
+            columnB = columnB(),
+            observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
+            sideContent = { column, _ -> Text(column.name) },
+          )
+        }
+      }
+      emit(fakeA, "dev-a", "onlyA")
+      emit(fakeB, "dev-b", "onlyB")
+      waitUntil {
+        onAllNodesWithContentDescription("Only in Pixel: onlyA").fetchSemanticsNodes().isNotEmpty()
+      }
+
+      // Device loss arrives out-of-band as a deviceEvent, not a null hierarchy update: side A must
+      // clear so the diff retires instead of comparing the live device against a stale snapshot.
+      runOnIdle {
+        fakeA.emitDeviceEvent(
+          DeviceStreamEvent.DeviceConnectionLost("dev-a", 2L, "connection lost")
+        )
+      }
+      waitUntil {
+        onAllNodesWithText("Waiting for both device hierarchies", substring = true)
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
+      onNodeWithContentDescription("Only in Pixel: onlyA").assertDoesNotExist()
+    }
 }

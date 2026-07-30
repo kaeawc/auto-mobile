@@ -98,4 +98,6 @@ class FakeObservationStream : ObservationStream {
   fun emitStorage(update: StorageStreamUpdate): Boolean = _storageUpdates.tryEmit(update)
 
   fun emitHierarchy(update: HierarchyStreamUpdate): Boolean = _hierarchyUpdates.tryEmit(update)
+
+  fun emitDeviceEvent(event: DeviceStreamEvent): Boolean = _deviceEvents.tryEmit(event)
 }

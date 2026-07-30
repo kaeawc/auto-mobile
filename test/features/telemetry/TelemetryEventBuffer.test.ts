@@ -203,15 +203,25 @@ describe("TelemetryEventBuffer", () => {
     // Let the first flush snapshot ["first"] and park on the repository gate.
     await new Promise<void>(resolve => setImmediate(resolve));
 
-    // A second flush requested while the first is still blocked must queue behind it.
+    // A second flush requested while the first is still blocked must queue behind
+    // it — crucially, its buffer snapshot must not happen until the first flush
+    // completes.
     buffer.addLog(makeLog("second"));
     const secondFlush = buffer.flush();
+
+    // Added AFTER the second flush() call but BEFORE the first flush is released.
+    // Under serialization the second flush has not snapshotted the buffer yet, so
+    // "third" joins its batch. If the two flushes ran concurrently the second would
+    // have already snapshotted ["second"] and stranded "third" — so this row is
+    // what discriminates the serialization the test names (drop `flushChain` and it
+    // reds). The earlier single-shared-gate assertion held either way.
+    buffer.addLog(makeLog("third"));
 
     repository.releaseLogFlush();
     await Promise.all([firstFlush, secondFlush]);
 
     expect(repository.logBatches).toHaveLength(2);
     expect(repository.logBatches[0].map(r => r.message)).toEqual(["first"]);
-    expect(repository.logBatches[1].map(r => r.message)).toEqual(["second"]);
+    expect(repository.logBatches[1].map(r => r.message)).toEqual(["second", "third"]);
   });
 });

@@ -31,5 +31,10 @@ let package = Package(
             dependencies: ["ScreenCaptureCore"],
             path: "Tests/ScreenCaptureCoreTests"
         ),
+        .testTarget(
+            name: "ScreenCaptureHelperTests",
+            dependencies: ["ScreenCaptureHelper"],
+            path: "Tests/ScreenCaptureHelperTests"
+        ),
     ]
 )

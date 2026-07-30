@@ -1,12 +1,21 @@
 #!/usr/bin/env bats
 #
-# Guards the wiring the issue #2745 regression was about: every workflow that
-# generates release constants must pass the computed iOS runner SHA256 into the
-# script, and the release paths must run the integrity gate before publishing.
+# Guards release checksum handoff: Prepare Release is the single builder and
+# integrity gate, while Release publishes the artifacts from that successful run.
 
-@test "release.yml passes runner sha256 into generate-release-constants" {
-  grep -q "IOS_CTRL_PROXY_RUNNER_SHA256:" ".github/workflows/release.yml"
-  grep -q "runner_sha256" ".github/workflows/release.yml"
+@test "release.yml reads the checksums baked by prepare-release" {
+  wiring_requires_yq
+  local script
+  script="$(yq -r '.jobs."verify-and-release".steps[]
+    | select(.id == "prepared_checksums") | .run' ".github/workflows/release.yml" \
+    | grep -v '^[[:space:]]*#')"
+  [ -n "$script" ]
+  [ "$script" != "null" ]
+  [[ "$script" == *"RELEASE_CHECKSUM_REGISTRY"* ]]
+  [[ "$script" == *"apkSha256"* ]]
+  [[ "$script" == *"ipaSha256"* ]]
+  [[ "$script" == *"videoJarSha256"* ]]
+  [[ "$script" == *"screenCaptureHelperSha256"* ]]
 }
 
 @test "prepare-release.yml passes runner sha256 into generate-release-constants" {
@@ -49,14 +58,197 @@
   grep -q "chore: update video-server jar SHA256" ".github/workflows/pull_request.yml"
 }
 
-@test "release.yml builds, verifies, and attaches the video-server jar (#3832)" {
-  workflow=".github/workflows/release.yml"
-  grep -Fq "uses: ./.github/workflows/build-video-server-jar.yml" "$workflow"
-  # Verified against the registry via the videojar platform token, then written.
-  grep -Fq "/tmp/automobile-video.jar videojar" "$workflow"
-  grep -Fq "VIDEO_JAR_SHA256:" "$workflow"
-  # Attached to the GitHub release assets.
-  grep -Fq "/tmp/automobile-video.jar" "$workflow"
+@test "release.yml reuses prepare-release artifacts instead of rebuilding them (#4686)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/release.yml"
+
+  run yq -r '.on.workflow_dispatch.inputs.prepare_run_id.required' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+
+  run yq -r '.permissions.actions' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "read" ]
+
+  run yq -r '.on.create // "absent"' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "absent" ]
+
+  run yq -r '
+    .jobs."verify-and-release".steps[]
+    | select(.uses == "actions/download-artifact@v7")
+    | .with.name + "\t" + .with."run-id" + "\t" + .with."github-token" + "\t" + .with.repository' "$workflow"
+  [ "$status" -eq 0 ]
+
+  local artifact_name
+  for artifact_name in control-proxy-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper; do
+    [[ "$output" == *"${artifact_name}"$'\t''${{ inputs.prepare_run_id }}'$'\t''${{ secrets.GITHUB_TOKEN }}'$'\t''${{ github.repository }}'* ]]
+  done
+
+  run yq -r '.jobs | keys[]' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"build-ctrl-proxy-ios-ipa"* ]]
+  [[ "$output" != *"build-control-proxy-apk"* ]]
+  [[ "$output" != *"build-video-server-jar"* ]]
+  [[ "$output" != *"build-screen-capture-helper"* ]]
+
+  run yq -r '.jobs."verify-and-release".steps[] | select(.run != null) | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"verify-artifact-sha256.sh"* ]]
+  [[ "$output" != *"verify-release-integrity.sh"* ]]
+}
+
+@test "prepare-release verifies and tags the single prepared artifact set before dispatching release (#4686)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/prepare-release.yml"
+  local builder
+  for builder in build-candidate-ctrl-proxy-ios-ipa build-candidate-control-proxy-apk build-candidate-video-server-jar build-candidate-screen-capture-helper; do
+    run yq -r ".jobs.\"$builder\".needs" "$workflow"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"prepare-version"* ]]
+
+    run yq -r ".jobs.\"$builder\".with.checkout-ref" "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = '${{ needs.prepare-version.outputs.release_commit }}' ]
+
+    run yq -r ".jobs.\"$builder\".with.upload-artifact" "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "true" ]
+
+    run yq -r ".jobs.\"$builder\".with.artifact-retention-days" "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "90" ]
+  done
+
+  run yq -r '.jobs | keys[]' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"build-ctrl-proxy-ios-ipa"* ]]
+  [[ "$output" != *"build-control-proxy-apk"* ]]
+  [[ "$output" != *"build-video-server-jar"* ]]
+  [[ "$output" != *"build-screen-capture-helper"* ]]
+
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Verify prepared release artifacts") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verify-artifact-sha256.sh"* ]]
+  [[ "$output" == *"verify-release-integrity.sh"* ]]
+
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Setup Bun") | .with."bun-version"' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.3.9" ]
+
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Promote verified release and create tag") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'git push origin "$EXPECTED_RELEASE_COMMIT":main'* ]]
+  [[ "$output" == *'git tag "$TAG" "$EXPECTED_RELEASE_COMMIT"'* ]]
+}
+
+@test "prepare-release keeps intermediate version commits on a run-scoped staging ref (#4686)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/prepare-release.yml"
+
+  run yq -r '.jobs."prepare-version".outputs.base_main_commit' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ steps.commit.outputs.base_main_commit }}' ]
+
+  local prepare_commit final_commit
+  prepare_commit="$(yq -r '.jobs."prepare-version".steps[] | select(.id == "commit") | .run' "$workflow")"
+  final_commit="$(yq -r '.jobs."finalize-release".steps[] | select(.id == "commit") | .run' "$workflow")"
+  run yq -r '.jobs."prepare-version".steps[] | select(.id == "commit") | .env.STAGING_REF' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'release-prepare/${{ github.run_id }}' ]
+  run yq -r '.jobs."finalize-release".steps[] | select(.id == "commit") | .env.STAGING_REF' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'release-prepare/${{ github.run_id }}' ]
+  [[ "$prepare_commit" == *'git push --force origin "HEAD:refs/heads/$STAGING_REF"'* ]]
+  [[ "$prepare_commit" != *'git push origin HEAD:main'* ]]
+  [[ "$final_commit" == *'git push --force origin "HEAD:refs/heads/$STAGING_REF"'* ]]
+  [[ "$final_commit" != *'git push origin HEAD:main'* ]]
+}
+
+@test "prepared release artifacts survive delayed publication retries (#4686)" {
+  wiring_requires_yq
+  local workflow
+  for workflow in \
+    .github/workflows/build-ctrl-proxy-ios-ipa.yml \
+    .github/workflows/build-control-proxy-apk.yml \
+    .github/workflows/build-video-server-jar.yml \
+    .github/workflows/build-screen-capture-helper.yml; do
+    run yq -r '.on.workflow_call.inputs."artifact-retention-days".default' "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "7" ]
+
+    run yq -r '.jobs.build.steps[] | select(.uses == "actions/upload-artifact@v6") | .with."retention-days"' "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = '${{ inputs.artifact-retention-days }}' ]
+  done
+
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Upload release artifact provenance") | .with."retention-days"' .github/workflows/prepare-release.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = "90" ]
+}
+
+@test "prepare-release validates the finalized tree before tagging and can rerun provenance upload (#4686)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/prepare-release.yml"
+
+  run yq -r '.jobs."validate-finalized-release".needs' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"finalize-release"* ]]
+
+  run yq -r '.jobs."verify-prepared-release".needs' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"validate-finalized-release"* ]]
+
+  local step_names
+  step_names="$(yq -r '.jobs."validate-finalized-release".steps[].name' "$workflow")"
+  [[ "$step_names" == *"Run tests"* ]]
+  [[ "$step_names" == *"Run lint"* ]]
+  [[ "$step_names" == *"Build TypeScript"* ]]
+  [[ "$step_names" == *"Run Bun MCP startup smoke"* ]]
+  [[ "$step_names" == *"Run Bun image runtime smoke"* ]]
+
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Upload release artifact provenance") | .with.overwrite' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
+@test "release.yml requires successful prepared-release provenance before downloading artifacts (#4686)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/release.yml"
+
+  run yq -r '.jobs."verify-and-release".steps[] | select(.name == "Wait for successful Prepare Release") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"conclusion"* ]]
+  [[ "$output" == *"prepare-release.yml"* ]]
+
+  run yq -r '.jobs."verify-and-release".steps[] | select(.name == "Validate prepared release provenance") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"release-artifact-provenance"* ]]
+  [[ "$output" == *"tag_sha"* ]]
+  [[ "$output" == *"prepare_run_id"* ]]
+}
+
+@test "release.yml builds the package before publishing npm" {
+  wiring_requires_yq
+  local steps build_index publish_index
+  steps="$(yq -r '.jobs."verify-and-release".steps[] | (.name // "") + "\t" + (.run // "")' ".github/workflows/release.yml")"
+  [[ "$steps" == *$'Build TypeScript package\tbun run build'* ]]
+  [[ "$steps" == *$'Publish to npm\t'* ]]
+
+  run yq -r '.jobs."verify-and-release".steps | to_entries[] | select(.value.name == "Build TypeScript package") | .key' ".github/workflows/release.yml"
+  [ "$status" -eq 0 ]
+  build_index="$output"
+
+  run yq -r '.jobs."verify-and-release".steps | to_entries[] | select(.value.name == "Publish to npm") | .key' ".github/workflows/release.yml"
+  [ "$status" -eq 0 ]
+  publish_index="$output"
+
+  (( build_index < publish_index ))
+
+  local notes_env
+  notes_env="$(yq -r '.jobs."verify-and-release".steps[] | select(.id == "release_notes") | .env' ".github/workflows/release.yml")"
+  [[ "$notes_env" == *"prepared_checksums.outputs.apk"* ]]
+  [[ "$notes_env" == *"prepared_checksums.outputs.ipa"* ]]
 }
 
 @test "prepare-release.yml records the video-server jar checksum (#3832)" {
@@ -65,15 +257,13 @@
   grep -Fq "VIDEO_JAR_SHA256:" "$workflow"
 }
 
-@test "release delivery builds, verifies, and attaches the screen-capture-helper" {
+@test "prepare-release records and verifies the screen-capture-helper before release delivery" {
   local workflow=".github/workflows/release.yml"
-  grep -Fq "uses: ./.github/workflows/build-screen-capture-helper.yml" "$workflow"
-  grep -Fq "/tmp/screen-capture-helper-macos-universal.zip screencapturehelper" "$workflow"
-  grep -Fq "SCREEN_CAPTURE_HELPER_SHA256:" "$workflow"
-  grep -Fq "/tmp/screen-capture-helper-macos-universal.zip" "$workflow"
+  ! grep -Fq "uses: ./.github/workflows/build-screen-capture-helper.yml" "$workflow"
 
   workflow=".github/workflows/prepare-release.yml"
   grep -Fq "uses: ./.github/workflows/build-screen-capture-helper.yml" "$workflow"
+  grep -Fq "verify-release-integrity.sh" "$workflow"
   grep -Fq "SCREEN_CAPTURE_HELPER_SHA256:" "$workflow"
 }
 
@@ -106,18 +296,6 @@
   [[ "$lint_block" == *"shell: bash"* ]]
   [[ "$lint_block" == *"NODE_OPTIONS: \"--max-old-space-size=4096\""* ]]
   [[ "$lint_block" == *"ci-logs/bun-lint-\${{ matrix.os }}.log"* ]]
-}
-
-@test "release.yml runs the release-integrity gate" {
-  grep -q "verify-release-integrity.sh" ".github/workflows/release.yml"
-}
-
-@test "release.yml runs the Bun image smoke without the retired Wasm OSR override (#4009)" {
-  smoke_block="$(sed -n '/name: Run Bun image runtime smoke/,/run: bun run test:image:bun/p' ".github/workflows/release.yml")"
-
-  [[ "$smoke_block" == *"run: bun run test:image:bun"* ]]
-  [[ "$smoke_block" != *"BUN_JSC_useWasmOSR"* ]]
-  [[ "$smoke_block" != *"@jimp/wasm-webp"* ]]
 }
 
 @test "prepare-release.yml runs the release-integrity gate" {
@@ -165,12 +343,8 @@
 # wiring link that regresses silently is the exact defect this whole area exists
 # to prevent. `yq` reads the real trigger and step fields instead.
 #
-# Pushing the tag does start Release on its own -- release.yml's `create:`
-# trigger fired for 0.0.43, 0.0.44 and 0.0.45, all pushed by CI. The premise
-# recorded here originally (that `create` never fires for CI-pushed tags) was a
-# misread: what failed at 0.0.44 was a v-prefixed tag losing the validation gate,
-# not a missing run. So prepare-release confirms a run exists for the tag and
-# only dispatches when none does; the assertions below pin that fallback.
+# Release takes an explicit prepare-run ID. This is the artifact provenance
+# boundary: it consumes the already checked artifacts instead of rebuilding.
 
 # Skipping locally is a convenience; skipping in CI would silently retire every
 # assertion below, which is the same fail-green these guards exist to catch.
@@ -190,12 +364,12 @@ wiring_requires_yq() {
   [ "$output" = "true" ]
 }
 
-@test "prepare-release dispatches release.yml on the tag, not a branch (#4157)" {
+@test "prepare-release dispatches release.yml on the tag with its run ID (#4686)" {
   wiring_requires_yq
   # Pull the one step's run script out of the parsed YAML, so comments elsewhere
   # in the file cannot satisfy these assertions.
   local script
-  script="$(yq -r '.jobs.prepare.steps[] | select(.name == "Start the release") | .run' \
+  script="$(yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Start the release") | .run' \
     ".github/workflows/prepare-release.yml")"
   [ -n "$script" ]
   [ "$script" != "null" ]
@@ -206,25 +380,31 @@ wiring_requires_yq() {
   [[ "$code" == *"gh workflow run release.yml"* ]]
   [[ "$code" == *'--ref "$TAG"'* ]]
   [[ "$code" != *"--ref main"* ]]
+  [[ "$code" == *'prepare_run_id="$PREPARE_RUN_ID"'* ]]
+  [[ "$code" == *"previous_release_run_ids"* ]]
+  [[ "$code" == *'repos/$REPO/actions/workflows/release.yml/runs?event=workflow_dispatch&per_page=100'* ]]
+  [[ "$code" == *'.head_branch == $tag and .head_sha == $sha'* ]]
+  [[ "$code" == *'grep -Fxq "$release_run_id" <<< "$previous_release_run_ids"'* ]]
+  [[ "$code" == *"Release dispatch for \$TAG did not materialize"* ]]
 
-  # Whichever route starts Release, the check has to be scoped to this tag.
-  # Comparing against the newest run of any branch matches the release.yml run
-  # that every branch creation queues, which reports a release that is not there.
-  [[ "$code" == *'--branch "$TAG"'* ]]
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Start the release") | .env.PREPARE_RUN_ID' \
+    ".github/workflows/prepare-release.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ github.run_id }}' ]
 }
 
 # The dispatch API rejects a token without actions: write, and the job-level
-# block replaces the workflow-level grant wholesale -- so dropping either half
-# turns the fallback into the 403 that failed Prepare Release #204.
+# block replaces the workflow-level grant wholesale. This job also creates the
+# tag only after artifact verification, so it needs contents: write.
 @test "prepare-release can dispatch and still push (#4157)" {
   wiring_requires_yq
   local perms
-  perms="$(yq -r '.jobs.prepare.permissions' ".github/workflows/prepare-release.yml")"
+  perms="$(yq -r '.jobs."verify-prepared-release".permissions' ".github/workflows/prepare-release.yml")"
   [ "$perms" != "null" ]
 
-  run yq -r '.jobs.prepare.permissions.actions' ".github/workflows/prepare-release.yml"
+  run yq -r '.jobs."verify-prepared-release".permissions.actions' ".github/workflows/prepare-release.yml"
   [ "$output" = "write" ]
-  run yq -r '.jobs.prepare.permissions.contents' ".github/workflows/prepare-release.yml"
+  run yq -r '.jobs."verify-prepared-release".permissions.contents' ".github/workflows/prepare-release.yml"
   [ "$output" = "write" ]
 }
 
@@ -269,29 +449,6 @@ wiring_requires_yq() {
     ".github/workflows/release.yml" | grep -v '^[[:space:]]*#')"
   [[ "$runs" == *'state=$(scripts/release/already-published.sh'* ]]
   [[ "$runs" != *'if [ "$(scripts/release/already-published.sh'* ]]
-}
-
-# The artifact checksum gate is the only thing standing between a stale APK/IPA
-# and a published release, and it failed open twice over in release 0.0.45:
-# `bash -e` without pipefail takes the pipeline's status from `tee`, discarding
-# the script's exit 1, and `grep | cut` takes its status from `cut`, so a missing
-# `checksum=` line produced an empty output rather than an abort.
-@test "release.yml artifact checksum gate cannot fail open (#4157)" {
-  wiring_requires_yq
-  local step
-  for step in verify_checksum verify_ipa_checksum verify_video_jar_checksum verify_screen_capture_helper_checksum; do
-    local script
-    script="$(yq -r ".jobs.\"verify-and-release\".steps[] | select(.id == \"$step\") | .run" \
-      ".github/workflows/release.yml" | grep -v '^[[:space:]]*#')"
-    [ -n "$script" ]
-    [ "$script" != "null" ]
-
-    # pipefail propagates the verify script's mismatch exit through `tee`.
-    [[ "$script" == *"pipefail"* ]]
-    # The emptiness check catches the grep-into-cut case, which pipefail alone
-    # does not: cut succeeds on empty input, so the pipeline status stays 0.
-    [[ "$script" == *'[ -n "$CHECKSUM" ]'* ]]
-  done
 }
 
 # A dispatch that merely names the tag is not enough: the Actions UI ref picker

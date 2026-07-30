@@ -2,28 +2,26 @@
 name: Release
 
 "on":
-  create:
-  # prepare-release dispatches this explicitly after pushing the tag. The `create`
-  # event above did not fire for CI-pushed tags (see v0.0.42/v0.0.44: the tag push
-  # succeeded and no Release run was ever queued), so the tag event alone cannot be
-  # relied on to start a release.
   workflow_dispatch:
     inputs:
       tag:
         description: "Release tag to publish, with no leading v (e.g. 0.0.45)"
         required: true
         type: string
+      prepare_run_id:
+        description: "Successful Prepare Release workflow run that built the artifacts"
+        required: true
+        type: string
 
-# `create:` is retained as a fallback for a hand-pushed tag, so one tag could in
-# principle arrive by both routes. This serializes them; it does NOT dedupe them
-# -- with cancel-in-progress false the second run queues and then starts once the
-# first finishes. What makes that second run harmless is the already-published.sh
-# guard on each non-idempotent publish step, not this block. Both are required.
+# Prepare Release dispatches this workflow only after it has built, hashed, and
+# integrity-checked every GitHub Release asset. The release consumes those exact
+# artifacts rather than starting a second, potentially different build.
 concurrency:
-  group: release-${{ inputs.tag || github.event.ref }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: write
   pull-requests: write
   id-token: write
@@ -33,8 +31,6 @@ jobs:
   validate-release-tag:
     name: "Validate Release Tag"
     runs-on: ubuntu-latest
-    # workflow_dispatch carries no ref_type; only the create path needs the tag gate.
-    if: github.event_name == 'workflow_dispatch' || github.event.ref_type == 'tag'
     outputs:
       is_release_tag: ${{ steps.validate.outputs.is_release_tag }}
       tag: ${{ steps.validate.outputs.tag }}
@@ -50,13 +46,9 @@ jobs:
         run: |
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-          # The dispatch must run ON the tag, not merely name it. The Actions UI
-          # ref picker defaults to a branch, and prepare-release is not the only
-          # caller. docker/metadata-action derives its semver tags from
-          # github.ref, so a dispatch from main checks out the right tree and
-          # still pushes an image with no version tag -- green, and wrong.
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]] \
-            && { [[ "$REF_TYPE" != "tag" ]] || [[ "$REF_NAME" != "$TAG" ]]; }; then
+          # Prepare Release must dispatch this workflow on the tag, not merely
+          # name it. docker/metadata-action derives semver tags from github.ref.
+          if { [[ "$REF_TYPE" != "tag" ]] || [[ "$REF_NAME" != "$TAG" ]]; }; then
             echo "Release must be dispatched on tag '$TAG', but this run is on" >&2
             echo "${REF_TYPE} '${REF_NAME}'. Re-run it and pick the tag in the" >&2
             echo "ref dropdown, or let prepare-release dispatch it." >&2
@@ -67,65 +59,14 @@ jobs:
             exit 0
           fi
 
-          echo "is_release_tag=false" >> "$GITHUB_OUTPUT"
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            # An explicit dispatch names the tag it wants released, so a format
-            # miss is a caller error. Failing beats skipping every publish step
-            # and still reporting the run green.
-            echo "Refusing to release malformed tag: $TAG (expected 0.0.45, no leading v)" >&2
-            exit 1
-          fi
-          echo "Ignoring non-release tag: $TAG"
-
-  build-ctrl-proxy-ios-ipa:
-    needs: validate-release-tag
-    if: needs.validate-release-tag.outputs.is_release_tag == 'true'
-    uses: ./.github/workflows/build-ctrl-proxy-ios-ipa.yml
-
-  build-control-proxy-apk:
-    needs: validate-release-tag
-    if: needs.validate-release-tag.outputs.is_release_tag == 'true'
-    uses: ./.github/workflows/build-control-proxy-apk.yml
-    secrets:
-      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-      RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-
-  build-video-server-jar:
-    needs: validate-release-tag
-    if: needs.validate-release-tag.outputs.is_release_tag == 'true'
-    # No verify-reproducible here: the verify-and-release job already re-verifies
-    # the release-built jar against the registry sha minted by prepare-release on a
-    # different runner — a stronger cross-run reproducibility check than an in-job
-    # double-build. The double-build runs once, at mint time (prepare-release).
-    uses: ./.github/workflows/build-video-server-jar.yml
-    secrets:
-      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-  build-screen-capture-helper:
-    needs: validate-release-tag
-    if: needs.validate-release-tag.outputs.is_release_tag == 'true'
-    uses: ./.github/workflows/build-screen-capture-helper.yml
-    secrets:
-      MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
-      MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
-      MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
-      MACOS_DEVELOPER_ID_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_SIGNING_IDENTITY }}
-      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
-      APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+          echo "Refusing to release malformed tag: $TAG (expected 0.0.45, no leading v)" >&2
+          exit 1
 
   verify-and-release:
     if: needs.validate-release-tag.outputs.is_release_tag == 'true'
     runs-on: ubuntu-latest
     needs:
       - validate-release-tag
-      - build-ctrl-proxy-ios-ipa
-      - build-control-proxy-apk
-      - build-video-server-jar
-      - build-screen-capture-helper
 
     steps:
       - name: Checkout code
@@ -157,138 +98,138 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Wait for successful Prepare Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREPARE_RUN_ID: ${{ inputs.prepare_run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          for _ in $(seq 1 12); do
+            run="$(gh api "repos/$REPO/actions/runs/$PREPARE_RUN_ID")"
+            status="$(jq -r '.status' <<<"$run")"
+            if [[ "$status" != completed ]]; then
+              sleep 5
+              continue
+            fi
+
+            conclusion="$(jq -r '.conclusion' <<<"$run")"
+            workflow_path="$(jq -r '.path' <<<"$run")"
+            if [[ "$conclusion" != success ]] \
+              || [[ "$workflow_path" != ".github/workflows/prepare-release.yml" ]]; then
+              echo "prepare_run_id must identify a successful Prepare Release run" >&2
+              exit 1
+            fi
+            exit 0
+          done
+
+          echo "Prepare Release run $PREPARE_RUN_ID did not complete within 60 seconds" >&2
+          exit 1
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: "Download release artifact provenance"
+        uses: actions/download-artifact@v7
+        with:
+          name: release-artifact-provenance
+          path: /tmp
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
+
+      - name: Validate prepared release provenance
+        env:
+          TAG: ${{ needs.validate-release-tag.outputs.tag }}
+          PREPARE_RUN_ID: ${{ inputs.prepare_run_id }}
+        run: |
+          set -euo pipefail
+
+          tag_sha="$(git rev-parse HEAD)"
+          jq -e \
+            --arg tag "$TAG" \
+            --arg tag_sha "$tag_sha" \
+            --arg prepare_run_id "$PREPARE_RUN_ID" \
+            '.tag == $tag
+              and .tag_sha == $tag_sha
+              and .prepare_run_id == $prepare_run_id
+              and .artifacts == ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper"]' \
+            /tmp/release-artifact-provenance.json >/dev/null
 
       - name: "Download CtrlProxy APK"
         uses: actions/download-artifact@v7
         with:
           name: control-proxy-apk
           path: /tmp
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
 
       - name: "Download CtrlProxy iOS IPA"
         uses: actions/download-artifact@v7
         with:
           name: ctrl-proxy-ios-ipa
           path: /tmp
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
 
       - name: "Download video-server jar"
         uses: actions/download-artifact@v7
         with:
           name: video-server-jar
           path: /tmp
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
 
       - name: "Download screen-capture-helper"
         uses: actions/download-artifact@v7
         with:
           name: screen-capture-helper
           path: /tmp
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
 
-      # These four steps run the release's only artifact-provenance gate, and
-      # both halves of the original form failed open. `bash -e` without pipefail
-      # takes its status from `tee`, so verify-artifact-sha256.sh's exit 1 on a
-      # mismatch was discarded; and `grep | cut` takes its status from `cut`, so
-      # finding no `checksum=` line set an empty output instead of aborting. A
-      # mismatched APK therefore sailed through green and only stopped later, at
-      # generate-release-constants.sh's "requires both" guard, reported as a
-      # missing variable rather than the mismatch it was. Keep pipefail and the
-      # non-empty assertion together: either one alone still lets a case through.
-      - name: "Verify APK SHA256 matches source"
-        id: verify_checksum
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash scripts/ci/verify-artifact-sha256.sh \
-            /tmp/control-proxy-debug.apk android | tee /tmp/apk-verify.log
-          CHECKSUM=$(grep '^checksum=' /tmp/apk-verify.log | cut -d= -f2)
-          [ -n "$CHECKSUM" ] || { echo "No checksum= line in APK verify log" >&2; exit 1; }
-          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
-
-      - name: "Verify CtrlProxy iOS IPA SHA256 matches source"
-        id: verify_ipa_checksum
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash scripts/ci/verify-artifact-sha256.sh \
-            /tmp/control-proxy.ipa ios | tee /tmp/ipa-verify.log
-          CHECKSUM=$(grep '^checksum=' /tmp/ipa-verify.log | cut -d= -f2)
-          [ -n "$CHECKSUM" ] || { echo "No checksum= line in IPA verify log" >&2; exit 1; }
-          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
-
-      - name: "Verify video-server jar SHA256 matches source"
-        id: verify_video_jar_checksum
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash scripts/ci/verify-artifact-sha256.sh \
-            /tmp/automobile-video.jar videojar | tee /tmp/videojar-verify.log
-          CHECKSUM=$(grep '^checksum=' /tmp/videojar-verify.log | cut -d= -f2)
-          [ -n "$CHECKSUM" ] || { echo "No checksum= line in jar verify log" >&2; exit 1; }
-          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
-
-      - name: "Verify screen-capture-helper SHA256 matches source"
-        id: verify_screen_capture_helper_checksum
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash scripts/ci/verify-artifact-sha256.sh \
-            /tmp/screen-capture-helper-macos-universal.zip screencapturehelper | tee /tmp/screen-capture-helper-verify.log
-          CHECKSUM=$(grep '^checksum=' /tmp/screen-capture-helper-verify.log | cut -d= -f2)
-          [ -n "$CHECKSUM" ] || { echo "No checksum= line in screen-capture-helper verify log" >&2; exit 1; }
-          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
-
-      - name: Generate release constants
+      - name: Read checksums prepared for this release
+        id: prepared_checksums
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-          APK_SHA256_CHECKSUM: ${{ steps.verify_checksum.outputs.checksum }}
-          IOS_CTRL_PROXY_SHA256_CHECKSUM:
-            ${{ steps.verify_ipa_checksum.outputs.checksum }}
-          IOS_CTRL_PROXY_RUNNER_SHA256:
-            ${{ needs.build-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
-          VIDEO_JAR_SHA256:
-            ${{ steps.verify_video_jar_checksum.outputs.checksum }}
-          SCREEN_CAPTURE_HELPER_SHA256:
-            ${{ steps.verify_screen_capture_helper_checksum.outputs.checksum }}
-        run: bash scripts/generate-release-constants.sh
-
-      - name: Verify release integrity
-        run: >
-          bash scripts/ci/verify-release-integrity.sh
-          "${{ steps.version.outputs.version }}"
-          /tmp/control-proxy.ipa
-
-      - name: Run tests
-        env:
-          TURBO_TELEMETRY_DISABLED: "1"
-          TURBO_NO_UPDATE_NOTIFIER: "1"
-          DO_NOT_TRACK: "1"
-          NO_COLOR: "1"
-        run: turbo run test --output-logs=errors-only
-
-      - name: Run lint
-        env:
-          TURBO_TELEMETRY_DISABLED: "1"
-          TURBO_NO_UPDATE_NOTIFIER: "1"
-          DO_NOT_TRACK: "1"
-          NO_COLOR: "1"
-        run: turbo run lint --output-logs=errors-only
-
-      - name: Build TypeScript with injected checksum
-        env:
-          TURBO_TELEMETRY_DISABLED: "1"
-          TURBO_NO_UPDATE_NOTIFIER: "1"
-          DO_NOT_TRACK: "1"
-          NO_COLOR: "1"
-        run: turbo run build --force --output-logs=errors-only
-
-      - name: Run Bun MCP startup smoke
-        run: bun run test:startup:bun
-
-      - name: Run Bun image runtime smoke
-        run: bun run test:image:bun
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          bun -e '
+            import { appendFileSync } from "node:fs";
+            import { RELEASE_CHECKSUM_REGISTRY } from "./src/constants/release";
+            const entry = RELEASE_CHECKSUM_REGISTRY.find(({ version }) => version === process.env.VERSION);
+            if (!entry) {
+              throw new Error(`No prepared checksum registry entry for ${process.env.VERSION}`);
+            }
+            const checksums = {
+              apk: entry.apkSha256,
+              ipa: entry.ipaSha256,
+              video_jar: entry.videoJarSha256,
+              screen_capture_helper: entry.screenCaptureHelperSha256,
+            };
+            const missing = Object.entries(checksums)
+              .filter(([, value]) => !value)
+              .map(([name]) => name);
+            if (missing.length > 0) {
+              throw new Error(`Missing prepared checksums for ${process.env.VERSION}: ${missing.join(", ")}`);
+            }
+            const output = process.env.GITHUB_OUTPUT;
+            for (const [key, value] of Object.entries(checksums)) {
+              appendFileSync(output, `${key}=${value}\n`);
+            }
+          '
 
       - name: Create release notes
         id: release_notes
+        env:
+          APK_CHECKSUM: ${{ steps.prepared_checksums.outputs.apk }}
+          IPA_CHECKSUM: ${{ steps.prepared_checksums.outputs.ipa }}
+          VIDEO_JAR_CHECKSUM: ${{ steps.prepared_checksums.outputs.video_jar }}
+          SCREEN_CAPTURE_HELPER_CHECKSUM: ${{ steps.prepared_checksums.outputs.screen_capture_helper }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
@@ -307,10 +248,6 @@ jobs:
           fi
 
           # Add checksum to notes
-          APK_CHECKSUM="${{ steps.verify_checksum.outputs.checksum }}"
-          IPA_CHECKSUM="${{ steps.verify_ipa_checksum.outputs.checksum }}"
-          VIDEO_JAR_CHECKSUM="${{ steps.verify_video_jar_checksum.outputs.checksum }}"
-          SCREEN_CAPTURE_HELPER_CHECKSUM="${{ steps.verify_screen_capture_helper_checksum.outputs.checksum }}"
           NOTES="${NOTES}"$'\n\n'"## CtrlProxy APK"$'\n\n'\
             '"**SHA256 Checksum:** \`${APK_CHECKSUM}\`"$'\n\n'\
             '"Download the APK from the release assets below."
@@ -331,6 +268,9 @@ jobs:
           echo "notes<<EOF" >> $GITHUB_OUTPUT
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Build TypeScript package
+        run: bun run build
 
       - name: Publish to npm
         env:
@@ -508,10 +448,10 @@ jobs:
       - name: Summary
         env:
           VER: ${{ steps.version.outputs.version }}
-          APK_CHECKSUM: ${{ steps.verify_checksum.outputs.checksum }}
-          IPA_CHECKSUM: ${{ steps.verify_ipa_checksum.outputs.checksum }}
-          VIDEO_JAR_CHECKSUM: ${{ steps.verify_video_jar_checksum.outputs.checksum }}
-          SCREEN_CAPTURE_HELPER_CHECKSUM: ${{ steps.verify_screen_capture_helper_checksum.outputs.checksum }}
+          APK_CHECKSUM: ${{ steps.prepared_checksums.outputs.apk }}
+          IPA_CHECKSUM: ${{ steps.prepared_checksums.outputs.ipa }}
+          VIDEO_JAR_CHECKSUM: ${{ steps.prepared_checksums.outputs.video_jar }}
+          SCREEN_CAPTURE_HELPER_CHECKSUM: ${{ steps.prepared_checksums.outputs.screen_capture_helper }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |

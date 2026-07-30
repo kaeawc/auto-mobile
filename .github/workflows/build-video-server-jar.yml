@@ -11,6 +11,21 @@ name: "Build video-server jar"
 on:
   workflow_call:
     inputs:
+      checkout-ref:
+        description: "Commit or tag to build; defaults to the caller SHA"
+        required: false
+        type: string
+        default: ""
+      upload-artifact:
+        description: "Whether to upload the built jar as a workflow artifact"
+        required: false
+        type: boolean
+        default: true
+      artifact-retention-days:
+        description: "How long to retain the uploaded jar artifact"
+        required: false
+        type: number
+        default: 7
       verify-reproducible:
         description: >-
           When true, rebuild the jar from a clean tree and fail if the second
@@ -39,6 +54,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+          ref: ${{ inputs.checkout-ref || github.sha }}
+          persist-credentials: false
 
       - uses: ./.github/actions/gradle-task-run
         with:
@@ -86,8 +103,9 @@ jobs:
         run: cp android/video-server/build/libs/automobile-video.jar /tmp/automobile-video.jar
 
       - name: "Upload video-server jar"
+        if: ${{ inputs.upload-artifact }}
         uses: actions/upload-artifact@v6
         with:
           name: video-server-jar
           path: /tmp/automobile-video.jar
-          retention-days: 7
+          retention-days: ${{ inputs.artifact-retention-days }}

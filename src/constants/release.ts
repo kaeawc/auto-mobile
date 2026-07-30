@@ -67,11 +67,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
   {
     version: "0.0.47",
     apkSha256: "087518dcd258a9cb98dc5c47db2f8ae092740c84a42b33a57d71bdd5bb1ab263",
-    ipaSha256: "baeedf2473ffd2682fae7fe3db4d60592377465b4673e0685b0f308cb7bddf09",
-    runnerSha256: "d3ec1f78e4c6f7c17f67f5dec9c89801eab76ed0121439fb249cbb147abe9785",
+    ipaSha256: "176b7ae6528e87cc207397aad79ff8dd48aac4d7a646b0bd5a2a8b2a62d33d6c",
+    runnerSha256: "a46a6774cbd2d4a94f9cb1ab2e2a6fa3fea8e3ba7872b0cb7694a4d9527633f1",
     runnerSha256Target: "xctest",
     videoJarSha256: "3f3135e22fffed1e088bd434545eec873a5aec48c7c038cd2ffecdeb6b642c06",
-    screenCaptureHelperSha256: "599561da34054561137bed26924d02a65b6aefbb9171d7291b6d99decfb5ced5",
+    screenCaptureHelperSha256: "8773c8fe13b119d25fbe44bc3437b546841b861898c62de266f0abef6dd9439e",
   },
   {
     version: "0.0.46",

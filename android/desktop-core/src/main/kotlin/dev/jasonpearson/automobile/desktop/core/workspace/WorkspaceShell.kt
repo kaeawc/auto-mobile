@@ -165,13 +165,17 @@ private fun TopBar(
             .padding(horizontal = 8.dp, vertical = 4.dp),
       )
     }
+    // Visible dot stays 12dp; the clickable target is enlarged to 32dp. For a green status (no
+    // inline line) the dot is the only entry point to the health sheet.
     Box(
       modifier =
-        Modifier.size(12.dp)
-          .background(status.color(), CircleShape)
+        Modifier.size(32.dp)
           .clickable { onStatusClick() }
-          .semantics { contentDescription = "Status: ${status.name}" }
-    )
+          .semantics { contentDescription = "Status: ${status.name}" },
+      contentAlignment = Alignment.Center,
+    ) {
+      Box(Modifier.size(12.dp).background(status.color(), CircleShape))
+    }
   }
 }
 
@@ -233,10 +237,21 @@ private fun HealthSheetOverlay(onDismiss: () -> Unit, content: @Composable () ->
 private fun DefaultHealthSheetBody() {
   var connectedProcess by remember { mutableStateOf<McpProcess?>(null) }
   Column(Modifier.fillMaxSize()) {
-    McpProcessesPanel(useRealData = true, onProcessConnected = { connectedProcess = it })
+    // suppressAutoSelect: opening a diagnostic overlay must not mutate device selection. Without
+    // it,
+    // McpProcessesPanel calls setActiveDevice when exactly one device is booted.
+    // Both children are weighted so a tall process list can't push the dashboard out of view.
+    Box(Modifier.weight(1f)) {
+      McpProcessesPanel(
+        useRealData = true,
+        suppressAutoSelect = true,
+        onProcessConnected = { connectedProcess = it },
+      )
+    }
     DiagnosticsDashboard(
       connectedMcpProcess = connectedProcess,
       dataSourceMode = DataSourceMode.Real,
+      modifier = Modifier.weight(1f),
     )
   }
 }

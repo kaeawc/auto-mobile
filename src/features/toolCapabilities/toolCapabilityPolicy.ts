@@ -1,5 +1,6 @@
 import { ActionableError } from "../../models/ActionableError";
 import {
+  getEnvironmentDefaultToolCapabilities,
   getSessionToolProfileService,
   type SessionToolProfileService,
 } from "./SessionToolProfileService";
@@ -13,8 +14,16 @@ export async function isToolEnabledForSession(
   sessionToolProfileService?: ToolProfileReader,
 ): Promise<boolean> {
   const capability = TOOL_CAPABILITY_BY_NAME.get(toolName);
-  if (!capability || !sessionUuid) {
+  if (!capability) {
     return true;
+  }
+  if (!sessionUuid) {
+    // The initial tools/list has no session override to read. Consult the
+    // process default directly so discovery does not construct the file-backed
+    // profile repository merely to hide opt-in tools.
+    return sessionToolProfileService
+      ? sessionToolProfileService.isEnabled(undefined, capability)
+      : getEnvironmentDefaultToolCapabilities().has(capability);
   }
   return (sessionToolProfileService ?? getSessionToolProfileService()).isEnabled(sessionUuid, capability);
 }
@@ -42,10 +51,8 @@ export async function assertToolEnabledForSession(
  * session, or a deviceId whose owning session has no label) reduce to a single
  * check.
  *
- * When no candidate session is bound yet, the initial surface is preserved
- * (returns `true`), matching `isToolEnabledForSession`'s undefined-session
- * behavior — otherwise `tools/list` before a device session binds would filter
- * incorrectly.
+ * When no candidate session is bound yet, use the same process-level core
+ * default as a sessionless `tools/list` or `tools/call`.
  */
 export async function isToolEnabledForAnySession(
   toolName: string,
@@ -60,7 +67,7 @@ export async function isToolEnabledForAnySession(
     new Set(sessionUuids.filter((uuid): uuid is string => Boolean(uuid)))
   );
   if (candidates.length === 0) {
-    return true;
+    return isToolEnabledForSession(toolName, undefined, sessionToolProfileService);
   }
   const service = sessionToolProfileService ?? getSessionToolProfileService();
   for (const sessionUuid of candidates) {

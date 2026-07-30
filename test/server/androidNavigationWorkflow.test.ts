@@ -17,6 +17,7 @@ import { setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { installInMemoryNavManager, type InMemoryNavManagerHarness } from "../helpers/navigationTestHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { SessionToolProfileService } from "../../src/features/toolCapabilities/SessionToolProfileService";
 
 describe("Android navigation graph workflow (#4459)", () => {
   const device: BootedDevice = {
@@ -44,7 +45,10 @@ describe("Android navigation graph workflow (#4459)", () => {
   test("serves the debug-gated navigation tools through MCP tools/list", async () => {
     setDebugModeEnabled(true);
     serverConfig.setEmbeddedSdkEnabled(true);
-    const server = createMcpServer();
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = {
+      isEnabled: async () => true,
+    };
+    const server = createMcpServer({ sessionToolProfileService: profileService });
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     const client = new Client({ name: "navigation-workflow-test", version: "0.0.1" });

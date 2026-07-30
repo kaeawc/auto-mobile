@@ -57,6 +57,25 @@ describe("session tool capability MCP enforcement", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  test("denies an opt-in tool before a device session is bound", async () => {
+    fixture = new McpTestFixture();
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    const handler = mock(async () => ({ content: [{ type: "text", text: "ok" }] }));
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), handler);
+
+    await expect(fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "clipboard", arguments: {} },
+      },
+      z.any()
+    )).rejects.toThrow("requires the 'clipboard' capability");
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   test("denies a disabled device-aware tool when its schema strips sessionUuid", async () => {
     const isEnabled = mock(async (_sessionUuid: string | undefined, capability: string) =>
       capability === "test-authoring"

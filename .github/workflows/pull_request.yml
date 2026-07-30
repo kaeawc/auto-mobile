@@ -2310,7 +2310,7 @@ jobs:
               }
             };
 
-            const contextReport = readReport(contextPath, 'Context Thresholds');
+            const contextReport = readReport(contextPath, 'Context Baselines');
             const toolReport = readReport(toolPath, 'Tool Call Throughput');
             const startupReport = readReport(startupPath, 'Startup Performance');
             const npmReport = readReport(npmPath, 'NPM Unpacked Size');
@@ -2325,11 +2325,17 @@ jobs:
             const statuses = [];
             let hasFailures = false;
             let hasMissing = false;
+            let hasBaselineOnly = false;
 
             const trackStatus = (label, report) => {
               if (!report) {
                 statuses.push(`${label}: ⚠️ missing`);
                 hasMissing = true;
+                return;
+              }
+              if (report.enforcement?.enabled === false) {
+                statuses.push(`${label}: 📏`);
+                hasBaselineOnly = true;
                 return;
               }
               const passed = report.passed !== false;
@@ -2340,14 +2346,14 @@ jobs:
               }
             };
 
-            trackStatus('Context Thresholds', contextReport.report);
+            trackStatus('Context Baselines', contextReport.report);
             trackStatus('Tool Call Throughput', toolReport.report);
             trackStatus('Startup', startupReport.report);
             trackStatus('NPM Unpacked Size', npmReport.report);
 
             let overallStatus = '⚠️ PARTIAL';
             if (!hasFailures && !hasMissing) {
-              overallStatus = '✅ PASSED';
+              overallStatus = hasBaselineOnly ? '📏 BASELINES RECORDED' : '✅ PASSED';
             } else if (hasFailures) {
               overallStatus = '❌ FAILED';
             }
@@ -2361,20 +2367,26 @@ jobs:
                 if (!result) {
                   return `| ${label} | n/a | n/a | n/a | ⚠️ |`;
                 }
-                const status = result.passed ? '✅' : '❌';
+                const status = report.enforcement?.enabled === false
+                  ? '📏'
+                  : result.passed ? '✅' : '❌';
                 const actual = typeof result.actual === 'number' ? result.actual.toLocaleString() : 'n/a';
-                const threshold = typeof result.threshold === 'number' ? result.threshold.toLocaleString() : 'n/a';
-                const usage = typeof result.usage === 'number' ? `${result.usage}%` : 'n/a';
-                return `| ${label} | ${actual} | ${threshold} | ${usage} | ${status} |`;
+                const baseline = typeof result.baseline === 'number' ? result.baseline.toLocaleString() : 'n/a';
+                const delta = typeof result.delta === 'number'
+                  ? `${result.delta >= 0 ? '+' : ''}${result.delta.toLocaleString()}`
+                  : 'n/a';
+                return `| ${label} | ${actual} | ${baseline} | ${delta} | ${status} |`;
               };
 
-              body += '### Context Thresholds\n\n';
-              body += '| Category | Actual | Threshold | Usage | Status |\n';
-              body += '|----------|--------|-----------|-------|--------|\n';
-              body += formatRow('Tools', report.results?.tools) + '\n';
+              body += '### Context Baselines\n\n';
+              body += '| Category | Actual | Baseline | Delta | Status |\n';
+              body += '|----------|--------|----------|-------|--------|\n';
+              body += formatRow('Core Tools', report.results?.coreTools) + '\n';
+              body += formatRow('All Tools', report.results?.allTools) + '\n';
               body += formatRow('Resources', report.results?.resources) + '\n';
               body += formatRow('Resource Templates', report.results?.resourceTemplates) + '\n';
-              body += formatRow('**Total**', report.results?.total) + '\n';
+              body += formatRow('**Core Total**', report.results?.coreTotal) + '\n';
+              body += formatRow('**All Total**', report.results?.allTotal) + '\n';
 
               if (Array.isArray(report.violations) && report.violations.length > 0) {
                 body += '\n### ⚠️ Threshold Violations\n\n';
@@ -2383,7 +2395,10 @@ jobs:
                 }
               }
 
-              body += `\n**Overall Status:** ${report.passed ? '✅ PASSED' : '❌ FAILED'}`;
+              const contextStatus = report.enforcement?.enabled === false
+                ? '📏 BASELINES RECORDED (threshold enforcement pending)'
+                : report.passed ? '✅ PASSED' : '❌ FAILED';
+              body += `\n**Overall Status:** ${contextStatus}`;
               if (report.timestamp) {
                 body += `\n\n_Generated at ${report.timestamp}_`;
               }

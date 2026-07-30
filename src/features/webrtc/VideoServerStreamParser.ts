@@ -19,6 +19,9 @@
  * library-agnostic so it can be unit-tested without a device.
  */
 
+import { ActionableError } from "../../models/ActionableError";
+import { BufferQueue } from "../../utils/BufferQueue";
+
 /** "h264" as a big-endian int: 0x68323634. */
 export const VIDEO_SERVER_CODEC_ID_H264 = 0x68323634;
 /** "amux" as a big-endian int: multiplexed audio/video protocol marker. */
@@ -32,6 +35,24 @@ const STREAM_HEADER_BYTES = 12;
 const PACKET_HEADER_BYTES = 12;
 const MUX_TRACK_BYTES = 16;
 const MUX_PACKET_HEADER_BYTES = 16;
+
+/**
+ * Largest per-packet payload the parser will buffer. A single framing desync
+ * makes the 32-bit big-endian `size` field decode to an arbitrary value, so
+ * without a cap the parser buffers incoming bytes indefinitely while it waits
+ * for a bogus length — unbounded host-memory growth on a live 4-8 Mbps feed.
+ * 16 MiB sits comfortably above any real keyframe at the supported
+ * resolutions/bitrates, so legitimate maximum-size IDRs still parse while a
+ * corrupt length surfaces a bounded parse error instead.
+ */
+export const MAX_PACKET_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Largest declared mux `trackCount`. The multiplexed protocol carries a handful
+ * of tracks (video + audio today); a bogus 32-bit count would otherwise make
+ * the header wait for `12 + trackCount * 16` bytes that never arrive.
+ */
+export const MAX_TRACK_COUNT = 16;
 const FLAG_CONFIG = 1n << 63n;
 const FLAG_KEY_FRAME = 1n << 62n;
 const FLAG_REPLAYED = 1n << 61n;
@@ -73,36 +94,53 @@ export interface VideoServerStreamParserCallbacks {
  * fully buffered. Bytes for a not-yet-complete packet are retained across calls.
  */
 export class VideoServerStreamParser {
-  private buffered: Buffer = Buffer.alloc(0);
+  private readonly buffered = new BufferQueue();
   private header: VideoServerStreamHeader | null = null;
   private muxTracks: Map<number, { codecId: number; param1: number; param2: number }> | null = null;
 
   constructor(private readonly callbacks: VideoServerStreamParserCallbacks) {}
 
+  /**
+   * Guard a size/track-count read against its cap. A declared length over the
+   * cap means a framing desync (or a corrupt stream): fail fast with a bounded
+   * parse error instead of buffering the bogus length forever. The socket
+   * wiring routes the throw to its reconnect/fallback path.
+   */
+  private assertWithinCap(value: number, cap: number, field: string): void {
+    if (value > cap) {
+      throw new ActionableError(
+        `video-server stream declared ${field}=${value}, exceeding the ${cap} cap; ` +
+          "the stream is likely corrupt or out of sync."
+      );
+    }
+  }
+
   push(chunk: Buffer): void {
-    this.buffered =
-      this.buffered.length === 0 ? chunk : Buffer.concat([this.buffered, chunk]);
+    this.buffered.append(chunk);
 
     if (!this.header && !this.muxTracks) {
       if (this.buffered.length < STREAM_HEADER_BYTES) {
         return;
       }
-      const codecOrMagic = this.buffered.readUInt32BE(0);
+      const streamHeader = this.buffered.peek(STREAM_HEADER_BYTES);
+      const codecOrMagic = streamHeader.readUInt32BE(0);
       if (codecOrMagic === VIDEO_SERVER_CODEC_ID_AMUX) {
-        const trackCount = this.buffered.readUInt32BE(8);
+        const trackCount = streamHeader.readUInt32BE(8);
+        this.assertWithinCap(trackCount, MAX_TRACK_COUNT, "trackCount");
         const headerBytes = STREAM_HEADER_BYTES + trackCount * MUX_TRACK_BYTES;
         if (this.buffered.length < headerBytes) {
           return;
         }
+        const fullHeader = this.buffered.peek(headerBytes);
         this.muxTracks = new Map();
         let videoHeader: Pick<VideoServerStreamHeader, "codecId" | "width" | "height"> | null = null;
         let hasPcmAudioTrack = false;
         for (let i = 0; i < trackCount; i++) {
           const offset = STREAM_HEADER_BYTES + i * MUX_TRACK_BYTES;
-          const trackId = this.buffered.readUInt32BE(offset);
-          const codecId = this.buffered.readUInt32BE(offset + 4);
-          const param1 = this.buffered.readUInt32BE(offset + 8);
-          const param2 = this.buffered.readUInt32BE(offset + 12);
+          const trackId = fullHeader.readUInt32BE(offset);
+          const codecId = fullHeader.readUInt32BE(offset + 4);
+          const param1 = fullHeader.readUInt32BE(offset + 8);
+          const param2 = fullHeader.readUInt32BE(offset + 12);
           this.muxTracks.set(trackId, { codecId, param1, param2 });
           if (codecId === VIDEO_SERVER_CODEC_ID_H264) {
             videoHeader = { codecId, width: param1, height: param2 };
@@ -114,14 +152,14 @@ export class VideoServerStreamParser {
           this.header = { ...videoHeader, muxed: true, audio: hasPcmAudioTrack };
           this.callbacks.onHeader?.(this.header);
         }
-        this.buffered = this.buffered.subarray(headerBytes);
+        this.buffered.discard(headerBytes);
       } else {
         this.header = {
           codecId: codecOrMagic,
-          width: this.buffered.readUInt32BE(4),
-          height: this.buffered.readUInt32BE(8),
+          width: streamHeader.readUInt32BE(4),
+          height: streamHeader.readUInt32BE(8),
         };
-        this.buffered = this.buffered.subarray(STREAM_HEADER_BYTES);
+        this.buffered.discard(STREAM_HEADER_BYTES);
         this.callbacks.onHeader?.(this.header);
       }
     }
@@ -132,15 +170,15 @@ export class VideoServerStreamParser {
     }
 
     while (this.buffered.length >= PACKET_HEADER_BYTES) {
-      const flags = this.buffered.readBigUInt64BE(0);
-      const size = this.buffered.readUInt32BE(8);
+      const packetHeader = this.buffered.peek(PACKET_HEADER_BYTES);
+      const flags = packetHeader.readBigUInt64BE(0);
+      const size = packetHeader.readUInt32BE(8);
+      this.assertWithinCap(size, MAX_PACKET_BYTES, "packet size");
       if (this.buffered.length < PACKET_HEADER_BYTES + size) {
         break; // wait for the rest of the payload
       }
-      const data = Buffer.from(
-        this.buffered.subarray(PACKET_HEADER_BYTES, PACKET_HEADER_BYTES + size)
-      );
-      this.buffered = this.buffered.subarray(PACKET_HEADER_BYTES + size);
+      this.buffered.discard(PACKET_HEADER_BYTES);
+      const data = this.buffered.takeDetached(size);
       this.callbacks.onPacket({
         trackId: VIDEO_SERVER_TRACK_ID_VIDEO,
         codecId: this.header?.codecId ?? VIDEO_SERVER_CODEC_ID_H264,
@@ -155,16 +193,16 @@ export class VideoServerStreamParser {
 
   private drainMuxPackets(): void {
     while (this.buffered.length >= MUX_PACKET_HEADER_BYTES) {
-      const trackId = this.buffered.readUInt32BE(0);
-      const flags = this.buffered.readBigUInt64BE(4);
-      const size = this.buffered.readUInt32BE(12);
+      const packetHeader = this.buffered.peek(MUX_PACKET_HEADER_BYTES);
+      const trackId = packetHeader.readUInt32BE(0);
+      const flags = packetHeader.readBigUInt64BE(4);
+      const size = packetHeader.readUInt32BE(12);
+      this.assertWithinCap(size, MAX_PACKET_BYTES, "packet size");
       if (this.buffered.length < MUX_PACKET_HEADER_BYTES + size) {
         break;
       }
-      const data = Buffer.from(
-        this.buffered.subarray(MUX_PACKET_HEADER_BYTES, MUX_PACKET_HEADER_BYTES + size)
-      );
-      this.buffered = this.buffered.subarray(MUX_PACKET_HEADER_BYTES + size);
+      this.buffered.discard(MUX_PACKET_HEADER_BYTES);
+      const data = this.buffered.takeDetached(size);
       const track = this.muxTracks?.get(trackId);
       if (!track) {
         continue;

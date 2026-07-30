@@ -7,10 +7,14 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationNodeData
+import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
+import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFactory
+import dev.jasonpearson.automobile.desktop.core.datasource.NavigationDataSource
 import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
@@ -22,13 +26,34 @@ import org.junit.Test
 @OptIn(ExperimentalTestApi::class)
 class NavigationFacetTest {
 
+  /**
+   * [DataSourceFactory] that counts navigation-data-source creations, delegating everything else. A
+   * non-zero count means the dashboard ran its active-device fetch path — which a stream-only facet
+   * must never do.
+   */
+  private class CountingNavigationFactory(private val delegate: DataSourceFactory) :
+    DataSourceFactory by delegate {
+    var navigationDataSourceCreations = 0
+      private set
+
+    override fun createNavigationDataSource(
+      mode: DataSourceMode,
+      clientProvider: (() -> AutoMobileClient)?,
+      appId: String?,
+      cacheTtlMs: Long,
+    ): NavigationDataSource {
+      navigationDataSourceCreations++
+      return delegate.createNavigationDataSource(mode, clientProvider, appId, cacheTtlMs)
+    }
+  }
+
   /** In-memory graph so the dashboard's data-source load hits a fake client, never a socket. */
-  private fun testGraph(): AutoMobileGraphProvider {
+  private fun testGraph(factory: DataSourceFactory? = null): AutoMobileGraphProvider {
     val client = FakeAutoMobileClient()
     return object : AutoMobileGraphProvider {
       override val autoMobileClient = client
       override val settingsProvider = FakeSettingsProvider()
-      override val dataSourceFactory = DefaultDataSourceFactory(client)
+      override val dataSourceFactory = factory ?: DefaultDataSourceFactory(client)
     }
   }
 
@@ -131,4 +156,32 @@ class NavigationFacetTest {
     assertEquals(1, streams.getValue("dev-2").connectCallCount)
     assertEquals("dev-2", streams.getValue("dev-2").lastConnectedDeviceId)
   }
+
+  @Test
+  fun `never queries the active-device data source, even during the on-mount window`() =
+    runComposeUiTest {
+      val factory = CountingNavigationFactory(DefaultDataSourceFactory(FakeAutoMobileClient()))
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph(factory)) {
+          MaterialTheme {
+            NavigationFacet(
+              column =
+                DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+              observationStreamFactory = { FakeObservationStream() },
+            )
+          }
+        }
+      }
+      waitForIdle()
+
+      // The facet attaches its stream via DisposableEffect AFTER first composition, so on mount
+      // observationStreamClient is still null. A count > 0 would mean the dashboard fell back to
+      // the active-device fetch during that window (the old stream-presence gate) — briefly showing
+      // the wrong device's graph. Gating on streamOnly directly keeps this at 0.
+      assertEquals(
+        "stream-only facet must never create the active-device navigation data source",
+        0,
+        factory.navigationDataSourceCreations,
+      )
+    }
 }

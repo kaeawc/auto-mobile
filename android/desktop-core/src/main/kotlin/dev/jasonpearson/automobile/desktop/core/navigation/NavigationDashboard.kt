@@ -45,8 +45,8 @@ fun NavigationDashboard(
     null, // Screenshot loader (hoisted to parent so cache persists across toggles)
   settingsProvider: SettingsProvider =
     FakeSettingsProvider(), // Settings provider (caller injects real impl)
-  // When true (and a stream is provided), skip the initial active-device data-source fetch and
-  // drive the graph solely from the per-device [observationStreamClient]. This keeps per-device
+  // When true, never run the initial active-device data-source fetch; the graph is driven solely by
+  // the per-device [observationStreamClient] (which the caller attaches). This keeps per-device
   // panes correct: the active-device fetch would otherwise briefly show the wrong device's graph
   // until the first stream push. The default preserves the existing (non-facet) fetch behavior.
   streamOnly: Boolean = false,
@@ -75,12 +75,13 @@ fun NavigationDashboard(
   var isLoading by remember { mutableStateOf(true) }
   var error by remember { mutableStateOf<String?>(null) }
 
-  val streamDriven = streamOnly && observationStreamClient != null
-
-  LaunchedEffect(dataSourceMode, clientProvider, selectedAppId, streamDriven) {
-    // Stream-only: skip the active-device data-source fetch so the graph is driven solely by this
-    // pane's per-device stream (avoids briefly showing the active device's graph).
-    if (streamDriven) {
+  LaunchedEffect(dataSourceMode, clientProvider, selectedAppId, streamOnly) {
+    // Stream-only: never run the active-device data-source fetch — the graph is driven solely by
+    // this pane's per-device stream. Gated on streamOnly directly (not stream presence): the facet
+    // attaches its stream via DisposableEffect AFTER first composition, so keying on the attached
+    // stream would still let the fetch fire once on mount and briefly show the wrong device's
+    // graph.
+    if (streamOnly) {
       isLoading = false
       return@LaunchedEffect
     }

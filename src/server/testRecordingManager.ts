@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
 import * as yaml from "js-yaml";
 import { BootedDevice, Plan, PlanStep } from "../models";
 import { logger } from "../utils/logger";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import { PlanValidator } from "../utils/plan/PlanValidator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { DualTrackRecorder } from "../features/record/android";
 
 interface TestRecordingStartResult {
@@ -110,7 +110,11 @@ const formatPlanName = (planName?: string): string => {
   return `recorded-plan-${timestamp}`;
 };
 
-export async function startTestRecording(device: BootedDevice, timer: Timer = defaultTimer): Promise<TestRecordingStartResult> {
+export async function startTestRecording(
+  device: BootedDevice,
+  timer: Timer = defaultTimer,
+  idGenerator: IdGenerator = defaultIdGenerator
+): Promise<TestRecordingStartResult> {
   if (activeRecording) {
     if (activeRecording.deviceId !== device.deviceId) {
       throw new Error(
@@ -131,7 +135,7 @@ export async function startTestRecording(device: BootedDevice, timer: Timer = de
     throw new Error(`Test recording is only supported on Android right now (got ${device.platform}).`);
   }
 
-  const recordingId = randomUUID();
+  const recordingId = idGenerator.next();
   const startedAt = timer.now();
 
   const recorder = new DualTrackRecorder(device);

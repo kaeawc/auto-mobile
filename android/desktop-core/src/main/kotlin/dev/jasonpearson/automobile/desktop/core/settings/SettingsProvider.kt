@@ -13,4 +13,6 @@ interface SettingsProvider {
   var iosIde: String
   /** Theme mode: "dark", "light", or "system" */
   var themeMode: String
+  /** Whether the first-run onboarding has been dismissed. */
+  var hasSeenOnboarding: Boolean
 }

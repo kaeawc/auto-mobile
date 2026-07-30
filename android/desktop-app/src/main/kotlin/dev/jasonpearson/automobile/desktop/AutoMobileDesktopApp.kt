@@ -19,6 +19,7 @@ import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.Tool
@@ -65,6 +66,7 @@ fun AutoMobileDesktopApp(
     remember(scope, resourceClient) { DevicePickerViewModel(resourceClient, scope) }
   val pickerState by pickerViewModel.state.collectAsState()
   var pickerOpen by remember { mutableStateOf(false) }
+  var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
 
   // OpenPicker (from the empty state or the Devices launcher) shows the picker; observing selected
   // devices turns them into workspace columns.
@@ -102,19 +104,27 @@ fun AutoMobileDesktopApp(
       // Device-tab workspace is the desktop app root (replaces ThreePaneShell). AutoMobileContent
       // is retained and still used by the IDE plugin; dashboards return as workspace facets in
       // follow-up PRs. menuBarActions is plumbed for later re-wiring once facets/panes exist.
-      if (pickerOpen) {
-        DevicePicker(
-          state = pickerState,
-          onAction = pickerViewModel::onAction,
-          onClose = { pickerOpen = false },
-        )
-      } else {
-        WorkspaceShell(
-          state = workspaceState,
-          onAction = workspaceViewModel::onAction,
-          onOpenPicker = workspaceViewModel::openPicker,
-          facetContent = { column, tool -> WorkspaceFacet(column, tool) },
-        )
+      when {
+        showOnboarding ->
+          OnboardingScreen(
+            onGetStarted = {
+              settings.hasSeenOnboarding = true
+              showOnboarding = false
+            }
+          )
+        pickerOpen ->
+          DevicePicker(
+            state = pickerState,
+            onAction = pickerViewModel::onAction,
+            onClose = { pickerOpen = false },
+          )
+        else ->
+          WorkspaceShell(
+            state = workspaceState,
+            onAction = workspaceViewModel::onAction,
+            onOpenPicker = workspaceViewModel::openPicker,
+            facetContent = { column, tool -> WorkspaceFacet(column, tool) },
+          )
       }
     }
   }

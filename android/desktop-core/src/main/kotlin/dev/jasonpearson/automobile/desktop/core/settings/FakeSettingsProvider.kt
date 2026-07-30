@@ -10,4 +10,5 @@ class FakeSettingsProvider(
   override var androidIde: String = "auto",
   override var iosIde: String = "auto",
   override var themeMode: String = "dark",
+  override var hasSeenOnboarding: Boolean = false,
 ) : SettingsProvider

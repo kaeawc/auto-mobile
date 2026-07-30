@@ -95,8 +95,13 @@ class NavigationFacetTest {
         currentScreen = "Login",
       )
     )
-    waitForIdle()
 
+    // Poll rather than a single waitForIdle: the render depends on the async chain
+    // SharedFlow collect -> state update -> recompose -> canvas layout, which a lone waitForIdle
+    // does not deterministically await (flaked under CI load).
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("Login").fetchSemanticsNodes().isNotEmpty()
+    }
     onAllNodesWithText("Login").onFirst().assertExists()
   }
 

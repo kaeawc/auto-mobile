@@ -421,6 +421,111 @@ describe("IosH264Source", () => {
     await pool.shutdown();
   });
 
+  test("re-resolves a changed Simulator windowID before the silent-capture retry", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const helperTargets: CaptureTarget[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: options => {
+        helperTargets.push(options.target);
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const resolvedWindowIds = [42, 99];
+    let resolveCalls = 0;
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      firstFrameTimeoutMs: 1,
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => resolvedWindowIds[resolveCalls++] ?? 99,
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    timer.advanceTime(1);
+    await flush();
+
+    expect(helpers).toHaveLength(2);
+    helpers[1].emitFrame(frame(1, 1, 0x11));
+
+    expect(await started).toBeNull();
+    // First attempt targeted the initially-resolved window; the retry re-resolved
+    // to the recreated window's new CGWindowID rather than reusing the stale one.
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+      { kind: "simulator", windowID: 99, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    ]);
+    expect(resolveCalls).toBe(2);
+    expect(helpers[0].stopped).toBe(true);
+    expect(helpers[1].started).toBe(true);
+    await source.stop();
+    await pool.shutdown();
+  });
+
+  test("retries with the same windowID when the Simulator window is unchanged", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const helperTargets: CaptureTarget[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: options => {
+        helperTargets.push(options.target);
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    let resolveCalls = 0;
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      firstFrameTimeoutMs: 1,
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => {
+        resolveCalls++;
+        return 42;
+      },
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    timer.advanceTime(1);
+    await flush();
+
+    expect(helpers).toHaveLength(2);
+    helpers[1].emitFrame(frame(1, 1, 0x11));
+
+    expect(await started).toBeNull();
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+      { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    ]);
+    // Re-resolution happens once on retry; the unchanged id preserves prior behavior.
+    expect(resolveCalls).toBe(2);
+    expect(helpers[0].stopped).toBe(true);
+    expect(helpers[1].started).toBe(true);
+    await source.stop();
+    await pool.shutdown();
+  });
+
   test("reports the existing no-frame error after a second silent pooled Simulator attempt", async () => {
     const helpers: FakeFrameCaptureHelper[] = [];
     const pool = new IOSSimulatorCaptureHelperPool({

@@ -1389,38 +1389,42 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Delegated Public Methods - Hierarchy
   // ===========================================================================
 
+  // Thin pass-throughs: like the gesture/text/etc. delegates below, these do NOT
+  // restate the delegate's default parameter values. Omitted args forward as
+  // `undefined`, so CtrlProxyHierarchy (the single source of truth) applies its own
+  // defaults — keeping the two-copies drift class from issue #3505 unrepresentable.
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    disableAllFiltering: boolean = false,
+    perf?: PerformanceTracker,
+    skipWaitForFresh?: boolean,
+    minTimestamp?: number,
+    disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number
   ): Promise<ViewHierarchyResult | null> {
     return this.hierarchy.getAccessibilityHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, disableAllFiltering, signal, timeoutMs);
   }
 
-  async setRecompositionTrackingEnabled(enabled: boolean, perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<void> {
+  async setRecompositionTrackingEnabled(enabled: boolean, perf?: PerformanceTracker): Promise<void> {
     return this.hierarchy.setRecompositionTrackingEnabled(enabled, perf);
   }
 
   async getLatestHierarchy(
-    waitForFresh: boolean = false,
+    waitForFresh?: boolean,
     timeout?: number,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
+    perf?: PerformanceTracker,
+    skipWaitForFresh?: boolean,
+    minTimestamp?: number,
     signal?: AbortSignal
   ): Promise<AccessibilityHierarchyResponse> {
-    return this.hierarchy.getLatestHierarchy(waitForFresh, timeout!, perf, skipWaitForFresh, minTimestamp, signal);
+    return this.hierarchy.getLatestHierarchy(waitForFresh, timeout, perf, skipWaitForFresh, minTimestamp, signal);
   }
 
   async requestHierarchySync(
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    disableAllFiltering: boolean = false,
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs: number = 10000,
+    timeoutMs?: number,
     diagnostics?: HierarchySyncDiagnostics
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, diagnostics);
@@ -1457,22 +1461,30 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Delegated Public Methods - Gestures
   // ===========================================================================
 
+  // These are thin pass-throughs. They deliberately DO NOT restate the delegate's
+  // default parameter values: omitted args forward as `undefined`, so the delegate
+  // (the single source of truth) applies its own defaults. This makes the two-copies
+  // drift class from issue #3505 unrepresentable.
   async requestSwipe(
     x1: number, y1: number, x2: number, y2: number,
-    duration: number = 300, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker(), frameContext?: string
+    duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestSwipe(x1, y1, x2, y2, duration, timeoutMs, perf, frameContext);
   }
 
   async requestTapCoordinates(
-    x: number, y: number, duration: number = 10, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker(), frameContext?: string
+    x: number, y: number,
+    // Deliberate Android-specific override: taps default to a 10ms press, not the
+    // delegate's cross-platform 0ms default. This is the one intentional divergence,
+    // not restated drift — see issue #3505.
+    duration: number = 10, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<A11yTapCoordinatesResult> {
     return this.gestures.requestTapCoordinates(x, y, duration, timeoutMs, perf, frameContext);
   }
 
   async requestTwoFingerSwipe(
     x1: number, y1: number, x2: number, y2: number,
-    duration: number = 300, offset: number = 100, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    duration?: number, offset?: number, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestTwoFingerSwipe(x1, y1, x2, y2, duration, offset, timeoutMs, perf);
   }
@@ -1487,7 +1499,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   async requestPinch(
     centerX: number, centerY: number,
     distanceStart: number, distanceEnd: number, rotationDegrees: number,
-    duration: number = 300, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    duration?: number, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yPinchResult> {
     return this.gestures.requestPinch(centerX, centerY, distanceStart, distanceEnd, rotationDegrees, duration, timeoutMs, perf);
   }
@@ -1503,20 +1515,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   async requestClearText(
-    resourceId?: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11ySetTextResult> {
     return this.text.requestClearText(resourceId, timeoutMs, perf);
   }
 
   async requestImeAction(
     action: ImeAction,
-    timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yImeActionResult> {
     return this.text.requestImeAction(action, timeoutMs, perf);
   }
 
   async requestSelectAll(
-    timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11ySelectAllResult> {
     return this.text.requestSelectAll(timeoutMs, perf);
   }
@@ -1526,31 +1538,31 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   async requestInstallCaCertificate(
-    certificate: string, timeoutMs: number = 10000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    certificate: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yCaCertResult> {
     return this.certificates.requestInstallCaCertificate(certificate, timeoutMs, perf);
   }
 
   async requestInstallCaCertificateFromFile(
-    certificatePath: string, timeoutMs: number = 10000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    certificatePath: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yCaCertResult> {
     return this.certificates.requestInstallCaCertificateFromFile(certificatePath, timeoutMs, perf);
   }
 
   async requestRemoveCaCertificate(
-    alias: string, timeoutMs: number = 10000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    alias: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yCaCertResult> {
     return this.certificates.requestRemoveCaCertificate(alias, timeoutMs, perf);
   }
 
   async requestDeviceOwnerStatus(
-    timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yDeviceOwnerStatusResult> {
     return this.certificates.requestDeviceOwnerStatus(timeoutMs, perf);
   }
 
   async requestPermission(
-    permission: string, requestPermission: boolean = true, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    permission: string, requestPermission?: boolean, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yPermissionResult> {
     return this.certificates.requestPermission(permission, requestPermission, timeoutMs, perf);
   }
@@ -1559,35 +1571,35 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Delegated Public Methods - Storage
   // ===========================================================================
 
-  async listPreferenceFiles(packageName: string, timeoutMs: number = 5000): Promise<PreferenceFile[]> {
+  async listPreferenceFiles(packageName: string, timeoutMs?: number): Promise<PreferenceFile[]> {
     return this.storage.listPreferenceFiles(packageName, timeoutMs);
   }
 
-  async getPreferenceEntries(packageName: string, fileName: string, timeoutMs: number = 5000): Promise<KeyValueEntry[]> {
+  async getPreferenceEntries(packageName: string, fileName: string, timeoutMs?: number): Promise<KeyValueEntry[]> {
     return this.storage.getPreferenceEntries(packageName, fileName, timeoutMs);
   }
 
-  async getPreference(packageName: string, fileName: string, key: string, timeoutMs: number = 5000): Promise<KeyValueEntry | null> {
+  async getPreference(packageName: string, fileName: string, key: string, timeoutMs?: number): Promise<KeyValueEntry | null> {
     return this.storage.getPreference(packageName, fileName, key, timeoutMs);
   }
 
-  async setPreference(packageName: string, fileName: string, key: string, value: string | null, type: KeyValueType, timeoutMs: number = 5000): Promise<void> {
+  async setPreference(packageName: string, fileName: string, key: string, value: string | null, type: KeyValueType, timeoutMs?: number): Promise<void> {
     return this.storage.setPreference(packageName, fileName, key, value, type, timeoutMs);
   }
 
-  async removePreference(packageName: string, fileName: string, key: string, timeoutMs: number = 5000): Promise<void> {
+  async removePreference(packageName: string, fileName: string, key: string, timeoutMs?: number): Promise<void> {
     return this.storage.removePreference(packageName, fileName, key, timeoutMs);
   }
 
-  async clearPreferenceStore(packageName: string, fileName: string, timeoutMs: number = 5000): Promise<void> {
+  async clearPreferenceStore(packageName: string, fileName: string, timeoutMs?: number): Promise<void> {
     return this.storage.clearPreferenceStore(packageName, fileName, timeoutMs);
   }
 
-  async subscribeStorage(packageName: string, fileName: string, timeoutMs: number = 5000): Promise<StorageSubscription> {
+  async subscribeStorage(packageName: string, fileName: string, timeoutMs?: number): Promise<StorageSubscription> {
     return this.storage.subscribeStorage(packageName, fileName, timeoutMs);
   }
 
-  async unsubscribeStorage(subscriptionId: string, timeoutMs: number = 5000): Promise<void> {
+  async unsubscribeStorage(subscriptionId: string, timeoutMs?: number): Promise<void> {
     return this.storage.unsubscribeStorage(subscriptionId, timeoutMs);
   }
 
@@ -1600,25 +1612,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   async clearAccessibilityFocus(
-    resourceId: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    resourceId: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<void> {
     return this.focus.clearAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
   async setAccessibilityFocus(
-    resourceId: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    resourceId: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<void> {
     return this.focus.setAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
   async requestCurrentFocus(
-    timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CurrentFocusResult> {
     return this.focus.requestCurrentFocus(timeoutMs, perf);
   }
 
   async requestTraversalOrder(
-    timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<TraversalOrderResult> {
     return this.focus.requestTraversalOrder(timeoutMs, perf);
   }
@@ -1628,7 +1640,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   async requestAddHighlight(
-    id: string, shape: HighlightShape, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+    id: string, shape: HighlightShape, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<HighlightOperationResult> {
     return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf);
   }

@@ -1625,12 +1625,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return this.hierarchy.getAccessibilityHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, disableAllFiltering);
   }
 
+  // Thin pass-throughs: like the delegated methods below, these do NOT restate the
+  // delegate's default parameter values. Omitted args forward as `undefined`, so
+  // CtrlProxyHierarchy (the single source of truth) applies its own defaults —
+  // keeping the two-copies drift class from issue #3505 unrepresentable.
   async getLatestHierarchy(
-    waitForFresh: boolean = false,
-    timeout: number = 15000,
+    waitForFresh?: boolean,
+    timeout?: number,
     perf?: PerformanceTracker,
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0
+    skipWaitForFresh?: boolean,
+    minTimestamp?: number
   ): Promise<CtrlProxyHierarchyResponse> {
     return this.hierarchy.getLatestHierarchy(waitForFresh, timeout, perf, skipWaitForFresh, minTimestamp);
   }
@@ -1639,7 +1643,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs: number = 5000
+    timeoutMs?: number
   ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
   }
@@ -1648,7 +1652,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs: number = 5000
+    timeoutMs?: number
   ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, true);
   }
@@ -1673,11 +1677,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Delegated Public Methods - Highlights
   // ===========================================================================
 
+  // Thin pass-throughs below deliberately DO NOT restate the delegate's default
+  // parameter values: omitted args forward as `undefined` so the delegate (the
+  // single source of truth) applies its own defaults, making the two-copies drift
+  // class from issue #3505 unrepresentable.
   async requestAddHighlight(
     id: string,
     shape: HighlightShape,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    timeoutMs?: number,
+    perf?: PerformanceTracker
   ): Promise<CtrlProxyHighlightResult> {
     return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf);
   }
@@ -1709,14 +1717,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestTapCoordinates(
-    x: number, y: number, duration: number = 0, timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
+    x: number, y: number, duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyTapResult> {
     return this.gestures.requestTapCoordinates(x, y, duration, timeoutMs, perf, frameContext);
   }
 
   async requestSwipe(
     x1: number, y1: number, x2: number, y2: number,
-    duration: number = 300, timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
+    duration?: number, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxySwipeResult> {
     return this.gestures.requestSwipe(x1, y1, x2, y2, duration, timeoutMs, perf, frameContext);
   }
@@ -1731,7 +1739,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   async requestPinch(
     centerX: number, centerY: number,
     distanceStart: number, distanceEnd: number, rotationDegrees: number,
-    duration: number = 300, timeoutMs: number = 5000, perf?: PerformanceTracker
+    duration?: number, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyPinchResult> {
     return this.gestures.requestPinch(centerX, centerY, distanceStart, distanceEnd, rotationDegrees, duration, timeoutMs, perf);
   }
@@ -1747,33 +1755,33 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   async requestAppendText(
-    text: string, timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
+    text: string, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxySetTextResult> {
     return this.text.requestAppendText(text, timeoutMs, perf, frameContext);
   }
 
   async requestClearText(
-    resourceId?: string, timeoutMs: number = 5000, perf?: PerformanceTracker
+    resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxySetTextResult> {
     return this.text.requestClearText(resourceId, timeoutMs, perf);
   }
 
   async requestImeAction(
     action: ImeAction,
-    timeoutMs: number = 5000, perf?: PerformanceTracker
+    timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyImeActionResult> {
     return this.text.requestImeAction(action, timeoutMs, perf);
   }
 
   async requestSelectAll(
-    timeoutMs: number = 5000, perf?: PerformanceTracker
+    timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxySelectAllResult> {
     return this.text.requestSelectAll(timeoutMs, perf);
   }
 
   async requestKeyboard(
     action: "open" | "close" | "detect",
-    timeoutMs: number = 5000,
+    timeoutMs?: number,
     perf?: PerformanceTracker
   ): Promise<CtrlProxyKeyboardResult> {
     return this.keyboard.requestKeyboard(action, timeoutMs, perf);
@@ -1784,43 +1792,43 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestPressHome(
-    timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
+    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyPressHomeResult> {
     return this.navigation.requestPressHome(timeoutMs, perf, frameContext);
   }
 
   async requestPressBack(
-    timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
+    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyPressBackResult> {
     return this.navigation.requestPressBack(timeoutMs, perf, frameContext);
   }
 
   async requestShake(
-    timeoutMs: number = 5000, perf?: PerformanceTracker
+    timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyShakeResult> {
     return this.navigation.requestShake(timeoutMs, perf);
   }
 
   async requestPressButton(
-    button: string, timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
+    button: string, timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyPressButtonResult> {
     return this.navigation.requestPressButton(button, timeoutMs, perf, frameContext);
   }
 
   async requestRecentApps(
-    timeoutMs: number = 5000, perf?: PerformanceTracker, frameContext?: string
+    timeoutMs?: number, perf?: PerformanceTracker, frameContext?: string
   ): Promise<CtrlProxyRecentAppsResult> {
     return this.navigation.requestRecentApps(timeoutMs, perf, frameContext);
   }
 
   async requestRotate(
-    orientation: string, timeoutMs: number = 5000, perf?: PerformanceTracker
+    orientation: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyRotateResult> {
     return this.navigation.requestRotate(orientation, timeoutMs, perf);
   }
 
   async requestLaunchApp(
-    bundleId: string, timeoutMs: number = 10000, perf?: PerformanceTracker, coldBoot: boolean = false
+    bundleId: string, timeoutMs?: number, perf?: PerformanceTracker, coldBoot?: boolean
   ): Promise<CtrlProxyLaunchAppResult> {
     return this.navigation.requestLaunchApp(bundleId, timeoutMs, perf, coldBoot);
   }
@@ -1830,7 +1838,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestResetPermissions(
-    bundleId: string, permissions: string[], timeoutMs: number = 5000, perf?: PerformanceTracker
+    bundleId: string, permissions: string[], timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyResetPermissionsResult> {
     return this.permissions.requestResetPermissions(bundleId, permissions, timeoutMs, perf);
   }
@@ -1842,7 +1850,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   async requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
-    timeoutMs: number = 5000,
+    timeoutMs?: number,
     perf?: PerformanceTracker
   ): Promise<CtrlProxyClipboardResult> {
     return this.clipboard.requestClipboard(action, text, timeoutMs, perf);
@@ -1853,13 +1861,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestScreenshot(
-    timeoutMs: number = 5000, perf?: PerformanceTracker
+    timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyScreenshotResult> {
     return this.screenshot.requestScreenshot(timeoutMs, perf);
   }
 
   async requestScreenshotWithoutObservationStreamPush(
-    timeoutMs: number = 5000, perf?: PerformanceTracker
+    timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyScreenshotResult> {
     return this.requestScreenshot(timeoutMs, perf);
   }
@@ -1869,7 +1877,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestVoiceOverState(
-    timeoutMs: number = 5000, perf?: PerformanceTracker
+    timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyVoiceOverResult> {
     return this.voiceOver.requestVoiceOverState(timeoutMs, perf);
   }
@@ -1877,7 +1885,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   async requestVoiceOverActivate(
     label: string,
     action: "activate" | "long_press",
-    timeoutMs: number = 5000,
+    timeoutMs?: number,
     perf?: PerformanceTracker
   ): Promise<CtrlProxyActionResult> {
     return this.voiceOver.requestVoiceOverActivate(label, action, timeoutMs, perf);
@@ -1887,7 +1895,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     action: string,
     resourceId?: string,
     label?: string,
-    timeoutMs: number = 5000,
+    timeoutMs?: number,
     perf?: PerformanceTracker
   ): Promise<CtrlProxyActionResult> {
     return this.voiceOver.requestAction(action, resourceId, label, timeoutMs, perf);
@@ -1896,8 +1904,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   async requestMultiFingerSwipe(
     x1: number, y1: number, x2: number, y2: number,
     fingerCount: number,
-    duration: number = 300,
-    timeoutMs: number = 5000,
+    duration?: number,
+    timeoutMs?: number,
     perf?: PerformanceTracker,
     fingerSpacing?: number
   ): Promise<CtrlProxySwipeResult> {
@@ -1908,27 +1916,27 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Delegated Public Methods - Storage (UserDefaults)
   // ===========================================================================
 
-  async listPreferenceFiles(packageName: string, timeoutMs: number = 5000): Promise<import("../../storage/storageTypes").PreferenceFile[]> {
+  async listPreferenceFiles(packageName: string, timeoutMs?: number): Promise<import("../../storage/storageTypes").PreferenceFile[]> {
     return this.storage.listPreferenceFiles(packageName, timeoutMs);
   }
 
-  async getPreferenceEntries(packageName: string, fileName: string, timeoutMs: number = 5000): Promise<import("../../storage/storageTypes").KeyValueEntry[]> {
+  async getPreferenceEntries(packageName: string, fileName: string, timeoutMs?: number): Promise<import("../../storage/storageTypes").KeyValueEntry[]> {
     return this.storage.getPreferenceEntries(packageName, fileName, timeoutMs);
   }
 
-  async getPreference(packageName: string, fileName: string, key: string, timeoutMs: number = 5000): Promise<import("../../storage/storageTypes").KeyValueEntry | null> {
+  async getPreference(packageName: string, fileName: string, key: string, timeoutMs?: number): Promise<import("../../storage/storageTypes").KeyValueEntry | null> {
     return this.storage.getPreference(packageName, fileName, key, timeoutMs);
   }
 
-  async setPreference(packageName: string, fileName: string, key: string, value: string | null, type: import("../../storage/storageTypes").KeyValueType, timeoutMs: number = 5000): Promise<void> {
+  async setPreference(packageName: string, fileName: string, key: string, value: string | null, type: import("../../storage/storageTypes").KeyValueType, timeoutMs?: number): Promise<void> {
     return this.storage.setPreference(packageName, fileName, key, value, type, timeoutMs);
   }
 
-  async removePreference(packageName: string, fileName: string, key: string, timeoutMs: number = 5000): Promise<void> {
+  async removePreference(packageName: string, fileName: string, key: string, timeoutMs?: number): Promise<void> {
     return this.storage.removePreference(packageName, fileName, key, timeoutMs);
   }
 
-  async clearPreferenceStore(packageName: string, fileName: string, timeoutMs: number = 5000): Promise<void> {
+  async clearPreferenceStore(packageName: string, fileName: string, timeoutMs?: number): Promise<void> {
     return this.storage.clearPreferenceStore(packageName, fileName, timeoutMs);
   }
 
@@ -1940,19 +1948,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     appId: string,
     databasePath: string,
     query: string,
-    timeoutMs: number = 5000
+    timeoutMs?: number
   ): Promise<import("../../database/DatabaseInspector").SQLResult> {
     return this.database.executeSQL(appId, databasePath, query, timeoutMs);
   }
 
   async listDatabasesForIos(
     appId: string,
-    timeoutMs: number = 5000
+    timeoutMs?: number
   ): Promise<import("../../database/DatabaseInspector").DatabaseInfo[]> {
     return this.database.listDatabases(appId, timeoutMs);
   }
 
-  async listTablesForIos(appId: string, databasePath: string, timeoutMs: number = 5000): Promise<string[]> {
+  async listTablesForIos(appId: string, databasePath: string, timeoutMs?: number): Promise<string[]> {
     return this.database.listTables(appId, databasePath, timeoutMs);
   }
 
@@ -1960,9 +1968,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     appId: string,
     databasePath: string,
     table: string,
-    limit: number = 50,
-    offset: number = 0,
-    timeoutMs: number = 5000
+    limit?: number,
+    offset?: number,
+    timeoutMs?: number
   ): Promise<import("../../database/DatabaseInspector").TableDataResult> {
     return this.database.getTableData(appId, databasePath, table, limit, offset, timeoutMs);
   }
@@ -1971,7 +1979,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     appId: string,
     databasePath: string,
     table: string,
-    timeoutMs: number = 5000
+    timeoutMs?: number
   ): Promise<import("../../database/DatabaseInspector").TableStructureResult> {
     return this.database.getTableStructure(appId, databasePath, table, timeoutMs);
   }

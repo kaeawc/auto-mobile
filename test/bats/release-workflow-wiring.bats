@@ -114,6 +114,10 @@
     run yq -r ".jobs.\"$builder\".with.upload-artifact" "$workflow"
     [ "$status" -eq 0 ]
     [ "$output" = "true" ]
+
+    run yq -r ".jobs.\"$builder\".with.artifact-retention-days" "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "90" ]
   done
 
   run yq -r '.jobs | keys[]' "$workflow"
@@ -165,9 +169,13 @@
     .github/workflows/build-control-proxy-apk.yml \
     .github/workflows/build-video-server-jar.yml \
     .github/workflows/build-screen-capture-helper.yml; do
+    run yq -r '.on.workflow_call.inputs."artifact-retention-days".default' "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "7" ]
+
     run yq -r '.jobs.build.steps[] | select(.uses == "actions/upload-artifact@v6") | .with."retention-days"' "$workflow"
     [ "$status" -eq 0 ]
-    [ "$output" = "90" ]
+    [ "$output" = '${{ inputs.artifact-retention-days }}' ]
   done
 
   run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Upload release artifact provenance") | .with."retention-days"' .github/workflows/prepare-release.yml

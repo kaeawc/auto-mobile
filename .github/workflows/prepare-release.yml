@@ -110,6 +110,7 @@ jobs:
     with:
       checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
       upload-artifact: true
+      artifact-retention-days: 90
 
   build-candidate-control-proxy-apk:
     needs: prepare-version
@@ -117,6 +118,7 @@ jobs:
     with:
       checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
       upload-artifact: true
+      artifact-retention-days: 90
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
       RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -130,6 +132,7 @@ jobs:
     with:
       checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
       upload-artifact: true
+      artifact-retention-days: 90
       verify-reproducible: true
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
@@ -140,6 +143,7 @@ jobs:
     with:
       checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
       upload-artifact: true
+      artifact-retention-days: 90
     secrets:
       MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
       MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}

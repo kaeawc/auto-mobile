@@ -13,6 +13,11 @@ on:
         required: false
         type: boolean
         default: true
+      artifact-retention-days:
+        description: "How long to retain the uploaded IPA artifact"
+        required: false
+        type: number
+        default: 7
     outputs:
       sha256:
         description: "SHA256 checksum of the built IPA"
@@ -84,4 +89,4 @@ jobs:
         with:
           name: ctrl-proxy-ios-ipa
           path: /tmp/control-proxy.ipa
-          retention-days: 90
+          retention-days: ${{ inputs.artifact-retention-days }}

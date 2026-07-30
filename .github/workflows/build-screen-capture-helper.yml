@@ -13,6 +13,11 @@ on:
         required: false
         type: boolean
         default: true
+      artifact-retention-days:
+        description: "How long to retain the uploaded helper artifact"
+        required: false
+        type: number
+        default: 7
     secrets:
       MACOS_DEVELOPER_ID_CERT_BASE64:
         required: true
@@ -91,4 +96,4 @@ jobs:
         with:
           name: screen-capture-helper
           path: /tmp/screen-capture-helper-macos-universal.zip
-          retention-days: 90
+          retention-days: ${{ inputs.artifact-retention-days }}

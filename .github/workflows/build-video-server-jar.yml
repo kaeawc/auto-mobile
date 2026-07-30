@@ -21,6 +21,11 @@ on:
         required: false
         type: boolean
         default: true
+      artifact-retention-days:
+        description: "How long to retain the uploaded jar artifact"
+        required: false
+        type: number
+        default: 7
       verify-reproducible:
         description: >-
           When true, rebuild the jar from a clean tree and fail if the second
@@ -103,4 +108,4 @@ jobs:
         with:
           name: video-server-jar
           path: /tmp/automobile-video.jar
-          retention-days: 90
+          retention-days: ${{ inputs.artifact-retention-days }}

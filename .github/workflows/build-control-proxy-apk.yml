@@ -13,6 +13,11 @@ on:
         required: false
         type: boolean
         default: true
+      artifact-retention-days:
+        description: "How long to retain the uploaded APK artifact"
+        required: false
+        type: number
+        default: 7
     secrets:
       GRADLE_ENCRYPTION_KEY:
         required: true
@@ -74,4 +79,4 @@ jobs:
         with:
           name: control-proxy-apk
           path: /tmp/control-proxy-debug.apk
-          retention-days: 90
+          retention-days: ${{ inputs.artifact-retention-days }}

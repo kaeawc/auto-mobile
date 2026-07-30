@@ -1722,6 +1722,64 @@ describe("diffObserveResult — iOS stable-identity boundaries (A9/P8)", () => {
     }
   });
 
+  // Competing-identifier precedence: a single-id row (above) leaves the order
+  // resource-id > accessibilityIdentifier > view-id unpinned — reversing it keeps
+  // every single-id row green. Here BOTH a higher- and a lower-priority id are
+  // present and DISAGREE across the edit, so the pairing outcome is decided purely
+  // by which id source wins. `Old`/`New` text still differs, so content-identity
+  // never re-pairs and the iOS stable-id pass alone decides.
+  const textEditAsym = (oldAttrs: Record<string, unknown>, newAttrs: Record<string, unknown>) => {
+    const node = (attrs: Record<string, unknown>, t: string) => ({
+      "className": "XCUIElementTypeTextField",
+      ...attrs,
+      "text": t,
+      "value": t,
+      "bounds": { ...REGION },
+    });
+    return diffObserveResult(iosObs(node(oldAttrs, "Old")), iosObs(node(newAttrs, "New")));
+  };
+
+  const COMPETING_PRECEDENCE_ROWS: ReadonlyArray<
+    readonly [string, Record<string, unknown>, Record<string, unknown>, boolean]
+  > = [
+    [
+      "resource-id wins over a differing accessibilityIdentifier",
+      { "resource-id": "Field", "accessibilityIdentifier": "a11y-old" },
+      { "resource-id": "Field", "accessibilityIdentifier": "a11y-new" },
+      true,
+    ],
+    [
+      "a differing resource-id is authoritative over a matching accessibilityIdentifier",
+      { "resource-id": "Field-old", "accessibilityIdentifier": "a11y" },
+      { "resource-id": "Field-new", "accessibilityIdentifier": "a11y" },
+      false,
+    ],
+    [
+      "accessibilityIdentifier wins over a differing view-id when no resource-id",
+      { "accessibilityIdentifier": "a11y", "view-id": "view-old" },
+      { "accessibilityIdentifier": "a11y", "view-id": "view-new" },
+      true,
+    ],
+    [
+      "a differing accessibilityIdentifier is authoritative over a matching view-id",
+      { "accessibilityIdentifier": "a11y-old", "view-id": "view" },
+      { "accessibilityIdentifier": "a11y-new", "view-id": "view" },
+      false,
+    ],
+  ];
+
+  test.each(COMPETING_PRECEDENCE_ROWS)("%s", (_label, oldAttrs, newAttrs, expectRepaired) => {
+    const diff = textEditAsym(oldAttrs, newAttrs);
+    if (expectRepaired) {
+      expect(diff.changed).toHaveLength(1);
+      expect(diff.changed[0].changes.text).toEqual({ from: "Old", to: "New" });
+    } else {
+      expect(diff.added).toHaveLength(1);
+      expect(diff.removed).toHaveLength(1);
+      expect(diff.changed).toEqual([]);
+    }
+  });
+
   test("an editable field with a list-cell class opts out of the repair", () => {
     const node = (t: string) => ({
       "className": "XCUIElementTypeCell",

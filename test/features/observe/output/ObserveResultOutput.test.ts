@@ -1207,9 +1207,17 @@ describe("sanitizeObserveResult", () => {
 
     const ROWS: ReductionRow[] = [
       {
+        // Isolate the perf-audit strip: reference is the fully-sanitized output
+        // with ONLY the raw `performanceAudit` restored, so the sole difference is
+        // stripPerformanceAudit's work. Comparing against the raw fixture instead
+        // (as before) stayed green on independent perfTiming-drop + node-trim even
+        // if the strip regressed to a no-op.
         label: "perf-audit strip",
         reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_NONE),
-        reference: () => loadAndroidHomeObserve().observe,
+        reference: () => {
+          const { observe } = loadAndroidHomeObserve();
+          return { ...sanitizeObserveResult(observe, DROP_NONE), performanceAudit: observe.performanceAudit };
+        },
         tokensToo: true,
       },
       {

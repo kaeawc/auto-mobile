@@ -277,19 +277,16 @@ jobs:
             NOTES="Release v${VERSION}"
           fi
 
-          # Add checksum to notes
-          NOTES="${NOTES}"$'\n\n'"## CtrlProxy APK"$'\n\n'\
-            '"**SHA256 Checksum:** \`${APK_CHECKSUM}\`"$'\n\n'\
-            '"Download the APK from the release assets below."
-          NOTES="${NOTES}"$'\n\n'"## CtrlProxy iOS IPA"$'\n\n'\
-            '"**SHA256 Checksum:** \`${IPA_CHECKSUM}\`"$'\n\n'\
-            '"Download the IPA from the release assets below."
-          NOTES="${NOTES}"$'\n\n'"## video-server jar"$'\n\n'\
-            '"**SHA256 Checksum:** \`${VIDEO_JAR_CHECKSUM}\`"$'\n\n'\
-            '"Download automobile-video.jar from the release assets below."
-          NOTES="${NOTES}"$'\n\n'"## macOS screen-capture-helper"$'\n\n'\
-            '"**SHA256 Checksum:** \`${SCREEN_CAPTURE_HELPER_CHECKSUM}\`"$'\n\n'\
-            '"Download screen-capture-helper-macos-universal.zip from the release assets below."
+          # Add checksum to notes. Each section is a single-line concatenation of
+          # adjacent quoted strings ("..."$'\n\n'"..."). Do NOT split these across
+          # backslash-continued lines: the continuation indentation inserts an
+          # unquoted space between tokens, which ends the NOTES= assignment early
+          # and makes bash try to run the remainder as a command (exit 127). The
+          # Desktop App line below is the canonical form to match.
+          NOTES="${NOTES}"$'\n\n'"## CtrlProxy APK"$'\n\n'"**SHA256 Checksum:** \`${APK_CHECKSUM}\`"$'\n\n'"Download the APK from the release assets below."
+          NOTES="${NOTES}"$'\n\n'"## CtrlProxy iOS IPA"$'\n\n'"**SHA256 Checksum:** \`${IPA_CHECKSUM}\`"$'\n\n'"Download the IPA from the release assets below."
+          NOTES="${NOTES}"$'\n\n'"## video-server jar"$'\n\n'"**SHA256 Checksum:** \`${VIDEO_JAR_CHECKSUM}\`"$'\n\n'"Download automobile-video.jar from the release assets below."
+          NOTES="${NOTES}"$'\n\n'"## macOS screen-capture-helper"$'\n\n'"**SHA256 Checksum:** \`${SCREEN_CAPTURE_HELPER_CHECKSUM}\`"$'\n\n'"Download screen-capture-helper-macos-universal.zip from the release assets below."
           NOTES="${NOTES}"$'\n\n'"## Desktop App"$'\n\n'"Native installers are attached below: macOS \`.dmg\` (signed & notarized), Windows \`.msi\`, and Linux \`.deb\`."
 
           # Save to file for GitHub release

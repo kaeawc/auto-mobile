@@ -193,7 +193,9 @@ describe("daemon input API consumer docs", () => {
     expect(unixSocketApi).toContain(
       `default \`${defaultReleaseVersion}\` CtrlProxy artifacts are legacy`,
     );
-    expect(unixSocketApi).toContain("device-boundary guarantee currently applies to `input/tap` and `input/swipe`");
+    expect(unixSocketApi).toContain(
+      "device-boundary guarantee applies to `input/tap`, `input/swipe`, `input/pressButton`",
+    );
     expect(unixSocketApi).toMatch(/"duration": 50,\r?\n    "frameContext": "android-generation-42"/);
     expect(unixSocketApi).toMatch(/"durationMs": 350,\r?\n    "frameContext": "android-generation-42"/);
     expect(unixSocketApi).toMatch(/"button": "back",\r?\n    "frameContext": "android-generation-42"/);

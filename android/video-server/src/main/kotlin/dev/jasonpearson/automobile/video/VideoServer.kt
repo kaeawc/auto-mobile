@@ -32,8 +32,8 @@ object VideoServer {
   @Volatile private var encoder: VideoEncoder? = null
   // Volatile: the encode loop reads it for forceFrame() while the shutdown hook nulls it (#4383).
   @Volatile private var capture: ScreenCapture? = null
-  private var audioCapture: AudioCapture? = null
-  private var streamWriter: VideoStreamWriter? = null
+  @Volatile private var audioCapture: AudioCapture? = null
+  @Volatile private var streamWriter: VideoStreamWriter? = null
   @Volatile private var sessionLease: VideoSessionLease? = null
 
   @JvmStatic
@@ -281,11 +281,14 @@ object VideoServer {
     // Encoding loop
     val bufferInfo = MediaCodec.BufferInfo()
     while (running) {
+      // Snapshot the volatile streamWriter the shutdown hook nulls concurrently; a null
+      // means teardown has begun, so exit the loop cleanly instead of throwing (#4748).
+      val currentWriter = encodeLoopSnapshot(streamWriter) ?: break
       val index = encoder!!.dequeueOutputBuffer(bufferInfo, 100_000) // 100ms timeout
       if (index >= 0) {
         val buffer = encoder!!.getOutputBuffer(index)
         if (buffer != null) {
-          val success = streamWriter!!.writePacket(buffer, bufferInfo)
+          val success = currentWriter.writePacket(buffer, bufferInfo)
           if (!success) {
             println("Client disconnected")
             break
@@ -307,7 +310,7 @@ object VideoServer {
         capture?.forceFrame()
       }
 
-      if (streamWriter!!.reconnectWindowExpired()) {
+      if (currentWriter.reconnectWindowExpired()) {
         println("VIDEO_CLIENT_RECONNECT_EXPIRED socket=${session.socketName}")
         running = false
       }
@@ -315,6 +318,14 @@ object VideoServer {
 
     running = false
   }
+
+  /**
+   * Snapshot a volatile field the shutdown hook may null on another thread. The encode loop calls
+   * this instead of a `!!` deref so a concurrent null observed mid-shutdown yields a clean stop
+   * signal (null) rather than a [NullPointerException] (#4748). Kept as a seam so the loop's
+   * null-tolerance is unit-testable without the Android capture stack.
+   */
+  internal fun <T : Any> encodeLoopSnapshot(field: T?): T? = field
 
   private fun shutdown() {
     running = false

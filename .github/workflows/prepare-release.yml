@@ -153,6 +153,28 @@ jobs:
       APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
       APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
 
+  # Desktop installers are built here as signed + notarized release candidates and
+  # reused by release.yml (downloaded by prepare run id). Unlike the artifacts
+  # above they do not feed release constants, so finalize-release does not depend
+  # on them — only verify-prepared-release does, to gate the provenance manifest.
+  build-candidate-desktop-app-installers:
+    needs: prepare-version
+    uses: ./.github/workflows/build-desktop-app-installers.yml
+    with:
+      version: ${{ inputs.version }}
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: true
+      artifact-retention-days: 90
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+      MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
+      MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
+      MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+      MACOS_DEVELOPER_ID_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_SIGNING_IDENTITY }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+
   finalize-release:
     runs-on: ubuntu-latest
     needs: [prepare-version, build-candidate-ctrl-proxy-ios-ipa, build-candidate-control-proxy-apk, build-candidate-video-server-jar, build-candidate-screen-capture-helper]
@@ -292,7 +314,7 @@ jobs:
 
   verify-prepared-release:
     runs-on: ubuntu-latest
-    needs: [prepare-version, finalize-release, validate-finalized-release, build-candidate-ctrl-proxy-ios-ipa, build-candidate-control-proxy-apk, build-candidate-video-server-jar, build-candidate-screen-capture-helper]
+    needs: [prepare-version, finalize-release, validate-finalized-release, build-candidate-ctrl-proxy-ios-ipa, build-candidate-control-proxy-apk, build-candidate-video-server-jar, build-candidate-screen-capture-helper, build-candidate-desktop-app-installers]
     permissions:
       contents: write
       actions: write
@@ -392,7 +414,7 @@ jobs:
             --arg tag_sha "$TAG_SHA" \
             --arg prepare_run_id "$PREPARE_RUN_ID" \
             '{tag: $tag, tag_sha: $tag_sha, prepare_run_id: $prepare_run_id,
-              artifacts: ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper"]}' \
+              artifacts: ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
             > /tmp/release-artifact-provenance.json
 
       - name: Upload release artifact provenance

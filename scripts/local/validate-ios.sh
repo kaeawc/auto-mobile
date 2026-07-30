@@ -73,8 +73,6 @@ SWIFT_COMPONENTS=(
   "ios/AccessibilityService"
   "ios/AXeAutomation"
   "ios/XCTestRunner"
-  "ios/XcodeCompanion"
-  "ios/XcodeExtension"
 )
 
 FAILED_BUILDS=()

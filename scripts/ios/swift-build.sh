@@ -55,8 +55,6 @@ echo ""
 
 # macOS packages (can be built and tested on macOS)
 MACOS_PACKAGES=(
-    "XcodeCompanion"
-    "XcodeExtension"
     "screen-capture"
 )
 

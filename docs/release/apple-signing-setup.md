@@ -1,9 +1,8 @@
 # Apple Developer ID signing & notarization (from scratch)
 
-This document records how the macOS **ScreenCaptureKit helper** — and the
-`XcodeCompanion` / `XcodeExtension` Swift packages — are code-signed and
-notarized in CI, why each option was chosen, and what maintenance is due before
-the certificate expires.
+This document records how the macOS **ScreenCaptureKit helper** is code-signed
+and notarized in CI, why each option was chosen, and what maintenance is due
+before the certificate expires.
 
 It contains **no secret values**. Every identifier below is a placeholder.
 
@@ -62,10 +61,11 @@ Stored as GitHub Actions repository secrets. **Values are never committed.**
 > `MACOS_DEVELOPER_ID_TEAM_ID`. **Set all eight together** or you fix the release
 > job while reddening every PR/merge/nightly run.
 >
-> Strict signing is safe here because `XcodeCompanion` builds a signable
-> executable (`AutoMobileCompanion`, `require_signables=true`) and
-> `XcodeExtension` is a library that is explicitly exempt
-> (`require_signables=false`) — see `sign-macos-products.sh`.
+> `sign-macos-products.sh` is the generic signing seam for macOS Swift-package
+> apps. It signs no products right now (`XcodeCompanion` / `XcodeExtension` were
+> removed), but `AXBridge` and any future macOS app should register a
+> `sign_package` call there. The screen-capture helper is signed by its own
+> release pipeline in `build-screen-capture-helper-release.sh`.
 
 ## Setup procedure (from scratch)
 

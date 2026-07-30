@@ -272,11 +272,9 @@ describe("daemon input API consumer docs", () => {
     const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
     const screenStreaming = await readRepoFile("docs/design-docs/mcp/observe/screen-streaming.md");
     const androidIde = await readRepoFile("docs/design-docs/plat/android/ide-plugin/overview.md");
-    const iosIde = await readRepoFile("docs/design-docs/plat/ios/ide-plugin/overview.md");
 
     expect(unixSocketApi).toContain("[Screen Streaming](../observe/screen-streaming.md)");
     expect(screenStreaming).toContain("[daemon input API](../daemon/unix-socket-api.md#input-api)");
     expect(androidIde).toContain("[daemon input API](../../../mcp/daemon/unix-socket-api.md#input-api)");
-    expect(iosIde).toContain("[daemon input API](../../../mcp/daemon/unix-socket-api.md#input-api)");
   });
 });

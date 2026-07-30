@@ -12,8 +12,6 @@ The iOS platform consists of the following components:
 
 1. **XCTest Service** - Native iOS automation server with WebSocket API
 2. **XCTest Runner** - Test execution framework for plan-based tests
-3. **Xcode Companion** - macOS companion app for IDE integration
-4. **Xcode Extension** - Xcode source editor extension
 
 For detailed architecture documentation, see `docs/design-docs/plat/ios/`.
 
@@ -67,44 +65,6 @@ XCTest framework integration mirroring Android's JUnitRunner:
 
 ```bash
 cd ios/XCTestRunner
-swift build
-swift test
-```
-
-### XcodeCompanion
-
-**Path**: `ios/XcodeCompanion/`
-**Type**: Swift Package (macOS app)
-**Purpose**: IDE companion application
-
-Native macOS app providing:
-- Device and simulator management UI
-- Test recording workflow
-- Plan execution with live logs
-- Performance metrics and graphs
-- Feature flags configuration
-- Menu bar integration
-
-```bash
-cd ios/XcodeCompanion
-swift build
-swift run AutoMobileCompanion
-```
-
-### XcodeExtension
-
-**Path**: `ios/XcodeExtension/`
-**Type**: Swift Package (Xcode extension)
-**Purpose**: Xcode source editor integration
-
-Xcode Source Editor Extension providing:
-- YAML plan template generation
-- Plan execution from editor
-- Recording controls
-- Quick access to Companion app
-
-```bash
-cd ios/XcodeExtension
 swift build
 swift test
 ```
@@ -167,19 +127,11 @@ bun install && bun run build
 cd ios/AccessibilityService
 swift build
 swift test
-
-# Run companion app for UI testing
-cd ios/XcodeCompanion
-swift run AutoMobileCompanion
 ```
 
 ### 2. Integration Testing
 
 ```bash
-# Launch companion app
-cd ios/XcodeCompanion
-swift run AutoMobileCompanion
-
 # Boot iOS simulator
 xcrun simctl boot "iPhone 15 Pro"
 
@@ -211,7 +163,7 @@ All components have been scaffolded with:
 
 **Next Steps**:
 1. Integrate YAML parsing in XCTestRunner
-2. Connect MCP client in Companion and Runner
+2. Connect MCP client in Runner
 3. Create Xcode projects for app distribution
 4. Add comprehensive test coverage
 5. Add real iOS app integration examples
@@ -223,8 +175,6 @@ All components have been scaffolded with:
   - `index.md` - Architecture overview
   - `simctl.md` - Simulator lifecycle
   - `xctestrunner.md` - XCTest integration
-  - `ide-plugin/overview.md` - Xcode companion and extension
-  - `ide-plugin/test-recording.md` - Recording workflow
 
 - **Installation**: `docs/install/plat/ios.md`
 

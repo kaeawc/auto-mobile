@@ -29,7 +29,6 @@ flowchart TB
     end
 
     Agent -->|MCP Protocol| MCP
-    Xcode[AutoMobile Xcode Integration] -->|MCP Protocol + Unix socket| MCP
     MCP --> WSClient
     MCP --> Simctl
     WSClient -->|ws://localhost:8765| CtrlProxy iOS

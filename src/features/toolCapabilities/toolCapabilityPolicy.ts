@@ -6,7 +6,29 @@ import {
 } from "./SessionToolProfileService";
 import { TOOL_CAPABILITY_BY_NAME } from "./toolCapabilityMap";
 
-type ToolProfileReader = Pick<SessionToolProfileService, "isEnabled">;
+type ToolProfileReader = Pick<SessionToolProfileService, "isEnabled"> &
+  Partial<Pick<SessionToolProfileService, "getOverride">>;
+
+async function connectionOverrideResult(
+  service: ToolProfileReader,
+  connectionProfileUuid: string | undefined,
+  capability: NonNullable<ReturnType<typeof TOOL_CAPABILITY_BY_NAME.get>>,
+  candidateSessions: readonly string[],
+): Promise<boolean | undefined> {
+  if (!connectionProfileUuid || !service.getOverride) {
+    return undefined;
+  }
+  const connectionOverride = await service.getOverride(connectionProfileUuid, capability);
+  if (connectionOverride !== false) {
+    return connectionOverride;
+  }
+  for (const sessionUuid of candidateSessions.filter(uuid => uuid !== connectionProfileUuid)) {
+    if (await service.getOverride(sessionUuid, capability) === true) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export async function isToolEnabledForSession(
   toolName: string,
@@ -58,6 +80,7 @@ export async function isToolEnabledForAnySession(
   toolName: string,
   sessionUuids: ReadonlyArray<string | undefined>,
   sessionToolProfileService?: ToolProfileReader,
+  connectionProfileUuid?: string,
 ): Promise<boolean> {
   const capability = TOOL_CAPABILITY_BY_NAME.get(toolName);
   if (!capability) {
@@ -70,6 +93,19 @@ export async function isToolEnabledForAnySession(
     return isToolEnabledForSession(toolName, undefined, sessionToolProfileService);
   }
   const service = sessionToolProfileService ?? getSessionToolProfileService();
+  // A connection-level setting is a deliberate choice for the transport, so a
+  // later device binding must not overturn an explicit disable through that
+  // device session's inherited process default. Explicit routing-profile
+  // enables still participate in the normal base/derived union.
+  const connectionOverride = await connectionOverrideResult(
+    service,
+    connectionProfileUuid,
+    capability,
+    candidates,
+  );
+  if (connectionOverride !== undefined) {
+    return connectionOverride;
+  }
   for (const sessionUuid of candidates) {
     if (await service.isEnabled(sessionUuid, capability)) {
       return true;
@@ -82,8 +118,14 @@ export async function assertToolEnabledForAnySession(
   toolName: string,
   sessionUuids: ReadonlyArray<string | undefined>,
   sessionToolProfileService?: ToolProfileReader,
+  connectionProfileUuid?: string,
 ): Promise<void> {
-  if (await isToolEnabledForAnySession(toolName, sessionUuids, sessionToolProfileService)) {
+  if (await isToolEnabledForAnySession(
+    toolName,
+    sessionUuids,
+    sessionToolProfileService,
+    connectionProfileUuid,
+  )) {
     return;
   }
   const capability = TOOL_CAPABILITY_BY_NAME.get(toolName);

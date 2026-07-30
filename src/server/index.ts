@@ -344,7 +344,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         const candidateSessions = deviceAware
           ? [connectionProfileUuid, routingSessionUuid, ...labelSessionUuids]
           : [connectionProfileUuid, routingSessionUuid];
-        return await isToolEnabledForAnySession(definition.name, candidateSessions, options.sessionToolProfileService) ? definition : undefined;
+        return await isToolEnabledForAnySession(
+          definition.name,
+          candidateSessions,
+          options.sessionToolProfileService,
+          connectionProfileUuid,
+        ) ? definition : undefined;
       }))).filter((definition): definition is typeof definitions[number] => definition !== undefined)
     };
   });

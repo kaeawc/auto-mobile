@@ -965,13 +965,15 @@ export class ToolRegistryClass {
         // product decision): a tool is enabled if EITHER grants it, so a derived
         // label may re-enable a tool the base narrowed away.
         const capabilityDerivedSessionUuid = resolvedTarget.capabilitySessionUuid ?? resolvedTarget.sessionUuid;
-        await this.assertToolEnabledUnion(
-          name,
-          capabilityDerivedSessionUuid,
-          resolvedTarget.baseSessionUuid,
-          getToolCapabilityContext()?.sessionToolProfileService,
-          capabilityContext?.capabilitySessionUuid,
-        );
+        if (!capabilityContext?.planCapabilitiesAuthorized) {
+          await this.assertToolEnabledUnion(
+            name,
+            capabilityDerivedSessionUuid,
+            resolvedTarget.baseSessionUuid,
+            getToolCapabilityContext()?.sessionToolProfileService,
+            capabilityContext?.capabilitySessionUuid,
+          );
+        }
         return await runWithToolCapabilityContext(
           // Bind the ROUTING session (Gap C), not the base/capability session, so
           // nested calls re-inject the correct derived routing UUID.
@@ -1224,6 +1226,7 @@ export class ToolRegistryClass {
       toolName,
       [connectionCapabilityProfileUuid, baseSessionUuid, derivedSessionUuid],
       sessionToolProfileService,
+      connectionCapabilityProfileUuid,
     );
   }
 

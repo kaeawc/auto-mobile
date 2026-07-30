@@ -308,6 +308,36 @@ describe("ToolRegistry capability routing and enforcement (#4611)", () => {
     }
   });
 
+  test("an executePlan-authorized device-aware step bypasses the wrapper capability gate", async () => {
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled: async () => false };
+    const handler = mock(async () => ({ success: true }));
+    restorePipelineOverrides = passthroughPipeline(async input => ({
+      args: input.args,
+      baseSessionUuid: "plan-session",
+      device,
+      internalCall: true,
+      sessionUuid: "plan-session",
+      shouldResolveDevice: true,
+    }));
+    ToolRegistry.registerDeviceAware(
+      "clipboard",
+      "clipboard",
+      z.object({ sessionUuid: z.string().optional() }),
+      handler,
+    );
+
+    await runWithToolCapabilityContext(
+      {
+        routingSessionUuid: "plan-session",
+        planCapabilitiesAuthorized: true,
+        sessionToolProfileService: profileService,
+      },
+      () => ToolRegistry.callInternal("clipboard", {}, undefined, undefined, { forPlan: true }),
+    );
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   test("Gap B nested union: rejected only when both base and derived label disable the tool", async () => {
     const sessionManager = await initializeDaemonWithLabeledBase();
     try {

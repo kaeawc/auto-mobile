@@ -52,6 +52,11 @@ export class SessionToolProfileService {
     return overrides.get(capability) ?? this.environmentDefaults.has(capability);
   }
 
+  /** Return an explicit session choice without falling back to process defaults. */
+  async getOverride(sessionUuid: string, capability: ToolCapability): Promise<boolean | undefined> {
+    return (await this.repository.list(sessionUuid)).get(capability);
+  }
+
   async setEnabled(sessionUuid: string, capability: ToolCapability, enabled: boolean): Promise<void> {
     await this.repository.set(sessionUuid, capability, enabled);
   }

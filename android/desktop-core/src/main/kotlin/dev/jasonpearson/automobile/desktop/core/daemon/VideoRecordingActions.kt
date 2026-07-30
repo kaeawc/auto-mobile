@@ -81,12 +81,15 @@ class McpVideoRecordingActions(private val clientProvider: () -> AutoMobileClien
     )
   }
 
-  private fun call(arguments: JsonObject): VideoRecordingToolResponse =
-    decodeToolResponse(
+  private fun call(arguments: JsonObject): VideoRecordingToolResponse {
+    val client = clientProvider()
+    client.enableToolCapability("screen-artifacts")
+    return decodeToolResponse(
       recordingJson,
-      clientProvider().callTool("videoRecording", arguments),
+      client.callTool("videoRecording", arguments),
       serializer<VideoRecordingToolResponse>(),
     )
+  }
 }
 
 @Serializable

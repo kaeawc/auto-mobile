@@ -9,6 +9,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
@@ -61,6 +62,11 @@ class DeviceSnapshotActionsTest {
     val snapshots = actionsWith(client).listSnapshots()
 
     assertEquals(1, snapshots.size)
+    assertEquals("setToolCapability", client.toolCalls.single().name)
+    assertEquals(
+      "screen-artifacts",
+      client.toolCalls.single().arguments["capability"]?.jsonPrimitive?.content,
+    )
     assertEquals("nightly", snapshots.single().snapshotName)
     assertEquals("android", snapshots.single().platform)
     assertEquals(2048L, snapshots.single().sizeBytes)

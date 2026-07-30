@@ -153,6 +153,17 @@ interface AutoMobileClient {
   fun close() {}
 }
 
+/** Enable one optional server capability for this Desktop client's MCP connection. */
+fun AutoMobileClient.enableToolCapability(capability: String) {
+  callTool(
+    "setToolCapability",
+    buildJsonObject {
+      put("capability", capability)
+      put("enabled", true)
+    },
+  )
+}
+
 @Serializable
 data class KillDeviceResult(
   val success: Boolean = true,

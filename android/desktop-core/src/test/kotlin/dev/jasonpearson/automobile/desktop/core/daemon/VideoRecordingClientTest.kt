@@ -128,6 +128,11 @@ class VideoRecordingClientTest {
     val recordings = McpVideoRecordingActions { client }.startRecording("emulator-5554")
 
     assertEquals(1, recordings.size)
+    assertEquals(listOf("setToolCapability", "videoRecording"), client.toolCalls.map { it.name })
+    assertEquals(
+      "screen-artifacts",
+      client.toolCalls.first().arguments["capability"]?.jsonPrimitive?.content,
+    )
     assertEquals("rec-1", recordings.single().recordingId)
   }
 

@@ -12,6 +12,7 @@ import {
   DEFAULT_DAEMON_PORT,
   SOCKET_PATH,
   MCP_STREAMABLE_PATH,
+  DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_PORT_RANGE_START,
   DAEMON_PORT_RANGE_END,
 } from "./constants";
@@ -22,6 +23,7 @@ import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
+import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import {
   awaitInFlightMigrations,
   closeDatabase,
@@ -191,6 +193,14 @@ export class Daemon {
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
       NavigationGraphManager.releaseSession(sessionId);
       RealObserveScreen.clearCache(deviceId);
+    });
+    // Emit a real "session released" signal so a connected DaemonMcpProxy clears
+    // its remembered session binding the moment the daemon releases the session
+    // (heartbeat / idle / plan), rather than guessing with the replay TTL. Fires
+    // for every released key — base and derived `${base}:${label}` alike; the
+    // proxy matches its bound (base) UUID by exact equality (issue #4610).
+    this.sessionManager.onSessionRelease(sessionId => {
+      SessionReleaseBroadcaster.emit(sessionId);
     });
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     this.devicePool = new DevicePool(
@@ -608,7 +618,12 @@ export class Daemon {
           streamableTransport = this.transports.get(sessionId)!;
         } else if (isInitializeRequest || !sessionId) {
           // Create new transport for initialization or when no session ID
-          const sessionContext: { sessionId?: string } = {};
+          const boundSessionUuid = req.headers[DAEMON_SESSION_TOOL_BINDING_HEADER];
+          const sessionContext: { sessionId?: string; initialSessionToolBinding?: string } = {
+            ...(typeof boundSessionUuid === "string" && boundSessionUuid.trim().length > 0
+              ? { initialSessionToolBinding: boundSessionUuid }
+              : {}),
+          };
           streamableTransport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => this.idGenerator.next(),
             onsessioninitialized: newSessionId => {

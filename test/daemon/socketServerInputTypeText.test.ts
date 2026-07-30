@@ -564,6 +564,115 @@ describe("UnixSocketServer input/typeText", () => {
     ]);
   });
 
+  test("evicts the cached append helper after the direct device queue is idle", async () => {
+    const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([{ ...androidDevice, transportId: "1" }]));
+    server = new UnixSocketServer(socketPath, "http://localhost:0/mcp", createFakeDaemonState(), fakeTimer);
+    const adb = new ProductionShapedAdbExecutor(fakeTimer);
+    let factoryCalls = 0;
+    server.appendTextFactory = device => {
+      factoryCalls += 1;
+      return createAppendTextInput(device, adb, fakeTimer);
+    };
+    await server.start();
+
+    const append = (text: string) =>
+      sendRequest(socketPath, "input/typeText", {
+        platform: "android",
+        deviceId: "emulator-5554",
+        text,
+        mode: "append",
+      });
+
+    expect((await append("A")).success).toBe(true);
+    expect(factoryCalls).toBe(1);
+
+    await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
+
+    expect((await append("B")).success).toBe(true);
+    expect(factoryCalls).toBe(2);
+  });
+
+  test("evicts the cached append helper after a session MCP forward succeeds it in the device queue", async () => {
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([{ ...androidDevice, transportId: "1" }]));
+    const sessions = new Map([
+      ["session-a", createFakeSession("session-a", androidDevice.deviceId, "android")],
+    ]);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessions),
+      fakeTimer
+    );
+    let factoryCalls = 0;
+    let releaseAppend: () => void = () => {};
+    let signalAppendStarted: () => void = () => {};
+    const appendStarted = new Promise<void>(resolve => {
+      signalAppendStarted = resolve;
+    });
+    const appendReleased = new Promise<void>(resolve => {
+      releaseAppend = resolve;
+    });
+    server.appendTextFactory = () => {
+      factoryCalls += 1;
+      return {
+        appendText: async () => {
+          signalAppendStarted();
+          await appendReleased;
+          return { success: true, charsSent: 1 };
+        },
+      };
+    };
+    server.mcpClientFactory = async () => ({
+      callTool: async () => ({ content: [] }),
+      listTools: async () => ({ tools: [] }),
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    }) as any;
+    await server.start();
+
+    const append = (text: string) =>
+      sendRequest(socketPath, "input/typeText", {
+        platform: "android",
+        deviceId: androidDevice.deviceId,
+        text,
+        mode: "append",
+      });
+
+    const firstAppend = append("A");
+    await appendStarted;
+    const queuedMcpForward = sendRequest(socketPath, "tools/call", {
+      name: "observe",
+      arguments: {
+        sessionUuid: "session-a",
+        deviceId: androidDevice.deviceId,
+      },
+    });
+    await flushMicrotasks();
+    releaseAppend();
+
+    expect((await firstAppend).success).toBe(true);
+    expect((await queuedMcpForward).success).toBe(true);
+
+    // The helper was built exactly once and is still cached: the queued session
+    // MCP forward has NOT evicted it yet. Asserting this before advancing time
+    // proves the later rebuild is caused by the idle-window eviction rather than
+    // the helper never being cached or being evicted immediately.
+    expect(factoryCalls).toBe(1);
+
+    await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
+
+    expect((await append("B")).success).toBe(true);
+    expect(factoryCalls).toBe(2);
+  });
+
   // Issue #3351: an emulator replaced under a reused serial (emulator-5554) must not
   // inherit the previous device's cached API-level capability. The daemon's
   // disconnect monitor calls evictDeviceInputCache on a confirmed disconnect; after

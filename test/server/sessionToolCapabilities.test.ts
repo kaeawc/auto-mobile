@@ -1,8 +1,14 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { z } from "zod";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { SessionToolProfileService } from "../../src/features/toolCapabilities/SessionToolProfileService";
+import type { BootedDevice } from "../../src/models";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
 describe("session tool capability MCP enforcement", () => {
   let fixture: McpTestFixture | undefined;
@@ -216,5 +222,254 @@ describe("session tool capability MCP enforcement", () => {
     );
 
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Issue #4611: capability enforcement must honor the UNION of the base and the
+// derived `${base}:${label}` device-label sessions at EVERY gate — a tool is
+// enabled when EITHER grants it. These tests drive the PUBLIC MCP `tools/call`
+// boundary (an earlier gate than the authoritative union in
+// `registerDeviceAware`) with a real `device: label` so the boundary must
+// resolve base + derived itself. Before the fix the boundary asserted the base
+// session only and rejected a labeled call that the label re-enabled.
+describe("capability union at the MCP boundary (#4611)", () => {
+  const device: BootedDevice = { name: "Pixel", deviceId: "emulator-5554", platform: "android" };
+  let fixture: McpTestFixture | undefined;
+  let restorePipelineOverrides: (() => void) | undefined;
+  let sessionManager: SessionManager | undefined;
+
+  const passthroughDerivedLabelPipeline = () => ToolRegistry.setPipelineOverridesForTesting({
+    executionTargetResolver: {
+      // Mirrors what DefaultExecutionTargetResolver returns for a
+      // `{ sessionUuid: "base", device: "B" }` call: base + derived label session.
+      resolveExecutionTarget: async (input: any) => ({
+        args: input.args,
+        baseSessionUuid: "base",
+        capabilitySessionUuid: "base:B",
+        device,
+        internalCall: false,
+        sessionUuid: "base:B",
+        shouldResolveDevice: true,
+      }),
+    },
+    auditRunner: {
+      run: async (input: any) => input.handler(input.device, input.args, input.progress, input.signal),
+    },
+    afterToolCall: {
+      handle: async (input: any) => ({ durationMs: 0, finalizedResponse: input.response }),
+    },
+    planLifecycleManager: {
+      afterExecution: async () => {},
+    },
+  });
+
+  beforeEach(async () => {
+    ToolRegistry.clearTools();
+    const timer = new FakeTimer();
+    sessionManager = new SessionManager(timer);
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [device]);
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    await pool.initializeWithDevices([device]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    // Base session with a device-label map so the boundary can resolve the
+    // derived `base:B` label candidate via getDeviceLabelMap.
+    await sessionManager.createSession("base", device.deviceId, "android");
+    sessionManager.setDeviceLabels("base", { A: "base", B: "base:B" });
+  });
+
+  afterEach(async () => {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
+    await fixture?.teardown();
+    fixture = undefined;
+    sessionManager?.stopCleanupTimer();
+    sessionManager = undefined;
+    ToolRegistry.clearTools();
+    DaemonState.getInstance().reset();
+  });
+
+  const callLabeledClipboard = async (
+    isEnabled: (sessionUuid: string | undefined, capability: string) => Promise<boolean>,
+  ) => {
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled };
+    fixture = new McpTestFixture({
+      sessionContext: { sessionId: "mcp-session-1" },
+      sessionToolProfileService: profileService,
+    });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    restorePipelineOverrides = passthroughDerivedLabelPipeline();
+    const handler = mock(async () => ({ content: [{ type: "text", text: "ok" }] }));
+    ToolRegistry.registerDeviceAware(
+      "clipboard",
+      "clipboard",
+      z.object({ sessionUuid: z.string().optional(), device: z.string().optional() }),
+      handler,
+    );
+    const call = fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "clipboard", arguments: { sessionUuid: "base", device: "B" } },
+      },
+      z.any(),
+    );
+    return { call, handler };
+  };
+
+  test("base disables, derived label enables -> allowed end-to-end (union honored at the boundary)", async () => {
+    const { call, handler } = await callLabeledClipboard(
+      async (sessionUuid, capability) => capability === "clipboard" && sessionUuid === "base:B",
+    );
+    await call;
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  test("base enables, derived label disables -> still allowed (union)", async () => {
+    const { call, handler } = await callLabeledClipboard(
+      async (sessionUuid, capability) => capability === "clipboard" && sessionUuid === "base",
+    );
+    await call;
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  test("both base and derived label disable -> rejected", async () => {
+    const { call, handler } = await callLabeledClipboard(async () => false);
+    await expect(call).rejects.toThrow("requires the 'clipboard' capability");
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  const listToolsForBase = async (
+    isEnabled: (sessionUuid: string | undefined, capability: string) => Promise<boolean>,
+  ): Promise<string[]> => {
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled };
+    fixture = new McpTestFixture({
+      // Seed the transport binding to the base session so tools/list resolves the
+      // same base UUID (and its label map) the call-gate sees.
+      sessionContext: { sessionId: "mcp-session-1", initialSessionToolBinding: "base" },
+      sessionToolProfileService: profileService,
+    });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware(
+      "clipboard",
+      "clipboard",
+      z.object({ sessionUuid: z.string().optional(), device: z.string().optional() }),
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+    );
+    const result = await fixture.client.request(
+      { method: "tools/list", params: {} },
+      z.any(),
+    );
+    return (result.tools as Array<{ name: string }>).map(tool => tool.name);
+  };
+
+  test("base disables, derived label enables -> tool IS advertised (union discovery)", async () => {
+    // The call-gate accepts a `{ sessionUuid: base, device: B }` clipboard call
+    // because base:B re-enables it, so tools/list must advertise it too — otherwise
+    // the tool is callable but never discovered (issue #4611).
+    const toolNames = await listToolsForBase(
+      async (sessionUuid, capability) => capability === "clipboard" && sessionUuid === "base:B",
+    );
+    expect(toolNames).toContain("clipboard");
+  });
+
+  test("neither base nor any derived label enables -> tool is NOT advertised", async () => {
+    // Union discovery must not over-advertise: a tool no candidate session enables
+    // stays filtered out, matching the call-gate rejection.
+    const toolNames = await listToolsForBase(async () => false);
+    expect(toolNames).not.toContain("clipboard");
+  });
+
+  // Issue #4611 (follow-up P1): the derived-label union must be gated to
+  // DEVICE-AWARE tools only. A PLAIN tool (`register`, not `registerDeviceAware`)
+  // strips the `device` field via its schema and always runs under the base
+  // session, so it never runs on the labeled device — it must NOT borrow a
+  // label-only grant. `exportPlan` is a real plain tool and `startTestRecording`
+  // a real device-aware tool; both map to the `test-authoring` capability, so the
+  // ONLY difference exercised here is device-awareness.
+  const callPlainExportPlan = async (
+    isEnabled: (sessionUuid: string | undefined, capability: string) => Promise<boolean>,
+  ) => {
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled };
+    fixture = new McpTestFixture({
+      sessionContext: { sessionId: "mcp-session-1" },
+      sessionToolProfileService: profileService,
+    });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    const handler = mock(async () => ({ content: [{ type: "text", text: "ok" }] }));
+    // A plain tool: registered via `register`, its schema omits `device` (stripped
+    // for real plain tools). The raw `device: "B"` argument still reaches the
+    // call-gate, which must ignore it for a non-device-aware tool.
+    ToolRegistry.register(
+      "exportPlan",
+      "exportPlan",
+      z.object({ sessionUuid: z.string().optional() }),
+      handler,
+    );
+    const call = fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "exportPlan", arguments: { sessionUuid: "base", device: "B" } },
+      },
+      z.any(),
+    );
+    return { call, handler };
+  };
+
+  test("plain tool: base disables, label enables -> REJECTED (no label borrowing)", async () => {
+    const { call, handler } = await callPlainExportPlan(
+      async (sessionUuid, capability) => capability === "test-authoring" && sessionUuid === "base:B",
+    );
+    await expect(call).rejects.toThrow("requires the 'test-authoring' capability");
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  test("plain tool: base enables -> allowed (base-only enforcement still works)", async () => {
+    const { call, handler } = await callPlainExportPlan(
+      async (sessionUuid, capability) => capability === "test-authoring" && sessionUuid === "base",
+    );
+    await call;
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  const listToolsForBasePlain = async (
+    isEnabled: (sessionUuid: string | undefined, capability: string) => Promise<boolean>,
+  ): Promise<string[]> => {
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled };
+    fixture = new McpTestFixture({
+      sessionContext: { sessionId: "mcp-session-1", initialSessionToolBinding: "base" },
+      sessionToolProfileService: profileService,
+    });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register(
+      "exportPlan",
+      "exportPlan",
+      z.object({ sessionUuid: z.string().optional() }),
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+    );
+    const result = await fixture.client.request(
+      { method: "tools/list", params: {} },
+      z.any(),
+    );
+    return (result.tools as Array<{ name: string }>).map(tool => tool.name);
+  };
+
+  test("plain tool: only a label enables -> tool is NOT advertised (base-only discovery)", async () => {
+    // The base-only call gate would reject a plain-tool call, so discovery must not
+    // advertise a plain tool that only a label enables.
+    const toolNames = await listToolsForBasePlain(
+      async (sessionUuid, capability) => capability === "test-authoring" && sessionUuid === "base:B",
+    );
+    expect(toolNames).not.toContain("exportPlan");
+  });
+
+  test("plain tool: base enables -> tool IS advertised (base-only discovery)", async () => {
+    const toolNames = await listToolsForBasePlain(
+      async (sessionUuid, capability) => capability === "test-authoring" && sessionUuid === "base",
+    );
+    expect(toolNames).toContain("exportPlan");
   });
 });

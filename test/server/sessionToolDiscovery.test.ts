@@ -19,11 +19,53 @@ describe("session-scoped tool discovery", () => {
     expect(binding.bind("transport", "device-session-b")).toBe(true);
   });
 
+  test("seeds only a recreated transport's initial session binding", () => {
+    const binding = new SessionToolBinding("device-session-a");
+
+    expect(binding.effectiveSessionUuid("recreated-transport")).toBe("device-session-a");
+    expect(binding.bind("recreated-transport", "device-session-a")).toBe(true);
+    expect(binding.bind("recreated-transport", "device-session-a")).toBe(false);
+    expect(binding.bind("recreated-transport", "device-session-b")).toBe(true);
+    expect(binding.effectiveSessionUuid("recreated-transport")).toBe("device-session-b");
+  });
+
   test.each(["", "   "])("uses the bound session when an explicit session UUID is %p", sessionUuid => {
     const binding = new SessionToolBinding();
     binding.bind("transport", "disabled-session");
 
     expect(binding.effectiveSessionUuid("transport", { sessionUuid })).toBe("disabled-session");
     expect(binding.bind("transport", sessionUuid)).toBe(false);
+  });
+
+  test("unbindSession drops every transport binding whose effective session was released (issue #4611 Gap D)", () => {
+    const binding = new SessionToolBinding();
+    binding.bind("transport-a", "session-1");
+    binding.bind("transport-b", "session-1");
+    binding.bind("transport-c", "session-2");
+
+    // A real release of session-1 removes both bindings pointed at it and leaves
+    // the unrelated session-2 binding intact.
+    expect(binding.unbindSession("session-1")).toBe(true);
+    expect(binding.effectiveSessionUuid("transport-a")).toBeUndefined();
+    expect(binding.effectiveSessionUuid("transport-b")).toBeUndefined();
+    expect(binding.effectiveSessionUuid("transport-c")).toBe("session-2");
+  });
+
+  test("unbindSession reports no change when nothing matches the released session", () => {
+    const binding = new SessionToolBinding();
+    binding.bind("transport", "session-1");
+
+    expect(binding.unbindSession("session-2")).toBe(false);
+    expect(binding.unbindSession("")).toBe(false);
+    expect(binding.effectiveSessionUuid("transport")).toBe("session-1");
+  });
+
+  test("unbindSession also clears a seeded initial binding for the released session", () => {
+    const binding = new SessionToolBinding("seeded-session");
+
+    expect(binding.effectiveSessionUuid("recreated-transport")).toBe("seeded-session");
+    expect(binding.unbindSession("seeded-session")).toBe(true);
+    // The seed fallback is gone, so a later sessionless call no longer enforces it.
+    expect(binding.effectiveSessionUuid("recreated-transport")).toBeUndefined();
   });
 });

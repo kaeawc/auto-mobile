@@ -1,9 +1,10 @@
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike, type DaemonClientFactory } from "./client";
 import { DaemonManager, type DaemonManagerLike } from "./manager";
 import { logger } from "../utils/logger";
-import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "./constants";
+import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS, DAEMON_BOUND_SESSION_REPLAY_TTL_MS } from "./constants";
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
@@ -338,6 +339,34 @@ export class DaemonMcpProxy {
   private readonly clientAssetVersion: string | null;
   private connecting: Promise<void> | null = null;
   private connected: boolean = false;
+  // The daemon clears socket-local state when its RPC connection drops. Keep this
+  // proxy's successful explicit binding so subsequent sessionless calls can seed
+  // a replacement socket without sharing the binding with other proxies.
+  private boundSessionUuid: string | undefined;
+  // When the binding above was last set/refreshed, on the injected clock. Once
+  // the daemon's session idle window elapses with no explicit-sessionUuid call
+  // refreshing it, the remembered UUID is treated as retired so a sessionless
+  // call is not rewritten to a released session (issue #4610).
+  private boundSessionUuidAt: number | undefined;
+  // Monotonic release-epoch counter, bumped every time the daemon signals that a
+  // session was released (via handleDaemonNotification). `releasedSessionEpochs`
+  // records, per released UUID, the epoch at which it was last released. A
+  // callTool captures the epoch at forward time; on completion the post-call
+  // remember/refresh asks "was the SPECIFIC UUID I forwarded released at a later
+  // epoch?" and, if so, declines to resurrect it. Scoping the guard to the
+  // forwarded UUID (issue #4655) — rather than a single global generation bumped
+  // by ANY binding change (issue #4611's first cut) — means the release of an
+  // UNRELATED session mid-call no longer blocks remembering the session THIS call
+  // actually forwarded, while a release of the forwarded UUID still preserves.
+  private releaseEpoch: number = 0;
+  private readonly releasedSessionEpochs = new Map<string, number>();
+  // Monotonic counter bumped whenever a daemon push invalidates a discovery cache
+  // or the session binding mid-flight (list_changed nulls a cache; a bound-session
+  // release changes the session scope). A `tools/list` / `resources/list` captures
+  // this at forward time and, if it has advanced by completion, declines to store
+  // the now-stale response into the cache the invalidation just cleared — the next
+  // discovery refetches under the current scope (issue #4655).
+  private discoveryEpoch: number = 0;
 
   // Cached definitions from daemon
   private cachedTools: ProxiedToolDefinition[] | null = null;
@@ -463,6 +492,31 @@ export class DaemonMcpProxy {
   }
 
   private handleDaemonNotification(notification: DaemonNotification): void {
+    if (notification.method === SESSION_RELEASED_NOTIFICATION_METHOD) {
+      // The daemon actually released a session. Record the release against the
+      // SPECIFIC UUID (issue #4655) so an in-flight call that forwarded exactly
+      // this session declines to re-remember it on completion — regardless of
+      // whether it is the currently-bound session. If it IS the one this proxy
+      // remembers, also drop the binding NOW so a later sessionless call is not
+      // rewritten to the retired UUID (issue #4610). A non-matching key —
+      // including a derived `${base}:${label}` release when we hold the base —
+      // leaves the binding intact. The replay TTL stays as a dropped-frame
+      // backstop for when this signal never arrives.
+      if (typeof notification.sessionId === "string" && notification.sessionId.length > 0) {
+        this.recordSessionReleased(notification.sessionId);
+      }
+      if (
+        this.boundSessionUuid !== undefined &&
+        notification.sessionId === this.boundSessionUuid
+      ) {
+        // A bound-session release changes the scope of any in-flight discovery
+        // forwarded with that UUID, so invalidate pending discovery too (#4655).
+        this.discoveryEpoch += 1;
+        this.clearBoundSessionUuid();
+      }
+      return;
+    }
+
     const kind = listChangedKindForMethod(notification.method);
     if (kind === undefined) {
       // Unknown pushed methods are expected as the daemon grows new
@@ -471,6 +525,10 @@ export class DaemonMcpProxy {
       return;
     }
 
+    // Bump the discovery epoch so a discovery request whose response is still in
+    // flight declines to repopulate the cache this invalidation just cleared
+    // (issue #4655).
+    this.discoveryEpoch += 1;
     if (kind === "tools") {
       this.cachedTools = null;
     } else {
@@ -841,11 +899,25 @@ export class DaemonMcpProxy {
     }
 
     try {
+      // Bind discovery to the session like callTool does. Without this, a
+      // recoverable reconnect INSIDE withRecoverableReconnect retries tools/list
+      // with empty params against the fresh UNSEEDED transport, which returns the
+      // full unfiltered tool list instead of the session-scoped one. Computing the
+      // forwarded params inside the operation closure re-seeds the retry after a
+      // reconnect (issue #4610).
+      const discoveryEpoch = this.discoveryEpoch;
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("tools/list", {})
+        this.client!.callDaemonMethod("tools/list", this.withBoundSessionUuid({}))
       );
       const tools = result?.tools ?? [];
-      this.cachedTools = tools;
+      // If a list_changed or bound-session release invalidated this cache WHILE the
+      // response was in flight, the response is scoped to the now-stale binding.
+      // Return it to THIS caller but leave the cache empty so the next listTools()
+      // refetches under the current scope, instead of resurrecting the list the
+      // invalidation just cleared (issue #4655).
+      if (this.discoveryEpoch === discoveryEpoch) {
+        this.cachedTools = tools;
+      }
       return tools;
     } catch (error) {
       logger.error(`[DaemonMcpProxy] Failed to list tools: ${error}`);
@@ -860,9 +932,40 @@ export class DaemonMcpProxy {
     name: string,
     args: Record<string, unknown>
   ): Promise<any> {
+    const forwardedArgs = this.withBoundSessionUuid(args);
+    // Snapshot the release epoch at forward time. If a session-released signal for
+    // the SPECIFIC forwarded UUID lands WHILE this call is in flight, that UUID's
+    // recorded epoch advances past this snapshot and the completion path below
+    // declines to resurrect the released UUID (issue #4611/#4655). A release of an
+    // UNRELATED session bumps the global epoch but not the forwarded UUID's entry,
+    // so it does not block remembering the session this call forwarded.
+    const callReleaseEpoch = this.releaseEpoch;
     try {
-      return await this.withRecoverableReconnect(() => this.client!.callTool(name, args));
+      const result = await this.withRecoverableReconnect(() => this.client!.callTool(name, forwardedArgs));
+      // Remember what was actually forwarded, not the caller's raw args. An
+      // implicit sessionless call injects the bound UUID into forwardedArgs and
+      // extends the live daemon session in getOrCreateSession(); refreshing the
+      // replay lease off forwardedArgs keeps continuous implicit activity from
+      // being mistaken for idleness, so a later reconnect re-seeds the still-live
+      // session instead of creating an unseeded transport (issue #4610).
+      this.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch);
+      return result;
     } catch (error) {
+      // The success-only rememberSessionUuid above never runs when the handler
+      // rejects, but an admitted-then-rejected call still reached
+      // getOrCreateSession() and refreshed the LIVE daemon session. Without
+      // refreshing the replay lease here too, repeated admitted-but-failed calls
+      // let the proxy lease silently expire while the daemon session stays alive,
+      // so a later reconnect can no longer replay it (issue #4610).
+      this.refreshReplayLeaseAfterAdmittedFailure(name, forwardedArgs, error, callReleaseEpoch);
+      // Do NOT clear the binding on a rejected executePlan. A plan can reject
+      // *before* the handler runs — capability enforcement or schema parsing in
+      // src/server/index.ts — in which case DefaultPlanLifecycleManager
+      // .afterExecution() never runs and the daemon session stays LIVE. Forgetting
+      // it here would strand a still-live session after a reconnect. The binding is
+      // now cleared authoritatively by the daemon's session-released signal
+      // (handleDaemonNotification) whenever the session is *actually* released —
+      // whether the plan succeeded or failed inside the handler (issue #4610).
       // withRecoverableReconnect already reconciled build identity and retried once.
       // A still-"Unknown tool" failure means the daemon genuinely cannot provide a
       // tool this frontend advertises — surface an actionable error naming both
@@ -871,6 +974,130 @@ export class DaemonMcpProxy {
         throw await this.toolUnavailableError(name);
       }
       throw error;
+    }
+  }
+
+  private withBoundSessionUuid(args: Record<string, unknown>): Record<string, unknown> {
+    // A daemon session released by ordinary heartbeat/idle expiry leaves this
+    // remembered binding dangling; replaying its UUID on a later sessionless call
+    // would silently recreate the session and reacquire a device without the
+    // caller asking for it (issue #4610). Once the replay window has elapsed with
+    // no forwarded call (explicit or implicit) refreshing the binding, treat it
+    // as retired.
+    if (this.isBoundSessionReplayExpired()) {
+      this.clearBoundSessionUuid();
+    }
+    // Only a caller-provided NON-EMPTY STRING sessionUuid counts as an explicit
+    // session selection that bypasses the retained binding. A blank/null/number/
+    // object sessionUuid is not explicit, so the bound UUID is still injected.
+    if (
+      !this.boundSessionUuid ||
+      (typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0)
+    ) {
+      return args;
+    }
+    return { ...args, sessionUuid: this.boundSessionUuid };
+  }
+
+  private isBoundSessionReplayExpired(): boolean {
+    if (this.boundSessionUuid === undefined || this.boundSessionUuidAt === undefined) {
+      return false;
+    }
+    return this.timer.now() - this.boundSessionUuidAt >= DAEMON_BOUND_SESSION_REPLAY_TTL_MS;
+  }
+
+  private clearBoundSessionUuid(): void {
+    this.boundSessionUuid = undefined;
+    this.boundSessionUuidAt = undefined;
+  }
+
+  // Record that the daemon released a specific session UUID, advancing the global
+  // release epoch. An in-flight call that forwarded this exact UUID compares its
+  // captured epoch against this entry and declines to resurrect the released
+  // session on completion (issue #4655). Scoping the record to the UUID — not a
+  // global counter — is what lets an unrelated session's release NOT block
+  // remembering the session another in-flight call forwarded.
+  private recordSessionReleased(sessionUuid: string): void {
+    this.releaseEpoch += 1;
+    this.releasedSessionEpochs.set(sessionUuid, this.releaseEpoch);
+  }
+
+  // True when the session THIS call forwarded was released at a later epoch than
+  // the one captured at forward time — i.e. a release for the forwarded UUID
+  // landed WHILE the call was in flight. A release of any OTHER session advances
+  // the global epoch but leaves the forwarded UUID's entry untouched, so this
+  // stays false for it (issue #4655).
+  private wasForwardedSessionReleasedSince(
+    forwardedArgs: Record<string, unknown>,
+    forwardEpoch: number,
+  ): boolean {
+    const forwardedUuid = typeof forwardedArgs.sessionUuid === "string"
+      ? forwardedArgs.sessionUuid
+      : undefined;
+    if (forwardedUuid === undefined || forwardedUuid.trim().length === 0) {
+      return false;
+    }
+    return (this.releasedSessionEpochs.get(forwardedUuid) ?? 0) > forwardEpoch;
+  }
+
+  // Called with the FORWARDED args (post-withBoundSessionUuid), so an implicit
+  // sessionless call that had the bound UUID injected refreshes the replay lease
+  // just like an explicit-sessionUuid call, matching the daemon session it just
+  // extended (issue #4610).
+  private rememberSessionUuid(
+    name: string,
+    forwardedArgs: Record<string, unknown>,
+    callReleaseEpoch: number,
+  ): void {
+    if (name === "executePlan") {
+      this.clearBoundSessionUuid();
+      return;
+    }
+    // A release for the FORWARDED UUID observed WHILE this call was in flight
+    // already recorded that UUID's release (handleDaemonNotification).
+    // Re-remembering it now would resurrect the freed session and let the next
+    // sessionless call recreate it (issue #4611). Scoped to the forwarded UUID so
+    // an unrelated session's mid-call release does NOT block this remember (issue
+    // #4655); a later explicit call re-binds normally.
+    if (this.wasForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch)) {
+      return;
+    }
+    if (typeof forwardedArgs.sessionUuid === "string" && forwardedArgs.sessionUuid.trim().length > 0) {
+      this.boundSessionUuid = forwardedArgs.sessionUuid;
+      this.boundSessionUuidAt = this.timer.now();
+    }
+  }
+
+  // Refresh the replay lease for a call that was ADMITTED and forwarded to the
+  // daemon handler but then REJECTED. getOrCreateSession() already refreshed the
+  // live daemon session before the handler ran, so the proxy lease must track
+  // that liveness even on failure — otherwise repeated admitted-but-failed calls
+  // retire a still-live session and a reconnect seeds an unbound transport
+  // (issue #4610). Excluded, because none of them refreshed a live session:
+  //   - executePlan owns its own binding lifecycle via the release signal; leave
+  //     it untouched so a pre-handler plan rejection does not strand the binding.
+  //   - a recoverable error (DaemonUnavailableError transport/connect failure,
+  //     "Session not found", or an unknown-tool build-skew) never reached the
+  //     handler with a live session, so the lease must be allowed to expire.
+  private refreshReplayLeaseAfterAdmittedFailure(
+    name: string,
+    forwardedArgs: Record<string, unknown>,
+    error: unknown,
+    callReleaseEpoch: number,
+  ): void {
+    if (name === "executePlan" || this.isRecoverableDaemonSessionError(error)) {
+      return;
+    }
+    // As in rememberSessionUuid: a release of the forwarded UUID observed
+    // mid-flight already recorded it, so an admitted-then-rejected call must not
+    // re-refresh the released UUID's lease (issue #4611/#4655). The session is
+    // gone; resurrecting the lease would replay it on the next sessionless call.
+    if (this.wasForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch)) {
+      return;
+    }
+    if (typeof forwardedArgs.sessionUuid === "string" && forwardedArgs.sessionUuid.trim().length > 0) {
+      this.boundSessionUuid = forwardedArgs.sessionUuid;
+      this.boundSessionUuidAt = this.timer.now();
     }
   }
 
@@ -899,11 +1126,16 @@ export class DaemonMcpProxy {
     }
 
     try {
+      const discoveryEpoch = this.discoveryEpoch;
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("resources/list", {})
+        this.client!.callDaemonMethod("resources/list", this.withBoundSessionUuid({}))
       );
       const resources = result?.resources ?? [];
-      this.cachedResources = resources;
+      // Discard a response invalidated mid-flight rather than caching the stale
+      // scope (issue #4655); the next listResources() refetches.
+      if (this.discoveryEpoch === discoveryEpoch) {
+        this.cachedResources = resources;
+      }
       return resources;
     } catch (error) {
       logger.error(`[DaemonMcpProxy] Failed to list resources: ${error}`);
@@ -921,11 +1153,16 @@ export class DaemonMcpProxy {
     }
 
     try {
+      const discoveryEpoch = this.discoveryEpoch;
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("resources/list-templates", {})
+        this.client!.callDaemonMethod("resources/list-templates", this.withBoundSessionUuid({}))
       );
       const templates = result?.resourceTemplates ?? [];
-      this.cachedResourceTemplates = templates;
+      // Discard a response invalidated mid-flight rather than caching the stale
+      // scope (issue #4655); the next listResourceTemplates() refetches.
+      if (this.discoveryEpoch === discoveryEpoch) {
+        this.cachedResourceTemplates = templates;
+      }
       return templates;
     } catch (error) {
       logger.error(`[DaemonMcpProxy] Failed to list resource templates: ${error}`);
@@ -967,6 +1204,7 @@ export class DaemonMcpProxy {
     this.notificationUnsubscribe?.();
     this.notificationUnsubscribe = null;
     this.connected = false;
+    this.clearBoundSessionUuid();
     this.invalidateCache();
     logger.debug("[DaemonMcpProxy] Disconnected from daemon");
   }

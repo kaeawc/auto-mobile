@@ -7,11 +7,12 @@ import {
 } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike } from "../../src/daemon/client";
 import { ActionableError } from "../../src/models";
-import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../src/daemon/constants";
+import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS, DAEMON_BOUND_SESSION_REPLAY_TTL_MS } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 
 const OLDER_VERSION = "0.0.1";
 const NEWER_VERSION = "9999.0.0";
@@ -45,6 +46,7 @@ class ScriptedDaemonClient implements DaemonClientLike {
     private readonly behavior: {
       toolResult?: any;
       toolError?: Error;
+      toolErrorByName?: Map<string, Error>;
       resourceResult?: any;
       resourceError?: Error;
       daemonMethodResults?: Map<string, any>;
@@ -62,6 +64,10 @@ class ScriptedDaemonClient implements DaemonClientLike {
 
   async callTool(toolName: string, params: Record<string, any>): Promise<any> {
     this.callToolCalls.push({ toolName, params });
+    const perToolError = this.behavior.toolErrorByName?.get(toolName);
+    if (perToolError) {
+      throw perToolError;
+    }
     if (this.behavior.toolError) {
       throw this.behavior.toolError;
     }
@@ -1299,6 +1305,383 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("replays a successful session binding on later sessionless calls after reconnect", async () => {
+      const staleClient = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "bound" }] },
+      });
+      const originalCallTool = staleClient.callTool.bind(staleClient);
+      staleClient.callTool = async (toolName, params) => {
+        if (staleClient.callToolCalls.length === 1) {
+          staleClient.callToolCalls.push({ toolName, params });
+          throw new DaemonUnavailableError("Daemon socket connection lost: connection closed");
+        }
+        return await originalCallTool(toolName, params);
+      };
+      const freshClient = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "recovered" }] },
+      });
+      const clients = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        const result = await proxy.callTool("videoRecording", {
+          action: "stop",
+          deviceId: "device-a",
+          recordingId: "recording-a",
+        });
+
+        expect(result).toEqual({ content: [{ type: "text", text: "recovered" }] });
+        expect(staleClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          {
+            toolName: "videoRecording",
+            params: {
+              action: "stop",
+              deviceId: "device-a",
+              recordingId: "recording-a",
+              sessionUuid: "session-a",
+            },
+          },
+        ]);
+        expect(freshClient.callToolCalls).toEqual([
+          {
+            toolName: "videoRecording",
+            params: {
+              action: "stop",
+              deviceId: "device-a",
+              recordingId: "recording-a",
+              sessionUuid: "session-a",
+            },
+          },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("listTools re-seeds the bound session on a reconnect so discovery stays session-scoped", async () => {
+      // listTools forwards to a shared transport. A reconnect mid-listTools would
+      // otherwise retry tools/list with empty params against the fresh unseeded
+      // transport, returning the full unfiltered tool list instead of the
+      // session-scoped one. Binding discovery like callTool re-seeds the retried
+      // tools/list so it returns the session-scoped list (issue #4610).
+      const staleClient = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "bound" }] },
+        daemonMethodError: new Error("Session not found"),
+      });
+      const freshClient = new ScriptedDaemonClient({
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "scopedTool", inputSchema: {} }] }],
+        ]),
+      });
+      const clients = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        // Bind the proxy to session-a via a successful tool call.
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+
+        const tools = await proxy.listTools();
+
+        expect(tools).toEqual([{ name: "scopedTool", inputSchema: {} }]);
+        // The stale attempt and the reconnect retry both carry the bound session.
+        expect(staleClient.callDaemonMethodCalls).toEqual([
+          { method: "tools/list", params: { sessionUuid: "session-a" } },
+        ]);
+        expect(freshClient.callDaemonMethodCalls).toEqual([
+          { method: "tools/list", params: { sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does not replay an executePlan session after its successful release", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("executePlan", { sessionUuid: "session-a", deviceId: "device-a" });
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "executePlan", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("preserves the binding when an executePlan rejects (a pre-handler rejection leaves the session live)", async () => {
+      // An executePlan can reject BEFORE the handler runs — capability enforcement
+      // or schema parsing in src/server/index.ts — in which case
+      // DefaultPlanLifecycleManager.afterExecution() never runs and the daemon
+      // session stays LIVE. The proxy must NOT forget the binding on rejection, or
+      // a later sessionless call after a reconnect would strand that still-live
+      // session. The binding is cleared only by the daemon's real session-released
+      // signal (see the release-signal tests), never by a bare plan rejection
+      // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        toolErrorByName: new Map([["executePlan", new Error("plan boom")]]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await expect(proxy.callTool("executePlan", { deviceId: "device-a" })).rejects.toThrow("plan boom");
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        // The third call is still rewritten to session-a: the binding survived the
+        // rejection because nothing proved the session was released.
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "executePlan", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("stops replaying a bound session after the daemon session idle window elapses", async () => {
+      // The daemon's heartbeat/idle cleanup can release an ordinary session while
+      // this proxy stays connected. Once the replay window elapses with no
+      // explicit-sessionUuid call refreshing the binding, a later device-aware
+      // call that omits sessionUuid must NOT be rewritten to the retired UUID —
+      // otherwise createToolExecutionContext silently recreates the session
+      // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("still replays a bound session before the idle window elapses", async () => {
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("keeps replaying a bound session across continuous implicit activity beyond one TTL", async () => {
+      // Continuous implicit (sessionless) calls forward the bound UUID and extend
+      // the live daemon session, so the replay lease must refresh off the forwarded
+      // args. Otherwise total elapsed time crossing one TTL retires a still-live
+      // session, and a later reconnect would seed an unbound transport that treats
+      // session-disabled capabilities as enabled
+      // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // Two implicit calls, each within the TTL, but cumulatively past it. Each
+        // forwarded implicit call must renew the lease so the binding survives.
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("refreshes the replay lease when an admitted bound call is rejected by the handler", async () => {
+      // An implicit sessionless call has the bound UUID injected and reaches the
+      // daemon, which refreshes the LIVE session in getOrCreateSession(). The
+      // handler then rejects (e.g. a tool failure), so the success-only
+      // rememberSessionUuid never runs. Without refreshing the lease in the catch
+      // path, crossing one TTL retires the still-live session and a later reconnect
+      // would seed an unbound transport (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        toolErrorByName: new Map([["tapOn", new ActionableError("tap failed after admission")]]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // An admitted-then-rejected implicit call within the TTL. It must renew the
+        // lease off the injected UUID even though it throws.
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toThrow("tap failed after admission");
+        // Cumulatively past one TTL from the initial bind; only the refreshed lease
+        // keeps the binding alive for this final implicit call.
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "tapOn", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does NOT refresh the replay lease when the failing call never reached the daemon", async () => {
+      // A transport/connect failure (DaemonUnavailableError) never reached the
+      // handler, so the live session was not refreshed. The lease must be allowed
+      // to expire — refreshing it would replay a UUID whose session may be gone
+      // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        toolErrorByName: new Map([
+          ["tapOn", new DaemonUnavailableError("Daemon socket connection lost: connection closed")],
+        ]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toBeInstanceOf(DaemonUnavailableError);
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        // The final implicit observe must NOT carry an injected sessionUuid: the
+        // lease expired because the transport failure did not refresh it.
+        const lastCall = client.callToolCalls[client.callToolCalls.length - 1];
+        expect(lastCall).toEqual({ toolName: "observe", params: { deviceId: "device-a" } });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("injects the bound UUID when a later call carries a non-string sessionUuid", async () => {
+      // A null/number/object sessionUuid is not an explicit session selection, so
+      // the retained binding must still be injected rather than bypassed
+      // (issue [#4610](https://github.com/kaeawc/auto-mobile/issues/4610)).
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await proxy.callTool("observe", { deviceId: "device-a", sessionUuid: null as unknown as string });
+        await proxy.callTool("observe", { deviceId: "device-a", sessionUuid: 42 as unknown as string });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("readResource recovers when a sibling's socket dropped", async () => {
       const recoveredResult = { contents: [{ uri: "automobile:devices/booted", text: "[]" }] };
       const staleClient = new ScriptedDaemonClient({
@@ -1377,6 +1760,352 @@ describe("DaemonMcpProxy", () => {
         await expect(proxy.callTool("sendSms", {})).rejects.toThrow("ECONNREFUSED");
         expect(client.callToolCalls).toHaveLength(1);
         expect(client.closeCallCount).toBe(0);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+  });
+
+  describe("session-released signal (issue #4610)", () => {
+    // A real daemon->proxy "session released" push clears the remembered binding
+    // the moment the daemon releases the session (heartbeat / idle / plan),
+    // instead of waiting out the replay-TTL guess. The TTL stays as a
+    // dropped-frame backstop.
+
+    test("a released signal for the bound UUID clears the binding", async () => {
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        // Bind session-a via an explicit call, then the daemon releases it.
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+        // The next sessionless call must NOT be rewritten to the retired UUID.
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a released signal for a different session leaves the binding intact", async () => {
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // A derived-only release (`${base}:${label}`) or an unrelated session key
+        // must NOT clear a base binding matched by exact equality.
+        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a:device-a");
+        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-b");
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    // Issue #4611 (follow-up P1): a release observed WHILE a callTool is in flight
+    // must survive the call's completion. The in-flight call's post-call
+    // remember/refresh previously re-established the released UUID unconditionally,
+    // so the next sessionless call would inject it and recreate the freed session.
+    test("a release during a fulfilled in-flight call is not undone by the post-call remember", async () => {
+      let callCount = 0;
+      const fakeClient: FakeDaemonClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        onCallTool: () => {
+          callCount += 1;
+          // Fire the release DURING the second (sessionless, bound) call — after the
+          // bound UUID was injected into forwardedArgs but before the call resolves.
+          if (callCount === 2) {
+            fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // Call 2 injects session-a, then the release lands mid-flight.
+        await proxy.callTool("observe", { deviceId: "device-a" });
+        // Call 3 must NOT be rewritten to the released UUID.
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a release of an UNRELATED session mid-call does not block remembering the forwarded session (#4655)", async () => {
+      // Regression for the global-generation guard: the proxy is bound to
+      // session-a while an EXPLICIT session-b call is in flight; session-a (NOT
+      // the session this call forwarded) is released mid-flight. The old guard
+      // bumped one global counter on ANY binding clear, so the completing
+      // session-b call saw "a binding changed" and declined to remember session-b
+      // — even though session-b was never released. Scoped to the forwarded UUID,
+      // the release of the unrelated session-a must NOT block remembering
+      // session-b.
+      let callCount = 0;
+      const fakeClient: FakeDaemonClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        onCallTool: () => {
+          callCount += 1;
+          if (callCount === 2) {
+            fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        // Bind session-a.
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // Explicit session-b call; the unrelated session-a is released mid-flight.
+        await proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" });
+        // The next sessionless call must be rewritten to session-b (never released).
+        await proxy.callTool("observe", { deviceId: "device-b" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { sessionUuid: "session-b", deviceId: "device-b" } },
+          { toolName: "observe", params: { deviceId: "device-b", sessionUuid: "session-b" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a release during an admitted-then-rejected in-flight call is not undone by the refresh", async () => {
+      let callCount = 0;
+      const fakeClient: FakeDaemonClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        onCallTool: () => {
+          callCount += 1;
+          if (callCount === 2) {
+            // Admitted (recorded + reached the daemon handler), then released
+            // mid-flight, then rejected by the handler (non-recoverable error).
+            fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+            throw new Error("handler rejected the admitted call");
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toThrow(
+          "handler rejected the admitted call"
+        );
+        // The admitted-failure refresh must not resurrect the released UUID's lease.
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "tapOn", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("with NO release mid-call, the in-flight call still remembers the binding normally", async () => {
+      // Positive control: the mid-flight guard must not over-fire. With the
+      // onCallTool seam present but emitting nothing, the binding persists and the
+      // next sessionless call is still rewritten (issue #4611).
+      let observed = 0;
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        onCallTool: () => {
+          observed += 1;
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+        expect(observed).toBe(2);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("the TTL backstop still expires the binding when no signal arrives", async () => {
+      // Dropped-frame path: no released signal is delivered, so the replay TTL
+      // must still retire the binding on its own.
+      const timer = new FakeTimer();
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a tools/list invalidated mid-flight is not cached; the next listTools refetches (#4655)", async () => {
+      // A list_changed (or bound-session release) lands WHILE a session-scoped
+      // tools/list is pending. The handler nulls the cache immediately, but the
+      // eventual (now-stale) response used to repopulate cachedTools
+      // unconditionally, resurrecting the list the invalidation just cleared. The
+      // response must NOT be cached, so the next listTools() refetches.
+      let methodCallCount = 0;
+      const fakeClient: FakeDaemonClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "t", inputSchema: {} }] }],
+        ]),
+        onCallDaemonMethod: method => {
+          if (method === "tools/list") {
+            methodCallCount += 1;
+            if (methodCallCount === 1) {
+              fakeClient.emitNotification("notifications/tools/list_changed");
+            }
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        const first = await proxy.listTools();
+        expect(first).toEqual([{ name: "t", inputSchema: {} }]);
+        // The mid-flight invalidation prevented caching, so a second call refetches.
+        const second = await proxy.listTools();
+        expect(second).toEqual([{ name: "t", inputSchema: {} }]);
+        expect(fakeClient.callDaemonMethodCalls).toHaveLength(2);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a tools/list with NO mid-flight invalidation caches normally (positive control, #4655)", async () => {
+      // The discovery guard must not over-fire: with no push during the pending
+      // call, the response is cached and the second listTools() serves the cache.
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "t", inputSchema: {} }] }],
+        ]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        await proxy.listTools();
+        expect(fakeClient.callDaemonMethodCalls).toHaveLength(1);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("an unknown pushed method is still logged and ignored", async () => {
+      const fakeClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // A future notification family must not touch the binding.
+        expect(() => fakeClient.emitNotification("notifications/some/future_thing")).not.toThrow();
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

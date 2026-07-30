@@ -38,7 +38,10 @@ import {
 import { JsonToolOutputArtifactWriter, type ToolOutputArtifactRetention } from "./toolOutputArtifactWriter";
 import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 import type { SessionToolProfileService } from "../features/toolCapabilities/SessionToolProfileService";
-import { assertToolEnabledForSession } from "../features/toolCapabilities/toolCapabilityPolicy";
+import {
+  assertToolEnabledForAnySession,
+} from "../features/toolCapabilities/toolCapabilityPolicy";
+import { resolveCapabilityBaseSessionUuid } from "../features/toolCapabilities/capabilitySessionResolver";
 import {
   getToolCapabilityContext,
   runWithToolCapabilityContext,
@@ -86,7 +89,7 @@ interface InternalToolCallOptions {
 
 interface InternalToolInvocationContext {
   args: Record<string, unknown>;
-  sessionUuid?: string;
+  routingSessionUuid?: string;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
 }
 
@@ -168,6 +171,13 @@ interface ExecutionTargetInput {
 interface ExecutionTargetContext {
   args: any;
   baseSessionUuid: string | undefined;
+  // Capability enforcement session (issue #4611 Gap A). Distinct from the
+  // routing `sessionUuid`: for a deviceId-only call there is no routing session,
+  // so this is derived from the device's owning session and enforcement still
+  // applies. May be a derived `${base}:${label}` label session. Optional so
+  // test pipeline overrides need not set it (the assert falls back to
+  // `sessionUuid`).
+  capabilitySessionUuid?: string | undefined;
   device: BootedDevice | undefined;
   internalCall: boolean;
   sessionUuid: string | undefined;
@@ -229,6 +239,20 @@ const AUTOMATIC_TOOL_OUTPUT_RETENTION: ToolOutputArtifactRetention = {
   overflowMinAgeMs: 60 * 60 * 1000,
 };
 
+/**
+ * Server-side session-binding teardown seam (issue #4611 Gap D). A daemon
+ * session release (e.g. an executePlan auto-release) frees the session in the
+ * SessionManager/DevicePool but cannot, by itself, reach the per-transport
+ * `SessionToolBinding` held in `createMcpServer` (index.ts) — that binding still
+ * resolves the released session as the transport's effective session, so a later
+ * sessionless `tools/list`/`tools/call` keeps enforcing the released (stale)
+ * profile. `createMcpServer` registers a handler here (interface + fake per DI
+ * convention) so the actual release path can clear its transport binding.
+ */
+export interface SessionBindingReleaseHandler {
+  onSessionReleased(sessionUuid: string): void;
+}
+
 export interface PlanLifecycleInput {
   name: string;
   args: any;
@@ -237,6 +261,10 @@ export interface PlanLifecycleInput {
   device: BootedDevice | undefined;
   sessionUuid: string | undefined;
   shouldResolveDevice: boolean;
+  // Injected teardown for the server-side per-transport SessionToolBinding
+  // (issue #4611 Gap D). Invoked AFTER a real release for every session freed —
+  // base and derived label sessions alike — never optimistically.
+  sessionBindingReleaseHandler?: SessionBindingReleaseHandler;
 }
 
 interface PlanLifecycleManager {
@@ -393,9 +421,25 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       }
     }
 
+    // Capability enforcement session (issue #4611 Gap A). A deviceId-only call
+    // has no routing sessionUuid, so a narrowed profile on the device's owning
+    // session would otherwise be silently bypassed (the policy treats an
+    // undefined session as fully enabled). When a routing session exists it IS
+    // the capability session (possibly a derived `${base}:${label}` label
+    // session); otherwise derive the device's owning session so enforcement
+    // still applies. Guarded on an initialized daemon — outside the daemon
+    // there is no session registry to consult. This mirrors the socket path,
+    // which already resolves deviceId -> session before enforcing.
+    let capabilitySessionUuid = sessionUuid;
+    if (!capabilitySessionUuid && device && DaemonState.getInstance().isInitialized()) {
+      capabilitySessionUuid =
+        DaemonState.getInstance().getSessionManager().getSessionForDevice?.(device.deviceId) ?? undefined;
+    }
+
     return {
       args,
       baseSessionUuid,
+      capabilitySessionUuid,
       device,
       internalCall,
       sessionUuid,
@@ -724,7 +768,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 // executePlan cleanup and the auto-release guard without a live daemon session.
 export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
   async afterExecution(input: PlanLifecycleInput): Promise<void> {
-    const { name, args, baseSessionUuid, cleanupService, device, sessionUuid, shouldResolveDevice } = input;
+    const { name, args, baseSessionUuid, cleanupService, device, sessionUuid, shouldResolveDevice, sessionBindingReleaseHandler } = input;
     if (device && name === "executePlan" && args?.cleanupAppId) {
       await cleanupService.cleanup(device, {
         appId: args.cleanupAppId,
@@ -737,8 +781,12 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         const sessionManager = DaemonState.getInstance().getSessionManager();
         const devicePool = DaemonState.getInstance().getDevicePool();
         const releaseSessionUuid = baseSessionUuid ?? sessionUuid;
+        // Track exactly which sessions this release actually frees so the
+        // server-side transport binding is torn down for each (issue #4611 Gap
+        // D) — coupled to the REAL release, never cleared optimistically.
+        const releasedSessionUuids: string[] = [];
         if (releaseSessionUuid) {
-          await releaseDeviceLabelSessions(releaseSessionUuid);
+          releasedSessionUuids.push(...await releaseDeviceLabelSessions(releaseSessionUuid));
         }
 
         const session = releaseSessionUuid ? sessionManager.getSession(releaseSessionUuid) : null;
@@ -748,7 +796,18 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
           await devicePool.releaseDevice(deviceId);
           NavigationGraphManager.releaseSession(releaseSessionUuid);
           RealObserveScreen.clearCache(deviceId);
+          releasedSessionUuids.push(releaseSessionUuid);
           logger.info(`Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`);
+        }
+
+        // Clear the per-transport SessionToolBinding for every freed session so a
+        // later sessionless tools/list or tools/call stops enforcing a released
+        // profile (issue #4611 Gap D). Best-effort: the handler swallows its own
+        // failures, but the release itself has already succeeded regardless.
+        if (sessionBindingReleaseHandler) {
+          for (const releasedUuid of releasedSessionUuids) {
+            sessionBindingReleaseHandler.onSessionReleased(releasedUuid);
+          }
         }
       } catch (releaseError) {
         logger.warn(`Failed to auto-release session ${sessionUuid}: ${releaseError}`);
@@ -766,6 +825,17 @@ export class ToolRegistryClass {
   // last-writer-wins (issue #3223). Entries are pruned via the underlying
   // server's onclose hook when a session's transport closes.
   private servers: Set<McpServer> = new Set();
+  // Per-transport server-side session-binding teardown handlers (issue #4611 Gap
+  // D). `createMcpServer` registers one per loopback transport; the plan-release
+  // path fans a released session UUID out to all of them so each transport's
+  // SessionToolBinding drops the stale session. Pruned via the returned
+  // unsubscribe on transport close, mirroring the `servers` set above.
+  private sessionBindingReleaseHandlers: Set<SessionBindingReleaseHandler> = new Set();
+  // Stable aggregate handed to the plan-lifecycle input so afterExecution can
+  // fan a released session out to every registered transport handler.
+  private readonly sessionBindingReleaseNotifier: SessionBindingReleaseHandler = {
+    onSessionReleased: sessionUuid => this.notifySessionBindingReleased(sessionUuid),
+  };
   private deviceSessionManager: DeviceSessionManager;
   private cleanupService: AppCleanupService;
   private toolCallRepository: ToolCallRepository;
@@ -849,8 +919,11 @@ export class ToolRegistryClass {
     // Create a wrapper that handles device ID injection
     const wrappedHandler: ToolHandler = async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
       const capabilityContext = getToolCapabilityContext();
-      const handlerArgs = capabilityContext?.sessionUuid && args.sessionUuid !== capabilityContext.sessionUuid
-        ? { ...args, sessionUuid: capabilityContext.sessionUuid }
+      // Re-inject the ambient ROUTING session (issue #4611 Gap C) so a nested
+      // device-aware call keeps the outer call's derived/label routing identity
+      // rather than reverting to the base session.
+      const handlerArgs = capabilityContext?.routingSessionUuid && args.sessionUuid !== capabilityContext.routingSessionUuid
+        ? { ...args, sessionUuid: capabilityContext.routingSessionUuid }
         : args;
       const toolStartMs = this.timer.now();
       const toolCallTimestamp = new Date().toISOString();
@@ -865,14 +938,24 @@ export class ToolRegistryClass {
           deviceSessionManager: this.deviceSessionManager,
         });
         sessionUuid = resolvedTarget.sessionUuid;
-        const capabilitySessionUuid = resolvedTarget.baseSessionUuid ?? resolvedTarget.sessionUuid;
-        await assertToolEnabledForSession(
+        // Capability enforcement is resolved independently of the routing
+        // session (issue #4611 Gaps A/B/C). The derived capability session is
+        // the resolver-derived device session (Gap A) or the routing session;
+        // the base is the caller-supplied base or the label's base resolved via
+        // the shared helper. Enforcement is the UNION of base + derived (Gap B,
+        // product decision): a tool is enabled if EITHER grants it, so a derived
+        // label may re-enable a tool the base narrowed away.
+        const capabilityDerivedSessionUuid = resolvedTarget.capabilitySessionUuid ?? resolvedTarget.sessionUuid;
+        await this.assertToolEnabledUnion(
           name,
-          capabilitySessionUuid,
+          capabilityDerivedSessionUuid,
+          resolvedTarget.baseSessionUuid,
           getToolCapabilityContext()?.sessionToolProfileService,
         );
         return await runWithToolCapabilityContext(
-          { sessionUuid: capabilitySessionUuid },
+          // Bind the ROUTING session (Gap C), not the base/capability session, so
+          // nested calls re-inject the correct derived routing UUID.
+          { routingSessionUuid: resolvedTarget.sessionUuid },
           async () => {
             try {
               let response: any | undefined;
@@ -922,6 +1005,7 @@ export class ToolRegistryClass {
                 device: resolvedTarget.device,
                 sessionUuid: resolvedTarget.sessionUuid,
                 shouldResolveDevice: resolvedTarget.shouldResolveDevice,
+                sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
               });
             }
           }
@@ -1010,7 +1094,7 @@ export class ToolRegistryClass {
         progress,
         signal,
         options.targetDevice,
-        invocation.sessionUuid,
+        invocation.routingSessionUuid,
         invocation.sessionToolProfileService,
       ),
     );
@@ -1021,14 +1105,17 @@ export class ToolRegistryClass {
     options: InternalToolCallOptions,
   ): InternalToolInvocationContext {
     const context = getToolCapabilityContext();
+    // An internal call inherits the ambient ROUTING session (issue #4611 Gap C)
+    // so a plan step or navigation replay routes to the same derived/label
+    // session the outer call resolved to, not the base session.
     const sessionUuid = options.sessionUuid
-      ?? context?.sessionUuid
+      ?? context?.routingSessionUuid
       ?? (typeof args.sessionUuid === "string" ? args.sessionUuid : undefined);
     return {
       args: sessionUuid && args.sessionUuid !== sessionUuid
         ? { ...args, sessionUuid }
         : args,
-      sessionUuid,
+      routingSessionUuid: sessionUuid,
       sessionToolProfileService: options.sessionToolProfileService ?? context?.sessionToolProfileService,
     };
   }
@@ -1042,11 +1129,55 @@ export class ToolRegistryClass {
     sessionUuid: string | undefined,
     sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
   ): Promise<any> {
-    await assertToolEnabledForSession(tool.name, sessionUuid, sessionToolProfileService);
+    // Honor the UNION of the base + derived `${base}:${label}` sessions here too
+    // (issue #4611). `sessionUuid` is the ambient ROUTING session — a derived
+    // label session for a labeled `criticalSection`/`executePlan` step — so a
+    // single-session assert would reject a tool the base enables but the label
+    // narrowed away. The `targetDevice` path below bypasses the device-aware
+    // wrapper's own union gate entirely, so this pre-gate is the ONLY enforcement
+    // point for it and must apply the union as well.
+    await this.assertToolEnabledUnion(tool.name, sessionUuid, undefined, sessionToolProfileService);
     if (targetDevice && tool.deviceAwareHandler) {
       return tool.deviceAwareHandler(targetDevice, markInternalToolCall(args), progress, signal);
     }
     return tool.handler(markInternalToolCall(args), progress, signal);
+  }
+
+  /**
+   * Assert a tool is enabled under UNION capability semantics (issue #4611): a
+   * tool is enabled when EITHER the base OR the derived `${base}:${label}`
+   * device-label session grants it. Applied at every enforcement gate — the
+   * device-aware wrapper and the nested internal-call pre-gate — so no gate can
+   * reject a call the union should allow.
+   *
+   * The REAL base is always resolved through the shared resolver, even when the
+   * caller supplies `explicitBaseSessionUuid` (issue #4655). For an internal
+   * device-aware step whose routing session is already the derived `${base}:B`,
+   * the wrapper's resolver reports `baseSessionUuid = ${base}:B` — the derived
+   * value, not the true base. Trusting it verbatim would collapse the union to
+   * `[${base}:B, ${base}:B]` and lose the base grant. Passing the supplied base
+   * (or the derived session when none is supplied) back through
+   * `resolveCapabilityBaseSessionUuid` strips a `:label` when present and is a
+   * no-op for a genuine base, so the union is genuinely `[base, ${base}:B]`.
+   */
+  private async assertToolEnabledUnion(
+    toolName: string,
+    derivedSessionUuid: string | undefined,
+    explicitBaseSessionUuid: string | undefined,
+    sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
+  ): Promise<void> {
+    const sessionManager = DaemonState.getInstance().isInitialized()
+      ? DaemonState.getInstance().getSessionManager()
+      : undefined;
+    const baseSessionUuid = resolveCapabilityBaseSessionUuid(
+      explicitBaseSessionUuid ?? derivedSessionUuid,
+      sessionManager,
+    );
+    await assertToolEnabledForAnySession(
+      toolName,
+      [baseSessionUuid, derivedSessionUuid],
+      sessionToolProfileService,
+    );
   }
 
   // Typed variant of `callInternal` for the handful of internally-consumed tools
@@ -1166,6 +1297,38 @@ export class ToolRegistryClass {
   // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
   clearServersForTesting(): void {
     this.servers.clear();
+  }
+
+  // Register a per-transport server-side session-binding teardown handler (issue
+  // #4611 Gap D) and return its unsubscribe. `createMcpServer` calls this once per
+  // loopback transport and drops it on transport close, so a released session's
+  // stale binding is cleared on every live transport but a closed transport's
+  // handler never lingers.
+  registerSessionBindingReleaseHandler(handler: SessionBindingReleaseHandler): () => void {
+    this.sessionBindingReleaseHandlers.add(handler);
+    return () => {
+      this.sessionBindingReleaseHandlers.delete(handler);
+    };
+  }
+
+  // Fan a released session UUID out to every registered transport handler. Called
+  // from the plan-release path (via the injected notifier) after a session is
+  // actually freed. Best-effort: one throwing handler never blocks the others or
+  // the release that triggered it.
+  notifySessionBindingReleased(sessionUuid: string): void {
+    for (const handler of this.sessionBindingReleaseHandlers) {
+      try {
+        handler.onSessionReleased(sessionUuid);
+      } catch (error) {
+        logger.warn(`[ToolRegistry] session-binding release handler failed for ${sessionUuid}: ${error}`);
+      }
+    }
+  }
+
+  // Test-only: drop registered session-binding release handlers so suites sharing
+  // the singleton stay hermetic.
+  clearSessionBindingReleaseHandlersForTesting(): void {
+    this.sessionBindingReleaseHandlers.clear();
   }
 
   // Emit notifications/tools/list_changed so caching clients re-fetch tools/list

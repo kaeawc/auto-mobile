@@ -130,6 +130,23 @@ export const READINESS_PROBE_BACKOFF_MS = 150;
 export const MCP_STREAMABLE_PATH = "/auto-mobile/streamable";
 
 /**
+ * Internal loopback header used to restore a daemon socket's capability
+ * profile when its Streamable HTTP MCP transport is recreated.
+ */
+export const DAEMON_SESSION_TOOL_BINDING_HEADER = "x-auto-mobile-session-uuid";
+
+/**
+ * How long the proxy will keep replaying a remembered session binding on
+ * sessionless calls before treating it as retired (issue #4610). It mirrors the
+ * daemon's session idle timeout (`SessionManager.SESSION_TIMEOUT_MS`, 30 min):
+ * once this window elapses with no forwarded call (explicit or implicit)
+ * refreshing the binding, the daemon session has certainly idle/heartbeat-expired, and
+ * replaying its UUID would silently recreate the released session and reacquire
+ * a device without the caller asking for it.
+ */
+export const DAEMON_BOUND_SESSION_REPLAY_TTL_MS = 30 * 60 * 1000;
+
+/**
  * Control-socket method a client sends to opt in to server-pushed
  * `DaemonNotification` frames (tools/resources list_changed forwarding,
  * issue #3223). Opt-in keeps the push invisible to Kotlin/Swift/legacy

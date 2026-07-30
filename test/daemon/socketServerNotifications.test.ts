@@ -7,6 +7,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
+import {
+  SessionReleaseBroadcaster,
+  SESSION_RELEASED_NOTIFICATION_METHOD,
+} from "../../src/server/sessionReleaseBroadcast";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
@@ -148,6 +152,38 @@ describe("UnixSocketServer notification broadcast", () => {
       type: "daemon_notification",
       method: "notifications/resources/list_changed",
     });
+  });
+
+  test("pushes a session-released frame carrying the released session id to subscribers (issue #4610)", async () => {
+    const subscriber = await connectedClient();
+    subscriber.send(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
+    await subscriber.waitForFrames(1);
+
+    // Emitted by the daemon's onSessionRelease callback in production; the socket
+    // server subscribes to the broadcaster in start().
+    SessionReleaseBroadcaster.emit("session-a");
+    await subscriber.waitForFrames(2);
+
+    expect(subscriber.frames[1]).toEqual({
+      type: "daemon_notification",
+      method: SESSION_RELEASED_NOTIFICATION_METHOD,
+      sessionId: "session-a",
+    });
+  });
+
+  test("close() unsubscribes from the session-release broadcaster too (issue #4610)", async () => {
+    const subscriber = await connectedClient();
+    subscriber.send(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
+    await subscriber.waitForFrames(1);
+
+    subscriber.close();
+    await server.close();
+
+    expect(
+      (server as unknown as { sessionReleaseUnsubscribe: unknown }).sessionReleaseUnsubscribe
+    ).toBeNull();
+    expect(() => SessionReleaseBroadcaster.emit("session-a")).not.toThrow();
+    expect(subscriber.frames).toHaveLength(1);
   });
 
   test("close() unsubscribes from the broadcaster (no write to dead sockets)", async () => {

@@ -143,7 +143,7 @@ describe("UnixSocketServer app-data capability enforcement", () => {
     expect(getInstanceCalls).toBe(1);
   });
 
-  test("uses the base profile for a labeled device session", async () => {
+  test("denies a labeled device session when both base and derived narrow the tool away", async () => {
     await server.close();
     await startServer({ useLabeledSession: true });
 
@@ -158,7 +158,30 @@ describe("UnixSocketServer app-data capability enforcement", () => {
 
     expect(response.success).toBe(false);
     expect(response.error).toContain("requires the 'app-data-interop' capability");
+    // UNION consults both the derived label session and its resolved base.
     expect(isEnabled).toHaveBeenCalledWith("device-session-1", "app-data-interop");
+    expect(isEnabled).toHaveBeenCalledWith("device-session-1:B", "app-data-interop");
     expect(getInstanceCalls).toBe(0);
+  });
+
+  test("allows a labeled device session when the derived label re-enables the tool (Gap B union symmetry)", async () => {
+    await server.close();
+    await startServer({ useLabeledSession: true });
+    // Base "device-session-1" narrows app-data-interop away; the derived
+    // "device-session-1:B" label grants it. Union => allowed, matching the MCP
+    // registerDeviceAware path.
+    isEnabled.mockImplementation(async (sessionUuid: string | undefined) => sessionUuid === "device-session-1:B");
+
+    const response = await sendRequest(socketPath, "ide/setKeyValue", {
+      deviceId: device.deviceId,
+      appId: "com.example",
+      fileName: "prefs",
+      key: "name",
+      value: "value",
+      type: "STRING",
+    });
+
+    expect(response.success).toBe(true);
+    expect(getInstanceCalls).toBe(1);
   });
 });

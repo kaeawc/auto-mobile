@@ -11,6 +11,7 @@ import { executionTracker } from "./executionTracker";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 
 // Import the tool registry
 import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
@@ -72,14 +73,15 @@ import {
   type SessionToolProfileService,
 } from "../features/toolCapabilities/SessionToolProfileService";
 import {
-  assertToolEnabledForSession,
-  isToolEnabledForSession,
+  assertToolEnabledForAnySession,
+  isToolEnabledForAnySession,
 } from "../features/toolCapabilities/toolCapabilityPolicy";
+import { getDeviceLabelMap } from "./deviceLabelMapping";
 import { runWithToolCapabilityContext } from "../features/toolCapabilities/toolCapabilityContext";
 
 export interface McpServerOptions {
   debug?: boolean;
-  sessionContext?: { sessionId?: string };
+  sessionContext?: { sessionId?: string; initialSessionToolBinding?: string };
   planExecutionLock?: PlanExecutionLock;
   daemonMode?: boolean;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
@@ -164,7 +166,7 @@ export function formatToolParamError(toolName: string, error: unknown): string {
 }
 
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
-  const sessionToolBinding = new SessionToolBinding();
+  const sessionToolBinding = new SessionToolBinding(options.sessionContext?.initialSessionToolBinding);
   // Plan execution lock with per-session scope to prevent interference during executePlan
   // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
   const planExecutionLock = options.planExecutionLock ?? createDefaultPlanExecutionLock();
@@ -272,14 +274,65 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   // Register all resources with the server
   ResourceRegistry.registerWithServer(server);
 
+  // Tear down this transport's server-side SessionToolBinding when the daemon
+  // actually releases a session (issue #4611 Gap D). Two release sources funnel
+  // through the same idempotent `unbindSession`:
+  //   - the plan-release path, via ToolRegistry's injected teardown handler
+  //     (executePlan auto-release, deterministic, works in stdio mode too); and
+  //   - heartbeat/idle/explicit releases, via the process-wide
+  //     SessionReleaseBroadcaster (issue #4610), active in daemon mode.
+  // Clearing the binding stops a later sessionless tools/list or tools/call on
+  // this same MCP transport from enforcing the released session's stale profile.
+  // A list-changed notification is emitted only when a binding actually changed,
+  // so a duplicate release signal for the same session is a no-op.
+  const clearReleasedSessionBinding = (sessionUuid: string): void => {
+    if (sessionToolBinding.unbindSession(sessionUuid)) {
+      ToolRegistry.notifyToolListChanged();
+    }
+  };
+  const unregisterSessionBindingRelease = ToolRegistry.registerSessionBindingReleaseHandler({
+    onSessionReleased: clearReleasedSessionBinding,
+  });
+  const unsubscribeSessionReleaseBroadcast = SessionReleaseBroadcaster.subscribe(clearReleasedSessionBinding);
+  // Chain onto the existing onclose (set by ToolRegistry.registerWithServer's
+  // server tracking) so the per-transport teardown subscriptions are dropped when
+  // the transport closes, and no other lifecycle hook is clobbered.
+  const existingServerOnClose = server.server.onclose;
+  server.server.onclose = () => {
+    unregisterSessionBindingRelease();
+    unsubscribeSessionReleaseBroadcast();
+    existingServerOnClose?.();
+  };
+
   // Register tool definitions using the lower-level interface
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     const sessionUuid = sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId);
     const definitions = ToolRegistry.getToolDefinitions();
+    // Advertise a tool when EITHER the bound base session OR any of its derived
+    // `${base}:${label}` device-label sessions enables it — the same UNION the
+    // `tools/call` gate applies (issue #4611). The call-gate accepts a
+    // `{ sessionUuid: base, device: label }` call whenever a label re-enables a
+    // tool the base narrowed away; filtering discovery on the base alone would
+    // then leave that tool callable but never discovered. The base's label map is
+    // a read-only lookup (no device allocation); a session with no labels collapses
+    // to the base, preserving prior single-session filtering.
+    //
+    // The union is per-tool and DEVICE-AWARE only, mirroring the call gate: a
+    // plain (non-`requiresDevice`) tool runs under the base session regardless of
+    // any `device` argument, so its discovery must be base-only. Advertising a
+    // plain tool that only a label enables would leave it listed but rejected by
+    // the base-only call gate — a label-only grant must not surface a plain tool.
+    const labelSessionUuids = sessionUuid
+      ? Object.values(getDeviceLabelMap(sessionUuid) ?? {})
+      : [];
     return {
-      tools: (await Promise.all(definitions.map(async definition =>
-        await isToolEnabledForSession(definition.name, sessionUuid, options.sessionToolProfileService) ? definition : undefined
-      ))).filter((definition): definition is typeof definitions[number] => definition !== undefined)
+      tools: (await Promise.all(definitions.map(async definition => {
+        const deviceAware = ToolRegistry.getTool(definition.name)?.requiresDevice ?? false;
+        const candidateSessions = deviceAware
+          ? [sessionUuid, ...labelSessionUuids]
+          : [sessionUuid];
+        return await isToolEnabledForAnySession(definition.name, candidateSessions, options.sessionToolProfileService) ? definition : undefined;
+      }))).filter((definition): definition is typeof definitions[number] => definition !== undefined)
     };
   });
 
@@ -319,7 +372,36 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     if (!tool) {
       throw new ActionableError(`Unknown tool: ${name}`);
     }
-    await assertToolEnabledForSession(name, sessionUuid, options.sessionToolProfileService);
+    // Capability enforcement honors the UNION of the base and the derived
+    // `${base}:${label}` device-label sessions (issue #4611): a tool is enabled
+    // when EITHER grants it. This public MCP boundary is an EARLIER gate than the
+    // authoritative union in `registerDeviceAware` (which rejects a
+    // capability-denied tool before allocating a device), so it must apply the
+    // same union — otherwise a base session that narrowed a tool away would
+    // reject a `{ sessionUuid: base, device: label }` call here before the deeper
+    // gate could observe that `base:label` re-enables it. Resolve the derived
+    // label candidate from the base session's label map (a read-only lookup, no
+    // device allocation). Non-labeled and non-device-aware calls collapse to the
+    // base, preserving prior single-session behavior and `tools/list` filtering.
+    //
+    // Gate the derived-label candidate to DEVICE-AWARE tools only. A plain tool
+    // (registered via `register`, not `registerDeviceAware`) strips the `device`
+    // field via its `z.object` schema and always executes under the base session,
+    // so it never runs on the labeled device — consulting `base:label`'s profile
+    // would let a caller borrow the label's grants for a base-disabled plain tool
+    // with `{ sessionUuid: base, device: label }`. For a plain tool, enforcement
+    // is base-only; only a `requiresDevice` tool actually uses the device field.
+    const requestedDeviceLabel = typeof (toolParams as Record<string, unknown>).device === "string"
+      ? (toolParams as Record<string, unknown>).device as string
+      : undefined;
+    const derivedLabelSessionUuid = tool.requiresDevice && requestedDeviceLabel && sessionUuid
+      ? getDeviceLabelMap(sessionUuid)?.[requestedDeviceLabel]
+      : undefined;
+    await assertToolEnabledForAnySession(
+      name,
+      [sessionUuid, derivedLabelSessionUuid],
+      options.sessionToolProfileService,
+    );
 
     const requestMcpSessionId = extractInternalMcpSessionId(toolParams);
     const implicitAutolockMcpSessionId = requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
@@ -386,7 +468,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       const result = await runWithAbortSignal(
         execution.abortController.signal,
         () => runWithToolCapabilityContext(
-          { sessionUuid, sessionToolProfileService: options.sessionToolProfileService },
+          { routingSessionUuid: sessionUuid, sessionToolProfileService: options.sessionToolProfileService },
           () => tool.handler(handlerParams, progressCallback, execution.abortController.signal)
         )
       );

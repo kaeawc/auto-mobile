@@ -47,8 +47,8 @@ describe("isToolEnabledForAnySession (union semantics)", () => {
     expect(await isToolEnabledForAnySession("observe", [undefined], only("x"))).toBe(true);
   });
 
-  test("keeps the initial surface when no session is bound", async () => {
-    expect(await isToolEnabledForAnySession("clipboard", [undefined, undefined], only("x"))).toBe(true);
+  test("uses the core default when no session is bound", async () => {
+    expect(await isToolEnabledForAnySession("clipboard", [undefined, undefined], only("x"))).toBe(false);
   });
 
   test("enabled when only the base session grants it", async () => {

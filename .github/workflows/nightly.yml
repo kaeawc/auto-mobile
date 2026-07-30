@@ -561,6 +561,7 @@ jobs:
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
           AUTOMOBILE_TEST_RETRY_COUNT: "1"
+          AUTOMOBILE_TOOLSET_TEST_AUTHORING: "1"
         run: ./scripts/ci/run-reminders-launch-plan-tests.sh
 
       - name: "Shutdown iOS Simulators"
@@ -596,4 +597,5 @@ jobs:
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
           AUTOMOBILE_TEST_RETRY_COUNT: "1"
+          AUTOMOBILE_TOOLSET_TEST_AUTHORING: "1"
         run: ./scripts/ci/run-reminders-launch-plan-tests.sh

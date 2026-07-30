@@ -19,6 +19,7 @@ import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.Tool
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceAction
@@ -128,7 +129,11 @@ fun AutoMobileDesktopApp(
 private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
   when (tool) {
     Tool.Logs -> LogsFacet(column)
-    Tool.Storage -> StorageFacet(column)
+    // Storage is Android-only for now: iOS key-value mutations misroute to Android-only daemon
+    // handlers (#4708). iOS panes fall back to the placeholder until that lands.
+    Tool.Storage ->
+      if (column.platform == Platform.Android) StorageFacet(column)
+      else WorkspaceFacetPlaceholder(tool)
     else -> WorkspaceFacetPlaceholder(tool)
   }
 }

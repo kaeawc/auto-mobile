@@ -3,9 +3,11 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
+import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -45,11 +47,26 @@ class StorageFacetTest {
       MaterialTheme {
         StorageFacet(
           column = DeviceColumn(deviceId = "d", name = "Pixel", platform = Platform.Android),
-          loadInstalledApps = { emptyList() },
+          loadInstalledApps = { Result.Success(emptyList()) },
         )
       }
     }
     waitForIdle()
     onNodeWithText("No app found", substring = true).assertIsDisplayed()
+  }
+
+  @Test
+  fun `surfaces a retryable error when the app list fails to load`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        StorageFacet(
+          column = DeviceColumn(deviceId = "d", name = "Pixel", platform = Platform.Android),
+          loadInstalledApps = { Result.Error(RuntimeException("daemon down")) },
+        )
+      }
+    }
+    waitForIdle()
+    onNodeWithText("daemon down", substring = true).assertIsDisplayed()
+    onNodeWithContentDescription("Retry loading apps").assertIsDisplayed()
   }
 }

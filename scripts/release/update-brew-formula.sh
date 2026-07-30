@@ -50,6 +50,19 @@ trap 'rm -rf "$tmp"' EXIT
 # not fail the release; genuine failures still surface, just later.
 max_attempts="${BREW_TARBALL_FETCH_ATTEMPTS:-30}"
 retry_delay="${BREW_TARBALL_FETCH_DELAY_SECONDS:-10}"
+# Reject non-base-10 / zero-padded overrides up front. A value like "08" is an
+# invalid octal in bash arithmetic, so the `-ge` comparison below errors; because
+# that comparison is the `while` loop's condition, `set -e` does not fire and the
+# error is swallowed, turning the attempt cap into an infinite loop. Validate
+# here as scripts/ci/run-gradle-with-retry.sh does.
+if ! [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Invalid BREW_TARBALL_FETCH_ATTEMPTS='${max_attempts}' (want a positive base-10 integer)" >&2
+  exit 1
+fi
+if ! [[ "$retry_delay" =~ ^[0-9]+$ ]]; then
+  echo "Invalid BREW_TARBALL_FETCH_DELAY_SECONDS='${retry_delay}' (want a non-negative base-10 integer)" >&2
+  exit 1
+fi
 attempt=1
 while ! curl -fsSL "$TARBALL_URL" -o "$tmp/auto-mobile.tgz"; do
   if [[ "$attempt" -ge "$max_attempts" ]]; then

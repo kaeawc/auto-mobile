@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "fpsTarget": 60,
+  "fpsTargetTolerance": 0.5,
+  "metrics": {
+    "encodeFps": {
+      "baseline": 45,
+      "tolerance": 0.2,
+      "direction": "higher-is-better",
+      "percentile": "p50"
+    },
+    "egressKbps": {
+      "baseline": 4000,
+      "tolerance": 0.3,
+      "direction": "higher-is-better",
+      "percentile": "p50"
+    },
+    "captureToFirstFrameMs": {
+      "baseline": 2000,
+      "tolerance": 0.3,
+      "direction": "lower-is-better",
+      "percentile": "p95"
+    },
+    "captureToBrowserMs": {
+      "baseline": 5000,
+      "tolerance": 0.3,
+      "direction": "lower-is-better",
+      "percentile": "p95"
+    },
+    "keyframeRecoveryMs": {
+      "baseline": 3000,
+      "tolerance": 0.35,
+      "direction": "lower-is-better",
+      "percentile": "p95"
+    }
+  },
+  "metadata": {
+    "generatedAt": "2026-07-29T00:00:00.000Z",
+    "description": "Android video-server p50/p95 throughput/latency baseline (#4758). Values mirror the QualityPreset.MEDIUM operating point (720p @ 4 Mbps @ 60fps) plus a hosted-runner buffer, and are PROVISIONAL targets pending several accumulated device-lane runs — the same posture the iOS aggregator (#4387) took by not committing a number until samples calibrated it. Ratchet down toward observed p50/p95 once the device lane has accumulated samples."
+  }
+}

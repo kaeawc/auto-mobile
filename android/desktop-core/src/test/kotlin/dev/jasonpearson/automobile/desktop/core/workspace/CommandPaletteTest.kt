@@ -4,6 +4,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -131,6 +133,23 @@ class CommandPaletteTest {
     }
     assertEquals("c", ran)
   }
+
+  @Test
+  fun `the highlighted row carries selected semantics and moves with arrow keys`() =
+    runComposeUiTest {
+      val commands =
+        listOf(
+          PaletteCommand("a", "Open Devices") {},
+          PaletteCommand("b", "Close Pixel") {},
+        )
+      setContent { MaterialTheme { CommandPalette(commands, onDismiss = {}) } }
+      onNodeWithContentDescription("Command search").assertIsFocused()
+      onNodeWithText("Open Devices").assertIsSelected()
+      onNodeWithText("Close Pixel").assertIsNotSelected()
+      onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+      onNodeWithText("Close Pixel").assertIsSelected()
+      onNodeWithText("Open Devices").assertIsNotSelected()
+    }
 
   @Test
   fun `escape closes the palette`() = runComposeUiTest {

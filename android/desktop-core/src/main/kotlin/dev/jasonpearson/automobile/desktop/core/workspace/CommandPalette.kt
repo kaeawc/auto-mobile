@@ -36,6 +36,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
@@ -228,8 +229,9 @@ fun CommandPalette(
       Spacer(Modifier.height(8.dp))
       LazyColumn(state = listState, modifier = Modifier.heightIn(max = 360.dp)) {
         itemsIndexed(results, key = { _, command -> command.id }) { index, command ->
+          val isSelected = index == safeIndex
           val highlight =
-            if (index == safeIndex) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
+            if (isSelected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
           Text(
             command.label,
             modifier =
@@ -239,6 +241,8 @@ fun CommandPalette(
                   command.run()
                   onDismiss()
                 }
+                // Announce the keyboard highlight to assistive tech, not just visually.
+                .semantics { selected = isSelected }
                 .padding(vertical = 8.dp, horizontal = 4.dp),
           )
         }

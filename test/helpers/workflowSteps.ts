@@ -47,6 +47,7 @@ export interface WorkflowJob {
   "timeout-minutes"?: number;
   /** Set when the job delegates to a reusable workflow. */
   uses?: string;
+  env?: Record<string, string | number | boolean>;
 }
 
 /**

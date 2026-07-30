@@ -494,6 +494,10 @@ jobs:
     name: "XCTestRunner Simulator Tests"
     runs-on: macos-26
     timeout-minutes: 45
+    # The shared bring-up action starts the daemon before either Reminders step.
+    # Keep this advanced integration capability available to both daemon starts.
+    env:
+      AUTOMOBILE_TOOLSET_TEST_AUTHORING: "1"
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -561,7 +565,6 @@ jobs:
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
           AUTOMOBILE_TEST_RETRY_COUNT: "1"
-          AUTOMOBILE_TOOLSET_TEST_AUTHORING: "1"
         run: ./scripts/ci/run-reminders-launch-plan-tests.sh
 
       - name: "Shutdown iOS Simulators"
@@ -597,5 +600,4 @@ jobs:
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
           AUTOMOBILE_TEST_RETRY_COUNT: "1"
-          AUTOMOBILE_TOOLSET_TEST_AUTHORING: "1"
         run: ./scripts/ci/run-reminders-launch-plan-tests.sh

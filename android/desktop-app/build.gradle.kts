@@ -88,9 +88,11 @@ compose.desktop {
       description = "AutoMobile Desktop - Device automation and testing dashboard"
       vendor = "AutoMobile"
 
-      linux { iconFile.set(project.file("src/main/resources/icons/app-icon.png")) }
+      // Custom installer icons are intentionally omitted for now: the committed
+      // app-icon.{icns,ico,png} are 1x1 placeholder stubs (the .icns is in fact a
+      // PNG), which jpackage would reject or embed as a broken icon. jpackage
+      // falls back to its default icon until real branded assets replace them.
       macOS {
-        iconFile.set(project.file("src/main/resources/icons/app-icon.icns"))
         bundleID = "dev.jasonpearson.automobile.desktop"
         // jpackage rejects a 0 major on macOS; use the floored version here.
         packageVersion = desktopMacPackageVersion
@@ -107,7 +109,6 @@ compose.desktop {
           )
         }
       }
-      windows { iconFile.set(project.file("src/main/resources/icons/app-icon.ico")) }
     }
   }
 }

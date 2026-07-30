@@ -83,18 +83,11 @@ jobs:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
-          # persist-credentials stays enabled (default) so the Git LFS step below
-          # can authenticate; a full `lfs: true` would pull every LFS object in
-          # the repo (videos, archives), so fetch only the icons instead.
+          # No LFS: the packaging config sets no custom icon (the only LFS assets
+          # under desktop-app), so the LFS-tracked pointer files are never read.
           lfs: false
           ref: ${{ inputs.checkout-ref || github.sha }}
-
-      # app-icon.png (Linux) and app-icon.ico (Windows) are Git LFS-tracked
-      # (.gitattributes), so a non-LFS checkout leaves them as pointer files that
-      # jpackage would embed as invalid icon data. Materialize just the icons.
-      - name: "Materialize desktop app icons (Git LFS)"
-        shell: bash
-        run: git lfs pull --include="android/desktop-app/src/main/resources/icons/**"
+          persist-credentials: false
 
       # Fail closed on a malformed version before packaging. Also prevents any
       # `${{ inputs.version }}` from carrying shell metacharacters into later run

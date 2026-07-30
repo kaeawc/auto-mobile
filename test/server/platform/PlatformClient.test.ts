@@ -69,70 +69,68 @@ describe("PlatformClient", () => {
     },
   ];
 
-  for (const c of cases) {
-    describe(`createPlatformClient (${c.name})`, () => {
-      const createOptions = () => ({
-        ...buildOptions(),
-        ctrlProxy: {} as CtrlProxyClient,
-      });
-
-      it("passes the target device and ADB factory to the injected CtrlProxy factory", () => {
-        const adbFactory = new FakeAdbClientFactory();
-        const ctrlProxy = {} as CtrlProxyClient;
-        const calls: Array<[BootedDevice, FakeAdbClientFactory]> = [];
-        const client = createPlatformClient(c.device, {
-          ...buildOptions(),
-          adbFactory,
-          ctrlProxyFactory: (device, factory) => {
-            calls.push([device, factory as FakeAdbClientFactory]);
-            return ctrlProxy;
-          },
-        });
-
-        expect(client.ctrlProxy).toBe(ctrlProxy);
-        expect(calls).toEqual([[c.device, adbFactory]]);
-      });
-
-      it("returns the platform-appropriate TapStrategy", () => {
-        const client = createPlatformClient(c.device, createOptions());
-        expect(client.tapStrategy).toBeInstanceOf(c.expectedTapStrategyCtor);
-      });
-
-      it("returns the platform-appropriate SystemConfigurationAdapter", () => {
-        const client = createPlatformClient(c.device, createOptions());
-        expect(client.systemConfiguration).toBeInstanceOf(
-          c.expectedSystemConfigCtor
-        );
-      });
-
-      it("returns the platform-appropriate NotificationUIDetector", () => {
-        const client = createPlatformClient(c.device, createOptions());
-        expect(client.notificationUI).toBeInstanceOf(
-          c.expectedNotificationUICtor
-        );
-      });
-
-      it("bundles the same device on the facade", () => {
-        const client = createPlatformClient(c.device, createOptions());
-        expect(client.device).toBe(c.device);
-        expect(client.notificationUI.device).toBe(c.device);
-      });
-
-      it("satisfies the PlatformClient interface", () => {
-        const client: PlatformClient = createPlatformClient(
-          c.device,
-          createOptions()
-        );
-        expect(client.device).toBeDefined();
-        expect(client.ctrlProxy).toBeDefined();
-        expect(typeof client.tapStrategy.isAccessibilityServiceEnabled).toBe(
-          "function"
-        );
-        expect(typeof client.systemConfiguration.setLocale).toBe("function");
-        expect(typeof client.notificationUI.isTrayOpen).toBe("function");
-      });
+  describe.each(cases)("createPlatformClient ($name)", c => {
+    const createOptions = () => ({
+      ...buildOptions(),
+      ctrlProxy: {} as CtrlProxyClient,
     });
-  }
+
+    it("passes the target device and ADB factory to the injected CtrlProxy factory", () => {
+      const adbFactory = new FakeAdbClientFactory();
+      const ctrlProxy = {} as CtrlProxyClient;
+      const calls: Array<[BootedDevice, FakeAdbClientFactory]> = [];
+      const client = createPlatformClient(c.device, {
+        ...buildOptions(),
+        adbFactory,
+        ctrlProxyFactory: (device, factory) => {
+          calls.push([device, factory as FakeAdbClientFactory]);
+          return ctrlProxy;
+        },
+      });
+
+      expect(client.ctrlProxy).toBe(ctrlProxy);
+      expect(calls).toEqual([[c.device, adbFactory]]);
+    });
+
+    it("returns the platform-appropriate TapStrategy", () => {
+      const client = createPlatformClient(c.device, createOptions());
+      expect(client.tapStrategy).toBeInstanceOf(c.expectedTapStrategyCtor);
+    });
+
+    it("returns the platform-appropriate SystemConfigurationAdapter", () => {
+      const client = createPlatformClient(c.device, createOptions());
+      expect(client.systemConfiguration).toBeInstanceOf(
+        c.expectedSystemConfigCtor
+      );
+    });
+
+    it("returns the platform-appropriate NotificationUIDetector", () => {
+      const client = createPlatformClient(c.device, createOptions());
+      expect(client.notificationUI).toBeInstanceOf(
+        c.expectedNotificationUICtor
+      );
+    });
+
+    it("bundles the same device on the facade", () => {
+      const client = createPlatformClient(c.device, createOptions());
+      expect(client.device).toBe(c.device);
+      expect(client.notificationUI.device).toBe(c.device);
+    });
+
+    it("satisfies the PlatformClient interface", () => {
+      const client: PlatformClient = createPlatformClient(
+        c.device,
+        createOptions()
+      );
+      expect(client.device).toBeDefined();
+      expect(client.ctrlProxy).toBeDefined();
+      expect(typeof client.tapStrategy.isAccessibilityServiceEnabled).toBe(
+        "function"
+      );
+      expect(typeof client.systemConfiguration.setLocale).toBe("function");
+      expect(typeof client.notificationUI.isTrayOpen).toBe("function");
+    });
+  });
 
   describe("createPlatformClient overrides", () => {
     it("uses the injected ctrlProxy without constructing a platform client", () => {

@@ -246,6 +246,11 @@ jobs:
         with:
           lfs: false
           ref: ${{ needs.finalize-release.outputs.release_commit }}
+          # Full history so origin/main resolves. `bun run lint` chains
+          # diff-based ratchet boundary scripts (check-host-shell-boundary.ts
+          # et al.) that require a base ref; a shallow single-ref checkout of
+          # the release commit lacks origin/main and makes them throw.
+          fetch-depth: 0
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2

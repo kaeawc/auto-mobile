@@ -5,6 +5,7 @@
 
 import crypto from "crypto";
 import { Element } from "../../models/Element";
+import { ElementBounds } from "../../models/ElementBounds";
 import { ViewHierarchyNode } from "../../models/ViewHierarchyResult";
 import {
   AccessibilityAuditConfig,
@@ -42,7 +43,8 @@ export class WcagAudit {
     viewHierarchy: ViewHierarchyNode,
     screenshotPath: string | undefined,
     packageName: string,
-    config: AccessibilityAuditConfig
+    config: AccessibilityAuditConfig,
+    density?: number
   ): Promise<AccessibilityAuditResult> {
     const violations: WcagViolation[] = [];
 
@@ -63,11 +65,8 @@ export class WcagAudit {
     // Check for touch target size violations
     violations.push(...this.checkTouchTargetSizes(elements, config.level));
 
-    // Check for heading hierarchy violations
-    violations.push(...this.checkHeadingHierarchy(viewHierarchy));
-
     // Check for unlabeled form inputs
-    violations.push(...this.checkFormInputLabels(elements, viewHierarchy));
+    violations.push(...this.checkFormInputLabels(elements, viewHierarchy, density));
 
     // Generate screen ID for baseline tracking
     const screenId = this.generateScreenId(packageName, viewHierarchy);
@@ -242,82 +241,12 @@ export class WcagAudit {
   }
 
   /**
-   * Check heading hierarchy for skipped levels
-   */
-  private checkHeadingHierarchy(hierarchy: ViewHierarchyNode): WcagViolation[] {
-    const violations: WcagViolation[] = [];
-    const headings = this.extractHeadings(hierarchy);
-
-    if (headings.length < 2) {
-      return violations; // Need at least 2 headings to check hierarchy
-    }
-
-    for (let i = 1; i < headings.length; i++) {
-      const prevLevel = headings[i - 1].level;
-      const currLevel = headings[i].level;
-
-      // Check if we skipped a level (e.g., h1 -> h3)
-      if (currLevel > prevLevel + 1) {
-        violations.push({
-          type: "heading-hierarchy-skip",
-          severity: "warning",
-          criterion: "1.3.1", // Info and Relationships
-          message: `Heading hierarchy skip: h${prevLevel} to h${currLevel} (expected h${prevLevel + 1})`,
-          element: headings[i].element,
-          details: {
-            expectedLevel: prevLevel + 1,
-            actualLevel: currLevel,
-            explanation: "Heading levels should not be skipped to maintain proper document structure",
-          },
-          fingerprint: this.generateFingerprint(headings[i].element, "heading-hierarchy-skip"),
-        });
-      }
-    }
-
-    return violations;
-  }
-
-  /**
-   * Extract heading elements from hierarchy
-   * Note: Android doesn't have native heading semantics, so this is a heuristic
-   */
-  private extractHeadings(
-    node: ViewHierarchyNode,
-    headings: Array<{ level: number; element: Element }> = []
-  ): Array<{ level: number; element: Element }> {
-    // Heuristic: larger text sizes are likely headings
-    // This is a simplified approach - real apps may need custom logic
-    const element = node as unknown as Element;
-
-    if (element.text) {
-      const height = element.bounds.bottom - element.bounds.top;
-
-      // Rough heuristic for heading levels based on text height
-      let level = 6; // Default to h6
-      if (height > 48) {level = 1;} else if (height > 36) {level = 2;} else if (height > 28) {level = 3;} else if (height > 22) {level = 4;} else if (height > 18) {level = 5;}
-
-      // Only consider it a heading if it's relatively large
-      if (height > 20) {
-        headings.push({ level, element });
-      }
-    }
-
-    // Recurse through children
-    if (node.children) {
-      for (const child of node.children) {
-        this.extractHeadings(child, headings);
-      }
-    }
-
-    return headings;
-  }
-
-  /**
    * Check for form inputs without associated labels
    */
   private checkFormInputLabels(
     elements: Element[],
-    hierarchy: ViewHierarchyNode
+    hierarchy: ViewHierarchyNode,
+    density?: number
   ): WcagViolation[] {
     const violations: WcagViolation[] = [];
 
@@ -334,12 +263,15 @@ export class WcagAudit {
     // (hasNearbyLabel was O(inputs * elements) just rebuilding this list).
     const textViews = elements.filter(e => e.class?.includes("TextView") && e.text);
 
+    // Scale the proximity gate for this device's pixel density once per audit.
+    const gapThresholdPx = this.labelGapThresholdPx(density);
+
     for (const input of inputElements) {
       // Check if input has a label via text, content-desc, or nearby TextView
       const hasLabel =
         input.text ||
         input["content-desc"] ||
-        this.hasNearbyLabel(input, textViews);
+        this.hasNearbyLabel(input, textViews, gapThresholdPx);
 
       if (!hasLabel) {
         violations.push({
@@ -361,29 +293,75 @@ export class WcagAudit {
   }
 
   /**
+   * Maximum gap between a form input and a candidate label TextView, expressed
+   * in density-independent pixels (dp), for the TextView to be treated as that
+   * input's visible label. Form labels sit immediately above or beside their
+   * input, so the bounding boxes are adjacent (a small gap), not merely on the
+   * same row.
+   */
+  private static readonly LABEL_GAP_DP = 50;
+
+  /** Android baseline density (mdpi): 1dp == 1px at 160 DPI. */
+  private static readonly BASELINE_DENSITY_DPI = 160;
+
+  /**
+   * Fallback density (≈xhdpi / 2x) used when the hierarchy did not report one —
+   * older runners omit it. Chosen from the mid-to-high end of the modern device
+   * fleet so a real, normally-spaced label is not mistaken for "no label" (a
+   * false positive) on the common case; when density IS reported it is used
+   * directly and this value is irrelevant.
+   */
+  private static readonly FALLBACK_DENSITY_DPI = 320;
+
+  /**
+   * Resolve the label-proximity gate in physical pixels for this device.
+   *
+   * `bounds` are physical pixels on Android (see Element.ts / ViewHierarchyNode),
+   * so a fixed pixel gate is density-dependent: 50px is ~50dp on an mdpi device
+   * but only ~17dp on a 3x (480 DPI) phone, wrongly rejecting normally-spaced
+   * labels there. Scaling `LABEL_GAP_DP` by `density / 160` keeps the gate a
+   * constant physical/visual distance across densities.
+   */
+  private labelGapThresholdPx(density?: number): number {
+    const dpi = density && density > 0 ? density : WcagAudit.FALLBACK_DENSITY_DPI;
+    return WcagAudit.LABEL_GAP_DP * (dpi / WcagAudit.BASELINE_DENSITY_DPI);
+  }
+
+  /**
    * Check if an element has a nearby TextView that could serve as a label.
    * `textViews` is precomputed by the caller (see checkFormInputLabels) so this
    * is O(textViews) per input rather than re-filtering all elements each call.
+   * `gapThresholdPx` is the density-scaled gate from `labelGapThresholdPx`.
+   *
+   * Proximity is the Euclidean gap between the input's and the TextView's
+   * bounding boxes, and only the NEAREST candidate is compared to the gate. This
+   * replaces a prior `||`-of-per-axis-center-distance test that treated any
+   * TextView sharing the input's horizontal OR vertical band — even one on the
+   * opposite edge of the screen — as a label, under-reporting unlabeled inputs.
    */
-  private hasNearbyLabel(input: Element, textViews: Element[]): boolean {
-    // Input centers are loop-invariant; compute them once.
-    const inputCenterY = (input.bounds.top + input.bounds.bottom) / 2;
-    const inputCenterX = (input.bounds.left + input.bounds.right) / 2;
+  private hasNearbyLabel(input: Element, textViews: Element[], gapThresholdPx: number): boolean {
+    let nearestGap = Infinity;
 
     for (const textView of textViews) {
-      // Check if TextView is close to the input (within 50dp vertically or horizontally)
-      const textCenterY = (textView.bounds.top + textView.bounds.bottom) / 2;
-      const verticalDistance = Math.abs(inputCenterY - textCenterY);
-
-      const textCenterX = (textView.bounds.left + textView.bounds.right) / 2;
-      const horizontalDistance = Math.abs(inputCenterX - textCenterX);
-
-      if (verticalDistance < 50 || horizontalDistance < 50) {
-        return true;
+      const gap = this.boundingBoxGap(input.bounds, textView.bounds);
+      if (gap < nearestGap) {
+        nearestGap = gap;
       }
     }
 
-    return false;
+    return nearestGap <= gapThresholdPx;
+  }
+
+  /**
+   * Euclidean distance between the nearest edges of two axis-aligned rectangles.
+   * Returns 0 when the rectangles overlap or touch. Unlike center-to-center
+   * distance this stays small for a label sitting directly above or beside an
+   * input even when the label is wide — the real-world layout for form labels.
+   */
+  private boundingBoxGap(a: ElementBounds, b: ElementBounds): number {
+    const dx = Math.max(0, a.left - b.right, b.left - a.right);
+    const dy = Math.max(0, a.top - b.bottom, b.top - a.bottom);
+    return Math.sqrt(dx * dx + dy * dy);
   }
 
   /**
@@ -444,7 +422,6 @@ export class WcagAudit {
       "missing-content-description": 0,
       "insufficient-contrast": 0,
       "touch-target-too-small": 0,
-      "heading-hierarchy-skip": 0,
       "unlabeled-form-input": 0,
     };
 

@@ -316,8 +316,8 @@ describe("WcagAudit", function() {
     };
     const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
 
-    async function formInputViolations(elements: Element[]) {
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+    async function formInputViolations(elements: Element[], density?: number) {
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, density);
       return result.violations.filter(v => v.type === "unlabeled-form-input");
     }
 
@@ -328,10 +328,11 @@ describe("WcagAudit", function() {
       expect(await formInputViolations(elements)).toHaveLength(1);
     });
 
-    it("does NOT flag an EditText with a TextView within 50dp", async function() {
+    it("does NOT flag an EditText with a label TextView directly above it", async function() {
       const elements: Element[] = [
         { class: "android.widget.EditText", bounds: { left: 0, top: 100, right: 200, bottom: 160 } },
-        // Horizontally aligned label just above the input (centers within 50dp on X).
+        // Label sits directly above with a 20px vertical gap and full horizontal
+        // overlap: bounding boxes are adjacent, so it is a genuine label.
         { class: "android.widget.TextView", text: "Name", bounds: { left: 0, top: 40, right: 200, bottom: 80 } },
       ];
       expect(await formInputViolations(elements)).toHaveLength(0);
@@ -340,10 +341,55 @@ describe("WcagAudit", function() {
     it("flags an EditText whose only TextView is far away on both axes", async function() {
       const elements: Element[] = [
         { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },
-        // Label >50dp away in both X and Y from the input center.
+        // Label far from the input on both axes: bounding boxes are not adjacent.
         { class: "android.widget.TextView", text: "Far", bounds: { left: 500, top: 500, right: 600, bottom: 560 } },
       ];
       expect(await formInputViolations(elements)).toHaveLength(1);
+    });
+
+    // Regression for the `||` proximity bug: the old heuristic treated ANY
+    // TextView sharing the input's horizontal band (|centerY diff| < 50) as a
+    // label, even one on the opposite edge of the screen. That under-reports
+    // unlabeled inputs (false negative). A real proximity metric must flag this.
+    it("flags an EditText whose only TextView shares its row but is far to the side", async function() {
+      const elements: Element[] = [
+        { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },
+        // Same vertical band (identical centerY) but ~1900px away horizontally.
+        { class: "android.widget.TextView", text: "Unrelated", bounds: { left: 2000, top: 0, right: 2100, bottom: 60 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(1);
+    });
+
+    // Companion to the above for the vertical axis: a TextView sharing the
+    // input's column but far above it must not count as a label either.
+    it("flags an EditText whose only TextView shares its column but is far above", async function() {
+      const elements: Element[] = [
+        { class: "android.widget.EditText", bounds: { left: 0, top: 2000, right: 100, bottom: 2060 } },
+        // Same horizontal band (identical centerX) but ~1940px above.
+        { class: "android.widget.TextView", text: "Header", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(1);
+    });
+
+    it("picks the nearest TextView: a far one does not mask a genuinely absent label", async function() {
+      const elements: Element[] = [
+        { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },
+        // Two TextViews, both too far to be labels; the nearest still exceeds the gate.
+        { class: "android.widget.TextView", text: "A", bounds: { left: 400, top: 0, right: 500, bottom: 60 } },
+        { class: "android.widget.TextView", text: "B", bounds: { left: 0, top: 400, right: 100, bottom: 460 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(1);
+    });
+
+    it("does NOT flag when a genuine label sits beside an unrelated far TextView", async function() {
+      const elements: Element[] = [
+        { class: "android.widget.EditText", bounds: { left: 200, top: 100, right: 400, bottom: 160 } },
+        // Adjacent label to the left (10px horizontal gap, rows overlap).
+        { class: "android.widget.TextView", text: "Email", bounds: { left: 0, top: 100, right: 190, bottom: 160 } },
+        // Unrelated far-away TextView must not change the result.
+        { class: "android.widget.TextView", text: "Far", bounds: { left: 2000, top: 2000, right: 2100, bottom: 2060 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(0);
     });
 
     it("ignores TextViews with no text when resolving labels", async function() {
@@ -353,6 +399,26 @@ describe("WcagAudit", function() {
         { class: "android.widget.TextView", bounds: { left: 0, top: 40, right: 200, bottom: 80 } },
       ];
       expect(await formInputViolations(elements)).toHaveLength(1);
+    });
+
+    // Density scaling: on a 3x (480 DPI) device a 120px gap is only 40dp — a
+    // normally-spaced label. The gate scales to 50dp*3 = 150px, so it counts.
+    // A fixed 50px gate (the pre-density bug) would reject it, producing a false
+    // "unlabeled" violation.
+    const highDensityLabel: Element[] = [
+      { class: "android.widget.EditText", bounds: { left: 0, top: 200, right: 200, bottom: 260 } },
+      // Label directly above with a 120px vertical gap (label.bottom 80, input.top 200).
+      { class: "android.widget.TextView", text: "Name", bounds: { left: 0, top: 20, right: 200, bottom: 80 } },
+    ];
+
+    it("does NOT flag a normally-spaced label on a high-density (480 DPI) device", async function() {
+      // 120px gap == 40dp <= 50dp gate scaled to 150px.
+      expect(await formInputViolations(highDensityLabel, 480)).toHaveLength(0);
+    });
+
+    it("flags the same 120px gap as unlabeled on a low-density (160 DPI) device", async function() {
+      // At mdpi 1dp == 1px, so a 120px gap is a genuine 120dp away: not a label.
+      expect(await formInputViolations(highDensityLabel, 160)).toHaveLength(1);
     });
   });
 
@@ -410,9 +476,11 @@ describe("WcagAudit", function() {
       useBaseline: false,
     };
 
-    // extractHeadings maps text height to a heading level using the bands
-    // >48→h1, >36→h2, >28→h3, >22→h4, >18→h5, and only includes nodes taller
-    // than 20dp. A violation is raised when a level is skipped (curr > prev + 1).
+    // The height-based heading heuristic was removed (issue #3507): Android has
+    // no native heading semantics, so inferring heading levels from absolute
+    // pixel text height produced density-dependent, arbitrary "hierarchy skip"
+    // violations. These tests pin that NO heading violations are ever produced,
+    // regardless of text sizes in the hierarchy.
     function hierarchyWithHeadingHeights(heights: number[]): ViewHierarchyNode {
       return {
         class: "View",
@@ -425,17 +493,15 @@ describe("WcagAudit", function() {
     }
 
     it.each([
-      ["h1→h3 skips a level", [50, 30], 1],
-      ["h1→h2 is contiguous", [50, 40], 0],
-      ["h2→h4 skips a level", [40, 25], 1],
-      ["h1→h2→h3 is contiguous", [50, 40, 30], 0],
-      ["descending levels never skip", [30, 50], 0],
-      ["a 20dp node is below the inclusion gate", [50, 20], 0],
-      ["h1→h5 skips (21dp is included as h5)", [50, 21], 1],
-      ["only one skip across three headings", [50, 30, 25], 1],
+      ["what would have been h1→h3", [50, 30]],
+      ["what would have been h1→h2", [50, 40]],
+      ["what would have been h2→h4", [40, 25]],
+      ["three descending sizes", [50, 40, 30]],
+      ["ascending sizes", [30, 50]],
+      ["small nodes near the old inclusion gate", [50, 20, 21]],
     ])(
-      "%s",
-      async function(_label, heights, expectedSkips) {
+      "produces no heading violations for %s",
+      async function(_label, heights) {
         const result = await audit.audit(
           [],
           hierarchyWithHeadingHeights(heights as number[]),
@@ -443,10 +509,24 @@ describe("WcagAudit", function() {
           "com.test",
           config
         );
-        const skips = result.violations.filter(v => v.type === "heading-hierarchy-skip");
-        expect(skips).toHaveLength(expectedSkips as number);
+        const headingViolations = result.violations.filter(v =>
+          v.type.includes("heading")
+        );
+        expect(headingViolations).toHaveLength(0);
       }
     );
+
+    it("does not report heading-hierarchy-skip in the byType summary", async function() {
+      const result = await audit.audit(
+        [],
+        hierarchyWithHeadingHeights([50, 30, 25]),
+        undefined,
+        "com.test",
+        config
+      );
+      // The heading violation type is no longer produced or tracked.
+      expect((result.summary.byType as Record<string, number>)["heading-hierarchy-skip"]).toBeUndefined();
+    });
   });
 
   describe("Baseline Suppression", function() {

@@ -13,6 +13,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
@@ -34,13 +36,53 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceFacetPlacehol
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
+import dev.jasonpearson.automobile.desktop.core.workspace.deriveWorkspaceStatus
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAction
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 private val LOG = LoggerFactory.getLogger("AutoMobileDesktopApp")
+
+// How often the top-bar status dot re-probes daemon connectivity. Matches the health sheet's
+// read-only refresh cadence (WorkspaceShell.HEALTH_SHEET_REFRESH_MS).
+private const val DAEMON_STATUS_POLL_MS = 5_000L
+
+/**
+ * Live daemon connectivity as a [ConnectionState], polled from [AutoMobileClient.getDaemonStatus].
+ * A successful status call means the daemon socket is reachable ([ConnectionState.Connected]); a
+ * throw means it is not ([ConnectionState.Disconnected]). Starts as [ConnectionState.Connecting]
+ * until the first probe resolves.
+ */
+@Composable
+private fun rememberDaemonConnectionState(client: AutoMobileClient): ConnectionState {
+  var state by remember(client) { mutableStateOf<ConnectionState>(ConnectionState.Connecting) }
+  LaunchedEffect(client) {
+    while (true) {
+      state =
+        try {
+          withContext(Dispatchers.IO) { client.getDaemonStatus() }
+          ConnectionState.Connected()
+        } catch (cancellation: CancellationException) {
+          // Disposal cancels this effect; propagate it instead of logging a false daemon failure
+          // and flipping the dot to disconnected during teardown.
+          throw cancellation
+        } catch (error: Exception) {
+          // A failed status call means the daemon socket is unreachable; surface it as
+          // disconnected so the status dot goes red. Logged so there is a trace behind the dot.
+          LOG.warn("Daemon status poll failed: ${error.message}", error)
+          ConnectionState.Disconnected(error.message)
+        }
+      delay(DAEMON_STATUS_POLL_MS)
+    }
+  }
+  return state
+}
 
 /**
  * Wraps a [SettingsProvider] so that [themeMode] is backed by Compose snapshot state, enabling
@@ -127,11 +169,23 @@ fun AutoMobileDesktopApp(
           )
         else ->
           Box(Modifier.fillMaxSize()) {
+            // Roll live connection health up into the top-bar status dot. The daemon signal is
+            // polled here; per-device stream health is not yet fed in — device streams are
+            // facet-owned and carry screenshots, so opening extra status-only streams would be
+            // wasteful. deriveWorkspaceStatus already handles the device dimension, so it can be
+            // fed once a central per-device stream registry exists (follow-up).
+            val daemonState = rememberDaemonConnectionState(graph.autoMobileClient)
+            val workspaceStatus =
+              remember(daemonState) {
+                deriveWorkspaceStatus(daemon = daemonState, devices = emptyList())
+              }
             WorkspaceShell(
               state = workspaceState,
               onAction = workspaceViewModel::onAction,
               onOpenPicker = workspaceViewModel::openPicker,
               onOpenPalette = { paletteOpen = true },
+              status = workspaceStatus.status,
+              statusDetail = workspaceStatus.detail,
               facetContent = { column, tool -> WorkspaceFacet(column, tool) },
             )
             if (paletteOpen) {

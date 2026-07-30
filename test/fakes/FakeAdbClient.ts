@@ -241,11 +241,14 @@ export class FakeAdbClient implements FakeAdbClientContract {
   }
 
   /**
-   * Return the configured device time (device-authored clock domain), or the
-   * host wall clock when unset — mirrors {@link FakeAdbExecutor.getDeviceTimestampMs}.
+   * Return the configured device time (device-authored clock domain), or a
+   * deterministic `0` when unset. `0` is the faithful fake equivalent of the
+   * host FakeTimer's default epoch; use {@link setDeviceTimestampMs} to model
+   * device-vs-host clock skew. (No real-clock fallback here — fakes must stay
+   * deterministic; #4186 hygiene scan.)
    */
   async getDeviceTimestampMs(): Promise<number> {
-    return this.deviceTimestampMs ?? Date.now();
+    return this.deviceTimestampMs ?? 0;
   }
 
   /**

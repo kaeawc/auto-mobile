@@ -1250,6 +1250,18 @@ describe("finalizeToolResponse", () => {
       // the 64KB inline ceiling is routed to the artifact writer; anything at or
       // under the threshold stays inline. These tests pin the exact 65536-byte
       // boundary (shouldArtifactObservationPayload uses a strict `>` comparison).
+      //
+      // The payloads below are sized against the LITERAL 65536/65537 byte counts,
+      // not the DEFAULT_OBSERVATION_INLINE_MAX_BYTES symbol, so a change to the
+      // production threshold breaks these tests instead of silently sliding with
+      // it. This canary makes the literal↔constant coupling explicit: if it
+      // fails, the boundary moved and the literals below must be re-derived.
+      const INLINE_MAX_BYTES = 65536;
+      const FIRST_ARTIFACT_BYTES = 65537;
+      test("the production inline ceiling is still 65536 bytes", () => {
+        expect(DEFAULT_OBSERVATION_INLINE_MAX_BYTES).toBe(INLINE_MAX_BYTES);
+      });
+
       const oversizedCtx = (writer: FakeObservationArtifactWriter) =>
         ({ name: "tapOn", artifactMode: "oversized", artifactWriter: writer } as any);
 
@@ -1270,13 +1282,11 @@ describe("finalizeToolResponse", () => {
       test("a served payload exactly at 65536 bytes stays inline", () => {
         const writer = new FakeObservationArtifactWriter();
         const finalized = finalizeToolResponse(
-          tapResponseOfSize(DEFAULT_OBSERVATION_INLINE_MAX_BYTES),
+          tapResponseOfSize(INLINE_MAX_BYTES),
           oversizedCtx(writer)
         );
 
-        expect(Buffer.byteLength(stringifyToolResponse(finalized.structuredContent), "utf8")).toBe(
-          DEFAULT_OBSERVATION_INLINE_MAX_BYTES
-        );
+        expect(Buffer.byteLength(stringifyToolResponse(finalized.structuredContent), "utf8")).toBe(65536);
         expect(writer.writes).toHaveLength(0);
         expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
         expect((finalized.structuredContent as any).observation.artifact).toBeUndefined();
@@ -1285,7 +1295,7 @@ describe("finalizeToolResponse", () => {
       test("a served payload one byte over 65536 is routed to the artifact writer", () => {
         const writer = new FakeObservationArtifactWriter();
         const finalized = finalizeToolResponse(
-          tapResponseOfSize(DEFAULT_OBSERVATION_INLINE_MAX_BYTES + 1),
+          tapResponseOfSize(FIRST_ARTIFACT_BYTES),
           oversizedCtx(writer)
         );
 

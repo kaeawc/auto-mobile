@@ -12,6 +12,8 @@ import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.HierarchyStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
+import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import org.junit.Assert.assertEquals
@@ -160,5 +162,48 @@ class TwoDeviceCompareViewTest {
           .isNotEmpty()
       }
       onNodeWithContentDescription("Only in Pixel: onlyA").assertDoesNotExist()
+    }
+
+  @Test
+  fun `device loss during an in-flight parse does not restore the stale hierarchy`() =
+    runComposeUiTest {
+      val fakeA = FakeObservationStream()
+      val fakeB = FakeObservationStream()
+      // Gates ONLY side A's parse so it is suspended in flight when the device is lost.
+      val gate = CompletableDeferred<Unit>()
+      setContent {
+        MaterialTheme {
+          TwoDeviceCompareView(
+            columnA = columnA(),
+            columnB = columnB(),
+            observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
+            sideContent = { column, _ -> Text(column.name) },
+            parseHierarchy = { json ->
+              if (json.toString().contains("gated")) gate.await()
+              parseHierarchyFromJson(json)
+            },
+          )
+        }
+      }
+      // B parses immediately; A's parse suspends on the gate.
+      emit(fakeB, "dev-b", "onlyB")
+      emit(fakeA, "dev-a", "gated")
+      waitForIdle()
+
+      // Device A is lost while its parse is still suspended: the clear bumps A's generation.
+      runOnIdle {
+        fakeA.emitDeviceEvent(
+          DeviceStreamEvent.DeviceConnectionLost("dev-a", 2L, "connection lost")
+        )
+      }
+      waitForIdle()
+
+      // Let the stale parse complete; its result must be discarded (generation changed), so A's
+      // snapshot is never restored and the diff stays in the waiting state.
+      runOnIdle { gate.complete(Unit) }
+      waitForIdle()
+
+      onNodeWithText("Waiting for both device hierarchies", substring = true).assertExists()
+      onNodeWithContentDescription("Only in Pixel: gated").assertDoesNotExist()
     }
 }

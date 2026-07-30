@@ -13,8 +13,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,8 +44,10 @@ import dev.jasonpearson.automobile.desktop.core.layout.NodeDiffStatus
 import dev.jasonpearson.automobile.desktop.core.layout.ParsedHierarchy
 import dev.jasonpearson.automobile.desktop.core.layout.diffHierarchies
 import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonElement
 
 private val OnlyInAColor = Color(0xFF4CAF50) // green: present on the left device only
 private val OnlyInBColor = Color(0xFF4DABF7) // blue: present on the right device only
@@ -84,6 +86,11 @@ fun TwoDeviceCompareView(
       platform = if (column.platform == Platform.Ios) "ios" else "android",
     )
   },
+  // Parses a hierarchy stream frame off the main thread. Injected so a test can deterministically
+  // interleave a slow parse with a device-loss to exercise the stale-restore guard.
+  parseHierarchy: suspend (JsonElement) -> ParsedHierarchy? = { json ->
+    withContext(Dispatchers.Default) { parseHierarchyFromJson(json) }
+  },
 ) {
   var hierarchyA by remember(columnA.deviceId) { mutableStateOf<ParsedHierarchy?>(null) }
   var hierarchyB by remember(columnB.deviceId) { mutableStateOf<ParsedHierarchy?>(null) }
@@ -100,6 +107,7 @@ fun TwoDeviceCompareView(
         column = columnA,
         observationStreamFactory = observationStreamFactory,
         sideContent = sideContent,
+        parseHierarchy = parseHierarchy,
         onHierarchy = { hierarchyA = it },
         modifier = Modifier.weight(1f).fillMaxHeight(),
       )
@@ -107,6 +115,7 @@ fun TwoDeviceCompareView(
         column = columnB,
         observationStreamFactory = observationStreamFactory,
         sideContent = sideContent,
+        parseHierarchy = parseHierarchy,
         onHierarchy = { hierarchyB = it },
         modifier = Modifier.weight(1f).fillMaxHeight(),
       )
@@ -130,12 +139,19 @@ fun TwoDeviceCompareView(
  * hierarchy update, so this side also watches those signals and clears its hierarchy (reports null)
  * on loss/disconnect. Otherwise the last parsed hierarchy would linger and the still-live device
  * would keep diffing against a stale snapshot forever.
+ *
+ * A per-side **connection-generation** token closes the parse-vs-clear race: [parseHierarchy]
+ * suspends, so a clear can land while a parse is in flight. Each clear bumps the generation; a
+ * parse captures the generation before it starts and applies its result only if the generation is
+ * unchanged on completion, so a parse that resumes after a clear is discarded rather than restoring
+ * the dead device's stale snapshot.
  */
 @Composable
 private fun CompareSide(
   column: DeviceColumn,
   observationStreamFactory: () -> ObservationStream,
   sideContent: @Composable (DeviceColumn, ObservationStream) -> Unit,
+  parseHierarchy: suspend (JsonElement) -> ParsedHierarchy?,
   onHierarchy: (ParsedHierarchy?) -> Unit,
   modifier: Modifier,
 ) {
@@ -149,11 +165,19 @@ private fun CompareSide(
     }
   }
   val activeStream = stream ?: return
+  // Reset per stream instance; a reconnect creates a fresh stream and thus a fresh token.
+  val generation = remember(activeStream) { AtomicInteger(0) }
+  val clearHierarchy = {
+    generation.incrementAndGet()
+    onHierarchy(null)
+  }
   LaunchedEffect(activeStream) {
     activeStream.hierarchyUpdates.collect { update ->
       val json = update.data ?: return@collect
-      val parsed = withContext(Dispatchers.Default) { parseHierarchyFromJson(json) }
-      if (parsed != null) onHierarchy(parsed)
+      val launchGeneration = generation.get()
+      val parsed = parseHierarchy(json)
+      // Drop a result whose generation was invalidated by a clear while the parse was suspended.
+      if (parsed != null && generation.get() == launchGeneration) onHierarchy(parsed)
     }
   }
   LaunchedEffect(activeStream) {
@@ -161,7 +185,7 @@ private fun CompareSide(
       when (event) {
         // Device unplugged/offline: retire the snapshot so the diff shows "waiting" until a fresh
         // frame arrives, rather than diffing the live device against a dead one's stale tree.
-        is DeviceStreamEvent.DeviceConnectionLost -> onHierarchy(null)
+        is DeviceStreamEvent.DeviceConnectionLost -> clearHierarchy()
       }
     }
   }
@@ -169,7 +193,7 @@ private fun CompareSide(
     activeStream.connectionState.collect { state ->
       // Only a confirmed disconnect clears; Connecting/Reconnecting/Error keep the last snapshot so
       // a brief stream blip does not flush a still-valid hierarchy.
-      if (state is ConnectionState.Disconnected) onHierarchy(null)
+      if (state is ConnectionState.Disconnected) clearHierarchy()
     }
   }
   Box(modifier) { sideContent(column, activeStream) }
@@ -230,13 +254,16 @@ private fun DiffEntryList(diff: HierarchyDiff, labelA: String, labelB: String) {
     )
     return
   }
-  Column(
-    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+  // LazyColumn (not a scrolling Column) so only the visible rows compose/measure: a live diff can
+  // carry hundreds of differing nodes and a plain Column would build every offscreen row per
+  // update.
+  // Entry keys are unique within a diff (A's keys plus disjoint B-only keys), so they are stable
+  // item keys.
+  LazyColumn(
+    Modifier.fillMaxWidth().fillMaxHeight(),
     verticalArrangement = Arrangement.spacedBy(2.dp),
   ) {
-    for (entry in differing) {
-      DiffEntryRow(entry, labelA, labelB)
-    }
+    items(differing, key = { it.key }) { entry -> DiffEntryRow(entry, labelA, labelB) }
   }
 }
 

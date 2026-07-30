@@ -1625,12 +1625,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return this.hierarchy.getAccessibilityHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, disableAllFiltering);
   }
 
+  // Thin pass-throughs: like the delegated methods below, these do NOT restate the
+  // delegate's default parameter values. Omitted args forward as `undefined`, so
+  // CtrlProxyHierarchy (the single source of truth) applies its own defaults —
+  // keeping the two-copies drift class from issue #3505 unrepresentable.
   async getLatestHierarchy(
-    waitForFresh: boolean = false,
-    timeout: number = 15000,
+    waitForFresh?: boolean,
+    timeout?: number,
     perf?: PerformanceTracker,
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0
+    skipWaitForFresh?: boolean,
+    minTimestamp?: number
   ): Promise<CtrlProxyHierarchyResponse> {
     return this.hierarchy.getLatestHierarchy(waitForFresh, timeout, perf, skipWaitForFresh, minTimestamp);
   }
@@ -1639,7 +1643,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs: number = 5000
+    timeoutMs?: number
   ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
   }
@@ -1648,7 +1652,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs: number = 5000
+    timeoutMs?: number
   ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, true);
   }

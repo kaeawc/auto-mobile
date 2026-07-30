@@ -1389,38 +1389,42 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Delegated Public Methods - Hierarchy
   // ===========================================================================
 
+  // Thin pass-throughs: like the gesture/text/etc. delegates below, these do NOT
+  // restate the delegate's default parameter values. Omitted args forward as
+  // `undefined`, so CtrlProxyHierarchy (the single source of truth) applies its own
+  // defaults — keeping the two-copies drift class from issue #3505 unrepresentable.
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    disableAllFiltering: boolean = false,
+    perf?: PerformanceTracker,
+    skipWaitForFresh?: boolean,
+    minTimestamp?: number,
+    disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number
   ): Promise<ViewHierarchyResult | null> {
     return this.hierarchy.getAccessibilityHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, disableAllFiltering, signal, timeoutMs);
   }
 
-  async setRecompositionTrackingEnabled(enabled: boolean, perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<void> {
+  async setRecompositionTrackingEnabled(enabled: boolean, perf?: PerformanceTracker): Promise<void> {
     return this.hierarchy.setRecompositionTrackingEnabled(enabled, perf);
   }
 
   async getLatestHierarchy(
-    waitForFresh: boolean = false,
+    waitForFresh?: boolean,
     timeout?: number,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
+    perf?: PerformanceTracker,
+    skipWaitForFresh?: boolean,
+    minTimestamp?: number,
     signal?: AbortSignal
   ): Promise<AccessibilityHierarchyResponse> {
-    return this.hierarchy.getLatestHierarchy(waitForFresh, timeout!, perf, skipWaitForFresh, minTimestamp, signal);
+    return this.hierarchy.getLatestHierarchy(waitForFresh, timeout, perf, skipWaitForFresh, minTimestamp, signal);
   }
 
   async requestHierarchySync(
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    disableAllFiltering: boolean = false,
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs: number = 10000,
+    timeoutMs?: number,
     diagnostics?: HierarchySyncDiagnostics
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, diagnostics);

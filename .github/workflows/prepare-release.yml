@@ -401,14 +401,20 @@ jobs:
           TAG: ${{ inputs.version }}
           REPO: ${{ github.repository }}
           PREPARE_RUN_ID: ${{ github.run_id }}
+          RELEASE_SHA: ${{ needs.finalize-release.outputs.release_commit }}
         run: |
           set -euo pipefail
 
           # Release publishes the exact artifacts prepared in this workflow
           # run. It intentionally does not rebuild or re-verify them from the
           # tag, because a moving main branch can make that second build differ.
-          previous_release_run_ids="$(gh run list --repo "$REPO" --workflow release.yml \
-            --branch "$TAG" --limit 100 --json databaseId --jq '.[].databaseId')"
+          release_run_ids() {
+            gh api --paginate "repos/$REPO/actions/workflows/release.yml/runs?event=workflow_dispatch&per_page=100" \
+              | jq -r --arg tag "$TAG" --arg sha "$RELEASE_SHA" \
+                '.workflow_runs[] | select(.head_branch == $tag and .head_sha == $sha) | .id'
+          }
+
+          previous_release_run_ids="$(release_run_ids)"
           gh workflow run release.yml --repo "$REPO" --ref "$TAG" \
             -f tag="$TAG" \
             -f prepare_run_id="$PREPARE_RUN_ID"
@@ -423,8 +429,7 @@ jobs:
                 echo "Release is running for $TAG (run $release_run_id)"
                 exit 0
               fi
-            done < <(gh run list --repo "$REPO" --workflow release.yml \
-              --branch "$TAG" --limit 100 --json databaseId --jq '.[].databaseId')
+            done < <(release_run_ids)
             sleep 5
           done
 

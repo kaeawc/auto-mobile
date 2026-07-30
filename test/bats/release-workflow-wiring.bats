@@ -145,6 +145,12 @@
   local prepare_commit final_commit
   prepare_commit="$(yq -r '.jobs."prepare-version".steps[] | select(.id == "commit") | .run' "$workflow")"
   final_commit="$(yq -r '.jobs."finalize-release".steps[] | select(.id == "commit") | .run' "$workflow")"
+  run yq -r '.jobs."prepare-version".steps[] | select(.id == "commit") | .env.STAGING_REF' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'release-prepare/${{ github.run_id }}' ]
+  run yq -r '.jobs."finalize-release".steps[] | select(.id == "commit") | .env.STAGING_REF' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'release-prepare/${{ github.run_id }}' ]
   [[ "$prepare_commit" == *'git push --force origin "HEAD:refs/heads/$STAGING_REF"'* ]]
   [[ "$prepare_commit" != *'git push origin HEAD:main'* ]]
   [[ "$final_commit" == *'git push --force origin "HEAD:refs/heads/$STAGING_REF"'* ]]
@@ -364,8 +370,8 @@ wiring_requires_yq() {
   [[ "$code" != *"--ref main"* ]]
   [[ "$code" == *'prepare_run_id="$PREPARE_RUN_ID"'* ]]
   [[ "$code" == *"previous_release_run_ids"* ]]
-  [[ "$code" == *'gh run list --repo "$REPO" --workflow release.yml'* ]]
-  [[ "$code" == *'--branch "$TAG"'* ]]
+  [[ "$code" == *'repos/$REPO/actions/workflows/release.yml/runs?event=workflow_dispatch&per_page=100'* ]]
+  [[ "$code" == *'.head_branch == $tag and .head_sha == $sha'* ]]
   [[ "$code" == *'grep -Fxq "$release_run_id" <<< "$previous_release_run_ids"'* ]]
   [[ "$code" == *"Release dispatch for \$TAG did not materialize"* ]]
 

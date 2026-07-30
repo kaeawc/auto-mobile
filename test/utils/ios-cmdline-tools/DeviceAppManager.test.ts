@@ -1081,6 +1081,123 @@ describe("DeviceAppManager terminate (devicectl)", () => {
   });
 });
 
+describe("DeviceAppManager getInstalledAppInfo (devicectl)", () => {
+  const bundlePath = "/private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app";
+  const makeExecResult = (stdout = "") => ({
+    stdout,
+    stderr: "",
+    toString() { return this.stdout; },
+    trim() { return this.stdout.trim(); },
+    includes(searchString: string) { return this.stdout.includes(searchString); }
+  });
+
+  const createInspector = (opts: {
+    platform?: NodeJS.Platform;
+    exec: (command: string) => Promise<ReturnType<typeof makeExecResult>>;
+    logger?: ReturnType<typeof createFakeLogger>;
+  }) => new DeviceAppManager({
+    platform: () => opts.platform ?? "darwin",
+    execute: (file, args) => opts.exec([file, ...args].join(" ")),
+    readFile: async path => fs.readFile(path, "utf-8"),
+    mkdtemp: async prefix => fs.mkdtemp(prefix),
+    rm: async path => fs.rm(path, { recursive: true, force: true }),
+    readdir: async path => fs.readdir(path),
+    stat: async path => fs.stat(path),
+    tmpdir,
+    logger: opts.logger ?? createFakeLogger()
+  });
+
+  test("issues `device info apps --bundle-id --json-output --quiet` with exact UDID/bundle argv and returns the parsed entry", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => {
+      commands.push(command);
+      if (command.includes("device info apps")) {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          await fs.writeFile(jsonPath, JSON.stringify({
+            apps: [{ bundleIdentifier: bundleId, bundleURL: `file://${bundlePath}`, version: "1.2.3" }]
+          }), "utf-8");
+        }
+      }
+      return makeExecResult();
+    };
+
+    const inspector = createInspector({ exec });
+    const entry = await inspector.getInstalledAppInfo("device-udid", bundleId);
+
+    expect(entry).not.toBeNull();
+    expect(entry!.bundleIdentifier).toBe(bundleId);
+    expect(entry!.version).toBe("1.2.3");
+    const infoCommand = commands.find(c => c.includes("device info apps"))!;
+    expect(infoCommand).toContain("xcrun devicectl device info apps");
+    expect(infoCommand).toContain("--device device-udid");
+    expect(infoCommand).toContain(`--bundle-id ${bundleId}`);
+    expect(infoCommand).toContain("--json-output");
+    expect(infoCommand).toContain("--quiet");
+    // Metadata read must never touch the simulator tool.
+    expect(commands.every(c => !c.includes("simctl"))).toBe(true);
+  });
+
+  test("returns null (no shell-out) off macOS", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string) => { commands.push(command); return makeExecResult(); };
+    const inspector = createInspector({ platform: "linux", exec });
+
+    expect(await inspector.getInstalledAppInfo("device-udid", bundleId)).toBeNull();
+    expect(commands).toEqual([]);
+  });
+
+  test("returns null for an uninstalled bundle", async () => {
+    const exec = async (command: string) => {
+      if (command.includes("device info apps")) {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          await fs.writeFile(jsonPath, JSON.stringify({ apps: [] }), "utf-8");
+        }
+      }
+      return makeExecResult();
+    };
+    const inspector = createInspector({ exec });
+    expect(await inspector.getInstalledAppInfo("device-udid", bundleId)).toBeNull();
+  });
+
+  test("degrades a devicectl failure to null and warns (best-effort metadata contract)", async () => {
+    const logger = createFakeLogger();
+    const exec = async () => { throw new Error("xcrun: devicectl not available"); };
+    const inspector = createInspector({ exec, logger });
+
+    expect(await inspector.getInstalledAppInfo("device-udid", bundleId)).toBeNull();
+    expect(logger.warnMessages.some(m => m.includes(bundleId))).toBe(true);
+  });
+
+  test("cleans up the temp json dir after the query", async () => {
+    const removed: string[] = [];
+    const exec = async (command: string) => {
+      if (command.includes("device info apps")) {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          await fs.writeFile(jsonPath, JSON.stringify({ apps: [{ bundleIdentifier: bundleId }] }), "utf-8");
+        }
+      }
+      return makeExecResult();
+    };
+    const inspector = new DeviceAppManager({
+      platform: () => "darwin",
+      execute: (file, args) => exec([file, ...args].join(" ")),
+      readFile: async path => fs.readFile(path, "utf-8"),
+      mkdtemp: async prefix => fs.mkdtemp(prefix),
+      rm: async path => { removed.push(path); await fs.rm(path, { recursive: true, force: true }); },
+      readdir: async path => fs.readdir(path),
+      stat: async path => fs.stat(path),
+      tmpdir,
+      logger: createFakeLogger()
+    });
+
+    await inspector.getInstalledAppInfo("device-udid", bundleId);
+    expect(removed.length).toBe(1);
+  });
+});
+
 describe("isDevicectlProcessGoneError", () => {
   test("matches ESRCH / already-exited devicectl phrasings (case-insensitive)", () => {
     expect(isDevicectlProcessGoneError("The operation couldn’t be completed. No such process (NSPOSIXErrorDomain error 3.)")).toBe(true);

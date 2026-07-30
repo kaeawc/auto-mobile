@@ -17,8 +17,12 @@ import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
+import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
+import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.Tool
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceAction
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceEffect
+import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceFacetPlaceholder
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
@@ -107,8 +111,22 @@ fun AutoMobileDesktopApp(
           state = workspaceState,
           onAction = workspaceViewModel::onAction,
           onOpenPicker = workspaceViewModel::openPicker,
+          facetContent = { column, tool -> WorkspaceFacet(column, tool) },
         )
       }
     }
+  }
+}
+
+/**
+ * Real docked-facet content for a pane. Only Logs is wired so far (per-device telemetry, via the
+ * testable [LogsFacet] in desktop-core); every other tool falls back to the shared placeholder
+ * until its dashboard gains per-device targeting.
+ */
+@Composable
+private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
+  when (tool) {
+    Tool.Logs -> LogsFacet(column)
+    else -> WorkspaceFacetPlaceholder(tool)
   }
 }

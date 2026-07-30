@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -46,6 +47,11 @@ fun WorkspaceShell(
   onOpenPicker: () -> Unit,
   status: WorkspaceStatus = WorkspaceStatus.Green,
   modifier: Modifier = Modifier,
+  // Renders the docked facet body for a pane's active tool. Hoisted so the host can supply real
+  // per-device dashboards; defaults to a placeholder so un-wired tools stay inert.
+  facetContent: @Composable (DeviceColumn, Tool) -> Unit = { _, tool ->
+    WorkspaceFacetPlaceholder(tool)
+  },
 ) {
   Column(modifier.fillMaxSize()) {
     TopBar(status = status, onOpenPicker = onOpenPicker)
@@ -54,12 +60,17 @@ fun WorkspaceShell(
       is WorkspaceUiState.Content ->
         Row(Modifier.weight(1f).fillMaxWidth()) {
           state.columns.forEach { column ->
-            DeviceColumnView(
-              column = column,
-              focused = column.deviceId == state.focusedDeviceId,
-              onAction = onAction,
-              modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
+            // Key by deviceId so a surviving pane keeps its own remembered state + facet
+            // connection when another pane closes (unkeyed = positional identity churns survivors).
+            key(column.deviceId) {
+              DeviceColumnView(
+                column = column,
+                focused = column.deviceId == state.focusedDeviceId,
+                onAction = onAction,
+                facetContent = facetContent,
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+              )
+            }
           }
         }
     }
@@ -134,6 +145,7 @@ private fun DeviceColumnView(
   column: DeviceColumn,
   focused: Boolean,
   onAction: (WorkspaceAction) -> Unit,
+  facetContent: @Composable (DeviceColumn, Tool) -> Unit,
   modifier: Modifier,
 ) {
   Column(
@@ -152,7 +164,7 @@ private fun DeviceColumnView(
       // stream collapses to grow the facet.
       val facetFraction = facetHeightFraction(column.shrunk)
       StreamArea(column, onAction, Modifier.weight(1f - facetFraction))
-      DockedFacet(column, tool, onAction, Modifier.weight(facetFraction))
+      DockedFacet(column, tool, onAction, facetContent, Modifier.weight(facetFraction))
     }
   }
 }
@@ -182,14 +194,15 @@ private fun StreamArea(
 
 /**
  * The docked facet (tool window) for a pane's active [tool]: a header with the tool icon + label
- * and a ✕ that deselects the tool, over a placeholder body. Real per-tool dashboard content is
- * deferred — the existing dashboards target a single active device, not a per-pane one.
+ * and a ✕ that deselects the tool, over a body supplied by [facetContent]. The body is hoisted so
+ * the host can drop in real per-device dashboards; the default is [WorkspaceFacetPlaceholder].
  */
 @Composable
 private fun DockedFacet(
   column: DeviceColumn,
   tool: Tool,
   onAction: (WorkspaceAction) -> Unit,
+  facetContent: @Composable (DeviceColumn, Tool) -> Unit,
   modifier: Modifier,
 ) {
   Column(modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
@@ -216,9 +229,19 @@ private fun DockedFacet(
         onClick = { onAction(WorkspaceAction.SelectTool(column.deviceId, null)) },
       )
     }
-    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-      Text("${tool.label} — coming soon", color = MaterialTheme.colorScheme.outline)
-    }
+    Box(Modifier.weight(1f).fillMaxWidth()) { facetContent(column, tool) }
+  }
+}
+
+/**
+ * Default docked-facet body: a centered "coming soon" note for a tool with no wired dashboard.
+ * Public so a host that wires real content for only some tools can reuse it as the fallback for the
+ * rest (see [WorkspaceShell]'s `facetContent`).
+ */
+@Composable
+fun WorkspaceFacetPlaceholder(tool: Tool) {
+  Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Text("${tool.label} — coming soon", color = MaterialTheme.colorScheme.outline)
   }
 }
 

@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -181,5 +182,41 @@ class WorkspaceShellUiTest {
     }
     onNodeWithContentDescription("Storage Pixel 8").performClick()
     assertEquals(WorkspaceAction.SelectTool("a", Tool.Storage), action)
+  }
+
+  @Test
+  fun `facet renders the injected facetContent for the active tool`() = runComposeUiTest {
+    var received: Pair<String, Tool>? = null
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel 8").copy(activeTool = Tool.Logs)),
+        focusedDeviceId = "a",
+      )
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          onOpenPicker = {},
+          facetContent = { column, tool ->
+            received = column.deviceId to tool
+            Text("facet-slot:${tool.label}")
+          },
+        )
+      }
+    }
+    onNodeWithText("facet-slot:Logs").assertIsDisplayed()
+    assertEquals("a" to Tool.Logs, received)
+  }
+
+  @Test
+  fun `default facetContent shows the coming-soon placeholder`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel 8").copy(activeTool = Tool.Performance)),
+        focusedDeviceId = "a",
+      )
+    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    onNodeWithText("Performance — coming soon", substring = true).assertIsDisplayed()
   }
 }

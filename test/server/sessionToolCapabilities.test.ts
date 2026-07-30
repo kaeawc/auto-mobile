@@ -79,6 +79,18 @@ describe("session tool capability MCP enforcement", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  test("rejects a capability write when the injected profile service is read-only", async () => {
+    fixture = new McpTestFixture({
+      sessionToolProfileService: { isEnabled: async () => false },
+    });
+    await fixture.setup();
+
+    await expect(fixture.client.request(
+      { method: "tools/call", params: { name: "setToolCapability", arguments: { capability: "clipboard" } } },
+      z.any(),
+    )).rejects.toThrow("read-only");
+  });
+
   test("lets a core capability control tool opt in a stdio session before device binding", async () => {
     const enabled = new Set<string>();
     const profileService: Pick<SessionToolProfileService, "isEnabled"> &

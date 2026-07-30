@@ -155,14 +155,15 @@ fun connectionStatusText(state: ConnectionState): String? =
  * Filtering never touches the daemon protocol — it only narrows what is already in memory.
  *
  * The client is owned by the caller (the facet connects/disposes it per device). Streamed rows are
- * kept per [activeDeviceId]; switching devices clears the buffer. [platform] selects the numeric
- * log-level scale used to bucket rows into filter chips (see [logLevelOf]).
+ * kept per [activeDeviceId] (capped at [maxRows]); switching devices clears the buffer. [platform]
+ * selects the numeric log-level scale used to bucket rows into filter chips (see [logLevelOf]).
  */
 @Composable
 fun LogsPanel(
   telemetryPushClient: TelemetryPushClient?,
   activeDeviceId: String? = null,
   platform: LogPlatform = LogPlatform.Android,
+  maxRows: Int = MAX_LOG_ROWS,
   modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
@@ -170,20 +171,30 @@ fun LogsPanel(
   var query by remember { mutableStateOf("") }
   var enabledLevels by remember { mutableStateOf(LogLevel.entries.toSet()) }
   var connectionState by remember(activeDeviceId) { mutableStateOf<ConnectionState?>(null) }
+  // Monotonic append counter: unlike filtered.size it keeps advancing once the buffer is pinned at
+  // maxRows, so the tail-follow effect below still re-fires on every appended row at the cap.
+  var appendCount by remember(activeDeviceId) { mutableStateOf(0) }
   // Tail-follow *intent*: preserved across filter changes and reset only when the user scrolls away
   // from the bottom, so clearing a filter that had anchored the list on an old row still follows
   // the next live row.
   var followTail by remember(activeDeviceId) { mutableStateOf(true) }
 
-  val filtered by remember {
-    derivedStateOf { filterLogs(logs, enabledLevels, query, platform) }
-  }
+  // Keyed on `platform` so a platform change re-creates the derived state with the new scale;
+  // `logs`, `enabledLevels`, and `query` are Compose State reads that derivedStateOf tracks on
+  // its own, so they are intentionally not remember keys.
+  val filtered by
+    remember(platform) {
+      derivedStateOf { filterLogs(logs, enabledLevels, query, platform) }
+    }
   val listState = rememberLazyListState()
 
-  LaunchedEffect(telemetryPushClient, activeDeviceId) {
+  LaunchedEffect(telemetryPushClient, activeDeviceId, maxRows) {
     val client = telemetryPushClient ?: return@LaunchedEffect
     client.telemetryEvents.collect { event ->
-      if (event is TelemetryDisplayEvent.Log) appendBounded(logs, event)
+      if (event is TelemetryDisplayEvent.Log) {
+        appendBounded(logs, event, maxRows)
+        appendCount++
+      }
     }
   }
 
@@ -200,10 +211,10 @@ fun LogsPanel(
       .collect { inProgress -> if (!inProgress) followTail = !listState.canScrollForward }
   }
 
-  // Follow the tail when following: fires on new rows (size change) and on filter changes (which
-  // re-anchor the list), so the newest visible row stays in view without fighting a scrolled-up
-  // user.
-  LaunchedEffect(filtered.size, query, enabledLevels, followTail) {
+  // Follow the tail when following: fires on every appended row (via appendCount, which advances
+  // even at the buffer cap) and on filter changes (which re-anchor the list), so the newest
+  // visible row stays in view without fighting a scrolled-up user.
+  LaunchedEffect(appendCount, query, enabledLevels, followTail) {
     if (followTail && filtered.isNotEmpty()) {
       listState.scrollToItem(filtered.lastIndex)
     }

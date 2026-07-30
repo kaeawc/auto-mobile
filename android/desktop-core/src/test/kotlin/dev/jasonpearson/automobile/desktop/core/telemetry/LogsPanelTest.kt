@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.telemetry
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -266,5 +267,68 @@ class LogsPanelTest {
       onAllNodesWithText("row 30").fetchSemanticsNodes().isNotEmpty()
     }
     onNodeWithText("row 30").assertIsDisplayed()
+  }
+
+  @Test
+  fun `tail-follow keeps following once the buffer is at its cap`() = runComposeUiTest {
+    val fake = FakeTelemetryPushClient()
+    setContent {
+      MaterialTheme {
+        Box(Modifier.height(120.dp)) {
+          // Tiny cap so the buffer pins quickly and `filtered.size` stops changing on append.
+          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1", maxRows = 4)
+        }
+      }
+    }
+    waitForIdle()
+    for (i in 0 until 10) {
+      fake.emitEvent(log(4, "T", "row $i", i.toLong()))
+    }
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("row 9").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("row 9").assertIsDisplayed()
+
+    // Buffer is pinned at 4 rows now; the next append does not change filtered.size, but the
+    // newest row must still be followed (regression guard for the size-keyed follow effect).
+    fake.emitEvent(log(4, "T", "row 10", 10L))
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("row 10").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("row 10").assertIsDisplayed()
+  }
+
+  @Test
+  fun `changing platform re-buckets rows without going stale`() = runComposeUiTest {
+    val fake = FakeTelemetryPushClient()
+    val platform = mutableStateOf(LogPlatform.Android)
+    setContent {
+      MaterialTheme {
+        LogsPanel(
+          telemetryPushClient = fake,
+          activeDeviceId = "dev-1",
+          platform = platform.value,
+        )
+      }
+    }
+    waitForIdle()
+    fake.emitEvent(log(5, "T", "level five", 1))
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("level five").fetchSemanticsNodes().isNotEmpty()
+    }
+
+    // On the Android scale level 5 = Warn, so disabling Warn hides the row.
+    onNodeWithContentDescription("Toggle Warn logs").performClick()
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("level five").fetchSemanticsNodes().isEmpty()
+    }
+
+    // Flipping to iOS after first composition must re-bucket: level 5 = fault → Error (Warn still
+    // off), so the row reappears — proving the derived filter is not stale on `platform`.
+    runOnIdle { platform.value = LogPlatform.Ios }
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("level five").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("level five").assertIsDisplayed()
   }
 }

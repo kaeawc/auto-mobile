@@ -362,7 +362,7 @@ internal object AutoMobilePlanExecutor {
           ),
           options.effectiveExecutePlanTimeoutMs(),
         )
-      if (!response.success) {
+      if (!response.success && !isUnknownToolError(response.error)) {
         // Treat the prerequisite like executePlan itself: the retry classifier
         // below handles transient daemon responses rather than throwing before
         // it has a chance to retry the attempt.
@@ -895,6 +895,9 @@ internal object AutoMobilePlanExecutor {
       normalized.contains("plan execution in progress") ||
       normalized.contains("daemon request timeout")
   }
+
+  private fun isUnknownToolError(errorMessage: String?): Boolean =
+    errorMessage?.contains("unknown tool", ignoreCase = true) == true
 
   // ── Internal types ────────────────────────────────────────────────────────
 

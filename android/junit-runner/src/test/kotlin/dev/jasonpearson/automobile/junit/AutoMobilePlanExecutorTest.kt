@@ -118,6 +118,27 @@ class AutoMobilePlanExecutorTest {
   }
 
   @Test
+  fun `executes plan when an older daemon lacks the capability tool`() {
+    fakeDaemonClient.queueCapabilityResponse(
+      DaemonResponse(
+        id = "capability-unknown-tool",
+        type = "mcp_response",
+        success = false,
+        error = "Unknown tool: setToolCapability",
+      )
+    )
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(JsonObject(mapOf("success" to JsonPrimitive(true)))),
+    )
+
+    val result = executePlan()
+
+    assertTrue(result.success)
+    assertEquals(1, fakeDaemonClient.capabilityArguments.size)
+  }
+
+  @Test
   fun `getSelection returns null when selectedElement is missing`() {
     val step =
       JsonObject(

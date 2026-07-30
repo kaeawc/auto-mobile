@@ -47,6 +47,7 @@ class McpDaemonClientInputTest {
               """{"content":[{"type":"text","text":"{\"sessionUuid\":\"profile-a\"}"}]}""",
               null,
             ),
+            SocketResponse("""{"tools":[]}""", null),
             SocketResponse("""{"content":[]}""", null),
           )
       )
@@ -54,12 +55,18 @@ class McpDaemonClientInputTest {
         val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
 
         client.enableToolCapability("screen-artifacts")
+        client.listTools()
         client.callTool("videoRecording", JsonObject(emptyMap()))
 
         val requests = server.awaitRequests()
         assertEquals("setToolCapability", requests[0].params["name"]?.jsonPrimitive?.content)
-        assertEquals("videoRecording", requests[1].params["name"]?.jsonPrimitive?.content)
-        val arguments = requests[1].params["arguments"]?.jsonObject
+        assertEquals("tools/list", requests[1].method)
+        assertEquals(
+          "profile-a",
+          requests[1].params["__autoMobileCapabilityProfileUuid"]?.jsonPrimitive?.content,
+        )
+        assertEquals("videoRecording", requests[2].params["name"]?.jsonPrimitive?.content)
+        val arguments = requests[2].params["arguments"]?.jsonObject
         assertEquals(
           "profile-a",
           arguments?.get("__autoMobileCapabilityProfileUuid")?.jsonPrimitive?.content,

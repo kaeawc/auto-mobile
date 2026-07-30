@@ -88,7 +88,15 @@ class McpDaemonClient(
   }
 
   override fun listTools(): List<McpTool> {
-    val response = sendRequest("tools/list")
+    val response =
+      sendRequest(
+        "tools/list",
+        capabilityProfileUuid?.let { profileUuid ->
+          buildJsonObject {
+            put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(profileUuid))
+          }
+        } ?: JsonObject(emptyMap()),
+      )
     ensureSuccess(response)
     val result = json.decodeFromJsonElement(serializer<ListToolsResult>(), response.result!!)
     return result.tools

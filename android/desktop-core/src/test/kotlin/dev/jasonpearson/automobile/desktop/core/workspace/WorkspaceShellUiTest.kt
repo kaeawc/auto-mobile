@@ -281,4 +281,94 @@ class WorkspaceShellUiTest {
     setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
     onNodeWithText("Performance — coming soon", substring = true).assertIsDisplayed()
   }
+
+  @Test
+  fun `green status shows no inline detail line`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Green,
+          statusDetail = "Daemon reconnecting",
+        )
+      }
+    }
+    // "Expands only when not green": the detail line stays hidden even if a detail is supplied.
+    onNodeWithContentDescription("Status detail: Daemon reconnecting").assertDoesNotExist()
+  }
+
+  @Test
+  fun `non-green status shows the inline detail line`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Yellow,
+          statusDetail = "Daemon reconnecting",
+        )
+      }
+    }
+    onNodeWithContentDescription("Status detail: Daemon reconnecting").assertIsDisplayed()
+  }
+
+  @Test
+  fun `clicking the status dot opens the health sheet`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Green,
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithText("fake-health-body").assertDoesNotExist()
+    onNodeWithContentDescription("Status: Green").performClick()
+    onNodeWithContentDescription("Health sheet").assertIsDisplayed()
+    onNodeWithText("fake-health-body").assertIsDisplayed()
+  }
+
+  @Test
+  fun `closing the health sheet dismisses it`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Red,
+          statusDetail = "Device offline",
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status: Red").performClick()
+    onNodeWithText("fake-health-body").assertIsDisplayed()
+    onNodeWithContentDescription("Close health sheet").performClick()
+    onNodeWithText("fake-health-body").assertDoesNotExist()
+  }
+
+  @Test
+  fun `clicking the inline detail line also opens the health sheet`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Yellow,
+          statusDetail = "Daemon reconnecting",
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status detail: Daemon reconnecting").performClick()
+    onNodeWithText("fake-health-body").assertIsDisplayed()
+  }
 }

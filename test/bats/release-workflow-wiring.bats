@@ -353,6 +353,9 @@ wiring_requires_yq() {
   [[ "$code" == *'--ref "$TAG"'* ]]
   [[ "$code" != *"--ref main"* ]]
   [[ "$code" == *'prepare_run_id="$PREPARE_RUN_ID"'* ]]
+  [[ "$code" == *'gh run list --repo "$REPO" --workflow release.yml'* ]]
+  [[ "$code" == *'--branch "$TAG"'* ]]
+  [[ "$code" == *"Release dispatch for \$TAG did not materialize"* ]]
 
   run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Start the release") | .env.PREPARE_RUN_ID' \
     ".github/workflows/prepare-release.yml"

@@ -410,3 +410,19 @@ jobs:
           gh workflow run release.yml --repo "$REPO" --ref "$TAG" \
             -f tag="$TAG" \
             -f prepare_run_id="$PREPARE_RUN_ID"
+
+          # workflow_dispatch returns before the run is visible. Confirm the
+          # tag-scoped Release run materializes so a delayed or dropped dispatch
+          # leaves Prepare retryable instead of reporting a false success.
+          for _ in $(seq 1 12); do
+            release_run_id="$(gh run list --repo "$REPO" --workflow release.yml \
+              --branch "$TAG" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            if [[ -n "$release_run_id" ]]; then
+              echo "Release is running for $TAG (run $release_run_id)"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "Release dispatch for $TAG did not materialize within 60 seconds" >&2
+          exit 1

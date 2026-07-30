@@ -130,43 +130,34 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     (overrides.processCommandLine as string | undefined) ??
     `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`;
 
+  // Command substrings whose ADB call should hang forever, exercising the
+  // injected withTimeout bound under FakeTimer (never a real wait).
+  const hangCommands = (overrides.hangCommands as string[] | undefined) ?? [];
+  const neverResolves = <T>(): Promise<T> => new Promise<T>(() => {});
+
   const adbFactory: AdbClientFactory = {
     create() {
       return {
         getAdbPathOnly: async () => "adb",
-        executeCommand: async (command: string) => {
+        executeCommand: (command: string) => {
           commands.push(command);
+          if (hangCommands.some(sub => command.includes(sub))) {
+            return neverResolves<{ stdout: string; stderr: string; exitCode: number }>();
+          }
           if (command.startsWith("forward tcp:0")) {
             forwardedSocket = command.split("localabstract:")[1] ?? null;
             if (forwardResult) {
               return forwardResult;
             }
-            return { stdout: `${FORWARD_PORT}\n`, stderr: "", exitCode: 0 };
+            return Promise.resolve({ stdout: `${FORWARD_PORT}\n`, stderr: "", exitCode: 0 });
           }
-          if (command === "forward --list") {
-            const stdout =
-              (overrides.forwardListOutput as string | undefined) ??
-              (forwardedSocket
-                ? `${DEVICE.deviceId} tcp:${FORWARD_PORT} localabstract:${forwardedSocket}\n`
-                : "");
-            return { stdout, stderr: "", exitCode: 0 };
-          }
-          if (command.includes(`for f in ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json`)) {
-            return { stdout: leaseOutput, stderr: "", exitCode: 0 };
-          }
-          if (command.startsWith(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/`)) {
-            return { stdout: leaseOutput, stderr: "", exitCode: 0 };
-          }
-          if (command === "shell cat /proc/uptime") {
-            return { stdout: `${deviceUptimeMs / 1000} 0.00\n`, stderr: "", exitCode: 0 };
-          }
-          if (command.startsWith("shell cat /proc/")) {
-            return { stdout: processCommandLine, stderr: "", exitCode: 0 };
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
+          return Promise.resolve(resolveCommand(command));
         },
         spawn: async (args: string[]) => {
           spawnArgs.push(args);
+          if (overrides.spawnHang === true) {
+            return neverResolves<FakeProcess>();
+          }
           const process = new FakeProcess();
           processes.push(process);
           return process;
@@ -174,6 +165,30 @@ function makeSource(overrides: Record<string, unknown> = {}) {
       } as unknown as ReturnType<AdbClientFactory["create"]>;
     },
   };
+
+  function resolveCommand(command: string): { stdout: string; stderr: string; exitCode: number } {
+    if (command === "forward --list") {
+      const stdout =
+        (overrides.forwardListOutput as string | undefined) ??
+        (forwardedSocket
+          ? `${DEVICE.deviceId} tcp:${FORWARD_PORT} localabstract:${forwardedSocket}\n`
+          : "");
+      return { stdout, stderr: "", exitCode: 0 };
+    }
+    if (command.includes(`for f in ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json`)) {
+      return { stdout: leaseOutput, stderr: "", exitCode: 0 };
+    }
+    if (command.startsWith(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/`)) {
+      return { stdout: leaseOutput, stderr: "", exitCode: 0 };
+    }
+    if (command === "shell cat /proc/uptime") {
+      return { stdout: `${deviceUptimeMs / 1000} 0.00\n`, stderr: "", exitCode: 0 };
+    }
+    if (command.startsWith("shell cat /proc/")) {
+      return { stdout: processCommandLine, stderr: "", exitCode: 0 };
+    }
+    return { stdout: "", stderr: "", exitCode: 0 };
+  }
 
   const connector: SocketConnector = async () => {
     const socket = new FakeSocket();
@@ -1024,5 +1039,80 @@ describe("PersistentEncoderH264Source", () => {
 
     await first.source.stop();
     await second.source.stop();
+  });
+
+  describe("bounded ADB/socket timeouts", () => {
+    const COMMAND_TIMEOUT_MS = 20_000;
+    const TEARDOWN_TIMEOUT_MS = 5_000;
+
+    // Let the pending withTimeout promise register its FakeTimer setTimeout
+    // before advancing fake time, so the deadline actually fires.
+    async function fireTimeout(ctx: ReturnType<typeof makeSource>, ms: number): Promise<void> {
+      await tick();
+      ctx.timer.advanceTime(ms);
+      await tick();
+    }
+
+    async function expectStartRejects(overrides: Record<string, unknown>): Promise<Error> {
+      const ctx = makeSource(overrides);
+      const startPromise = ctx.source.start();
+      const settled = startPromise.then(() => null, error => error as Error);
+      await fireTimeout(ctx, COMMAND_TIMEOUT_MS);
+      const error = await settled;
+      expect(error).toBeInstanceOf(Error);
+      // The source tore itself down so the factory can fall back to screenrecord.
+      expect(ctx.source.isRunning).toBe(false);
+      return error as Error;
+    }
+
+    test("a hung adb push makes start() reject within the launch timeout", async () => {
+      const error = await expectStartRejects({ hangCommands: ["push \""] });
+      expect(error.message).toContain("adb push video-server jar");
+    });
+
+    test("a hung adb forward makes start() reject within the launch timeout", async () => {
+      const error = await expectStartRejects({ forwardResult: new Promise(() => {}) });
+      expect(error.message).toContain("adb forward video-server socket");
+    });
+
+    test("a hung adb spawn makes start() reject within the launch timeout", async () => {
+      const error = await expectStartRejects({ spawnHang: true });
+      expect(error.message).toContain("adb spawn video-server");
+    });
+
+    test("a hung initial socket connect makes start() reject within the launch timeout", async () => {
+      const ctx = makeSource({ connector: (() => new Promise(() => {})) as SocketConnector });
+      const startPromise = ctx.source.start();
+      const settled = startPromise.then(() => null, error => error as Error);
+      await tick(); // push + spawn
+      ctx.processes[0].ready();
+      await tick(); // ready resolves, forward + connect begins (and hangs)
+      ctx.timer.advanceTime(COMMAND_TIMEOUT_MS);
+      await tick();
+      const error = await settled;
+      expect(error).toBeInstanceOf(Error);
+      expect(ctx.source.isRunning).toBe(false);
+    });
+
+    test("a hung teardown command still lets stop() resolve within the timeout", async () => {
+      // readLease's `shell cat <lease>.json` is only hit during cleanup, so it
+      // hangs teardown without affecting the successful start.
+      const ctx = makeSource({
+        hangCommands: [`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/${SESSION_TOKEN}.json`],
+      });
+      await startReady(ctx);
+
+      const stopPromise = ctx.source.stop();
+      const settled = stopPromise.then(() => "resolved", () => "rejected");
+      await fireTimeout(ctx, TEARDOWN_TIMEOUT_MS);
+      expect(await settled).toBe("resolved");
+      // stop() always winds the source down even when cleanup could not complete.
+      expect(ctx.source.isRunning).toBe(false);
+    });
+
+    test("rejects construction with a non-positive command timeout", () => {
+      expect(() => makeSource({ commandTimeoutMs: 0 })).toThrow();
+      expect(() => makeSource({ teardownTimeoutMs: -1 })).toThrow();
+    });
   });
 });

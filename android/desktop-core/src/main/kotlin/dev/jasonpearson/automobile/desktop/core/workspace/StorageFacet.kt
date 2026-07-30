@@ -25,6 +25,8 @@ import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.storage.StorageDashboard
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The package whose storage a pane inspects: the device's foreground app, else its first installed
@@ -63,9 +65,13 @@ fun StorageFacet(
   val loader: suspend (String) -> Result<List<InstalledApp>> =
     loadInstalledApps
       ?: { deviceId ->
-        graph.dataSourceFactory
-          .createAppListDataSource(DataSourceMode.Real, { graph.autoMobileClient }, deviceId)
-          .getInstalledApps()
+        // Resolve off the UI thread: the app-list read hits the daemon and would otherwise block
+        // recomposition. Injected test loaders run inline (deterministic).
+        withContext(Dispatchers.IO) {
+          graph.dataSourceFactory
+            .createAppListDataSource(DataSourceMode.Real, { graph.autoMobileClient }, deviceId)
+            .getInstalledApps()
+        }
       }
   var attempt by remember(column.deviceId) { mutableStateOf(0) }
   var state by
@@ -80,7 +86,9 @@ fun StorageFacet(
             ?: StorageFacetState.NoApp
         is Result.Error ->
           StorageFacetState.Error(result.message ?: "Failed to load the device's apps")
-        Result.Loading -> StorageFacetState.Loading
+        // A one-shot app-list load resolves to Success/Error; treat a stray Loading as retryable
+        // rather than leaving the facet stuck on "Resolving app…".
+        Result.Loading -> StorageFacetState.Error("App list is still loading")
       }
   }
   when (val current = state) {

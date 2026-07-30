@@ -26,7 +26,9 @@ function createAdbFactory(fakeAdb: FakeAdbExecutor): AdbClientFactory {
 describe("InputKey", () => {
   test("sends supported Android keys through ADB keyevent with the caller timeout", async () => {
     const fakeAdb = new FakeAdbExecutor();
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb));
+    // Inject a FakeTimer so `now()` is constant: with the real timer, a 1ms tick between the two
+    // `timer.now()` calls in press() intermittently made the forwarded timeout 1233 not 1234 (#4696).
+    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), undefined, new FakeTimer());
 
     const result = await inputKey.press("enter", 1234);
 

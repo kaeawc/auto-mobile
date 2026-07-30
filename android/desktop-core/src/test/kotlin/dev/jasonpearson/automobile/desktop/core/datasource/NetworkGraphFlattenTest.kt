@@ -73,6 +73,26 @@ class NetworkGraphFlattenTest {
   }
 
   @Test
+  fun `preserves a bracketed intermediate segment and strips only the leaf method suffix`() {
+    val hosts =
+      parse(
+        """
+        {"graph":[{"scheme":"https","host":"api.example.com","paths":{
+          "items[archived]":{"paths":{"detail[GET]":{"method":"GET","success":4,"errors":0,"p50":5,"p95":9}}}
+        }}]}
+        """
+          .trimIndent()
+      )
+
+    val rows = flattenNetworkGraph(hosts)
+
+    assertEquals(1, rows.size)
+    // The `[archived]` branch segment must survive; only the leaf's `[GET]` is stripped.
+    assertEquals("/items[archived]/detail", rows.first().path)
+    assertEquals("GET", rows.first().method)
+  }
+
+  @Test
   fun `renders the root path as slash`() {
     val hosts =
       parse(

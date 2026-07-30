@@ -87,7 +87,11 @@ private fun walkPaths(
 ) {
   for ((key, element) in paths) {
     val node = element as? JsonObject ?: continue
-    val segment = stripMethodSuffix(key)
+    val nested = node["paths"] as? JsonObject
+    // The server appends `[METHOD]` only to pure-leaf keys (`insertIntoTree`); branch and
+    // leaf+branch keys stay literal. So strip the method suffix only when this node has no
+    // children — otherwise a real bracketed segment like `items[archived]` would be mangled.
+    val segment = if (nested != null) key else stripMethodSuffix(key)
     val nextSegments = if (segment.isEmpty()) segments else segments + segment
     if (node.containsKey("success")) {
       out.add(
@@ -104,7 +108,6 @@ private fun walkPaths(
         )
       )
     }
-    val nested = node["paths"] as? JsonObject
     if (nested != null) {
       walkPaths(scheme, host, nested, nextSegments, out)
     }

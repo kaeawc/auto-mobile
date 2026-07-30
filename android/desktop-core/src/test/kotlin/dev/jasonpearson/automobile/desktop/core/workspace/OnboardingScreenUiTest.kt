@@ -18,7 +18,7 @@ class OnboardingScreenUiTest {
     setContent { MaterialTheme { OnboardingScreen(onGetStarted = {}) } }
     onNodeWithText("Welcome to AutoMobile").assertIsDisplayed()
     onNodeWithText("WHAT YOU CAN DO HERE", substring = true).assertIsDisplayed()
-    onNodeWithText("Observe devices live", substring = true).assertIsDisplayed()
+    onNodeWithText("Observe devices", substring = true).assertIsDisplayed()
     onNodeWithText("Compare devices", substring = true).assertIsDisplayed()
     onNodeWithContentDescription("Get started").assertIsDisplayed()
   }

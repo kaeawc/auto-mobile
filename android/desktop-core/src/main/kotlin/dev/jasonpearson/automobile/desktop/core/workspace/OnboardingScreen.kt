@@ -1,7 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,29 +10,28 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-private val Accent = Color(0xFF4DABF7)
-
 /** One capability shown on the onboarding coach panel: an emoji + a plain-language line. */
 private data class Capability(val icon: String, val text: String)
 
+// Only capabilities that are actually wired today — no live streams, navigation, or
+// emulator-control
+// execution yet, so the panel doesn't promise inert functionality.
 private val CAPABILITIES =
   listOf(
-    Capability("🖥", "Observe devices live — pick booted devices and watch them side by side"),
-    Capability("🧭", "Inspect each device — logs, storage, navigation and more in a docked panel"),
+    Capability("🖥", "Observe devices — pick booted devices and open them as side-by-side panes"),
+    Capability("🧭", "Inspect per device — dock the logs and storage tools into each pane"),
     Capability("⧉", "Compare devices — open the same tool across devices for a like-for-like view"),
-    Capability("🎮", "Control emulators — rotate, screenshot, snapshot and unlock from the stream"),
   )
 
 /**
@@ -75,16 +73,15 @@ fun OnboardingScreen(onGetStarted: () -> Unit, modifier: Modifier = Modifier) {
         }
       }
       Spacer(Modifier.height(28.dp))
-      Text(
-        "Get started",
-        color = Color.White,
-        fontWeight = FontWeight.SemiBold,
-        modifier =
-          Modifier.clickable(onClick = onGetStarted)
-            .semantics { contentDescription = "Get started" }
-            .background(Accent, RoundedCornerShape(6.dp))
-            .padding(horizontal = 24.dp, vertical = 12.dp),
-      )
+      // Material3 Button: themed container/content colors carry sufficient contrast (vs a
+      // hand-rolled
+      // white-on-accent treatment) and bring button semantics for free.
+      Button(
+        onClick = onGetStarted,
+        modifier = Modifier.semantics { contentDescription = "Get started" },
+      ) {
+        Text("Get started")
+      }
     }
   }
 }

@@ -283,8 +283,10 @@ class VideoStreamWriter(
     // audio resumes live when the replacement mux client attaches.
     val output = outputStream ?: return true
     try {
-      output.write(VideoStreamProtocol.packetHeader(audioEnabled, trackId, ptsAndFlags, data.size))
-      output.write(data)
+      // One write per packet: header + payload are framed into a single buffer so each packet
+      // costs one syscall instead of two and the header is never split from its payload across
+      // TCP segments (issue #4743).
+      output.write(VideoStreamProtocol.framedPacket(audioEnabled, trackId, ptsAndFlags, data))
       return true
     } catch (e: IOException) {
       println("Error writing packet: ${e.message}")

@@ -154,4 +154,17 @@ class CommandPaletteTest {
     assertEquals(2, focusLabels.size)
     assertEquals(focusLabels.size, focusLabels.toSet().size)
   }
+
+  @Test
+  fun `same-name devices whose ids share their final six chars still get distinct labels`() {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(column("A-15-ABCDEF", "iPhone 15"), column("B-15-ABCDEF", "iPhone 15")),
+        focusedDeviceId = "A-15-ABCDEF",
+      )
+    val focusLabels =
+      buildWorkspaceCommands(state, {}, {}).filter { it.id.startsWith("focus-") }.map { it.label }
+    assertEquals(2, focusLabels.size)
+    assertEquals(focusLabels.size, focusLabels.toSet().size)
+  }
 }

@@ -51,25 +51,37 @@ internal fun filterCommands(commands: List<PaletteCommand>, query: String): List
 /**
  * Human-readable display names for [columns], keyed by device id. When two columns share a display
  * name (common for iOS simulators, which surface identical labels like "iPhone 15"), the colliding
- * ones get a short device-id suffix so palette labels stay distinguishable. Unique names are left
- * untouched. Command ids are already device-id-keyed, so this only affects the visible label. Pure.
+ * ones get a device-id suffix so palette labels stay distinguishable. The suffix is the *shortest*
+ * length that is unique within that duplicate-name group, so devices whose ids share a final run of
+ * characters still get labels that differ. Unique names are left untouched. Command ids are already
+ * device-id-keyed, so this only affects the visible label. Pure.
  */
-internal fun disambiguatedDeviceNames(columns: List<DeviceColumn>): Map<String, String> {
-  val counts = columns.groupingBy { it.name }.eachCount()
-  return columns.associate { column ->
-    val display =
-      if ((counts[column.name] ?: 0) > 1) "${column.name} (${shortDeviceId(column.deviceId)})"
-      else column.name
-    column.deviceId to display
-  }
+internal fun disambiguatedDeviceNames(columns: List<DeviceColumn>): Map<String, String> = buildMap {
+  columns
+    .groupBy { it.name }
+    .forEach { (name, group) ->
+      if (group.size == 1) {
+        put(group.single().deviceId, name)
+      } else {
+        val length = shortestDistinguishingLength(group.map { it.deviceId })
+        group.forEach { column ->
+          put(column.deviceId, "$name (${column.deviceId.takeLast(length)})")
+        }
+      }
+    }
 }
 
-/** A short, human-scannable slice of a device id for label disambiguation. */
-private fun shortDeviceId(deviceId: String): String =
-  if (deviceId.length <= SHORT_DEVICE_ID_LENGTH) deviceId
-  else deviceId.takeLast(SHORT_DEVICE_ID_LENGTH)
-
-private const val SHORT_DEVICE_ID_LENGTH = 6
+/**
+ * The shortest id-suffix length whose `takeLast` values are all distinct across [deviceIds], so a
+ * duplicate-name group gets the minimal readable disambiguator. Falls back to the longest id length
+ * (the full id) when no shorter suffix separates them.
+ */
+private fun shortestDistinguishingLength(deviceIds: List<String>): Int {
+  val maxLength = deviceIds.maxOf { it.length }
+  return (1..maxLength).firstOrNull { length ->
+    deviceIds.mapTo(mutableSetOf()) { it.takeLast(length) }.size == deviceIds.size
+  } ?: maxLength
+}
 
 /**
  * The commands available for the current workspace [state]: open the picker, focus/close each

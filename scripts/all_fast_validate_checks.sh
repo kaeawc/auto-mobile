@@ -36,6 +36,7 @@ add_check "xml" "\"$PROJECT_ROOT/scripts/xml/validate_xml.sh\"" "config,xml" "Va
 add_check "shellcheck" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_scripts.sh\"" "lint,shell" "Validate shell scripts with shellcheck"
 add_check "shell-portability" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_portability.sh\"" "lint,shell" "Lint shell scripts for portability footguns"
 add_check "shell-sete" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_sete.sh\"" "lint,shell" "Gate new set -e-suppressed shell findings against the baseline"
+add_check "markdown-bash" "\"$PROJECT_ROOT/scripts/shellcheck/validate_markdown_bash.sh\"" "lint,shell" "Shellcheck fenced bash blocks in .claude/commands and skills Markdown"
 add_check "stdlib-first" "\"$PROJECT_ROOT/scripts/conventions/validate-stdlib-first.sh\"" "lint,conventions" "Enforce structured parsing and shared-helper conventions"
 add_check "mkdocs-nav" "\"$PROJECT_ROOT/scripts/validate_mkdocs_nav.sh\"" "docs" "Validate MkDocs navigation"
 add_check "claude-plugin" "\"$PROJECT_ROOT/scripts/claude/validate_plugin.sh\"" "config" "Validate Claude plugin structure"

@@ -19,6 +19,7 @@ import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.Tool
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceAction
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceEffect
@@ -119,14 +120,15 @@ fun AutoMobileDesktopApp(
 }
 
 /**
- * Real docked-facet content for a pane. Only Logs is wired so far (per-device telemetry, via the
- * testable [LogsFacet] in desktop-core); every other tool falls back to the shared placeholder
- * until its dashboard gains per-device targeting.
+ * Real docked-facet content for a pane. Logs (per-device telemetry) and Storage (per-device,
+ * auto-resolved app) are wired via their testable facets in desktop-core; every other tool falls
+ * back to the shared placeholder until its dashboard gains per-device targeting.
  */
 @Composable
 private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
   when (tool) {
     Tool.Logs -> LogsFacet(column)
+    Tool.Storage -> StorageFacet(column)
     else -> WorkspaceFacetPlaceholder(tool)
   }
 }

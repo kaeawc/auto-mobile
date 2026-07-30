@@ -123,8 +123,8 @@ describe("InstallApp", () => {
     fakeHost.setCommandResponse("aapt2", createExecResult("package: name='com.example.app' versionCode='1'"));
 
     fakeAdb.setUsers([
-      { userId: 0, name: "Owner", flags: 13, running: true },
-      { userId: 10, name: "Work", flags: 30, running: true }
+      { userId: 0, name: "Owner", flags: 0x13, running: true },
+      { userId: 10, name: "Work", flags: 0x30, running: true }
     ]);
     fakeAdb.setCommandResponse("shell pm list packages --user 10 -f com.example.app", createExecResult("0"));
     fakeAdb.setCommandResponse(`install --user 10 -r "${apkPath}"`, createExecResult("Success"));

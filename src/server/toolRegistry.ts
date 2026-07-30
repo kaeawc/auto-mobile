@@ -99,6 +99,13 @@ interface InternalToolInvocationContext {
 // expected in plans (so getToolForPlan does not warn about it).
 const PLAN_ONLY_GATE_REASON = "plan-only tool";
 
+function preservesPlanCapabilityAuthorization(
+  toolName: string,
+  parentAuthorized: boolean | undefined,
+): boolean {
+  return parentAuthorized === true || toolName === "executePlan";
+}
+
 interface ToolRegistrationOptions {
   supportsProgress?: boolean;
   debugOnly?: boolean;
@@ -987,7 +994,10 @@ export class ToolRegistryClass {
             // The outer executePlan tool has already passed its test-authoring
             // capability gate, so its declarative steps are authorized by that
             // admission. Other tool handlers retain normal per-tool policy.
-            planCapabilitiesAuthorized: name === "executePlan",
+            planCapabilitiesAuthorized: preservesPlanCapabilityAuthorization(
+              name,
+              capabilityContext?.planCapabilitiesAuthorized,
+            ),
           },
           async () => {
             try {

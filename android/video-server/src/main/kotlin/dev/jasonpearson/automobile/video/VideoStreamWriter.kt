@@ -59,18 +59,30 @@ class VideoStreamWriter(
   )
 
   private var serverSocket: LocalServerSocket? = null
-  private var clientSocket: LocalSocket? = null
+  // @Volatile: stop() closes this without the lock to unblock a writer thread wedged in a
+  // blocking socket write (the writer holds `lock` for the duration of that write).
+  @Volatile private var clientSocket: LocalSocket? = null
   private var outputStream: OutputStream? = null
   private var commandHandler: ((Int) -> Unit)? = null
   private val lock = Any()
   private val packetCache = VideoPacketCache()
   private val reconnectWindow = ReconnectWindow(nowMs, CLIENT_RECONNECT_WINDOW_MS)
 
+  // Decouple encode from transport (#4749): the encode loop offers to a drop-oldest single-slot
+  // handoff and returns immediately; this dedicated thread drains it into the socket, so a stalled
+  // reader can never back-pressure MediaCodec's Surface input.
+  private val handoff = FrameHandoff()
+  // @Volatile: assigned on the thread that calls start(), read by stop() on the shutdown hook.
+  @Volatile private var writerThread: Thread? = null
+
   @Volatile private var stopped = false
 
   companion object {
     /** Keep capture warm long enough for ADB/daemon local-socket recovery. */
     const val CLIENT_RECONNECT_WINDOW_MS = 5_000L
+
+    /** Upper bound on how long [stop] waits for the transport writer thread to unwind. */
+    const val WRITER_JOIN_TIMEOUT_MS = 200L
 
     /** "h264" as big-endian int: 0x68323634 */
     const val CODEC_ID_H264 = VideoStreamProtocol.CODEC_ID_H264
@@ -101,12 +113,29 @@ class VideoStreamWriter(
     serverSocket = LocalServerSocket(socketName)
     synchronized(lock) { reconnectWindow.start() }
     println("Waiting for client connection on localabstract:$socketName")
+    writerThread =
+      Thread({ drainToTransport() }, "video-transport-writer").apply {
+        isDaemon = true
+        start()
+      }
     Thread(
         { acceptClients(onClientConnected) },
         "video-client-acceptor",
       )
       .apply { isDaemon = true }
       .start()
+  }
+
+  /**
+   * The single consumer of [handoff]: blocks for the next encoded packet and writes it to the
+   * current client. Isolating the blocking transport write on this thread is what keeps a slow or
+   * stalled reader from back-pressuring the encode loop.
+   */
+  private fun drainToTransport() {
+    while (!stopped) {
+      val frame = handoff.take() ?: break
+      synchronized(lock) { writePacketDataLocked(TRACK_ID_VIDEO, frame.ptsAndFlags, frame.data) }
+    }
   }
 
   /**
@@ -187,8 +216,14 @@ class VideoStreamWriter(
   }
 
   /**
-   * Write one encoded video packet. It is cached before writing, allowing a later client to decode
-   * immediately even if this client fails mid-write.
+   * Hand one encoded video packet off to the transport writer. Copies the buffer, caches decoder
+   * state, then offers to the drop-oldest [handoff] — all non-blocking, so the caller may release
+   * the MediaCodec output buffer immediately without waiting on the socket.
+   *
+   * Caching happens here on the producer side, before the handoff can drop anything, so a dropped
+   * live packet never removes SPS/PPS or the latest IDR from the reconnect replay cache.
+   *
+   * @return false once the writer has been [stop]ped, signalling the encode loop to exit.
    */
   fun writePacket(buffer: ByteBuffer, bufferInfo: MediaCodec.BufferInfo): Boolean {
     val data = ByteArray(bufferInfo.size)
@@ -200,10 +235,8 @@ class VideoStreamWriter(
         (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0,
         (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0,
       )
-    synchronized(lock) {
-      packetCache.remember(CachedVideoPacket(ptsAndFlags, data))
-      return writePacketDataLocked(TRACK_ID_VIDEO, ptsAndFlags, data)
-    }
+    synchronized(lock) { packetCache.remember(CachedVideoPacket(ptsAndFlags, data)) }
+    return handoff.offer(EncodedVideoFrame(ptsAndFlags, data))
   }
 
   fun writeAudioPacket(data: ByteArray, ptsUs: Long): Boolean =
@@ -278,6 +311,22 @@ class VideoStreamWriter(
   /** Stop the stream writer and close all sockets. */
   fun stop() {
     stopped = true
+    handoff.close()
+    // Unblock the writer thread if it is wedged in a blocking socket write (it holds `lock` for the
+    // duration, so we must NOT take `lock` here). Closing the socket makes that write throw.
+    try {
+      clientSocket?.close()
+    } catch (_: IOException) {}
+    writerThread?.let {
+      try {
+        // Bounded: the socket close above unblocks a wedged write promptly; the join only lets the
+        // writer thread unwind cleanly and must never hang shutdown.
+        it.join(WRITER_JOIN_TIMEOUT_MS)
+      } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+      }
+    }
+    writerThread = null
     synchronized(lock) {
       closeClientLocked()
     }

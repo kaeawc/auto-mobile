@@ -1,59 +1,47 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { defaultTimer } from "../../src/utils/SystemTimer";
 
 describe("CriticalSectionCoordinator", () => {
   let coordinator: CriticalSectionCoordinator;
   let fakeTimer: FakeTimer;
-  let originalSetTimeout: typeof global.setTimeout;
-  let originalClearTimeout: typeof global.clearTimeout;
-  let originalDateNow: typeof Date.now;
 
   beforeEach(() => {
+    // Inject a FakeTimer via the createForTesting seam so barrier timeouts,
+    // cleanup delays, and now() are deterministic — no global setTimeout /
+    // clearTimeout / Date.now patching (#4183 item 14).
     fakeTimer = new FakeTimer();
-
-    originalSetTimeout = global.setTimeout;
-    originalClearTimeout = global.clearTimeout;
-    originalDateNow = Date.now;
-
-    global.setTimeout = ((callback: (...args: any[]) => void, ms?: number, ...args: any[]) => {
-      return fakeTimer.setTimeout(() => callback(...args), ms ?? 0);
-    }) as typeof global.setTimeout;
-    global.clearTimeout = ((handle: NodeJS.Timeout) => {
-      fakeTimer.clearTimeout(handle);
-    }) as typeof global.clearTimeout;
-    Date.now = () => fakeTimer.now();
-
-    coordinator = CriticalSectionCoordinator.getInstance();
-    coordinator.reset();
+    coordinator = CriticalSectionCoordinator.createForTesting(fakeTimer);
   });
 
   afterEach(() => {
-    Date.now = originalDateNow;
-    global.setTimeout = originalSetTimeout;
-    global.clearTimeout = originalClearTimeout;
+    coordinator.reset();
     fakeTimer.reset();
   });
 
+  // Coordination tests never need to control time explicitly: the barrier lifts
+  // synchronously when the last device arrives, and work/staggering sleeps just
+  // need to resolve so concurrent promises make progress. Auto-advance resolves
+  // those sleeps asynchronously while preserving deadline order, so a
+  // still-held mutex's blocked work does not deadlock the test.
   const wait = async (ms: number): Promise<void> => {
-    const promise = defaultTimer.sleep(ms);
-    fakeTimer.advanceTime(ms);
-    await promise;
+    await fakeTimer.sleep(ms);
   };
 
   test("allows single device to immediately enter critical section", async () => {
+    fakeTimer.enableAutoAdvance();
     coordinator.registerExpectedDevices("lock-1", 1);
 
-    const start = Date.now();
+    const start = fakeTimer.now();
     const release = await coordinator.enterCriticalSection("lock-1", "device-1");
-    const elapsed = Date.now() - start;
+    const elapsed = fakeTimer.now() - start;
 
     expect(elapsed).toBeLessThan(100); // Should not wait
     release();
   });
 
   test("waits for all devices to arrive at barrier before releasing any", async () => {
+    fakeTimer.enableAutoAdvance();
     const lockName = "lock-2";
     const deviceCount = 3;
     coordinator.registerExpectedDevices(lockName, deviceCount);
@@ -66,13 +54,13 @@ describe("CriticalSectionCoordinator", () => {
       async (deviceId, index) => {
         // Stagger arrivals slightly
         await wait(index * 10);
-        arrivals.push({ deviceId, arrivedAt: Date.now() });
+        arrivals.push({ deviceId, arrivedAt: fakeTimer.now() });
 
         const release = await coordinator.enterCriticalSection(
           lockName,
           deviceId
         );
-        releases.push({ deviceId, releasedAt: Date.now() });
+        releases.push({ deviceId, releasedAt: fakeTimer.now() });
 
         release();
       }
@@ -93,6 +81,7 @@ describe("CriticalSectionCoordinator", () => {
   });
 
   test("executes steps serially within critical section", async () => {
+    fakeTimer.enableAutoAdvance();
     const lockName = "lock-3";
     const deviceCount = 2;
     coordinator.registerExpectedDevices(lockName, deviceCount);
@@ -103,9 +92,9 @@ describe("CriticalSectionCoordinator", () => {
     const deviceWork = async (deviceId: string) => {
       const release = await coordinator.enterCriticalSection(lockName, deviceId);
 
-      executionLog.push({ deviceId, event: "start", time: Date.now() });
+      executionLog.push({ deviceId, event: "start", time: fakeTimer.now() });
       await wait(20);
-      executionLog.push({ deviceId, event: "end", time: Date.now() });
+      executionLog.push({ deviceId, event: "end", time: fakeTimer.now() });
 
       release();
     };
@@ -202,6 +191,7 @@ describe("CriticalSectionCoordinator", () => {
   });
 
   test("schedules cleanup after devices finish", async () => {
+    fakeTimer.enableAutoAdvance();
     const lockName = "lock-8";
     coordinator.registerExpectedDevices(lockName, 2);
 
@@ -229,6 +219,7 @@ describe("CriticalSectionCoordinator", () => {
   });
 
   test("supports multiple independent locks concurrently", async () => {
+    fakeTimer.enableAutoAdvance();
     coordinator.registerExpectedDevices("lock-A", 2);
     coordinator.registerExpectedDevices("lock-B", 2);
 
@@ -285,7 +276,8 @@ describe("CriticalSectionCoordinator", () => {
     const lockName = "lock-timeout-clear";
     coordinator.registerExpectedDevices(lockName, 2);
 
-    // Both devices enter concurrently and release immediately
+    // Both devices enter concurrently and release immediately. The barrier lifts
+    // synchronously when the second device arrives, so no time advance is needed.
     await Promise.all([
       (async () => {
         const release = await coordinator.enterCriticalSection(lockName, "device-1", 30000);
@@ -306,6 +298,7 @@ describe("CriticalSectionCoordinator", () => {
   });
 
   test("allows lock reuse after all devices complete", async () => {
+    fakeTimer.enableAutoAdvance();
     const lockName = "lock-reuse";
 
     // First round
@@ -339,6 +332,7 @@ describe("CriticalSectionCoordinator", () => {
   });
 
   test("handles reregistration of same lock after cleanup", async () => {
+    fakeTimer.enableAutoAdvance();
     const lockName = "lock-10";
 
     // First round

@@ -42,12 +42,16 @@ import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 private val StatusGreen = Color(0xFF40C057)
 private val StatusYellow = Color(0xFFF0C000)
 private val StatusRed = Color(0xFFFA5252)
 private val Accent = Color(0xFF4DABF7)
+
+// How often the open health sheet re-scans for the daemon process (read-only).
+private const val HEALTH_SHEET_REFRESH_MS = 5_000L
 
 /**
  * Root of the device-tab workspace. Device identity lives in each column header (no top tab bar); a
@@ -159,7 +163,10 @@ private fun TopBar(
       Text(
         statusDetail,
         style = MaterialTheme.typography.labelMedium,
-        color = status.color(),
+        // Legibility over the top bar's surfaceVariant: the status color lives on the dot; the
+        // detail text uses onSurfaceVariant so it stays readable in both light and dark themes
+        // (status yellow #F0C000 on the light surfaceVariant is ~1.5:1, unreadable).
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier =
@@ -227,15 +234,17 @@ private fun HealthSheetOverlay(onDismiss: () -> Unit, content: @Composable () ->
         )
       }
       Spacer(Modifier.height(8.dp))
-      content()
+      // Constrain the body to the height below the title row so a fillMaxSize() body can't overflow
+      // the header out of the panel.
+      Box(Modifier.weight(1f).fillMaxWidth()) { content() }
     }
   }
 }
 
 /**
- * Default health-sheet body: the live [DiagnosticsDashboard], fed the MCP process detected by
- * [McpProcessesPanel]. Tests inject their own `healthSheetContent`, so this real, system-touching
- * path is exercised only in production / manual runs.
+ * Default health-sheet body: the live [DiagnosticsDashboard], fed the Unix-socket daemon found by a
+ * read-only [RealMcpProcessDetector] scan. Tests inject their own `healthSheetContent`, so this
+ * real, system-touching path is exercised only in production / manual runs.
  */
 @Composable
 private fun DefaultHealthSheetBody() {
@@ -244,12 +253,16 @@ private fun DefaultHealthSheetBody() {
   // effect can call setActiveDevice and DesktopDaemonLifecycle.ensureVersionMatchedDaemon (which
   // may
   // restart the daemon), and merely opening a diagnostic overlay must never mutate daemon or device
-  // state. RealMcpProcessDetector.detectProcesses() just inspects the process/socket table.
+  // state. RealMcpProcessDetector.detectProcesses() just inspects the process/socket table. Re-scan
+  // on an interval so the sheet reflects a daemon started/stopped/restarted while it stays open.
   LaunchedEffect(Unit) {
-    val detected = withContext(Dispatchers.IO) { RealMcpProcessDetector().detectProcesses() }
-    daemonProcess =
-      detected.firstOrNull { it.connectionType == McpConnectionType.UnixSocket }
-        ?: detected.firstOrNull()
+    while (true) {
+      val detected = withContext(Dispatchers.IO) { RealMcpProcessDetector().detectProcesses() }
+      // Only a Unix-socket daemon is the desktop's real connection; a detected STDIO process is not
+      // "connected", so surface null rather than mislabel it as connected.
+      daemonProcess = detected.firstOrNull { it.connectionType == McpConnectionType.UnixSocket }
+      delay(HEALTH_SHEET_REFRESH_MS)
+    }
   }
   DiagnosticsDashboard(
     connectedMcpProcess = daemonProcess,

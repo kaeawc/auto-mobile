@@ -59,7 +59,7 @@ test-androidx-junit = "1.3.0"
 test-androidx-espresso = "3.7.0"
 
 # Navigation versions
-navigation3 = "1.1.4"              # Used in playground app
+navigation3 = "1.1.5"              # Used in playground app
 circuit = "0.35.1"
 
 # Kotlin ecosystem

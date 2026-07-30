@@ -228,27 +228,56 @@ describe("MCP Resources Read", () => {
     expect(content.blob!.length).toBeGreaterThan(0);
   });
 
-  test("reading non-existent resource should throw error", async function() {
+  const readResourceResponseSchema = z.object({
+    contents: z.array(z.object({
+      uri: z.string(),
+      mimeType: z.string().optional(),
+      text: z.string().optional(),
+      blob: z.string().optional()
+    }))
+  });
+
+  // Capture the message of the error a resources/read request rejects with, so
+  // the recovery-guidance strings can be pinned by value rather than presence
+  // (issue #4659; #4183 item 10 + R5).
+  const readResourceError = async (uri: string): Promise<string> => {
     const { client } = fixture.getContext();
-
-    // Send resources/read request for non-existent resource
-    const readResourceResponseSchema = z.object({
-      contents: z.array(z.object({
-        uri: z.string(),
-        mimeType: z.string().optional(),
-        text: z.string().optional(),
-        blob: z.string().optional()
-      }))
-    });
-
-    // Expect this to throw an error
-    await expect(async () => {
+    let caught: unknown;
+    try {
       await client.request({
         method: "resources/read",
-        params: {
-          uri: "automobile:observation/invalid"
-        }
+        params: { uri }
       }, readResourceResponseSchema);
-    }).toThrow();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    return (caught as Error).message;
+  };
+
+  test("reading non-existent resource throws not-found guidance pinned by value", async function() {
+    // The registry's "Resource not found" recovery guidance (R5) is the
+    // agent-facing hint for a mistyped resource path; assert every pattern line
+    // by value so a src rewrite that drops one is caught.
+    const message = await readResourceError("automobile:observation/invalid");
+
+    expect(message).toContain("Resource not found: automobile:observation/invalid");
+    expect(message).toContain("Available resource patterns:");
+    expect(message).toContain("automobile:devices/booted - List all booted devices");
+    expect(message).toContain("automobile:devices/booted/{platform} - List devices by platform (android|ios)");
+    expect(message).toContain("automobile:devices/{deviceId}/apps - List apps for a device");
+    expect(message).toContain("automobile:apps?deviceId={deviceId} - Query apps with filters");
+    expect(message).toContain("automobile:observation/latest - Latest screen observation");
+    expect(message).toContain("Use the listApps tool for detailed guidance on listing apps.");
+  });
+
+  test("reading a resource with an unknown URI scheme throws scheme-correction guidance", async function() {
+    // A mistyped scheme (here 'automoble') is rewritten to 'automobile:' in the
+    // recovery hint; pin the exact wording and the corrected suggestion.
+    const message = await readResourceError("automoble:devices/booted");
+
+    expect(message).toContain("Unknown URI scheme 'automoble://'.");
+    expect(message).toContain("AutoMobile resources use the 'automobile:' prefix.");
+    expect(message).toContain("Try: automobile:devices/booted");
   });
 });

@@ -16,8 +16,6 @@ if [[ $# -eq 0 ]]; then
   echo "  AXeAutomation"
   echo "  SimctlIntegration"
   echo "  XCTestRunner"
-  echo "  XcodeCompanion"
-  echo "  XcodeExtension"
   exit 1
 fi
 

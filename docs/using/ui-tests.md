@@ -4,7 +4,7 @@ AutoMobile will be able to record and playback sessions via IDE integrations.
 
 ## Recording a Test
 
-See the design docs for [Android](../design-docs/plat/android/ide-plugin/test-recording.md) & [iOS](../design-docs/plat/ios/ide-plugin/test-recording.md). For the moment this is still WIP.
+See the design docs for [Android](../design-docs/plat/android/ide-plugin/test-recording.md). For the moment this is still WIP.
 
 ## Example Test
 

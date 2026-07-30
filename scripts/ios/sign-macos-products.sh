@@ -2,6 +2,13 @@
 #
 # Build and sign macOS Swift package products with Developer ID.
 #
+# This is the generic signing seam for macOS Swift-package apps. Register each
+# signable product with a `sign_package` call below. There are no registered
+# products at the moment (XcodeCompanion / XcodeExtension were removed), but
+# AXBridge and any future macOS app will need Developer ID signing and should be
+# added here. The screen-capture helper is signed by its own release pipeline in
+# build-screen-capture-helper-release.sh, not here.
+#
 
 set -euo pipefail
 
@@ -75,8 +82,9 @@ sign_package() {
   fi
 }
 
-sign_package "XcodeCompanion" "AutoMobileCompanion" "true"
-sign_package "XcodeExtension" "" "false"
+# Register signable macOS products here, e.g.:
+#   sign_package "AXBridge" "AXBridgeApp" "true"
+# No products are registered right now (see the header comment).
 
 for artifact in ${sign_paths[@]+"${sign_paths[@]}"}; do
   echo "Signing ${artifact}"

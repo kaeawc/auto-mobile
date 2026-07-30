@@ -112,4 +112,3 @@ Feature implementation status is indicated throughout these docs using chips. Se
 | [CtrlProxy iOS](plat/ios/ctrl-proxy-ios.md) | WebSocket automation server | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 | [XCTestRunner](plat/ios/xctestrunner/index.md) | Test execution framework | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 | [AutoMobile SDK](plat/ios/auto-mobile-sdk.md) | Event tracking, crash reporting, session management, and diagnostics SDK | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| [Xcode Integration](plat/ios/ide-plugin/overview.md) | Companion app + editor extension | <kbd>⚠️ Partial</kbd> |

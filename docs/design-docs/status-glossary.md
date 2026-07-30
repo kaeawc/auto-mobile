@@ -37,8 +37,6 @@ The following items are documented as designs or proposals but have **no corresp
 - **Standalone `await`/`assert` YAML steps** — `executePlan` steps named `await` and `assert` (as described in the design doc) are not implemented. `waitFor` params on individual tools and `expectations` in step params are the current approach. See [executeplan-assertions.md](plat/android/executeplan-assertions.md).
 - **TalkBack tool adaptations (Phases 2–4)** — ACTION_CLICK routing, two-finger scroll, focus tracking for TalkBack mode are not yet implemented. See [talkback-voiceover.md](mcp/a11y/talkback-voiceover.md).
 - **iOS VoiceOver adaptation** — All phases are design-only. See [talkback-voiceover.md](mcp/a11y/talkback-voiceover.md).
-- **iOS XcodeExtension feature flag UI** — Not implemented; stubs only. See [ios/ide-plugin/feature-flags.md](plat/ios/ide-plugin/feature-flags.md).
-- **iOS XcodeCompanion test recording** — Not implemented; scaffold only. See [ios/ide-plugin/test-recording.md](plat/ios/ide-plugin/test-recording.md).
 
 #### iOS Platform
 
@@ -63,8 +61,6 @@ The following items are documented as designs or proposals but have **no corresp
 - **Vision fallback (Claude)** — Works for `tapOn` on Android only; disabled by default and not exposed via MCP. See [vision-fallback.md](mcp/observe/vision-fallback.md).
 - **TalkBack enablement (ADB)** — ADB commands are validated and documented; the MCP tool wrapper is not yet built.
 - **Android live screen streaming (IDE mirroring)** — The Android `video-server` JAR (H.264, VirtualDisplay) is built; the full end-to-end IDE mirroring pipeline is in progress. The `videoRecording` MCP tool (record-to-file) is fully implemented. See [Android screen streaming](plat/android/screen-streaming.md).
-- **iOS XcodeCompanion** — Scaffolded macOS app with all views and navigation defined; feature completeness is ongoing. See [iOS IDE plugin](plat/ios/ide-plugin/overview.md).
-- **iOS XcodeExtension** — Scaffold with 5 registered commands; implementations are minimal stubs.
 - **`highlight` tool** — Fully implemented on Android. On iOS it requires the AutoMobileSDK in-app bridge embedded in the target app: iOS cannot draw an overlay into another app from the test runner, so highlighting a foreground app without the SDK returns an actionable error rather than silently no-op'ing.
 - **`rawViewHierarchy` (control-proxy source)** — Android only. iOS returns XCUITest JSON.
 - **Work profile `userId` override** — Auto-detection works; manual `userId` parameter is not supported in MCP tool schemas.
@@ -75,8 +71,6 @@ The following items are documented as designs or proposals but have **no corresp
 
 > All TypeScript MCP server features have unit tests. The items below are platform-level features with limited or no automated coverage.
 
-- **iOS XcodeCompanion** — Only scaffold/smoke tests exist.
-- **iOS XcodeExtension** — Only scaffold/smoke tests exist.
 - **Android IDE plugin** — UI and Compose Desktop views are lightly tested; daemon communication has more coverage.
 - **Biometric enrollment flow** — Enrollment steps require real emulator; only capability probing is covered by unit tests.
 - **Live screen streaming (IDE mirroring)** — End-to-end streaming is not covered by automated tests.

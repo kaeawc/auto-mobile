@@ -10,8 +10,8 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IOS_DIR="${PROJECT_ROOT}/ios"
 OUTPUT_FILE="${PROJECT_ROOT}/coverage/swift-coverage-badge.json"
 
-# Core library packages only — excludes scaffold apps (XcodeCompanion, XcodeExtension)
-# and iOS-only packages (XCTestRunner) that require a simulator.
+# Core library packages only — excludes iOS-only packages (XCTestRunner) that
+# require a simulator.
 TESTABLE_PACKAGES=(
   "control-proxy"
 )

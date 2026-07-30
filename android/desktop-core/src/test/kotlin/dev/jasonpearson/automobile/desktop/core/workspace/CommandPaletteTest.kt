@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runComposeUiTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -25,6 +26,16 @@ class CommandPaletteTest {
 
   private fun column(id: String, name: String, activeTool: Tool? = null) =
     DeviceColumn(deviceId = id, name = name, platform = Platform.Android, activeTool = activeTool)
+
+  @Test
+  fun `command-palette shortcut matches K with meta or ctrl only`() {
+    assertTrue(isCommandPaletteShortcut(Key.K, isMetaPressed = true, isCtrlPressed = false))
+    assertTrue(isCommandPaletteShortcut(Key.K, isMetaPressed = false, isCtrlPressed = true))
+    assertTrue(isCommandPaletteShortcut(Key.K, isMetaPressed = true, isCtrlPressed = true))
+    assertFalse(isCommandPaletteShortcut(Key.K, isMetaPressed = false, isCtrlPressed = false))
+    assertFalse(isCommandPaletteShortcut(Key.J, isMetaPressed = true, isCtrlPressed = false))
+    assertFalse(isCommandPaletteShortcut(Key.P, isMetaPressed = false, isCtrlPressed = true))
+  }
 
   @Test
   fun `filter matches label substring case-insensitively and blank returns all`() {

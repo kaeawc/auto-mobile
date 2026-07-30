@@ -42,6 +42,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAct
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -67,6 +68,10 @@ private fun rememberDaemonConnectionState(client: AutoMobileClient): ConnectionS
         try {
           withContext(Dispatchers.IO) { client.getDaemonStatus() }
           ConnectionState.Connected()
+        } catch (cancellation: CancellationException) {
+          // Disposal cancels this effect; propagate it instead of logging a false daemon failure
+          // and flipping the dot to disconnected during teardown.
+          throw cancellation
         } catch (error: Exception) {
           // A failed status call means the daemon socket is unreachable; surface it as
           // disconnected so the status dot goes red. Logged so there is a trace behind the dot.

@@ -1,12 +1,16 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runComposeUiTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -89,5 +93,65 @@ class CommandPaletteTest {
     onNodeWithText("Close Pixel").performClick()
     assertEquals("b", ran)
     assertTrue(dismissed)
+  }
+
+  @Test
+  fun `arrow down then enter runs the second command and dismisses`() = runComposeUiTest {
+    var ran: String? = null
+    var dismissed = false
+    val commands =
+      listOf(
+        PaletteCommand("a", "Open Devices") { ran = "a" },
+        PaletteCommand("b", "Close Pixel") { ran = "b" },
+      )
+    setContent { MaterialTheme { CommandPalette(commands, onDismiss = { dismissed = true }) } }
+    onNodeWithContentDescription("Command search").assertIsFocused()
+    onRoot().performKeyInput {
+      pressKey(Key.DirectionDown)
+      pressKey(Key.Enter)
+    }
+    assertEquals("b", ran)
+    assertTrue(dismissed)
+  }
+
+  @Test
+  fun `arrow up from the top wraps to the last command`() = runComposeUiTest {
+    var ran: String? = null
+    val commands =
+      listOf(
+        PaletteCommand("a", "Open Devices") { ran = "a" },
+        PaletteCommand("b", "Close Pixel") { ran = "b" },
+        PaletteCommand("c", "Open Logs") { ran = "c" },
+      )
+    setContent { MaterialTheme { CommandPalette(commands, onDismiss = {}) } }
+    onNodeWithContentDescription("Command search").assertIsFocused()
+    onRoot().performKeyInput {
+      pressKey(Key.DirectionUp)
+      pressKey(Key.Enter)
+    }
+    assertEquals("c", ran)
+  }
+
+  @Test
+  fun `escape closes the palette`() = runComposeUiTest {
+    var dismissed = false
+    val commands = listOf(PaletteCommand("a", "Open Devices") {})
+    setContent { MaterialTheme { CommandPalette(commands, onDismiss = { dismissed = true }) } }
+    onNodeWithContentDescription("Command search").assertIsFocused()
+    onRoot().performKeyInput { pressKey(Key.Escape) }
+    assertTrue(dismissed)
+  }
+
+  @Test
+  fun `identically named devices get distinct labels`() {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(column("sim-A", "iPhone 15"), column("sim-B", "iPhone 15")),
+        focusedDeviceId = "sim-A",
+      )
+    val focusLabels =
+      buildWorkspaceCommands(state, {}, {}).filter { it.id.startsWith("focus-") }.map { it.label }
+    assertEquals(2, focusLabels.size)
+    assertEquals(focusLabels.size, focusLabels.toSet().size)
   }
 }

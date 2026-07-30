@@ -13,7 +13,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -29,6 +30,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -43,6 +49,29 @@ internal fun filterCommands(commands: List<PaletteCommand>, query: String): List
 }
 
 /**
+ * Human-readable display names for [columns], keyed by device id. When two columns share a display
+ * name (common for iOS simulators, which surface identical labels like "iPhone 15"), the colliding
+ * ones get a short device-id suffix so palette labels stay distinguishable. Unique names are left
+ * untouched. Command ids are already device-id-keyed, so this only affects the visible label. Pure.
+ */
+internal fun disambiguatedDeviceNames(columns: List<DeviceColumn>): Map<String, String> {
+  val counts = columns.groupingBy { it.name }.eachCount()
+  return columns.associate { column ->
+    val display =
+      if ((counts[column.name] ?: 0) > 1) "${column.name} (${shortDeviceId(column.deviceId)})"
+      else column.name
+    column.deviceId to display
+  }
+}
+
+/** A short, human-scannable slice of a device id for label disambiguation. */
+private fun shortDeviceId(deviceId: String): String =
+  if (deviceId.length <= SHORT_DEVICE_ID_LENGTH) deviceId
+  else deviceId.takeLast(SHORT_DEVICE_ID_LENGTH)
+
+private const val SHORT_DEVICE_ID_LENGTH = 6
+
+/**
  * The commands available for the current workspace [state]: open the picker, focus/close each
  * observed device, open any tool on the focused device, and (with >1 device) compare the focused
  * device's active tool. Each command dispatches an existing workspace action, so the palette needs
@@ -55,23 +84,26 @@ fun buildWorkspaceCommands(
 ): List<PaletteCommand> = buildList {
   add(PaletteCommand("open-devices", "Open Devices", onOpenPicker))
   val content = state as? WorkspaceUiState.Content ?: return@buildList
+  val displayNames = disambiguatedDeviceNames(content.columns)
   content.columns.forEach { column ->
+    val name = displayNames[column.deviceId] ?: column.name
     add(
-      PaletteCommand("focus-${column.deviceId}", "Focus ${column.name}") {
+      PaletteCommand("focus-${column.deviceId}", "Focus $name") {
         onAction(WorkspaceAction.FocusDevice(column.deviceId))
       }
     )
     add(
-      PaletteCommand("close-${column.deviceId}", "Close ${column.name}") {
+      PaletteCommand("close-${column.deviceId}", "Close $name") {
         onAction(WorkspaceAction.CloseDevice(column.deviceId))
       }
     )
   }
   val focused = content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
   if (focused != null) {
+    val focusedName = displayNames[focused.deviceId] ?: focused.name
     Tool.entries.forEach { tool ->
       add(
-        PaletteCommand("tool-${tool.name}", "Open ${tool.label} on ${focused.name}") {
+        PaletteCommand("tool-${tool.name}", "Open ${tool.label} on $focusedName") {
           onAction(WorkspaceAction.SelectTool(focused.deviceId, tool))
         }
       )
@@ -91,6 +123,11 @@ fun buildWorkspaceCommands(
 /**
  * Quick-jump command palette (⌘K): a search field over a filtered command list, on a dimmed shell.
  * Selecting a command runs it and dismisses; clicking the scrim dismisses.
+ *
+ * Keyboard: Up/Down move a highlighted selection through the filtered results (wrapping at the
+ * ends), Enter runs the highlighted command, and Esc dismisses. The handler is a *preview* handler
+ * on the palette root so it sees keys before the focused search field, letting the arrows navigate
+ * results rather than move the text cursor.
  */
 @Composable
 fun CommandPalette(
@@ -100,14 +137,51 @@ fun CommandPalette(
 ) {
   var query by remember { mutableStateOf("") }
   val results = filterCommands(commands, query)
+  var selectedIndex by remember { mutableStateOf(0) }
+  // A narrowing filter can leave the selection past the end of the shorter list; clamp it back into
+  // range (or to 0 when empty) so Enter and the highlight never read out of bounds.
+  val safeIndex = selectedIndex.coerceIn(0, (results.size - 1).coerceAtLeast(0))
+  // Reset the highlight to the top whenever the filter changes the result set.
+  LaunchedEffect(query) { selectedIndex = 0 }
   // Focus the search field as soon as the palette opens, so the user can type immediately.
   val searchFocus = remember { FocusRequester() }
   LaunchedEffect(Unit) { searchFocus.requestFocus() }
+  val listState = rememberLazyListState()
+  // Keep the highlighted row visible as the selection moves.
+  LaunchedEffect(safeIndex, results.size) {
+    if (results.isNotEmpty()) listState.animateScrollToItem(safeIndex)
+  }
   Box(
     modifier =
       modifier
         .fillMaxSize()
         .background(Color.Black.copy(alpha = 0.5f))
+        .onPreviewKeyEvent { event ->
+          if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+          when (event.key) {
+            Key.DirectionDown -> {
+              if (results.isNotEmpty()) selectedIndex = (safeIndex + 1) % results.size
+              true
+            }
+            Key.DirectionUp -> {
+              if (results.isNotEmpty())
+                selectedIndex = (safeIndex - 1 + results.size) % results.size
+              true
+            }
+            Key.Enter -> {
+              results.getOrNull(safeIndex)?.let {
+                it.run()
+                onDismiss()
+              }
+              true
+            }
+            Key.Escape -> {
+              onDismiss()
+              true
+            }
+            else -> false
+          }
+        }
         .clickable(
           interactionSource = remember { MutableInteractionSource() },
           indication = null,
@@ -140,12 +214,15 @@ fun CommandPalette(
           },
       )
       Spacer(Modifier.height(8.dp))
-      LazyColumn(Modifier.heightIn(max = 360.dp)) {
-        items(results, key = { it.id }) { command ->
+      LazyColumn(state = listState, modifier = Modifier.heightIn(max = 360.dp)) {
+        itemsIndexed(results, key = { _, command -> command.id }) { index, command ->
+          val highlight =
+            if (index == safeIndex) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
           Text(
             command.label,
             modifier =
               Modifier.fillMaxWidth()
+                .background(highlight)
                 .clickable {
                   command.run()
                   onDismiss()

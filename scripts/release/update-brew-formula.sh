@@ -3,11 +3,13 @@
 # kaeawc/homebrew-tap repository.
 #
 # Required env:
-#   GH_TOKEN  PAT with Contents:Write on kaeawc/homebrew-tap
 #   TAG       Release tag (e.g. v0.1.0)
 #   REPO      Source repo, owner/name (e.g. kaeawc/auto-mobile)
 #
 # Optional env:
+#   GH_TOKEN       PAT with Contents:Write on kaeawc/homebrew-tap. When unset,
+#                  the publish is skipped cleanly (exit 0) so this optional
+#                  channel does not block the rest of the release.
 #   RENDER_ONLY=1  Write the rendered formula to ./auto-mobile.rb in the
 #                  current directory and exit without git operations. Used
 #                  by tests; in CI the unset default does the full publish.
@@ -19,6 +21,18 @@ set -euo pipefail
 
 : "${TAG:?TAG is required}"
 : "${REPO:?REPO is required}"
+
+# Homebrew publishing is an optional release channel. The tap token
+# (HOMEBREW_TAP_TOKEN -> GH_TOKEN) is not always configured, in which case there
+# is nowhere to push the formula. Skip cleanly rather than hard-failing, so a
+# missing optional channel does not block the rest of the release (Maven
+# Central, Docker, and the GitHub Release all run after this step). RENDER_ONLY
+# (tests) never pushes, so it does not need the token. When the token IS set,
+# any clone/push failure below still fails the step under `set -e`.
+if [[ "${RENDER_ONLY:-0}" != "1" && -z "${GH_TOKEN:-}" ]]; then
+  echo "GH_TOKEN (HOMEBREW_TAP_TOKEN) is not set; skipping Homebrew formula publish." >&2
+  exit 0
+fi
 
 VERSION="${TAG#v}"
 PKG="@kaeawc/auto-mobile"
@@ -83,8 +97,8 @@ if [[ "${RENDER_ONLY:-0}" == "1" ]]; then
   exit 0
 fi
 
-: "${GH_TOKEN:?GH_TOKEN is required}"
-
+# GH_TOKEN presence is enforced early (see the skip guard near the top); a
+# non-RENDER_ONLY run reaches here only when the token is set.
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$tmp" "$WORKDIR"' EXIT
 cd "$WORKDIR"

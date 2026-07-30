@@ -31,6 +31,16 @@ teardown() {
   [[ "$output" == *"REPO"* ]]
 }
 
+@test "skips cleanly when GH_TOKEN is unset (optional channel)" {
+  cd "$TEST_ROOT"
+  # No GH_TOKEN and not RENDER_ONLY: the publish is skipped before any network
+  # or git work, so a missing tap token does not fail the release.
+  run env -u GH_TOKEN -u RENDER_ONLY TAG=v0.0.26 REPO=kaeawc/auto-mobile \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipping Homebrew formula publish"* ]]
+}
+
 @test "RENDER_ONLY writes a formula with the resolved sha256" {
   cd "$TEST_ROOT"
   run env TAG=v0.0.26 REPO=kaeawc/auto-mobile RENDER_ONLY=1 \

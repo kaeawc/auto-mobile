@@ -381,19 +381,38 @@ jobs:
         run: |
           set -euo pipefail
 
-          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          if [[ "$remote_main" == "$BASE_MAIN_COMMIT" ]]; then
-            git push origin "$EXPECTED_RELEASE_COMMIT":main
-          elif [[ "$remote_main" != "$EXPECTED_RELEASE_COMMIT" ]]; then
-            # A rerun can arrive after this job promoted and tagged the release,
-            # then a normal main commit landed before a later dispatch step
-            # failed. That is recoverable only when this exact release remains
-            # in main's history; otherwise never tag a different tree.
-            git fetch origin main
-            if ! git merge-base --is-ancestor "$EXPECTED_RELEASE_COMMIT" FETCH_HEAD; then
-              echo "main moved while the release was being verified; refusing to promote a different tree" >&2
-              exit 1
-            fi
+          # Decide how main relates to the verified release before promoting.
+          # $EXPECTED_RELEASE_COMMIT (the release-constants commit) was built on
+          # $BASE_MAIN_COMMIT, the main tip when this run started. The ~15 min
+          # build window means main frequently advances (unrelated PRs, the
+          # README-badge [skip ci] commits that follow every merge) before we
+          # reach this step. A forward move must NOT block tagging the verified
+          # release; only a genuine divergence (main rewound/rebased so our base
+          # is gone) is unsafe. The tag must stay pinned to $EXPECTED_RELEASE_COMMIT
+          # because the provenance tag_sha and the Release dispatch matcher are.
+          git fetch origin main
+          main_tip="$(git rev-parse FETCH_HEAD)"
+          if git merge-base --is-ancestor "$EXPECTED_RELEASE_COMMIT" "$main_tip"; then
+            # Idempotent rerun: this exact release is already in main's history.
+            echo "Release commit already in main; nothing to promote."
+          elif ! git merge-base --is-ancestor "$BASE_MAIN_COMMIT" "$main_tip"; then
+            # main no longer contains the base we built from — it was rewound or
+            # rebased. That is a real divergence; never tag a different tree.
+            echo "main diverged from the release base (rewound/rebased); refusing to promote a different tree" >&2
+            exit 1
+          elif [[ "$main_tip" == "$BASE_MAIN_COMMIT" ]]; then
+            # main is unchanged since we branched: fast-forward it to include the
+            # release commit. If it raced and moved between the fetch above and
+            # this push, the non-fast-forward push is rejected and we fall through
+            # to tagging — the tag below is the source of truth for the release.
+            git push origin "$EXPECTED_RELEASE_COMMIT":main \
+              || echo "main moved during promotion; tagging the verified release without moving main."
+          else
+            # main advanced past our base with unrelated commits. The verified
+            # release tree is still correct; tag it without forcing it onto main's
+            # tip. A fast-forward is impossible and rebasing would change the SHA
+            # that the provenance manifest and Release dispatch are pinned to.
+            echo "main advanced past the release base with unrelated commits; tagging the verified release without moving main."
           fi
 
           git fetch --tags origin

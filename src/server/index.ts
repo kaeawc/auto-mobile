@@ -386,6 +386,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
     let connectionProfileUuid = sessionToolBinding.connectionCapabilityProfileUuid(sessionId);
     let capabilitySessionUuid = connectionProfileUuid ?? routingSessionUuid;
+    const rawRequestedCapabilityProfileUuid = (toolParams as Record<string, unknown>).sessionUuid;
+    const requestedCapabilityProfileUuid = typeof rawRequestedCapabilityProfileUuid === "string"
+      ? rawRequestedCapabilityProfileUuid
+      : undefined;
 
     // Get the registered tool
     const tool = ToolRegistry.getTool(name);
@@ -402,10 +406,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     if (
       name === SET_TOOL_CAPABILITY_TOOL_NAME
       && !connectionProfileUuid
-      && typeof (toolParams as Record<string, unknown>).sessionUuid === "string"
-      && (toolParams as Record<string, unknown>).sessionUuid.trim().length > 0
+      && requestedCapabilityProfileUuid?.trim().length
     ) {
-      connectionProfileUuid = (toolParams as Record<string, unknown>).sessionUuid as string;
+      connectionProfileUuid = requestedCapabilityProfileUuid;
       sessionToolBinding.bindCapabilityProfile(sessionId, connectionProfileUuid);
       capabilitySessionUuid = connectionProfileUuid;
     }

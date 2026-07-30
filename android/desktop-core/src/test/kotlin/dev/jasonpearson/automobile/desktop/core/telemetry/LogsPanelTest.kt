@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.desktop.core.telemetry
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -90,6 +92,22 @@ class LogsPanelTest {
     assertEquals(listOf(logs[0]), result)
   }
 
+  @Test
+  fun `appendBounded keeps only the most recent rows past the cap`() {
+    val buffer = mutableListOf<TelemetryDisplayEvent.Log>()
+    val max = 5
+    for (i in 0 until 12) {
+      appendBounded(buffer, log(4, "T", "m$i", i.toLong()), max)
+    }
+    // Only the most recent `max` rows survive, oldest dropped first.
+    assertEquals(max, buffer.size)
+    assertEquals(listOf("m7", "m8", "m9", "m10", "m11"), buffer.map { it.message })
+
+    // Filtering still works over the bounded buffer (substring "m1" matches m10 and m11).
+    val filtered = filterLogs(buffer, LogLevel.entries.toSet(), "m1")
+    assertEquals(listOf("m10", "m11"), filtered.map { it.message })
+  }
+
   // -- Compose UI tests --
 
   @Test
@@ -157,5 +175,19 @@ class LogsPanelTest {
       MaterialTheme { LogsPanel(telemetryPushClient = null, activeDeviceId = "dev-1") }
     }
     onNodeWithText("No logs yet").assertIsDisplayed()
+  }
+
+  @Test
+  fun `level chip exposes a selected state that flips when toggled`() = runComposeUiTest {
+    setContent {
+      MaterialTheme { LogsPanel(telemetryPushClient = null, activeDeviceId = "dev-1") }
+    }
+    // Chips start enabled (selected); toggling off flips selected to false, toggling on restores
+    // it.
+    onNodeWithContentDescription("Toggle Warn logs").assertIsSelected()
+    onNodeWithContentDescription("Toggle Warn logs").performClick()
+    onNodeWithContentDescription("Toggle Warn logs").assertIsNotSelected()
+    onNodeWithContentDescription("Toggle Warn logs").performClick()
+    onNodeWithContentDescription("Toggle Warn logs").assertIsSelected()
   }
 }

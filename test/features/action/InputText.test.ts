@@ -6,6 +6,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { InputTextMode } from "../../../src/features/action/InputText";
+import type { ObserveScreen, ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AdbClient, AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
@@ -605,6 +606,70 @@ describe("InputText", () => {
       "shell input keyevent KEYCODE_X",
       "shell input keyevent KEYCODE_T"
     ]);
+  });
+
+  // Regression for https://github.com/kaeawc/auto-mobile/issues/4617.
+  // When the failed cached hierarchy carries no `updatedAt`, the refresh lower
+  // bound must be derived from the DEVICE clock (getDeviceTimestampMs), not the
+  // host FakeTimer/wall clock. Android interprets `minTimestamp` in the
+  // device-authored hierarchy clock domain, so a device clock running AHEAD of
+  // the host would let an older cached focused hierarchy satisfy a host-clock
+  // lower bound and be wrongly accepted as fresh — dispatching key events.
+  test("eventOnly derives the no-updatedAt refresh lower bound from the device clock, not the host", async () => {
+    const factory = new FakeAdbClientFactory();
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
+    // Device clock is far ahead of the host FakeTimer (which starts at 0).
+    const deviceNowMs = 1_700_000_000_000;
+    factory.getFakeClient().setDeviceTimestampMs(deviceNowMs);
+    const hostTimer = new FakeTimer(); // now() === 0, strictly behind the device clock
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, undefined, hostTimer);
+
+    // A cached focused hierarchy captured EARLIER in device time than "now" —
+    // stale — but still newer than the host clock (0). Under the old host-clock
+    // fallback its timestamp satisfies minTimestamp and it is wrongly accepted.
+    const cachedFocusedDeviceTs = 1_699_999_999_000;
+    const observeExecuteOptions: ObserveScreenExecuteOptions[] = [];
+    const focused = observeResultWithFocusedText("old");
+    const observe = {
+      execute: async (options?: ObserveScreenExecuteOptions): Promise<ObserveResult> => {
+        observeExecuteOptions.push({ ...(options ?? {}) });
+        const lowerBound = options?.minTimestamp ?? 0;
+        return {
+          ...focused,
+          viewHierarchy: { ...focused.viewHierarchy, updatedAt: cachedFocusedDeviceTs },
+          freshness: {
+            requestedAfter: lowerBound,
+            actualTimestamp: cachedFocusedDeviceTs,
+            isFresh: cachedFocusedDeviceTs >= lowerBound,
+            staleDurationMs: Math.max(0, lowerBound - cachedFocusedDeviceTs),
+          },
+        } as ObserveResult;
+      },
+    };
+    inputText.observeScreen = observe as unknown as ObserveScreen;
+
+    // The cached hierarchy that FAILED the focused-editable check: no focus, no updatedAt.
+    const cachedUnfocused = {
+      viewHierarchy: {
+        hierarchy: { node: { class: "android.view.inputmethod.SoftInputWindow" } },
+      },
+    } as ObserveResult;
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "next",
+      undefined,
+      false,
+      "eventOnly",
+      cachedUnfocused
+    );
+
+    // Device-domain lower bound rejects the stale cached focused hierarchy: no
+    // key events are dispatched. The host-clock fallback (minTimestamp 0) would
+    // have accepted it and typed.
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("eventOnly requires a focused editable field");
+    expect(observeExecuteOptions[0]?.minTimestamp).toBe(deviceNowMs);
+    expect(inputCommands(factory)).toEqual([]);
   });
 
   test("eventOnly delegates keyboard dismissal to the keyboard closer", async () => {

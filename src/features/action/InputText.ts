@@ -658,9 +658,17 @@ export class InputText extends BaseVisualChange {
       return viewHierarchy;
     }
 
+    // Android interprets `minTimestamp` in the device-authored hierarchy clock
+    // domain. When the failed hierarchy carries an `updatedAt` we derive the
+    // lower bound from it (device clock, +1 for strictly-newer). When it does
+    // NOT, we must still stay in the device domain: falling back to the host
+    // clock (`this.timer.now()`) lets a device clock running ahead of the host
+    // accept an older cached focused hierarchy as fresh, defeating the freshness
+    // guarantee (issue #4617). Derive the fallback from the device clock via
+    // `getDeviceTimestampMs`, the same source the rest of the freshness logic uses.
     const minTimestamp = typeof viewHierarchy.updatedAt === "number"
       ? viewHierarchy.updatedAt + 1
-      : this.timer.now();
+      : await this.adb.getDeviceTimestampMs();
     const refreshedObserveResult = await this.observeScreen.execute({
       skipWaitForFresh: false,
       minTimestamp

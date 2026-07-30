@@ -9,7 +9,7 @@ import { FakeAdbProcess } from "./FakeAdbProcess";
 
 type FakeAdbClientContract = Pick<
   AdbExecutor,
-  "execute" | "executeCommand" | "getForegroundApp" | "listUsers" | "spawn"
+  "execute" | "executeCommand" | "getForegroundApp" | "getDeviceTimestampMs" | "listUsers" | "spawn"
 >;
 
 /** How a spawned command should terminate, keyed by a substring of its argv. */
@@ -41,6 +41,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
   private foregroundAppError: Error | null = null;
   private hangingCommandPatterns: string[] = [];
   private users: Array<{ userId: number; name: string; flags?: number; running?: boolean }> = [];
+  private deviceTimestampMs: number | null = null;
   private spawnCalls: string[][] = [];
   private spawnBehaviors: SpawnBehavior[] = [];
 
@@ -232,6 +233,22 @@ export class FakeAdbClient implements FakeAdbClientContract {
   }
 
   /**
+   * Configure the device clock returned by {@link getDeviceTimestampMs}. Pass a
+   * value ahead of the host FakeTimer to exercise device-vs-host clock skew.
+   */
+  setDeviceTimestampMs(timestampMs: number | null): void {
+    this.deviceTimestampMs = timestampMs;
+  }
+
+  /**
+   * Return the configured device time (device-authored clock domain), or the
+   * host wall clock when unset — mirrors {@link FakeAdbExecutor.getDeviceTimestampMs}.
+   */
+  async getDeviceTimestampMs(): Promise<number> {
+    return this.deviceTimestampMs ?? Date.now();
+  }
+
+  /**
    * Get all recorded command calls
    */
   getCommandCalls(): Array<{
@@ -294,6 +311,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.hangingCommandPatterns = [];
     this.spawnCalls = [];
     this.spawnBehaviors = [];
+    this.deviceTimestampMs = null;
   }
 
   /**

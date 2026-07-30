@@ -117,6 +117,25 @@ class CommandPaletteTest {
   }
 
   @Test
+  fun `numpad enter runs the selected command and dismisses`() = runComposeUiTest {
+    var ran: String? = null
+    var dismissed = false
+    val commands =
+      listOf(
+        PaletteCommand("a", "Open Devices") { ran = "a" },
+        PaletteCommand("b", "Close Pixel") { ran = "b" },
+      )
+    setContent { MaterialTheme { CommandPalette(commands, onDismiss = { dismissed = true }) } }
+    onNodeWithContentDescription("Command search").assertIsFocused()
+    onRoot().performKeyInput {
+      pressKey(Key.DirectionDown)
+      pressKey(Key.NumPadEnter)
+    }
+    assertEquals("b", ran)
+    assertTrue(dismissed)
+  }
+
+  @Test
   fun `arrow up from the top wraps to the last command`() = runComposeUiTest {
     var ran: String? = null
     val commands =

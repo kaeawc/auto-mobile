@@ -181,7 +181,8 @@ fun CommandPalette(
                 selectedIndex = (safeIndex - 1 + results.size) % results.size
               true
             }
-            Key.Enter -> {
+            Key.Enter,
+            Key.NumPadEnter -> {
               results.getOrNull(safeIndex)?.let {
                 it.run()
                 onDismiss()

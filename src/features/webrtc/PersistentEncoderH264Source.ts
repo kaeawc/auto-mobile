@@ -270,17 +270,26 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
     this.commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_LAUNCH_COMMAND_TIMEOUT_MS;
     this.teardownTimeoutMs = options.teardownTimeoutMs ?? DEFAULT_TEARDOWN_COMMAND_TIMEOUT_MS;
-    if (this.commandTimeoutMs <= 0 || this.teardownTimeoutMs <= 0) {
-      throw new ActionableError("Video server command timeouts must be positive milliseconds.");
-    }
     this.localSocketReconnectWindowMs =
       options.localSocketReconnectWindowMs ?? DEFAULT_LOCAL_SOCKET_RECONNECT_WINDOW_MS;
     this.localSocketReconnectRetryMs =
       options.localSocketReconnectRetryMs ?? DEFAULT_LOCAL_SOCKET_RECONNECT_RETRY_MS;
+    this.sessionTokenFactory = options.sessionTokenFactory ?? (() => defaultIdGenerator.next());
+    this.validateTimings();
+  }
+
+  /**
+   * Fail fast on non-positive timing options. Extracted from the constructor so the constructor
+   * stays under the cyclomatic-complexity ratchet; every branch here is a validation guard, not
+   * constructor control flow.
+   */
+  private validateTimings(): void {
+    if (this.commandTimeoutMs <= 0 || this.teardownTimeoutMs <= 0) {
+      throw new ActionableError("Video server command timeouts must be positive milliseconds.");
+    }
     if (this.localSocketReconnectWindowMs <= 0 || this.localSocketReconnectRetryMs <= 0) {
       throw new ActionableError("Local socket reconnect timings must be positive milliseconds.");
     }
-    this.sessionTokenFactory = options.sessionTokenFactory ?? (() => defaultIdGenerator.next());
   }
 
   get isRunning(): boolean {

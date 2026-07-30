@@ -62,12 +62,27 @@ export class SessionToolBinding {
   /** Creates and binds a persistent capability profile without selecting a device session. */
   createAndBindCapabilityProfile(mcpSessionId: string | undefined): string {
     const sessionUuid = this.idGenerator.next();
+    this.bindCapabilityProfile(mcpSessionId, sessionUuid);
+    return sessionUuid;
+  }
+
+  /** Associate a persisted profile with this MCP connection without changing device routing. */
+  bindCapabilityProfile(mcpSessionId: string | undefined, sessionUuid: string | undefined): boolean {
+    if (!sessionUuid?.trim()) {
+      return false;
+    }
     if (mcpSessionId) {
+      if (this.capabilityProfiles.get(mcpSessionId) === sessionUuid) {
+        return false;
+      }
       this.capabilityProfiles.set(mcpSessionId, sessionUuid);
     } else {
+      if (this.directCapabilityProfileUuid === sessionUuid) {
+        return false;
+      }
       this.directCapabilityProfileUuid = sessionUuid;
     }
-    return sessionUuid;
+    return true;
   }
 
   /**

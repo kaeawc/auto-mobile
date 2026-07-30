@@ -3,7 +3,6 @@ package dev.jasonpearson.automobile.desktop.core.datasource
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.decodeToolResponse
-import dev.jasonpearson.automobile.desktop.core.daemon.enableToolCapability
 import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponent
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.storage.ColumnInfo

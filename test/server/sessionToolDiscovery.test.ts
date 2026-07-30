@@ -32,6 +32,14 @@ describe("session-scoped tool discovery", () => {
     expect(binding.effectiveCapabilityProfileUuid(undefined)).toBe(sessionUuid);
   });
 
+  test("binds a resumed profile to an unbound stdio transport without selecting device routing", () => {
+    const binding = new SessionToolBinding();
+
+    expect(binding.bindCapabilityProfile(undefined, "capability-profile-1")).toBe(true);
+    expect(binding.effectiveSessionUuid(undefined)).toBeUndefined();
+    expect(binding.effectiveCapabilityProfileUuid(undefined)).toBe("capability-profile-1");
+  });
+
   test("seeds only a recreated transport's initial session binding", () => {
     const binding = new SessionToolBinding("device-session-a");
 

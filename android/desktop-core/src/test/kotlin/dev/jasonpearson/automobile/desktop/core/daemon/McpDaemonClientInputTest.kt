@@ -39,6 +39,35 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `capability profile is forwarded across per-request daemon sockets`() {
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(
+              """{"content":[{"type":"text","text":"{\"sessionUuid\":\"profile-a\"}"}]}""",
+              null,
+            ),
+            SocketResponse("""{"content":[]}""", null),
+          )
+      )
+      .use { server ->
+        val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
+
+        client.enableToolCapability("screen-artifacts")
+        client.callTool("videoRecording", JsonObject(emptyMap()))
+
+        val requests = server.awaitRequests()
+        assertEquals("setToolCapability", requests[0].params["name"]?.jsonPrimitive?.content)
+        assertEquals("videoRecording", requests[1].params["name"]?.jsonPrimitive?.content)
+        val arguments = requests[1].params["arguments"]?.jsonObject
+        assertEquals(
+          "profile-a",
+          arguments?.get("__autoMobileCapabilityProfileUuid")?.jsonPrimitive?.content,
+        )
+      }
+  }
+
+  @Test
   fun `socket requests surface lifecycle failures before opening the socket`() {
     val lifecycle =
       object : DaemonLifecycleEnsurer {

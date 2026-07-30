@@ -399,6 +399,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       capabilitySessionUuid = sessionToolBinding.createAndBindCapabilityProfile(sessionId);
       connectionProfileUuid = capabilitySessionUuid;
     }
+    if (
+      name === SET_TOOL_CAPABILITY_TOOL_NAME
+      && !connectionProfileUuid
+      && typeof (toolParams as Record<string, unknown>).sessionUuid === "string"
+      && (toolParams as Record<string, unknown>).sessionUuid.trim().length > 0
+    ) {
+      connectionProfileUuid = (toolParams as Record<string, unknown>).sessionUuid as string;
+      sessionToolBinding.bindCapabilityProfile(sessionId, connectionProfileUuid);
+      capabilitySessionUuid = connectionProfileUuid;
+    }
     // Capability enforcement honors the UNION of the base and the derived
     // `${base}:${label}` device-label sessions (issue #4611): a tool is enabled
     // when EITHER grants it. This public MCP boundary is an EARLIER gate than the

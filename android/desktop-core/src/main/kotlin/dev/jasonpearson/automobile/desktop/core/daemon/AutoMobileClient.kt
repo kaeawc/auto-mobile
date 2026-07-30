@@ -150,18 +150,18 @@ interface AutoMobileClient {
 
   fun callTool(name: String, arguments: JsonObject): JsonElement
 
-  fun close() {}
-}
+  /** Enable one optional server capability for this client connection. */
+  fun enableToolCapability(capability: String) {
+    callTool(
+      "setToolCapability",
+      buildJsonObject {
+        put("capability", capability)
+        put("enabled", true)
+      },
+    )
+  }
 
-/** Enable one optional server capability for this Desktop client's MCP connection. */
-fun AutoMobileClient.enableToolCapability(capability: String) {
-  callTool(
-    "setToolCapability",
-    buildJsonObject {
-      put("capability", capability)
-      put("enabled", true)
-    },
-  )
+  fun close() {}
 }
 
 @Serializable

@@ -2504,6 +2504,41 @@ describe("DaemonMcpProxy", () => {
         await proxy.close();
       }
     });
+
+    test("does not replace a retained device session when updating an explicit capability profile", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: {
+          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a", capability: "clipboard" }) }],
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "device-session-a" });
+        await proxy.callTool("setToolCapability", { capability: "clipboard" });
+        await proxy.callTool("setToolCapability", {
+          capability: "clipboard",
+          sessionUuid: "profile-a",
+        });
+        await proxy.callTool("observe", {});
+
+        expect(client.callToolCalls[3]).toEqual({
+          toolName: "observe",
+          params: {
+            sessionUuid: "device-session-a",
+            [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a",
+          },
+        });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
   });
 
   describe("DaemonVersionMismatchError restart hint", () => {

@@ -1089,6 +1089,9 @@ export class DaemonMcpProxy {
       this.clearBoundSessionUuid();
       return;
     }
+    if (name === SET_TOOL_CAPABILITY_TOOL_NAME) {
+      return;
+    }
     // A release for the FORWARDED UUID observed WHILE this call was in flight
     // already recorded that UUID's release (handleDaemonNotification).
     // Re-remembering it now would resurrect the freed session and let the next
@@ -1121,7 +1124,7 @@ export class DaemonMcpProxy {
     error: unknown,
     callReleaseEpoch: number,
   ): void {
-    if (name === "executePlan" || this.isRecoverableDaemonSessionError(error)) {
+    if (name === "executePlan" || name === SET_TOOL_CAPABILITY_TOOL_NAME || this.isRecoverableDaemonSessionError(error)) {
       return;
     }
     // As in rememberSessionUuid: a release of the forwarded UUID observed

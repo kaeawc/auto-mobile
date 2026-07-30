@@ -247,12 +247,22 @@ export class IOSScreenCaptureHelper extends EventEmitter {
       `[IOSScreenCaptureHelper] helper pid=${proc.pid ?? "?"} did not exit after SIGTERM; escalating to SIGKILL`
     );
     proc.kill("SIGKILL");
-    if (process.platform === "darwin" && proc.pid !== undefined) {
-      try {
-        this.processGroupKiller(proc.pid, "SIGKILL");
-      } catch (error) {
-        logger.debug(
-          `[IOSScreenCaptureHelper] process-group cleanup failed for pid=${proc.pid}: ${error}`
+    if (process.platform === "darwin") {
+      if (proc.pid !== undefined) {
+        try {
+          this.processGroupKiller(proc.pid, "SIGKILL");
+        } catch (error) {
+          // A surviving process group can leak detached ScreenCaptureKit XPC
+          // children, so surface the failure rather than swallowing it at debug.
+          logger.warn(
+            `[IOSScreenCaptureHelper] process-group cleanup failed for pid=${proc.pid}; detached children may leak: ${error}`
+          );
+        }
+      } else {
+        // Without a pid the detached process group cannot be targeted; the
+        // direct SIGKILL above is the only cleanup, so flag the potential leak.
+        logger.warn(
+          "[IOSScreenCaptureHelper] helper pid unknown after SIGKILL; cannot group-kill, detached children may leak"
         );
       }
     }

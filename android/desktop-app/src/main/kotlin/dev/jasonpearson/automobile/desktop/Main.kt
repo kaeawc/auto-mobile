@@ -193,9 +193,13 @@ fun main() {
               shortcut = platformShortcut(Key.F, shift = true),
             )
             Item(
+              // ⌘K/Ctrl+K is handled by the window-level onPreviewKeyEvent below (opens the command
+              // palette). No shortcut here — a duplicate Key.K accelerator on this (currently
+              // inert)
+              // item would race the window handler. Re-wiring this menu item + restoring its
+              // shortcut is tracked in #4670.
               "Quick Jump",
               onClick = { menuBarActions.showQuickJump = true },
-              shortcut = platformShortcut(Key.K),
             )
             Separator()
             Item(

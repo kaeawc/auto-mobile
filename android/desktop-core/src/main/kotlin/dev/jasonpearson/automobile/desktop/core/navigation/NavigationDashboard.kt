@@ -11,7 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
-import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
@@ -39,12 +39,17 @@ fun NavigationDashboard(
   dataSourceMode: DataSourceMode = DataSourceMode.Fake,
   clientProvider: (() -> AutoMobileClient)? = null, // MCP client for real data
   selectedAppId: String? = null, // App ID to filter navigation graph by (managed by parent)
-  observationStreamClient: ObservationStreamClient? =
+  observationStreamClient: ObservationStream? =
     null, // Real-time stream client for navigation updates
   screenshotLoader: ScreenshotLoader? =
     null, // Screenshot loader (hoisted to parent so cache persists across toggles)
   settingsProvider: SettingsProvider =
     FakeSettingsProvider(), // Settings provider (caller injects real impl)
+  // When true, never run the initial active-device data-source fetch; the graph is driven solely by
+  // the per-device [observationStreamClient] (which the caller attaches). This keeps per-device
+  // panes correct: the active-device fetch would otherwise briefly show the wrong device's graph
+  // until the first stream push. The default preserves the existing (non-facet) fetch behavior.
+  streamOnly: Boolean = false,
 ) {
   val graph = LocalAutoMobileGraph.current
   var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
@@ -70,7 +75,16 @@ fun NavigationDashboard(
   var isLoading by remember { mutableStateOf(true) }
   var error by remember { mutableStateOf<String?>(null) }
 
-  LaunchedEffect(dataSourceMode, clientProvider, selectedAppId) {
+  LaunchedEffect(dataSourceMode, clientProvider, selectedAppId, streamOnly) {
+    // Stream-only: never run the active-device data-source fetch — the graph is driven solely by
+    // this pane's per-device stream. Gated on streamOnly directly (not stream presence): the facet
+    // attaches its stream via DisposableEffect AFTER first composition, so keying on the attached
+    // stream would still let the fetch fire once on mount and briefly show the wrong device's
+    // graph.
+    if (streamOnly) {
+      isLoading = false
+      return@LaunchedEffect
+    }
     LOG.info(
       "Loading navigation data with mode: $dataSourceMode, appId: $selectedAppId, clientProvider=${if (clientProvider != null) "present" else "null"}"
     )

@@ -5,6 +5,7 @@
 
 import crypto from "crypto";
 import { Element } from "../../models/Element";
+import { ElementBounds } from "../../models/ElementBounds";
 import { ViewHierarchyNode } from "../../models/ViewHierarchyResult";
 import {
   AccessibilityAuditConfig,
@@ -62,9 +63,6 @@ export class WcagAudit {
 
     // Check for touch target size violations
     violations.push(...this.checkTouchTargetSizes(elements, config.level));
-
-    // Check for heading hierarchy violations
-    violations.push(...this.checkHeadingHierarchy(viewHierarchy));
 
     // Check for unlabeled form inputs
     violations.push(...this.checkFormInputLabels(elements, viewHierarchy));
@@ -242,77 +240,6 @@ export class WcagAudit {
   }
 
   /**
-   * Check heading hierarchy for skipped levels
-   */
-  private checkHeadingHierarchy(hierarchy: ViewHierarchyNode): WcagViolation[] {
-    const violations: WcagViolation[] = [];
-    const headings = this.extractHeadings(hierarchy);
-
-    if (headings.length < 2) {
-      return violations; // Need at least 2 headings to check hierarchy
-    }
-
-    for (let i = 1; i < headings.length; i++) {
-      const prevLevel = headings[i - 1].level;
-      const currLevel = headings[i].level;
-
-      // Check if we skipped a level (e.g., h1 -> h3)
-      if (currLevel > prevLevel + 1) {
-        violations.push({
-          type: "heading-hierarchy-skip",
-          severity: "warning",
-          criterion: "1.3.1", // Info and Relationships
-          message: `Heading hierarchy skip: h${prevLevel} to h${currLevel} (expected h${prevLevel + 1})`,
-          element: headings[i].element,
-          details: {
-            expectedLevel: prevLevel + 1,
-            actualLevel: currLevel,
-            explanation: "Heading levels should not be skipped to maintain proper document structure",
-          },
-          fingerprint: this.generateFingerprint(headings[i].element, "heading-hierarchy-skip"),
-        });
-      }
-    }
-
-    return violations;
-  }
-
-  /**
-   * Extract heading elements from hierarchy
-   * Note: Android doesn't have native heading semantics, so this is a heuristic
-   */
-  private extractHeadings(
-    node: ViewHierarchyNode,
-    headings: Array<{ level: number; element: Element }> = []
-  ): Array<{ level: number; element: Element }> {
-    // Heuristic: larger text sizes are likely headings
-    // This is a simplified approach - real apps may need custom logic
-    const element = node as unknown as Element;
-
-    if (element.text) {
-      const height = element.bounds.bottom - element.bounds.top;
-
-      // Rough heuristic for heading levels based on text height
-      let level = 6; // Default to h6
-      if (height > 48) {level = 1;} else if (height > 36) {level = 2;} else if (height > 28) {level = 3;} else if (height > 22) {level = 4;} else if (height > 18) {level = 5;}
-
-      // Only consider it a heading if it's relatively large
-      if (height > 20) {
-        headings.push({ level, element });
-      }
-    }
-
-    // Recurse through children
-    if (node.children) {
-      for (const child of node.children) {
-        this.extractHeadings(child, headings);
-      }
-    }
-
-    return headings;
-  }
-
-  /**
    * Check for form inputs without associated labels
    */
   private checkFormInputLabels(
@@ -361,29 +288,50 @@ export class WcagAudit {
   }
 
   /**
+   * Maximum gap, in pixels, between a form input and a candidate label TextView
+   * for the TextView to be treated as that input's visible label.
+   *
+   * `bounds` are pixels everywhere (see Element.ts), so this threshold is pixels,
+   * not dp — the old "within 50dp" comment was mislabelled. The value is a
+   * heuristic: form labels sit immediately above or beside their input, so the
+   * bounding boxes are adjacent (a small gap), not merely on the same row.
+   */
+  private static readonly MAX_LABEL_GAP_PX = 50;
+
+  /**
    * Check if an element has a nearby TextView that could serve as a label.
    * `textViews` is precomputed by the caller (see checkFormInputLabels) so this
    * is O(textViews) per input rather than re-filtering all elements each call.
+   *
+   * Proximity is the Euclidean gap between the input's and the TextView's
+   * bounding boxes, and only the NEAREST candidate is compared to the gate. This
+   * replaces a prior `||`-of-per-axis-center-distance test that treated any
+   * TextView sharing the input's horizontal OR vertical band — even one on the
+   * opposite edge of the screen — as a label, under-reporting unlabeled inputs.
    */
   private hasNearbyLabel(input: Element, textViews: Element[]): boolean {
-    // Input centers are loop-invariant; compute them once.
-    const inputCenterY = (input.bounds.top + input.bounds.bottom) / 2;
-    const inputCenterX = (input.bounds.left + input.bounds.right) / 2;
+    let nearestGap = Infinity;
 
     for (const textView of textViews) {
-      // Check if TextView is close to the input (within 50dp vertically or horizontally)
-      const textCenterY = (textView.bounds.top + textView.bounds.bottom) / 2;
-      const verticalDistance = Math.abs(inputCenterY - textCenterY);
-
-      const textCenterX = (textView.bounds.left + textView.bounds.right) / 2;
-      const horizontalDistance = Math.abs(inputCenterX - textCenterX);
-
-      if (verticalDistance < 50 || horizontalDistance < 50) {
-        return true;
+      const gap = this.boundingBoxGap(input.bounds, textView.bounds);
+      if (gap < nearestGap) {
+        nearestGap = gap;
       }
     }
 
-    return false;
+    return nearestGap <= WcagAudit.MAX_LABEL_GAP_PX;
+  }
+
+  /**
+   * Euclidean distance between the nearest edges of two axis-aligned rectangles.
+   * Returns 0 when the rectangles overlap or touch. Unlike center-to-center
+   * distance this stays small for a label sitting directly above or beside an
+   * input even when the label is wide — the real-world layout for form labels.
+   */
+  private boundingBoxGap(a: ElementBounds, b: ElementBounds): number {
+    const dx = Math.max(0, a.left - b.right, b.left - a.right);
+    const dy = Math.max(0, a.top - b.bottom, b.top - a.bottom);
+    return Math.sqrt(dx * dx + dy * dy);
   }
 
   /**
@@ -444,7 +392,6 @@ export class WcagAudit {
       "missing-content-description": 0,
       "insufficient-contrast": 0,
       "touch-target-too-small": 0,
-      "heading-hierarchy-skip": 0,
       "unlabeled-form-input": 0,
     };
 

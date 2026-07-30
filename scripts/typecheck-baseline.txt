@@ -63,8 +63,6 @@ src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'n
 src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
 src/features/accessibility/ContrastChecker.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
 src/features/accessibility/ContrastChecker.ts: error TS2532: Object is possibly 'undefined'.
-src/features/accessibility/WcagAudit.ts: error TS2339: Property 'children' does not exist on type 'ViewHierarchyNode'.
-src/features/accessibility/WcagAudit.ts: error TS2339: Property 'children' does not exist on type 'ViewHierarchyNode'.
 src/features/accessibility/WcagAudit.ts: error TS2339: Property 'class' does not exist on type 'ViewHierarchyNode'.
 src/features/accessibility/WcagAudit.ts: error TS2352: Conversion of type 'ViewHierarchyNode[]' to type 'ViewHierarchyNode' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
 src/features/accessibility/WcagAudit.ts: error TS7053: Element implicitly has an 'any' type because expression of type '"resource-id"' can't be used to index type 'ViewHierarchyNode'.
@@ -220,7 +218,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-prop
 # swap-fp: 13 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type '(Element | null)[]' is not assignable to type 'Element[]'.
 # swap-fp: 13,13,27 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
 # swap-fp: 14 :: src/features/accessibility/WcagAudit.ts: error TS2352: Conversion of type 'ViewHierarchyNode[]' to type 'ViewHierarchyNode' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
-# swap-fp: 14,32 :: src/features/accessibility/WcagAudit.ts: error TS2339: Property 'children' does not exist on type 'ViewHierarchyNode'.
 # swap-fp: 149 :: src/server/navigationTools.ts: error TS2339: Property 'coverage' does not exist on type 'ExploreExecutionResult'.
 # swap-fp: 15 :: src/server/networkTools.ts: error TS2459: Module '"../utils/deviceUtils"' declares 'BootedDevice' locally, but it is not exported.
 # swap-fp: 15,67 :: src/features/navigation/Explore.ts: error TS2345: Argument of type 'NavigationGraphService' is not assignable to parameter of type 'NavigationGraphManager'.

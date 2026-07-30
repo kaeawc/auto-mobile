@@ -22,7 +22,6 @@ export type ViolationType =
   | "missing-content-description"
   | "insufficient-contrast"
   | "touch-target-too-small"
-  | "heading-hierarchy-skip"
   | "unlabeled-form-input";
 
 /**
@@ -92,12 +91,6 @@ export interface WcagViolation {
 
     /** For touch target violations: required minimum size in dp */
     requiredSize?: { width: number; height: number };
-
-    /** For heading violations: expected level */
-    expectedLevel?: number;
-
-    /** For heading violations: actual level */
-    actualLevel?: number;
 
     /** For any violation: additional explanation */
     explanation?: string;

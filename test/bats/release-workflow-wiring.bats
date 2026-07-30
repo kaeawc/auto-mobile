@@ -132,6 +132,10 @@
   [[ "$output" == *"verify-artifact-sha256.sh"* ]]
   [[ "$output" == *"verify-release-integrity.sh"* ]]
 
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Setup Bun") | .with."bun-version"' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1.3.9" ]
+
   run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Promote verified release and create tag") | .run' "$workflow"
   [ "$status" -eq 0 ]
   [[ "$output" == *'git push origin "$EXPECTED_RELEASE_COMMIT":main'* ]]

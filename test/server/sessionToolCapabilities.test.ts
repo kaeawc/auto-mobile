@@ -110,6 +110,15 @@ describe("session tool capability MCP enforcement", () => {
     expect(profileService.calls).toBe(1);
   });
 
+  test("advertises enabled as an optional defaulted control parameter", async () => {
+    fixture = new McpTestFixture();
+    await fixture.setup();
+
+    const definition = ToolRegistry.getToolDefinitions().find(tool => tool.name === "setToolCapability");
+    const schema = definition?.inputSchema as { required?: string[] } | undefined;
+    expect(schema?.required).toEqual(["capability"]);
+  });
+
   test("lets a core capability control tool opt in a stdio session before device binding", async () => {
     const enabled = new Set<string>();
     const profileService: Pick<SessionToolProfileService, "isEnabled"> &

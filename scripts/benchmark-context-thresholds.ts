@@ -85,7 +85,7 @@ export function isCoreTool(toolName: string): boolean {
  * registration as new tools or resources are added.
  */
 export function collectContextMeasurements(): ContextMeasurements {
-  createMcpServer();
+  createMcpServer({ daemonMode: true });
 
   const allTools = ToolRegistry.getToolDefinitions();
   const coreTools = allTools.filter(tool => isCoreTool(tool.name));

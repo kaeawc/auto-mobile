@@ -7,14 +7,17 @@ import { ActionableError } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { getToolCapabilityContext } from "../features/toolCapabilities/toolCapabilityContext";
 import { ToolRegistry } from "./toolRegistry";
+import { SET_TOOL_CAPABILITY_TOOL_NAME } from "../features/toolCapabilities/toolCapabilityControl";
 
-export const SET_TOOL_CAPABILITY_TOOL_NAME = "setToolCapability";
+export { SET_TOOL_CAPABILITY_TOOL_NAME } from "../features/toolCapabilities/toolCapabilityControl";
 
 export const setToolCapabilitySchema = z.object({
   capability: z.enum(TOOL_CAPABILITIES).describe("Optional tool capability to enable or disable for this MCP session."),
-  enabled: z.boolean().default(true).describe("Whether to enable the capability (default: true)."),
+  // Keep this optional in the advertised JSON Schema while documenting the
+  // default. Zod emits a defaulted field as required unless optional wraps it.
+  enabled: z.boolean().default(true).optional().describe("Whether to enable the capability (default: true)."),
   sessionUuid: z.string().min(1).optional().describe(
-    "Existing session profile to update. Omit to create or use this MCP connection's profile."
+    "Active connection or routing-session profile to update. Omit to update this MCP connection's profile."
   ),
 });
 
@@ -32,9 +35,18 @@ export function registerToolCapabilityTools(): void {
     setToolCapabilitySchema,
     async args => {
       const context = getToolCapabilityContext();
-      const sessionUuid = context?.capabilitySessionUuid ?? context?.routingSessionUuid;
+      const connectionProfileUuid = context?.capabilitySessionUuid;
+      const routingSessionUuid = context?.routingSessionUuid;
+      const sessionUuid = args.sessionUuid ?? connectionProfileUuid ?? routingSessionUuid;
       if (!sessionUuid) {
         throw new ActionableError("Unable to establish an MCP session profile for this capability update.");
+      }
+      if (
+        args.sessionUuid !== undefined &&
+        args.sessionUuid !== connectionProfileUuid &&
+        args.sessionUuid !== routingSessionUuid
+      ) {
+        throw new ActionableError("sessionUuid must identify this connection's active capability or routing session profile.");
       }
 
       const profileService = context?.sessionToolProfileService;
@@ -44,16 +56,16 @@ export function registerToolCapabilityTools(): void {
         );
       }
       if (profileService) {
-        await profileService.setEnabled!(sessionUuid, args.capability, args.enabled);
+        await profileService.setEnabled!(sessionUuid, args.capability, args.enabled ?? true);
       } else {
-        await getSessionToolProfileService().setEnabled(sessionUuid, args.capability, args.enabled);
+        await getSessionToolProfileService().setEnabled(sessionUuid, args.capability, args.enabled ?? true);
       }
       ToolRegistry.notifyToolListChanged();
 
       return createJSONToolResponse({
         sessionUuid,
         capability: args.capability,
-        enabled: args.enabled,
+        enabled: args.enabled ?? true,
       });
     }
   );

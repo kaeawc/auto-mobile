@@ -40,8 +40,11 @@ final class XCTestRunnerTests: XCTestCase {
 
         _ = try executor.execute(testMetadata: metadata)
 
-        XCTAssertEqual(mcpClient.calls.count, 1)
-        let call = mcpClient.calls[0]
+        XCTAssertEqual(mcpClient.calls.count, 2)
+        let capabilityCall = mcpClient.calls[0]
+        XCTAssertEqual(capabilityCall.name, "setToolCapability")
+        XCTAssertEqual(capabilityCall.arguments["capability"] as? String, "test-authoring")
+        let call = mcpClient.calls[1]
         XCTAssertEqual(call.name, "executePlan")
         XCTAssertEqual(call.arguments["platform"] as? String, "ios")
         XCTAssertEqual(call.arguments["startStep"] as? Int, 0)
@@ -487,6 +490,9 @@ private final class FakeMCPClient: AutoMobileMCPClient {
 
     func callTool(name: String, arguments: [String: Any], timeout _: TimeInterval) throws -> MCPToolResponse {
         calls.append(Call(name: name, arguments: arguments))
+        if name == "setToolCapability" {
+            return MCPToolResponse(text: "{\"enabled\":true}")
+        }
         guard !queuedResults.isEmpty else {
             return MCPToolResponse(text: "{\"success\":true,\"executedSteps\":0,\"totalSteps\":0}")
         }

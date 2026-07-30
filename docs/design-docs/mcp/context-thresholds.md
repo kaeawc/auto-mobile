@@ -48,30 +48,30 @@ to resume the same persisted profile after reconnecting.
 {
   "version": "2.0.0",
   "metadata": {
-    "generatedAt": "2026-07-29",
+    "generatedAt": "2026-07-30",
     "description": "Production-server context baselines for core and all-tool profiles",
     "baseline": {
-      "coreTools": 8468,
-      "allTools": 26187,
+      "coreTools": 8465,
+      "allTools": 26184,
       "resources": 1259,
       "resourceTemplates": 12137,
-      "coreTotal": 21864,
-      "allTotal": 39583
+      "coreTotal": 21861,
+      "allTotal": 39580
     }
   }
 }
 ```
 
-### Current Baselines (2026-07-29)
+### Current Baselines (2026-07-30)
 
 | Category | Baseline | Scope |
 |----------|----------|-------|
-| Core Tools | 8,468 tokens | Default core profile |
-| All Tools | 26,187 tokens | All advertised tools |
+| Core Tools | 8,465 tokens | Default core profile |
+| All Tools | 26,184 tokens | All advertised tools |
 | Resources | 1,259 tokens | Shared |
 | Resource Templates | 12,137 tokens | Shared |
-| **Core Total** | **21,864 tokens** | **Default core profile** |
-| **All Total** | **39,583 tokens** | **All advertised tools** |
+| **Core Total** | **21,861 tokens** | **Default core profile** |
+| **All Total** | **39,580 tokens** | **All advertised tools** |
 
 ## Benchmark Report Format
 
@@ -80,13 +80,13 @@ MCP CONTEXT BASELINE BENCHMARK REPORT
 
 Category                     Actual   Baseline    Delta  Status
 --------------------------------------------------------------------------------
-  Core Tools                     8468       8468       +0  • BASELINE
-  All Tools                     26187      26187       +0  • BASELINE
+  Core Tools                     8465       8465       +0  • BASELINE
+  All Tools                     26184      26184       +0  • BASELINE
   Resources                      1259       1259       +0  • BASELINE
   Resource Templates            12137      12137       +0  • BASELINE
 --------------------------------------------------------------------------------
-  CORE TOTAL                   21864      21864       +0  • BASELINE
-  ALL TOTAL                    39583      39583       +0  • BASELINE
+  CORE TOTAL                   21861      21861       +0  • BASELINE
+  ALL TOTAL                    39580      39580       +0  • BASELINE
 
 Overall Status: • BASELINES RECORDED (threshold enforcement pending)
 ```
@@ -98,12 +98,12 @@ The JSON report marks this state explicitly:
   "passed": true,
   "enforcement": { "enabled": false },
   "results": {
-    "coreTools": { "actual": 8468, "baseline": 8468, "delta": 0 },
-    "allTools": { "actual": 26187, "baseline": 26187, "delta": 0 },
+    "coreTools": { "actual": 8465, "baseline": 8465, "delta": 0 },
+    "allTools": { "actual": 26184, "baseline": 26184, "delta": 0 },
     "resources": { "actual": 1259, "baseline": 1259, "delta": 0 },
     "resourceTemplates": { "actual": 12137, "baseline": 12137, "delta": 0 },
-    "coreTotal": { "actual": 21864, "baseline": 21864, "delta": 0 },
-    "allTotal": { "actual": 39583, "baseline": 39583, "delta": 0 }
+    "coreTotal": { "actual": 21861, "baseline": 21861, "delta": 0 },
+    "allTotal": { "actual": 39580, "baseline": 39580, "delta": 0 }
   },
   "violations": []
 }

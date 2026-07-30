@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 
 export class SessionToolBinding {
   private readonly boundDeviceSessions = new Map<string, string>();
@@ -8,7 +8,11 @@ export class SessionToolBinding {
   private directCapabilityProfileUuid?: string;
   private readonly capabilityProfiles = new Map<string, string>();
 
-  constructor(initialSessionUuid?: string, initialCapabilityProfileUuid?: string) {
+  constructor(
+    initialSessionUuid?: string,
+    initialCapabilityProfileUuid?: string,
+    private readonly idGenerator: IdGenerator = defaultIdGenerator,
+  ) {
     this.initialSessionUuid = initialSessionUuid;
     this.initialCapabilityProfileUuid = initialCapabilityProfileUuid;
   }
@@ -31,10 +35,11 @@ export class SessionToolBinding {
    * capability choices for the still-open MCP connection.
    */
   effectiveCapabilityProfileUuid(mcpSessionId: string | undefined, params?: unknown): string | undefined {
-    const routingSessionUuid = this.effectiveSessionUuid(mcpSessionId, params);
-    if (routingSessionUuid) {
-      return routingSessionUuid;
-    }
+    return this.connectionCapabilityProfileUuid(mcpSessionId) ?? this.effectiveSessionUuid(mcpSessionId, params);
+  }
+
+  /** Connection-scoped profile, deliberately independent of routing sessions. */
+  connectionCapabilityProfileUuid(mcpSessionId: string | undefined): string | undefined {
     return mcpSessionId
       ? this.capabilityProfiles.get(mcpSessionId) ?? this.initialCapabilityProfileUuid
       : this.directCapabilityProfileUuid ?? this.initialCapabilityProfileUuid;
@@ -56,7 +61,7 @@ export class SessionToolBinding {
 
   /** Creates and binds a persistent capability profile without selecting a device session. */
   createAndBindCapabilityProfile(mcpSessionId: string | undefined): string {
-    const sessionUuid = randomUUID();
+    const sessionUuid = this.idGenerator.next();
     if (mcpSessionId) {
       this.capabilityProfiles.set(mcpSessionId, sessionUuid);
     } else {

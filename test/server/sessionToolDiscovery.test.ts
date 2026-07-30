@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 
 describe("session-scoped tool discovery", () => {
   test("does not leak a bound session to another MCP server with the same transport session ID", async () => {
@@ -20,10 +21,10 @@ describe("session-scoped tool discovery", () => {
   });
 
   test("retains a generated profile for an unbound stdio transport", () => {
-    const binding = new SessionToolBinding();
+    const binding = new SessionToolBinding(undefined, undefined, new FakeIdGenerator(["capability-profile-1"]));
     const sessionUuid = binding.createAndBindCapabilityProfile(undefined);
 
-    expect(sessionUuid).toMatch(/^[0-9a-f-]{36}$/);
+    expect(sessionUuid).toBe("capability-profile-1");
     expect(binding.effectiveSessionUuid(undefined)).toBeUndefined();
     expect(binding.effectiveCapabilityProfileUuid(undefined)).toBe(sessionUuid);
     // A capability profile is connection state, not a releasable device session.

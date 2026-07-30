@@ -946,21 +946,24 @@ export class ToolRegistryClass {
         // the shared helper. Enforcement is the UNION of base + derived (Gap B,
         // product decision): a tool is enabled if EITHER grants it, so a derived
         // label may re-enable a tool the base narrowed away.
-        const capabilityDerivedSessionUuid = capabilityContext?.capabilitySessionUuid
-          ?? resolvedTarget.capabilitySessionUuid
-          ?? resolvedTarget.sessionUuid;
+        const capabilityDerivedSessionUuid = resolvedTarget.capabilitySessionUuid ?? resolvedTarget.sessionUuid;
         await this.assertToolEnabledUnion(
           name,
           capabilityDerivedSessionUuid,
           resolvedTarget.baseSessionUuid,
           getToolCapabilityContext()?.sessionToolProfileService,
+          capabilityContext?.capabilitySessionUuid,
         );
         return await runWithToolCapabilityContext(
           // Bind the ROUTING session (Gap C), not the base/capability session, so
           // nested calls re-inject the correct derived routing UUID.
           {
             routingSessionUuid: resolvedTarget.sessionUuid,
-            capabilitySessionUuid: capabilityDerivedSessionUuid,
+            // Preserve the connection profile, if any. The derived session is
+            // supplied separately to the union assertion above; replacing the
+            // connection identity here would lose an opt-in when nested calls
+            // route through a labeled or explicitly selected device session.
+            capabilitySessionUuid: capabilityContext?.capabilitySessionUuid,
           },
           async () => {
             try {
@@ -1123,7 +1126,7 @@ export class ToolRegistryClass {
         ? { ...args, sessionUuid }
         : args,
       routingSessionUuid: sessionUuid,
-      capabilitySessionUuid: context?.capabilitySessionUuid ?? sessionUuid,
+      capabilitySessionUuid: context?.capabilitySessionUuid,
       sessionToolProfileService: options.sessionToolProfileService ?? context?.sessionToolProfileService,
     };
   }
@@ -1147,9 +1150,10 @@ export class ToolRegistryClass {
     // point for it and must apply the union as well.
     await this.assertToolEnabledUnion(
       tool.name,
-      capabilitySessionUuid ?? sessionUuid,
+      sessionUuid,
       undefined,
       sessionToolProfileService,
+      capabilitySessionUuid,
     );
     if (targetDevice && tool.deviceAwareHandler) {
       return tool.deviceAwareHandler(targetDevice, markInternalToolCall(args), progress, signal);
@@ -1179,6 +1183,7 @@ export class ToolRegistryClass {
     derivedSessionUuid: string | undefined,
     explicitBaseSessionUuid: string | undefined,
     sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
+    connectionCapabilityProfileUuid?: string,
   ): Promise<void> {
     const sessionManager = DaemonState.getInstance().isInitialized()
       ? DaemonState.getInstance().getSessionManager()
@@ -1189,7 +1194,7 @@ export class ToolRegistryClass {
     );
     await assertToolEnabledForAnySession(
       toolName,
-      [baseSessionUuid, derivedSessionUuid],
+      [connectionCapabilityProfileUuid, baseSessionUuid, derivedSessionUuid],
       sessionToolProfileService,
     );
   }

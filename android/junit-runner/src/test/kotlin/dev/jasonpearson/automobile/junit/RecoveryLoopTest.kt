@@ -285,6 +285,7 @@ class RecoveryLoopTest {
 private class RecoveryFakeDaemonToolClient : DaemonToolClient {
   val responses = mutableListOf<DaemonResponse>()
   val callArgs = mutableListOf<JsonObject>()
+  val capabilityCallArgs = mutableListOf<JsonObject>()
   private var callIndex = 0
   override var sessionUuid: String = "recovery-test-session"
 
@@ -293,6 +294,10 @@ private class RecoveryFakeDaemonToolClient : DaemonToolClient {
     arguments: JsonObject,
     timeoutMs: Long,
   ): DaemonResponse {
+    if (toolName == "setToolCapability") {
+      capabilityCallArgs.add(arguments)
+      return DaemonResponse(id = "capability", type = "mcp_response", success = true)
+    }
     callArgs.add(arguments)
     return if (callIndex < responses.size) {
       responses[callIndex++]

@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -84,6 +85,11 @@ class AutoMobilePlanExecutorTest {
     val result = executePlan()
 
     assertTrue(result.success)
+    assertEquals(1, fakeDaemonClient.capabilityArguments.size)
+    assertEquals(
+      "test-authoring",
+      fakeDaemonClient.capabilityArguments.single()["capability"]?.jsonPrimitive?.content,
+    )
     assertEquals(1, result.toolResults.size)
     assertEquals("Test Channel", result.getSelection(0))
   }
@@ -249,6 +255,7 @@ class AutoMobilePlanExecutorTest {
 
 private class FakeDaemonToolClient : DaemonToolClient {
   private val responses = mutableMapOf<String, DaemonResponse>()
+  val capabilityArguments = mutableListOf<JsonObject>()
   override var sessionUuid: String = "test-session"
 
   fun setResponse(toolName: String, response: DaemonResponse) {
@@ -260,6 +267,10 @@ private class FakeDaemonToolClient : DaemonToolClient {
     arguments: JsonObject,
     timeoutMs: Long,
   ): DaemonResponse {
+    if (toolName == "setToolCapability") {
+      capabilityArguments.add(arguments)
+      return DaemonResponse(id = "capability", type = "mcp_response", success = true)
+    }
     return responses[toolName]
       ?: throw IllegalStateException("No response configured for tool: $toolName")
   }

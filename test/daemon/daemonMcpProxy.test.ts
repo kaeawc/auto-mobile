@@ -2431,7 +2431,7 @@ describe("DaemonMcpProxy", () => {
   });
 
   describe("connection capability profiles", () => {
-    test("replays a generated profile for sessionless discovery without turning it into a device session", async () => {
+    test("replays a generated profile for discovery and explicit device calls without turning it into a device session", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: {
           content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a", capability: "test-authoring" }) }],
@@ -2448,11 +2448,21 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("setToolCapability", { capability: "test-authoring" });
         await proxy.listTools();
+        await proxy.callTool("executePlan", { sessionUuid: "device-session-a" });
 
-        expect(client.callToolCalls).toEqual([{
-          toolName: "setToolCapability",
-          params: { capability: "test-authoring" },
-        }]);
+        expect(client.callToolCalls).toEqual([
+          {
+            toolName: "setToolCapability",
+            params: { capability: "test-authoring" },
+          },
+          {
+            toolName: "executePlan",
+            params: {
+              sessionUuid: "device-session-a",
+              [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a",
+            },
+          },
+        ]);
         expect(client.callDaemonMethodCalls).toEqual([{
           method: "tools/list",
           params: { [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a" },

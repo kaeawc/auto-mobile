@@ -6,6 +6,7 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { DAEMON_CAPABILITY_PROFILE_PARAM } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
@@ -316,6 +317,29 @@ describe("UnixSocketServer MCP forward serialization", () => {
     } finally {
       client.close();
     }
+  });
+
+  test("creates a loopback client with both an explicit device session and its capability profile", async () => {
+    const factoryArguments: Array<[string | undefined, string | undefined]> = [];
+    server.mcpClientFactory = async (sessionUuid, capabilityProfileUuid) => {
+      factoryArguments.push([sessionUuid, capabilityProfileUuid]);
+      return {
+        callTool: async () => ({ content: [] }),
+        listTools: async () => ({ tools: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    const response = await sendToolsCallWithArgs(socketPath, "executePlan", {
+      sessionUuid: "device-session-a",
+      [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a",
+    });
+
+    expect(response.success).toBe(true);
+    expect(factoryArguments).toEqual([["device-session-a", "profile-a"]]);
   });
 
   test("routes sessionless calls through the client bound by an earlier session-aware call", async () => {

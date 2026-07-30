@@ -348,6 +348,24 @@ internal object AutoMobilePlanExecutor {
       appendExecutePlanCleanupArgs(args)
       appendCaptureObserveStepsArgs(args)
 
+      // Plans use test-authoring tools such as executePlan. Opt this generated
+      // device session in before executing the plan so runner behavior remains
+      // unchanged while interactive MCP clients keep the lean core default.
+      val capabilityResponse =
+        DaemonSocketClientManager.callTool(
+          "setToolCapability",
+          JsonObject(
+            mapOf(
+              "capability" to JsonPrimitive("test-authoring"),
+              "sessionUuid" to JsonPrimitive(sessionUuid),
+            )
+          ),
+          options.effectiveExecutePlanTimeoutMs(),
+        )
+      check(capabilityResponse.success) {
+        "Unable to enable the test-authoring capability: ${capabilityResponse.error ?: "unknown daemon error"}"
+      }
+
       if (options.debugMode) {
         println(
           "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)"

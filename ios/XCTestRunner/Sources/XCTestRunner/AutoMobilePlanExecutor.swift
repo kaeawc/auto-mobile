@@ -992,6 +992,16 @@ public final class AutoMobilePlanExecutor {
             try PerfTimer.measure("mcpClient.initialize") {
                 try mcpClient.initialize(timeout: configuration.timeoutSeconds)
             }
+            _ = try PerfTimer.measure("mcpClient.callTool(setToolCapability)") {
+                try mcpClient.callTool(
+                    name: "setToolCapability",
+                    arguments: [
+                        "capability": "test-authoring",
+                        "sessionUuid": sessionUuid,
+                    ],
+                    timeout: configuration.timeoutSeconds
+                )
+            }
             PerfTimer.log("calling executePlan tool with timeout=\(configuration.timeoutSeconds)s")
             let response = try PerfTimer.measure("mcpClient.callTool(executePlan)") {
                 try mcpClient.callTool(

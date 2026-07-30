@@ -34,6 +34,7 @@ import {
   SessionReleaseBroadcaster,
   SESSION_RELEASED_NOTIFICATION_METHOD,
 } from "../server/sessionReleaseBroadcast";
+import { capabilityProfileUuidFromToolResponse, SET_TOOL_CAPABILITY_TOOL_NAME } from "../features/toolCapabilities/toolCapabilityControl";
 import {
   evaluateClientHandshake,
   extractClientHandshake,
@@ -169,36 +170,6 @@ interface McpForwardRoute {
 
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
-
-function responseTextContent(response: unknown): string[] {
-  if (!response || typeof response !== "object") {
-    return [];
-  }
-  const content = (response as { content?: unknown }).content;
-  if (!Array.isArray(content)) {
-    return [];
-  }
-  return content.flatMap(item => {
-    const text = item && typeof item === "object" && (item as { type?: unknown }).type === "text"
-      ? (item as { text?: unknown }).text
-      : undefined;
-    return typeof text === "string" ? [text] : [];
-  });
-}
-
-function profileUuidFromToolResponse(response: unknown): string | undefined {
-  for (const text of responseTextContent(response)) {
-    try {
-      const parsed = JSON.parse(text) as { sessionUuid?: unknown };
-      if (isNonBlankSessionUuid(parsed.sessionUuid)) {
-        return parsed.sessionUuid;
-      }
-    } catch (error) {
-      logger.debug(`[McpForward] Ignoring non-JSON setToolCapability response: ${error}`);
-    }
-  }
-  return undefined;
-}
 
 /**
  * Preserve the normal failed socket envelope while carrying append progress for
@@ -792,10 +763,10 @@ export class UnixSocketServer {
       // seeded loopback transport advertises the session-scoped list, completing
       // the proxy-side reconnect seeding (issue #4610).
       const listSessionUuid = this.getSessionUuid(request.params);
-      if (listSessionUuid) {
-        return this.sessionScopedForwardRoute(socketSessionId, listSessionUuid, undefined);
-      }
       const capabilityProfileUuid = this.getCapabilityProfileUuid(request.params);
+      if (listSessionUuid) {
+        return this.sessionScopedForwardRoute(socketSessionId, listSessionUuid, undefined, capabilityProfileUuid);
+      }
       if (capabilityProfileUuid) {
         return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, undefined);
       }
@@ -839,10 +810,10 @@ export class UnixSocketServer {
   private getToolsCallForwardRoute(args: unknown, socketSessionId: string): McpForwardRoute {
     const scopedKey = this.getRequestArgumentScopeKey(args);
     const sessionUuid = this.getSessionUuid(args);
-    if (sessionUuid) {
-      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, scopedKey);
-    }
     const capabilityProfileUuid = this.getCapabilityProfileUuid(args);
+    if (sessionUuid) {
+      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, scopedKey, capabilityProfileUuid);
+    }
     if (capabilityProfileUuid) {
       return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, scopedKey);
     }
@@ -873,8 +844,14 @@ export class UnixSocketServer {
     return { executionKey: key, clientKey: key };
   }
 
-  private sessionMcpClientKey(socketSessionId: string, sessionUuid: string): string {
-    return `socket:${socketSessionId}:session:${sessionUuid}`;
+  private sessionMcpClientKey(
+    socketSessionId: string,
+    sessionUuid: string,
+    capabilityProfileUuid?: string,
+  ): string {
+    return capabilityProfileUuid
+      ? `socket:${socketSessionId}:session:${sessionUuid}:capability:${capabilityProfileUuid}`
+      : `socket:${socketSessionId}:session:${sessionUuid}`;
   }
 
   private capabilityProfileMcpClientKey(socketSessionId: string, capabilityProfileUuid: string): string {
@@ -887,12 +864,14 @@ export class UnixSocketServer {
   private sessionScopedForwardRoute(
     socketSessionId: string,
     sessionUuid: string,
-    scopedKey: string | undefined
+    scopedKey: string | undefined,
+    capabilityProfileUuid?: string,
   ): McpForwardRoute {
     return {
       executionKey: scopedKey ?? `session:${sessionUuid}`,
-      clientKey: this.sessionMcpClientKey(socketSessionId, sessionUuid),
+      clientKey: this.sessionMcpClientKey(socketSessionId, sessionUuid, capabilityProfileUuid),
       sessionUuid,
+      capabilityProfileUuid,
     };
   }
 
@@ -1000,10 +979,10 @@ export class UnixSocketServer {
   }
 
   private getGeneratedCapabilityProfileUuid(request: DaemonRequest, response: unknown): string | undefined {
-    if (request.params?.name !== "setToolCapability") {
+    if (request.params?.name !== SET_TOOL_CAPABILITY_TOOL_NAME) {
       return undefined;
     }
-    return profileUuidFromToolResponse(response);
+    return capabilityProfileUuidFromToolResponse(response);
   }
 
   private clearBoundMcpClientKey(socketSessionId: string): void {

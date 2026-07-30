@@ -5,6 +5,7 @@ import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_V
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
+import { capabilityProfileUuidFromToolResponse, SET_TOOL_CAPABILITY_TOOL_NAME } from "../features/toolCapabilities/toolCapabilityControl";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
@@ -243,33 +244,6 @@ function stringOption(
 
 function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function capabilityProfileUuidFromToolResponse(result: unknown): string | undefined {
-  if (!result || typeof result !== "object") {
-    return undefined;
-  }
-  const content = (result as { content?: unknown }).content;
-  if (!Array.isArray(content)) {
-    return undefined;
-  }
-  for (const item of content) {
-    const text = item && typeof item === "object" && (item as { type?: unknown }).type === "text"
-      ? (item as { text?: unknown }).text
-      : undefined;
-    if (typeof text !== "string") {
-      continue;
-    }
-    try {
-      const sessionUuid = (JSON.parse(text) as { sessionUuid?: unknown }).sessionUuid;
-      if (typeof sessionUuid === "string" && sessionUuid.trim().length > 0) {
-        return sessionUuid;
-      }
-    } catch (error) {
-      logger.debug(`[DaemonMcpProxy] Ignoring non-JSON setToolCapability response: ${error}`);
-    }
-  }
-  return undefined;
 }
 
 /**
@@ -1032,14 +1006,14 @@ export class DaemonMcpProxy {
   }
 
   private withCapabilityProfile(args: Record<string, unknown>): Record<string, unknown> {
-    if (!this.capabilityProfileUuid || typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0) {
+    if (!this.capabilityProfileUuid) {
       return args;
     }
     return { ...args, [DAEMON_CAPABILITY_PROFILE_PARAM]: this.capabilityProfileUuid };
   }
 
   private rememberCapabilityProfile(name: string, result: unknown): void {
-    if (name !== "setToolCapability") {
+    if (name !== SET_TOOL_CAPABILITY_TOOL_NAME) {
       return;
     }
     const sessionUuid = capabilityProfileUuidFromToolResponse(result);

@@ -10,7 +10,9 @@ import type { SessionToolProfileService } from "./SessionToolProfileService";
  * device/routing identity instead of collapsing back onto the base session.
  * Capability enforcement is computed SEPARATELY at each assert call (union of
  * base + derived, Gap B) and is intentionally NOT carried here, so routing and
- * capability can no longer be re-conflated.
+ * capability can no longer be re-conflated. A connection-scoped capability
+ * profile is carried independently so it can participate in that union without
+ * changing nested calls' routing identity.
  */
 type ToolCapabilityContext = {
   routingSessionUuid?: string;

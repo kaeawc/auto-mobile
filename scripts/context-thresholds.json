@@ -1,15 +1,15 @@
 {
   "version": "2.0.0",
   "metadata": {
-    "generatedAt": "2026-07-29",
+    "generatedAt": "2026-07-30",
     "description": "Canonical context baselines after core tools became the default profile. The benchmark instantiates the production MCP server, measures the core profile (tools without an opt-in capability) and the complete advertised tool surface, then includes the resources and resource templates shared by both profiles. Thresholds are intentionally omitted until these two baselines have been reviewed.",
     "baseline": {
-      "coreTools": 8468,
-      "allTools": 26187,
+      "coreTools": 8465,
+      "allTools": 26184,
       "resources": 1259,
       "resourceTemplates": 12137,
-      "coreTotal": 21864,
-      "allTotal": 39583
+      "coreTotal": 21861,
+      "allTotal": 39580
     }
   }
 }

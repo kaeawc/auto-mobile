@@ -316,7 +316,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   // Register tool definitions using the lower-level interface
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const sessionUuid = sessionToolBinding.effectiveCapabilityProfileUuid(options.sessionContext?.sessionId);
+    const sessionId = options.sessionContext?.sessionId;
+    const routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId);
+    const connectionProfileUuid = sessionToolBinding.connectionCapabilityProfileUuid(sessionId);
     const definitions = ToolRegistry.getToolDefinitions();
     // Advertise a tool when EITHER the bound base session OR any of its derived
     // `${base}:${label}` device-label sessions enables it — the same UNION the
@@ -332,15 +334,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // any `device` argument, so its discovery must be base-only. Advertising a
     // plain tool that only a label enables would leave it listed but rejected by
     // the base-only call gate — a label-only grant must not surface a plain tool.
-    const labelSessionUuids = sessionUuid
-      ? Object.values(getDeviceLabelMap(sessionUuid) ?? {})
+    const labelSessionUuids = routingSessionUuid
+      ? Object.values(getDeviceLabelMap(routingSessionUuid) ?? {})
       : [];
     return {
       tools: (await Promise.all(definitions.map(async definition => {
         const deviceAware = ToolRegistry.getTool(definition.name)?.requiresDevice ?? false;
         const candidateSessions = deviceAware
-          ? [sessionUuid, ...labelSessionUuids]
-          : [sessionUuid];
+          ? [connectionProfileUuid, routingSessionUuid, ...labelSessionUuids]
+          : [connectionProfileUuid, routingSessionUuid];
         return await isToolEnabledForAnySession(definition.name, candidateSessions, options.sessionToolProfileService) ? definition : undefined;
       }))).filter((definition): definition is typeof definitions[number] => definition !== undefined)
     };
@@ -376,7 +378,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
     const sessionId = options.sessionContext?.sessionId;
     const routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
-    let capabilitySessionUuid = sessionToolBinding.effectiveCapabilityProfileUuid(sessionId, toolParams);
+    let connectionProfileUuid = sessionToolBinding.connectionCapabilityProfileUuid(sessionId);
+    let capabilitySessionUuid = connectionProfileUuid ?? routingSessionUuid;
 
     // Get the registered tool
     const tool = ToolRegistry.getTool(name);
@@ -388,6 +391,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // persist and that later tools/list calls use for discovery.
     if (name === SET_TOOL_CAPABILITY_TOOL_NAME && !capabilitySessionUuid) {
       capabilitySessionUuid = sessionToolBinding.createAndBindCapabilityProfile(sessionId);
+      connectionProfileUuid = capabilitySessionUuid;
     }
     // Capability enforcement honors the UNION of the base and the derived
     // `${base}:${label}` device-label sessions (issue #4611): a tool is enabled
@@ -416,7 +420,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       : undefined;
     await assertToolEnabledForAnySession(
       name,
-      [capabilitySessionUuid, derivedLabelSessionUuid],
+      [connectionProfileUuid, routingSessionUuid, derivedLabelSessionUuid],
       options.sessionToolProfileService,
     );
 
@@ -490,9 +494,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // A routing session already carries its own base/label union in
             // ToolRegistry. Carry only a distinct connection profile so it
             // cannot suppress that derived-label resolution.
-            capabilitySessionUuid: capabilitySessionUuid !== routingSessionUuid
-              ? capabilitySessionUuid
-              : undefined,
+            capabilitySessionUuid: connectionProfileUuid,
             sessionToolProfileService: options.sessionToolProfileService,
           },
           () => tool.handler(handlerParams, progressCallback, execution.abortController.signal)

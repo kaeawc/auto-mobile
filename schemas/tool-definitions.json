@@ -7722,19 +7722,18 @@
           "description": "Optional tool capability to enable or disable for this MCP session."
         },
         "enabled": {
-          "default": true,
           "description": "Whether to enable the capability (default: true).",
+          "default": true,
           "type": "boolean"
         },
         "sessionUuid": {
-          "description": "Existing session profile to update. Omit to create or use this MCP connection's profile.",
+          "description": "Active connection or routing-session profile to update. Omit to update this MCP connection's profile.",
           "type": "string",
           "minLength": 1
         }
       },
       "required": [
-        "capability",
-        "enabled"
+        "capability"
       ],
       "additionalProperties": false
     }

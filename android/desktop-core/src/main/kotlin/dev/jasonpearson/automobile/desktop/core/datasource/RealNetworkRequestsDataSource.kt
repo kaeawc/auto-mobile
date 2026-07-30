@@ -78,8 +78,14 @@ class RealNetworkRequestsDataSource(
               RuntimeException("No detail returned for request $id")
             )
         val response = json.decodeFromString(serializer<RequestDetailResponse>(), text)
-        if (response.error != null) {
-          return@withContext Result.Error(RuntimeException(response.error))
+        // The true not-found/invalid envelope is `{ error }` with no `id` (getNetworkEventById
+        // miss / invalid requestId). A transport-level request failure still returns a full
+        // detail (valid id, headers, protocol) *with* a non-null `error`, so gate on the missing
+        // id — NOT the presence of `error` — and surface that error inside the detail.
+        if (response.id == 0L) {
+          return@withContext Result.Error(
+            RuntimeException(response.error ?: "Network request $id not found")
+          )
         }
         Result.Success(response.toDetail())
       }

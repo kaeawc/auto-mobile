@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.datasource
 
+import kotlin.math.roundToLong
 import kotlinx.serialization.Serializable
 
 /**
@@ -71,6 +72,11 @@ class FakeNetworkRequestsDataSource(
  * query returns `{ error }` instead, which the data source surfaces as a typed failure. Nullable
  * string fields mirror the daemon shape — `host`/`path`/`contentType`/`error` are `null` when
  * absent.
+ *
+ * Timing fields (`timestamp`, `durationMs`) decode as [Double]: iOS captures compute a fractional
+ * `durationMs` (e.g. `34.125`) that the daemon serializes un-rounded, and kotlinx throws on the
+ * whole payload if a `Long` field meets a fractional number — which would hide the entire table
+ * behind a spurious load error. The projectors round to `Long` for display.
  */
 @Serializable
 data class TrafficResponse(
@@ -81,20 +87,26 @@ data class TrafficResponse(
 @Serializable
 data class TrafficEventSummary(
   val id: Long = 0,
-  val timestamp: Long = 0,
+  val timestamp: Double = 0.0,
   val method: String = "",
   val url: String? = null,
   val host: String? = null,
   val path: String? = null,
   val statusCode: Int = 0,
-  val durationMs: Long = 0,
+  val durationMs: Double = 0.0,
   val contentType: String? = null,
   val error: String? = null,
 )
 
 /**
  * `automobile:network/request/{id}` payload (eventToDetail). Header maps are `null` when the event
- * carried no headers. A `{ error }` shape (invalid/missing id) is surfaced as a typed failure.
+ * carried no headers. `durationMs` is a [Double] for the same fractional-timing reason as
+ * [TrafficEventSummary].
+ *
+ * A non-null [error] does NOT mark an invalid/not-found envelope — a request that failed at the
+ * transport layer still returns a *successful* detail (valid [id], headers, protocol) alongside a
+ * non-null `error`. The true not-found/invalid envelope is `{ error }` with no `id`, distinguished
+ * by a missing/default [id] (see `RealNetworkRequestsDataSource.getRequestDetail`).
  */
 @Serializable
 data class RequestDetailResponse(
@@ -104,7 +116,7 @@ data class RequestDetailResponse(
   val host: String? = null,
   val path: String? = null,
   val statusCode: Int = 0,
-  val durationMs: Long = 0,
+  val durationMs: Double = 0.0,
   val protocol: String? = null,
   val contentType: String? = null,
   val requestHeaders: Map<String, String>? = null,
@@ -120,8 +132,8 @@ fun TrafficEventSummary.toRow(): NetworkRequestRow =
     host = host ?: "",
     path = path ?: "",
     statusCode = statusCode,
-    durationMs = durationMs,
-    timestamp = timestamp,
+    durationMs = durationMs.roundToLong(),
+    timestamp = timestamp.roundToLong(),
     contentType = contentType,
     error = error,
   )
@@ -135,7 +147,7 @@ fun RequestDetailResponse.toDetail(): NetworkRequestDetail =
     host = host ?: "",
     path = path ?: "",
     statusCode = statusCode,
-    durationMs = durationMs,
+    durationMs = durationMs.roundToLong(),
     protocol = protocol,
     contentType = contentType,
     requestHeaders = requestHeaders ?: emptyMap(),

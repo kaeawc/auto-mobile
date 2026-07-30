@@ -228,7 +228,7 @@ class RealNetworkRequestsDataSourceTest {
   }
 
   @Test
-  fun `getRequestDetail surfaces an error field as a failure`() = runBlocking {
+  fun `getRequestDetail treats the no-id not-found envelope as a failure`() = runBlocking {
     val client = FakeAutoMobileClient()
     client.setResourceResponseWithText(
       "automobile:network/request/404",
@@ -250,4 +250,49 @@ class RealNetworkRequestsDataSourceTest {
     assertTrue(result is Result.Error)
     assertFalse((result as Result.Error).message.isNullOrBlank())
   }
+
+  @Test
+  fun `a fractional durationMs decodes into a row instead of failing the whole table`() =
+    runBlocking {
+      // iOS captures serialize a fractional durationMs (and timestamp); a Long wire field would
+      // throw on the whole payload and hide every row. It must decode and round for display.
+      val client = FakeAutoMobileClient()
+      client.setResourceResponseWithText(
+        "automobile:network/traffic?limit=50&deviceId=emulator-5554",
+        """{"events":[{"id":3,"timestamp":1000.5,"method":"GET","host":"h","path":"/p","statusCode":200,"durationMs":34.125}],"count":1}""",
+      )
+
+      val result =
+        RealNetworkRequestsDataSource(clientProvider = { client }, deviceId = "emulator-5554")
+          .getRequests()
+
+      assertTrue(result is Result.Success)
+      val row = (result as Result.Success).data.single()
+      assertEquals(3L, row.id)
+      assertEquals(34L, row.durationMs)
+      assertEquals(1001L, row.timestamp)
+    }
+
+  @Test
+  fun `getRequestDetail on a transport-failed request returns the detail with its error`() =
+    runBlocking {
+      // A request that failed at the transport layer still returns a full, successful detail
+      // (valid id, headers, protocol) alongside a non-null error — it must NOT be mistaken for
+      // the not-found envelope.
+      val client = FakeAutoMobileClient()
+      client.setResourceResponseWithText(
+        "automobile:network/request/11",
+        """{"id":11,"method":"GET","url":"https://x/y","host":"x","path":"/y","statusCode":0,"durationMs":0,"protocol":"h2","requestHeaders":{"accept":"*/*"},"error":"Connection reset"}""",
+      )
+
+      val result =
+        RealNetworkRequestsDataSource(clientProvider = { client }, deviceId = "emulator-5554")
+          .getRequestDetail(11)
+
+      assertTrue(result is Result.Success)
+      val detail = (result as Result.Success).data
+      assertEquals(11L, detail.id)
+      assertEquals("Connection reset", detail.error)
+      assertEquals("*/*", detail.requestHeaders["accept"])
+    }
 }

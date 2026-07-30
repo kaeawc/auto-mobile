@@ -66,6 +66,14 @@ class VideoStreamWriter(
   private val packetCache = VideoPacketCache()
   private val reconnectWindow = ReconnectWindow(nowMs, CLIENT_RECONNECT_WINDOW_MS)
 
+  /**
+   * Growable scratch buffer reused across inter frames to move the payload out of the codec
+   * [ByteBuffer] without a per-frame heap allocation. Only ever touched under [lock] from the
+   * single encoder thread. Config/keyframe packets bypass it because they are copied for the cache
+   * anyway.
+   */
+  private var scratch = ByteArray(0)
+
   @Volatile private var stopped = false
 
   companion object {
@@ -187,22 +195,31 @@ class VideoStreamWriter(
   }
 
   /**
-   * Write one encoded video packet. It is cached before writing, allowing a later client to decode
-   * immediately even if this client fails mid-write.
+   * Write one encoded video packet directly from the codec [ByteBuffer].
+   *
+   * Config and keyframe packets are copied into an exact-size [ByteArray] and cached before
+   * writing, so a later client can decode immediately even if this client fails mid-write. Inter
+   * frames are not cached, so they are moved through a reused growable scratch buffer rather than a
+   * fresh per-frame allocation — the payload is fully written before the caller releases the output
+   * buffer, so the codec-owned bytes stay valid for the duration of this call.
    */
   fun writePacket(buffer: ByteBuffer, bufferInfo: MediaCodec.BufferInfo): Boolean {
-    val data = ByteArray(bufferInfo.size)
-    buffer.position(bufferInfo.offset)
-    buffer.get(data, 0, bufferInfo.size)
+    val size = bufferInfo.size
+    val isConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+    val isKeyFrame = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
     val ptsAndFlags =
-      VideoStreamProtocol.ptsAndFlags(
-        bufferInfo.presentationTimeUs,
-        (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0,
-        (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0,
-      )
+      VideoStreamProtocol.ptsAndFlags(bufferInfo.presentationTimeUs, isConfig, isKeyFrame)
+    buffer.position(bufferInfo.offset)
     synchronized(lock) {
-      packetCache.remember(CachedVideoPacket(ptsAndFlags, data))
-      return writePacketDataLocked(TRACK_ID_VIDEO, ptsAndFlags, data)
+      if (isConfig || isKeyFrame) {
+        val data = ByteArray(size)
+        buffer.get(data, 0, size)
+        packetCache.remember(CachedVideoPacket(ptsAndFlags, data))
+        return writePacketDataLocked(TRACK_ID_VIDEO, ptsAndFlags, data)
+      }
+      scratch = growScratch(scratch, size)
+      buffer.get(scratch, 0, size)
+      return writePacketDataLocked(TRACK_ID_VIDEO, ptsAndFlags, scratch, size)
     }
   }
 
@@ -243,15 +260,20 @@ class VideoStreamWriter(
     }
   }
 
-  private fun writePacketDataLocked(trackId: Int, ptsAndFlags: Long, data: ByteArray): Boolean {
+  private fun writePacketDataLocked(
+    trackId: Int,
+    ptsAndFlags: Long,
+    data: ByteArray,
+    length: Int = data.size,
+  ): Boolean {
     if (stopped) return false
 
     // Keep the encoder alive during local client recovery. Video data is cached;
     // audio resumes live when the replacement mux client attaches.
     val output = outputStream ?: return true
     try {
-      output.write(VideoStreamProtocol.packetHeader(audioEnabled, trackId, ptsAndFlags, data.size))
-      output.write(data)
+      output.write(VideoStreamProtocol.packetHeader(audioEnabled, trackId, ptsAndFlags, length))
+      output.write(data, 0, length)
       return true
     } catch (e: IOException) {
       println("Error writing packet: ${e.message}")
@@ -287,6 +309,14 @@ class VideoStreamWriter(
     serverSocket = null
   }
 }
+
+/**
+ * Returns a [ByteArray] of at least [size] bytes, reusing [scratch] whenever it already fits so
+ * inter frames avoid a per-frame allocation. Only the leading [size] bytes are ever written, so a
+ * larger reused buffer never leaks stale trailing bytes onto the wire.
+ */
+internal fun growScratch(scratch: ByteArray, size: Int): ByteArray =
+  if (scratch.size < size) ByteArray(size) else scratch
 
 /** Cached decoder setup and latest complete keyframe for a replacement client. */
 internal data class CachedVideoPacket(val ptsAndFlags: Long, val data: ByteArray) {

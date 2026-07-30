@@ -407,20 +407,24 @@ jobs:
           # Release publishes the exact artifacts prepared in this workflow
           # run. It intentionally does not rebuild or re-verify them from the
           # tag, because a moving main branch can make that second build differ.
+          previous_release_run_ids="$(gh run list --repo "$REPO" --workflow release.yml \
+            --branch "$TAG" --limit 100 --json databaseId --jq '.[].databaseId')"
           gh workflow run release.yml --repo "$REPO" --ref "$TAG" \
             -f tag="$TAG" \
             -f prepare_run_id="$PREPARE_RUN_ID"
 
           # workflow_dispatch returns before the run is visible. Confirm the
-          # tag-scoped Release run materializes so a delayed or dropped dispatch
-          # leaves Prepare retryable instead of reporting a false success.
+          # newly-dispatched tag-scoped Release run materializes so an older
+          # retry cannot mask a delayed or dropped dispatch.
           for _ in $(seq 1 12); do
-            release_run_id="$(gh run list --repo "$REPO" --workflow release.yml \
-              --branch "$TAG" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-            if [[ -n "$release_run_id" ]]; then
-              echo "Release is running for $TAG (run $release_run_id)"
-              exit 0
-            fi
+            while IFS= read -r release_run_id; do
+              [[ -z "$release_run_id" ]] && continue
+              if ! grep -Fxq "$release_run_id" <<< "$previous_release_run_ids"; then
+                echo "Release is running for $TAG (run $release_run_id)"
+                exit 0
+              fi
+            done < <(gh run list --repo "$REPO" --workflow release.yml \
+              --branch "$TAG" --limit 100 --json databaseId --jq '.[].databaseId')
             sleep 5
           done
 

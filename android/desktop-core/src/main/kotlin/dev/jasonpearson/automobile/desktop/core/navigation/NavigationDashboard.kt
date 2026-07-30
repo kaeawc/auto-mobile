@@ -11,7 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
-import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
@@ -39,7 +39,7 @@ fun NavigationDashboard(
   dataSourceMode: DataSourceMode = DataSourceMode.Fake,
   clientProvider: (() -> AutoMobileClient)? = null, // MCP client for real data
   selectedAppId: String? = null, // App ID to filter navigation graph by (managed by parent)
-  observationStreamClient: ObservationStreamClient? =
+  observationStreamClient: ObservationStream? =
     null, // Real-time stream client for navigation updates
   screenshotLoader: ScreenshotLoader? =
     null, // Screenshot loader (hoisted to parent so cache persists across toggles)

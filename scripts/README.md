@@ -76,9 +76,11 @@ Thresholds are defined in `scripts/context-thresholds.json`:
 }
 ```
 
-The benchmark compares both profiles against their recorded baselines. Generate a
-fresh config with `bun run benchmark-context --update-baseline`; do not copy the
-zeroes above into a working configuration.
+The benchmark compares both profiles against their recorded baselines. To record
+a new baseline, run `bun run benchmark-context`, copy its six **Actual** values
+into `metadata.baseline` in the chosen config, then rerun the benchmark to
+verify every delta is zero. Do not copy the zeroes above into a working
+configuration.
 
 ### Observe Output Byte Breakdown
 

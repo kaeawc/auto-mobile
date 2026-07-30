@@ -43,8 +43,11 @@ export function registerToolCapabilityTools(): void {
           "This MCP server's injected capability profile service is read-only and cannot update tool capabilities."
         );
       }
-      const setEnabled = profileService?.setEnabled ?? getSessionToolProfileService().setEnabled;
-      await setEnabled(sessionUuid, args.capability, args.enabled);
+      if (profileService) {
+        await profileService.setEnabled!(sessionUuid, args.capability, args.enabled);
+      } else {
+        await getSessionToolProfileService().setEnabled(sessionUuid, args.capability, args.enabled);
+      }
       ToolRegistry.notifyToolListChanged();
 
       return createJSONToolResponse({

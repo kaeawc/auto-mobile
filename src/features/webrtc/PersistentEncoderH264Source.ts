@@ -762,7 +762,6 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         }
       },
     });
-    socket.on("data", chunk => parser.push(chunk));
     let failed = false;
     const reportFailure = (error: Error): void => {
       if (failed || this.socket !== socket) {
@@ -771,6 +770,17 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       failed = true;
       onSocketFailure(error);
     };
+    socket.on("data", chunk => {
+      try {
+        parser.push(chunk);
+      } catch (error) {
+        // A bounded parse error (over-cap size/trackCount, i.e. a framing
+        // desync) surfaces here instead of the parser buffering forever. Route
+        // it through the same failure path as a socket error so the source
+        // triggers its bounded reconnect/fallback.
+        reportFailure(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
     socket.on("error", reportFailure);
     socket.on("close", () => reportFailure(new Error("video-server socket closed")));
   }

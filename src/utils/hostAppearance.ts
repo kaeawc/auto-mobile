@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { AppearanceMode } from "../models";
+import { DefaultHostDefaultsClient, type HostDefaultsClient } from "./HostDefaultsClient";
 import { logger } from "./logger";
 
 const execFileAsync = promisify(execFile);
@@ -31,13 +32,12 @@ function isDarkThemeValue(value: string): boolean {
   return normalized.includes("dark") || normalized.includes("prefer-dark");
 }
 
-export async function detectHostAppearance(): Promise<AppearanceMode> {
-  if (process.platform === "darwin") {
-    const result = await runCommand("defaults", ["read", "-g", "AppleInterfaceStyle"]);
-    if (result && result.stdout.trim().toLowerCase() === "dark") {
-      return "dark";
-    }
-    return "light";
+export async function detectHostAppearance(
+  hostDefaults: HostDefaultsClient = new DefaultHostDefaultsClient()
+): Promise<AppearanceMode> {
+  if (hostDefaults.isSupported()) {
+    const style = await hostDefaults.readGlobal("AppleInterfaceStyle");
+    return style?.toLowerCase() === "dark" ? "dark" : "light";
   }
 
   if (process.platform === "linux") {

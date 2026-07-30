@@ -1,8 +1,6 @@
 package dev.jasonpearson.automobile.video
 
 import android.media.MediaCodec
-import android.net.LocalServerSocket
-import android.net.LocalSocket
 import android.os.SystemClock
 import java.io.IOException
 import java.io.OutputStream
@@ -51,6 +49,7 @@ class VideoStreamWriter(
   private val height: Int,
   private val audioEnabled: Boolean = false,
   private val nowMs: () -> Long = { SystemClock.elapsedRealtime() },
+  private val socketFactory: VideoServerSocketFactory = LocalServerSocketFactory,
 ) {
   private data class CachedPacket(
     val trackId: Int,
@@ -58,10 +57,10 @@ class VideoStreamWriter(
     val data: ByteArray,
   )
 
-  private var serverSocket: LocalServerSocket? = null
+  private var serverSocket: VideoServerSocket? = null
   // @Volatile: stop() closes this without the lock to unblock a writer thread wedged in a
   // blocking socket write (the writer holds `lock` for the duration of that write).
-  @Volatile private var clientSocket: LocalSocket? = null
+  @Volatile private var clientSocket: VideoClientConnection? = null
   private var outputStream: OutputStream? = null
   private var commandHandler: ((Int) -> Unit)? = null
   private val lock = Any()
@@ -110,9 +109,7 @@ class VideoStreamWriter(
    * without delaying initial decoder setup.
    */
   fun start(onClientConnected: () -> Unit = {}) {
-    serverSocket = LocalServerSocket(socketName)
-    synchronized(lock) { reconnectWindow.start() }
-    println("Waiting for client connection on localabstract:$socketName")
+    bindServerSocket()
     writerThread =
       Thread({ drainToTransport() }, "video-transport-writer").apply {
         isDaemon = true
@@ -139,6 +136,17 @@ class VideoStreamWriter(
   }
 
   /**
+   * Bind the listening socket and arm the reconnect window without spawning the acceptor thread.
+   * Split out from [start] so unit tests can drive [acceptClients] synchronously on the test thread
+   * with an injected [socketFactory].
+   */
+  internal fun bindServerSocket() {
+    serverSocket = socketFactory.create(socketName)
+    synchronized(lock) { reconnectWindow.start() }
+    println("Waiting for client connection on localabstract:$socketName")
+  }
+
+  /**
    * Registers a callback for every current or future bidirectional client. The reader is
    * deliberately owned by the writer so reconnects do not lose the keyframe-request control
    * channel.
@@ -149,7 +157,7 @@ class VideoStreamWriter(
     }
   }
 
-  private fun acceptClients(onClientConnected: () -> Unit) {
+  internal fun acceptClients(onClientConnected: () -> Unit) {
     while (!stopped) {
       val client =
         try {
@@ -188,7 +196,7 @@ class VideoStreamWriter(
     }
   }
 
-  private fun startCommandReaderFor(client: LocalSocket) {
+  private fun startCommandReaderFor(client: VideoClientConnection) {
     val input = client.inputStream
     Thread(
         {
@@ -296,7 +304,7 @@ class VideoStreamWriter(
     }
   }
 
-  private fun isCurrentClient(client: LocalSocket): Boolean =
+  private fun isCurrentClient(client: VideoClientConnection): Boolean =
     synchronized(lock) { clientSocket === client }
 
   private fun closeClientLocked() {

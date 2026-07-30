@@ -100,7 +100,7 @@ object VideoServer {
     }
   }
 
-  private fun parseQuality(args: Array<String>): QualityPreset {
+  internal fun parseQuality(args: Array<String>): QualityPreset {
     var i = 0
     while (i < args.size) {
       when (args[i]) {
@@ -128,7 +128,7 @@ object VideoServer {
   }
 
   /** Read the integer value following [flag], or null if absent/invalid. */
-  private fun parseIntFlag(args: Array<String>, flag: String): Int? {
+  internal fun parseIntFlag(args: Array<String>, flag: String): Int? {
     val index = args.indexOf(flag)
     if (index < 0 || index + 1 >= args.size) {
       return null
@@ -137,7 +137,7 @@ object VideoServer {
   }
 
   /** Parse `--size WxH` into an even-rounded (width, height) pair, or null. */
-  private fun parseSizeFlag(args: Array<String>): Pair<Int, Int>? {
+  internal fun parseSizeFlag(args: Array<String>): Pair<Int, Int>? {
     val index = args.indexOf("--size")
     if (index < 0 || index + 1 >= args.size) {
       return null

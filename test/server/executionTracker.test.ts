@@ -79,7 +79,7 @@ describe("ExecutionTracker", function() {
     };
 
     test.each<[string, ExecutionScopeOptions, boolean]>([
-      ["global scope matches regardless of session keys", { scope: "global" }, true],
+      ["global scope matches regardless of present non-matching session keys", { scope: "global", sessionId: "other-id", sessionUuid: "other-uuid" }, true],
       ["session scope matches on sessionUuid", { scope: "session", sessionUuid: "session-uuid" }, true],
       ["session scope misses on non-matching sessionUuid", { scope: "session", sessionUuid: "other-uuid" }, false],
       ["session scope falls back to sessionId when no uuid", { scope: "session", sessionId: "session-id" }, true],

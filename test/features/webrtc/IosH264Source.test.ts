@@ -69,6 +69,10 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
   emitStderr(line: string): void {
     this.emit("stderr", line);
   }
+
+  emitReadiness(phase: string, atMs = 0, detail?: string): void {
+    this.emit("readiness", { phase, atMs, detail });
+  }
 }
 
 class DelayedStopFrameCaptureHelper extends FakeFrameCaptureHelper {
@@ -697,6 +701,73 @@ describe("IosH264Source", () => {
     expect(error?.message).toBe("iOS screen capture did not produce a first frame.");
     expect(helpers).toHaveLength(1);
     expect(helpers[0].stopped).toBe(true);
+  });
+
+  test("names the last capture startup stage in the first-frame timeout error", async () => {
+    const timer = new FakeTimer();
+    const helper = new FakeFrameCaptureHelper();
+    const source = new IosH264Source({
+      device: IOS_DEVICE,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      firstFrameTimeoutMs: 1,
+      timer,
+      onData: () => {},
+      createHelper: () => helper,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    // The furthest stage reached wins: capture-started is later than the
+    // earlier permission/resolve markers.
+    helper.emitReadiness("permission-ready");
+    helper.emitReadiness("target-resolved");
+    helper.emitReadiness("capture-started");
+    timer.advanceTime(1);
+
+    const error = await started;
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toBe(
+      "iOS screen capture did not produce a first frame (last stage: capture-started)."
+    );
+  });
+
+  test("adds a hung-start hint when a simulator resolves its window but never starts", async () => {
+    const timer = new FakeTimer();
+    const helper = new FakeFrameCaptureHelper();
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      firstFrameTimeoutMs: 1,
+      timer,
+      onData: () => {},
+      createHelper: () => helper,
+      simulatorWindowResolver: async () => 42,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    helper.emitReadiness("permission-ready");
+    helper.emitReadiness("target-resolved");
+    timer.advanceTime(1);
+
+    const error = await started;
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toBe(
+      "iOS screen capture did not produce a first frame (last stage: target-resolved). " +
+        "Capture never started after the window resolved (hung start); retry or restart the Simulator."
+    );
   });
 
   test("requests simulator audio and forwards its PCM16LE chunks unchanged", async () => {

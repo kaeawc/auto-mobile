@@ -22,7 +22,6 @@ import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.FailuresFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
-import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
 import dev.jasonpearson.automobile.desktop.core.workspace.PerformanceFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
@@ -153,9 +152,10 @@ fun AutoMobileDesktopApp(
 
 /**
  * Real docked-facet content for a pane, wired to the per-device facets in desktop-core: Logs
- * (telemetry), Storage (auto-resolved app, Android-only), Navigation + Performance (per-device
- * observation stream), and Failures (cross-device aggregate). Network (real decode pending #4834)
- * and Test (needs a per-device daemon resource) fall back to the placeholder for now.
+ * (telemetry), Storage (auto-resolved app, Android-only), Performance (per-device observation
+ * stream, filtered by deviceId), and Failures (cross-device aggregate). Navigation (#4837 — nav
+ * updates lack a deviceId and broadcast to all panes), Network (#4834 decode), and Test (per-device
+ * daemon resource, #4715) fall back to the placeholder for now.
  */
 @Composable
 private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
@@ -166,11 +166,12 @@ private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
     Tool.Storage ->
       if (column.platform == Platform.Android) StorageFacet(column)
       else WorkspaceFacetPlaceholder(tool)
-    Tool.Navigation -> NavigationFacet(column)
     Tool.Performance -> PerformanceFacet(column)
     Tool.Failures -> FailuresFacet(column)
-    // Network (real decode pending #4834) and Test (needs a per-device daemon resource) stay on the
-    // placeholder for now.
+    // Navigation is intentionally NOT wired: nav-graph stream updates carry no deviceId and the
+    // daemon broadcasts them to all panes, so two panes would cross-contaminate (#4837). The facet
+    // + streamOnly support exist; wire once the deviceId contract lands. Network (#4834 decode) and
+    // Test (per-device daemon resource, #4715) likewise stay on the placeholder.
     else -> WorkspaceFacetPlaceholder(tool)
   }
 }

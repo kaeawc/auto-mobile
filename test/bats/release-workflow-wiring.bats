@@ -212,10 +212,20 @@
 
 @test "release.yml builds the package before publishing npm" {
   wiring_requires_yq
-  local steps
+  local steps build_index publish_index
   steps="$(yq -r '.jobs."verify-and-release".steps[] | (.name // "") + "\t" + (.run // "")' ".github/workflows/release.yml")"
   [[ "$steps" == *$'Build TypeScript package\tbun run build'* ]]
   [[ "$steps" == *$'Publish to npm\t'* ]]
+
+  run yq -r '.jobs."verify-and-release".steps | to_entries[] | select(.value.name == "Build TypeScript package") | .key' ".github/workflows/release.yml"
+  [ "$status" -eq 0 ]
+  build_index="$output"
+
+  run yq -r '.jobs."verify-and-release".steps | to_entries[] | select(.value.name == "Publish to npm") | .key' ".github/workflows/release.yml"
+  [ "$status" -eq 0 ]
+  publish_index="$output"
+
+  (( build_index < publish_index ))
 
   local notes_env
   notes_env="$(yq -r '.jobs."verify-and-release".steps[] | select(.id == "release_notes") | .env' ".github/workflows/release.yml")"

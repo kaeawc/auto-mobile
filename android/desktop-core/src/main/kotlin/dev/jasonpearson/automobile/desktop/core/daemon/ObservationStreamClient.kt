@@ -41,7 +41,7 @@ import kotlinx.serialization.serializer
  *
  * Socket path: ~/.auto-mobile/observation-stream.sock
  */
-class ObservationStreamClient {
+class ObservationStreamClient : ObservationStream {
   companion object {
     internal fun getSocketPath(): String =
       AutoMobileSocketPaths.socketPath("observation-stream.sock")
@@ -59,15 +59,18 @@ class ObservationStreamClient {
 
   // Flow for hierarchy updates
   private val _hierarchyUpdates = MutableSharedFlow<HierarchyStreamUpdate>(replay = 1)
-  val hierarchyUpdates: SharedFlow<HierarchyStreamUpdate> = _hierarchyUpdates.asSharedFlow()
+  override val hierarchyUpdates: SharedFlow<HierarchyStreamUpdate> =
+    _hierarchyUpdates.asSharedFlow()
 
   // Flow for screenshot updates
   private val _screenshotUpdates = MutableSharedFlow<ScreenshotStreamUpdate>(replay = 1)
-  val screenshotUpdates: SharedFlow<ScreenshotStreamUpdate> = _screenshotUpdates.asSharedFlow()
+  override val screenshotUpdates: SharedFlow<ScreenshotStreamUpdate> =
+    _screenshotUpdates.asSharedFlow()
 
   // Flow for navigation graph updates
   private val _navigationUpdates = MutableSharedFlow<NavigationGraphStreamUpdate>(replay = 1)
-  val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate> = _navigationUpdates.asSharedFlow()
+  override val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate> =
+    _navigationUpdates.asSharedFlow()
 
   // Flow for performance metrics updates (use extraBufferCapacity + DROP_OLDEST to avoid blocking)
   private val _performanceUpdates =
@@ -76,7 +79,8 @@ class ObservationStreamClient {
       extraBufferCapacity = 10,
       onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
-  val performanceUpdates: SharedFlow<PerformanceStreamUpdate> = _performanceUpdates.asSharedFlow()
+  override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
+    _performanceUpdates.asSharedFlow()
 
   // Flow for live key/value storage changes. Storage writes can burst (a screen that persists
   // several preferences at once), so this follows the performance flow's non-blocking policy
@@ -87,15 +91,15 @@ class ObservationStreamClient {
       extraBufferCapacity = 32,
       onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
-  val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
+  override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
 
   // Flow for device-level stream events such as control connection loss.
   private val _deviceEvents = MutableSharedFlow<DeviceStreamEvent>(replay = 1)
-  val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
+  override val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
 
   // Flow for connection state
   private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
-  val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+  override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
   // Requested observation cadence, remembered so it is re-applied on every (re)subscribe (so the
   // cadence survives reconnects). Managed via setCadence(); null means "use the daemon's default".
@@ -109,7 +113,7 @@ class ObservationStreamClient {
    *
    * @param deviceId Optional device ID to subscribe to. If null, subscribes to all devices.
    */
-  fun connect(deviceId: String? = null) {
+  override fun connect(deviceId: String?) {
     if (_connectionState.value.isConnected) {
       log.info("Already connected to observation stream")
       return
@@ -156,7 +160,7 @@ class ObservationStreamClient {
     }
   }
 
-  fun disconnect() {
+  override fun disconnect() {
     if (!_connectionState.value.isConnected) return
 
     val previousState = _connectionState.value
@@ -183,13 +187,13 @@ class ObservationStreamClient {
     _connectionState.update { ConnectionState.Disconnected() }
   }
 
-  fun isConnected(): Boolean = _connectionState.value.isConnected
+  override fun isConnected(): Boolean = _connectionState.value.isConnected
 
   /**
    * Disconnect and cancel the internal coroutine scope. After calling dispose(), this client
    * instance should not be reused.
    */
-  fun dispose() {
+  override fun dispose() {
     disconnect()
     scope.coroutineContext[Job]?.cancel()
   }
@@ -223,7 +227,7 @@ class ObservationStreamClient {
    * null for a field to fall back to the daemon's per-platform default. No-op when the cadence is
    * unchanged, so callers can invoke this on every focus change without spamming the socket.
    */
-  fun setCadence(screenshotIntervalMs: Long? = null, hierarchyIntervalMs: Long? = null) {
+  override fun setCadence(screenshotIntervalMs: Long?, hierarchyIntervalMs: Long?) {
     if (
       requestedScreenshotIntervalMs == screenshotIntervalMs &&
         requestedHierarchyIntervalMs == hierarchyIntervalMs
@@ -472,7 +476,7 @@ class ObservationStreamClient {
    * already done on a device-connection-lost event.
    */
   @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-  fun resetLayoutReplayCache() {
+  override fun resetLayoutReplayCache() {
     _screenshotUpdates.resetReplayCache()
     _hierarchyUpdates.resetReplayCache()
   }
@@ -484,7 +488,7 @@ class ObservationStreamClient {
    * @param appId Optional app ID to request the graph for a specific app. If null, the server
    *   returns the graph for the current foreground app.
    */
-  fun requestNavigationGraph(appId: String? = null) {
+  override fun requestNavigationGraph(appId: String?) {
     if (!_connectionState.value.isConnected) return
 
     val request =
@@ -504,7 +508,7 @@ class ObservationStreamClient {
    *
    * @param deviceId Capture just this device; null captures every subscribed device.
    */
-  fun requestObservation(deviceId: String? = null) {
+  override fun requestObservation(deviceId: String?) {
     if (!_connectionState.value.isConnected) return
 
     val request =

@@ -91,9 +91,12 @@ still widely called **Trusted Signing**). Certs are cloud-hosted, short-lived
   Windows-only tooling):
 
   ```bash
+  # --keystore <region>: the account region, e.g. weu / eus
+  # --storepass: an AAD access token for the service principal (az login / OIDC)
+  # --alias: "<account-name>/<cert-profile-name>"
   jsign --storetype TRUSTEDSIGNING \
-        --keystore <region>.codesigning.azure.net \   # e.g. weu / eus
-        --storepass "$ACCESS_TOKEN" \                  # AAD token for the SP
+        --keystore <region>.codesigning.azure.net \
+        --storepass "$ACCESS_TOKEN" \
         --alias "<account-name>/<cert-profile-name>" \
         AutoMobile-<version>-windows.msi
   ```
@@ -178,7 +181,15 @@ So for our current "download the `.deb` from the release page" model:
    `gpg --verify`. The public key goes in the repo / release notes.
    - Key is **self-issued and free** — no CA, no HSM, no cost. Store the private
      key + passphrase as GitHub secrets (`LINUX_GPG_PRIVATE_KEY`,
-     `LINUX_GPG_PASSPHRASE`), import in CI, `gpg --armor --detach-sign` the `.deb`.
+     `LINUX_GPG_PASSPHRASE`), import in CI, then sign **noninteractively** —
+     plain `gpg --detach-sign` on a headless runner launches pinentry and dies
+     with `Inappropriate ioctl for device`. Feed the passphrase on a file
+     descriptor (never in argv):
+     ```bash
+     printf '%s' "$LINUX_GPG_PASSPHRASE" | gpg --batch --yes \
+       --pinentry-mode loopback --passphrase-fd 0 \
+       --armor --detach-sign AutoMobile-<version>-linux.deb
+     ```
 3. **Skip `dpkg-sig`/`debsigs` embedded signing** — high-friction, near-zero
    real-world verification.
 4. **Defer apt-repo signing** until we actually stand up an apt repo. *That* is

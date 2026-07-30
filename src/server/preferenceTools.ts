@@ -54,13 +54,6 @@ function getPreferenceToolsDependencies(): PreferenceToolsDependencies {
   return preferenceToolsDependencies;
 }
 
-export function setPreferenceToolsDependencies(deps: Partial<PreferenceToolsDependencies>): void {
-  const current = getPreferenceToolsDependencies();
-  preferenceToolsDependencies = {
-    appPreferencesFactory: deps.appPreferencesFactory ?? current.appPreferencesFactory,
-  };
-}
-
 export function resetPreferenceToolsDependencies(): void {
   preferenceToolsDependencies = null;
 }

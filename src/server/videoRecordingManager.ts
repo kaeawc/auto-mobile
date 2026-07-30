@@ -332,7 +332,12 @@ function highlightAnimationDurationMs(platform: BootedDevice["platform"]): numbe
     : ANDROID_HIGHLIGHT_ANIMATION_DURATION_MS;
 }
 
-function generateHighlightId(timer: Timer = defaultTimer): string {
+/**
+ * Canonical highlight-id factory. Formats an operator-visible `highlight_<ts>_<uuid>`
+ * whose uniqueness comes from the injected {@link createTimestampedId} primitive.
+ * Exported so `highlightTools` shares this one path rather than re-inlining it.
+ */
+export function generateHighlightId(timer: Timer = defaultTimer): string {
   return createTimestampedId("highlight", timer);
 }
 

@@ -10,6 +10,7 @@ import {
 import type { BootedDevice } from "../../src/models";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
@@ -169,6 +170,35 @@ describe("AppFileService", () => {
     expect(commands[1]).toContain("/data/local/tmp/automobile-");
     expect(commands[1]).toContain("files/fixtures/welcome file.txt");
     expect(commands[2]).toContain("shell rm -f '/data/local/tmp/automobile-");
+  });
+
+  test("sources the run-as temp path token from the injected IdGenerator", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const service = createAppFileServiceForTesting({
+      adbFactory,
+      idGenerator: new CountingIdGenerator("tmp"),
+      simctlFactory: () => {
+        throw new Error("simctl not used");
+      },
+    });
+    const device: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "Pixel",
+      platform: "android",
+    };
+
+    await service.putFile({
+      device,
+      appId: "com.example.app",
+      container: "documents",
+      contentText: "hello",
+      destinationPath: "fixtures/welcome.txt",
+    });
+
+    const commands = adbFactory.getFakeClient().getAllCommands();
+    // Deterministic token proves randomUUID() was routed onto the IdGenerator seam (issue #3511).
+    expect(commands[0]).toContain("/data/local/tmp/automobile-tmp-1-welcome.txt");
+    expect(commands[2]).toContain("/data/local/tmp/automobile-tmp-1-welcome.txt");
   });
 
   test("lists missing Android containers as empty instead of failing find", async () => {

@@ -13,7 +13,7 @@ import {
   ViewHierarchyResult
 } from "../models";
 import { highlightShapeSchema, VisualHighlightClient } from "../features/debug/VisualHighlight";
-import { recordVideoRecordingHighlightAdded } from "./videoRecordingManager";
+import { generateHighlightId, recordVideoRecordingHighlightAdded } from "./videoRecordingManager";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -21,8 +21,6 @@ import { DefaultElementSelector } from "../features/utility/DefaultElementSelect
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../utils/PerformanceTracker";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { createTimestampedId } from "../utils/IdGenerator";
 import {
   elementContainerSchema,
   elementIdTextFieldsSchema,
@@ -30,10 +28,6 @@ import {
   validateElementIdTextSelector
 } from "./elementSelectorSchemas";
 import { boundsEqual } from "../utils/bounds";
-
-const generateHighlightId = (timer: Timer = defaultTimer): string => {
-  return createTimestampedId("highlight", timer);
-};
 
 const highlightBaseSchema = z.object({
   platform: platformSchema,

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix, relative } from "node:path";
@@ -17,6 +16,7 @@ import {
 } from "./appFileContract";
 import { ActionableError, BootedDevice, Platform, type ExecResult } from "../models";
 import { defaultAdbClientFactory, type AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
@@ -97,6 +97,7 @@ export interface AppFileServiceDependencies {
   fileSystem?: AppFileFileSystem;
   providers?: AppFileProvider[];
   deviceResolver?: (deviceId: string) => Promise<BootedDevice>;
+  idGenerator?: IdGenerator;
 }
 
 const nodeAppFileFileSystem: AppFileFileSystem = {
@@ -157,17 +158,18 @@ export function createAppFileServiceForTesting(deps: AppFileServiceDependencies 
     deviceResolver: deps.deviceResolver ?? defaultDependencies.deviceResolver,
   };
   return new DefaultAppFileService(
-    deps.providers ?? createDefaultProviders(resolvedDeps),
+    deps.providers ?? createDefaultProviders(resolvedDeps, deps.idGenerator ?? defaultIdGenerator),
     resolvedDeps.deviceResolver,
     resolvedDeps.fileSystem
   );
 }
 
 function createDefaultProviders(
-  deps: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "fileSystem">>
+  deps: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "fileSystem">>,
+  idGenerator: IdGenerator = defaultIdGenerator
 ): AppFileProvider[] {
   return [
-    new AndroidAppFileProvider(deps.adbFactory),
+    new AndroidAppFileProvider(deps.adbFactory, idGenerator),
     new IosSimulatorAppFileProvider(deps.simctlFactory, deps.fileSystem),
   ];
 }
@@ -284,7 +286,10 @@ class DefaultAppFileService implements AppFileService {
 class AndroidAppFileProvider implements AppFileProvider {
   readonly platform = "android" as const;
 
-  constructor(private readonly adbFactory: AdbClientFactory) {}
+  constructor(
+    private readonly adbFactory: AdbClientFactory,
+    private readonly idGenerator: IdGenerator = defaultIdGenerator
+  ) {}
 
   async putFile(request: PutAppFileProviderRequest): Promise<void> {
     const adb = this.adbFactory.create(request.device);
@@ -309,7 +314,7 @@ class AndroidAppFileProvider implements AppFileProvider {
       return;
     }
 
-    const tempDevicePath = `/data/local/tmp/automobile-${randomUUID()}-${posix.basename(request.destinationPath)}`;
+    const tempDevicePath = `/data/local/tmp/automobile-${this.idGenerator.next()}-${posix.basename(request.destinationPath)}`;
     await executeAndroidAppFileCommand(
       adb,
       `push ${shellQuote(request.sourcePath)} ${shellQuote(tempDevicePath)}`,

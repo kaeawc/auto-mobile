@@ -20,8 +20,11 @@ import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
+import dev.jasonpearson.automobile.desktop.core.workspace.FailuresFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
+import dev.jasonpearson.automobile.desktop.core.workspace.PerformanceFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.Tool
@@ -149,9 +152,10 @@ fun AutoMobileDesktopApp(
 }
 
 /**
- * Real docked-facet content for a pane. Logs (per-device telemetry) and Storage (per-device,
- * auto-resolved app) are wired via their testable facets in desktop-core; every other tool falls
- * back to the shared placeholder until its dashboard gains per-device targeting.
+ * Real docked-facet content for a pane, wired to the per-device facets in desktop-core: Logs
+ * (telemetry), Storage (auto-resolved app, Android-only), Navigation + Performance (per-device
+ * observation stream), and Failures (cross-device aggregate). Network (real decode pending #4834)
+ * and Test (needs a per-device daemon resource) fall back to the placeholder for now.
  */
 @Composable
 private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
@@ -162,6 +166,11 @@ private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
     Tool.Storage ->
       if (column.platform == Platform.Android) StorageFacet(column)
       else WorkspaceFacetPlaceholder(tool)
+    Tool.Navigation -> NavigationFacet(column)
+    Tool.Performance -> PerformanceFacet(column)
+    Tool.Failures -> FailuresFacet(column)
+    // Network (real decode pending #4834) and Test (needs a per-device daemon resource) stay on the
+    // placeholder for now.
     else -> WorkspaceFacetPlaceholder(tool)
   }
 }

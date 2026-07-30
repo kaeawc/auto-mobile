@@ -57,5 +57,8 @@ fun NavigationFacet(
     settingsProvider = graph.settingsProvider,
     selectedAppId = null,
     screenshotLoader = screenshotLoader,
+    // Drive the graph solely from this pane's per-device stream so a second pane on another device
+    // never shows the active device's graph.
+    streamOnly = true,
   )
 }

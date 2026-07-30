@@ -45,6 +45,11 @@ fun NavigationDashboard(
     null, // Screenshot loader (hoisted to parent so cache persists across toggles)
   settingsProvider: SettingsProvider =
     FakeSettingsProvider(), // Settings provider (caller injects real impl)
+  // When true (and a stream is provided), skip the initial active-device data-source fetch and
+  // drive the graph solely from the per-device [observationStreamClient]. This keeps per-device
+  // panes correct: the active-device fetch would otherwise briefly show the wrong device's graph
+  // until the first stream push. The default preserves the existing (non-facet) fetch behavior.
+  streamOnly: Boolean = false,
 ) {
   val graph = LocalAutoMobileGraph.current
   var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
@@ -70,7 +75,15 @@ fun NavigationDashboard(
   var isLoading by remember { mutableStateOf(true) }
   var error by remember { mutableStateOf<String?>(null) }
 
-  LaunchedEffect(dataSourceMode, clientProvider, selectedAppId) {
+  val streamDriven = streamOnly && observationStreamClient != null
+
+  LaunchedEffect(dataSourceMode, clientProvider, selectedAppId, streamDriven) {
+    // Stream-only: skip the active-device data-source fetch so the graph is driven solely by this
+    // pane's per-device stream (avoids briefly showing the active device's graph).
+    if (streamDriven) {
+      isLoading = false
+      return@LaunchedEffect
+    }
     LOG.info(
       "Loading navigation data with mode: $dataSourceMode, appId: $selectedAppId, clientProvider=${if (clientProvider != null) "present" else "null"}"
     )

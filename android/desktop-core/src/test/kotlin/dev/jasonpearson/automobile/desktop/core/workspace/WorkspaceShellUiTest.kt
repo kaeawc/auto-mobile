@@ -210,6 +210,51 @@ class WorkspaceShellUiTest {
   }
 
   @Test
+  fun `diff control appears in a facet only with multiple devices`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(
+        columns =
+          listOf(
+            col("a", "Pixel 8").copy(activeTool = Tool.Logs),
+            col("b", "iPhone 15", Platform.Ios),
+          ),
+        focusedDeviceId = "a",
+      )
+    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    onNodeWithContentDescription("Open Logs on all devices").assertIsDisplayed()
+  }
+
+  @Test
+  fun `diff control is absent with a single device`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel 8").copy(activeTool = Tool.Logs)),
+        focusedDeviceId = "a",
+      )
+    setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
+    onNodeWithContentDescription("Open Logs on all devices").assertDoesNotExist()
+  }
+
+  @Test
+  fun `clicking diff dispatches DiffTool for the facet's tool`() = runComposeUiTest {
+    var action: WorkspaceAction? = null
+    val state =
+      WorkspaceUiState.Content(
+        columns =
+          listOf(
+            col("a", "Pixel 8").copy(activeTool = Tool.Logs),
+            col("b", "iPhone 15", Platform.Ios),
+          ),
+        focusedDeviceId = "a",
+      )
+    setContent {
+      MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
+    }
+    onNodeWithContentDescription("Open Logs on all devices").performClick()
+    assertEquals(WorkspaceAction.DiffTool(Tool.Logs), action)
+  }
+
+  @Test
   fun `default facetContent shows the coming-soon placeholder`() = runComposeUiTest {
     val state =
       WorkspaceUiState.Content(

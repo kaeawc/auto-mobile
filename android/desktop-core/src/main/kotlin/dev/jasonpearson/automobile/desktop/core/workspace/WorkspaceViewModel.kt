@@ -39,6 +39,9 @@ sealed interface WorkspaceAction {
 
   /** Run an emulator control against a device pane (rotate, screenshot, snapshot, unlock). */
   data class RunControl(val deviceId: String, val control: EmulatorControl) : WorkspaceAction
+
+  /** Open [tool] on every observed pane for like-for-like comparison (the facet ⧉ Diff control). */
+  data class DiffTool(val tool: Tool) : WorkspaceAction
 }
 
 /** One-shot effects emitted by the workspace. */
@@ -78,6 +81,15 @@ class WorkspaceViewModel(private val scope: CoroutineScope) {
       is WorkspaceAction.ToggleShrink -> mutate(action.deviceId) { it.copy(shrunk = !it.shrunk) }
       is WorkspaceAction.SelectTool -> mutate(action.deviceId) { it.copy(activeTool = action.tool) }
       is WorkspaceAction.RunControl -> runControl(action.deviceId, action.control)
+      is WorkspaceAction.DiffTool -> diffTool(action.tool)
+    }
+  }
+
+  /** Open [tool] on every observed column so all panes show the same facet side by side. */
+  private fun diffTool(tool: Tool) {
+    _state.update { current ->
+      val content = current as? WorkspaceUiState.Content ?: return@update current
+      content.copy(columns = content.columns.map { it.copy(activeTool = tool) })
     }
   }
 

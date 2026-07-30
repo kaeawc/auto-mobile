@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -82,6 +83,7 @@ class CommandPaletteTest {
         PaletteCommand("b", "Close Pixel") { ran = "b" },
       )
     setContent { MaterialTheme { CommandPalette(commands, onDismiss = { dismissed = true }) } }
+    onNodeWithContentDescription("Command search").assertIsFocused()
     onNodeWithContentDescription("Command search").performTextInput("close")
     onNodeWithText("Open Devices").assertDoesNotExist()
     onNodeWithText("Close Pixel").performClick()

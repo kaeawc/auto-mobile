@@ -19,12 +19,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -97,6 +100,9 @@ fun CommandPalette(
 ) {
   var query by remember { mutableStateOf("") }
   val results = filterCommands(commands, query)
+  // Focus the search field as soon as the palette opens, so the user can type immediately.
+  val searchFocus = remember { FocusRequester() }
+  LaunchedEffect(Unit) { searchFocus.requestFocus() }
   Box(
     modifier =
       modifier
@@ -128,7 +134,10 @@ fun CommandPalette(
         onValueChange = { query = it },
         singleLine = true,
         label = { Text("Search commands") },
-        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Command search" },
+        modifier =
+          Modifier.fillMaxWidth().focusRequester(searchFocus).semantics {
+            contentDescription = "Command search"
+          },
       )
       Spacer(Modifier.height(8.dp))
       LazyColumn(Modifier.heightIn(max = 360.dp)) {

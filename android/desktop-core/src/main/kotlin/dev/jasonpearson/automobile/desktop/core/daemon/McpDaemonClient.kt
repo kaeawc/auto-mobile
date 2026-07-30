@@ -505,12 +505,13 @@ class McpDaemonClient(
   }
 
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
+    val profileUuid = capabilityProfileUuid
     val routedArguments =
-      if (name == SET_TOOL_CAPABILITY_TOOL_NAME || capabilityProfileUuid == null) arguments
+      if (name == SET_TOOL_CAPABILITY_TOOL_NAME || profileUuid == null) arguments
       else
         buildJsonObject {
           arguments.forEach { (key, value) -> put(key, value) }
-          put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(capabilityProfileUuid!!))
+          put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(profileUuid))
         }
     val response =
       sendRequest(

@@ -1263,8 +1263,8 @@ describe("finalizeToolResponse", () => {
     });
 
     // A bounds-free single node keeps sanitize ~identity (no bounds compaction),
-    // and node `text` survives the trim verbatim — so the filler length linearly
-    // controls the serialized size the oversized threshold measures.
+    // and node `text` (ASCII, never JSON-escaped) survives the trim verbatim — so
+    // the serialized payload size is linear in filler length with slope 1.
     function paddedObservation(fillerLen: number): ObserveResult {
       return {
         updatedAt: 0,
@@ -1283,35 +1283,52 @@ describe("finalizeToolResponse", () => {
       } as ObserveResult;
     }
 
-    // Serialized size of the payload the threshold actually measures (the diff is
-    // disabled here, so observationDiff is the fixed `full/disabled` marker).
-    function actionPayloadBytes(fillerLen: number): number {
-      return Buffer.byteLength(
-        stringifyToolResponse({
-          success: true,
-          observation: paddedObservation(fillerLen),
-          observationDiff: { mode: "full", reason: "disabled" },
-        }),
-        "utf8"
-      );
-    }
-
-    // Filler that lands the payload `delta` bytes past the boundary. A ±1KB delta
-    // comfortably exceeds sanitize's near-identity size drift on this fixture.
-    function fillerForDelta(delta: number): number {
-      return DEFAULT_OBSERVATION_INLINE_MAX_BYTES - actionPayloadBytes(0) + delta;
-    }
-
-    test("routes an over-64KB observation to an artifact", () => {
-      const writer = new FakeObservationArtifactWriter();
-      const filler = fillerForDelta(1024);
-      // Guard the fixture genuinely crosses the boundary before asserting routing.
-      expect(actionPayloadBytes(filler)).toBeGreaterThan(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
-
+    function finalizeOversized(fillerLen: number, writer = new FakeObservationArtifactWriter()) {
       const finalized = finalizeToolResponse(
-        createStructuredToolResponse({ success: true, observation: paddedObservation(filler) }),
+        createStructuredToolResponse({ success: true, observation: paddedObservation(fillerLen) }),
         { name: "tapOn", sessionUuid: "s1", artifactMode: "oversized", artifactWriter: writer } as any
       );
+      return { finalized, writer };
+    }
+
+    // For an INLINE result, finalizeToolResponse rewrites content[0].text from the
+    // very payload the oversized threshold measured, so its byte length IS the
+    // post-sanitization size the threshold compared against the cutoff — no need to
+    // re-derive sanitize. Throws if the filler artifacted (out of the inline regime).
+    function inlineBytes(fillerLen: number): number {
+      const { finalized, writer } = finalizeOversized(fillerLen);
+      if (writer.writes.length !== 0) {
+        throw new Error(`filler ${fillerLen} artifacted; calibrate within the inline regime`);
+      }
+      return Buffer.byteLength(finalized.content[0].text, "utf8");
+    }
+
+    // Solve for the filler whose post-sanitization payload is exactly the cutoff.
+    // Size is linear in filler with slope 1, so a single step lands it exactly; we
+    // assert that before relying on it.
+    function fillerAtExactMax(): number {
+      const probe = 4096; // safely inline
+      const solved = DEFAULT_OBSERVATION_INLINE_MAX_BYTES - inlineBytes(probe) + probe;
+      expect(inlineBytes(solved)).toBe(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+      return solved;
+    }
+
+    test("a payload of exactly 64KB stays inline (strict > semantics)", () => {
+      const atMax = fillerAtExactMax();
+      // One filler char == one payload byte: the size is pinned, not merely near.
+      expect(inlineBytes(atMax) - inlineBytes(atMax - 1)).toBe(1);
+      expect(inlineBytes(atMax)).toBe(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+
+      const { finalized, writer } = finalizeOversized(atMax);
+      expect(writer.writes).toHaveLength(0);
+      expect((finalized.structuredContent as any).observation.artifact).toBeUndefined();
+      expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
+    });
+
+    test("a payload of exactly 64KB + 1 routes to an artifact", () => {
+      // atMax is exactly the cutoff, so +1 filler char is exactly one byte over it.
+      const overByOne = fillerAtExactMax() + 1;
+      const { finalized, writer } = finalizeOversized(overByOne);
 
       expect(writer.writes).toHaveLength(1);
       expect((finalized.structuredContent as any).observation).toEqual({
@@ -1324,22 +1341,6 @@ describe("finalizeToolResponse", () => {
         },
       });
       expect((finalized.structuredContent as any).observation.viewHierarchy).toBeUndefined();
-    });
-
-    test("keeps an under-64KB observation inline", () => {
-      const writer = new FakeObservationArtifactWriter();
-      const filler = fillerForDelta(-1024);
-      expect(actionPayloadBytes(filler)).toBeLessThan(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
-
-      const finalized = finalizeToolResponse(
-        createStructuredToolResponse({ success: true, observation: paddedObservation(filler) }),
-        { name: "tapOn", sessionUuid: "s1", artifactMode: "oversized", artifactWriter: writer } as any
-      );
-
-      expect(writer.writes).toHaveLength(0);
-      // Inline: still the ObserveResult shape, not replaced with artifact metadata.
-      expect((finalized.structuredContent as any).observation.artifact).toBeUndefined();
-      expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
     });
   });
 

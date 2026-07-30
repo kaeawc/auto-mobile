@@ -109,6 +109,13 @@ compose.desktop {
           )
         }
       }
+      windows {
+        // Stable Windows Installer UpgradeCode. jpackage generates a fresh UUID
+        // per build when this is unset, so consecutive MSIs would not recognize
+        // each other as upgrades and would install side-by-side. This value must
+        // stay constant across all future releases.
+        upgradeUuid = "D3041B43-B2F0-413F-980F-A05C6DC370B2"
+      }
     }
   }
 }

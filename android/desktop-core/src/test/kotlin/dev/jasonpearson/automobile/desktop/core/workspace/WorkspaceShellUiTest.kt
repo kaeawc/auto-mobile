@@ -19,6 +19,23 @@ class WorkspaceShellUiTest {
     DeviceColumn(deviceId = id, name = name, platform = platform)
 
   @Test
+  fun `top bar exposes a command-palette trigger`() = runComposeUiTest {
+    var opened = false
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          onOpenPalette = { opened = true },
+        )
+      }
+    }
+    onNodeWithContentDescription("Open command palette").performClick()
+    assertTrue(opened)
+  }
+
+  @Test
   fun `empty state prompts to open Devices`() = runComposeUiTest {
     setContent {
       MaterialTheme {

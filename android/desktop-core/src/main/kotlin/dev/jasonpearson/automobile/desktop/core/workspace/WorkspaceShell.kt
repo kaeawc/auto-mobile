@@ -46,6 +46,7 @@ fun WorkspaceShell(
   onAction: (WorkspaceAction) -> Unit,
   onOpenPicker: () -> Unit,
   status: WorkspaceStatus = WorkspaceStatus.Green,
+  onOpenPalette: () -> Unit = {},
   modifier: Modifier = Modifier,
   // Renders the docked facet body for a pane's active tool. Hoisted so the host can supply real
   // per-device dashboards; defaults to a placeholder so un-wired tools stay inert.
@@ -54,7 +55,7 @@ fun WorkspaceShell(
   },
 ) {
   Column(modifier.fillMaxSize()) {
-    TopBar(status = status, onOpenPicker = onOpenPicker)
+    TopBar(status = status, onOpenPicker = onOpenPicker, onOpenPalette = onOpenPalette)
     when (state) {
       is WorkspaceUiState.Empty -> EmptyState(onOpenPicker, Modifier.weight(1f).fillMaxWidth())
       is WorkspaceUiState.Content ->
@@ -80,7 +81,11 @@ fun WorkspaceShell(
 }
 
 @Composable
-private fun TopBar(status: WorkspaceStatus, onOpenPicker: () -> Unit) {
+private fun TopBar(
+  status: WorkspaceStatus,
+  onOpenPicker: () -> Unit,
+  onOpenPalette: () -> Unit,
+) {
   Row(
     modifier =
       Modifier.fillMaxWidth()
@@ -100,6 +105,17 @@ private fun TopBar(status: WorkspaceStatus, onOpenPicker: () -> Unit) {
       Text("  +", color = Accent, fontWeight = FontWeight.Bold)
     }
     Spacer(Modifier.weight(1f))
+    // Quick-jump command palette (⌘K).
+    Text(
+      "⌘K",
+      style = MaterialTheme.typography.labelMedium,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      modifier =
+        Modifier.clickable { onOpenPalette() }
+          .semantics { contentDescription = "Open command palette" }
+          .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+    Spacer(Modifier.width(8.dp))
     Box(
       modifier =
         Modifier.size(12.dp).background(status.color(), CircleShape).semantics {

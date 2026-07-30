@@ -21,12 +21,14 @@ describe("session-scoped tool discovery", () => {
 
   test("retains a generated profile for an unbound stdio transport", () => {
     const binding = new SessionToolBinding();
-    const sessionUuid = binding.createAndBind(undefined);
+    const sessionUuid = binding.createAndBindCapabilityProfile(undefined);
 
     expect(sessionUuid).toMatch(/^[0-9a-f-]{36}$/);
-    expect(binding.effectiveSessionUuid(undefined)).toBe(sessionUuid);
-    expect(binding.unbindSession(sessionUuid)).toBe(true);
     expect(binding.effectiveSessionUuid(undefined)).toBeUndefined();
+    expect(binding.effectiveCapabilityProfileUuid(undefined)).toBe(sessionUuid);
+    // A capability profile is connection state, not a releasable device session.
+    expect(binding.unbindSession(sessionUuid)).toBe(false);
+    expect(binding.effectiveCapabilityProfileUuid(undefined)).toBe(sessionUuid);
   });
 
   test("seeds only a recreated transport's initial session binding", () => {

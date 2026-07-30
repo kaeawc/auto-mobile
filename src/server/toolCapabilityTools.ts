@@ -32,16 +32,14 @@ export function registerToolCapabilityTools(): void {
     setToolCapabilitySchema,
     async args => {
       const context = getToolCapabilityContext();
-      const sessionUuid = context?.routingSessionUuid;
+      const sessionUuid = context?.capabilitySessionUuid ?? context?.routingSessionUuid;
       if (!sessionUuid) {
         throw new ActionableError("Unable to establish an MCP session profile for this capability update.");
       }
 
       const profileService = context?.sessionToolProfileService;
-      const service = profileService?.setEnabled
-        ? profileService
-        : getSessionToolProfileService();
-      await service.setEnabled(sessionUuid, args.capability, args.enabled);
+      const setEnabled = profileService?.setEnabled ?? getSessionToolProfileService().setEnabled;
+      await setEnabled(sessionUuid, args.capability, args.enabled);
       ToolRegistry.notifyToolListChanged();
 
       return createJSONToolResponse({

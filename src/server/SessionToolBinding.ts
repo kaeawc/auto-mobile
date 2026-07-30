@@ -3,11 +3,14 @@ import { randomUUID } from "node:crypto";
 export class SessionToolBinding {
   private readonly boundDeviceSessions = new Map<string, string>();
   private initialSessionUuid?: string;
+  private initialCapabilityProfileUuid?: string;
   /** The single stdio transport has no MCP session ID, so retain its profile here. */
-  private directSessionUuid?: string;
+  private directCapabilityProfileUuid?: string;
+  private readonly capabilityProfiles = new Map<string, string>();
 
-  constructor(initialSessionUuid?: string) {
+  constructor(initialSessionUuid?: string, initialCapabilityProfileUuid?: string) {
     this.initialSessionUuid = initialSessionUuid;
+    this.initialCapabilityProfileUuid = initialCapabilityProfileUuid;
   }
 
   effectiveSessionUuid(mcpSessionId: string | undefined, params?: unknown): string | undefined {
@@ -18,7 +21,23 @@ export class SessionToolBinding {
       ? explicit
       : mcpSessionId
         ? this.boundDeviceSessions.get(mcpSessionId) ?? this.initialSessionUuid
-        : this.directSessionUuid ?? this.initialSessionUuid;
+        : this.initialSessionUuid;
+  }
+
+  /**
+   * Resolve the profile used solely for tool-capability policy. A generated
+   * connection profile deliberately never becomes a routing/device session:
+   * executePlan may release device sessions, but that must not erase a user's
+   * capability choices for the still-open MCP connection.
+   */
+  effectiveCapabilityProfileUuid(mcpSessionId: string | undefined, params?: unknown): string | undefined {
+    const routingSessionUuid = this.effectiveSessionUuid(mcpSessionId, params);
+    if (routingSessionUuid) {
+      return routingSessionUuid;
+    }
+    return mcpSessionId
+      ? this.capabilityProfiles.get(mcpSessionId) ?? this.initialCapabilityProfileUuid
+      : this.directCapabilityProfileUuid ?? this.initialCapabilityProfileUuid;
   }
 
   bind(mcpSessionId: string | undefined, sessionUuid: string | undefined): boolean {
@@ -26,11 +45,7 @@ export class SessionToolBinding {
       return false;
     }
     if (!mcpSessionId) {
-      if (this.directSessionUuid === sessionUuid) {
-        return false;
-      }
-      this.directSessionUuid = sessionUuid;
-      return true;
+      return false;
     }
     if (this.boundDeviceSessions.get(mcpSessionId) === sessionUuid) {
       return false;
@@ -39,10 +54,14 @@ export class SessionToolBinding {
     return true;
   }
 
-  /** Creates and binds a persistent profile for a connection that has none yet. */
-  createAndBind(mcpSessionId: string | undefined): string {
+  /** Creates and binds a persistent capability profile without selecting a device session. */
+  createAndBindCapabilityProfile(mcpSessionId: string | undefined): string {
     const sessionUuid = randomUUID();
-    this.bind(mcpSessionId, sessionUuid);
+    if (mcpSessionId) {
+      this.capabilityProfiles.set(mcpSessionId, sessionUuid);
+    } else {
+      this.directCapabilityProfileUuid = sessionUuid;
+    }
     return sessionUuid;
   }
 
@@ -72,10 +91,6 @@ export class SessionToolBinding {
     }
     if (this.initialSessionUuid === sessionUuid) {
       this.initialSessionUuid = undefined;
-      removed = true;
-    }
-    if (this.directSessionUuid === sessionUuid) {
-      this.directSessionUuid = undefined;
       removed = true;
     }
     return removed;

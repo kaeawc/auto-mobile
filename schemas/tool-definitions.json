@@ -7695,6 +7695,51 @@
     }
   },
   {
+    "name": "setToolCapability",
+    "description": "Enable or disable an optional AutoMobile tool capability for this MCP session.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "capability": {
+          "type": "string",
+          "enum": [
+            "clipboard",
+            "advanced-interaction",
+            "app-permissions",
+            "device-settings",
+            "app-data-interop",
+            "notifications",
+            "telephony",
+            "accessibility-tools",
+            "screen-artifacts",
+            "test-authoring",
+            "network-inspection",
+            "app-routing",
+            "navigation-modeling",
+            "biometric-auth"
+          ],
+          "description": "Optional tool capability to enable or disable for this MCP session."
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether to enable the capability (default: true).",
+          "type": "boolean"
+        },
+        "sessionUuid": {
+          "description": "Existing session profile to update. Omit to create or use this MCP connection's profile.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "capability",
+        "enabled"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "setUIState",
     "description": "Set multiple form fields by desired state.",
     "inputSchema": {

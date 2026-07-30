@@ -14,6 +14,8 @@ import type { SessionToolProfileService } from "./SessionToolProfileService";
  */
 type ToolCapabilityContext = {
   routingSessionUuid?: string;
+  /** Connection-scoped profile used for policy, distinct from device routing. */
+  capabilitySessionUuid?: string;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled"> &
     Partial<Pick<SessionToolProfileService, "setEnabled">>;
 };
@@ -27,6 +29,7 @@ export const runWithToolCapabilityContext = async <T>(
   const parent = toolCapabilityContext.getStore();
   return toolCapabilityContext.run({
     routingSessionUuid: context.routingSessionUuid ?? parent?.routingSessionUuid,
+    capabilitySessionUuid: context.capabilitySessionUuid ?? parent?.capabilitySessionUuid,
     sessionToolProfileService: context.sessionToolProfileService ?? parent?.sessionToolProfileService,
   }, fn);
 };

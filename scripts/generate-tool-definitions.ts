@@ -14,6 +14,7 @@ import { registerInteractionTools } from "../src/server/interactionTools";
 import { registerAppTools } from "../src/server/appTools";
 import { registerUtilityTools } from "../src/server/utilityTools";
 import { registerDeviceTools } from "../src/server/deviceTools";
+import { registerToolCapabilityTools } from "../src/server/toolCapabilityTools";
 import { registerDeepLinkTools } from "../src/server/deepLinkTools";
 import { registerNavigationTools } from "../src/server/navigationTools";
 import { registerNotificationTools } from "../src/server/notificationTools";
@@ -43,6 +44,7 @@ function registerAllTools(): void {
   registerAppTools();
   registerUtilityTools();
   registerDeviceTools();
+  registerToolCapabilityTools();
   registerDeepLinkTools();
   registerNavigationTools();
   registerNotificationTools();

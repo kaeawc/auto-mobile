@@ -7,7 +7,7 @@ import {
 } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike } from "../../src/daemon/client";
 import { ActionableError } from "../../src/models";
-import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS, DAEMON_BOUND_SESSION_REPLAY_TTL_MS } from "../../src/daemon/constants";
+import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS, DAEMON_BOUND_SESSION_REPLAY_TTL_MS, DAEMON_CAPABILITY_PROFILE_PARAM } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -2423,6 +2423,40 @@ describe("DaemonMcpProxy", () => {
         await expect(proxy.callTool("observe", {})).rejects.toThrow("Permission denied");
         expect(client.callToolCalls).toHaveLength(1);
         expect(client.closeCallCount).toBe(0);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+  });
+
+  describe("connection capability profiles", () => {
+    test("replays a generated profile for sessionless discovery without turning it into a device session", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: {
+          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a", capability: "test-authoring" }) }],
+        },
+        daemonMethodResults: new Map([["tools/list", { tools: [{ name: "executePlan" }] }]]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("setToolCapability", { capability: "test-authoring" });
+        await proxy.listTools();
+
+        expect(client.callToolCalls).toEqual([{
+          toolName: "setToolCapability",
+          params: { capability: "test-authoring" },
+        }]);
+        expect(client.callDaemonMethodCalls).toEqual([{
+          method: "tools/list",
+          params: { [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a" },
+        }]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

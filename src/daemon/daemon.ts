@@ -13,6 +13,7 @@ import {
   SOCKET_PATH,
   MCP_STREAMABLE_PATH,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
+  DAEMON_CAPABILITY_PROFILE_HEADER,
   DAEMON_PORT_RANGE_START,
   DAEMON_PORT_RANGE_END,
 } from "./constants";
@@ -619,9 +620,17 @@ export class Daemon {
         } else if (isInitializeRequest || !sessionId) {
           // Create new transport for initialization or when no session ID
           const boundSessionUuid = req.headers[DAEMON_SESSION_TOOL_BINDING_HEADER];
-          const sessionContext: { sessionId?: string; initialSessionToolBinding?: string } = {
+          const boundCapabilityProfileUuid = req.headers[DAEMON_CAPABILITY_PROFILE_HEADER];
+          const sessionContext: {
+            sessionId?: string;
+            initialSessionToolBinding?: string;
+            initialCapabilityToolProfile?: string;
+          } = {
             ...(typeof boundSessionUuid === "string" && boundSessionUuid.trim().length > 0
               ? { initialSessionToolBinding: boundSessionUuid }
+              : {}),
+            ...(typeof boundCapabilityProfileUuid === "string" && boundCapabilityProfileUuid.trim().length > 0
+              ? { initialCapabilityToolProfile: boundCapabilityProfileUuid }
               : {}),
           };
           streamableTransport = new StreamableHTTPServerTransport({

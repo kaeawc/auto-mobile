@@ -281,6 +281,43 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(inFlight).toBe(0);
   });
 
+  test("binds a generated capability profile to the socket and reuses it for discovery", async () => {
+    const clients: FakeMcpClient[] = [];
+    server.mcpClientFactory = async () => {
+      const client: FakeMcpClient = {
+        callTool: async () => ({
+          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a" }) }],
+        }),
+        listTools: async () => ({ tools: [{ name: `profile-client-${clients.length}` }] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      clients.push(client);
+      return client;
+    };
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const set = await client.request("tools/call", {
+        name: "setToolCapability",
+        arguments: { capability: "test-authoring" },
+      });
+      const list = await client.request("tools/list", {});
+
+      expect(set.success).toBe(true);
+      expect(list.result).toEqual({ tools: [{ name: "profile-client-1" }] });
+      // `clients.length` is one while listTools executes: the generated profile
+      // stayed on the socket's loopback transport instead of falling back to an
+      // unbound tools/list client.
+      expect(clients).toHaveLength(1);
+    } finally {
+      client.close();
+    }
+  });
+
   test("routes sessionless calls through the client bound by an earlier session-aware call", async () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-session-list-${randomUUID()}.sock`);

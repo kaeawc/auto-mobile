@@ -21,6 +21,8 @@ import {
   DAEMON_HANDSHAKE_ENABLED,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
+  DAEMON_CAPABILITY_PROFILE_HEADER,
+  DAEMON_CAPABILITY_PROFILE_PARAM,
   DAEMON_VERSION,
 } from "./constants";
 import {
@@ -125,7 +127,7 @@ interface SocketFileIdentity {
  * by name (a name-based patch silently no-ops if the internal creator is renamed,
  * leaving forwarding dead but the suite green).
  */
-export type McpClientFactory = (boundSessionUuid?: string) => Promise<Client>;
+export type McpClientFactory = (boundSessionUuid?: string, capabilityProfileUuid?: string) => Promise<Client>;
 
 /**
  * The narrow append-text surface `input/typeText mode:"append"` needs.
@@ -150,7 +152,8 @@ interface CachedAppendTextInput {
 interface BoundMcpClient {
   clientKey: string;
   executionKey: string;
-  sessionUuid: string;
+  sessionUuid?: string;
+  capabilityProfileUuid?: string;
   requiresLiveDaemonSession: boolean;
 }
 
@@ -161,10 +164,41 @@ interface McpForwardRoute {
   clientKey: string;
   /** Replayed when this transport needs to establish a fresh MCP session. */
   sessionUuid?: string;
+  capabilityProfileUuid?: string;
 }
 
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
+
+function responseTextContent(response: unknown): string[] {
+  if (!response || typeof response !== "object") {
+    return [];
+  }
+  const content = (response as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  return content.flatMap(item => {
+    const text = item && typeof item === "object" && (item as { type?: unknown }).type === "text"
+      ? (item as { text?: unknown }).text
+      : undefined;
+    return typeof text === "string" ? [text] : [];
+  });
+}
+
+function profileUuidFromToolResponse(response: unknown): string | undefined {
+  for (const text of responseTextContent(response)) {
+    try {
+      const parsed = JSON.parse(text) as { sessionUuid?: unknown };
+      if (isNonBlankSessionUuid(parsed.sessionUuid)) {
+        return parsed.sessionUuid;
+      }
+    } catch (error) {
+      logger.debug(`[McpForward] Ignoring non-JSON setToolCapability response: ${error}`);
+    }
+  }
+  return undefined;
+}
 
 /**
  * Preserve the normal failed socket envelope while carrying append progress for
@@ -218,7 +252,8 @@ export class UnixSocketServer {
    * Defaults to the real {@link createMcpClient}; tests assign a fake here to
    * exercise forwarding without a live HTTP endpoint.
    */
-  mcpClientFactory: McpClientFactory = sessionUuid => this.createMcpClient(sessionUuid);
+  mcpClientFactory: McpClientFactory = (sessionUuid, capabilityProfileUuid) =>
+    this.createMcpClient(sessionUuid, capabilityProfileUuid);
 
   /**
    * Factory for the Android append-text helper behind `input/typeText mode:"append"`.
@@ -541,16 +576,13 @@ export class UnixSocketServer {
 
           const forwardStartMs = this.timer.now();
           try {
-            const mcpClient = await this.getMcpClient(route.clientKey, route.sessionUuid);
+            const mcpClient = await this.getMcpClient(route.clientKey, route.sessionUuid, route.capabilityProfileUuid);
             const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
 
             try {
               const response = await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs, sessionId);
               this.recordBoundMcpClientKey(
-                request,
-                sessionId,
-                route,
-                sessionWasActiveBeforeForward
+                request, sessionId, route, sessionWasActiveBeforeForward, response
               );
               return response;
             } catch (ideError) {
@@ -558,7 +590,7 @@ export class UnixSocketServer {
               if (ideErrorMessage.includes("Session not found")) {
                 logger.warn("MCP client session expired, reconnecting and retrying...");
                 await this.resetMcpClient(route.clientKey);
-                const freshClient = await this.getMcpClient(route.clientKey, route.sessionUuid);
+                const freshClient = await this.getMcpClient(route.clientKey, route.sessionUuid, route.capabilityProfileUuid);
                 const retryRemainingMs = remainingTimeoutMs - (this.timer.now() - forwardStartMs);
                 if (retryRemainingMs <= 0) {
                   const toolName = request.method === "tools/call" ? request.params?.name ?? request.method : request.method;
@@ -571,10 +603,7 @@ export class UnixSocketServer {
                 }
                 const response = await this.handleIdeRequest(freshClient, request, retryRemainingMs, sessionId);
                 this.recordBoundMcpClientKey(
-                  request,
-                  sessionId,
-                  route,
-                  sessionWasActiveBeforeForward
+                  request, sessionId, route, sessionWasActiveBeforeForward, response
                 );
                 return response;
               }
@@ -766,6 +795,10 @@ export class UnixSocketServer {
       if (listSessionUuid) {
         return this.sessionScopedForwardRoute(socketSessionId, listSessionUuid, undefined);
       }
+      const capabilityProfileUuid = this.getCapabilityProfileUuid(request.params);
+      if (capabilityProfileUuid) {
+        return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, undefined);
+      }
       return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
     }
 
@@ -809,6 +842,10 @@ export class UnixSocketServer {
     if (sessionUuid) {
       return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, scopedKey);
     }
+    const capabilityProfileUuid = this.getCapabilityProfileUuid(args);
+    if (capabilityProfileUuid) {
+      return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, scopedKey);
+    }
 
     const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
     if (scopedKey) {
@@ -840,6 +877,10 @@ export class UnixSocketServer {
     return `socket:${socketSessionId}:session:${sessionUuid}`;
   }
 
+  private capabilityProfileMcpClientKey(socketSessionId: string, capabilityProfileUuid: string): string {
+    return `socket:${socketSessionId}:capability:${capabilityProfileUuid}`;
+  }
+
   // Route an explicit-session request (tools/call or an IDE read) to its OWN
   // session-specific loopback client so it never repurposes the socket's bound
   // transport to a different session (issue #4610).
@@ -855,17 +896,31 @@ export class UnixSocketServer {
     };
   }
 
+  private capabilityProfileScopedForwardRoute(
+    socketSessionId: string,
+    capabilityProfileUuid: string,
+    scopedKey: string | undefined
+  ): McpForwardRoute {
+    return {
+      executionKey: scopedKey ?? `capability:${capabilityProfileUuid}`,
+      clientKey: this.capabilityProfileMcpClientKey(socketSessionId, capabilityProfileUuid),
+      capabilityProfileUuid,
+    };
+  }
+
   private recordBoundMcpClientKey(
     request: DaemonRequest,
     socketSessionId: string,
     route: McpForwardRoute,
-    sessionWasActiveBeforeForward: boolean
+    sessionWasActiveBeforeForward: boolean,
+    response: unknown,
   ): void {
     if (request.method !== "tools/call") {
       return;
     }
     const sessionUuid = this.getSessionUuid(request.params?.arguments);
     if (!sessionUuid) {
+      this.recordGeneratedCapabilityProfile(request, response, socketSessionId, route);
       return;
     }
     const sessionIsActiveAfterForward = this.hasActiveDaemonSession(sessionUuid);
@@ -888,6 +943,29 @@ export class UnixSocketServer {
     }
   }
 
+  private recordGeneratedCapabilityProfile(
+    request: DaemonRequest,
+    response: unknown,
+    socketSessionId: string,
+    route: McpForwardRoute,
+  ): boolean {
+    const capabilityProfileUuid = this.getGeneratedCapabilityProfileUuid(request, response);
+    if (!capabilityProfileUuid) {
+      return false;
+    }
+    const previousBinding = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
+    this.boundMcpClientKeysBySocketSession.set(socketSessionId, {
+      clientKey: route.clientKey,
+      executionKey: route.executionKey,
+      capabilityProfileUuid,
+      requiresLiveDaemonSession: false,
+    });
+    if (previousBinding && previousBinding.clientKey !== route.clientKey) {
+      this.scheduleMcpClientIdleClose(previousBinding.clientKey);
+    }
+    return true;
+  }
+
   private getBoundMcpClientRoute(socketSessionId: string): McpForwardRoute | undefined {
     const boundClient = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
     if (!boundClient) {
@@ -898,17 +976,34 @@ export class UnixSocketServer {
         clientKey: boundClient.clientKey,
         executionKey: boundClient.executionKey,
         sessionUuid: boundClient.sessionUuid,
+        capabilityProfileUuid: boundClient.capabilityProfileUuid,
       };
     }
-    if (this.hasActiveDaemonSession(boundClient.sessionUuid)) {
+    if (boundClient.sessionUuid && this.hasActiveDaemonSession(boundClient.sessionUuid)) {
       return {
         clientKey: boundClient.clientKey,
         executionKey: boundClient.executionKey,
         sessionUuid: boundClient.sessionUuid,
+        capabilityProfileUuid: boundClient.capabilityProfileUuid,
       };
     }
     this.clearBoundMcpClientKey(socketSessionId);
     return undefined;
+  }
+
+  private getCapabilityProfileUuid(params: unknown): string | undefined {
+    if (!params || typeof params !== "object" || Array.isArray(params)) {
+      return undefined;
+    }
+    const value = (params as Record<string, unknown>)[DAEMON_CAPABILITY_PROFILE_PARAM];
+    return isNonBlankSessionUuid(value) ? value : undefined;
+  }
+
+  private getGeneratedCapabilityProfileUuid(request: DaemonRequest, response: unknown): string | undefined {
+    if (request.params?.name !== "setToolCapability") {
+      return undefined;
+    }
+    return profileUuidFromToolResponse(response);
   }
 
   private clearBoundMcpClientKey(socketSessionId: string): void {
@@ -2272,8 +2367,10 @@ export class UnixSocketServer {
       return args;
     }
 
+    const forwardedArgs = { ...args } as Record<string, unknown>;
+    delete forwardedArgs[DAEMON_CAPABILITY_PROFILE_PARAM];
     return {
-      ...args,
+      ...forwardedArgs,
       __mcpSessionId: socketSessionId,
     };
   }
@@ -2281,7 +2378,7 @@ export class UnixSocketServer {
   /**
    * Create an MCP client connected to the HTTP server
    */
-  private async createMcpClient(boundSessionUuid?: string): Promise<Client> {
+  private async createMcpClient(boundSessionUuid?: string, capabilityProfileUuid?: string): Promise<Client> {
     logger.info(`Creating MCP client with endpoint: "${this.mcpEndpoint}"`);
     if (!this.mcpEndpoint) {
       logger.error(`ERROR: mcpEndpoint is empty or undefined when creating client!`);
@@ -2291,11 +2388,12 @@ export class UnixSocketServer {
       new URL(this.mcpEndpoint),
       {
         reconnectionOptions: DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION,
-        ...(boundSessionUuid
+        ...(boundSessionUuid || capabilityProfileUuid
           ? {
             requestInit: {
               headers: {
-                [DAEMON_SESSION_TOOL_BINDING_HEADER]: boundSessionUuid,
+                ...(boundSessionUuid ? { [DAEMON_SESSION_TOOL_BINDING_HEADER]: boundSessionUuid } : {}),
+                ...(capabilityProfileUuid ? { [DAEMON_CAPABILITY_PROFILE_HEADER]: capabilityProfileUuid } : {}),
               },
             },
           }
@@ -2322,7 +2420,11 @@ export class UnixSocketServer {
   /**
    * Get or create the MCP client for a target key.
    */
-  private async getMcpClient(key: string, boundSessionUuid?: string): Promise<Client> {
+  private async getMcpClient(
+    key: string,
+    boundSessionUuid?: string,
+    capabilityProfileUuid?: string,
+  ): Promise<Client> {
     this.clearMcpClientIdleTimer(key);
 
     const existingClient = this.mcpClients.get(key);
@@ -2335,7 +2437,7 @@ export class UnixSocketServer {
       return existingPromise;
     }
 
-    const clientPromise = this.mcpClientFactory(boundSessionUuid)
+    const clientPromise = this.mcpClientFactory(boundSessionUuid, capabilityProfileUuid)
       .then(client => {
         this.mcpClients.set(key, client);
         this.mcpClientPromises.delete(key);

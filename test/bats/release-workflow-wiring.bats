@@ -151,6 +151,24 @@
   [[ "$final_commit" != *'git push origin HEAD:main'* ]]
 }
 
+@test "prepared release artifacts survive delayed publication retries (#4686)" {
+  wiring_requires_yq
+  local workflow
+  for workflow in \
+    .github/workflows/build-ctrl-proxy-ios-ipa.yml \
+    .github/workflows/build-control-proxy-apk.yml \
+    .github/workflows/build-video-server-jar.yml \
+    .github/workflows/build-screen-capture-helper.yml; do
+    run yq -r '.jobs.build.steps[] | select(.uses == "actions/upload-artifact@v6") | .with."retention-days"' "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "90" ]
+  done
+
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Upload release artifact provenance") | .with."retention-days"' .github/workflows/prepare-release.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = "90" ]
+}
+
 @test "prepare-release validates the finalized tree before tagging and can rerun provenance upload (#4686)" {
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"

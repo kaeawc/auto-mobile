@@ -91,4 +91,4 @@ jobs:
         with:
           name: screen-capture-helper
           path: /tmp/screen-capture-helper-macos-universal.zip
-          retention-days: 7
+          retention-days: 90

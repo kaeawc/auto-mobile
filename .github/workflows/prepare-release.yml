@@ -349,8 +349,15 @@ jobs:
           if [[ "$remote_main" == "$BASE_MAIN_COMMIT" ]]; then
             git push origin "$EXPECTED_RELEASE_COMMIT":main
           elif [[ "$remote_main" != "$EXPECTED_RELEASE_COMMIT" ]]; then
-            echo "main moved while the release was being verified; refusing to promote a different tree" >&2
-            exit 1
+            # A rerun can arrive after this job promoted and tagged the release,
+            # then a normal main commit landed before a later dispatch step
+            # failed. That is recoverable only when this exact release remains
+            # in main's history; otherwise never tag a different tree.
+            git fetch origin main
+            if ! git merge-base --is-ancestor "$EXPECTED_RELEASE_COMMIT" FETCH_HEAD; then
+              echo "main moved while the release was being verified; refusing to promote a different tree" >&2
+              exit 1
+            fi
           fi
 
           git fetch --tags origin
@@ -384,7 +391,7 @@ jobs:
         with:
           name: release-artifact-provenance
           path: /tmp/release-artifact-provenance.json
-          retention-days: 7
+          retention-days: 90
           overwrite: true
 
       - name: Start the release

@@ -84,4 +84,4 @@ jobs:
         with:
           name: ctrl-proxy-ios-ipa
           path: /tmp/control-proxy.ipa
-          retention-days: 7
+          retention-days: 90

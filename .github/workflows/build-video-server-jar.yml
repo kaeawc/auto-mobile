@@ -103,4 +103,4 @@ jobs:
         with:
           name: video-server-jar
           path: /tmp/automobile-video.jar
-          retention-days: 7
+          retention-days: 90

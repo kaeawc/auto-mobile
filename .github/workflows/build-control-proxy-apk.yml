@@ -74,4 +74,4 @@ jobs:
         with:
           name: control-proxy-apk
           path: /tmp/control-proxy-debug.apk
-          retention-days: 7
+          retention-days: 90

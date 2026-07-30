@@ -319,6 +319,44 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
+  test("preserves a socket-bound capability profile for a later explicit device call", async () => {
+    const factoryArguments: Array<[string | undefined, string | undefined]> = [];
+    server.mcpClientFactory = async (sessionUuid, capabilityProfileUuid) => {
+      factoryArguments.push([sessionUuid, capabilityProfileUuid]);
+      return {
+        callTool: async () => ({
+          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a" }) }],
+        }),
+        listTools: async () => ({ tools: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      await client.request("tools/call", {
+        name: "setToolCapability",
+        arguments: { capability: "test-authoring" },
+      });
+      const call = await client.request("tools/call", {
+        name: "executePlan",
+        arguments: { sessionUuid: "device-session-a" },
+      });
+
+      expect(call.success).toBe(true);
+      expect(factoryArguments).toEqual([
+        [undefined, undefined],
+        ["device-session-a", "profile-a"],
+      ]);
+    } finally {
+      client.close();
+    }
+  });
+
   test("creates a loopback client with both an explicit device session and its capability profile", async () => {
     const factoryArguments: Array<[string | undefined, string | undefined]> = [];
     server.mcpClientFactory = async (sessionUuid, capabilityProfileUuid) => {

@@ -18,6 +18,8 @@ type ToolCapabilityContext = {
   routingSessionUuid?: string;
   /** Connection-scoped profile used for policy, distinct from device routing. */
   capabilitySessionUuid?: string;
+  /** An admitted executePlan may invoke its nested plan steps without per-step opt-ins. */
+  planCapabilitiesAuthorized?: boolean;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled"> &
     Partial<Pick<SessionToolProfileService, "setEnabled">>;
 };
@@ -32,6 +34,8 @@ export const runWithToolCapabilityContext = async <T>(
   return toolCapabilityContext.run({
     routingSessionUuid: context.routingSessionUuid ?? parent?.routingSessionUuid,
     capabilitySessionUuid: context.capabilitySessionUuid ?? parent?.capabilitySessionUuid,
+    planCapabilitiesAuthorized: context.planCapabilitiesAuthorized
+      ?? parent?.planCapabilitiesAuthorized,
     sessionToolProfileService: context.sessionToolProfileService ?? parent?.sessionToolProfileService,
   }, fn);
 };

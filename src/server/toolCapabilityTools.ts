@@ -2,6 +2,8 @@ import { z } from "zod";
 import {
   getSessionToolProfileService,
   TOOL_CAPABILITIES,
+  type ToolCapability,
+  type SessionToolProfileService,
 } from "../features/toolCapabilities/SessionToolProfileService";
 import { ActionableError } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
@@ -21,6 +23,43 @@ export const setToolCapabilitySchema = z.object({
   ),
 });
 
+function resolveCapabilitySessionUuid(
+  requestedSessionUuid: string | undefined,
+  connectionProfileUuid: string | undefined,
+  routingSessionUuid: string | undefined,
+): string {
+  const sessionUuid = requestedSessionUuid ?? connectionProfileUuid ?? routingSessionUuid;
+  if (!sessionUuid) {
+    throw new ActionableError("Unable to establish an MCP session profile for this capability update.");
+  }
+  if (
+    requestedSessionUuid !== undefined &&
+    requestedSessionUuid !== connectionProfileUuid &&
+    requestedSessionUuid !== routingSessionUuid
+  ) {
+    throw new ActionableError("sessionUuid must identify this connection's active capability or routing session profile.");
+  }
+  return sessionUuid;
+}
+
+async function persistCapability(
+  profileService: (Pick<SessionToolProfileService, "isEnabled"> & Partial<Pick<SessionToolProfileService, "setEnabled">>) | undefined,
+  sessionUuid: string,
+  capability: ToolCapability,
+  enabled: boolean,
+): Promise<void> {
+  if (profileService && !profileService.setEnabled) {
+    throw new ActionableError(
+      "This MCP server's injected capability profile service is read-only and cannot update tool capabilities."
+    );
+  }
+  if (profileService) {
+    await profileService.setEnabled!(sessionUuid, capability, enabled);
+    return;
+  }
+  await getSessionToolProfileService().setEnabled(sessionUuid, capability, enabled);
+}
+
 /**
  * Registers the always-available MCP control for opt-in tool capabilities.
  *
@@ -37,35 +76,15 @@ export function registerToolCapabilityTools(): void {
       const context = getToolCapabilityContext();
       const connectionProfileUuid = context?.capabilitySessionUuid;
       const routingSessionUuid = context?.routingSessionUuid;
-      const sessionUuid = args.sessionUuid ?? connectionProfileUuid ?? routingSessionUuid;
-      if (!sessionUuid) {
-        throw new ActionableError("Unable to establish an MCP session profile for this capability update.");
-      }
-      if (
-        args.sessionUuid !== undefined &&
-        args.sessionUuid !== connectionProfileUuid &&
-        args.sessionUuid !== routingSessionUuid
-      ) {
-        throw new ActionableError("sessionUuid must identify this connection's active capability or routing session profile.");
-      }
-
-      const profileService = context?.sessionToolProfileService;
-      if (profileService && !profileService.setEnabled) {
-        throw new ActionableError(
-          "This MCP server's injected capability profile service is read-only and cannot update tool capabilities."
-        );
-      }
-      if (profileService) {
-        await profileService.setEnabled!(sessionUuid, args.capability, args.enabled ?? true);
-      } else {
-        await getSessionToolProfileService().setEnabled(sessionUuid, args.capability, args.enabled ?? true);
-      }
+      const sessionUuid = resolveCapabilitySessionUuid(args.sessionUuid, connectionProfileUuid, routingSessionUuid);
+      const enabled = args.enabled ?? true;
+      await persistCapability(context?.sessionToolProfileService, sessionUuid, args.capability, enabled);
       ToolRegistry.notifyToolListChanged();
 
       return createJSONToolResponse({
         sessionUuid,
         capability: args.capability,
-        enabled: args.enabled ?? true,
+        enabled,
       });
     }
   );

@@ -937,7 +937,11 @@ export class DaemonMcpProxy {
     name: string,
     args: Record<string, unknown>
   ): Promise<any> {
-    const forwardedArgs = this.withCapabilityProfile(this.withBoundSessionUuid(args));
+    // An omitted `sessionUuid` on the control tool means the connection profile,
+    // not the proxy's retained device-routing session. Preserve that distinction
+    // after a device has been bound.
+    const routingArgs = name === SET_TOOL_CAPABILITY_TOOL_NAME ? args : this.withBoundSessionUuid(args);
+    const forwardedArgs = this.withCapabilityProfile(routingArgs);
     // Snapshot the release epoch at forward time. If a session-released signal for
     // the SPECIFIC forwarded UUID lands WHILE this call is in flight, that UUID's
     // recorded epoch advances past this snapshot and the completion path below
@@ -947,7 +951,7 @@ export class DaemonMcpProxy {
     const callReleaseEpoch = this.releaseEpoch;
     try {
       const result = await this.withRecoverableReconnect(() => this.client!.callTool(name, forwardedArgs));
-      this.rememberCapabilityProfile(name, result);
+      this.rememberCapabilityProfile(name, args, result);
       // Remember what was actually forwarded, not the caller's raw args. An
       // implicit sessionless call injects the bound UUID into forwardedArgs and
       // extends the live daemon session in getOrCreateSession(); refreshing the
@@ -1012,8 +1016,15 @@ export class DaemonMcpProxy {
     return { ...args, [DAEMON_CAPABILITY_PROFILE_PARAM]: this.capabilityProfileUuid };
   }
 
-  private rememberCapabilityProfile(name: string, result: unknown): void {
-    if (name !== SET_TOOL_CAPABILITY_TOOL_NAME) {
+  private rememberCapabilityProfile(
+    name: string,
+    requestedArgs: Record<string, unknown>,
+    result: unknown,
+  ): void {
+    if (
+      name !== SET_TOOL_CAPABILITY_TOOL_NAME ||
+      (typeof requestedArgs.sessionUuid === "string" && requestedArgs.sessionUuid.trim().length > 0)
+    ) {
       return;
     }
     const sessionUuid = capabilityProfileUuidFromToolResponse(result);

@@ -809,8 +809,9 @@ export class UnixSocketServer {
 
   private getToolsCallForwardRoute(args: unknown, socketSessionId: string): McpForwardRoute {
     const scopedKey = this.getRequestArgumentScopeKey(args);
+    const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
     const sessionUuid = this.getSessionUuid(args);
-    const capabilityProfileUuid = this.getCapabilityProfileUuid(args);
+    const capabilityProfileUuid = this.getCapabilityProfileUuid(args) ?? boundRoute?.capabilityProfileUuid;
     if (sessionUuid) {
       return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, scopedKey, capabilityProfileUuid);
     }
@@ -818,7 +819,6 @@ export class UnixSocketServer {
       return this.capabilityProfileScopedForwardRoute(socketSessionId, capabilityProfileUuid, scopedKey);
     }
 
-    const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
     if (scopedKey) {
       if (boundRoute) {
         return { ...boundRoute, executionKey: scopedKey };
@@ -915,6 +915,7 @@ export class UnixSocketServer {
       clientKey: route.clientKey,
       executionKey: route.executionKey,
       sessionUuid,
+      capabilityProfileUuid: route.capabilityProfileUuid,
       requiresLiveDaemonSession: sessionWasActiveBeforeForward || sessionIsActiveAfterForward,
     });
     if (previousBinding && previousBinding.clientKey !== route.clientKey) {

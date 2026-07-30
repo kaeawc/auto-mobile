@@ -2431,6 +2431,38 @@ describe("DaemonMcpProxy", () => {
   });
 
   describe("connection capability profiles", () => {
+    test("keeps an omitted capability update on the connection profile after device routing binds", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: {
+          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a", capability: "clipboard" }) }],
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "device-session-a" });
+        await proxy.callTool("setToolCapability", { capability: "clipboard" });
+        await proxy.callTool("setToolCapability", { capability: "test-authoring" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "device-session-a" } },
+          { toolName: "setToolCapability", params: { capability: "clipboard" } },
+          {
+            toolName: "setToolCapability",
+            params: { capability: "test-authoring", [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a" },
+          },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("replays a generated profile for discovery and explicit device calls without turning it into a device session", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: {

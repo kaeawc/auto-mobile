@@ -95,7 +95,7 @@ final class XCTestRunnerTests: XCTestCase {
 
         _ = try executor.execute(testMetadata: nil)
 
-        XCTAssertEqual(mcpClient.calls.count, 2)
+        XCTAssertEqual(mcpClient.executePlanCalls.count, 2)
         XCTAssertEqual(timer.sleeps, [1])
     }
 
@@ -186,7 +186,7 @@ final class XCTestRunnerTests: XCTestCase {
 
         _ = try executor.execute(testMetadata: nil)
 
-        guard let encoded = mcpClient.calls.first?.arguments["planContent"] as? String else {
+        guard let encoded = mcpClient.executePlanCalls.first?.arguments["planContent"] as? String else {
             XCTFail("Missing plan content")
             return
         }
@@ -227,7 +227,7 @@ final class XCTestRunnerTests: XCTestCase {
 
         _ = try executor.execute(testMetadata: nil)
 
-        XCTAssertEqual(mcpClient.calls.first?.arguments["platform"] as? String, "android")
+        XCTAssertEqual(mcpClient.executePlanCalls.first?.arguments["platform"] as? String, "android")
     }
 
     func testPlanDevicesPassedToExecutePlan() throws {
@@ -268,7 +268,7 @@ final class XCTestRunnerTests: XCTestCase {
 
         _ = try executor.execute(testMetadata: nil)
 
-        let devices = mcpClient.calls.first?.arguments["devices"] as? [String]
+        let devices = mcpClient.executePlanCalls.first?.arguments["devices"] as? [String]
         XCTAssertEqual(devices, ["ios-1"])
     }
 
@@ -436,6 +436,8 @@ private final class FakeMCPClient: AutoMobileMCPClient {
     private var queuedResults: [Result<MCPToolResponse, Error>] = []
     private(set) var calls: [Call] = []
     private(set) var initializeCount = 0
+
+    var executePlanCalls: [Call] { calls.filter { $0.name == "executePlan" } }
 
     func queueResponse(success: Bool, executedSteps: Int, totalSteps: Int) {
         let payload: [String: Any] = [

@@ -82,6 +82,8 @@ interface DeviceAwareToolHandler<T = any> {
 
 interface InternalToolCallOptions {
   forPlan?: boolean;
+  /** The outer executePlan authorization admits every step in that plan. */
+  allowPlanCapabilities?: boolean;
   sessionUuid?: string;
   targetDevice?: BootedDevice;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
@@ -91,6 +93,7 @@ interface InternalToolInvocationContext {
   args: Record<string, unknown>;
   routingSessionUuid?: string;
   capabilitySessionUuid?: string;
+  planCapabilitiesAuthorized: boolean;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
 }
 
@@ -1106,6 +1109,7 @@ export class ToolRegistryClass {
         invocation.routingSessionUuid,
         invocation.capabilitySessionUuid,
         invocation.sessionToolProfileService,
+        invocation.planCapabilitiesAuthorized,
       ),
     );
   }
@@ -1127,6 +1131,8 @@ export class ToolRegistryClass {
         : args,
       routingSessionUuid: sessionUuid,
       capabilitySessionUuid: context?.capabilitySessionUuid,
+      planCapabilitiesAuthorized: options.allowPlanCapabilities === true
+        || context?.planCapabilitiesAuthorized === true,
       sessionToolProfileService: options.sessionToolProfileService ?? context?.sessionToolProfileService,
     };
   }
@@ -1140,6 +1146,7 @@ export class ToolRegistryClass {
     sessionUuid: string | undefined,
     capabilitySessionUuid: string | undefined,
     sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
+    allowPlanCapabilities: boolean,
   ): Promise<any> {
     // Honor the UNION of the base + derived `${base}:${label}` sessions here too
     // (issue #4611). `sessionUuid` is the ambient ROUTING session — a derived
@@ -1148,13 +1155,15 @@ export class ToolRegistryClass {
     // narrowed away. The `targetDevice` path below bypasses the device-aware
     // wrapper's own union gate entirely, so this pre-gate is the ONLY enforcement
     // point for it and must apply the union as well.
-    await this.assertToolEnabledUnion(
-      tool.name,
-      sessionUuid,
-      undefined,
-      sessionToolProfileService,
-      capabilitySessionUuid,
-    );
+    if (!allowPlanCapabilities) {
+      await this.assertToolEnabledUnion(
+        tool.name,
+        sessionUuid,
+        undefined,
+        sessionToolProfileService,
+        capabilitySessionUuid,
+      );
+    }
     if (targetDevice && tool.deviceAwareHandler) {
       return tool.deviceAwareHandler(targetDevice, markInternalToolCall(args), progress, signal);
     }

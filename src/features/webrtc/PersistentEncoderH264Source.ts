@@ -40,6 +40,18 @@ export const VIDEO_SERVER_COMMAND_REQUEST_KEY_FRAME = 0x01;
 /** Retry a replaced local ADB socket without tearing down the device encoder. */
 export const DEFAULT_LOCAL_SOCKET_RECONNECT_WINDOW_MS = 5_000;
 export const DEFAULT_LOCAL_SOCKET_RECONNECT_RETRY_MS = 100;
+/**
+ * Bounded time for a blocking launch-path ADB/socket call (push, forward, spawn,
+ * initial connect). A wedged ADB/USB state must degrade to screenrecord, not hang
+ * the stream lifecycle forever.
+ */
+export const DEFAULT_LAUNCH_COMMAND_TIMEOUT_MS = 20_000;
+/**
+ * Bounded time for a blocking teardown/cleanup ADB call. Teardown is best-effort:
+ * a timeout is logged and skipped so `stop()` always settles and lease
+ * reconciliation handles any orphaned device resources.
+ */
+export const DEFAULT_TEARDOWN_COMMAND_TIMEOUT_MS = 5_000;
 
 /** Minimal socket surface the source needs, for injectable testing. */
 export interface StreamSocket {
@@ -125,6 +137,10 @@ export interface PersistentEncoderH264SourceOptions {
   timer?: Timer;
   /** How long to wait for the server to signal readiness (ms). */
   readyTimeoutMs?: number;
+  /** Bounded time for a blocking launch-path ADB/socket call (ms). */
+  commandTimeoutMs?: number;
+  /** Bounded time for a blocking teardown/cleanup ADB call (ms). */
+  teardownTimeoutMs?: number;
   /** Bounded time to reconnect a dropped local socket before failing the source. */
   localSocketReconnectWindowMs?: number;
   /** Spacing between local socket reconnect attempts. */
@@ -216,6 +232,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private readonly connector: SocketConnector;
   private readonly timer: Timer;
   private readonly readyTimeoutMs: number;
+  private readonly commandTimeoutMs: number;
+  private readonly teardownTimeoutMs: number;
   private readonly localSocketReconnectWindowMs: number;
   private readonly localSocketReconnectRetryMs: number;
   private readonly sessionTokenFactory: () => string;
@@ -250,6 +268,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.connector = options.connector ?? defaultConnector;
     this.timer = options.timer ?? defaultTimer;
     this.readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
+    this.commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_LAUNCH_COMMAND_TIMEOUT_MS;
+    this.teardownTimeoutMs = options.teardownTimeoutMs ?? DEFAULT_TEARDOWN_COMMAND_TIMEOUT_MS;
+    if (this.commandTimeoutMs <= 0 || this.teardownTimeoutMs <= 0) {
+      throw new ActionableError("Video server command timeouts must be positive milliseconds.");
+    }
     this.localSocketReconnectWindowMs =
       options.localSocketReconnectWindowMs ?? DEFAULT_LOCAL_SOCKET_RECONNECT_WINDOW_MS;
     this.localSocketReconnectRetryMs =
@@ -336,6 +359,45 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
   }
 
+  /**
+   * Race `operation` against a deadline driven by the injected `Timer`, so a
+   * wedged ADB/USB state cannot block the persistent-encoder lifecycle forever.
+   * On timeout the returned promise rejects with an `ActionableError`; launch-path
+   * callers let it propagate (falling back to screenrecord) while teardown-path
+   * callers catch it and continue. Deterministic under `FakeTimer` in tests.
+   */
+  private withTimeout<T>(operation: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const timeout = this.timer.setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        logger.warn(`[PersistentEncoderH264Source] ${label} timed out after ${ms}ms`);
+        reject(new ActionableError(`${label} did not complete within ${ms}ms`));
+      }, ms);
+      operation.then(
+        value => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          this.timer.clearTimeout(timeout);
+          resolve(value);
+        },
+        error => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          this.timer.clearTimeout(timeout);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      );
+    });
+  }
+
   private async launch(): Promise<void> {
     const adb = this.adbFactory.create(this.options.device);
     const port = await this.prepareSession(adb);
@@ -356,10 +418,16 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.deviceProcessId = null;
     await this.reconcileExpiredLeases(adb);
     if (!this.running) {return null;}
-    await adb.executeCommand(`push "${this.options.jarPath}" ${VIDEO_SERVER_REMOTE_JAR_PATH}`);
+    await this.withTimeout(
+      adb.executeCommand(`push "${this.options.jarPath}" ${VIDEO_SERVER_REMOTE_JAR_PATH}`),
+      this.commandTimeoutMs,
+      "adb push video-server jar"
+    );
     if (!this.running) {return null;}
-    const forward = await adb.executeCommand(
-      `forward tcp:0 localabstract:${session.socketName}`
+    const forward = await this.withTimeout(
+      adb.executeCommand(`forward tcp:0 localabstract:${session.socketName}`),
+      this.commandTimeoutMs,
+      "adb forward video-server socket"
     );
     const port = Number.parseInt(forward.stdout.trim(), 10);
     if (!Number.isInteger(port) || port <= 0) {
@@ -378,7 +446,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private async spawnAndWaitForServer(
     adb: ReturnType<AdbClientFactory["create"]>
   ): Promise<AdbProcess | null> {
-    const server = await adb.spawn(this.buildServerArgs());
+    const server = await this.withTimeout(
+      adb.spawn(this.buildServerArgs()),
+      this.commandTimeoutMs,
+      "adb spawn video-server"
+    );
     if (!this.running) {
       server.kill("SIGINT");
       return null;
@@ -407,7 +479,12 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     // the marker in the gap between client connect and the later startup await.
     streamingStarted?.catch(() => {});
 
-    const connection = this.connector(port);
+    // Give the first connect the same deadline+abort treatment the reconnect path
+    // uses. A half-open forward with a live server would otherwise hang here
+    // forever (the race below only settles on server failure, not a stuck connect).
+    const connectController = new AbortController();
+    const connectDeadline = this.timer.now() + this.commandTimeoutMs;
+    const connection = this.connectBeforeDeadline(port, connectDeadline, connectController.signal);
     let connectionWon = false;
     let rejectServerFailure!: (error: Error) => void;
     const serverFailure = new Promise<never>((_, reject) => {
@@ -467,7 +544,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       server.removeListener("exit", onServerExit);
       server.removeListener("error", onServerError);
       if (!connectionWon) {
-        void connection.then(socket => socket.destroy(), () => {});
+        // Server failure (or teardown) won the race: cancel the bounded connect
+        // so a late-resolving local socket is destroyed rather than leaked.
+        connectController.abort();
+        void connection.catch(() => {});
       }
       if (this.serverStartupInProgress === server) {
         this.serverStartupInProgress = null;
@@ -996,7 +1076,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       const leaseListCommand =
         `for f in ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json; do ` +
         '[ -f "$f" ] || continue; cat "$f"; printf "\\n"; done';
-      const result = await adb.executeCommand(`shell sh -c ${shellQuote(leaseListCommand)}`);
+      const result = await this.withTimeout(
+        adb.executeCommand(`shell sh -c ${shellQuote(leaseListCommand)}`),
+        this.teardownTimeoutMs,
+        "adb read video session leases"
+      );
       leases = parseLeases(result.stdout);
     } catch (error) {
       logger.debug(`[PersistentEncoderH264Source] unable to read video session leases: ${error}`);
@@ -1090,7 +1174,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     token: string
   ): Promise<VideoServerLease | null> {
     try {
-      const result = await adb.executeCommand(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/${token}.json`);
+      const result = await this.withTimeout(
+        adb.executeCommand(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/${token}.json`),
+        this.teardownTimeoutMs,
+        "adb read owned video session lease"
+      );
       return parseLeases(result.stdout).find(lease => lease.token === token) ?? null;
     } catch (error) {
       logger.debug(`[PersistentEncoderH264Source] unable to read owned video session lease: ${error}`);
@@ -1103,7 +1191,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     lease: VideoServerLease
   ): Promise<void> {
     try {
-      const commandLine = await adb.executeCommand(`shell cat /proc/${lease.pid}/cmdline`);
+      const commandLine = await this.withTimeout(
+        adb.executeCommand(`shell cat /proc/${lease.pid}/cmdline`),
+        this.teardownTimeoutMs,
+        "adb read video-server process cmdline"
+      );
       const argv = commandLine.stdout.split("\u0000");
       const ownsSession = argv.some(
         (argument, index) =>
@@ -1118,7 +1210,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         );
         return;
       }
-      await adb.executeCommand(`shell kill -2 ${lease.pid}`);
+      await this.withTimeout(
+        adb.executeCommand(`shell kill -2 ${lease.pid}`),
+        this.teardownTimeoutMs,
+        "adb terminate video-server process"
+      );
     } catch (error) {
       logger.debug(
         `[PersistentEncoderH264Source] stale-session process cleanup skipped token=${lease.token}: ${error}`
@@ -1132,7 +1228,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     socketName: string
   ): Promise<void> {
     try {
-      const listed = await adb.executeCommand("forward --list");
+      const listed = await this.withTimeout(
+        adb.executeCommand("forward --list"),
+        this.teardownTimeoutMs,
+        "adb forward --list"
+      );
       const expectedPort = `tcp:${port}`;
       const expectedDestination = `localabstract:${socketName}`;
       const matches = listed.stdout.split(/\r?\n/).some(line => {
@@ -1145,7 +1245,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         );
         return;
       }
-      await adb.executeCommand(`forward --remove tcp:${port}`);
+      await this.withTimeout(
+        adb.executeCommand(`forward --remove tcp:${port}`),
+        this.teardownTimeoutMs,
+        "adb forward --remove"
+      );
     } catch (error) {
       logger.debug(`[PersistentEncoderH264Source] forward --remove failed: ${error}`);
     }
@@ -1164,7 +1268,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       return;
     }
     try {
-      await adb.executeCommand(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${lease.token}.json`);
+      await this.withTimeout(
+        adb.executeCommand(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${lease.token}.json`),
+        this.teardownTimeoutMs,
+        "adb remove video session lease"
+      );
     } catch (error) {
       logger.debug(`[PersistentEncoderH264Source] stale-session lease cleanup failed: ${error}`);
     }
@@ -1198,7 +1306,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     adb: ReturnType<AdbClientFactory["create"]>
   ): Promise<number | null> {
     try {
-      const result = await adb.executeCommand("shell cat /proc/uptime");
+      const result = await this.withTimeout(
+        adb.executeCommand("shell cat /proc/uptime"),
+        this.teardownTimeoutMs,
+        "adb read device uptime"
+      );
       const uptimeSeconds = Number.parseFloat(result.stdout.trim().split(/\s+/, 1)[0] ?? "");
       if (Number.isFinite(uptimeSeconds) && uptimeSeconds >= 0) {
         return Math.floor(uptimeSeconds * 1_000);

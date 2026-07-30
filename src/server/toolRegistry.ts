@@ -638,6 +638,27 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
   }
 }
 
+function responseText(response: any): unknown {
+  const first = Array.isArray(response?.content) ? response.content[0] : undefined;
+  return first?.type === "text" ? first.text : undefined;
+}
+
+function unwrapToolResponse(response: any): any {
+  if (!response || typeof response !== "object" || "success" in response) {
+    return response;
+  }
+  const text = responseText(response);
+  if (typeof text !== "string") {
+    return response;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && "success" in parsed ? parsed : response;
+  } catch {
+    return response;
+  }
+}
+
 export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
   constructor(
     private readonly createArtifactWriter: ObservationArtifactWriterFactory =
@@ -650,22 +671,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     // Unwrap MCP response envelope to get the inner result for success/error checks.
     // Tools may return { content: [{ type: "text", text: '{"success":false,...}' }] }
     // instead of a plain { success, error } object.
-    let unwrapped = response;
-    if (
-      response && typeof response === "object" &&
-      !("success" in response) &&
-      Array.isArray(response.content) && response.content.length > 0
-    ) {
-      const first = response.content[0];
-      if (first?.type === "text" && typeof first.text === "string") {
-        try {
-          const parsed = JSON.parse(first.text);
-          if (parsed && typeof parsed === "object" && "success" in parsed) {
-            unwrapped = parsed;
-          }
-        } catch { /* not JSON — use original response */ }
-      }
-    }
+    const unwrapped = unwrapToolResponse(response);
 
     const toolSuccess = unwrapped && typeof unwrapped === "object" && "success" in unwrapped
       ? unwrapped.success !== false
@@ -818,15 +824,9 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         // later sessionless tools/list or tools/call stops enforcing a released
         // profile (issue #4611 Gap D). Best-effort: the handler swallows its own
         // failures, but the release itself has already succeeded regardless.
-        if (sessionBindingReleaseHandler) {
-          for (const releasedUuid of releasedSessionUuids) {
-            sessionBindingReleaseHandler.onSessionReleased(releasedUuid);
-          }
-        }
-        if (sessionToolProfileService?.deleteSession) {
-          for (const releasedUuid of releasedSessionUuids) {
-            await sessionToolProfileService.deleteSession(releasedUuid);
-          }
+        for (const releasedUuid of releasedSessionUuids) {
+          sessionBindingReleaseHandler?.onSessionReleased(releasedUuid);
+          await sessionToolProfileService?.deleteSession?.(releasedUuid);
         }
       } catch (releaseError) {
         logger.warn(`Failed to auto-release session ${sessionUuid}: ${releaseError}`);

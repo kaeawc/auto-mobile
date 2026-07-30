@@ -73,6 +73,10 @@ fun WorkspaceShell(
   facetContent: @Composable (DeviceColumn, Tool) -> Unit = { _, tool ->
     WorkspaceFacetPlaceholder(tool)
   },
+  // Pane content shown while a column is in Inspect mode: the per-device Layout inspector (view
+  // hierarchy + device mirror) replaces the stream. Hoisted like [facetContent] so a test can drive
+  // it with a fake; the default is the real [LayoutFacet], so the host needs no extra wiring.
+  inspectContent: @Composable (DeviceColumn) -> Unit = { LayoutFacet(it) },
   // Body of the health sheet opened by clicking the status dot. Hoisted like [facetContent] so the
   // host (or a test) can substitute content; defaults to the live [DiagnosticsDashboard].
   healthSheetContent: @Composable () -> Unit = { DefaultHealthSheetBody() },
@@ -102,6 +106,7 @@ fun WorkspaceShell(
                   focused = column.deviceId == state.focusedDeviceId,
                   onAction = onAction,
                   facetContent = facetContent,
+                  inspectContent = inspectContent,
                   canDiff = canDiff,
                   modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
@@ -313,6 +318,7 @@ private fun DeviceColumnView(
   focused: Boolean,
   onAction: (WorkspaceAction) -> Unit,
   facetContent: @Composable (DeviceColumn, Tool) -> Unit,
+  inspectContent: @Composable (DeviceColumn) -> Unit,
   canDiff: Boolean,
   modifier: Modifier,
 ) {
@@ -326,14 +332,33 @@ private fun DeviceColumnView(
     DeviceColumnHeader(column, onAction)
     val tool = column.activeTool
     if (tool == null) {
-      StreamArea(column, onAction, Modifier.weight(1f))
+      PaneMainContent(column, onAction, inspectContent, Modifier.weight(1f))
     } else {
-      // With a tool active the pane splits stream + docked facet; ⤡ shrink flips the split so the
-      // stream collapses to grow the facet.
+      // With a tool active the pane splits main content + docked facet; ⤡ shrink flips the split so
+      // the main content collapses to grow the facet.
       val facetFraction = facetHeightFraction(column.shrunk)
-      StreamArea(column, onAction, Modifier.weight(1f - facetFraction))
+      PaneMainContent(column, onAction, inspectContent, Modifier.weight(1f - facetFraction))
       DockedFacet(column, tool, onAction, facetContent, canDiff, Modifier.weight(facetFraction))
     }
+  }
+}
+
+/**
+ * The pane's primary content above any docked facet. In [InteractionMode.Input] this is the device
+ * [StreamArea]; in [InteractionMode.Inspect] the stream is replaced by [inspectContent] (the
+ * per-device Layout inspector), so the wireframe's 🔍 toggle gains behavior without adding a Tool.
+ */
+@Composable
+private fun PaneMainContent(
+  column: DeviceColumn,
+  onAction: (WorkspaceAction) -> Unit,
+  inspectContent: @Composable (DeviceColumn) -> Unit,
+  modifier: Modifier,
+) {
+  if (column.mode == InteractionMode.Inspect) {
+    Box(modifier.fillMaxWidth()) { inspectContent(column) }
+  } else {
+    StreamArea(column, onAction, modifier)
   }
 }
 

@@ -321,6 +321,30 @@ describe("DefaultPlanLifecycleManager server-side binding teardown (issue #4611 
     expect(releaseHandler.released).toEqual(["base"]);
   });
 
+  test("removes capability overrides for an auto-released session", async () => {
+    await sessionManager.createSession("base", androidDevice.deviceId, "android");
+    const deletedSessions: string[] = [];
+    const cleanupService = new FakeAppCleanupService();
+    const manager = new DefaultPlanLifecycleManager();
+
+    await manager.afterExecution({
+      name: "executePlan",
+      args: {},
+      baseSessionUuid: "base",
+      cleanupService,
+      device: androidDevice,
+      sessionUuid: "base",
+      shouldResolveDevice: true,
+      sessionToolProfileService: {
+        deleteSession: async sessionUuid => {
+          deletedSessions.push(sessionUuid);
+        },
+      },
+    });
+
+    expect(deletedSessions).toEqual(["base"]);
+  });
+
   test("notifies the release handler for every derived label session it releases", async () => {
     await sessionManager.createSession("base", androidDevice.deviceId, "android");
     await sessionManager.createSession("base:B", androidDevice.deviceId, "android");

@@ -21,7 +21,7 @@ type ToolCapabilityContext = {
   /** An admitted executePlan may invoke its nested plan steps without per-step opt-ins. */
   planCapabilitiesAuthorized?: boolean;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled"> &
-    Partial<Pick<SessionToolProfileService, "setEnabled">>;
+    Partial<Pick<SessionToolProfileService, "setEnabled" | "deleteSession">>;
 };
 
 const toolCapabilityContext = new AsyncLocalStorage<ToolCapabilityContext>();

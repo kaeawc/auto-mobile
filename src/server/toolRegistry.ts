@@ -267,6 +267,8 @@ export interface PlanLifecycleInput {
   // (issue #4611 Gap D). Invoked AFTER a real release for every session freed —
   // base and derived label sessions alike — never optimistically.
   sessionBindingReleaseHandler?: SessionBindingReleaseHandler;
+  /** Removes persisted capability overrides for sessions actually released. */
+  sessionToolProfileService?: Partial<Pick<SessionToolProfileService, "deleteSession">>;
 }
 
 interface PlanLifecycleManager {
@@ -770,7 +772,17 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 // executePlan cleanup and the auto-release guard without a live daemon session.
 export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
   async afterExecution(input: PlanLifecycleInput): Promise<void> {
-    const { name, args, baseSessionUuid, cleanupService, device, sessionUuid, shouldResolveDevice, sessionBindingReleaseHandler } = input;
+    const {
+      name,
+      args,
+      baseSessionUuid,
+      cleanupService,
+      device,
+      sessionUuid,
+      shouldResolveDevice,
+      sessionBindingReleaseHandler,
+      sessionToolProfileService,
+    } = input;
     if (device && name === "executePlan" && args?.cleanupAppId) {
       await cleanupService.cleanup(device, {
         appId: args.cleanupAppId,
@@ -809,6 +821,11 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         if (sessionBindingReleaseHandler) {
           for (const releasedUuid of releasedSessionUuids) {
             sessionBindingReleaseHandler.onSessionReleased(releasedUuid);
+          }
+        }
+        if (sessionToolProfileService?.deleteSession) {
+          for (const releasedUuid of releasedSessionUuids) {
+            await sessionToolProfileService.deleteSession(releasedUuid);
           }
         }
       } catch (releaseError) {
@@ -1020,6 +1037,7 @@ export class ToolRegistryClass {
                 sessionUuid: resolvedTarget.sessionUuid,
                 shouldResolveDevice: resolvedTarget.shouldResolveDevice,
                 sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
+                sessionToolProfileService: getToolCapabilityContext()?.sessionToolProfileService,
               });
             }
           }

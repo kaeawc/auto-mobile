@@ -27,6 +27,7 @@ export const DEFAULT_TOOL_CAPABILITIES: ReadonlySet<ToolCapability> = new Set();
 export interface SessionToolProfileRepository {
   list(sessionUuid: string): Promise<Map<string, boolean>>;
   set(sessionUuid: string, capability: string, enabled: boolean): Promise<void>;
+  deleteSession(sessionUuid: string): Promise<void>;
 }
 
 /**
@@ -53,6 +54,11 @@ export class SessionToolProfileService {
 
   async setEnabled(sessionUuid: string, capability: ToolCapability, enabled: boolean): Promise<void> {
     await this.repository.set(sessionUuid, capability, enabled);
+  }
+
+  /** Drop overrides once their routing session has been released. */
+  async deleteSession(sessionUuid: string): Promise<void> {
+    await this.repository.deleteSession(sessionUuid);
   }
 }
 

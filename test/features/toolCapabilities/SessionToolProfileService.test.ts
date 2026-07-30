@@ -18,6 +18,10 @@ class FakeRepository implements SessionToolProfileRepository {
     values.set(capability, enabled);
     this.rows.set(sessionUuid, values);
   }
+
+  async deleteSession(sessionUuid: string): Promise<void> {
+    this.rows.delete(sessionUuid);
+  }
 }
 
 describe("SessionToolProfileService", () => {
@@ -74,6 +78,16 @@ describe("SessionToolProfileService", () => {
     expect(await service.isEnabled("device-session-1", "clipboard")).toBe(true);
 
     await service.setEnabled("device-session-1", "clipboard", false);
+    expect(await service.isEnabled("device-session-1", "clipboard")).toBe(false);
+  });
+
+  test("removes overrides after the routing session is released", async () => {
+    const repository = new FakeRepository();
+    const service = new SessionToolProfileService(repository);
+    await service.setEnabled("device-session-1", "clipboard", true);
+
+    await service.deleteSession("device-session-1");
+
     expect(await service.isEnabled("device-session-1", "clipboard")).toBe(false);
   });
 });

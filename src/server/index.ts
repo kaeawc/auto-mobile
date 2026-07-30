@@ -71,6 +71,7 @@ import { registerNetworkResources } from "./networkResources";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { startupBenchmark } from "../utils/startupBenchmark";
 import {
+  getSessionToolProfileService,
   type SessionToolProfileService,
 } from "../features/toolCapabilities/SessionToolProfileService";
 import {
@@ -90,7 +91,7 @@ export interface McpServerOptions {
   planExecutionLock?: PlanExecutionLock;
   daemonMode?: boolean;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled"> &
-    Partial<Pick<SessionToolProfileService, "setEnabled">>;
+    Partial<Pick<SessionToolProfileService, "setEnabled" | "deleteSession">>;
 }
 
 const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
@@ -495,7 +496,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // ToolRegistry. Carry only a distinct connection profile so it
             // cannot suppress that derived-label resolution.
             capabilitySessionUuid: connectionProfileUuid,
-            sessionToolProfileService: options.sessionToolProfileService,
+            // Keep profile persistence lazy for ordinary core-tool calls while
+            // giving an admitted plan its service instance for release cleanup.
+            sessionToolProfileService: options.sessionToolProfileService
+              ?? (name === "executePlan" ? getSessionToolProfileService() : undefined),
           },
           () => tool.handler(handlerParams, progressCallback, execution.abortController.signal)
         )

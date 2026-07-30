@@ -36,6 +36,7 @@ class AutoMobilePlanExecutorTest {
     AutoMobileSharedUtils.testDeviceChecker = null
     DaemonHeartbeat.testController = null
     AutoMobilePlanExecutor.testAgent = null
+    AutoMobilePlanExecutor.retryBackoffMs = 2000L
   }
 
   @Test
@@ -92,6 +93,28 @@ class AutoMobilePlanExecutorTest {
     )
     assertEquals(1, result.toolResults.size)
     assertEquals("Test Channel", result.getSelection(0))
+  }
+
+  @Test
+  fun `retries a transient test-authoring capability failure`() {
+    fakeDaemonClient.queueCapabilityResponse(
+      DaemonResponse(
+        id = "capability-timeout",
+        type = "mcp_response",
+        success = false,
+        error = "daemon request timeout",
+      )
+    )
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(JsonObject(mapOf("success" to JsonPrimitive(true)))),
+    )
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1))
+
+    assertTrue(result.success)
+    assertEquals(2, fakeDaemonClient.capabilityArguments.size)
   }
 
   @Test
@@ -217,11 +240,13 @@ class AutoMobilePlanExecutorTest {
     assertNull(AutoMobilePlanExecutor.resolveCaptureObserveSteps())
   }
 
-  private fun executePlan(): AutoMobilePlanExecutionResult {
+  private fun executePlan(
+    options: AutoMobilePlanExecutionOptions = AutoMobilePlanExecutionOptions(),
+  ): AutoMobilePlanExecutionResult {
     return AutoMobilePlanExecutor.execute(
       "test-plans/launch-clock-app.yaml",
       emptyMap(),
-      AutoMobilePlanExecutionOptions(),
+      options,
     )
   }
 
@@ -255,11 +280,16 @@ class AutoMobilePlanExecutorTest {
 
 private class FakeDaemonToolClient : DaemonToolClient {
   private val responses = mutableMapOf<String, DaemonResponse>()
+  private val capabilityResponses = mutableListOf<DaemonResponse>()
   val capabilityArguments = mutableListOf<JsonObject>()
   override var sessionUuid: String = "test-session"
 
   fun setResponse(toolName: String, response: DaemonResponse) {
     responses[toolName] = response
+  }
+
+  fun queueCapabilityResponse(response: DaemonResponse) {
+    capabilityResponses.add(response)
   }
 
   override fun callTool(
@@ -269,7 +299,8 @@ private class FakeDaemonToolClient : DaemonToolClient {
   ): DaemonResponse {
     if (toolName == "setToolCapability") {
       capabilityArguments.add(arguments)
-      return DaemonResponse(id = "capability", type = "mcp_response", success = true)
+      return capabilityResponses.removeFirstOrNull()
+        ?: DaemonResponse(id = "capability", type = "mcp_response", success = true)
     }
     return responses[toolName]
       ?: throw IllegalStateException("No response configured for tool: $toolName")

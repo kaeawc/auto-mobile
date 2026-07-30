@@ -22,9 +22,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
-import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.tabs.PanelHeader
 import dev.jasonpearson.automobile.desktop.core.tabs.VerticalCollapsibleTab
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
@@ -40,11 +40,11 @@ fun LayoutInspectorDashboard(
   modifier: Modifier = Modifier,
   dataSourceMode: DataSourceMode = DataSourceMode.Fake,
   clientProvider: (() -> AutoMobileClient)? = null, // MCP client for real data
-  observationStreamClient: ObservationStreamClient, // Shared stream client (managed at app level)
+  observationStream: ObservationStream, // Per-device stream (owned by the pane's facet)
+  deviceId: String? = null, // Pane's device; tags applied frames and scopes the initial request
   platform: String = "android", // Device platform ("android" or "ios")
   onRestartDaemon: (() -> Unit)? = null,
 ) {
-  val graph = LocalAutoMobileGraph.current
   val state = rememberLayoutInspectorState()
   val colors = SharedTheme.globalColors
 
@@ -54,7 +54,7 @@ fun LayoutInspectorDashboard(
       "LayoutInspectorDashboard"
     )
 
-  val streamClient = observationStreamClient
+  val streamClient = observationStream
 
   // Collect hierarchy updates from the stream
   LaunchedEffect(streamClient) {
@@ -79,7 +79,11 @@ fun LayoutInspectorDashboard(
             "Parsed hierarchy: root=${result.first.root.className}, children=${result.first.root.children.size}"
           )
           state.updateConnectionStatus(ConnectionStatus.Connected)
-          state.applyHierarchyUpdate(result.first, result.second)
+          state.applyHierarchyUpdate(
+            result.first,
+            result.second,
+            deviceId = update.deviceId ?: deviceId,
+          )
           dashboardLog.info("Updated state with new hierarchy")
         } else {
           dashboardLog.warn("Failed to parse hierarchy from JSON")
@@ -114,6 +118,7 @@ fun LayoutInspectorDashboard(
           fallbackReason = update.screenshotFallbackReason,
           format = update.screenshotFormat,
           captureSource = update.screenshotCaptureSource,
+          deviceId = update.deviceId ?: deviceId,
         )
         dashboardLog.info("Updated state with new screenshot")
       }
@@ -170,37 +175,11 @@ fun LayoutInspectorDashboard(
     }
   }
 
-  // Initial fetch as fallback (in case stream hasn't pushed yet)
-  LaunchedEffect(dataSourceMode, clientProvider) {
-    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-      try {
-        val dataSource =
-          graph.dataSourceFactory.createLayoutDataSource(dataSourceMode, clientProvider, platform)
-        when (val result = dataSource.getObservation()) {
-          is dev.jasonpearson.automobile.desktop.core.datasource.Result.Success -> {
-            val observation = result.data
-            state.updateHierarchy(observation.hierarchy, observation.rotation)
-            observation.screenshotData?.let { screenshot ->
-              state.updateScreenshot(
-                data = screenshot,
-                width = observation.screenWidth,
-                height = observation.screenHeight,
-                timestamp = observation.timestamp,
-              )
-            }
-          }
-          is dev.jasonpearson.automobile.desktop.core.datasource.Result.Error -> {
-            // Keep current state or show error
-          }
-          is dev.jasonpearson.automobile.desktop.core.datasource.Result.Loading -> {
-            // Keep loading state
-          }
-        }
-      } catch (e: Exception) {
-        // Keep current state or show error
-      }
-    }
-  }
+  // Prime the stream with a one-off observation for THIS pane's device, in case it hasn't pushed
+  // yet. Scoped to [deviceId] rather than the previous active-device REST fallback, so a per-device
+  // facet never renders another device's frame. The result flows back through
+  // hierarchyUpdates/screenshotUpdates above.
+  LaunchedEffect(observationStream, deviceId) { observationStream.requestObservation(deviceId) }
 
   // Panel collapse states - default to collapsed, remember user preference
   // TODO: Persist these to IDE preferences for remembering across sessions

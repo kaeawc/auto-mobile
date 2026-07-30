@@ -128,9 +128,12 @@ validate as an organization. For a solo maintainer shipping a dev tool,
 
 ### Recommendation for Windows
 
-**Azure Trusted Signing + `jsign`, signing the MSI in the `windows-latest`
-matrix leg.** Gate it behind a `sign` input exactly like the Apple path, so
-prepare-release (unsigned smoke) and forks skip it cleanly.
+**Azure Trusted Signing + `jsign`, signing the MSI inside the reusable
+`build-desktop-app-installers.yml` `windows` matrix leg** — the same leg the
+macOS DMG is signed in. That workflow is what `prepare-release.yml` runs to build
+the release candidates, and `release.yml` reuses those exact artifacts without
+rebuilding (see below), so signing must happen at build time in that matrix, not
+as a release-only step.
 
 Refinement worth noting: signing only the outer `.msi` leaves the bundled
 launcher `.exe` and JVM runtime inside unsigned. For best SmartScreen behavior
@@ -203,19 +206,33 @@ signing-authority relationship.
 
 ## Suggested implementation shape (fits the existing workflow)
 
-The current matrix already has per-OS legs. Additions, all gated like the Apple
-`sign` input:
+Crucially, the desktop installers follow the repo's **"prepare builds, release
+reuses"** provenance model: `prepare-release.yml` runs
+`build-desktop-app-installers.yml` to produce the `automobile-desktop-{macos,
+windows,linux}` artifacts, and `release.yml` **downloads those exact artifacts by
+`prepare_run_id` and attaches them — it never rebuilds or re-signs** (its header:
+"consumes those exact artifacts rather than starting a second, potentially
+different build"). So every signing step must live in the reusable workflow's
+per-OS matrix leg, exactly where macOS already signs — not in `release.yml`, which
+would otherwise publish the unsigned prepared artifact or need a second build that
+breaks provenance.
+
+The matrix already has per-OS legs. Additions, mirroring the macOS leg (which
+signs whenever its secrets are present):
 
 - **`windows` leg:** after `packageMsi` → **`jsign --storetype TRUSTEDSIGNING`**
-  step (needs the 6 Azure secrets above). Cross-platform jar, so it can also run
-  on the Linux leg if we'd rather keep signing off the Windows runner.
-- **`linux` leg:** after `packageDeb` → `gpg --detach-sign` step (2 secrets) +
-  emit `.sha256`. Upload the `.asc`/`.sha256` alongside the `.deb`.
-- **`macos` leg:** unchanged (already signed + notarized).
+  step (needs the 6 Azure secrets above, plumbed through `prepare-release.yml`
+  like the Apple secrets already are). Cross-platform jar, so it can also run on
+  the Linux leg if we'd rather keep signing off the Windows runner.
+- **`linux` leg:** after `packageDeb` → the `gpg … --detach-sign` step (2 secrets)
+  + emit `.sha256`. Upload the `.asc`/`.sha256` alongside the `.deb` so they ride
+  the same artifact into `release.yml`.
+- **`macos` leg:** unchanged (already signed + notarized in-leg).
 
-Prepare-release keeps calling with `sign: false` (unsigned smoke). Release calls
-with `sign: true`. Same gating discipline as today, so forks and the packaging
-smoke gate never need the secrets.
+The signed installer becomes the uploaded candidate, so `release.yml` publishes it
+unchanged. Since `build-desktop-app-installers.yml` is `workflow_call`-only (run by
+`prepare-release.yml`, never on PRs or forks), the new secrets are only ever needed
+on the release path.
 
 ---
 

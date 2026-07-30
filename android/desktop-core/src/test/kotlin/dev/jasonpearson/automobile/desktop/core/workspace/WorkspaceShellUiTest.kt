@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -280,6 +281,72 @@ class WorkspaceShellUiTest {
       )
     setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
     onNodeWithText("Performance — coming soon", substring = true).assertIsDisplayed()
+  }
+
+  @Test
+  fun `Inspect mode renders the injected inspect content in place of the stream`() =
+    runComposeUiTest {
+      val state =
+        WorkspaceUiState.Content(
+          columns = listOf(col("a", "Pixel 8").copy(mode = InteractionMode.Inspect)),
+          focusedDeviceId = "a",
+        )
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(
+            state = state,
+            onAction = {},
+            onOpenPicker = {},
+            inspectContent = { column -> Text("inspect-slot:${column.deviceId}") },
+          )
+        }
+      }
+      onNodeWithText("inspect-slot:a").assertIsDisplayed()
+      // The device stream is replaced by the inspector while in Inspect mode.
+      onNodeWithText("stream").assertDoesNotExist()
+    }
+
+  @Test
+  fun `Input mode renders the stream and not the inspect content`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          onOpenPicker = {},
+          inspectContent = { Text("inspect-slot") },
+        )
+      }
+    }
+    onNodeWithText("stream").assertIsDisplayed()
+    onNodeWithText("inspect-slot").assertDoesNotExist()
+  }
+
+  @Test
+  fun `toggling Inspect back to Input swaps the stream back in`() = runComposeUiTest {
+    val mode = mutableStateOf(InteractionMode.Inspect)
+    setContent {
+      MaterialTheme {
+        val state =
+          WorkspaceUiState.Content(
+            columns = listOf(col("a", "Pixel 8").copy(mode = mode.value)),
+            focusedDeviceId = "a",
+          )
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          onOpenPicker = {},
+          inspectContent = { Text("inspect-slot") },
+        )
+      }
+    }
+    onNodeWithText("inspect-slot").assertIsDisplayed()
+    onNodeWithText("stream").assertDoesNotExist()
+    runOnIdle { mode.value = InteractionMode.Input }
+    onNodeWithText("inspect-slot").assertDoesNotExist()
+    onNodeWithText("stream").assertIsDisplayed()
   }
 
   @Test

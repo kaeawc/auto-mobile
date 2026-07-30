@@ -130,10 +130,9 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     const profileService = { isEnabled: async () => false };
 
     await runWithToolCapabilityContext(
-      { sessionToolProfileService: profileService },
+      { planCapabilitiesAuthorized: true, sessionToolProfileService: profileService },
       () => ToolRegistry.callInternal("clipboard", {}, undefined, undefined, {
         forPlan: true,
-        allowPlanCapabilities: true,
       }),
     );
 
@@ -152,10 +151,9 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     const profileService = { isEnabled: async () => false };
 
     await runWithToolCapabilityContext(
-      { sessionToolProfileService: profileService },
+      { planCapabilitiesAuthorized: true, sessionToolProfileService: profileService },
       () => ToolRegistry.callInternal("criticalSection", {}, undefined, undefined, {
         forPlan: true,
-        allowPlanCapabilities: true,
       }),
     );
 

@@ -403,10 +403,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
       const response = await ToolRegistry.callInternal(tool, parsedParams, undefined, context.signal, {
         forPlan: true,
-        // executePlan already passed the test-authoring gate. Its declarative
-        // steps may use any registered capability, so do not require callers to
-        // pre-enable each one merely to execute the admitted plan.
-        allowPlanCapabilities: true,
         sessionUuid: context.sessionUuid,
         sessionToolProfileService: context.sessionToolProfileService,
       });

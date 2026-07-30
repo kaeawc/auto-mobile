@@ -82,8 +82,6 @@ interface DeviceAwareToolHandler<T = any> {
 
 interface InternalToolCallOptions {
   forPlan?: boolean;
-  /** The outer executePlan authorization admits every step in that plan. */
-  allowPlanCapabilities?: boolean;
   sessionUuid?: string;
   targetDevice?: BootedDevice;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
@@ -967,6 +965,10 @@ export class ToolRegistryClass {
             // connection identity here would lose an opt-in when nested calls
             // route through a labeled or explicitly selected device session.
             capabilitySessionUuid: capabilityContext?.capabilitySessionUuid,
+            // The outer executePlan tool has already passed its test-authoring
+            // capability gate, so its declarative steps are authorized by that
+            // admission. Other tool handlers retain normal per-tool policy.
+            planCapabilitiesAuthorized: name === "executePlan",
           },
           async () => {
             try {
@@ -1131,8 +1133,7 @@ export class ToolRegistryClass {
         : args,
       routingSessionUuid: sessionUuid,
       capabilitySessionUuid: context?.capabilitySessionUuid,
-      planCapabilitiesAuthorized: options.allowPlanCapabilities === true
-        || context?.planCapabilitiesAuthorized === true,
+      planCapabilitiesAuthorized: context?.planCapabilitiesAuthorized === true,
       sessionToolProfileService: options.sessionToolProfileService ?? context?.sessionToolProfileService,
     };
   }

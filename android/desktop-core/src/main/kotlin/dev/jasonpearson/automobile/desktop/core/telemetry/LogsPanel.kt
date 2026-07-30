@@ -179,11 +179,12 @@ fun LogsPanel(
   // the next live row.
   var followTail by remember(activeDeviceId) { mutableStateOf(true) }
 
-  // Keyed on `platform` so a platform change re-creates the derived state with the new scale;
-  // `logs`, `enabledLevels`, and `query` are Compose State reads that derivedStateOf tracks on
-  // its own, so they are intentionally not remember keys.
+  // Keyed on `platform` (new scale) and `activeDeviceId` (a device switch swaps `logs` for a fresh
+  // remembered list, so the derived state must re-capture it — otherwise it keeps reading the old
+  // device's buffer). `enabledLevels` and `query` are Compose State reads that derivedStateOf
+  // tracks on its own, so they are intentionally not remember keys.
   val filtered by
-    remember(platform) {
+    remember(platform, activeDeviceId) {
       derivedStateOf { filterLogs(logs, enabledLevels, query, platform) }
     }
   val listState = rememberLazyListState()
@@ -198,23 +199,27 @@ fun LogsPanel(
     }
   }
 
-  LaunchedEffect(telemetryPushClient) {
+  // Keyed on activeDeviceId as well as the client: the client is recreated per device by the
+  // facet (so identity already changes on switch), but keying on the device id too makes the reset
+  // explicit and re-seeds the remembered connectionState for the new device.
+  LaunchedEffect(telemetryPushClient, activeDeviceId) {
     val client = telemetryPushClient ?: return@LaunchedEffect
     client.connectionState.collect { connectionState = it }
   }
 
   // Re-derive follow intent whenever a scroll settles: we follow iff the viewport rests at the
   // bottom. A user drag that stops mid-list clears it; reaching the bottom (or a programmatic
-  // tail scroll) re-arms it. Filter changes do not scroll, so they never clear the intent.
-  LaunchedEffect(listState) {
+  // tail scroll) re-arms it. Filter changes do not scroll, so they never clear the intent. Keyed
+  // on activeDeviceId so a device switch restarts the observer against the reset follow state.
+  LaunchedEffect(listState, activeDeviceId) {
     snapshotFlow { listState.isScrollInProgress }
       .collect { inProgress -> if (!inProgress) followTail = !listState.canScrollForward }
   }
 
   // Follow the tail when following: fires on every appended row (via appendCount, which advances
-  // even at the buffer cap) and on filter changes (which re-anchor the list), so the newest
-  // visible row stays in view without fighting a scrolled-up user.
-  LaunchedEffect(appendCount, query, enabledLevels, followTail) {
+  // even at the buffer cap) and on filter/platform changes (which re-anchor the list), so the
+  // newest visible row stays in view without fighting a scrolled-up user.
+  LaunchedEffect(appendCount, query, enabledLevels, platform, followTail) {
     if (followTail && filtered.isNotEmpty()) {
       listState.scrollToItem(filtered.lastIndex)
     }

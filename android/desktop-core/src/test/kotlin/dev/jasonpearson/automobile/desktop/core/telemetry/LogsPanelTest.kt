@@ -331,4 +331,28 @@ class LogsPanelTest {
     }
     onNodeWithText("level five").assertIsDisplayed()
   }
+
+  @Test
+  fun `switching device resets the log buffer`() = runComposeUiTest {
+    val fake = FakeTelemetryPushClient()
+    val deviceId = mutableStateOf("dev-1")
+    setContent {
+      MaterialTheme {
+        LogsPanel(telemetryPushClient = fake, activeDeviceId = deviceId.value)
+      }
+    }
+    waitForIdle()
+    fake.emitEvent(log(4, "T", "device one row", 1))
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("device one row").fetchSemanticsNodes().isNotEmpty()
+    }
+
+    // Switching devices must clear the per-device buffer (and re-arm the collect against the new
+    // device), so the previous device's rows disappear and the empty state returns.
+    runOnIdle { deviceId.value = "dev-2" }
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("device one row").fetchSemanticsNodes().isEmpty()
+    }
+    onNodeWithText("No logs yet").assertIsDisplayed()
+  }
 }

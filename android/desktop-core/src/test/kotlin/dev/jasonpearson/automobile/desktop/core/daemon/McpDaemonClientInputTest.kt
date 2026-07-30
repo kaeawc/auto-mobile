@@ -75,6 +75,28 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `capability enable tolerates an older daemon without the control tool`() {
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(error = "Unknown tool: setToolCapability"),
+            SocketResponse("""{"content":[]}""", null),
+          )
+      )
+      .use { server ->
+        val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
+
+        client.enableToolCapability("screen-artifacts")
+        client.callTool("videoRecording", JsonObject(emptyMap()))
+
+        assertEquals(
+          listOf("setToolCapability", "videoRecording"),
+          server.awaitRequests().map { it.params["name"]?.jsonPrimitive?.content },
+        )
+      }
+  }
+
+  @Test
   fun `socket requests surface lifecycle failures before opening the socket`() {
     val lifecycle =
       object : DaemonLifecycleEnsurer {

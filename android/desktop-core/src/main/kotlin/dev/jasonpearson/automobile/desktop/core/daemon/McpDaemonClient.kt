@@ -527,16 +527,21 @@ class McpDaemonClient(
 
   override fun enableToolCapability(capability: String) {
     val response =
-      callTool(
-        SET_TOOL_CAPABILITY_TOOL_NAME,
-        buildJsonObject {
-          put("capability", JsonPrimitive(capability))
-          put("enabled", JsonPrimitive(true))
-          capabilityProfileUuid?.let {
-            put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(it))
-          }
-        },
-      )
+      try {
+        callTool(
+          SET_TOOL_CAPABILITY_TOOL_NAME,
+          buildJsonObject {
+            put("capability", JsonPrimitive(capability))
+            put("enabled", JsonPrimitive(true))
+            capabilityProfileUuid?.let {
+              put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(it))
+            }
+          },
+        )
+      } catch (error: McpConnectionException) {
+        if (error.message?.contains("unknown tool", ignoreCase = true) != true) throw error
+        return
+      }
     val text =
       response.jsonObject["content"]
         ?.jsonArray

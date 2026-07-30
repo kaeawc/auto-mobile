@@ -22,25 +22,41 @@ class FakeBatchTelemetryRepository implements BatchTelemetryRepository {
 
   rejectLogsWith: Error | null = null;
 
-  private pendingLogGate: Promise<void> | null = null;
-  private releaseLogGate: (() => void) | null = null;
+  // Per-invocation gates (issue #4518): each blocked recordLogEvents parks on its
+  // OWN resolver rather than a single shared promise. A shared gate released
+  // all-at-once let two overlapping flushes resume together, so the serialization
+  // test passed whether or not `flush()` chains — it couldn't distinguish serial
+  // from concurrent. With one gate per invocation, concurrently-blocked flushes
+  // are individually observable and can be released newest-first, which surfaces
+  // any non-serialized commit ordering in `logBatches`.
+  private blockLogFlushes = false;
+  private logGateResolvers: Array<() => void> = [];
 
-  /** Make the next recordLogEvents block until releaseLogFlush() is called. */
+  /** Block EVERY subsequent recordLogEvents on its own gate until released. */
   holdNextLogFlush(): void {
-    this.pendingLogGate = new Promise<void>(resolve => {
-      this.releaseLogGate = resolve;
-    });
+    this.blockLogFlushes = true;
   }
 
+  /**
+   * Stop blocking and release every currently-parked flush NEWEST-FIRST. If
+   * flushes run concurrently this lets a later flush commit before an earlier
+   * one, so a lost serialization guarantee shows up as reordered `logBatches`.
+   * When flushes are serialized only one flush is ever parked here at a time, so
+   * newest-first and oldest-first coincide and ordering is preserved.
+   */
   releaseLogFlush(): void {
-    this.releaseLogGate?.();
-    this.releaseLogGate = null;
-    this.pendingLogGate = null;
+    this.blockLogFlushes = false;
+    const resolvers = this.logGateResolvers.splice(0).reverse();
+    for (const resolve of resolvers) {
+      resolve();
+    }
   }
 
   async recordLogEvents(inputs: RecordLogEventInput[]): Promise<void> {
-    if (this.pendingLogGate) {
-      await this.pendingLogGate;
+    if (this.blockLogFlushes) {
+      await new Promise<void>(resolve => {
+        this.logGateResolvers.push(resolve);
+      });
     }
     if (this.rejectLogsWith) {
       throw this.rejectLogsWith;

@@ -1722,6 +1722,46 @@ describe("diffObserveResult — iOS stable-identity boundaries (A9/P8)", () => {
     }
   });
 
+  // Competing-identifier precedence. Each row supplies TWO identifiers that
+  // DISAGREE across the edit: the higher-priority slot holds a stable value on
+  // both sides while a lower-priority slot changes. Under the documented
+  // precedence (resource-id > accessibilityIdentifier > non-UUID view-id) the
+  // stable higher-priority id is chosen → both sides share an iOS key → the pair
+  // re-pairs as `changed`. If the precedence were inverted, the *changing*
+  // lower-priority id would be selected → the keys diverge → the pair splits into
+  // add+remove. The single-identifier PRECEDENCE_ROWS above cannot catch that
+  // inversion (they stay green either way); these rows red it.
+  const textEditAsym = (oldIds: Record<string, unknown>, newIds: Record<string, unknown>) => {
+    const node = (ids: Record<string, unknown>, t: string) => ({
+      "className": "XCUIElementTypeTextField",
+      ...ids,
+      "text": t,
+      "value": t,
+      "bounds": { ...REGION },
+    });
+    return diffObserveResult(iosObs(node(oldIds, "Old")), iosObs(node(newIds, "New")));
+  };
+
+  const COMPETING_ROWS: ReadonlyArray<readonly [string, Record<string, unknown>, Record<string, unknown>]> = [
+    ["resource-id outranks a changing accessibilityIdentifier",
+      { "resource-id": "TitleField", "accessibilityIdentifier": "before" },
+      { "resource-id": "TitleField", "accessibilityIdentifier": "after" }],
+    ["resource-id outranks a changing (non-UUID) view-id",
+      { "resource-id": "TitleField", "view-id": "before" },
+      { "resource-id": "TitleField", "view-id": "after" }],
+    ["accessibilityIdentifier outranks a changing (non-UUID) view-id",
+      { "accessibilityIdentifier": "title", "view-id": "before" },
+      { "accessibilityIdentifier": "title", "view-id": "after" }],
+  ];
+
+  test.each(COMPETING_ROWS)("%s → re-pairs on the higher-priority id", (_label, oldIds, newIds) => {
+    const diff = textEditAsym(oldIds, newIds);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].changes.text).toEqual({ from: "Old", to: "New" });
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+  });
+
   test("an editable field with a list-cell class opts out of the repair", () => {
     const node = (t: string) => ({
       "className": "XCUIElementTypeCell",

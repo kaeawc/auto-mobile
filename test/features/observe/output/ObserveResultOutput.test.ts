@@ -1209,7 +1209,17 @@ describe("sanitizeObserveResult", () => {
       {
         label: "perf-audit strip",
         reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_NONE),
-        reference: () => loadAndroidHomeObserve().observe,
+        // Reference = fully sanitized EXCEPT the perf-audit strip: re-attach the
+        // raw (un-stripped) `performanceAudit` onto an otherwise-sanitized copy so
+        // the only delta between `reduced` and `reference` is `stripPerformanceAudit`.
+        // Comparing against the raw fixture instead would let the always-on
+        // perfTiming drop + node trim satisfy the row even if this specific strip
+        // regressed; isolating it means the row reds iff the perf-audit strip stops
+        // shrinking the payload.
+        reference: () => {
+          const { observe } = loadAndroidHomeObserve();
+          return { ...sanitizeObserveResult(observe, DROP_NONE), performanceAudit: observe.performanceAudit };
+        },
         tokensToo: true,
       },
       {

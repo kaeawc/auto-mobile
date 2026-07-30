@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.SearchBar
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
@@ -58,31 +60,57 @@ enum class LogLevel(val label: String, val letter: String, val color: Long) {
 }
 
 /**
- * Maps an Android log-priority int to its [LogLevel] bucket. Every int maps to exactly one bucket
- * so that "all chips enabled" is a true no-op filter: unknown/low priorities fall back to
- * [Verbose], and Assert (7) or higher folds into [Error].
+ * Which platform's numeric log-priority scale a row's `level` field uses. A telemetry panel is
+ * scoped to a single device, so every row it shows shares one scale — the caller supplies it rather
+ * than the (platform-less) row carrying it. Android and iOS number their levels differently, so the
+ * same int means different severities on each.
  */
-fun logLevelOf(level: Int): LogLevel =
-  when {
-    level <= 2 -> LogLevel.Verbose
-    level == 3 -> LogLevel.Debug
-    level == 4 -> LogLevel.Info
-    level == 5 -> LogLevel.Warn
-    else -> LogLevel.Error
+enum class LogPlatform {
+  Android,
+  Ios,
+}
+
+/**
+ * Maps a raw log-priority int to its [LogLevel] bucket for the given [platform]. Every int maps to
+ * exactly one bucket so that "all chips enabled" is a true no-op filter.
+ *
+ * Android uses `Log.VERBOSE`=2 .. `Log.ASSERT`=7; iOS's `LogLevel` uses `verbose`=0 .. `fault`=5
+ * (see `ios/auto-mobile-sdk/.../Events/SdkEvent.swift`). Both fold their top severities (Android
+ * Assert, iOS Fault) into [Error], and unknown/low priorities into [Verbose].
+ */
+fun logLevelOf(level: Int, platform: LogPlatform = LogPlatform.Android): LogLevel =
+  when (platform) {
+    LogPlatform.Android ->
+      when {
+        level <= 2 -> LogLevel.Verbose
+        level == 3 -> LogLevel.Debug
+        level == 4 -> LogLevel.Info
+        level == 5 -> LogLevel.Warn
+        else -> LogLevel.Error
+      }
+    LogPlatform.Ios ->
+      when {
+        level <= 0 -> LogLevel.Verbose
+        level == 1 -> LogLevel.Debug
+        level == 2 -> LogLevel.Info
+        level == 3 -> LogLevel.Warn
+        else -> LogLevel.Error // 4 = error, 5 = fault
+      }
   }
 
 /**
- * Client-side filter over already-streamed log rows. A row survives when its [LogLevel] is in
- * [enabledLevels] and its tag/message matches [query] (case-insensitive substring). A blank [query]
- * and the full level set together return the input unchanged, so an untouched filter bar shows
- * everything.
+ * Client-side filter over already-streamed log rows. A row survives when its [LogLevel] (bucketed
+ * for [platform]) is in [enabledLevels] and its tag/message matches [query] (case-insensitive
+ * substring). A blank [query] and the full level set together return the input unchanged, so an
+ * untouched filter bar shows everything.
  */
 fun filterLogs(
   logs: List<TelemetryDisplayEvent.Log>,
   enabledLevels: Set<LogLevel>,
   query: String,
+  platform: LogPlatform = LogPlatform.Android,
 ): List<TelemetryDisplayEvent.Log> = logs.filter {
-  logLevelOf(it.level) in enabledLevels && it.matchesSearch(query)
+  logLevelOf(it.level, platform) in enabledLevels && it.matchesSearch(query)
 }
 
 /**
@@ -108,43 +136,80 @@ fun appendBounded(
 }
 
 /**
+ * Human-readable status for a non-healthy telemetry [ConnectionState], or `null` when
+ * [ConnectionState.Connected] (nothing to surface). Pure so the mapping is unit-testable and the
+ * panel never mislabels a connecting/errored socket as an empty-but-healthy stream.
+ */
+fun connectionStatusText(state: ConnectionState): String? =
+  when (state) {
+    is ConnectionState.Connecting -> "Connecting..."
+    is ConnectionState.Reconnecting -> "Reconnecting (attempt ${state.attempt})..."
+    is ConnectionState.Disconnected -> "Disconnected" + (state.reason?.let { ": $it" } ?: "")
+    is ConnectionState.Error -> "Error: ${state.message}"
+    is ConnectionState.Connected -> null
+  }
+
+/**
  * Logs facet body: a logs-only event stream with an always-on filter bar (per-level chips +
  * free-text search) applied client-side over the rows already received from [telemetryPushClient].
  * Filtering never touches the daemon protocol — it only narrows what is already in memory.
  *
  * The client is owned by the caller (the facet connects/disposes it per device). Streamed rows are
- * kept per [activeDeviceId]; switching devices clears the buffer.
+ * kept per [activeDeviceId]; switching devices clears the buffer. [platform] selects the numeric
+ * log-level scale used to bucket rows into filter chips (see [logLevelOf]).
  */
 @Composable
 fun LogsPanel(
   telemetryPushClient: TelemetryPushClient?,
   activeDeviceId: String? = null,
+  platform: LogPlatform = LogPlatform.Android,
   modifier: Modifier = Modifier,
 ) {
   val colors = SharedTheme.globalColors
   val logs = remember(activeDeviceId) { mutableStateListOf<TelemetryDisplayEvent.Log>() }
   var query by remember { mutableStateOf("") }
   var enabledLevels by remember { mutableStateOf(LogLevel.entries.toSet()) }
+  var connectionState by remember(activeDeviceId) { mutableStateOf<ConnectionState?>(null) }
+  // Tail-follow *intent*: preserved across filter changes and reset only when the user scrolls away
+  // from the bottom, so clearing a filter that had anchored the list on an old row still follows
+  // the next live row.
+  var followTail by remember(activeDeviceId) { mutableStateOf(true) }
 
-  val filtered by remember { derivedStateOf { filterLogs(logs, enabledLevels, query) } }
+  val filtered by remember {
+    derivedStateOf { filterLogs(logs, enabledLevels, query, platform) }
+  }
   val listState = rememberLazyListState()
 
   LaunchedEffect(telemetryPushClient, activeDeviceId) {
     val client = telemetryPushClient ?: return@LaunchedEffect
     client.telemetryEvents.collect { event ->
-      if (event is TelemetryDisplayEvent.Log) {
-        // Sample tail-follow intent *before* the append shifts the layout: only keep following
-        // when the viewport is already pinned to the bottom, so a user who scrolled up to read
-        // history is never yanked back down.
-        val wasAtBottom = !listState.canScrollForward
-        appendBounded(logs, event)
-        val rows = filtered
-        if (wasAtBottom && rows.isNotEmpty()) {
-          listState.scrollToItem(rows.lastIndex)
-        }
-      }
+      if (event is TelemetryDisplayEvent.Log) appendBounded(logs, event)
     }
   }
+
+  LaunchedEffect(telemetryPushClient) {
+    val client = telemetryPushClient ?: return@LaunchedEffect
+    client.connectionState.collect { connectionState = it }
+  }
+
+  // Re-derive follow intent whenever a scroll settles: we follow iff the viewport rests at the
+  // bottom. A user drag that stops mid-list clears it; reaching the bottom (or a programmatic
+  // tail scroll) re-arms it. Filter changes do not scroll, so they never clear the intent.
+  LaunchedEffect(listState) {
+    snapshotFlow { listState.isScrollInProgress }
+      .collect { inProgress -> if (!inProgress) followTail = !listState.canScrollForward }
+  }
+
+  // Follow the tail when following: fires on new rows (size change) and on filter changes (which
+  // re-anchor the list), so the newest visible row stays in view without fighting a scrolled-up
+  // user.
+  LaunchedEffect(filtered.size, query, enabledLevels, followTail) {
+    if (followTail && filtered.isNotEmpty()) {
+      listState.scrollToItem(filtered.lastIndex)
+    }
+  }
+
+  val statusText = connectionState?.let { connectionStatusText(it) }
 
   Column(modifier = modifier.fillMaxSize()) {
     LogsFilterBar(
@@ -156,13 +221,26 @@ fun LogsPanel(
       },
     )
 
+    if (statusText != null) {
+      Box(
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(Color(0xFF5C4033).copy(alpha = 0.3f))
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+      ) {
+        Text(statusText, fontSize = 10.sp, color = Color(0xFFE0A040))
+      }
+    }
+
     if (filtered.isEmpty()) {
       Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val message =
-          if (query.isBlank() && enabledLevels == LogLevel.entries.toSet()) {
-            "No logs yet"
-          } else {
-            "No logs match the filter"
+          when {
+            // A non-healthy socket is why there are no rows — say so instead of the misleading
+            // "No logs yet" (which implies a healthy but quiet stream).
+            statusText != null -> statusText
+            query.isBlank() && enabledLevels == LogLevel.entries.toSet() -> "No logs yet"
+            else -> "No logs match the filter"
           }
         Text(message, fontSize = 12.sp, color = colors.text.normal.copy(alpha = 0.4f))
       }
@@ -175,7 +253,7 @@ fun LogsPanel(
             "${event.timestamp}_${System.identityHashCode(event)}"
           },
         ) { index ->
-          LogRow(filtered[index], colors.text.normal)
+          LogRow(filtered[index], colors.text.normal, platform)
         }
       }
     }
@@ -256,8 +334,8 @@ private fun LevelChip(level: LogLevel, isEnabled: Boolean, onToggle: () -> Unit)
 
 /** Single log row: level letter, tag, and message, matching the dashboard's compact styling. */
 @Composable
-private fun LogRow(event: TelemetryDisplayEvent.Log, textColor: Color) {
-  val level = logLevelOf(event.level)
+private fun LogRow(event: TelemetryDisplayEvent.Log, textColor: Color, platform: LogPlatform) {
+  val level = logLevelOf(event.level, platform)
   Row(
     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
     verticalAlignment = Alignment.Top,

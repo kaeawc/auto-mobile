@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.desktop.core.telemetry
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
@@ -13,6 +16,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryPushClient
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -108,6 +113,27 @@ class LogsPanelTest {
     assertEquals(listOf("m10", "m11"), filtered.map { it.message })
   }
 
+  @Test
+  fun `logLevelOf buckets ios levels on the ios scale`() {
+    assertEquals(LogLevel.Verbose, logLevelOf(0, LogPlatform.Ios))
+    assertEquals(LogLevel.Debug, logLevelOf(1, LogPlatform.Ios))
+    assertEquals(LogLevel.Info, logLevelOf(2, LogPlatform.Ios))
+    assertEquals(LogLevel.Warn, logLevelOf(3, LogPlatform.Ios))
+    assertEquals(LogLevel.Error, logLevelOf(4, LogPlatform.Ios))
+    // iOS fault (5) is the top severity → Error.
+    assertEquals(LogLevel.Error, logLevelOf(5, LogPlatform.Ios))
+    // The same int buckets differently per platform: 5 = Warn on Android, Error (fault) on iOS.
+    assertEquals(LogLevel.Warn, logLevelOf(5, LogPlatform.Android))
+  }
+
+  @Test
+  fun `filterLogs buckets ios rows on the ios scale`() {
+    val logs = listOf(log(3, "T", "ios warning", 1), log(5, "T", "ios fault", 2))
+    // On the iOS scale level 3 = Warn and level 5 = Error (fault).
+    assertEquals(listOf(logs[0]), filterLogs(logs, setOf(LogLevel.Warn), "", LogPlatform.Ios))
+    assertEquals(listOf(logs[1]), filterLogs(logs, setOf(LogLevel.Error), "", LogPlatform.Ios))
+  }
+
   // -- Compose UI tests --
 
   @Test
@@ -189,5 +215,56 @@ class LogsPanelTest {
     onNodeWithContentDescription("Toggle Warn logs").assertIsNotSelected()
     onNodeWithContentDescription("Toggle Warn logs").performClick()
     onNodeWithContentDescription("Toggle Warn logs").assertIsSelected()
+  }
+
+  @Test
+  fun `surfaces a connection banner instead of a misleading no-logs-yet`() = runComposeUiTest {
+    val fake = FakeTelemetryPushClient()
+    setContent {
+      MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") }
+    }
+    fake.setConnectionState(ConnectionState.Connecting)
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("Connecting...").fetchSemanticsNodes().isNotEmpty()
+    }
+    // The connecting status is surfaced; the healthy-but-empty text is not shown.
+    onNodeWithText("No logs yet").assertDoesNotExist()
+  }
+
+  @Test
+  fun `tail-follow survives filtering to an old row then clearing`() = runComposeUiTest {
+    val fake = FakeTelemetryPushClient()
+    setContent {
+      MaterialTheme {
+        // Constrain height so the row list overflows and scroll position actually matters.
+        Box(Modifier.height(120.dp)) {
+          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1")
+        }
+      }
+    }
+    waitForIdle()
+    for (i in 0 until 30) {
+      fake.emitEvent(log(4, "T", "row $i", i.toLong()))
+    }
+    // Following the tail, the newest row is visible.
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("row 29").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("row 29").assertIsDisplayed()
+
+    // Filter down to an old row, then clear the query.
+    onNode(hasSetTextAction()).performTextInput("row 0")
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("row 0").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNode(hasSetTextAction()).performTextClearance()
+    waitForIdle()
+
+    // The next live row is still followed to the bottom, not stranded below the fold.
+    fake.emitEvent(log(4, "T", "row 30", 30L))
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("row 30").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("row 30").assertIsDisplayed()
   }
 }

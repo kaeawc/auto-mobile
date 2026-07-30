@@ -8,7 +8,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
+import dev.jasonpearson.automobile.desktop.core.telemetry.LogPlatform
 import dev.jasonpearson.automobile.desktop.core.telemetry.LogsPanel
+
+/**
+ * The log-level numeric scale this device's logs use (Android and iOS number levels differently).
+ */
+private fun Platform.toLogPlatform(): LogPlatform =
+  if (this == Platform.Ios) LogPlatform.Ios else LogPlatform.Android
 
 /**
  * Docked-facet body for [Tool.Logs]: a logs-only event stream with an always-on filter bar
@@ -38,5 +45,6 @@ fun LogsFacet(
   LogsPanel(
     telemetryPushClient = client,
     activeDeviceId = column.deviceId,
+    platform = column.platform.toLogPlatform(),
   )
 }

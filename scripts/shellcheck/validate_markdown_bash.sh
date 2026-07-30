@@ -97,50 +97,102 @@ block_is_illustrative() {
   return 1
 }
 
-# GNU-only footgun scan over a block's lines. Skips comment-only lines and lines
-# carrying `# md-bash-lint-ok`. Reports each finding relative to the Markdown
-# source line. Args: FILE START_LINE TMPFILE.
+# True when LINE ends with a bash line-continuation — an odd-length run of
+# trailing backslashes (`grep \` continues; `foo\\` is a literal backslash and
+# does not). A continuation cannot carry trailing whitespace in bash, so the
+# backslash must be the final character.
+ends_with_continuation() {
+  local s="$1"
+  [[ "$s" == *\\ ]] || return 1
+  # ${s##*[!\\]} strips everything up to and including the last non-backslash
+  # char, leaving only the trailing backslash run (the whole string if it is all
+  # backslashes).
+  local run="${s##*[!\\]}"
+  (( ${#run} % 2 == 1 ))
+}
+
+# GNU-only footgun check for a single LOGICAL line. Skips comment-only lines and
+# lines carrying `# md-bash-lint-ok`. Args: FILE SRCLINE LINE.
+check_logical_line() {
+  local file="$1" srcline="$2" line="$3"
+  [[ "$line" =~ ^[[:space:]]*# ]] && return
+  printf '%s' "$line" | grep -q 'md-bash-lint-ok' && return
+
+  local label="" hint=""
+  # grep PCRE: short `-P`/`-oP` and the long `--perl-regexp` (with optional
+  # `=value`). This is the exact class behind #4117.
+  if printf '%s' "$line" | grep -qE '\bgrep\b[^|]*(-[A-Za-z]*P|--perl-regexp)'; then
+    label="gnu-grep-P"; hint="grep -P/-oP/--perl-regexp is GNU-only PCRE; /usr/bin/grep on macOS rejects it (#4117)."
+  elif printf '%s' "$line" | grep -qE '\bsed\b[^|]*[[:space:]]-i([[:space:]]|$)'; then
+    label="gnu-sed-inplace"; hint="sed -i without a suffix is GNU-only; BSD/macOS needs sed -i '' or a temp file."
+  elif printf '%s' "$line" | grep -qE '\breadlink\b[^|]*-[A-Za-z]*f'; then
+    label="gnu-readlink-f"; hint="readlink -f is GNU-only; use a portable path resolver (cd/pwd -P)."
+  elif printf '%s' "$line" | grep -qE '\b(mapfile|readarray)\b'; then
+    label="bash4-mapfile"; hint="mapfile/readarray is bash 4+; /bin/bash on macOS is 3.2. Use a read loop."
+  elif printf '%s' "$line" | grep -qE '\bdate\b[^|]*[[:space:]]-d([[:space:]]|$)'; then
+    label="gnu-date-d"; hint="date -d is GNU-only; BSD/macOS date uses -v/-j -f."
+  fi
+
+  if [[ -n "$label" ]]; then
+    printf '%s%s%s %s:%s\n    %s\n    %s→ %s%s\n' \
+      "$RED" "[$label]" "$NC" "$file" "$srcline" \
+      "$(printf '%s' "$line" | sed 's/^[[:space:]]*//')" "$YELLOW" "$hint" "$NC" >&2
+    violations=$((violations + 1))
+  fi
+}
+
+# GNU-only footgun scan over a block. Physical lines joined by a trailing `\`
+# line-continuation are coalesced into one logical line before matching, so a
+# `grep \`<newline>`-P …` split cannot slip past a single-line pattern. Reports
+# each finding relative to the Markdown source line the logical line began on.
+# Args: FILE START_LINE TMPFILE.
 scan_gnuisms() {
   local file="$1" start="$2" tmp="$3"
-  local n=0 line
+  local n=0 line buf="" bufline=0 pending=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     n=$((n + 1))
-    local srcline=$((start + n - 1))
-    [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    printf '%s' "$line" | grep -q 'md-bash-lint-ok' && continue
-
-    local label="" hint=""
-    if printf '%s' "$line" | grep -qE '\bgrep\b[^|]*-[A-Za-z]*P'; then
-      label="gnu-grep-P"; hint="grep -P/-oP is GNU-only PCRE; /usr/bin/grep on macOS rejects it (#4117)."
-    elif printf '%s' "$line" | grep -qE '\bsed\b[^|]*[[:space:]]-i([[:space:]]|$)'; then
-      label="gnu-sed-inplace"; hint="sed -i without a suffix is GNU-only; BSD/macOS needs sed -i '' or a temp file."
-    elif printf '%s' "$line" | grep -qE '\breadlink\b[^|]*-[A-Za-z]*f'; then
-      label="gnu-readlink-f"; hint="readlink -f is GNU-only; use a portable path resolver (cd/pwd -P)."
-    elif printf '%s' "$line" | grep -qE '\b(mapfile|readarray)\b'; then
-      label="bash4-mapfile"; hint="mapfile/readarray is bash 4+; /bin/bash on macOS is 3.2. Use a read loop."
-    elif printf '%s' "$line" | grep -qE '\bdate\b[^|]*[[:space:]]-d([[:space:]]|$)'; then
-      label="gnu-date-d"; hint="date -d is GNU-only; BSD/macOS date uses -v/-j -f."
+    if [[ "$pending" -eq 1 ]]; then
+      # Drop the joining backslash and splice onto the continued line.
+      buf="${buf%\\} $line"
+    else
+      buf="$line"; bufline=$((start + n - 1))
     fi
-
-    if [[ -n "$label" ]]; then
-      printf '%s%s%s %s:%s\n    %s\n    %s→ %s%s\n' \
-        "$RED" "[$label]" "$NC" "$file" "$srcline" \
-        "$(printf '%s' "$line" | sed 's/^[[:space:]]*//')" "$YELLOW" "$hint" "$NC" >&2
-      violations=$((violations + 1))
+    if ends_with_continuation "$line"; then
+      pending=1
+      continue
     fi
+    pending=0
+    check_logical_line "$file" "$bufline" "$buf"
   done < "$tmp"
+  # A block whose final line dangles a continuation still gets checked.
+  if [[ "$pending" -eq 1 ]]; then
+    check_logical_line "$file" "$bufline" "$buf"
+  fi
 }
 
 process_file() {
   local file="$1"
   # Split the file into fenced ```bash blocks. awk emits, per block, a header
-  # line `@@ START_LINE` followed by the block body, then `@@END`. Only fences
-  # opened by exactly ```bash (optionally indented, optional trailing spaces)
-  # count — ```bash-inside-a-larger-info-string is not a shell block.
+  # line `@@ START_LINE` followed by the block body, then `@@END`. A block opens
+  # on a run of >=3 backticks with a `bash` info string (optionally indented,
+  # optional trailing spaces). Per CommonMark the closing fence must be a run of
+  # AT LEAST as many backticks as the opener, so a block opened with ``` may be
+  # closed with ```` (a longer fence) — matching only an exact 3-backtick close
+  # would swallow the rest of the file as one block.
   local awk_out
   awk_out="$(awk '
-    /^[[:space:]]*```bash[[:space:]]*$/ && !inblock { inblock=1; print "@@ " NR; next }
-    /^[[:space:]]*```[[:space:]]*$/ && inblock { inblock=0; print "@@END"; next }
+    function fence_len(s,   m) {
+      sub(/^[[:space:]]+/, "", s)
+      m = 0
+      while (substr(s, m + 1, 1) == "`") { m++ }
+      return m
+    }
+    !inblock && $0 ~ /^[[:space:]]*`{3,}bash[[:space:]]*$/ {
+      inblock = 1; openlen = fence_len($0); print "@@ " NR; next
+    }
+    inblock && $0 ~ /^[[:space:]]*`{3,}[[:space:]]*$/ && fence_len($0) >= openlen {
+      inblock = 0; print "@@END"; next
+    }
     inblock { print "@@L " $0 }
   ' "$file")"
   [[ -z "$awk_out" ]] && return

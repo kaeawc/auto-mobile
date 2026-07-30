@@ -107,3 +107,59 @@ ls -la'
   run bash "$ABS" "$FIX"
   [ "$status" -eq 0 ]
 }
+
+# --- regression cases for the three P2 review threads on PR #4801 ---
+
+@test "flags a GNUism split across a trailing-backslash line-continuation" {
+  # `grep` and its `-P` sit on different physical lines; a single-line scan
+  # would miss it. The logical-line join must catch it.
+  write_block bad 'gh run list \
+  | grep -P "runs/[0-9]+"'
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-grep-P"* ]]
+}
+
+@test "a literal double-backslash line-end is not treated as a continuation" {
+  # An even run of trailing backslashes is a literal backslash, not a
+  # continuation, so the following line is scanned in its own right.
+  write_block bad 'printf "a\\\\"
+date -d yesterday'
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-date-d"* ]]
+}
+
+@test "closes a block opened with 3 backticks on a longer 4-backtick fence" {
+  # CommonMark allows a longer closing fence. If the extractor only matched an
+  # exact 3-backtick close it would swallow everything below as one block; here
+  # the fenced GNUism must still be flagged and the close must be honored.
+  printf '````bash\ngrep -P "x" file\n````\n' > "$FIX/fence.md"
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-grep-P"* ]]
+}
+
+@test "a longer closing fence ends the block (does not swallow later content)" {
+  printf '````bash\necho ok\n````\n\ntext\n\n```bash\ndate -d x\n```\n' > "$FIX/two.md"
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  # The GNUism lives in the SECOND block; catching it proves the first block
+  # closed on its 4-backtick fence.
+  [[ "$output" == *"gnu-date-d"* ]]
+  [[ "$output" == *"2 block(s)"* ]]
+}
+
+@test "flags the long-option grep --perl-regexp" {
+  write_block bad 'gh run list | grep --perl-regexp "runs/[0-9]+"'
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-grep-P"* ]]
+}
+
+@test "flags grep --perl-regexp=VALUE (attached value form)" {
+  write_block bad 'gh run list | grep --perl-regexp="runs/[0-9]+" file'
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-grep-P"* ]]
+}

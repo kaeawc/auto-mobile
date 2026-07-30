@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -17,6 +18,7 @@ import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
+import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
@@ -28,6 +30,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceEffect
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceFacetPlaceholder
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceViewModel
+import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAction
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
@@ -66,6 +69,7 @@ fun AutoMobileDesktopApp(
     remember(scope, resourceClient) { DevicePickerViewModel(resourceClient, scope) }
   val pickerState by pickerViewModel.state.collectAsState()
   var pickerOpen by remember { mutableStateOf(false) }
+  var paletteOpen by remember { mutableStateOf(false) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
 
   // OpenPicker (from the empty state or the Devices launcher) shows the picker; observing selected
@@ -119,12 +123,26 @@ fun AutoMobileDesktopApp(
             onClose = { pickerOpen = false },
           )
         else ->
-          WorkspaceShell(
-            state = workspaceState,
-            onAction = workspaceViewModel::onAction,
-            onOpenPicker = workspaceViewModel::openPicker,
-            facetContent = { column, tool -> WorkspaceFacet(column, tool) },
-          )
+          Box(Modifier.fillMaxSize()) {
+            WorkspaceShell(
+              state = workspaceState,
+              onAction = workspaceViewModel::onAction,
+              onOpenPicker = workspaceViewModel::openPicker,
+              onOpenPalette = { paletteOpen = true },
+              facetContent = { column, tool -> WorkspaceFacet(column, tool) },
+            )
+            if (paletteOpen) {
+              CommandPalette(
+                commands =
+                  buildWorkspaceCommands(
+                    workspaceState,
+                    onOpenPicker = workspaceViewModel::openPicker,
+                    onAction = workspaceViewModel::onAction,
+                  ),
+                onDismiss = { paletteOpen = false },
+              )
+            }
+          }
       }
     }
   }

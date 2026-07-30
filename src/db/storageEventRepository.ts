@@ -1,7 +1,6 @@
 import type { Kysely } from "kysely";
 import type { Database } from "./types";
-import { getDatabase } from "./database";
-import { pruneEventTableByCount, type EventRetentionState } from "./eventRetention";
+import { getDb, createEventRetentionState, cleanupEventTable } from "./eventRepositoryBase";
 import { logger } from "../utils/logger";
 
 export interface RecordStorageEventInput {
@@ -62,11 +61,7 @@ export function normalizeStorageEvent(input: PartialStorageEvent): RecordStorage
   };
 }
 
-const retentionState: EventRetentionState = { cleanupInProgress: false, insertsSinceCleanup: 0 };
-
-function getDb(db?: Kysely<Database>): Kysely<Database> {
-  return db ?? (getDatabase() as unknown as Kysely<Database>);
-}
+const retentionState = createEventRetentionState();
 
 export async function recordStorageEvent(
   rawInput: RecordStorageEventInput,
@@ -184,5 +179,5 @@ export async function cleanupIfNeeded(
   maxRows?: number,
   checkInterval?: number
 ): Promise<void> {
-  await pruneEventTableByCount(db, "storage_events", retentionState, maxRows, checkInterval);
+  await cleanupEventTable("storage_events", retentionState, db, maxRows, checkInterval);
 }

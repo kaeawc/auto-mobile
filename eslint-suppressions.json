@@ -162,6 +162,11 @@
       "count": 1
     }
   },
+  "src/db/eventRepositoryBase.ts": {
+    "auto-mobile/no-unknown-cast": {
+      "count": 1
+    }
+  },
   "src/db/eventRetention.ts": {
     "auto-mobile/no-unknown-cast": {
       "count": 1
@@ -180,17 +185,11 @@
   "src/db/layoutEventRepository.ts": {
     "@typescript-eslint/no-floating-promises": {
       "count": 2
-    },
-    "auto-mobile/no-unknown-cast": {
-      "count": 1
     }
   },
   "src/db/logEventRepository.ts": {
     "@typescript-eslint/no-floating-promises": {
       "count": 2
-    },
-    "auto-mobile/no-unknown-cast": {
-      "count": 1
     }
   },
   "src/db/migrationLock.ts": {
@@ -206,9 +205,6 @@
   "src/db/navigationEventRepository.ts": {
     "@typescript-eslint/no-floating-promises": {
       "count": 2
-    },
-    "auto-mobile/no-unknown-cast": {
-      "count": 1
     }
   },
   "src/db/navigationRepository.ts": {
@@ -219,24 +215,15 @@
   "src/db/networkEventRepository.ts": {
     "@typescript-eslint/no-floating-promises": {
       "count": 1
-    },
-    "auto-mobile/no-unknown-cast": {
-      "count": 1
     }
   },
   "src/db/osEventRepository.ts": {
     "@typescript-eslint/no-floating-promises": {
       "count": 2
-    },
-    "auto-mobile/no-unknown-cast": {
-      "count": 1
     }
   },
   "src/db/storageEventRepository.ts": {
     "@typescript-eslint/no-floating-promises": {
-      "count": 1
-    },
-    "auto-mobile/no-unknown-cast": {
       "count": 1
     }
   },
@@ -372,14 +359,6 @@
       "count": 3
     }
   },
-  "src/features/action/PressButton.ts": {
-    "auto-mobile/catch-convention": {
-      "count": 1
-    },
-    "max-depth": {
-      "count": 1
-    }
-  },
   "src/features/action/RecentApps.ts": {
     "auto-mobile/catch-convention": {
       "count": 1
@@ -477,19 +456,13 @@
   },
   "src/features/navigation/DefaultUIStateSetup.ts": {
     "auto-mobile/catch-convention": {
-      "count": 2
+      "count": 1
     },
     "complexity": {
       "count": 2
-    },
-    "max-depth": {
-      "count": 3
     }
   },
   "src/features/navigation/Explore.ts": {
-    "auto-mobile/catch-convention": {
-      "count": 2
-    },
     "complexity": {
       "count": 3
     },
@@ -506,9 +479,6 @@
     }
   },
   "src/features/navigation/NavigateTo.ts": {
-    "auto-mobile/catch-convention": {
-      "count": 1
-    },
     "complexity": {
       "count": 1
     },
@@ -679,17 +649,11 @@
     }
   },
   "src/features/observe/ios/IOSCtrlProxyClient.ts": {
-    "@typescript-eslint/no-misused-promises": {
-      "count": 1
-    },
     "auto-mobile/catch-convention": {
       "count": 1
     },
     "complexity": {
-      "count": 3
-    },
-    "max-depth": {
-      "count": 1
+      "count": 2
     }
   },
   "src/features/observe/ios/IosScreenIdentity.ts": {
@@ -832,21 +796,11 @@
       "count": 1
     }
   },
-  "src/features/webrtc/PersistentEncoderH264Source.ts": {
-    "complexity": {
-      "count": 1
-    }
-  },
   "src/features/webrtc/VideoServerStreamParser.ts": {
     "complexity": {
       "count": 1
     },
     "max-depth": {
-      "count": 1
-    }
-  },
-  "src/features/webrtc/WebRtcPublisher.ts": {
-    "complexity": {
       "count": 1
     }
   },
@@ -908,7 +862,7 @@
       "count": 1
     },
     "max-depth": {
-      "count": 3
+      "count": 2
     }
   },
   "src/server/deviceImageResources.ts": {
@@ -931,7 +885,7 @@
       "count": 1
     },
     "auto-mobile/no-unknown-cast": {
-      "count": 3
+      "count": 2
     },
     "complexity": {
       "count": 3
@@ -1111,7 +1065,7 @@
       "count": 2
     },
     "complexity": {
-      "count": 8
+      "count": 7
     },
     "max-depth": {
       "count": 12

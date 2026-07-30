@@ -19,6 +19,16 @@ describe("session-scoped tool discovery", () => {
     expect(binding.bind("transport", "device-session-b")).toBe(true);
   });
 
+  test("retains a generated profile for an unbound stdio transport", () => {
+    const binding = new SessionToolBinding();
+    const sessionUuid = binding.createAndBind(undefined);
+
+    expect(sessionUuid).toMatch(/^[0-9a-f-]{36}$/);
+    expect(binding.effectiveSessionUuid(undefined)).toBe(sessionUuid);
+    expect(binding.unbindSession(sessionUuid)).toBe(true);
+    expect(binding.effectiveSessionUuid(undefined)).toBeUndefined();
+  });
+
   test("seeds only a recreated transport's initial session binding", () => {
     const binding = new SessionToolBinding("device-session-a");
 

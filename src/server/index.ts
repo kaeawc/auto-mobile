@@ -46,6 +46,7 @@ import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
+import { registerToolCapabilityTools, SET_TOOL_CAPABILITY_TOOL_NAME } from "./toolCapabilityTools";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 
 // Import resource registration functions
@@ -84,7 +85,8 @@ export interface McpServerOptions {
   sessionContext?: { sessionId?: string; initialSessionToolBinding?: string };
   planExecutionLock?: PlanExecutionLock;
   daemonMode?: boolean;
-  sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
+  sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled"> &
+    Partial<Pick<SessionToolProfileService, "setEnabled">>;
 }
 
 const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
@@ -185,6 +187,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerAppTools();
   registerUtilityTools();
   registerDeviceTools();
+  registerToolCapabilityTools();
   registerDeepLinkTools();
   registerNavigationTools();
   registerNotificationTools();
@@ -365,12 +368,18 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     }
 
     const sessionId = options.sessionContext?.sessionId;
-    const sessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    let sessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
 
     // Get the registered tool
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       throw new ActionableError(`Unknown tool: ${name}`);
+    }
+    // Capability management must be callable before an agent has chosen a
+    // device. Establish a transport-local profile that the control tool can
+    // persist and that later tools/list calls use for discovery.
+    if (name === SET_TOOL_CAPABILITY_TOOL_NAME && !sessionUuid) {
+      sessionUuid = sessionToolBinding.createAndBind(sessionId);
     }
     // Capability enforcement honors the UNION of the base and the derived
     // `${base}:${label}` device-label sessions (issue #4611): a tool is enabled

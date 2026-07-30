@@ -76,6 +76,48 @@ describe("session tool capability MCP enforcement", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  test("lets a core capability control tool opt in a stdio session before device binding", async () => {
+    const enabled = new Set<string>();
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> &
+      Pick<SessionToolProfileService, "setEnabled"> = {
+        isEnabled: async (_sessionUuid, capability) => enabled.has(capability),
+        setEnabled: async (_sessionUuid, capability, value) => {
+          if (value) {
+            enabled.add(capability);
+          } else {
+            enabled.delete(capability);
+          }
+        },
+      };
+    fixture = new McpTestFixture({ sessionToolProfileService: profileService });
+    await fixture.setup();
+
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ok" }] })
+    );
+
+    const result = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "setToolCapability", arguments: { capability: "clipboard" } },
+      },
+      z.any()
+    );
+    const payload = JSON.parse(result.content[0].text) as { sessionUuid: string; capability: string; enabled: boolean };
+    expect(payload).toMatchObject({ capability: "clipboard", enabled: true });
+    expect(payload.sessionUuid).toMatch(/^[0-9a-f-]{36}$/);
+
+    const listed = await fixture.client.listTools();
+    expect(listed.tools.some(tool => tool.name === "clipboard")).toBe(true);
+    await expect(fixture.client.request(
+      { method: "tools/call", params: { name: "clipboard", arguments: {} } },
+      z.any()
+    )).resolves.toBeDefined();
+  });
+
   test("denies a disabled device-aware tool when its schema strips sessionUuid", async () => {
     const isEnabled = mock(async (_sessionUuid: string | undefined, capability: string) =>
       capability === "test-authoring"

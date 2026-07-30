@@ -14,7 +14,8 @@ import type { SessionToolProfileService } from "./SessionToolProfileService";
  */
 type ToolCapabilityContext = {
   routingSessionUuid?: string;
-  sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
+  sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled"> &
+    Partial<Pick<SessionToolProfileService, "setEnabled">>;
 };
 
 const toolCapabilityContext = new AsyncLocalStorage<ToolCapabilityContext>();

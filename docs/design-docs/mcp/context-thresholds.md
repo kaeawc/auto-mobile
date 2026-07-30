@@ -26,6 +26,20 @@ bun run benchmark-context
 bun run benchmark-context --output reports/context-benchmark.json
 ```
 
+## Opting Into Advanced Tools
+
+The core profile always includes `setToolCapability`. Call it before an advanced
+tool to persist that capability for the current MCP connection; the server then
+emits `notifications/tools/list_changed` so clients can refresh discovery.
+
+```json
+{ "capability": "clipboard", "enabled": true }
+```
+
+For a new stdio connection, the response includes the generated `sessionUuid`.
+The connection retains it for later calls, and callers may provide it explicitly
+to resume the same persisted profile after reconnecting.
+
 ## Baseline Configuration
 
 `scripts/context-thresholds.json` records the canonical measurements. It deliberately has no `thresholds` section until the core and all-tool totals have been reviewed.
@@ -37,12 +51,12 @@ bun run benchmark-context --output reports/context-benchmark.json
     "generatedAt": "2026-07-29",
     "description": "Production-server context baselines for core and all-tool profiles",
     "baseline": {
-      "coreTools": 8177,
-      "allTools": 25896,
+      "coreTools": 8468,
+      "allTools": 26187,
       "resources": 1259,
       "resourceTemplates": 12137,
-      "coreTotal": 21573,
-      "allTotal": 39292
+      "coreTotal": 21864,
+      "allTotal": 39583
     }
   }
 }
@@ -52,12 +66,12 @@ bun run benchmark-context --output reports/context-benchmark.json
 
 | Category | Baseline | Scope |
 |----------|----------|-------|
-| Core Tools | 8,177 tokens | Default core profile |
-| All Tools | 25,896 tokens | All advertised tools |
+| Core Tools | 8,468 tokens | Default core profile |
+| All Tools | 26,187 tokens | All advertised tools |
 | Resources | 1,259 tokens | Shared |
 | Resource Templates | 12,137 tokens | Shared |
-| **Core Total** | **21,573 tokens** | **Default core profile** |
-| **All Total** | **39,292 tokens** | **All advertised tools** |
+| **Core Total** | **21,864 tokens** | **Default core profile** |
+| **All Total** | **39,583 tokens** | **All advertised tools** |
 
 ## Benchmark Report Format
 
@@ -66,13 +80,13 @@ MCP CONTEXT BASELINE BENCHMARK REPORT
 
 Category                     Actual   Baseline    Delta  Status
 --------------------------------------------------------------------------------
-  Core Tools                     8177       8177       +0  • BASELINE
-  All Tools                     25896      25896       +0  • BASELINE
+  Core Tools                     8468       8468       +0  • BASELINE
+  All Tools                     26187      26187       +0  • BASELINE
   Resources                      1259       1259       +0  • BASELINE
   Resource Templates            12137      12137       +0  • BASELINE
 --------------------------------------------------------------------------------
-  CORE TOTAL                   21573      21573       +0  • BASELINE
-  ALL TOTAL                    39292      39292       +0  • BASELINE
+  CORE TOTAL                   21864      21864       +0  • BASELINE
+  ALL TOTAL                    39583      39583       +0  • BASELINE
 
 Overall Status: • BASELINES RECORDED (threshold enforcement pending)
 ```
@@ -84,12 +98,12 @@ The JSON report marks this state explicitly:
   "passed": true,
   "enforcement": { "enabled": false },
   "results": {
-    "coreTools": { "actual": 8177, "baseline": 8177, "delta": 0 },
-    "allTools": { "actual": 25896, "baseline": 25896, "delta": 0 },
+    "coreTools": { "actual": 8468, "baseline": 8468, "delta": 0 },
+    "allTools": { "actual": 26187, "baseline": 26187, "delta": 0 },
     "resources": { "actual": 1259, "baseline": 1259, "delta": 0 },
     "resourceTemplates": { "actual": 12137, "baseline": 12137, "delta": 0 },
-    "coreTotal": { "actual": 21573, "baseline": 21573, "delta": 0 },
-    "allTotal": { "actual": 39292, "baseline": 39292, "delta": 0 }
+    "coreTotal": { "actual": 21864, "baseline": 21864, "delta": 0 },
+    "allTotal": { "actual": 39583, "baseline": 39583, "delta": 0 }
   },
   "violations": []
 }

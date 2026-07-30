@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto";
+
 export class SessionToolBinding {
   private readonly boundDeviceSessions = new Map<string, string>();
   private initialSessionUuid?: string;
+  /** The single stdio transport has no MCP session ID, so retain its profile here. */
+  private directSessionUuid?: string;
 
   constructor(initialSessionUuid?: string) {
     this.initialSessionUuid = initialSessionUuid;
@@ -14,19 +18,32 @@ export class SessionToolBinding {
       ? explicit
       : mcpSessionId
         ? this.boundDeviceSessions.get(mcpSessionId) ?? this.initialSessionUuid
-        : undefined;
+        : this.directSessionUuid ?? this.initialSessionUuid;
   }
 
   bind(mcpSessionId: string | undefined, sessionUuid: string | undefined): boolean {
-    if (
-      !mcpSessionId
-      || !sessionUuid?.trim()
-      || this.boundDeviceSessions.get(mcpSessionId) === sessionUuid
-    ) {
+    if (!sessionUuid?.trim()) {
+      return false;
+    }
+    if (!mcpSessionId) {
+      if (this.directSessionUuid === sessionUuid) {
+        return false;
+      }
+      this.directSessionUuid = sessionUuid;
+      return true;
+    }
+    if (this.boundDeviceSessions.get(mcpSessionId) === sessionUuid) {
       return false;
     }
     this.boundDeviceSessions.set(mcpSessionId, sessionUuid);
     return true;
+  }
+
+  /** Creates and binds a persistent profile for a connection that has none yet. */
+  createAndBind(mcpSessionId: string | undefined): string {
+    const sessionUuid = randomUUID();
+    this.bind(mcpSessionId, sessionUuid);
+    return sessionUuid;
   }
 
   /**
@@ -55,6 +72,10 @@ export class SessionToolBinding {
     }
     if (this.initialSessionUuid === sessionUuid) {
       this.initialSessionUuid = undefined;
+      removed = true;
+    }
+    if (this.directSessionUuid === sessionUuid) {
+      this.directSessionUuid = undefined;
       removed = true;
     }
     return removed;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
+import { finalizeToolResponse, DEFAULT_OBSERVATION_INLINE_MAX_BYTES } from "../../src/server/finalizeToolResponse";
 import {
   createStructuredToolResponse,
   stringifyToolResponse,
@@ -925,59 +925,63 @@ describe("finalizeToolResponse", () => {
       expectObservationDiff(imePrevious, { mode: "diff", reason: "diff_emitted" });
     });
 
-    test("action policy: documented navigation-prone actions emit full on uncertain identity", () => {
-      const cases: Array<[string, Record<string, unknown>]> = [
-        ["tapOn", { action: "tap" }],
-        ["tapAny", { action: "tap" }],
-        ["homeScreen", {}],
-        ["recentApps", {}],
-        ["openLink", { url: "https://example.com" }],
-        ["pressButton", { button: "back" }],
-        ["pressButton", { button: "home" }],
-        ["pressButton", { button: "recent" }],
-        ["pressButton", { button: "power" }],
-        ["inputText", { text: "query", imeAction: "done" }],
-        ["inputText", { text: "query", imeAction: "go" }],
-        ["inputText", { text: "query", imeAction: "search" }],
-        ["inputText", { text: "query", imeAction: "send" }],
-        ["imeAction", { action: "done" }],
-        ["imeAction", { action: "go" }],
-        ["imeAction", { action: "search" }],
-        ["imeAction", { action: "send" }],
-      ];
+    // Each row is its own test.each case so a single failing action is
+    // attributable, rather than collapsing the whole table on the first miss.
+    const NAV_PRONE_FULL_CASES: Array<[string, Record<string, unknown>]> = [
+      ["tapOn", { action: "tap" }],
+      ["tapAny", { action: "tap" }],
+      ["homeScreen", {}],
+      ["recentApps", {}],
+      ["openLink", { url: "https://example.com" }],
+      ["pressButton", { button: "back" }],
+      ["pressButton", { button: "home" }],
+      ["pressButton", { button: "recent" }],
+      ["pressButton", { button: "power" }],
+      ["inputText", { text: "query", imeAction: "done" }],
+      ["inputText", { text: "query", imeAction: "go" }],
+      ["inputText", { text: "query", imeAction: "search" }],
+      ["inputText", { text: "query", imeAction: "send" }],
+      ["imeAction", { action: "done" }],
+      ["imeAction", { action: "go" }],
+      ["imeAction", { action: "search" }],
+      ["imeAction", { action: "send" }],
+    ];
 
-      for (const [name, args] of cases) {
+    test.each(NAV_PRONE_FULL_CASES)(
+      "action policy: navigation-prone %s %o emits full on uncertain identity",
+      (name, args) => {
         const finalized = finalizeChangedLowConfidenceAction(name, args);
         expect((finalized.structuredContent as any).observation.isDiff).toBeUndefined();
         expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
         expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
       }
-    });
+    );
 
-    test("action policy: documented in-place and scroll actions diff on stable uncertain identity", () => {
-      const cases: Array<[string, Record<string, unknown>]> = [
-        ["inputText", { text: "hello" }],
-        ["inputText", { text: "hello", imeAction: "next" }],
-        ["inputText", { text: "hello", imeAction: "previous" }],
-        ["clearText", {}],
-        ["selectAllText", {}],
-        ["imeAction", { action: "next" }],
-        ["imeAction", { action: "previous" }],
-        ["keyboard", { action: "open" }],
-        ["clipboard", { action: "paste" }],
-        ["pressButton", { button: "menu" }],
-        ["pressButton", { button: "volume_up" }],
-        ["pressButton", { button: "volume_down" }],
-        ["swipeOn", { direction: "up" }],
-        ["dragAndDrop", {}],
-      ];
+    const IN_PLACE_DIFF_CASES: Array<[string, Record<string, unknown>]> = [
+      ["inputText", { text: "hello" }],
+      ["inputText", { text: "hello", imeAction: "next" }],
+      ["inputText", { text: "hello", imeAction: "previous" }],
+      ["clearText", {}],
+      ["selectAllText", {}],
+      ["imeAction", { action: "next" }],
+      ["imeAction", { action: "previous" }],
+      ["keyboard", { action: "open" }],
+      ["clipboard", { action: "paste" }],
+      ["pressButton", { button: "menu" }],
+      ["pressButton", { button: "volume_up" }],
+      ["pressButton", { button: "volume_down" }],
+      ["swipeOn", { direction: "up" }],
+      ["dragAndDrop", {}],
+    ];
 
-      for (const [name, args] of cases) {
+    test.each(IN_PLACE_DIFF_CASES)(
+      "action policy: in-place/scroll %s %o diffs on stable uncertain identity",
+      (name, args) => {
         const finalized = finalizeChangedLowConfidenceAction(name, args);
         expect((finalized.structuredContent as any).observation.isDiff).toBe(true);
         expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
       }
-    });
+    );
 
     test("falls back to full when there is no sessionUuid (legacy single-agent path)", () => {
       const { store, map } = makeStore();
@@ -1239,6 +1243,103 @@ describe("finalizeToolResponse", () => {
         { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer } as any
       )).toThrow("artifact disk is full");
       expect(map.get("s1")).toBe(renderedBaseline);
+    });
+  });
+
+  describe("observation artifact mode — oversized threshold (#4183 item 4)", () => {
+    let originalDiff: boolean;
+    let originalNoObserve: boolean;
+
+    beforeEach(() => {
+      originalDiff = serverConfig.isActionsDiffObserveEnabled();
+      originalNoObserve = serverConfig.isActionsNoObserveEnabled();
+      serverConfig.setActionsDiffObserveEnabled(false);
+      serverConfig.setActionsNoObserveEnabled(false);
+    });
+
+    afterEach(() => {
+      serverConfig.setActionsDiffObserveEnabled(originalDiff);
+      serverConfig.setActionsNoObserveEnabled(originalNoObserve);
+    });
+
+    // A bounds-free single node keeps sanitize ~identity (no bounds compaction),
+    // and node `text` survives the trim verbatim — so the filler length linearly
+    // controls the serialized size the oversized threshold measures.
+    function paddedObservation(fillerLen: number): ObserveResult {
+      return {
+        updatedAt: 0,
+        screenSize: { width: 100, height: 100 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: {
+          packageName: "com.example",
+          hierarchy: {
+            node: {
+              "resource-id": "com.example:id/root",
+              "text": "x".repeat(fillerLen),
+              "node": [],
+            } as any,
+          },
+        },
+      } as ObserveResult;
+    }
+
+    // Serialized size of the payload the threshold actually measures (the diff is
+    // disabled here, so observationDiff is the fixed `full/disabled` marker).
+    function actionPayloadBytes(fillerLen: number): number {
+      return Buffer.byteLength(
+        stringifyToolResponse({
+          success: true,
+          observation: paddedObservation(fillerLen),
+          observationDiff: { mode: "full", reason: "disabled" },
+        }),
+        "utf8"
+      );
+    }
+
+    // Filler that lands the payload `delta` bytes past the boundary. A ±1KB delta
+    // comfortably exceeds sanitize's near-identity size drift on this fixture.
+    function fillerForDelta(delta: number): number {
+      return DEFAULT_OBSERVATION_INLINE_MAX_BYTES - actionPayloadBytes(0) + delta;
+    }
+
+    test("routes an over-64KB observation to an artifact", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const filler = fillerForDelta(1024);
+      // Guard the fixture genuinely crosses the boundary before asserting routing.
+      expect(actionPayloadBytes(filler)).toBeGreaterThan(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: paddedObservation(filler) }),
+        { name: "tapOn", sessionUuid: "s1", artifactMode: "oversized", artifactWriter: writer } as any
+      );
+
+      expect(writer.writes).toHaveLength(1);
+      expect((finalized.structuredContent as any).observation).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/tapOn-1.json",
+          format: "json",
+          payload: "ObserveResult",
+          bytes: 123,
+          tool: "tapOn",
+        },
+      });
+      expect((finalized.structuredContent as any).observation.viewHierarchy).toBeUndefined();
+    });
+
+    test("keeps an under-64KB observation inline", () => {
+      const writer = new FakeObservationArtifactWriter();
+      const filler = fillerForDelta(-1024);
+      expect(actionPayloadBytes(filler)).toBeLessThan(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: paddedObservation(filler) }),
+        { name: "tapOn", sessionUuid: "s1", artifactMode: "oversized", artifactWriter: writer } as any
+      );
+
+      expect(writer.writes).toHaveLength(0);
+      // Inline: still the ObserveResult shape, not replaced with artifact metadata.
+      expect((finalized.structuredContent as any).observation.artifact).toBeUndefined();
+      expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
     });
   });
 

@@ -1,6 +1,6 @@
 import { Mutex } from "async-mutex";
 import { logger } from "../utils/logger";
-import { defaultTimer } from "../utils/SystemTimer";
+import { defaultTimer, Timer } from "../utils/SystemTimer";
 
 /**
  * Coordinates critical sections across multiple devices using global locks.
@@ -22,7 +22,14 @@ export class CriticalSectionCoordinator {
   // session UUID, so `namespace + SEP + lock` is collision-free.
   private static readonly NAMESPACE_SEPARATOR = "\u0000";
 
-  private constructor() {
+  // Injected timer seam (interface + fake per repo convention). Production uses
+  // the real `defaultTimer`; tests inject a FakeTimer via createForTesting() so
+  // barrier timeouts and cleanup delays are deterministic without global
+  // setTimeout/Date.now patching.
+  private readonly timer: Timer;
+
+  private constructor(timer: Timer = defaultTimer) {
+    this.timer = timer;
     this.locks = new Map();
     this.barrierCounts = new Map();
     this.expectedDeviceCounts = new Map();
@@ -35,6 +42,15 @@ export class CriticalSectionCoordinator {
       CriticalSectionCoordinator.instance = new CriticalSectionCoordinator();
     }
     return CriticalSectionCoordinator.instance;
+  }
+
+  /**
+   * Create an isolated instance with an injected timer (for testing). Bypasses
+   * the process-wide singleton so each test gets its own barrier state and its
+   * own FakeTimer.
+   */
+  public static createForTesting(timer: Timer): CriticalSectionCoordinator {
+    return new CriticalSectionCoordinator(timer);
   }
 
   /**
@@ -81,7 +97,7 @@ export class CriticalSectionCoordinator {
 
     const existingTimer = this.cleanupTimers.get(key);
     if (existingTimer) {
-      defaultTimer.clearTimeout(existingTimer);
+      this.timer.clearTimeout(existingTimer);
       this.cleanupTimers.delete(key);
     }
   }
@@ -216,7 +232,7 @@ export class CriticalSectionCoordinator {
       this.barrierResolvers.set(key, resolvers);
 
       // Set timeout
-      const timer = defaultTimer.setTimeout(() => {
+      const timer = this.timer.setTimeout(() => {
         // Remove this resolver
         const currentResolvers = this.barrierResolvers.get(key) || [];
         const index = currentResolvers.indexOf(resolve);
@@ -237,7 +253,7 @@ export class CriticalSectionCoordinator {
       // Store the timeout so we can clear it if resolved normally
       const originalResolve = resolve;
       const wrappedResolve = () => {
-        defaultTimer.clearTimeout(timer);
+        this.timer.clearTimeout(timer);
         originalResolve();
       };
 
@@ -256,11 +272,11 @@ export class CriticalSectionCoordinator {
   private scheduleCleanup(key: string): void {
     const existingTimer = this.cleanupTimers.get(key);
     if (existingTimer) {
-      defaultTimer.clearTimeout(existingTimer);
+      this.timer.clearTimeout(existingTimer);
     }
 
     // Schedule new cleanup
-    const timer = defaultTimer.setTimeout(() => {
+    const timer = this.timer.setTimeout(() => {
       logger.debug(`Cleaning up lock resources for "${key}"`);
       this.locks.delete(key);
       this.barrierCounts.delete(key);
@@ -284,7 +300,7 @@ export class CriticalSectionCoordinator {
 
     const existingTimer = this.cleanupTimers.get(key);
     if (existingTimer) {
-      defaultTimer.clearTimeout(existingTimer);
+      this.timer.clearTimeout(existingTimer);
     }
 
     this.locks.delete(key);
@@ -299,7 +315,7 @@ export class CriticalSectionCoordinator {
 	 */
   public reset(): void {
     for (const timer of this.cleanupTimers.values()) {
-      defaultTimer.clearTimeout(timer);
+      this.timer.clearTimeout(timer);
     }
 
     this.locks.clear();

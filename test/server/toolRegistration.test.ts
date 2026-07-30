@@ -91,6 +91,33 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     expect(() => compileJsonSchema(observe!.outputSchema)).not.toThrow();
   });
 
+  // R11 (issue #4183): the observe-only check above compiled a single schema.
+  // Every committed input/output schema must be compilable by strict clients,
+  // or a hand-edited schema slips through until a client rejects it at runtime.
+  test("should keep every committed tool schema compilable by strict clients", async () => {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
+
+    const content = await fs.readFile(schemaPath, "utf-8");
+    const schemas = JSON.parse(content) as ToolSchemaDefinition[];
+    expect(schemas.length).toBeGreaterThan(0);
+
+    for (const schema of schemas) {
+      expect(() => compileJsonSchema(schema.inputSchema), `${schema.name} inputSchema`).not.toThrow();
+      if (schema.outputSchema !== undefined) {
+        expect(() => compileJsonSchema(schema.outputSchema), `${schema.name} outputSchema`).not.toThrow();
+      }
+    }
+  });
+
+  // R9 (issue #4183): a negative assertion so the compile check cannot silently
+  // pass on anything — a structurally-invalid schema (`type` not an allowed
+  // keyword) must be rejected, proving compileJsonSchema is a real gate.
+  test("compileJsonSchema rejects a structurally invalid schema", () => {
+    expect(() => compileJsonSchema({ type: "not-a-json-schema-type" })).toThrow();
+  });
+
   // A5 (issue #4181, rank 6): the previous test compared only NAMES, and only
   // in the served->committed direction. This checks BOTH directions and the
   // body/description bytes:

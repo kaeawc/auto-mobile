@@ -154,7 +154,7 @@ jobs:
             '.tag == $tag
               and .tag_sha == $tag_sha
               and .prepare_run_id == $prepare_run_id
-              and .artifacts == ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper"]' \
+              and .artifacts == ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]' \
             /tmp/release-artifact-provenance.json >/dev/null
 
       - name: "Download CtrlProxy APK"
@@ -189,6 +189,36 @@ jobs:
         with:
           name: screen-capture-helper
           path: /tmp
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
+
+      # Desktop installers are direct user downloads, not runtime-fetched
+      # dependencies, so they carry no source-checksum entry in the release
+      # constants; they are attached to the GitHub release as-is.
+      - name: "Download desktop macOS DMG"
+        uses: actions/download-artifact@v7
+        with:
+          name: automobile-desktop-macos
+          path: /tmp/desktop
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
+
+      - name: "Download desktop Windows MSI"
+        uses: actions/download-artifact@v7
+        with:
+          name: automobile-desktop-windows
+          path: /tmp/desktop
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
+
+      - name: "Download desktop Linux Deb"
+        uses: actions/download-artifact@v7
+        with:
+          name: automobile-desktop-linux
+          path: /tmp/desktop
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
           run-id: ${{ inputs.prepare_run_id }}
@@ -260,6 +290,7 @@ jobs:
           NOTES="${NOTES}"$'\n\n'"## macOS screen-capture-helper"$'\n\n'\
             '"**SHA256 Checksum:** \`${SCREEN_CAPTURE_HELPER_CHECKSUM}\`"$'\n\n'\
             '"Download screen-capture-helper-macos-universal.zip from the release assets below."
+          NOTES="${NOTES}"$'\n\n'"## Desktop App"$'\n\n'"Native installers are attached below: macOS \`.dmg\` (signed & notarized), Windows \`.msi\`, and Linux \`.deb\`."
 
           # Save to file for GitHub release
           echo "$NOTES" > release_notes.txt
@@ -440,6 +471,9 @@ jobs:
             /tmp/control-proxy.ipa
             /tmp/automobile-video.jar
             /tmp/screen-capture-helper-macos-universal.zip
+            /tmp/desktop/AutoMobile-*-macos.dmg
+            /tmp/desktop/AutoMobile-*-windows.msi
+            /tmp/desktop/AutoMobile-*-linux.deb
           draft: false
           prerelease: false
         env:

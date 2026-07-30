@@ -59,6 +59,7 @@ fun WorkspaceShell(
       is WorkspaceUiState.Empty -> EmptyState(onOpenPicker, Modifier.weight(1f).fillMaxWidth())
       is WorkspaceUiState.Content ->
         Row(Modifier.weight(1f).fillMaxWidth()) {
+          val canDiff = state.columns.size > 1
           state.columns.forEach { column ->
             // Key by deviceId so a surviving pane keeps its own remembered state + facet
             // connection when another pane closes (unkeyed = positional identity churns survivors).
@@ -68,6 +69,7 @@ fun WorkspaceShell(
                 focused = column.deviceId == state.focusedDeviceId,
                 onAction = onAction,
                 facetContent = facetContent,
+                canDiff = canDiff,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
               )
             }
@@ -146,6 +148,7 @@ private fun DeviceColumnView(
   focused: Boolean,
   onAction: (WorkspaceAction) -> Unit,
   facetContent: @Composable (DeviceColumn, Tool) -> Unit,
+  canDiff: Boolean,
   modifier: Modifier,
 ) {
   Column(
@@ -164,7 +167,7 @@ private fun DeviceColumnView(
       // stream collapses to grow the facet.
       val facetFraction = facetHeightFraction(column.shrunk)
       StreamArea(column, onAction, Modifier.weight(1f - facetFraction))
-      DockedFacet(column, tool, onAction, facetContent, Modifier.weight(facetFraction))
+      DockedFacet(column, tool, onAction, facetContent, canDiff, Modifier.weight(facetFraction))
     }
   }
 }
@@ -203,6 +206,7 @@ private fun DockedFacet(
   tool: Tool,
   onAction: (WorkspaceAction) -> Unit,
   facetContent: @Composable (DeviceColumn, Tool) -> Unit,
+  canDiff: Boolean,
   modifier: Modifier,
 ) {
   Column(modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
@@ -212,8 +216,9 @@ private fun DockedFacet(
     ) {
       Text(tool.icon)
       Spacer(Modifier.width(6.dp))
-      // Weighted + ellipsized so a long label on a narrow pane yields space to the close control
-      // instead of pushing it off-screen.
+      // Weighted + ellipsized so a long label on a narrow pane yields space to the trailing
+      // controls
+      // instead of pushing them off-screen.
       Text(
         tool.label,
         style = MaterialTheme.typography.labelLarge,
@@ -222,6 +227,16 @@ private fun DockedFacet(
         modifier = Modifier.weight(1f),
       )
       Spacer(Modifier.width(6.dp))
+      // ⧉ Diff opens the same tool on the other observed devices; only meaningful with >1 device.
+      if (canDiff) {
+        Glyph(
+          text = "⧉",
+          description = "Open ${tool.label} on all devices",
+          active = false,
+          onClick = { onAction(WorkspaceAction.DiffTool(tool)) },
+        )
+        Spacer(Modifier.width(6.dp))
+      }
       Glyph(
         text = "✕",
         description = "Close ${tool.label} facet on ${column.name}",

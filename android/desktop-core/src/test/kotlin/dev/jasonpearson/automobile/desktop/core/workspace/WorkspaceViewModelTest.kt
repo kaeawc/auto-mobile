@@ -125,6 +125,20 @@ class WorkspaceViewModelTest {
   }
 
   @Test
+  fun `DiffTool opens the tool on every observed column`() = testScope.runTest {
+    val vm = WorkspaceViewModel(this)
+    vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+    vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
+    vm.onAction(WorkspaceAction.SelectTool("a", Tool.Storage))
+    vm.onAction(WorkspaceAction.DiffTool(Tool.Logs))
+    val state = vm.state.value as WorkspaceUiState.Content
+    assertTrue(
+      "every column should show the diffed tool",
+      state.columns.all { it.activeTool == Tool.Logs },
+    )
+  }
+
+  @Test
   fun `RunControl for an unknown device emits nothing`() = testScope.runTest {
     val vm = WorkspaceViewModel(this)
     vm.onAction(WorkspaceAction.ObserveDevice(column("a")))

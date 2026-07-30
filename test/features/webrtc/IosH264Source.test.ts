@@ -12,6 +12,7 @@ import {
   IOS_WEBRTC_FFMPEG_ENV_ALIAS,
   IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL,
   IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS,
+  IOS_ENCODER_RESTART_GRACE_MS,
   IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS,
   IosH264Source,
   defaultIosBitrateBps,
@@ -1379,6 +1380,68 @@ describe("IosH264Source", () => {
     expect(chunks).toContainEqual(Buffer.from([0, 0, 0, 1, 0x65]));
     // The deliberate restart must not surface as a source failure.
     expect(errors).toEqual([]);
+  });
+
+  test("escalates the outgoing encoder to SIGKILL when it ignores SIGTERM within the grace window", async () => {
+    const timer = new FakeTimer();
+    const { source, helper, encoders } = createRestartHarness({ timer }, encoder => {
+      // A slow / signal-ignoring h264_videotoolbox never emits "exit" on SIGTERM.
+      const signals: NodeJS.Signals[] = [];
+      (encoder as unknown as { killSignals: NodeJS.Signals[] }).killSignals = signals;
+      encoder.kill = (signal?: NodeJS.Signals | number): boolean => {
+        signals.push((typeof signal === "number" ? "SIGTERM" : signal ?? "SIGTERM") as NodeJS.Signals);
+        encoder.killed = true;
+        return true;
+      };
+    });
+
+    await startWithFrame(source, helper, frame(2, 2, 0x11));
+    emitIdr(encoders[0]);
+    await flush();
+
+    expect(source.requestKeyFrame()).toBe(true);
+    const oldSignals = (encoders[0] as unknown as { killSignals: NodeJS.Signals[] }).killSignals;
+
+    // The restart SIGTERMs the outgoing encoder but must not force-kill it until
+    // the bounded grace window elapses without an exit.
+    expect(oldSignals).toEqual(["SIGTERM"]);
+
+    timer.advanceTime(IOS_ENCODER_RESTART_GRACE_MS);
+    await flush();
+
+    // A zombie that ignored SIGTERM past the grace window is escalated to SIGKILL
+    // so it cannot linger holding the hardware encoder.
+    expect(oldSignals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  test("does not force-kill the outgoing encoder that exits within the grace window", async () => {
+    const timer = new FakeTimer();
+    const { source, helper, encoders } = createRestartHarness({ timer }, encoder => {
+      const signals: NodeJS.Signals[] = [];
+      (encoder as unknown as { killSignals: NodeJS.Signals[] }).killSignals = signals;
+      encoder.kill = (signal?: NodeJS.Signals | number): boolean => {
+        const name = (typeof signal === "number" ? "SIGTERM" : signal ?? "SIGTERM") as NodeJS.Signals;
+        signals.push(name);
+        encoder.killed = true;
+        if (name === "SIGTERM") {
+          // Honour SIGTERM promptly: exit before the grace window elapses.
+          encoder.emit("exit", null, "SIGTERM");
+        }
+        return true;
+      };
+    });
+
+    await startWithFrame(source, helper, frame(2, 2, 0x11));
+    emitIdr(encoders[0]);
+    await flush();
+
+    expect(source.requestKeyFrame()).toBe(true);
+    await flush();
+    timer.advanceTime(IOS_ENCODER_RESTART_GRACE_MS);
+    await flush();
+
+    const oldSignals = (encoders[0] as unknown as { killSignals: NodeJS.Signals[] }).killSignals;
+    expect(oldSignals).toEqual(["SIGTERM"]);
   });
 
   test("requestKeyFrame throttles a burst of PLIs to at most one restart per interval", async () => {

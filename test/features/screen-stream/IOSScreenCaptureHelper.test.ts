@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 import {
   encodeFrameHeader,
   IOS_HELPER_STOP_GRACE_MS,
@@ -362,6 +363,43 @@ describe("IOSScreenCaptureHelper", () => {
       expect(processGroupSignals).toEqual([]);
     }
   });
+
+  test.skipIf(process.platform !== "darwin")(
+    "logs at warn when process-group cleanup fails so a detached-child leak is visible",
+    async () => {
+      const timer = new FakeTimer();
+      const fake = new FakeChildProcess();
+      fake.kill = signal => {
+        // Ignore SIGTERM so stop() escalates to SIGKILL + process-group kill.
+        void signal;
+        fake.killed = true;
+        return true;
+      };
+      const helper = new IOSScreenCaptureHelper({
+        binaryPath: "/fake/screen-capture-helper",
+        target: { kind: "simulator", windowID: 1 },
+        spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+        timer,
+        processGroupKiller: () => {
+          throw new Error("kill: no such process group");
+        },
+      });
+      helper.start();
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+
+      try {
+        const stopped = helper.stop();
+        timer.advanceTime(IOS_HELPER_STOP_GRACE_MS);
+        await stopped;
+
+        expect(warning).toHaveBeenCalledWith(
+          expect.stringContaining(`process-group cleanup failed for pid=${fake.pid}`)
+        );
+      } finally {
+        warning.mockRestore();
+      }
+    }
+  );
 
   test("bounds a concurrent stop after SIGTERM instead of awaiting exit forever", async () => {
     const timer = new FakeTimer();

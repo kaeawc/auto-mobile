@@ -66,6 +66,16 @@ const IOS_KEYFRAME_INTERVAL_SECONDS = 2;
  * `ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS`.
  */
 export const IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS = 3000;
+/**
+ * Grace window granted to an outgoing ffmpeg encoder to honour SIGTERM after a
+ * keyframe restart before it is escalated to SIGKILL. A slow or signal-ignoring
+ * `h264_videotoolbox` process left un-reaped lingers as a zombie holding the
+ * (scarce on hosted runners) hardware encoder, so the restart is not considered
+ * complete until the old encoder has exited or been force-killed. Mirrors the
+ * capture helper's SIGTERM→grace→SIGKILL discipline
+ * ({@link IOS_HELPER_STOP_GRACE_MS}).
+ */
+export const IOS_ENCODER_RESTART_GRACE_MS = 2_000;
 /** H.264 macroblock edge, in pixels. */
 const H264_MACROBLOCK_SIZE = 16;
 /** Smallest dimension ffmpeg can encode as 4:2:0 chroma-subsampled video. */
@@ -389,9 +399,48 @@ export class IosH264Source implements H264CaptureSource {
       this.writeFrameToEncoder(this.lastHelperFrame);
       this.writeFrameToEncoder(this.lastHelperFrame);
     }
-    oldEncoder.stdin.end();
-    oldEncoder.kill("SIGTERM");
+    // Reap the outgoing encoder on a bounded grace, escalating to SIGKILL, so a
+    // slow or signal-ignoring h264_videotoolbox cannot linger as a zombie
+    // holding the hardware encoder. Fire-and-forget: the replacement is already
+    // live and every old-encoder handler is guarded by `this.encoder === encoder`.
+    void this.reapOutgoingEncoder(oldEncoder);
     return true;
+  }
+
+  /**
+   * End the outgoing encoder's stdin, SIGTERM it, and await its exit within
+   * {@link IOS_ENCODER_RESTART_GRACE_MS}; if it has not exited by then, escalate
+   * to SIGKILL. Mirrors {@link IOSScreenCaptureHelper}'s shutdown discipline.
+   */
+  private async reapOutgoingEncoder(encoder: IosH264EncoderProcess): Promise<void> {
+    let exited = false;
+    const exitPromise = new Promise<void>(resolve => {
+      encoder.once("exit", () => {
+        exited = true;
+        resolve();
+      });
+    });
+    encoder.stdin.end();
+    encoder.kill("SIGTERM");
+
+    let timeout: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<void>(resolve => {
+      timeout = this.timer.setTimeout(resolve, IOS_ENCODER_RESTART_GRACE_MS);
+    });
+    try {
+      await Promise.race([exitPromise, timedOut]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
+
+    if (!exited) {
+      logger.warn(
+        `[IosH264Source] outgoing ffmpeg encoder did not exit within ${IOS_ENCODER_RESTART_GRACE_MS}ms after SIGTERM; escalating to SIGKILL`
+      );
+      encoder.kill("SIGKILL");
+    }
   }
 
   private async resolveCaptureTarget(helperPath: string): Promise<CaptureTarget> {

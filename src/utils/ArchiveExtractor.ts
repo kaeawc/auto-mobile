@@ -1,3 +1,4 @@
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { ActionableError } from "../models/ActionableError";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "./HostCommandExecutor";
@@ -32,6 +33,12 @@ export interface ArchiveExtractor {
  * (absolute paths, drive-qualified paths, or `..` segments that resolve
  * outside `destinationDir`). Pure and exported so the zip-slip guard can be
  * unit-tested without spawning `tar`.
+ *
+ * This is a lexical, name-only check. On its own it does not defend against a
+ * *symlinked* parent of the destination (a legitimate-looking entry name can
+ * still be redirected outside the tree by a symlink), so {@link
+ * DefaultArchiveExtractor} additionally extracts into a fresh, realpath'd
+ * staging directory and moves the results into place. Keep both guards.
  */
 export function assertArchiveEntriesSafe(entries: string[], destinationDir: string): void {
   const resolvedRoot = path.resolve(destinationDir);
@@ -75,16 +82,51 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
     const entries = await this.listEntries(archivePath, timeoutMs, request.signal);
     assertArchiveEntriesSafe(entries, destinationDir);
 
+    await fs.mkdir(destinationDir, { recursive: true });
+    // Resolve the destination to its real, symlink-free path, then extract into a
+    // fresh staging directory created *inside* it (same filesystem, so the later
+    // rename is atomic and never crosses devices). tar writes — including any
+    // archive-internal symlink entries — are confined to this staging tree, so a
+    // symlinked parent of the destination cannot redirect them outside the
+    // intended directory. Only the validated top-level results are then moved
+    // into place. On any failure the staging tree is always removed.
+    const realDestination = await fs.realpath(destinationDir);
+    const stagingDir = await fs.mkdtemp(path.join(realDestination, ".am-extract-"));
+    try {
+      await this.runExtraction(archivePath, stagingDir, timeoutMs, request.signal);
+      await this.moveExtractedInto(stagingDir, realDestination);
+    } finally {
+      await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  private async runExtraction(
+    archivePath: string,
+    stagingDir: string,
+    timeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<void> {
     try {
       await this.executor.executeCommand(
         "tar",
-        ["-xzf", archivePath, "-C", destinationDir],
-        { timeoutMs, signal: request.signal }
+        ["-xzf", archivePath, "-C", stagingDir],
+        { timeoutMs, signal }
       );
     } catch (error) {
       throw new ActionableError(
-        `Failed to extract archive '${archivePath}' into '${destinationDir}': ${errorMessage(error)}.`
+        `Failed to extract archive '${archivePath}' into '${stagingDir}': ${errorMessage(error)}.`
       );
+    }
+  }
+
+  /** Move each top-level extracted entry from staging into the destination, replacing any prior copy. */
+  private async moveExtractedInto(stagingDir: string, destinationDir: string): Promise<void> {
+    const names = await fs.readdir(stagingDir);
+    for (const name of names) {
+      const from = path.join(stagingDir, name);
+      const to = path.join(destinationDir, name);
+      await fs.rm(to, { recursive: true, force: true }).catch(() => undefined);
+      await fs.rename(from, to);
     }
   }
 

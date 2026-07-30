@@ -466,9 +466,10 @@ export class IosH264Source implements H264CaptureSource {
 
   private async startCaptureWithSimulatorRetry(helperPath: string, target: CaptureTarget): Promise<void> {
     const shouldRetryNoFirstFrame = target.kind === "simulator" && !this.options.createHelper;
+    let currentTarget = target;
     for (let attempt = 0; ; attempt++) {
       try {
-        await this.startCaptureAttempt(helperPath, target);
+        await this.startCaptureAttempt(helperPath, currentTarget);
         return;
       } catch (error) {
         if (!shouldRetryNoFirstFrame || !(error instanceof NoFirstFrameError)) {
@@ -489,10 +490,39 @@ export class IosH264Source implements H264CaptureSource {
         // The failed lease is invalidated above, so one new ScreenCaptureKit session
         // can recover a transient no-frame startup without surfacing a warning.
         logger.debug(
-          `[IosH264Source] no first frame from pooled Simulator helper for ${describeCaptureTarget(target)}; retrying once`
+          `[IosH264Source] no first frame from pooled Simulator helper for ${describeCaptureTarget(currentTarget)}; retrying once`
         );
+        // A Simulator relaunch/reboot/window-recreation between attempts changes the
+        // CGWindowID, so reusing the stale windowID would deterministically retry
+        // against a dead window. Re-resolve it under the same 2s deadline
+        // (IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS) so the retry targets the live
+        // window without consuming the whole startup budget.
+        currentTarget = await this.reresolveSimulatorTarget(helperPath, currentTarget);
       }
     }
+  }
+
+  private async reresolveSimulatorTarget(
+    helperPath: string,
+    target: CaptureTarget
+  ): Promise<CaptureTarget> {
+    if (target.kind !== "simulator") {
+      return target;
+    }
+    let windowID: number;
+    try {
+      windowID = await this.resolveSimulatorWindowIdWithDeadline(helperPath);
+    } catch (error) {
+      throw toActionableError(error, "Failed to re-resolve iOS Simulator window for capture retry");
+    }
+    if (windowID === target.windowID) {
+      return target;
+    }
+    logger.debug(
+      `[IosH264Source] Simulator windowID changed from ${target.windowID} to ${windowID} before retry; ` +
+      "targeting the freshly-resolved window"
+    );
+    return { ...target, windowID };
   }
 
   private async startCaptureAttempt(helperPath: string, target: CaptureTarget): Promise<void> {

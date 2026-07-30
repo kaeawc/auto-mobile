@@ -9,11 +9,13 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
@@ -355,4 +357,43 @@ class LogsPanelTest {
     }
     onNodeWithText("No logs yet").assertIsDisplayed()
   }
+
+  @Test
+  fun `switching device after scrolling up still auto-follows on the new device`() =
+    runComposeUiTest {
+      val fake = FakeTelemetryPushClient()
+      val deviceId = mutableStateOf("dev-A")
+      setContent {
+        MaterialTheme {
+          Box(Modifier.height(120.dp)) {
+            LogsPanel(telemetryPushClient = fake, activeDeviceId = deviceId.value)
+          }
+        }
+      }
+      waitForIdle()
+      for (i in 0 until 30) {
+        fake.emitEvent(log(4, "A", "a-row $i", i.toLong()))
+      }
+      waitUntil(timeoutMillis = 2_000) {
+        onAllNodesWithText("a-row 29").fetchSemanticsNodes().isNotEmpty()
+      }
+      // Scroll device A away from the tail so its follow intent is cleared. Target the log list's
+      // scroll action specifically (the chip row is also horizontally scrollable).
+      onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+      waitUntil(timeoutMillis = 2_000) {
+        onAllNodesWithText("a-row 0").fetchSemanticsNodes().isNotEmpty()
+      }
+
+      // Switch to a fresh device: its list state and follow intent must reset, so its own new
+      // logs auto-follow rather than inheriting device A's scrolled-up position.
+      runOnIdle { deviceId.value = "dev-B" }
+      waitForIdle()
+      for (i in 0 until 30) {
+        fake.emitEvent(log(4, "B", "b-row $i", (100 + i).toLong()))
+      }
+      waitUntil(timeoutMillis = 2_000) {
+        onAllNodesWithText("b-row 29").fetchSemanticsNodes().isNotEmpty()
+      }
+      onNodeWithText("b-row 29").assertIsDisplayed()
+    }
 }

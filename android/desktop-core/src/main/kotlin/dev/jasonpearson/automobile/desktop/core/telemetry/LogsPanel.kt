@@ -12,8 +12,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -187,7 +188,9 @@ fun LogsPanel(
     remember(platform, activeDeviceId) {
       derivedStateOf { filterLogs(logs, enabledLevels, query, platform) }
     }
-  val listState = rememberLazyListState()
+  // Per-device scroll state: recreated on a device switch so a device left scrolled up does not
+  // carry its scroll offset (and suppress auto-follow) into the next device.
+  val listState = remember(activeDeviceId) { LazyListState() }
 
   LaunchedEffect(telemetryPushClient, activeDeviceId, maxRows) {
     val client = telemetryPushClient ?: return@LaunchedEffect
@@ -364,19 +367,26 @@ private fun LogRow(event: TelemetryDisplayEvent.Log, textColor: Color, platform:
       color = Color(level.color),
     )
     Spacer(Modifier.width(6.dp))
+    // Bound the tag so a long tag can't consume the whole row and starve the message of width.
     Text(
       event.tag,
       fontSize = 11.sp,
       fontFamily = FontFamily.Monospace,
       color = textColor.copy(alpha = 0.6f),
       maxLines = 1,
+      modifier = Modifier.widthIn(max = 140.dp),
     )
     Spacer(Modifier.width(6.dp))
+    // Message takes the remaining width and stays a single compact line (like the replaced
+    // dashboard): keeps every row a uniform height so tail-follow's scrollToItem lands on the
+    // true bottom instead of a tall wrapped row that leaves canScrollForward true.
     Text(
       event.message,
       fontSize = 11.sp,
       fontFamily = FontFamily.Monospace,
       color = textColor.copy(alpha = 0.9f),
+      maxLines = 1,
+      modifier = Modifier.weight(1f),
     )
   }
 }

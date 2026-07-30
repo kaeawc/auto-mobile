@@ -27,18 +27,24 @@ TARBALL_URL="https://registry.npmjs.org/${PKG}/-/auto-mobile-${VERSION}.tgz"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# Pull the just-published tarball and compute its sha256. Retries cover
-# the brief window where the npm CDN hasn't propagated the new version
-# yet immediately after `npm publish`.
+# Pull the just-published tarball and compute its sha256. Retries cover the
+# window where the npm CDN hasn't propagated the new version yet immediately
+# after `npm publish`. The previous budget (10 x 6s ~= 1 min) was too tight:
+# npm publish returns before the tarball is fetchable at the registry URL, and
+# propagation has been observed to take several minutes, 404ing the whole
+# release (run 30568093771). Widen to ~5 min so a slow-but-normal publish does
+# not fail the release; genuine failures still surface, just later.
+max_attempts="${BREW_TARBALL_FETCH_ATTEMPTS:-30}"
+retry_delay="${BREW_TARBALL_FETCH_DELAY_SECONDS:-10}"
 attempt=1
 while ! curl -fsSL "$TARBALL_URL" -o "$tmp/auto-mobile.tgz"; do
-  if [[ "$attempt" -ge 10 ]]; then
+  if [[ "$attempt" -ge "$max_attempts" ]]; then
     echo "ERROR: failed to fetch ${TARBALL_URL} after ${attempt} attempts" >&2
     exit 1
   fi
-  echo "tarball not yet available, retrying in 6s (attempt ${attempt})" >&2
+  echo "tarball not yet available, retrying in ${retry_delay}s (attempt ${attempt}/${max_attempts})" >&2
   attempt=$((attempt + 1))
-  sleep 6
+  sleep "$retry_delay"
 done
 
 SHA="$(shasum -a 256 "$tmp/auto-mobile.tgz" | awk '{print $1}')"

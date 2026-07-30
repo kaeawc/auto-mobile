@@ -91,11 +91,12 @@ still widely called **Trusted Signing**). Certs are cloud-hosted, short-lived
   Windows-only tooling):
 
   ```bash
-  # --keystore <region>: the account region, e.g. weu / eus
+  # --keystore: the account endpoint (== TRUSTED_SIGNING_ENDPOINT); <region> e.g.
+  #   weu / eus. jsign also accepts the bare host without the https:// scheme.
   # --storepass: an AAD access token for the service principal (az login / OIDC)
   # --alias: "<account-name>/<cert-profile-name>"
   jsign --storetype TRUSTEDSIGNING \
-        --keystore <region>.codesigning.azure.net \
+        --keystore "https://<region>.codesigning.azure.net" \
         --storepass "$ACCESS_TOKEN" \
         --alias "<account-name>/<cert-profile-name>" \
         AutoMobile-<version>-windows.msi

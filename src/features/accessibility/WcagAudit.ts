@@ -43,7 +43,8 @@ export class WcagAudit {
     viewHierarchy: ViewHierarchyNode,
     screenshotPath: string | undefined,
     packageName: string,
-    config: AccessibilityAuditConfig
+    config: AccessibilityAuditConfig,
+    density?: number
   ): Promise<AccessibilityAuditResult> {
     const violations: WcagViolation[] = [];
 
@@ -65,7 +66,7 @@ export class WcagAudit {
     violations.push(...this.checkTouchTargetSizes(elements, config.level));
 
     // Check for unlabeled form inputs
-    violations.push(...this.checkFormInputLabels(elements, viewHierarchy));
+    violations.push(...this.checkFormInputLabels(elements, viewHierarchy, density));
 
     // Generate screen ID for baseline tracking
     const screenId = this.generateScreenId(packageName, viewHierarchy);
@@ -244,7 +245,8 @@ export class WcagAudit {
    */
   private checkFormInputLabels(
     elements: Element[],
-    hierarchy: ViewHierarchyNode
+    hierarchy: ViewHierarchyNode,
+    density?: number
   ): WcagViolation[] {
     const violations: WcagViolation[] = [];
 
@@ -261,12 +263,15 @@ export class WcagAudit {
     // (hasNearbyLabel was O(inputs * elements) just rebuilding this list).
     const textViews = elements.filter(e => e.class?.includes("TextView") && e.text);
 
+    // Scale the proximity gate for this device's pixel density once per audit.
+    const gapThresholdPx = this.labelGapThresholdPx(density);
+
     for (const input of inputElements) {
       // Check if input has a label via text, content-desc, or nearby TextView
       const hasLabel =
         input.text ||
         input["content-desc"] ||
-        this.hasNearbyLabel(input, textViews);
+        this.hasNearbyLabel(input, textViews, gapThresholdPx);
 
       if (!hasLabel) {
         violations.push({
@@ -288,20 +293,45 @@ export class WcagAudit {
   }
 
   /**
-   * Maximum gap, in pixels, between a form input and a candidate label TextView
-   * for the TextView to be treated as that input's visible label.
-   *
-   * `bounds` are pixels everywhere (see Element.ts), so this threshold is pixels,
-   * not dp — the old "within 50dp" comment was mislabelled. The value is a
-   * heuristic: form labels sit immediately above or beside their input, so the
-   * bounding boxes are adjacent (a small gap), not merely on the same row.
+   * Maximum gap between a form input and a candidate label TextView, expressed
+   * in density-independent pixels (dp), for the TextView to be treated as that
+   * input's visible label. Form labels sit immediately above or beside their
+   * input, so the bounding boxes are adjacent (a small gap), not merely on the
+   * same row.
    */
-  private static readonly MAX_LABEL_GAP_PX = 50;
+  private static readonly LABEL_GAP_DP = 50;
+
+  /** Android baseline density (mdpi): 1dp == 1px at 160 DPI. */
+  private static readonly BASELINE_DENSITY_DPI = 160;
+
+  /**
+   * Fallback density (≈xhdpi / 2x) used when the hierarchy did not report one —
+   * older runners omit it. Chosen from the mid-to-high end of the modern device
+   * fleet so a real, normally-spaced label is not mistaken for "no label" (a
+   * false positive) on the common case; when density IS reported it is used
+   * directly and this value is irrelevant.
+   */
+  private static readonly FALLBACK_DENSITY_DPI = 320;
+
+  /**
+   * Resolve the label-proximity gate in physical pixels for this device.
+   *
+   * `bounds` are physical pixels on Android (see Element.ts / ViewHierarchyNode),
+   * so a fixed pixel gate is density-dependent: 50px is ~50dp on an mdpi device
+   * but only ~17dp on a 3x (480 DPI) phone, wrongly rejecting normally-spaced
+   * labels there. Scaling `LABEL_GAP_DP` by `density / 160` keeps the gate a
+   * constant physical/visual distance across densities.
+   */
+  private labelGapThresholdPx(density?: number): number {
+    const dpi = density && density > 0 ? density : WcagAudit.FALLBACK_DENSITY_DPI;
+    return WcagAudit.LABEL_GAP_DP * (dpi / WcagAudit.BASELINE_DENSITY_DPI);
+  }
 
   /**
    * Check if an element has a nearby TextView that could serve as a label.
    * `textViews` is precomputed by the caller (see checkFormInputLabels) so this
    * is O(textViews) per input rather than re-filtering all elements each call.
+   * `gapThresholdPx` is the density-scaled gate from `labelGapThresholdPx`.
    *
    * Proximity is the Euclidean gap between the input's and the TextView's
    * bounding boxes, and only the NEAREST candidate is compared to the gate. This
@@ -309,7 +339,7 @@ export class WcagAudit {
    * TextView sharing the input's horizontal OR vertical band — even one on the
    * opposite edge of the screen — as a label, under-reporting unlabeled inputs.
    */
-  private hasNearbyLabel(input: Element, textViews: Element[]): boolean {
+  private hasNearbyLabel(input: Element, textViews: Element[], gapThresholdPx: number): boolean {
     let nearestGap = Infinity;
 
     for (const textView of textViews) {
@@ -319,7 +349,7 @@ export class WcagAudit {
       }
     }
 
-    return nearestGap <= WcagAudit.MAX_LABEL_GAP_PX;
+    return nearestGap <= gapThresholdPx;
   }
 
   /**

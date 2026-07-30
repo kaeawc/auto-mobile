@@ -316,8 +316,8 @@ describe("WcagAudit", function() {
     };
     const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
 
-    async function formInputViolations(elements: Element[]) {
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+    async function formInputViolations(elements: Element[], density?: number) {
+      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, density);
       return result.violations.filter(v => v.type === "unlabeled-form-input");
     }
 
@@ -399,6 +399,26 @@ describe("WcagAudit", function() {
         { class: "android.widget.TextView", bounds: { left: 0, top: 40, right: 200, bottom: 80 } },
       ];
       expect(await formInputViolations(elements)).toHaveLength(1);
+    });
+
+    // Density scaling: on a 3x (480 DPI) device a 120px gap is only 40dp — a
+    // normally-spaced label. The gate scales to 50dp*3 = 150px, so it counts.
+    // A fixed 50px gate (the pre-density bug) would reject it, producing a false
+    // "unlabeled" violation.
+    const highDensityLabel: Element[] = [
+      { class: "android.widget.EditText", bounds: { left: 0, top: 200, right: 200, bottom: 260 } },
+      // Label directly above with a 120px vertical gap (label.bottom 80, input.top 200).
+      { class: "android.widget.TextView", text: "Name", bounds: { left: 0, top: 20, right: 200, bottom: 80 } },
+    ];
+
+    it("does NOT flag a normally-spaced label on a high-density (480 DPI) device", async function() {
+      // 120px gap == 40dp <= 50dp gate scaled to 150px.
+      expect(await formInputViolations(highDensityLabel, 480)).toHaveLength(0);
+    });
+
+    it("flags the same 120px gap as unlabeled on a low-density (160 DPI) device", async function() {
+      // At mdpi 1dp == 1px, so a 120px gap is a genuine 120dp away: not a label.
+      expect(await formInputViolations(highDensityLabel, 160)).toHaveLength(1);
     });
   });
 

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,12 +16,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -29,11 +36,22 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.diagnostics.DiagnosticsDashboard
+import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
+import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
+import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 private val StatusGreen = Color(0xFF40C057)
 private val StatusYellow = Color(0xFFF0C000)
 private val StatusRed = Color(0xFFFA5252)
 private val Accent = Color(0xFF4DABF7)
+
+// How often the open health sheet re-scans for the daemon process (read-only).
+private const val HEALTH_SHEET_REFRESH_MS = 5_000L
 
 /**
  * Root of the device-tab workspace. Device identity lives in each column header (no top tab bar); a
@@ -46,6 +64,8 @@ fun WorkspaceShell(
   onAction: (WorkspaceAction) -> Unit,
   onOpenPicker: () -> Unit,
   status: WorkspaceStatus = WorkspaceStatus.Green,
+  // A terse reason for a non-green status, shown inline next to the dot ("yellow = one line").
+  statusDetail: String? = null,
   onOpenPalette: () -> Unit = {},
   modifier: Modifier = Modifier,
   // Renders the docked facet body for a pane's active tool. Hoisted so the host can supply real
@@ -53,29 +73,48 @@ fun WorkspaceShell(
   facetContent: @Composable (DeviceColumn, Tool) -> Unit = { _, tool ->
     WorkspaceFacetPlaceholder(tool)
   },
+  // Body of the health sheet opened by clicking the status dot. Hoisted like [facetContent] so the
+  // host (or a test) can substitute content; defaults to the live [DiagnosticsDashboard].
+  healthSheetContent: @Composable () -> Unit = { DefaultHealthSheetBody() },
 ) {
-  Column(modifier.fillMaxSize()) {
-    TopBar(status = status, onOpenPicker = onOpenPicker, onOpenPalette = onOpenPalette)
-    when (state) {
-      is WorkspaceUiState.Empty -> EmptyState(onOpenPicker, Modifier.weight(1f).fillMaxWidth())
-      is WorkspaceUiState.Content ->
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-          val canDiff = state.columns.size > 1
-          state.columns.forEach { column ->
-            // Key by deviceId so a surviving pane keeps its own remembered state + facet
-            // connection when another pane closes (unkeyed = positional identity churns survivors).
-            key(column.deviceId) {
-              DeviceColumnView(
-                column = column,
-                focused = column.deviceId == state.focusedDeviceId,
-                onAction = onAction,
-                facetContent = facetContent,
-                canDiff = canDiff,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-              )
+  var showHealthSheet by remember { mutableStateOf(false) }
+  Box(modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
+      TopBar(
+        status = status,
+        statusDetail = statusDetail,
+        onOpenPicker = onOpenPicker,
+        onOpenPalette = onOpenPalette,
+        onStatusClick = { showHealthSheet = true },
+      )
+      when (state) {
+        is WorkspaceUiState.Empty -> EmptyState(onOpenPicker, Modifier.weight(1f).fillMaxWidth())
+        is WorkspaceUiState.Content ->
+          Row(Modifier.weight(1f).fillMaxWidth()) {
+            val canDiff = state.columns.size > 1
+            state.columns.forEach { column ->
+              // Key by deviceId so a surviving pane keeps its own remembered state + facet
+              // connection when another pane closes (unkeyed = positional identity churns
+              // survivors).
+              key(column.deviceId) {
+                DeviceColumnView(
+                  column = column,
+                  focused = column.deviceId == state.focusedDeviceId,
+                  onAction = onAction,
+                  facetContent = facetContent,
+                  canDiff = canDiff,
+                  modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+              }
             }
           }
-        }
+      }
+    }
+    if (showHealthSheet) {
+      HealthSheetOverlay(
+        onDismiss = { showHealthSheet = false },
+        content = healthSheetContent,
+      )
     }
   }
 }
@@ -83,8 +122,10 @@ fun WorkspaceShell(
 @Composable
 private fun TopBar(
   status: WorkspaceStatus,
+  statusDetail: String?,
   onOpenPicker: () -> Unit,
   onOpenPalette: () -> Unit,
+  onStatusClick: () -> Unit,
 ) {
   Row(
     modifier =
@@ -116,13 +157,121 @@ private fun TopBar(
           .padding(horizontal = 8.dp, vertical = 4.dp),
     )
     Spacer(Modifier.width(8.dp))
+    // "Yellow = one inline line": a non-green status shows a terse reason next to the dot; green
+    // stays a bare dot. The dot (and the line) open the health sheet on click.
+    if (status != WorkspaceStatus.Green && statusDetail != null) {
+      Text(
+        statusDetail,
+        style = MaterialTheme.typography.labelMedium,
+        // Legibility over the top bar's surfaceVariant: the status color lives on the dot; the
+        // detail text uses onSurfaceVariant so it stays readable in both light and dark themes
+        // (status yellow #F0C000 on the light surfaceVariant is ~1.5:1, unreadable).
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier =
+          // Content-sized and capped at 260dp with ellipsis. The leading weighted Spacer pushes
+          // this trailing cluster right, so the dot (the last child) stays hard-right; a weight
+          // here would leave an unfilled allocation that shifts the dot left for short details.
+          Modifier.widthIn(max = 260.dp)
+            .clickable { onStatusClick() }
+            .semantics { contentDescription = "Status detail: $statusDetail" }
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+      )
+    }
+    // Visible dot stays 12dp; the clickable target is enlarged to 32dp. For a green status (no
+    // inline line) the dot is the only entry point to the health sheet.
     Box(
       modifier =
-        Modifier.size(12.dp).background(status.color(), CircleShape).semantics {
-          contentDescription = "Status: ${status.name}"
-        }
-    )
+        Modifier.size(32.dp)
+          .clickable { onStatusClick() }
+          .semantics { contentDescription = "Status: ${status.name}" },
+      contentAlignment = Alignment.Center,
+    ) {
+      Box(Modifier.size(12.dp).background(status.color(), CircleShape))
+    }
   }
+}
+
+/**
+ * Full-window overlay for the workspace health sheet: a dimmed scrim (click-away to dismiss) with a
+ * centered panel that hosts [content] and a ✕ close affordance. Mirrors the command palette
+ * overlay.
+ */
+@Composable
+private fun HealthSheetOverlay(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+  Box(
+    modifier =
+      Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+      ) {
+        onDismiss()
+      },
+    contentAlignment = Alignment.Center,
+  ) {
+    Column(
+      modifier =
+        Modifier.fillMaxWidth(0.6f)
+          .fillMaxHeight(0.8f)
+          .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
+          // Swallow clicks on the panel so they don't dismiss via the scrim.
+          .clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+          ) {}
+          .padding(16.dp)
+          .semantics { contentDescription = "Health sheet" }
+    ) {
+      Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Health", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.weight(1f))
+        Text(
+          "✕",
+          style = MaterialTheme.typography.titleMedium,
+          color = MaterialTheme.colorScheme.onSurface,
+          modifier =
+            Modifier.clickable { onDismiss() }
+              .semantics { contentDescription = "Close health sheet" }
+              .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+      }
+      Spacer(Modifier.height(8.dp))
+      // Constrain the body to the height below the title row so a fillMaxSize() body can't overflow
+      // the header out of the panel.
+      Box(Modifier.weight(1f).fillMaxWidth()) { content() }
+    }
+  }
+}
+
+/**
+ * Default health-sheet body: the live [DiagnosticsDashboard], fed the Unix-socket daemon found by a
+ * read-only [RealMcpProcessDetector] scan. Tests inject their own `healthSheetContent`, so this
+ * real, system-touching path is exercised only in production / manual runs.
+ */
+@Composable
+private fun DefaultHealthSheetBody() {
+  var daemonProcess by remember { mutableStateOf<McpProcess?>(null) }
+  // Read-only detection only. We deliberately do NOT use McpProcessesPanel here: its auto-connect
+  // effect can call setActiveDevice and DesktopDaemonLifecycle.ensureVersionMatchedDaemon (which
+  // may
+  // restart the daemon), and merely opening a diagnostic overlay must never mutate daemon or device
+  // state. RealMcpProcessDetector.detectProcesses() just inspects the process/socket table. Re-scan
+  // on an interval so the sheet reflects a daemon started/stopped/restarted while it stays open.
+  LaunchedEffect(Unit) {
+    while (true) {
+      val detected = withContext(Dispatchers.IO) { RealMcpProcessDetector().detectProcesses() }
+      // Only a Unix-socket daemon is the desktop's real connection; a detected STDIO process is not
+      // "connected", so surface null rather than mislabel it as connected.
+      daemonProcess = detected.firstOrNull { it.connectionType == McpConnectionType.UnixSocket }
+      delay(HEALTH_SHEET_REFRESH_MS)
+    }
+  }
+  DiagnosticsDashboard(
+    connectedMcpProcess = daemonProcess,
+    dataSourceMode = DataSourceMode.Real,
+    modifier = Modifier.fillMaxSize(),
+  )
 }
 
 @Composable

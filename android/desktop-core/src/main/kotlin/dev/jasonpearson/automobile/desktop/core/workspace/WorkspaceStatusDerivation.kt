@@ -45,8 +45,9 @@ fun deriveWorkspaceStatus(
  */
 private fun deriveFromDevices(devices: List<ConnectionState>): WorkspaceStatusResult {
   val offline = devices.count { it is ConnectionState.Disconnected || it is ConnectionState.Error }
-  val reconnecting =
-    devices.count { it is ConnectionState.Connecting || it is ConnectionState.Reconnecting }
+  val reconnecting = devices.count {
+    it is ConnectionState.Connecting || it is ConnectionState.Reconnecting
+  }
   return when {
     offline > 0 -> WorkspaceStatusResult(WorkspaceStatus.Yellow, devicePhrase(offline, "offline"))
     reconnecting > 0 ->

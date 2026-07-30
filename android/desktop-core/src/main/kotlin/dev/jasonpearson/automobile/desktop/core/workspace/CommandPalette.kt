@@ -43,6 +43,17 @@ import androidx.compose.ui.unit.dp
 /** A single command in the palette: a stable [id], a display [label], and its [run] action. */
 data class PaletteCommand(val id: String, val label: String, val run: () -> Unit)
 
+/**
+ * True when a key event should open the command palette: the "K" key together with the platform
+ * accelerator modifier — Meta (⌘) on macOS or Ctrl elsewhere. Accepting either modifier keeps this
+ * platform-agnostic (⌘K and Ctrl+K both match) without needing to know the host OS here. Any other
+ * key, or "K" with no accelerator, returns false so the event propagates normally.
+ *
+ * Pure over its inputs so the window-level key binding stays thin, testable glue.
+ */
+fun isCommandPaletteShortcut(key: Key, isMetaPressed: Boolean, isCtrlPressed: Boolean): Boolean =
+  key == Key.K && (isMetaPressed || isCtrlPressed)
+
 /** Commands matching [query] by case-insensitive substring; blank query returns all. Pure. */
 internal fun filterCommands(commands: List<PaletteCommand>, query: String): List<PaletteCommand> {
   val q = query.trim()

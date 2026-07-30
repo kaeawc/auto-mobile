@@ -101,7 +101,8 @@ private class ObservableSettingsProvider(private val delegate: SettingsProvider)
 
 @Composable
 fun AutoMobileDesktopApp(
-  @Suppress("UNUSED_PARAMETER") menuBarActions: MenuBarActions = remember { MenuBarActions() }
+  @Suppress("UNUSED_PARAMETER") menuBarActions: MenuBarActions = remember { MenuBarActions() },
+  openPaletteRequest: Int = 0,
 ) {
   val graph = LocalAutoMobileGraph.current
   val settings = remember(graph) { ObservableSettingsProvider(graph.settingsProvider) }
@@ -116,6 +117,15 @@ fun AutoMobileDesktopApp(
   var pickerOpen by remember { mutableStateOf(false) }
   var paletteOpen by remember { mutableStateOf(false) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
+
+  // Window-level ⌘K/Ctrl+K (Main.kt) bumps openPaletteRequest; open the palette in response, but
+  // only while the workspace is showing — onboarding and the device picker own the screen and have
+  // no palette. The `> 0` guard skips the initial composition (the counter starts at 0).
+  LaunchedEffect(openPaletteRequest) {
+    if (openPaletteRequest > 0 && !showOnboarding && !pickerOpen) {
+      paletteOpen = true
+    }
+  }
 
   // OpenPicker (from the empty state or the Devices launcher) shows the picker; observing selected
   // devices turns them into workspace columns.

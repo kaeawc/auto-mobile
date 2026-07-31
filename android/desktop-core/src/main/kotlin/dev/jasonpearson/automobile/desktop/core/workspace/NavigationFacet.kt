@@ -33,9 +33,18 @@ import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 private val LOG = LoggerFactory.getLogger("NavigationFacet")
+
+/**
+ * How long to wait, after connecting, for the daemon to deliver a navigation payload before giving
+ * up. Backstops a "connected but silently no payload" daemon response (e.g. the on-demand export
+ * throws and is swallowed to null — daemon-side fix tracked in #4918) so the facet doesn't sit on
+ * "Resolving…" forever.
+ */
+private const val RESOLVE_TIMEOUT_MS = 10_000L
 
 private sealed interface NavigationFacetState {
   /** No foreground app resolved yet, or the app-scoped pull is in flight. */
@@ -95,6 +104,8 @@ fun NavigationFacet(
   column: DeviceColumn,
   observationStreamFactory: (String) -> ObservationStream = { ObservationStreamClient() },
   navigationDataSourceProvider: ((String) -> NavigationDataSource)? = null,
+  // Injectable so the resolution-timeout backstop is testable without a real 10s wait.
+  resolveTimeoutMs: Long = RESOLVE_TIMEOUT_MS,
 ) {
   val graph = LocalAutoMobileGraph.current
 
@@ -185,6 +196,38 @@ fun NavigationFacet(
       LOG.warn("Connection-state collection failed: ${e.message}", e)
       streamError = e.message ?: "Connection-state stream error"
     }
+  }
+
+  // Resolution-timeout backstop: if the socket is Connected but no navigation payload resolves
+  // within resolveTimeoutMs (no appId, no "no app" signal, no failure), give up and surface a
+  // retryable ConnectionError instead of sitting on "Resolving…" forever. This covers any
+  // "connected but silently no payload" cause; the specific daemon bug (on-demand export throws
+  // and is swallowed to null) is tracked as a daemon-side fix in #4918. The effect is cancelled
+  // (and thus never false-fires) the moment an app resolves, the stream reports "no app",
+  // disconnects/errors, or the stream is recreated — all of which change its keys.
+  LaunchedEffect(stream, connectionState, foregroundAppId, noNavigationApp, streamError) {
+    if (streamError != null) return@LaunchedEffect
+    if (foregroundAppId != null || noNavigationApp) return@LaunchedEffect
+    if (connectionState !is ConnectionState.Connected) return@LaunchedEffect
+    delay(resolveTimeoutMs)
+    // Still unresolved after the window (any resolution would have cancelled this effect).
+    streamError = "No navigation data received from the daemon"
+  }
+
+  // Foreground-app-change fog reset for the provided-graph path. NavigationDashboard's stream
+  // collector disables fog on every A -> B foreground switch, but the provided-graph path bypasses
+  // that collector; and because the switch remounts the dashboard via the Loading transition, B's
+  // fresh dashboard would otherwise read the persisted fog setting and inherit A's fog focus.
+  // Reset the persisted setting here, where the switch is observed, so B starts with fog disabled
+  // (full graph). First resolution (null -> A) keeps A's persisted preference.
+  var fogResetApp by remember(column.deviceId) { mutableStateOf<String?>(null) }
+  LaunchedEffect(foregroundAppId) {
+    val app = foregroundAppId ?: return@LaunchedEffect
+    val previous = fogResetApp
+    if (previous != null && previous != app) {
+      graph.settingsProvider.fogModeEnabled = false
+    }
+    fogResetApp = app
   }
 
   val sourceProvider =

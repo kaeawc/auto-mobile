@@ -28,6 +28,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.SharedFlow
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -771,6 +772,93 @@ class NavigationFacetTest {
           .isEmpty(),
       )
     }
+
+  @Test
+  fun `times out to a retryable error when the daemon never sends a navigation payload`() =
+    runComposeUiTest {
+      val created = mutableListOf<FakeObservationStream>()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { FakeObservationStream().also { created.add(it) } },
+              navigationDataSourceProvider = {
+                StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
+              },
+              // Small window so the backstop fires fast; no real 10s wait.
+              resolveTimeoutMs = 200L,
+            )
+          }
+        }
+      }
+
+      // The stream connects but the daemon never sends a navigation payload (silently no update).
+      // Without the backstop the facet would sit on "Resolving…" forever; instead it must surface
+      // the retryable error.
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("No navigation data received", substring = true)
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
+      onNodeWithText("No navigation data received", substring = true).assertExists()
+      onNodeWithContentDescription("Retry connecting to the AutoMobile daemon").assertExists()
+      assertTrue(
+        "the timeout must not leave the facet stuck on Resolving",
+        onAllNodesWithText("Resolving navigation graph", substring = true)
+          .fetchSemanticsNodes()
+          .isEmpty(),
+      )
+
+      // Retry recreates the stream and re-requests.
+      onNodeWithContentDescription("Retry connecting to the AutoMobile daemon").performClick()
+      waitUntil(timeoutMillis = 5_000) { created.size >= 2 }
+      assertTrue("retry should recreate the observation stream", created.size >= 2)
+    }
+
+  @Test
+  fun `switching apps resets fog so the new app starts with the full graph`() = runComposeUiTest {
+    // App A starts with fog enabled (persisted). Switching to B must not carry A's fog into B.
+    val settings = FakeSettingsProvider(fogModeEnabled = true)
+    val client = FakeAutoMobileClient()
+    val graphProvider =
+      object : AutoMobileGraphProvider {
+        override val autoMobileClient = client
+        override val settingsProvider = settings
+        override val dataSourceFactory = DefaultDataSourceFactory(client)
+      }
+    val fake = FakeObservationStream()
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides graphProvider) {
+        MaterialTheme {
+          NavigationFacet(
+            column = column(),
+            observationStreamFactory = { fake },
+            navigationDataSourceProvider = { appId ->
+              val label = if (appId == "com.example.b") "Beta" else "Alpha"
+              StubNavigationDataSource(
+                Result.Success(NavigationGraph(listOf(screen(label)), emptyList()))
+              )
+            },
+          )
+        }
+      }
+    }
+    waitForIdle()
+
+    fake.emitNavigation(navUpdate("com.example.a", currentScreen = "Alpha"))
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("Alpha").fetchSemanticsNodes().isNotEmpty()
+    }
+    assertTrue("precondition: app A has fog enabled", settings.fogModeEnabled)
+
+    // Foreground switches to app B: fog must be reset so B shows the full graph, not A's fog focus.
+    fake.emitNavigation(navUpdate("com.example.b", currentScreen = "Beta"))
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("Beta").fetchSemanticsNodes().isNotEmpty()
+    }
+    assertFalse("switching to a new app must reset fog", settings.fogModeEnabled)
+  }
 
   @Test
   fun `reconnects to a new device when the column device changes`() = runComposeUiTest {

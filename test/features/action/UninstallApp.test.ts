@@ -3,6 +3,7 @@ import { UninstallApp, DeviceAppUninstaller } from "../../../src/features/action
 import type { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 
 class FakeDeviceAppUninstaller implements DeviceAppUninstaller {
   public calls: Array<{ deviceUdid: string; bundleId: string; isSimulator?: boolean }> = [];
@@ -212,6 +213,28 @@ describe("UninstallApp (Android)", () => {
     expect(commands).toContain("shell am force-stop --user 0 com.example.app");
     expect(commands).toContain("shell pm uninstall --user 0 com.example.app");
     expect(commands).not.toContain("shell pm uninstall --user 0 -k com.example.app");
+  });
+
+  test("invalidates the installed-apps cache after a successful Android uninstall", async () => {
+    const repository = new FakeInstalledAppsRepository();
+    await repository.upsertInstalledApp(androidDevice.deviceId, 0, "com.cached.app", false, 1);
+    fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
+    fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
+      { stdout: "package:com.example.app\npackage:com.android.settings" },
+      { stdout: "package:com.android.settings" }
+    ]);
+
+    const uninstall = new UninstallApp(
+      androidDevice,
+      fakeAdbFactory(fakeAdb),
+      null,
+      null,
+      repository
+    );
+    await uninstall.execute("com.example.app");
+
+    expect(await repository.getLatestVerification(androidDevice.deviceId)).toBe(0);
   });
 
   test("emits pm uninstall -k when keepData is requested", async () => {

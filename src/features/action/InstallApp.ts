@@ -15,6 +15,8 @@ import { logger } from "../../utils/logger";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
+import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -29,6 +31,7 @@ export class InstallApp {
   private device: BootedDevice;
   private deviceAppInstaller: DeviceAppInstaller;
   private plist: PlistReader;
+  private installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository();
 
   constructor(
     device: BootedDevice,
@@ -190,6 +193,8 @@ export class InstallApp {
       }
     }
 
+    await this.markInstalledAppsCacheStale();
+
     perf.end();
     const warning = warnings.length > 0 ? warnings.join(" ") : undefined;
     return {
@@ -199,6 +204,16 @@ export class InstallApp {
       packageName: packageName,
       warning: warning
     };
+  }
+
+  private async markInstalledAppsCacheStale(): Promise<void> {
+    try {
+      await getDbWriteBarrier().track(() =>
+        this.installedAppsRepository.markDeviceStale(this.device.deviceId)
+      );
+    } catch (error) {
+      logger.warn(`[InstallApp] Failed to invalidate installed-apps cache: ${error}`);
+    }
   }
 
   private static readonly ANDROID_DOWNGRADE_MARKER = "INSTALL_FAILED_VERSION_DOWNGRADE";

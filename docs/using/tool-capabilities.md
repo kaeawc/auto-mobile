@@ -63,7 +63,7 @@ connected client sees.
 | `accessibility-tools` | `accessibility`, `accessibilityFocus` | `accessibilityFocus` also needs **`--debug`** |
 | `screen-artifacts` | `videoRecording`, `deviceSnapshot`, `highlight` | — |
 | `test-authoring` | `executePlan`, `startTestRecording`, `exportPlan`, `recordSteps`, `barrier`, `criticalSection` | `barrier` / `criticalSection` are **plan-only** and registered only in daemon mode (see below) |
-| `network-inspection` | `network`, `mockNetwork`, `clearMockNetwork`, `getNetworkGraph` | all four also need **`--embedded-sdk`** |
+| `network-inspection` | `network`, `mockNetwork`, `clearMockNetwork`, `getNetworkGraph` | all four also need **`--embedded-sdk`**; `mockNetwork` / `clearMockNetwork` additionally reject calls unless the daemon has **`--network-mockable`** (an action gate — see below) |
 | `app-routing` | `getDeepLinks` | — |
 | `navigation-modeling` | `navigateTo`, `getNavigationGraph`, `explore` | all three also need **`--debug`** *and* **`--embedded-sdk`** |
 | `biometric-auth` | `biometricAuth` | — |
@@ -140,20 +140,35 @@ export AUTOMOBILE_TOOLSET_NOTIFICATIONS=1
 
 ## Process-level gates
 
-These are set once, when the MCP server (daemon) starts, and apply to every
-session in that process.
+These apply to every session in the MCP server (daemon) process. One is a
+persistent, runtime-toggleable feature flag; the other is fixed for the life of
+the process — the distinction matters, so they are called out below.
 
-### `debugOnly` — `--debug` / `AUTOMOBILE_DEBUG=1`
+### `debugOnly` — the persistent `debug` flag (`--debug` / `AUTOMOBILE_DEBUG=1`)
 
 Hides diagnostic and introspection tools unless debug mode is on. Tools behind
 this gate include `debugSearch`, `bugReport`, `identifyInteractions`, `setUIState`,
 `accessibilityFocus`, and the navigation tools (`navigateTo`, `getNavigationGraph`,
-`explore`). Enable with the `--debug` CLI arg or `AUTOMOBILE_DEBUG=1`.
+`explore`).
 
-### `embeddedSdkOnly` — `--embedded-sdk`
+`debug` is a **persistent feature flag**, not a startup-only switch. `--debug` /
+`AUTOMOBILE_DEBUG=1` set it at launch, but:
 
-Hides tools intended for the embedded-SDK integration until the server is started
-with `--embedded-sdk`. Tools behind this gate include `sqlQuery`, the key-value
+- The value is **persisted** and re-applied on the next daemon start, so debug
+  tools can stay exposed after a restart *without* passing the flag again — and,
+  conversely, stay hidden until the flag is explicitly turned back on.
+- It can be toggled **while the daemon is running** (e.g. via the IDE
+  `ide/setFeatureFlag` route), which changes tool availability live and emits
+  `notifications/tools/list_changed`.
+
+To turn it off, clear the `debug` feature flag; passing no CLI flag on the next
+start is not sufficient if it was previously persisted on.
+
+### `embeddedSdkOnly` — `--embedded-sdk` (startup-only)
+
+Unlike `debug`, this gate is **fixed when the daemon starts** and is not a
+persisted, runtime-toggleable feature flag. Tools behind it stay hidden until the
+server is started with `--embedded-sdk`. They include `sqlQuery`, the key-value
 storage tools (`setKeyValue`, `removeKeyValue`, `clearKeyValueFile`), the network
 tools (`network`, `mockNetwork`, `clearMockNetwork`, `getNetworkGraph`), and the
 navigation tools.
@@ -165,10 +180,17 @@ callable only from **inside a plan**, never as a standalone `tools/call`. They a
 also registered only when the server runs in **daemon mode**. There is no flag to
 surface them in `tools/list` — this is by design.
 
-> **Related runtime action gate:** `recordSteps` is *visible* once
-> `test-authoring` is enabled, but its `begin`/`end` actions require the
-> `mcp-recording` feature flag (`--mcp-recording`) to be on; its `status` action
-> always works. This gates the *action*, not tool discovery.
+> **Related runtime action gates:** a few tools are *visible* once their
+> capability is enabled but still reject calls until a separate flag is on — the
+> flag gates the *action*, not tool discovery:
+>
+> - `recordSteps` (`test-authoring`): its `begin`/`end` actions require the
+>   `mcp-recording` feature flag (`--mcp-recording`); its `status` action always
+>   works.
+> - `mockNetwork` / `clearMockNetwork` (`network-inspection`): every call is
+>   rejected with a disabled-feature error unless the daemon was started with
+>   `--network-mockable`. So these two need the capability, `--embedded-sdk`
+>   (to be discoverable), **and** `--network-mockable` (to actually run).
 
 ---
 
@@ -187,20 +209,21 @@ Because the gates are cumulative, work through them in order:
 3. **Is it `planOnly`?** `barrier` / `criticalSection` will never appear in
    `tools/list`; use them from within a plan.
 4. **Did the client refresh its tool list?** `setToolCapability` emits
-   `notifications/tools/list_changed`. A directly connected client should
-   re-fetch `tools/list`. In the default **proxy topology**, the daemon proxy
-   does not yet forward that notification, so a proxy-mode client may need to
-   reconnect (or the daemon may need a restart) to observe capability tools that
-   were toggled after it connected — a known limitation shared with the feature
-   flags (see below).
+   `notifications/tools/list_changed`, and the default **proxy topology**
+   forwards it: the daemon proxy invalidates its discovery cache and re-emits the
+   notification to the connected client (issue #3223), so a client re-fetch of
+   `tools/list` returns the updated surface without reconnecting. A client that
+   caches its tool list and ignores the notification will still show a stale
+   surface until it re-fetches.
 
 ---
 
 ## Related documentation
 
 - **[Feature Flags](../design-docs/mcp/feature-flags.md)** — the CLI/env feature
-  flags (`--debug`, `--embedded-sdk`, output-size reduction, observe scope) and
-  the `tools/list_changed` mechanics and proxy-mode caveats referenced above.
+  flags (`--debug`, `--embedded-sdk`, `--network-mockable`, output-size
+  reduction, observe scope) and the `tools/list_changed` mechanics referenced
+  above.
 - **[Environment Variables](environment-variables.md)** — the full
   `AUTOMOBILE_*` environment surface, including the `AUTOMOBILE_TOOLSET_*`
   defaults described here.

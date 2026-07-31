@@ -12,6 +12,10 @@ import type {
 } from "../../models";
 import { logger, type Logger } from "../../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
+import {
+  defaultSecurePermissions,
+  type SecurePermissions,
+} from "../../utils/filesystem/securePermissions";
 
 export interface VideoCaptureConfig extends VideoRecordingConfig {
   recordingId: string;
@@ -67,6 +71,7 @@ export interface VideoRecorderServiceDependencies {
   logger?: Pick<Logger, "info" | "warn" | "error" | "debug">;
   idGenerator?: IdGenerator | (() => string);
   now?: () => Date;
+  securePermissions?: SecurePermissions;
 }
 
 interface ActiveRecordingState extends ActiveVideoRecording {
@@ -133,6 +138,7 @@ export class VideoRecorderService {
   private log: Pick<Logger, "info" | "warn" | "error" | "debug">;
   private idGenerator: IdGenerator;
   private now: () => Date;
+  private securePermissions: SecurePermissions;
   private activeRecordings = new Map<string, ActiveRecordingState>();
 
   constructor(dependencies: VideoRecorderServiceDependencies) {
@@ -143,6 +149,7 @@ export class VideoRecorderService {
     this.log = dependencies.logger ?? logger;
     this.idGenerator = normalizeIdGenerator(dependencies.idGenerator);
     this.now = dependencies.now ?? (() => new Date());
+    this.securePermissions = dependencies.securePermissions ?? defaultSecurePermissions;
   }
 
   async startRecording(
@@ -159,7 +166,9 @@ export class VideoRecorderService {
     const nameSlug = label ? `${label}-${recordingId}` : recordingId;
     const recordingDir = this.getRecordingDir(nameSlug);
 
-    await fsPromises.mkdir(recordingDir, { recursive: true });
+    // Owner-only (0o700): recordings routinely contain OTPs, credentials, and PII,
+    // so the per-recording directory must not be world-traversable (issue #4750).
+    await this.securePermissions.ensureSecureDir(recordingDir);
 
     const fileName = buildRecordingFileName(nameSlug, startedAt, config.format);
     const outputPath = path.join(recordingDir, fileName);
@@ -210,6 +219,11 @@ export class VideoRecorderService {
     const endedAt = stopResult.endedAt ?? this.now().toISOString();
     const outputPath = stopResult.outputPath || active.outputPath;
     const fileName = path.basename(outputPath);
+
+    // Restrict the finalized recording to the owner (0o600). The backend writes
+    // it via `adb pull` / `simctl recordVideo` / ffmpeg at the default
+    // world-readable mode; tighten it now that capture is complete (issue #4750).
+    await this.securePermissions.secureFile(outputPath);
     const fileStats = await this.safeStat(outputPath);
     const sizeBytes = stopResult.sizeBytes ?? fileStats?.size ?? 0;
 

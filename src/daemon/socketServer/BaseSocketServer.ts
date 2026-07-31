@@ -1,9 +1,10 @@
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { existsSync, statSync } from "node:fs";
-import { unlink, mkdir } from "node:fs/promises";
+import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { ensureSecureDir, secureFile } from "../../utils/filesystem/securePermissions";
 import { DEFAULT_SOCKET_IDLE_TIMEOUT_MS } from "./SocketServerTypes";
 
 /**
@@ -37,9 +38,10 @@ export abstract class BaseSocketServer {
    */
   async start(): Promise<void> {
     const directory = path.dirname(this.socketPath);
-    if (!existsSync(directory)) {
-      await mkdir(directory, { recursive: true });
-    }
+    // Owner-only (0o700) so the control socket is not world-traversable. On macOS
+    // socket-file permission bits are not reliably enforced on connect(), so the
+    // containing directory's mode is the primary access control (issue #4750).
+    await ensureSecureDir(directory);
 
     if (existsSync(this.socketPath)) {
       await unlink(this.socketPath);
@@ -53,8 +55,15 @@ export abstract class BaseSocketServer {
       this.server!.listen(this.socketPath, () => {
         logger.info(`[${this.serverName}] Socket listening on ${this.socketPath}`);
         this.socketFileIdentity = this.readSocketFileIdentity();
-        this.onServerStarted();
-        resolve();
+        // Restrict the bound socket to the owner (0o600) before start() resolves,
+        // so no client can connect while it is still world-accessible. listen()
+        // creates the socket at the umask default (issue #4750).
+        secureFile(this.socketPath)
+          .then(() => {
+            this.onServerStarted();
+            resolve();
+          })
+          .catch(reject);
       });
 
       this.server!.on("error", error => {

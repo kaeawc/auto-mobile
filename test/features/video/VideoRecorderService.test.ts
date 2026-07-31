@@ -10,6 +10,7 @@ import {
 } from "../../../src/features/video/VideoRecorderService";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeVideoCaptureBackend } from "../../fakes/FakeVideoCaptureBackend";
+import { FakeSecurePermissions } from "../../fakes/FakeSecurePermissions";
 
 describe("parseVideoRecordingConfig", () => {
   test("returns defaults for null input", () => {
@@ -107,16 +108,19 @@ describe("VideoRecorderService", () => {
   let backend: FakeVideoCaptureBackend;
   let service: VideoRecorderService;
   let archiveRoot: string;
+  let securePermissions: FakeSecurePermissions;
 
   beforeEach(async () => {
     backend = new FakeVideoCaptureBackend();
-    archiveRoot = path.join(os.tmpdir(), `video-test-${Date.now()}`);
+    archiveRoot = path.join(os.tmpdir(), `video-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    securePermissions = new FakeSecurePermissions();
 
     service = new VideoRecorderService({
       backend,
       archiveRoot,
       idGenerator: new CountingIdGenerator("rec"),
       now: () => new Date("2024-01-15T10:30:00.000Z"),
+      securePermissions,
     });
   });
 
@@ -174,6 +178,14 @@ describe("VideoRecorderService", () => {
       expect(r1.recordingId).toBe("rec-1");
       expect(r2.recordingId).toBe("rec-2");
     });
+
+    test("creates the per-recording directory with owner-only (0o700) permissions", async () => {
+      const result = await service.startRecording({ outputName: "case A" });
+      const recordingDir = path.dirname(result.outputPath);
+      // Hardening is requested through the injected seam, so the assertion holds
+      // on any host OS regardless of POSIX mode-bit support (issue #4750).
+      expect(securePermissions.ensureSecureDirCalls).toContain(recordingDir);
+    });
   });
 
   describe("stopRecording", () => {
@@ -228,6 +240,15 @@ describe("VideoRecorderService", () => {
 
       expect(backend.stopCalls).toHaveLength(1);
       expect(backend.stopCalls[0].recordingId).toBe("rec-1");
+    });
+
+    test("restricts the finalized recording file to owner-only (0o600)", async () => {
+      const recording = await service.startRecording();
+      const metadata = await service.stopRecording(recording.recordingId);
+
+      // The finalized MP4 (written by adb pull / simctl / ffmpeg at the default
+      // world-readable mode) must be chmod'd through the seam (issue #4750).
+      expect(securePermissions.secureFileCalls).toContain(metadata.filePath);
     });
   });
 });

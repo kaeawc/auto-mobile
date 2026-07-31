@@ -40,7 +40,11 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         private(set) var updatedConfigurations: [SCStreamConfiguration] = []
 
         var startCaptureError: Error?
+        /// When set, every `updateConfiguration` call throws it.
         var updateConfigurationError: Error?
+        /// Throws on the first N `updateConfiguration` calls, then succeeds —
+        /// models a transient failure that a single retry recovers from.
+        var updateConfigurationTransientFailures = 0
 
         func addStreamOutput(
             _ output: SCStreamOutput,
@@ -66,6 +70,10 @@ final class SimulatorCaptureSessionTests: XCTestCase {
 
         func updateConfiguration(_ configuration: SCStreamConfiguration) async throws {
             updatedConfigurations.append(configuration)
+            if updateConfigurationTransientFailures > 0 {
+                updateConfigurationTransientFailures -= 1
+                throw StubError(id: -1)
+            }
             if let error = updateConfigurationError { throw error }
         }
     }
@@ -204,7 +212,7 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         XCTAssertTrue(diagnostics.lines.isEmpty)
     }
 
-    func testReconfigureFailureIsSwallowedWithWarningButDimensionsStick() async {
+    func testReconfigureRetriesOnceThenWarnsButDimensionsStick() async {
         let diagnostics = DiagnosticRecorder()
         let session = makeSession(diagnostics: diagnostics)
         let fake = FakeCaptureStream()
@@ -217,11 +225,41 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         // failed update does not resurrect the stale size.
         XCTAssertEqual(session.configuredPixelWidth, 640)
         XCTAssertEqual(session.configuredPixelHeight, 480)
-        XCTAssertEqual(diagnostics.lines.count, 1)
-        let warning = diagnostics.lines.first ?? ""
+        // A persistent failure is retried exactly once (two total attempts).
+        XCTAssertEqual(fake.updatedConfigurations.count, 2)
+        XCTAssertEqual(diagnostics.lines.count, 2)
         XCTAssertTrue(
-            warning.hasPrefix("warn: failed to update stream configuration:"),
-            "unexpected diagnostic line: \(warning)"
+            diagnostics.lines[0].hasPrefix("warn: stream configuration update failed; retrying once:"),
+            "unexpected first diagnostic line: \(diagnostics.lines[0])"
+        )
+        XCTAssertTrue(
+            diagnostics.lines[1].hasPrefix("warn: failed to update stream configuration after retry:"),
+            "unexpected second diagnostic line: \(diagnostics.lines[1])"
+        )
+    }
+
+    func testReconfigureRecoversOnRetryWithoutFinalWarning() async {
+        let diagnostics = DiagnosticRecorder()
+        let session = makeSession(diagnostics: diagnostics)
+        let fake = FakeCaptureStream()
+        // Fail the first update, succeed on the retry.
+        fake.updateConfigurationTransientFailures = 1
+        session.stream = fake
+
+        await session.performReconfiguration(width: 800, height: 600)
+
+        XCTAssertEqual(session.configuredPixelWidth, 800)
+        XCTAssertEqual(session.configuredPixelHeight, 600)
+        // Two attempts: the transient failure plus the successful retry.
+        XCTAssertEqual(fake.updatedConfigurations.count, 2)
+        XCTAssertEqual(fake.updatedConfigurations.last?.width, 800)
+        XCTAssertEqual(fake.updatedConfigurations.last?.height, 600)
+        // Only the "retrying once" notice; no ultimate-failure line, since the
+        // retry applied the new configuration.
+        XCTAssertEqual(diagnostics.lines.count, 1)
+        XCTAssertTrue(
+            diagnostics.lines[0].hasPrefix("warn: stream configuration update failed; retrying once:"),
+            "unexpected diagnostic line: \(diagnostics.lines[0])"
         )
     }
 

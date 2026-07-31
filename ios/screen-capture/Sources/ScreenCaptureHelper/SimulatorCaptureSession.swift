@@ -207,8 +207,9 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     // MARK: - Internals
 
     private func reconfigure(width: Int, height: Int) {
-        // Fire-and-forget: if the update fails we keep using the old config and
-        // either resync on the next size change or stop with a delegate error.
+        // Detached task: the retry inside `performReconfiguration` bounds the
+        // recovery so a single transient `updateConfiguration` failure does not
+        // silently strand the stream at stale dimensions (issue #4768).
         Task {
             await performReconfiguration(width: width, height: height)
         }
@@ -233,10 +234,23 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         updated.sampleRate = 8_000
         updated.channelCount = 1
 
+        // Retry once on failure before giving up: `updateConfiguration` can fail
+        // transiently while ScreenCaptureKit is mid-frame, and silently keeping
+        // the stale config would drift delivered pixels away from the size the
+        // supervisor expects — which the TS side then kills on as a mismatch.
+        // The new dimensions are already recorded above, so on ultimate failure
+        // the next size change still attempts a correcting update.
+        do {
+            try await stream.updateConfiguration(updated)
+            return
+        } catch {
+            diagnosticSink("warn: stream configuration update failed; retrying once: \(error)\n")
+        }
+
         do {
             try await stream.updateConfiguration(updated)
         } catch {
-            diagnosticSink("warn: failed to update stream configuration: \(error)\n")
+            diagnosticSink("warn: failed to update stream configuration after retry: \(error)\n")
         }
     }
 

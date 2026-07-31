@@ -29,6 +29,12 @@ import {
   type FfmpegProcess,
 } from "../../utils/media/FfmpegClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import {
+  exponentialBackoff,
+  normalizeBackoff,
+  type BackoffInput,
+  type BackoffPolicy,
+} from "../../utils/Backoff";
 import type {
   H264CaptureSource,
   H264CaptureSourceMetrics,
@@ -77,6 +83,25 @@ export const IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS = 3000;
  * ({@link IOS_HELPER_STOP_GRACE_MS}).
  */
 export const IOS_ENCODER_RESTART_GRACE_MS = 2_000;
+/**
+ * Bounded reconnect attempts for a *running-phase* capture failure before the
+ * source finally surfaces `onError`. A long-lived automation stream should
+ * survive a transient helper crash / encoder blip by re-establishing capture
+ * in-process, mirroring how {@link AndroidH264Source} owns its persistent
+ * segment-rotated session rather than ending the WHIP session on the first
+ * hiccup (PR #4413). The initial startup is deliberately *not* covered — a
+ * failure there surfaces so a genuine misconfiguration (denied permission,
+ * wrong window) is not masked by a silent retry loop, matching
+ * {@link ReconnectController}'s "initial attempt is not retried" philosophy.
+ * See issue #4768.
+ */
+export const IOS_RUNNING_RECONNECT_MAX_ATTEMPTS = 2;
+/** Default backoff between running-phase reconnect attempts: 500ms→1s→2s (cap). */
+export const IOS_RUNNING_RECONNECT_BACKOFF: BackoffInput = exponentialBackoff({
+  initialDelayMs: 500,
+  multiplier: 2,
+  maxDelayMs: 2_000,
+});
 /** H.264 macroblock edge, in pixels. */
 const H264_MACROBLOCK_SIZE = 16;
 /** Smallest dimension ffmpeg can encode as 4:2:0 chroma-subsampled video. */
@@ -207,6 +232,14 @@ export interface IosH264SourceOptions extends H264CaptureSourceOptions {
   firstFrameTimeoutMs?: number;
   /** Host-scoped warm helper pool. Supplying createHelper bypasses it for tests. */
   simulatorHelperPool?: IOSSimulatorCaptureHelperPool;
+  /**
+   * Running-phase reconnect attempts before surfacing `onError`. Defaults to
+   * {@link IOS_RUNNING_RECONNECT_MAX_ATTEMPTS}; `0` restores the legacy
+   * fail-fast behavior (a running failure tears the source down immediately).
+   */
+  runningReconnectMaxAttempts?: number;
+  /** Backoff schedule between running-phase reconnect attempts. */
+  runningReconnectBackoff?: BackoffInput;
 }
 
 interface SimulatorWindowInfo {
@@ -223,7 +256,7 @@ export interface EncoderSize {
 
 export interface IosH264FrameMetrics extends H264CaptureSourceMetrics {}
 
-type IosH264SourcePhase = "idle" | "starting" | "running" | "stopping";
+type IosH264SourcePhase = "idle" | "starting" | "running" | "reconnecting" | "stopping";
 
 export interface ScreenCaptureHelperEnsurer {
   ensure(): Promise<string | null>;
@@ -245,6 +278,8 @@ export class IosH264Source implements H264CaptureSource {
   private readonly firstFrameTimeoutMs: number;
   private readonly pendingFrames: LatestFrameQueue;
   private readonly simulatorHelperPool: IOSSimulatorCaptureHelperPool;
+  private readonly runningReconnectMaxAttempts: number;
+  private readonly runningReconnectBackoff: BackoffPolicy;
 
   private helper: IosFrameCaptureHelper | null = null;
   private captureKind: CaptureTarget["kind"] | null = null;
@@ -269,6 +304,15 @@ export class IosH264Source implements H264CaptureSource {
   private encoderIdrParser = new H264AnnexBParser();
   private encoderHasProducedIdr = false;
   private phase: IosH264SourcePhase = "idle";
+  /**
+   * True once `start()` has fully resolved (first frame — and, when enabled,
+   * first audio — delivered). Running-phase reconnect only covers steady-state
+   * failures after this point; a failure during the initial handshake surfaces
+   * so a genuine misconfiguration is not hidden behind a retry loop.
+   */
+  private startupComplete = false;
+  /** Cancels an in-flight reconnect backoff wait; resolves it as "cancelled". */
+  private cancelReconnectDelay: (() => void) | null = null;
 
   constructor(private readonly options: IosH264SourceOptions) {
     this.helperPath = options.helperPath;
@@ -298,10 +342,23 @@ export class IosH264Source implements H264CaptureSource {
       now: () => this.timer.now(),
     });
     this.simulatorHelperPool = options.simulatorHelperPool ?? iosSimulatorCaptureHelperPool;
+    const reconnect = IosH264Source.resolveRunningReconnect(options);
+    this.runningReconnectMaxAttempts = reconnect.maxAttempts;
+    this.runningReconnectBackoff = reconnect.backoff;
     this.simulatorWindowResolver =
       options.simulatorWindowResolver ??
       ((helperPath, device, audioEnabled, signal) =>
         defaultResolveSimulatorWindowId(helperPath, device, this.commandRunner, audioEnabled, signal));
+  }
+
+  /** Resolve running-phase reconnect options against their defaults. */
+  private static resolveRunningReconnect(
+    options: IosH264SourceOptions
+  ): { maxAttempts: number; backoff: BackoffPolicy } {
+    return {
+      maxAttempts: options.runningReconnectMaxAttempts ?? IOS_RUNNING_RECONNECT_MAX_ATTEMPTS,
+      backoff: normalizeBackoff(options.runningReconnectBackoff ?? IOS_RUNNING_RECONNECT_BACKOFF),
+    };
   }
 
   /** Snapshot of each bounded handoff from capture through VideoToolbox. */
@@ -319,6 +376,7 @@ export class IosH264Source implements H264CaptureSource {
     }
     await this.teardownPromise;
     this.phase = "starting";
+    this.startupComplete = false;
     this.lastHelperStderr = null;
     this.lastReadinessPhase = null;
     this.helperFrameMetrics = null;
@@ -326,20 +384,31 @@ export class IosH264Source implements H264CaptureSource {
     this.lastHelperFrame = null;
 
     try {
-      const helperPath = await this.resolveHelperPath();
-      await validateFfmpegAvailability(this.ffmpegClient, this.ffmpegPath, this.options.commandRunner);
-      const target = await this.resolveCaptureTarget(helperPath);
-      this.captureKind = target.kind;
-      if (!this.isActive()) {
-        return;
-      }
-
-      await this.startCaptureWithSimulatorRetry(helperPath, target);
+      await this.establishCapture();
+      this.startupComplete = this.phaseNow() === "running";
     } catch (error) {
       this.phase = "stopping";
       await this.beginTeardown();
       throw error;
     }
+  }
+
+  /**
+   * Resolve the helper + capture target and bring capture up to the first
+   * frame. Shared by the initial {@link start} and the running-phase reconnect
+   * loop so both establish capture through exactly the same path. On success the
+   * phase is `"running"` (set by the first-frame handler); a `stop()` that races
+   * the handshake leaves it non-`"running"`, which callers treat as "not up".
+   */
+  private async establishCapture(): Promise<void> {
+    const helperPath = await this.resolveHelperPath();
+    await validateFfmpegAvailability(this.ffmpegClient, this.ffmpegPath, this.options.commandRunner);
+    const target = await this.resolveCaptureTarget(helperPath);
+    this.captureKind = target.kind;
+    if (!this.isActive()) {
+      return;
+    }
+    await this.startCaptureWithSimulatorRetry(helperPath, target);
   }
 
   async stop(): Promise<void> {
@@ -348,6 +417,8 @@ export class IosH264Source implements H264CaptureSource {
       return;
     }
     this.phase = "stopping";
+    this.startupComplete = false;
+    this.cancelReconnectDelay?.();
     this.cancelFirstFrameWait?.();
     this.cancelFirstAudioWait?.();
     await this.beginTeardown();
@@ -760,15 +831,40 @@ export class IosH264Source implements H264CaptureSource {
       this.encoderSize &&
       (this.encoderSize.width !== size.width || this.encoderSize.height !== size.height)
     ) {
-      this.failIfRunning(
-        new Error(
-          `iOS capture frame changed size from ${this.encoderSize.width}x${this.encoderSize.height} to ${size.width}x${size.height}`
-        )
-      );
-      return;
+      // A mid-stream size change (device rotation, the Swift helper's own
+      // reconfigure) is a recoverable reconfigure, not a fatal error: restart
+      // the encoder at the new geometry (a fresh SPS/PPS + IDR) rather than
+      // tearing the whole source down. See issue #4768.
+      this.reconfigureEncoderSize(size);
     }
 
     this.writeFrameToEncoder(frame);
+  }
+
+  /**
+   * Restart the ffmpeg encoder at a new capture geometry, in place. ffmpeg's
+   * `-s WxH` input size is fixed for the life of a process, so a size change
+   * requires a fresh encoder — but only the encoder, not the capture helper.
+   * The replacement begins its output with SPS/PPS + an IDR on the next frame,
+   * which is exactly what a resolution change needs downstream. Mirrors the
+   * on-demand restart in {@link requestKeyFrame}; the outgoing encoder's guarded
+   * exit/error handlers no-op once `this.encoder` is replaced.
+   */
+  private reconfigureEncoderSize(newSize: EncoderSize): void {
+    const previous = this.encoderSize;
+    logger.info(
+      `[IosH264Source] capture frame size changed from ${previous?.width}x${previous?.height} ` +
+      `to ${newSize.width}x${newSize.height}; restarting encoder at the new size`
+    );
+    const oldEncoder = this.encoder;
+    // Queued frames carry the old geometry; drop them so the new encoder is not
+    // fed a frame sized for the previous configuration.
+    this.pendingFrames.clear(true);
+    this.reportFrameMetrics();
+    this.startEncoder(newSize);
+    if (oldEncoder) {
+      void this.reapOutgoingEncoder(oldEncoder);
+    }
   }
 
   private writeFrameToEncoder(frame: DecodedFrame): void {
@@ -873,12 +969,9 @@ export class IosH264Source implements H264CaptureSource {
       this.encoderSize &&
       (this.encoderSize.width !== size.width || this.encoderSize.height !== size.height)
     ) {
-      this.failIfRunning(
-        new Error(
-          `iOS capture frame changed size from ${this.encoderSize.width}x${this.encoderSize.height} to ${size.width}x${size.height}`
-        )
-      );
-      return;
+      // A dequeued frame can also carry a new geometry; reconfigure rather than
+      // fail (issue #4768).
+      this.reconfigureEncoderSize(size);
     }
     this.writeFrameToEncoder(frame);
   }
@@ -1029,10 +1122,101 @@ export class IosH264Source implements H264CaptureSource {
     if (this.phase !== "running") {
       return;
     }
+    // Only a steady-state failure (after start() resolved) is eligible for a
+    // bounded reconnect; a failure still inside the initial handshake surfaces
+    // immediately so a real misconfiguration is not masked by a retry loop.
+    if (this.startupComplete && this.runningReconnectMaxAttempts > 0) {
+      this.phase = "reconnecting";
+      this.startupComplete = false;
+      void this.runReconnect(error);
+      return;
+    }
+    this.failNow(error);
+  }
+
+  /** Terminal failure: tear the source down and surface `onError`. */
+  private failNow(error: Error): void {
     this.rejectFirstAudioWait?.(error);
     this.phase = "stopping";
+    this.startupComplete = false;
     void this.beginTeardown();
     this.options.onError?.(error);
+  }
+
+  /**
+   * Bounded running-phase reconnect. Tears down the failed helper/encoder, then
+   * re-establishes capture up to {@link runningReconnectMaxAttempts} times with
+   * {@link runningReconnectBackoff} between attempts. On success the source
+   * resumes running with no `onError`; on exhaustion the original failure is
+   * surfaced. A `stop()` at any point cancels the cycle. This keeps a long-lived
+   * automation stream alive across a transient blip, mirroring how
+   * {@link AndroidH264Source} re-establishes its persistent session (PR #4413).
+   */
+  private async runReconnect(initialError: Error): Promise<void> {
+    logger.warn(
+      `[IosH264Source] running-phase capture failure; attempting bounded reconnect ` +
+      `(up to ${this.runningReconnectMaxAttempts}): ${initialError.message}`
+    );
+    await this.beginTeardown();
+
+    for (
+      let attempt = 1;
+      this.phase === "reconnecting" && attempt <= this.runningReconnectMaxAttempts;
+      attempt++
+    ) {
+      const delayMs = this.runningReconnectBackoff.delayForAttempt(attempt);
+      const cancelled = await this.waitReconnectBackoff(delayMs);
+      if (cancelled || this.phase !== "reconnecting") {
+        return; // stop() intervened during the backoff wait.
+      }
+      this.phase = "starting";
+      try {
+        await this.establishCapture();
+        if (this.phaseNow() === "running") {
+          this.startupComplete = true;
+          logger.info(
+            `[IosH264Source] running-phase reconnect succeeded on attempt ${attempt}`
+          );
+          return;
+        }
+        // A stop() raced the handshake; teardown is owned by stop().
+        return;
+      } catch (error) {
+        logger.warn(
+          `[IosH264Source] reconnect attempt ${attempt}/${this.runningReconnectMaxAttempts} failed: ` +
+          `${error instanceof Error ? error.message : String(error)}`
+        );
+        await this.beginTeardown();
+        const phase = this.phaseNow();
+        if (phase === "stopping" || phase === "idle") {
+          return; // stop() won during the attempt.
+        }
+        this.phase = "reconnecting";
+      }
+    }
+
+    if (this.phase === "reconnecting") {
+      this.failNow(initialError);
+    }
+  }
+
+  /**
+   * Resolve after `delayMs`, or immediately with `true` if {@link cancelReconnectDelay}
+   * fires first (a `stop()` during the backoff). Uses the injected {@link Timer}
+   * so reconnect timing is deterministic under a FakeTimer.
+   */
+  private waitReconnectBackoff(delayMs: number): Promise<boolean> {
+    return new Promise(resolve => {
+      const handle = this.timer.setTimeout(() => {
+        this.cancelReconnectDelay = null;
+        resolve(false);
+      }, delayMs);
+      this.cancelReconnectDelay = (): void => {
+        this.timer.clearTimeout(handle);
+        this.cancelReconnectDelay = null;
+        resolve(true);
+      };
+    });
   }
 
   private failIfCurrentHelper(helper: IosFrameCaptureHelper, error: Error): void {
@@ -1043,7 +1227,18 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private isActive(): boolean {
-    return this.phase === "starting" || this.phase === "running";
+    return this.phase === "starting" || this.phase === "running" || this.phase === "reconnecting";
+  }
+
+  /**
+   * Read the current phase through a method boundary so a comparison after an
+   * `await` is not defeated by TypeScript's flow narrowing: an async callback
+   * (a frame handler flipping the phase to `"running"`, a `stop()`) can mutate
+   * `this.phase` while an `await` is suspended, which control-flow analysis
+   * cannot see.
+   */
+  private phaseNow(): IosH264SourcePhase {
+    return this.phase;
   }
 
   private beginTeardown(): Promise<void> {

@@ -182,15 +182,30 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
  * them. Targets are validated against each link's *final* location under the
  * destination, since a relative target's meaning shifts when the tree is moved.
  */
-async function assertStagedSymlinksSafe(stagingDir: string, destinationDir: string): Promise<void> {
-  const dirents = await fs.readdir(stagingDir, { withFileTypes: true });
+async function assertStagedSymlinksSafe(stagingRoot: string, destinationDir: string): Promise<void> {
+  await walkStagedSymlinks(stagingRoot, stagingRoot, destinationDir);
+}
+
+/**
+ * Walk `dir` (a subtree of `stagingRoot`) and reject any escaping symlink. The
+ * root is threaded separately from the directory currently being read so a
+ * nested link's path relative to the staging *root* — and therefore its final
+ * location under the destination — is computed with every ancestor component
+ * intact.
+ */
+async function walkStagedSymlinks(dir: string, stagingRoot: string, destinationDir: string): Promise<void> {
+  const dirents = await fs.readdir(dir, { withFileTypes: true });
   for (const dirent of dirents) {
-    const entryPath = path.join(stagingDir, dirent.name);
+    const entryPath = path.join(dir, dirent.name);
     if (dirent.isSymbolicLink()) {
-      const relFromStaging = path.relative(stagingDir, entryPath);
+      const relFromStaging = path.relative(stagingRoot, entryPath);
       const finalLinkPath = path.join(destinationDir, relFromStaging);
       const target = await fs.readlink(entryPath);
-      const resolvedTarget = path.resolve(path.dirname(finalLinkPath), target);
+      const lexicalTarget = path.resolve(path.dirname(finalLinkPath), target);
+      // Resolve any *existing* symlink along the target path before the containment
+      // check: a pre-existing symlink in the destination (e.g. `dest/trusted ->
+      // ../outside`) would otherwise redirect an apparently-in-bounds target outside.
+      const resolvedTarget = await realpathExistingPrefix(lexicalTarget);
       const relToRoot = path.relative(destinationDir, resolvedTarget);
       if (relToRoot === ".." || relToRoot.startsWith(`..${path.sep}`) || path.isAbsolute(relToRoot)) {
         throw new ActionableError(
@@ -200,7 +215,35 @@ async function assertStagedSymlinksSafe(stagingDir: string, destinationDir: stri
       }
     } else if (dirent.isDirectory()) {
       // Recurse into real subdirectories only — never follow a symlinked directory.
-      await assertStagedSymlinksSafe(entryPath, destinationDir);
+      await walkStagedSymlinks(entryPath, stagingRoot, destinationDir);
+    }
+  }
+}
+
+/**
+ * Canonicalize the longest existing prefix of `target` with `fs.realpath` (so any
+ * symlinks in that prefix are followed) and re-append the not-yet-existing tail.
+ * A plain lexical resolve would miss a symlink already sitting in the destination.
+ */
+async function realpathExistingPrefix(target: string): Promise<string> {
+  const tail: string[] = [];
+  let existing = target;
+  for (;;) {
+    try {
+      const real = await fs.realpath(existing);
+      return tail.length ? path.join(real, ...tail.reverse()) : real;
+    } catch (error) {
+      // Expected: `existing` does not exist yet (the link target's tail is not on
+      // disk). Step up one component and keep looking for a real ancestor to
+      // canonicalize; only a genuinely surprising error is worth a trace.
+      logger.debug(`realpath prefix walk: '${existing}' not resolvable (${errorMessage(error)})`);
+      const parent = path.dirname(existing);
+      if (parent === existing) {
+        // Walked to the filesystem root without finding an existing path.
+        return target;
+      }
+      tail.push(path.basename(existing));
+      existing = parent;
     }
   }
 }

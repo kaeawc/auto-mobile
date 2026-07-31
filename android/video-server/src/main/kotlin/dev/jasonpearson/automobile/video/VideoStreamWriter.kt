@@ -119,6 +119,18 @@ class VideoStreamWriter(
     /** Sentinel for [writeStartedAtMs] meaning no client write is currently in flight. */
     const val NO_WRITE_IN_PROGRESS = Long.MIN_VALUE
 
+    /**
+     * Peer UIDs allowed to receive the screen stream, checked against `SO_PEERCRED` on every
+     * `accept()` before any byte is written (issue #4728).
+     *
+     * The legitimate host always reaches the abstract socket through `adbd`, which runs as shell
+     * (AID_SHELL, UID 2000); root (AID_ROOT, UID 0) covers `adb root` and eng/rooted builds where
+     * the daemon is relayed as root. Every normal app connects under its own app UID (>= 10000) and
+     * is therefore structurally excluded. Abstract-namespace local sockets have no filesystem
+     * permissions, so this kernel-supplied credential is the only access-control barrier available.
+     */
+    val ALLOWED_PEER_UIDS = setOf(0, 2000)
+
     /** "h264" as big-endian int: 0x68323634 */
     const val CODEC_ID_H264 = VideoStreamProtocol.CODEC_ID_H264
     /** "amux" as big-endian int: 0x616d7578 */
@@ -252,6 +264,24 @@ class VideoStreamWriter(
           }
           return
         }
+
+      // Gate on the peer's SO_PEERCRED UID before touching any shared state or writing a byte
+      // (issue #4728). Rejecting here — ahead of the closeClientLocked() eviction below — means an
+      // unauthorized peer neither displaces the current client nor observes any stream bytes, so it
+      // also avoids worsening the authenticate-before-evict ordering tracked by issue #4730.
+      val peerUid = client.peerUid
+      if (peerUid !in ALLOWED_PEER_UIDS) {
+        println(
+          "VIDEO_CLIENT_REJECTED socket=$socketName uid=$peerUid not in allowed set " +
+            "$ALLOWED_PEER_UIDS; disconnecting"
+        )
+        try {
+          client.close()
+        } catch (_: IOException) {
+          // Best-effort close of a rejected peer; nothing was written, so a failure here is benign.
+        }
+        continue
+      }
 
       val attached =
         synchronized(lock) {

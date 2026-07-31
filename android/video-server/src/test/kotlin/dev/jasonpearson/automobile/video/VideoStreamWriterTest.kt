@@ -167,6 +167,9 @@ class VideoStreamWriterTest {
   private class FakeClientConnection(
     override val outputStream: OutputStream = ByteArrayOutputStream(),
     input: InputStream? = null,
+    // Default to the shell UID (2000) so existing tests exercise the allowed path; the UID-gating
+    // tests below override it with an app-range UID to drive rejection (issue #4728).
+    override val peerUid: Int = 2000,
     private val onClose: () -> Unit = {},
   ) : VideoClientConnection {
     @Volatile var closed = false
@@ -328,6 +331,76 @@ class VideoStreamWriterTest {
       received.await(2, TimeUnit.SECONDS),
     )
     assertEquals(VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME, lastCommand.get())
+  }
+
+  // --- peer-UID gating (SO_PEERCRED, issue #4728) ---------------------------------------------
+
+  @Test
+  fun disallowedPeerUidReceivesNoBytesAndIsDisconnected() {
+    var now = 1_000L
+    val output = ScriptedOutputStream()
+    // A normal app connects under its own app-range UID (>= 10000); it must be refused.
+    val connection = FakeClientConnection(outputStream = output, peerUid = 10123)
+    val attachCount = AtomicInteger()
+    val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
+
+    subject.bindServerSocket()
+    subject.acceptClients { attachCount.incrementAndGet() }
+
+    assertEquals("a disallowed peer must never be reported as connected", 0, attachCount.get())
+    assertEquals("a disallowed peer must receive no stream bytes", 0, output.writeCount)
+    assertTrue("a disallowed peer must be disconnected", connection.closed)
+  }
+
+  @Test
+  fun allowedShellPeerUidAttachesAndReceivesStreamHeader() {
+    var now = 1_000L
+    val output = ScriptedOutputStream()
+    val connection = FakeClientConnection(outputStream = output, peerUid = 2000)
+    val attachCount = AtomicInteger()
+    val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
+
+    subject.bindServerSocket()
+    subject.acceptClients { attachCount.incrementAndGet() }
+
+    assertEquals("an allowed shell peer must attach", 1, attachCount.get())
+    assertTrue("an allowed peer must receive the stream header", output.writeCount > 0)
+    assertFalse("an allowed peer stays connected", connection.closed)
+  }
+
+  @Test
+  fun allowedRootPeerUidAttaches() {
+    var now = 1_000L
+    val connection = FakeClientConnection(peerUid = 0)
+    val attachCount = AtomicInteger()
+    val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
+
+    subject.bindServerSocket()
+    subject.acceptClients { attachCount.incrementAndGet() }
+
+    assertEquals("an allowed root peer must attach", 1, attachCount.get())
+    assertFalse(connection.closed)
+    subject.stop()
+  }
+
+  @Test
+  fun disallowedPeerDoesNotDisplaceTheCurrentAllowedClient() {
+    var now = 1_000L
+    // An allowed client attaches first; a disallowed peer then connects. Rejecting the intruder
+    // ahead of the eviction step must leave the legitimate client attached (does not worsen the
+    // authenticate-before-evict ordering of issue #4730).
+    val allowed = FakeClientConnection(peerUid = 2000)
+    val intruder = FakeClientConnection(peerUid = 10222)
+    val attachCount = AtomicInteger()
+    val subject = writer({ now }, FakeServerSocket(listOf({ allowed }, { intruder })))
+
+    subject.bindServerSocket()
+    subject.acceptClients { attachCount.incrementAndGet() }
+
+    assertEquals("only the allowed client attaches", 1, attachCount.get())
+    assertFalse("the allowed client must not be displaced by a rejected peer", allowed.closed)
+    assertTrue("the intruder must be disconnected", intruder.closed)
+    subject.stop()
   }
 
   // --- writePacket success/failure contract (pinning the decision) ----------------------------

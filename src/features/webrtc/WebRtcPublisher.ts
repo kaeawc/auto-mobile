@@ -15,7 +15,7 @@ import { RtpPcmuTrackWriter } from "./RtpPcmuTrackWriter";
 import {
   h264SpsProfileLevelId,
   h264SpsLevelIdc,
-  isCompatibleMainProfile,
+  isCompatibleConstrainedBaselineProfile,
   WEBRTC_H264_LEVEL_IDC,
   WEBRTC_H264_PROFILE_LEVEL_ID,
 } from "./h264Level";
@@ -446,9 +446,9 @@ export class WebRtcPublisher {
         timer: this.timer,
         onSps: sps => {
           const profileLevelId = h264SpsProfileLevelId(sps);
-          if (profileLevelId && !isCompatibleMainProfile(profileLevelId)) {
+          if (profileLevelId && !isCompatibleConstrainedBaselineProfile(profileLevelId)) {
             throw new Error(
-              `H.264 SPS profile ${profileLevelId.slice(0, 4)} is incompatible with negotiated Main profile.`
+              `H.264 SPS profile ${profileLevelId.slice(0, 4)} is incompatible with negotiated constrained baseline.`
             );
           }
           const levelIdc = h264SpsLevelIdc(sps);
@@ -914,7 +914,7 @@ function isAcceptedCodecRtpMap(
   }
   // AutoMobile packetizes H.264 at the RFC 6184 fixed 90 kHz clock rate and
   // uses FU-A, which requires packetization-mode=1. The local werift codec is
-  // Main profile 4d00xx; level may differ when asymmetry is negotiated.
+  // constrained-baseline 42e0xx; level may differ when asymmetry is negotiated.
   return match[3] === "90000" && attributeLines.some(fmtp => {
     if (!fmtp.startsWith(`a=fmtp:${match[1]} `)) {
       return false;
@@ -931,7 +931,7 @@ function h264CodecParameters(): string {
 }
 
 function acceptsLocalH264Send(parameters: string, profileLevelId: string): boolean {
-  if (!isCompatibleMainProfile(profileLevelId)) {
+  if (!isCompatibleConstrainedBaselineProfile(profileLevelId)) {
     return false;
   }
   const answerLevelIdc = Number.parseInt(profileLevelId.slice(4, 6), 16);
@@ -945,7 +945,7 @@ function acceptsLocalH264Send(parameters: string, profileLevelId: string): boole
   const maxReceiveLevel = /(?:^|;)\s*max-recv-level\s*=\s*([0-9a-f]{4})(?:;|$)/i.exec(parameters)?.[1];
   // RFC 6184 §8.2.2 encodes max-recv-level as the two hexadecimal bytes after
   // profile_idc in an SPS: profile-iop followed by level_idc (for example,
-  // 002a for Main Level 4.2). It is not a decimal level number.
+  // e02a for constrained-baseline Level 4.2). It is not a decimal level number.
   const maxReceiveLevelIdc = maxReceiveLevel
     ? Number.parseInt(maxReceiveLevel.slice(2), 16)
     : Number.NaN;

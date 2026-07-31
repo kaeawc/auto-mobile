@@ -72,7 +72,7 @@ const publisher = new WebRtcPublisher(
             status: 201,
             ok: true,
             headers: { get: name => (name.toLowerCase() === "location" ? "/whip/resource/debug-1" : null) },
-            text: async () => ["v=0", "m=video 9 UDP/TLS/RTP/SAVPF 96", "a=recvonly", "a=rtpmap:96 H264/90000", "a=fmtp:96 packetization-mode=1;profile-level-id=4d002a", ""].join("\\r\\n"),
+            text: async () => ["v=0", "m=video 9 UDP/TLS/RTP/SAVPF 96", "a=recvonly", "a=rtpmap:96 H264/90000", "a=fmtp:96 packetization-mode=1;profile-level-id=42e02a", ""].join("\\r\\n"),
           };
         },
       }),

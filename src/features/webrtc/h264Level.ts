@@ -1,18 +1,12 @@
 /**
- * The Main-profile level advertised by AutoMobile's WebRTC sender.
- *
- * `4d002a`: profile_idc `0x4d` (Main, 77), profile-iop `0x00` (Main sets no
- * constraint flags), level_idc `0x2a` (Level 4.2). Main enables CABAC over
- * Baseline's CAVLC for ~10-30% bitrate savings at equal quality with no added
- * latency (no B-frames requested), and both decode targets — werift and
- * Chromium — support it.
+ * The constrained-baseline level advertised by AutoMobile's WebRTC sender.
  *
  * Level 4.2 supports 8,192 macroblocks per picture and 522,240 macroblocks
  * per second (RFC 6184 §8.2.2 and ITU-T H.264 Annex A). That covers AutoMobile's
  * 1080p/60 Android preset while keeping the SDP offer truthful.
  * https://www.rfc-editor.org/rfc/rfc6184.html#section-8.2.2
  */
-export const WEBRTC_H264_PROFILE_LEVEL_ID = "4d002a";
+export const WEBRTC_H264_PROFILE_LEVEL_ID = "42e02a";
 export const WEBRTC_H264_LEVEL_IDC = 0x2a;
 export const WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME = 8_192;
 
@@ -36,20 +30,18 @@ export function h264SpsLevelIdc(nal: Buffer): number | undefined {
   return profileLevelId ? Number.parseInt(profileLevelId.slice(4, 6), 16) : undefined;
 }
 
-/** Whether a profile-level-id is compatible with AutoMobile's Main-profile sender. */
-export function isCompatibleMainProfile(profileLevelId: string): boolean {
-  // Accept the whole Main family (profile_idc 77 / 0x4d), regardless of the
-  // profile-iop constraint flags. AutoMobile's encoder now requests Main
-  // (`4d xx yy`); a device encoder may echo varying constraint-flag bytes, all
-  // of which decode identically for a screen-capture stream. Only profile_idc is
-  // significant here because reconnecting cannot change a fixed-profile encoder —
-  // an over-strict iop check turns into an endless reconnect loop that never
-  // renders a frame.
-  //
-  // Baseline (0x42) is deliberately rejected now that we send Main: a decoder
-  // that only advertises Baseline cannot decode a Main-profile stream. Higher
-  // profiles (High 0x64) genuinely differ and are handled by the caller.
+/** Whether a profile-level-id is compatible with AutoMobile constrained baseline. */
+export function isCompatibleConstrainedBaselineProfile(profileLevelId: string): boolean {
+  // Accept the whole Baseline family (profile_idc 66 / 0x42), regardless of the
+  // constraint flags. Constrained Baseline (constraint_set1_flag set) is a subset
+  // of Baseline and decodes identically for a screen-capture stream; the earlier
+  // `(iop & 0x4f) === 0x40` check rejected the plain-Baseline SPS that Android
+  // device encoders routinely emit (`42 80 xx`, constraint_set0 only, or
+  // `42 00 xx`). Because reconnecting cannot change a fixed-profile encoder, that
+  // rejection turned into an endless reconnect loop that never rendered a frame.
+  // Non-Baseline profiles (Main 0x4d, High 0x64) are still rejected — those
+  // genuinely differ and are handled by the caller.
   // https://www.rfc-editor.org/rfc/rfc6184.html#section-8.2.2
   const profileIdc = Number.parseInt(profileLevelId.slice(0, 2), 16);
-  return profileIdc === 0x4d;
+  return profileIdc === 0x42;
 }

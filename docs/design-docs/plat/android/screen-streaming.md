@@ -78,6 +78,38 @@ The accessibility service can only do on-demand `takeScreenshot()` or request `M
    - Decodes frames to tightly packed BGRA
    - Copied into a Skia raster image and drawn by Compose (no SwingPanel needed)
 
+## On-device JAR integrity + push-skip
+
+The persistent encoder is a DEX jar executed via `app_process` as the shell user
+([#4733](https://github.com/kaeawc/auto-mobile/issues/4733)). Two properties are
+enforced around that push/launch, both driven by a single on-device hash:
+
+- **Integrity before launch (defense-in-depth / TOCTOU).** Because the jar runs
+  in the screen/audio-capture context, anything able to write
+  `/data/local/tmp/automobile-video.jar` could substitute code. Before
+  `app_process` is spawned, the host hashes the remote jar
+  (`sha256sum` + `wc -c`, through the injectable ADB seam, bounded by the
+  launch-command timeout) and compares it against the host-known expected sha256
+  and byte size. On a **definitive mismatch** the launch is refused with an
+  `ActionableError` and the source degrades to `screenrecord`; an *unreadable*
+  probe (a device lacking `sha256sum`/`wc`, or a probe timeout) is not a mismatch
+  — the push already overwrote the remote with trusted bytes, so it logs and
+  proceeds (mirrors the handshake graceful-degrade).
+
+- **Skip the redundant push (startup latency).** The same probe runs once *before*
+  the push: when the remote copy is already byte-identical (size **and** hash),
+  the ~2.5 MB `adb push` is skipped and that match doubles as the pre-launch gate
+  (the happy path hashes the remote once). Any mismatch **or** uncertainty
+  (unreadable/absent remote) pushes — correctness is never traded for the
+  optimization.
+
+The expected sha256/size come from `VideoServerJarProvider.computeLocalJarIntegrity()`,
+which hashes the actual local bytes the host would push (the same canonical
+`ChecksumCalculator` used to verify downloads). This is correct for every
+resolution source — cached download, `AUTOMOBILE_VIDEO_SERVER_JAR` override, and
+local Gradle build — because it never trusts the release registry for jars that
+were never checked against it. The value is memoized across relaunches.
+
 ## Protocol Specification
 
 ### Video Stream Header (12 bytes)

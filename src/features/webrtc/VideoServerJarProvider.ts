@@ -37,6 +37,31 @@ export interface VideoServerJarMetadata {
   downloadedAt: number;
 }
 
+/**
+ * Host-known integrity descriptor of a local `automobile-video.jar` — the exact
+ * bytes the host would push to `/data/local/tmp`. Used by the on-device jar-hash
+ * mechanism (issue #4733) to decide whether the remote copy already matches
+ * (skip the push) and to verify the remote bytes before `app_process` launch.
+ */
+export interface VideoServerJarIntegrity {
+  /** Lowercase sha256 hex of the jar's bytes. */
+  sha256: string;
+  /** Byte size of the jar. */
+  size: number;
+}
+
+/**
+ * The single method {@link PersistentEncoderH264Source} needs to learn the
+ * host-known expected sha256 + size of the jar it is about to push/launch. A
+ * narrow interface (YAGNI) so tests can inject a fake without the download
+ * machinery. The production default is {@link VideoServerJarProvider}, which
+ * computes it with the same canonical {@link ChecksumCalculator} it uses to
+ * verify downloads.
+ */
+export interface JarIntegrityProbe {
+  computeLocalJarIntegrity(jarPath: string): Promise<VideoServerJarIntegrity>;
+}
+
 export interface VideoServerJarProviderDeps {
   downloader?: FileDownloader;
   checksumCalculator?: ChecksumCalculator;
@@ -102,6 +127,23 @@ export class VideoServerJarProvider {
    */
   public static setExpectedChecksumForTesting(checksum: string | null): void {
     VideoServerJarProvider.expectedChecksumOverride = checksum;
+  }
+
+  /**
+   * Compute the host-known sha256 + size of a resolved local jar (issue #4733).
+   * Works for any resolution source — cached download, `AUTOMOBILE_VIDEO_SERVER_JAR`
+   * override, or local Gradle build — because it hashes the actual bytes that
+   * will be pushed rather than trusting the release registry (which override/build
+   * jars are never checked against). Reuses the same canonical
+   * {@link ChecksumCalculator} the download path verifies with, so the "expected"
+   * value is derived identically everywhere.
+   */
+  public async computeLocalJarIntegrity(jarPath: string): Promise<VideoServerJarIntegrity> {
+    const [{ checksum }, stats] = await Promise.all([
+      this.checksumCalculator.computeFileSha256(jarPath),
+      fs.stat(jarPath),
+    ]);
+    return { sha256: checksum.toLowerCase(), size: stats.size };
   }
 
   private get cachedJarPath(): string {

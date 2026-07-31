@@ -52,20 +52,24 @@ premise carried in #2424/#2920:
   the crashing 0.35.x are compiled with `-Dopenjpeg=disabled` (verified in
   `lovell/sharp-libvips` `build/lin.sh` + `build/mac.sh`, `libvips/meson_options.txt`).
   jp2k is not in the binary; no upstream issue attributes a Bun abort to it.
-- The real cause is architectural and **Bun-side**: sharp deliberately ships
-  libvips as a *separate dynamically-linked shared library* (kept separate for
-  Apache-vs-LGPL licensing, [sharp#4023](https://github.com/lovell/sharp/issues/4023));
-  Bun's N-API/native interop with that separately-loaded lib has an open,
-  untriaged class of crashes ([bun#20372](https://github.com/oven-sh/bun/issues/20372),
-  [bun#29352](https://github.com/oven-sh/bun/issues/29352)). No released sharp
-  (0.34→0.35.3) or Bun version fixes it.
-- **sharp 0.34.5** (libvips 8.17.3 / `@img` 1.2.4) demonstrably runs under Bun.
-  This section originally claimed **0.35.x** (libvips 8.18.3 / `@img` 1.3.x)
-  "reintroduces the crash" — see the 2026-07-31 update above: that is not
-  reproducible on macOS or Linux, and sharp is now on 0.35.3.
-- sharp **cannot** be made reliable on **Windows** under Bun: global-libvips
-  build-from-source is unsupported on Windows, and there is a distinct open
-  Windows-only Bun+sharp crash ([bun#29352](https://github.com/oven-sh/bun/issues/29352)).
+- sharp deliberately ships libvips as a *separate dynamically-linked shared
+  library* (kept separate for Apache-vs-LGPL licensing,
+  [sharp#4023](https://github.com/lovell/sharp/issues/4023)). At the time this
+  record was written we attributed the abort to a Bun N-API interop crash class
+  against that separately-loaded lib and believed no released sharp/Bun version
+  fixed it. **The 2026-07-31 update supersedes this**: 0.35.3 loads and runs
+  cleanly under Bun on macOS and Linux, so whatever the original 0.35.0/0.35.1
+  abort was, it does not affect the platforms AutoMobile runs sharp on.
+  [bun#20372](https://github.com/oven-sh/bun/issues/20372) turned out to be a
+  resource-starved fly.io *inpaint* segfault, not a load-time abort.
+- **sharp 0.34.5** (libvips 8.17.3 / `@img` 1.2.4) ran under Bun; **0.35.3**
+  (libvips 8.18.3 / `@img` 1.3.2) now does too (see the update above). The
+  original "0.35.x reintroduces the crash" claim is retracted.
+- Windows still uses a non-sharp path (jimp + bundled cwebp) because
+  global-libvips build-from-source is unsupported on Windows — not because of a
+  Bun+sharp crash. ([bun#29352](https://github.com/oven-sh/bun/issues/29352),
+  once cited here as a Windows Bun+sharp crash, was in fact a Bun Windows
+  *path-handling* bug unrelated to libvips, since closed.)
 - `sharp-wasm32` is **not** a Windows option — it is a WASM build and would hit
   the same JSC-WASM-JIT crash class as `@jimp/wasm-webp`.
 

@@ -53,9 +53,26 @@ ctrl_proxy_port_for_device() {
   printf '%s\n' "${ctrl_proxy_port}"
 }
 
+wait_for_ctrl_proxy_health() {
+  local ctrl_proxy_port="$1"
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null; then
+      return 0
+    fi
+    if [[ "${attempt}" -lt 5 ]]; then
+      echo "CtrlProxy health check attempt ${attempt} failed; retrying in 2s..." >&2
+      sleep 2
+    fi
+  done
+
+  echo "error: CtrlProxy health check failed after 5 attempts on port ${ctrl_proxy_port}" >&2
+  return 1
+}
+
 ctrl_proxy_port="$(ctrl_proxy_port_for_device)"
 
-curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null
+wait_for_ctrl_proxy_health "${ctrl_proxy_port}"
 
 # The graph query selects the target device's latest observed foreground app.
 # Keep the injected SDK events and the following observations scoped to the
@@ -76,7 +93,7 @@ fi
 # Requesting debug and embedded-SDK tools can restart the daemon. That restart
 # creates a new CtrlProxy client, so the prior daemon's reported port is stale.
 ctrl_proxy_port="$(ctrl_proxy_port_for_device)"
-curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null
+wait_for_ctrl_proxy_health "${ctrl_proxy_port}"
 
 event_payload() {
   local destination="$1"

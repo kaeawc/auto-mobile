@@ -9,6 +9,7 @@ setup() {
   export CURL_URL_FILE="${MOCK_BIN}/curl-urls"
   export SESSION_OBSERVE_FILE="${MOCK_BIN}/session-observe"
   export DOCTOR_CALLS_FILE="${MOCK_BIN}/doctor-calls"
+  export HEALTH_ATTEMPTS_FILE="${MOCK_BIN}/health-attempts"
   export TARGET_APP_LAUNCHED_FILE="${MOCK_BIN}/target-app-launched"
   export INVOCATION_FILE="${MOCK_BIN}/invocations"
 }
@@ -32,6 +33,15 @@ SCRIPT
   make_mock xcrun 'exit 0'
   make_mock curl '
 url="${!#}"
+if [[ "$url" == */health ]]; then
+  health_attempts=0
+  [ -f "$HEALTH_ATTEMPTS_FILE" ] && health_attempts="$(cat "$HEALTH_ATTEMPTS_FILE")"
+  health_attempts=$((health_attempts + 1))
+  printf "%s\\n" "$health_attempts" > "$HEALTH_ATTEMPTS_FILE"
+  if [ "$health_attempts" -eq 1 ]; then
+    exit 1
+  fi
+fi
 if [[ "$url" == */sdk-events ]] && [[ ! -f "$SESSION_OBSERVE_FILE" ]]; then
   echo "SDK events were posted before the graph session was bound" >&2
   exit 1
@@ -98,6 +108,7 @@ fi
   [ "$status" -eq 0 ]
   [ "$(cat "$GRAPH_ATTEMPTS_FILE")" = "2" ]
   [ "$(cat "$DOCTOR_CALLS_FILE")" = "2" ]
+  [ "$(cat "$HEALTH_ATTEMPTS_FILE")" = "3" ]
   [ -f "$TARGET_APP_LAUNCHED_FILE" ]
   [[ "$output" == *"getNavigationGraph attempt 1 failed"* ]]
   launch_line="$(grep -n -- "launchApp --platform ios --appId com.apple.reminders --deviceId simulator-udid" "$INVOCATION_FILE" | head -n 1 | cut -d: -f1)"

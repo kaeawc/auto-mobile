@@ -62,6 +62,36 @@ class WebRtcStreamSocketClientTest {
   }
 
   @Test
+  fun `start carries the session uuid the provider supplies`() {
+    // #4751 stream-socket auth: a resolved daemon session UUID authenticates the request.
+    server("""{"action":"start"}""").use { s ->
+      runCatching {
+        WebRtcStreamSocketClient(
+            socketPathValue = s.socketPath.toString(),
+            sessionUuidProvider = { "session-abc" },
+          )
+          .startStream("emulator-5554")
+      }
+
+      assertEquals("session-abc", s.awaitRequest()["sessionUuid"]?.jsonPrimitive?.content)
+    }
+  }
+
+  @Test
+  fun `start omits the session uuid when the provider returns null`() {
+    // The default (no desktop session identity yet, issue #4924) must not send an empty field, so a
+    // pre-#4751 daemon still accepts the request unchanged.
+    server("""{"action":"start"}""").use { s ->
+      runCatching {
+        WebRtcStreamSocketClient(socketPathValue = s.socketPath.toString())
+          .startStream("emulator-5554")
+      }
+
+      assertTrue(!s.awaitRequest().containsKey("sessionUuid"))
+    }
+  }
+
+  @Test
   fun `stop carries the stream id when one is given`() {
     server("""{"action":"start"}""").use { s ->
       runCatching {

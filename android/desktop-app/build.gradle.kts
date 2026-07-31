@@ -152,6 +152,7 @@ dependencies {
   // Test dependencies
   testImplementation(libs.kotlin.test)
   testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(libs.junit)
 }
 
 compose.desktop {
@@ -164,11 +165,8 @@ compose.desktop {
       description = "AutoMobile Desktop - Device automation and testing dashboard"
       vendor = "AutoMobile"
 
-      // Custom installer icons are intentionally omitted for now: the committed
-      // app-icon.{icns,ico,png} are 1x1 placeholder stubs (the .icns is in fact a
-      // PNG), which jpackage would reject or embed as a broken icon. jpackage
-      // falls back to its default icon until real branded assets replace them.
       macOS {
+        iconFile.set(project.file("src/main/resources/icons/app-icon.icns"))
         bundleID = "dev.jasonpearson.automobile.desktop"
         // jpackage rejects a 0 major on macOS; use the floored version here.
         packageVersion = desktopMacPackageVersion
@@ -186,12 +184,14 @@ compose.desktop {
         }
       }
       windows {
+        iconFile.set(project.file("src/main/resources/icons/app-icon.ico"))
         // Stable Windows Installer UpgradeCode. jpackage generates a fresh UUID
         // per build when this is unset, so consecutive MSIs would not recognize
         // each other as upgrades and would install side-by-side. This value must
         // stay constant across all future releases.
         upgradeUuid = "D3041B43-B2F0-413F-980F-A05C6DC370B2"
       }
+      linux { iconFile.set(project.file("src/main/resources/icons/app-icon.png")) }
     }
   }
 }

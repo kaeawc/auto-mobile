@@ -69,6 +69,9 @@ private fun acquireSingleInstanceLock(): Boolean {
 }
 
 fun main() {
+  // Must run before any AWT toolkit initialization so the app name is picked up.
+  System.setProperty("apple.awt.application.name", "AutoMobile")
+
   if (!acquireSingleInstanceLock()) {
     System.err.println("AutoMobile Desktop is already running. Exiting.")
     return
@@ -85,6 +88,10 @@ fun main() {
     System.setProperty("apple.awt.fullWindowContent", "true")
     System.setProperty("apple.awt.transparentTitleBar", "true")
   }
+
+  // Set the macOS Dock icon. Runs after apple.awt.application.name is set above, since
+  // Taskbar.getTaskbar() initializes the AWT toolkit.
+  setDockIcon()
 
   application {
     var isWindowVisible by remember { mutableStateOf(true) }

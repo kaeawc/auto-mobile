@@ -1,4 +1,5 @@
 import { PerDeviceInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
+import { InMemoryDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 
 describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
   test("does not let a rebuild started before an invalidation restore fresh rows", async () => {
@@ -92,5 +93,37 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
 
     await clear;
     await expect(rebuild).resolves.toBe(false);
+  });
+
+  test("registers writes queued behind another write before shutdown drains", async () => {
+    const barrier = new InMemoryDbWriteBarrier();
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier);
+    let releaseFirst: (() => void) | undefined;
+    const firstStarted = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+    let finishFirst: (() => void) | undefined;
+    const firstFinished = new Promise<void>(resolve => {
+      finishFirst = resolve;
+    });
+    const writes: string[] = [];
+
+    const first = coordinator.invalidate("device-4", async () => {
+      writes.push("first");
+      releaseFirst?.();
+      await firstFinished;
+    });
+    await firstStarted;
+    const second = coordinator.invalidate("device-4", async () => {
+      writes.push("second");
+    });
+
+    expect(barrier.inFlightCount()).toBe(2);
+    const drain = barrier.drain(1_000);
+    finishFirst?.();
+
+    await expect(drain).resolves.toBe(true);
+    await Promise.all([first, second]);
+    expect(writes).toEqual(["first", "second"]);
   });
 });

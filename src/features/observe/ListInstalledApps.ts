@@ -101,8 +101,9 @@ export class ListInstalledApps {
 
   /**
    * List iOS simulator apps while preserving the optional metadata used by the
-   * app resource. This shares the persistent installed-apps cache with the
-   * package-name-only iOS path.
+   * app resource. iOS keeps its pre-existing live-list behavior because no
+   * production observer can invalidate a persistent cache after an out-of-band
+   * Xcode or simctl install/uninstall.
    */
   async executeIosDetailed(): Promise<IosInstalledAppRecord[]> {
     if (this.device.platform !== "ios") {
@@ -111,14 +112,6 @@ export class ListInstalledApps {
     }
 
     try {
-      if (this.cacheEnabled) {
-        const cachedApps = await this.getCachedIosApps();
-        if (cachedApps) {
-          return cachedApps;
-        }
-      }
-
-      const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(this.device.deviceId);
       const apps = await this.simctl.listApps(this.device.deviceId);
       const appsByBundleId = new Map<string, IosInstalledAppRecord>();
       for (const app of apps) {
@@ -133,23 +126,6 @@ export class ListInstalledApps {
       }
       const detailedApps = Array.from(appsByBundleId.values());
 
-      if (this.cacheEnabled) {
-        const timestampMs = this.timer.now();
-        const entries = detailedApps.map(app => ({
-          device_id: this.device.deviceId,
-          user_id: 0,
-          package_name: this.extractIosBundleId(app)!,
-          is_system: 0,
-          installed_at: timestampMs,
-          last_verified_at: timestampMs,
-          metadata_json: JSON.stringify(app)
-        }));
-        await getInstalledAppsCacheWriteCoordinator().commitRebuild(this.device.deviceId, cacheGeneration, () =>
-          getDbWriteBarrier().track(() =>
-            this.installedAppsRepository.replaceInstalledApps(this.device.deviceId, entries)
-          ).then(() => undefined)
-        );
-      }
       return detailedApps;
     } catch (error) {
       logger.warn("Failed to list installed iOS apps:", error);
@@ -334,42 +310,6 @@ export class ListInstalledApps {
     }
 
     return installedApps;
-  }
-
-  private async getCachedIosApps(): Promise<IosInstalledAppRecord[] | null> {
-    const lastVerifiedAt = await this.installedAppsRepository.getLatestVerification(this.device.deviceId);
-    if (!lastVerifiedAt || this.timer.now() - lastVerifiedAt > INSTALLED_APPS_CACHE_TTL_MS) {
-      return null;
-    }
-
-    const rows = await this.installedAppsRepository.listInstalledApps(this.device.deviceId);
-    if (rows.length === 0) {
-      return null;
-    }
-
-    const apps: IosInstalledAppRecord[] = [];
-    for (const row of rows) {
-      if (!row.metadata_json) {
-        return null;
-      }
-      try {
-        const parsed: unknown = JSON.parse(row.metadata_json);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          return null;
-        }
-        const app = parsed as IosInstalledAppRecord;
-        if (this.extractIosBundleId(app) !== row.package_name) {
-          return null;
-        }
-        apps.push(app);
-      } catch (error) {
-        logger.warn(`[ListInstalledApps] Ignoring invalid cached iOS app metadata: ${error}`);
-        return null;
-      }
-    }
-
-    logger.info(`[ListInstalledApps] Using cached iOS installed apps list (rows ${rows.length})`);
-    return apps;
   }
 
   private extractIosBundleId(record: IosInstalledAppRecord): string | undefined {

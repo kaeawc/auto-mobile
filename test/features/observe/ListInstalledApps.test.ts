@@ -280,7 +280,7 @@ describe("ListInstalledApps", function() {
   });
 
   describe("cache", function() {
-    test("caches iOS bundle IDs and rebuilds after the cache is marked stale", async function() {
+    test("lists iOS bundle IDs live after an out-of-band app change", async function() {
       const iosDevice: BootedDevice = {
         deviceId: "ios-cache-device",
         platform: "ios"
@@ -299,13 +299,10 @@ describe("ListInstalledApps", function() {
 
       await expect(list.execute()).resolves.toEqual(["com.example.cached"]);
       simctl.setInstalledApps([{ bundleIdentifier: "com.example.updated" }]);
-      await expect(list.execute()).resolves.toEqual(["com.example.cached"]);
-
-      await repo.markDeviceStale(iosDevice.deviceId);
       await expect(list.execute()).resolves.toEqual(["com.example.updated"]);
     });
 
-    test("caches iOS app metadata for the apps resource path", async function() {
+    test("preserves iOS app metadata for the apps resource path", async function() {
       const iosDevice: BootedDevice = {
         deviceId: "ios-metadata-cache-device",
         platform: "ios"
@@ -326,14 +323,6 @@ describe("ListInstalledApps", function() {
         simctl,
         { cacheEnabled: true, installedAppsRepository: repo, timer }
       );
-
-      await expect(list.executeIosDetailed()).resolves.toEqual([{
-        bundleId: "com.example.cached",
-        bundleDisplayName: "Cached App",
-        bundleShortVersionString: "1.2.3",
-        bundlePath: "/Applications/Cached.app"
-      }]);
-      simctl.setInstalledApps([{ bundleId: "com.example.updated" }]);
 
       await expect(list.executeIosDetailed()).resolves.toEqual([{
         bundleId: "com.example.cached",

@@ -4,6 +4,8 @@
  * coordinator preserves cache coherence between otherwise concurrent readers
  * and mutations.
  */
+import { type DbWriteBarrier, getDbWriteBarrier } from "./dbWriteBarrier";
+
 export interface InstalledAppsCacheWriteCoordinator {
   beginRebuild(deviceId: string): number;
   commitRebuild(deviceId: string, generation: number, write: () => Promise<void>): Promise<boolean>;
@@ -14,6 +16,8 @@ export interface InstalledAppsCacheWriteCoordinator {
 export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledAppsCacheWriteCoordinator {
   private generations = new Map<string, number>();
   private tails = new Map<string, Promise<unknown>>();
+
+  constructor(private readonly getBarrier: () => DbWriteBarrier = getDbWriteBarrier) {}
 
   beginRebuild(deviceId: string): number {
     return this.generations.get(deviceId) ?? 0;
@@ -48,6 +52,11 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
   private async enqueue<T>(deviceId: string, work: () => Promise<T>): Promise<T> {
     const previous = this.tails.get(deviceId) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(work);
+    // Register the whole queued lifetime before shutdown can start draining.
+    // Individual DB writes may still use track() to skip after draining begins;
+    // this makes a write already waiting behind a same-device predecessor
+    // visible to drain.
+    void this.getBarrier().trackExisting(next);
     this.tails.set(deviceId, next);
     try {
       return await next;

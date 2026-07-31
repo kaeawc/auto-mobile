@@ -731,7 +731,11 @@ export function invalidateInstalledAppsCache(deviceId?: string): void {
     invalidateMetadataCacheForDevice(deviceId);
     return;
   }
-  for (const deviceId of appCacheByDeviceId.keys()) {
+  const deviceIds = new Set<string>(appCacheByDeviceId.keys());
+  for (const entry of appMetadataCacheByKey.values()) {
+    deviceIds.add(entry.deviceId);
+  }
+  for (const deviceId of deviceIds) {
     getInstalledAppsCacheWriteCoordinator().invalidateWithoutWrite(deviceId);
   }
   appCacheByDeviceId.clear();
@@ -741,6 +745,7 @@ export function invalidateInstalledAppsCache(deviceId?: string): void {
 // --- App Metadata Resource ---
 
 interface AppMetadataCacheEntry {
+  deviceId: string;
   expiresAt: number;
   content: ResourceContent;
 }
@@ -809,6 +814,7 @@ async function getAppMetadataResource(
 
     await getInstalledAppsCacheWriteCoordinator().commitRebuild(deviceId, cacheGeneration, async () => {
       appMetadataCacheByKey.set(cacheKey, {
+        deviceId,
         expiresAt: timer.now() + APP_METADATA_CACHE_TTL_MS,
         content
       });

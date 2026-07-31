@@ -151,6 +151,10 @@ export class InstallApp {
     const installArgs = `install --user ${targetUserId} -r "${artifactPath}"`;
     let installAttempt = await perf.track("adbInstall", () => this.runAndroidInstall(installArgs, signal));
 
+    if (installAttempt.success) {
+      await this.markInstalledAppsCacheStale(true);
+    }
+
     if (!installAttempt.success && this.isAndroidDowngradeError(installAttempt.output)) {
       // The installed version is newer than the artifact. `adb install -r` cannot
       // downgrade a package, so the default behavior is to uninstall the existing
@@ -195,8 +199,6 @@ export class InstallApp {
         isInstalled = true;
       }
     }
-
-    await this.markInstalledAppsCacheStale(success);
 
     perf.end();
     const warning = warnings.length > 0 ? warnings.join(" ") : undefined;

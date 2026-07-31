@@ -272,6 +272,52 @@ describe("InstallApp", () => {
     expect(await repo.getLatestVerification(device.deviceId)).toBe(1_000);
   });
 
+  test("invalidates the cache before package discovery after a successful install", async () => {
+    class PackageDiscoveryFailureAdb extends FakeAdbExecutor {
+      private listPackagesCalls = 0;
+
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal
+      ): Promise<ExecResult> {
+        if (command === "shell pm list packages --user 0") {
+          this.listPackagesCalls++;
+          if (this.listPackagesCalls === 2) {
+            throw new Error("ADB disconnected after install");
+          }
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+
+    const apkPath = "/tmp/app-debug.apk";
+    const repo = new FakeInstalledAppsRepository();
+    const adb = new PackageDiscoveryFailureAdb();
+    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
+    fakeLocator.setTool(null);
+    adb.setCommandResponse("shell pm list packages --user 0", createExecResult("package:com.example.previous\n"));
+    adb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
+
+    const installApp = new InstallApp(
+      device,
+      { create: () => adb },
+      fakeHost,
+      fakeLocator,
+      () => createPerformanceTracker(true, fakeTimer),
+      null,
+      null,
+      undefined,
+      repo
+    );
+
+    await expect(installApp.execute(apkPath)).rejects.toThrow("ADB disconnected after install");
+
+    expect(await repo.getLatestVerification(device.deviceId)).toBe(0);
+  });
+
   test("installs iOS .app on simulator via simctl and detects new bundle id", async () => {
     const appPath = "/tmp/MyApp.app";
     const perf = createPerformanceTracker(true, fakeTimer);

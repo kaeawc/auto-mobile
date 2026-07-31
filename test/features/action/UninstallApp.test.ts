@@ -230,6 +230,39 @@ describe("UninstallApp (Android)", () => {
     expect(await repo.getLatestVerification(androidDevice.deviceId)).toBe(0);
   });
 
+  test("invalidates the cache before post-uninstall verification", async () => {
+    class VerificationFailureAdb extends FakeAdbClient {
+      private listPackagesCalls = 0;
+
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal
+      ) {
+        if (command === "shell pm list packages --user 0") {
+          this.listPackagesCalls++;
+          if (this.listPackagesCalls === 2) {
+            throw new Error("ADB disconnected after uninstall");
+          }
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+
+    const repo = new FakeInstalledAppsRepository();
+    const adb = new VerificationFailureAdb();
+    await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+
+    const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(adb), null, null, repo);
+    const result = await uninstall.execute("com.example.app");
+
+    expect(result.success).toBe(false);
+    expect(await repo.getLatestVerification(androidDevice.deviceId)).toBe(0);
+  });
+
   test("emits pm uninstall -k when keepData is requested", async () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);

@@ -181,6 +181,8 @@ export class UninstallApp {
 
       await this.adb.executeCommand(cmd);
 
+      await this.markInstalledAppsCacheStale();
+
       // Verify the app was uninstalled
       const isStillInstalled = await this.isInstalledForUser(packageName, targetUserId);
 
@@ -194,8 +196,6 @@ export class UninstallApp {
           error: "Failed to uninstall application"
         };
       }
-
-      await this.markInstalledAppsCacheStale();
 
       return {
         success: true,

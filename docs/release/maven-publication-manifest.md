@@ -28,9 +28,14 @@ credentials and no remote publish.
    and, by default, **still exits 0** — the preflight reports, it never blocks, so
    an urgent security release always ships. Only `--strict` turns a breach (or an
    unexpected file) into a non-zero exit.
-4. **Record.** In `release.yml` the preflight runs immediately before the publish
-   step, appends the totals to the job summary, and uploads the full manifest as
-   the `maven-publication-manifest` artifact.
+4. **Record.** `scripts/release/maven-publication-manifest-preflight.sh`
+   orchestrates the release-CI flow — stage all four modules, run the generator
+   with the budget, write the full manifest, append the totals to the job
+   summary. It lives in a script (not inline in the workflow) so it is linted and
+   BATS-tested on its own; set `STAGING_DIR` to skip the Gradle staging and run it
+   against an already-staged tree. In `release.yml` it runs immediately before the
+   publish step and uploads the full manifest as the `maven-publication-manifest`
+   artifact.
 
 ## File taxonomy
 
@@ -77,13 +82,27 @@ public API docs (~261 bytes each). Signing (enabled in release CI) adds a `.asc`
 plus its four checksums for each signed primary, which is what brings a real
 release to roughly 200 files.
 
+## Budget
+
+`maven-usage-budget.json` records both the real Central ceilings and the
+per-release guardrails:
+
+- `centralOrgLimits` — the Maven Central Usage Center ceilings, which are
+  **monthly** and **aggregate across the whole org**: 80 MB release size, 1000
+  files, 7 releases. Observed 2026-07: 15.43 MB, 320 files, 4 releases.
+- `perRelease` — what the preflight actually checks: one tagged release's staged
+  footprint. Because the local file repo over-counts versus Central (see below), a
+  release Central tallies at ~80 files shows here as ~200 signed, so these are
+  relative guardrails with headroom, sized to keep a normal release cadence well
+  inside the monthly ceilings.
+
 ## Caveats
 
-- The local file repository also writes `maven-metadata.xml` per coordinate. The
-  Central Portal bundle may regenerate metadata server-side, so the manifest can
-  slightly over-count versus the final Central state. This is intentional: the
-  manifest reflects what Gradle produces, and the relative before/after signal —
-  the point of the oracle — is unaffected.
-- The budget in `maven-usage-budget.json` is advisory and headroom-padded.
-  Tighten `maxBytes` after #4851 and #4852 land, and raise the ceilings
-  deliberately whenever a new coordinate is added.
+- The local file repository also writes `maven-metadata.xml` per coordinate and
+  every Gradle checksum. The Central Portal bundle regenerates metadata
+  server-side and counts differently, so the manifest **over-counts** versus the
+  final Central state (the Usage Center showed ~80 files/release against ~200 here
+  signed). This is intentional: the manifest reflects what Gradle produces, and
+  the relative before/after signal — the point of the oracle — is unaffected.
+- The budget is advisory. Tighten `perRelease.maxBytes` after #4851 and #4852
+  land, and raise a ceiling deliberately whenever a new coordinate is added.

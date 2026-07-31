@@ -389,39 +389,14 @@ jobs:
         continue-on-error: true
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          MANIFEST_OUT: ${{ runner.temp }}/maven-publication-manifest.txt
           ORG_GRADLE_PROJECT_signingInMemoryKey:
             ${{ secrets.SIGNING_IN_MEMORY_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword:
             ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyId:
             ${{ secrets.SIGNING_IN_MEMORY_KEY_ID }}
-        run: |
-          set -euo pipefail
-          MANIFEST_OUT="$RUNNER_TEMP/maven-publication-manifest.txt"
-          (
-            cd android
-            rm -rf build/central-manifest
-            ./gradlew \
-              :protocol:publishAllPublicationsToCentralManifestRepository \
-              :test-plan-validation:publishAllPublicationsToCentralManifestRepository \
-              :junit-runner:publishAllPublicationsToCentralManifestRepository \
-              :auto-mobile-sdk:publishAllPublicationsToCentralManifestRepository \
-              -PVERSION_NAME="$VERSION" \
-              --no-configuration-cache
-          )
-          scripts/release/maven-publication-manifest.sh \
-            android/build/central-manifest \
-            --budget scripts/release/maven-usage-budget.json \
-            | tee "$MANIFEST_OUT"
-          {
-            echo "### Maven Central publication manifest"
-            echo ""
-            echo '```'
-            # Totals only in the summary; the full per-file manifest is the
-            # uploaded artifact.
-            sed -n '/## Per-coordinate totals/,$p' "$MANIFEST_OUT"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: scripts/release/maven-publication-manifest-preflight.sh
 
       - name: Upload Maven publication manifest
         continue-on-error: true

@@ -353,16 +353,24 @@
   [ "$preflight" -lt "$publish" ]
 }
 
-@test "release.yml preflight invokes the manifest script with the budget (#4853)" {
+@test "release.yml preflight step calls the extracted preflight script (#4853)" {
   wiring_requires_yq
   local script
   script="$(yq -r '.jobs."verify-and-release".steps[]
     | select(.name == "Maven Central publication manifest preflight") | .run' \
     ".github/workflows/release.yml")"
-  [[ "$script" == *"scripts/release/maven-publication-manifest.sh"* ]]
-  [[ "$script" == *"scripts/release/maven-usage-budget.json"* ]]
-  [[ "$script" == *"publishAllPublicationsToCentralManifestRepository"* ]]
-  [[ "$script" == *"GITHUB_STEP_SUMMARY"* ]]
+  [[ "$script" == *"scripts/release/maven-publication-manifest-preflight.sh"* ]]
+}
+
+@test "the preflight script wires staging, the generator, the budget, and the summary (#4853)" {
+  # The bash lives in a script (not inline YAML) so it can be linted and tested;
+  # assert the script itself carries the wiring the release depends on.
+  local s="scripts/release/maven-publication-manifest-preflight.sh"
+  [ -x "$s" ]
+  grep -q "publishAllPublicationsToCentralManifestRepository" "$s"
+  grep -q "maven-publication-manifest.sh" "$s"
+  grep -q "maven-usage-budget.json" "$s"
+  grep -q "GITHUB_STEP_SUMMARY" "$s"
 }
 
 @test "release.yml uploads the publication manifest artifact (#4853)" {

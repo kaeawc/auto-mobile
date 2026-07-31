@@ -196,14 +196,9 @@ exit_code=0
 
 if [ -n "$budget_file" ]; then
   [ -f "$budget_file" ] || { echo "error: budget file not found: $budget_file" >&2; exit 2; }
-  limits="$(node -e '
-    const fs = require("fs");
-    const b = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    const r = b.perRelease || {};
-    const f = r.maxFiles == null ? "" : r.maxFiles;
-    const y = r.maxBytes == null ? "" : r.maxBytes;
-    process.stdout.write(f + " " + y);
-  ' "$budget_file")"
+  command -v jq >/dev/null 2>&1 || { echo "error: jq is required for --budget" >&2; exit 2; }
+  # jq's // treats only null/false as empty, so a real 0 threshold survives.
+  limits="$(jq -r '(.perRelease // {}) | "\(.maxFiles // "") \(.maxBytes // "")"' "$budget_file")"
   max_files="${limits%% *}"
   max_bytes="${limits##* }"
   breached=0

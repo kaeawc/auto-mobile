@@ -167,7 +167,7 @@ JSON
 
 @test "the committed budget policy exists and is valid JSON" {
   [ -f "$BUDGET_FILE" ]
-  run node -e "JSON.parse(require('fs').readFileSync('$BUDGET_FILE','utf8'))"
+  run jq empty "$BUDGET_FILE"
   [ "$status" -eq 0 ]
 }
 
@@ -190,4 +190,37 @@ JSON
   run bash "$SCRIPT" "$STAGE/does-not-exist"
   [ "$status" -ne 0 ]
   [[ "$output" == *"staging"* ]] || [[ "$output" == *"not"* ]]
+}
+
+# --- The extracted release-CI orchestrator (maven-publication-manifest-preflight.sh) ---
+# STAGING_DIR skips the Gradle staging step, so its manifest/summary wiring is
+# testable against a fixture without running Gradle.
+
+@test "preflight against a pre-staged dir emits the manifest and writes MANIFEST_OUT" {
+  local preflight="$REPO_ROOT/scripts/release/maven-publication-manifest-preflight.sh"
+  local out="$STAGE/manifest.txt"
+  STAGING_DIR="$STAGE" MANIFEST_OUT="$out" run bash "$preflight"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"files=110"* ]]
+  [ -f "$out" ]
+  grep -q "files=110" "$out"
+}
+
+@test "preflight appends a totals block to GITHUB_STEP_SUMMARY when set" {
+  local preflight="$REPO_ROOT/scripts/release/maven-publication-manifest-preflight.sh"
+  local summary="$STAGE/summary.md"
+  STAGING_DIR="$STAGE" GITHUB_STEP_SUMMARY="$summary" run bash "$preflight"
+  [ "$status" -eq 0 ]
+  [ -f "$summary" ]
+  grep -q "Maven Central publication manifest" "$summary"
+  grep -q "Release total" "$summary"
+  # The full per-file body is NOT dumped into the summary; only totals onward.
+  ! grep -q "auto-mobile-protocol-0.0.47.jar " "$summary"
+}
+
+@test "preflight requires VERSION when it must stage (no STAGING_DIR)" {
+  local preflight="$REPO_ROOT/scripts/release/maven-publication-manifest-preflight.sh"
+  run env -u VERSION -u STAGING_DIR bash "$preflight"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"VERSION"* ]]
 }

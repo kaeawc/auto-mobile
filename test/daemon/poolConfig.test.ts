@@ -1,11 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { isDevicePoolAutolockEnabled, getDevicePoolTimeoutMs } from "../../src/daemon/poolConfig";
+import {
+  getDevicePoolTimeoutMs,
+  isAndroidRebootOnDeathEnabled,
+  isDevicePoolAutolockEnabled,
+} from "../../src/daemon/poolConfig";
 
 const ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTOMOBILE_DEVICE_POOL_TIMEOUT",
   "AUTO_MOBILE_DEVICE_POOL_TIMEOUT",
+  "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",
+  "AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH",
 ] as const;
 
 function clearEnv(): void {
@@ -75,6 +81,24 @@ describe("poolConfig autolock", () => {
       expect(getDevicePoolTimeoutMs()).toBe(row.expected);
     });
   }
+});
+
+describe("Android reboot-on-death configuration", () => {
+  beforeEach(clearEnv);
+  afterEach(clearEnv);
+
+  it("defaults to disabled and accepts only '1'", () => {
+    expect(isAndroidRebootOnDeathEnabled()).toBe(false);
+    process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "true";
+    expect(isAndroidRebootOnDeathEnabled()).toBe(false);
+    process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+    expect(isAndroidRebootOnDeathEnabled()).toBe(true);
+  });
+
+  it("honors the AUTO_MOBILE_ alias", () => {
+    process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+    expect(isAndroidRebootOnDeathEnabled()).toBe(true);
+  });
 });
 
 /**

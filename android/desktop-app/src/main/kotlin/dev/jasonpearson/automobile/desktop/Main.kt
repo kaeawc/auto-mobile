@@ -23,7 +23,6 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
-import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.workspace.isCommandPaletteShortcut
 import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
@@ -68,33 +67,6 @@ private fun acquireSingleInstanceLock(): Boolean {
     true
   }
 }
-
-/** Logger for main-entrypoint diagnostics (Dock icon setup, etc.). */
-private val LOG = LoggerFactory.getLogger("Main")
-
-/**
- * Sets the macOS Dock icon from the bundled PNG. Guarded so non-macOS / unsupported platforms are a
- * no-op and never throw.
- *
- * Ordering constraint: [java.awt.Taskbar.getTaskbar] initializes the AWT toolkit, so this must run
- * only after `apple.awt.application.name` has been set.
- */
-private fun setDockIcon() {
-  if (!java.awt.Taskbar.isTaskbarSupported()) return
-  val taskbar = java.awt.Taskbar.getTaskbar()
-  if (!taskbar.isSupported(java.awt.Taskbar.Feature.ICON_IMAGE)) return
-  val stream = Main::class.java.getResourceAsStream("/icons/app-icon.png") ?: return
-  val image = stream.use { javax.imageio.ImageIO.read(it) } ?: return
-  try {
-    taskbar.iconImage = image
-  } catch (e: UnsupportedOperationException) {
-    // Some platforms report ICON_IMAGE support but still throw here; ignore but leave a trace.
-    LOG.warn("Setting the Dock icon is unsupported on this platform", e)
-  }
-}
-
-/** Marker class used to resolve bundled resources from the classpath. */
-private class Main
 
 fun main() {
   // Must run before any AWT toolkit initialization so the app name is picked up.

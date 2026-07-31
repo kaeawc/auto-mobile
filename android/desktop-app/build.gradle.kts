@@ -152,6 +152,7 @@ dependencies {
   // Test dependencies
   testImplementation(libs.kotlin.test)
   testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(libs.junit)
 }
 
 compose.desktop {

@@ -308,6 +308,14 @@ JSON
   [[ "$output" != *"BUDGET OK"* ]]
 }
 
+@test "a multi-document budget file fails closed (jq stream, not one object)" {
+  local budget="$STAGE/multi-budget.json"
+  printf '%s\n%s\n' '{"perRelease":{"maxFiles":0}}' '{"perRelease":{"maxFiles":100}}' >"$budget"
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"BUDGET OK"* ]]
+}
+
 @test "an unexpected filename with a space keeps correct byte subtotals" {
   local dir="$STAGE/$GROUP_PATH/auto-mobile-protocol/0.0.47"
   head -c 7 /dev/zero >"$dir/stray file.jar" # space in the name

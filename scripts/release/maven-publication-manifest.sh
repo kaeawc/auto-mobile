@@ -176,21 +176,21 @@ while IFS= read -r path; do
   if [ "$classifier" = unexpected ]; then
     unexpected_count=$(( unexpected_count + 1 ))
   fi
-done < <(sort "$files_list")
+done < <(LC_ALL=C sort "$files_list")
 
 echo >&2 "staging: $staging"
 
 echo "# Maven Central publication manifest"
 echo "# group: $GROUP"
 echo "# columns: coordinate classifier filename bytes"
-sort "$records" | tr '\t' ' '
+LC_ALL=C sort "$records" | tr '\t' ' '
 echo
 # Per-coordinate and per-classifier aggregation runs in awk, not bash associative
 # arrays, so the script works on bash 3.2 (macOS system bash, used by CI's BATS).
 # -F'\t' keeps a space-containing filename in a single field.
 echo "## Per-coordinate totals"
 awk -F'\t' '{ f[$1]++; b[$1] += $4 } END { for (c in f) printf "%s files=%d bytes=%d\n", c, f[c], b[c] }' \
-  "$records" | sort
+  "$records" | LC_ALL=C sort
 echo
 echo "## Classifier totals"
 awk -F'\t' -v classes="$CLASSES" '
@@ -204,7 +204,7 @@ awk -F'\t' -v classes="$CLASSES" '
 ' "$records"
 echo
 echo "## Release total"
-coord_n="$(cut -f1 "$records" | sort -u | wc -l | tr -d ' ')"
+coord_n="$(cut -f1 "$records" | LC_ALL=C sort -u | wc -l | tr -d ' ')"
 echo "coordinates=$coord_n files=$total_files bytes=$total_bytes"
 
 exit_code=0
@@ -212,23 +212,24 @@ exit_code=0
 if [ -n "$budget_file" ]; then
   [ -f "$budget_file" ] || { echo "error: budget file not found: $budget_file" >&2; exit 2; }
   command -v jq >/dev/null 2>&1 || { echo "error: jq is required for --budget" >&2; exit 2; }
-  # An empty or truncated file makes jq succeed with no output, which would read
-  # as "no limits" -- require exactly one JSON object first, so a broken policy
-  # file fails closed instead of silently disabling the budget.
-  jq -e 'type == "object"' "$budget_file" >/dev/null 2>&1 || {
+  # Require EXACTLY ONE JSON object. Slurp (-s) so an empty file (0 values) or a
+  # multi-document file (>1 value) fails closed instead of reading as "no limits"
+  # -- jq -e without -s validates a stream one value at a time and would accept
+  # both, and the later extraction would emit multiple lines.
+  jq -e -s 'length == 1 and (.[0] | type == "object")' "$budget_file" >/dev/null 2>&1 || {
     echo "error: budget file must be a single JSON object: $budget_file" >&2
     exit 2
   }
-  # Validate the whole budget shape in jq and fail closed on anything malformed,
-  # so nothing silently disables the budget -- not a `// ` coalescing a false/null
+  # Validate the whole budget shape and fail closed on anything malformed, so
+  # nothing silently disables the budget -- not a `//` coalescing a false/null
   # field NOR a non-object `perRelease` (e.g. `false`) collapsing to `{}`. Rule:
   # perRelease is absent or an object; each threshold is absent or a non-negative
   # integer. Output is "maxFiles<TAB>maxBytes" (empty field = no limit), or the
   # sentinel INVALID.
-  limits="$(jq -r '
+  limits="$(jq -r -s '
     def okint: type == "number" and . >= 0 and (floor == .);
     def field($v): if $v == null then "" elif ($v | okint) then ($v | tostring) else "INVALID" end;
-    .perRelease as $r
+    .[0].perRelease as $r
     | if $r == null then "\t"
       elif ($r | type) != "object" then "INVALID"
       else field($r.maxFiles) as $f | field($r.maxBytes) as $y

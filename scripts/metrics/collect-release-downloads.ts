@@ -15,7 +15,6 @@
  * network.
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ActionableError, toActionableError } from "../../src/models/ActionableError";
@@ -25,6 +24,7 @@ import {
   parseSnapshots,
   serializeSnapshots,
   utcDateString,
+  type DownloadSnapshot,
   type DownloadSources,
   type GithubAssetCount,
   type NpmDayCount,
@@ -144,9 +144,17 @@ export async function collect(
   const date = utcDateString(now);
   const snapshot = buildSnapshot(date, github, npm);
 
-  const existing = existsSync(dataFile)
-    ? parseSnapshots(await readFile(dataFile, "utf8"))
-    : [];
+  // Read-then-handle-ENOENT rather than existsSync-then-read: a single syscall
+  // with no check-then-use gap, so there is no file-system race (CodeQL
+  // js/file-system-race). Absent file on the first run => empty history.
+  let existing: DownloadSnapshot[] = [];
+  try {
+    existing = parseSnapshots(await readFile(dataFile, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw toActionableError(error, `Failed to read existing snapshots from ${dataFile}`);
+    }
+  }
   const merged = mergeSnapshot(existing, snapshot);
   const serialized = serializeSnapshots(merged);
 

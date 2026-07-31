@@ -243,10 +243,10 @@ describe("DefaultArchiveExtractor", () => {
     expect(await fs.readdir(destinationDir)).toEqual([]);
   });
 
-  test("rejects a staged symlink member whose target escapes the destination", async () => {
+  test("rejects a top-level symlink member outright", async () => {
     const destinationDir = await makeTempDir();
     const executor = new RecordingExecutor();
-    // `tar -tzf` reports only the benign member name; the symlink type/target is hidden.
+    // `tar -tzf` reports only the benign member name; the symlink type is hidden.
     executor.listing = "pkg/\npkg/tool";
     executor.symlinksToWrite = [{ path: "pkg/tool", target: "../../../outside/payload" }];
     const extractor = new DefaultArchiveExtractor(executor);
@@ -256,51 +256,16 @@ describe("DefaultArchiveExtractor", () => {
       .catch(error => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
-    expect((thrown as ActionableError).message).toContain("escapes the destination");
-    // Nothing escaped: the staging tree was cleaned up, destination left empty.
+    expect((thrown as ActionableError).message).toContain("symlinks are not permitted");
+    // Nothing landed: the staging tree was cleaned up, destination left empty.
     expect(await fs.readdir(destinationDir)).toEqual([]);
   });
 
-  test("allows a self-contained symlink whose target stays inside the destination", async () => {
-    const destinationDir = await makeTempDir();
-    const executor = new RecordingExecutor();
-    executor.listing = "lib/\nlib/libwebp.7.dylib\nlib/libwebp.dylib";
-    executor.filesToWrite = ["lib/libwebp.7.dylib"];
-    // Versioned dylib link, same directory — a normal shape for a lib archive.
-    executor.symlinksToWrite = [{ path: "lib/libwebp.dylib", target: "libwebp.7.dylib" }];
-    const extractor = new DefaultArchiveExtractor(executor);
-
-    await extractor.extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir });
-
-    // The link landed in place and still resolves inside the destination.
-    const linkPath = path.join(destinationDir, "lib", "libwebp.dylib");
-    expect((await fs.lstat(linkPath)).isSymbolicLink()).toBe(true);
-    expect(await fs.readlink(linkPath)).toBe("libwebp.7.dylib");
-  });
-
-  test("allows a nested self-contained symlink (path relative to the staging root)", async () => {
-    const destinationDir = await makeTempDir();
-    const executor = new RecordingExecutor();
-    executor.listing = "pkg/\npkg/lib/\npkg/shared/\npkg/shared/file\npkg/lib/tool";
-    executor.filesToWrite = ["pkg/shared/file"];
-    // Lands at dest/pkg/lib/tool, target resolves to dest/pkg/shared/file — inside.
-    executor.symlinksToWrite = [{ path: "pkg/lib/tool", target: "../shared/file" }];
-    const extractor = new DefaultArchiveExtractor(executor);
-
-    await extractor.extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir });
-
-    const linkPath = path.join(destinationDir, "pkg", "lib", "tool");
-    expect((await fs.lstat(linkPath)).isSymbolicLink()).toBe(true);
-    // readlink returns backslashes on Windows; normalize before comparing.
-    expect((await fs.readlink(linkPath)).split(path.sep).join("/")).toBe("../shared/file");
-  });
-
-  test("rejects a nested symlink whose target escapes from its real landing path", async () => {
+  test("rejects a nested symlink member", async () => {
     const destinationDir = await makeTempDir();
     const executor = new RecordingExecutor();
     executor.listing = "pkg/\npkg/lib/\npkg/lib/tool";
-    // Lands at dest/pkg/lib/tool; `../../../outside` climbs above dest.
-    executor.symlinksToWrite = [{ path: "pkg/lib/tool", target: "../../../outside/payload" }];
+    executor.symlinksToWrite = [{ path: "pkg/lib/tool", target: "../shared/file" }];
     const extractor = new DefaultArchiveExtractor(executor);
 
     const thrown = await extractor
@@ -308,23 +273,22 @@ describe("DefaultArchiveExtractor", () => {
       .catch(error => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
-    expect((thrown as ActionableError).message).toContain("escapes the destination");
+    expect((thrown as ActionableError).message).toContain("symlinks are not permitted");
     expect(await fs.readdir(destinationDir)).toEqual([]);
   });
 
-  test("rejects a link whose target is redirected by a pre-existing destination symlink", async () => {
+  test("rejects a symlink member even when its lexical target looks in-bounds", async () => {
+    // The dangerous escapes (a `..` collapsing across a symlink, a dangling
+    // destination symlink) all disguise the target as internal. Rejecting every
+    // link member removes the need to prove any single target stays contained.
     const base = await makeTempDir();
     const destinationDir = path.join(base, "dest");
-    const outside = path.join(base, "outside");
     await fs.mkdir(destinationDir, { recursive: true });
-    await fs.mkdir(outside, { recursive: true });
-    await fs.writeFile(path.join(outside, "payload"), "secret");
-    // A symlink already present in the destination pointing outside the tree.
+    // A pre-existing destination symlink an in-bounds-looking target could ride.
     await fs.symlink("../outside", path.join(destinationDir, "trusted"));
 
     const executor = new RecordingExecutor();
     executor.listing = "tool";
-    // `tool -> trusted/payload` looks in-bounds lexically, but `trusted` escapes.
     executor.symlinksToWrite = [{ path: "tool", target: "trusted/payload" }];
     const extractor = new DefaultArchiveExtractor(executor);
 
@@ -333,7 +297,7 @@ describe("DefaultArchiveExtractor", () => {
       .catch(error => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
-    expect((thrown as ActionableError).message).toContain("escapes the destination");
+    expect((thrown as ActionableError).message).toContain("symlinks are not permitted");
     // The link never landed; only the pre-existing `trusted` remains.
     expect(await fs.readdir(destinationDir)).toEqual(["trusted"]);
   });

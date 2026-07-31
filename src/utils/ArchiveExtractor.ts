@@ -103,7 +103,7 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
     const stagingDir = await fs.mkdtemp(path.join(realDestination, ".am-extract-"));
     try {
       await this.runExtraction(archivePath, stagingDir, timeoutMs, request.signal);
-      await assertStagedSymlinksSafe(stagingDir, realDestination);
+      await assertStagedSymlinksSafe(stagingDir);
       // A malicious `./` member can leave the staging root unwritable, which would
       // fail the rename below; restore owner write/traverse before moving.
       await fs.chmod(stagingDir, 0o700).catch(() => undefined);
@@ -173,77 +173,30 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
 }
 
 /**
- * Reject any staged symlink member whose target would resolve outside the
- * destination once the tree is moved into place. A self-contained link (target
- * stays inside the destination, e.g. a versioned `lib/*.dylib` link) is allowed;
- * an escaping link (absolute target, or a relative target that climbs past the
- * root) is rejected. `tar` creates symlink members without complaint and the
- * lexical name check never sees their type, so this is the guard that contains
- * them. Targets are validated against each link's *final* location under the
- * destination, since a relative target's meaning shifts when the tree is moved.
+ * Reject any staged symlink (or hardlink surfacing as one) member outright. `tar`
+ * creates link members without complaint and the lexical name check never sees
+ * their type, so an archive symlink can otherwise redirect a write outside the
+ * destination — directly, or by a target that resolves through a `..` component
+ * or a pre-existing/dangling symlink already in the destination. Rather than try
+ * to prove each link's fully-resolved target stays in bounds (fragile: `..`
+ * collapses across symlinks, dangling links defeat `realpath`, and the pre-move
+ * tree differs from the final one), this boundary refuses link members entirely.
+ * Its production archives (checksummed libwebp releases) contain none; a future
+ * consumer that legitimately needs symlinks must widen this policy deliberately.
  */
-async function assertStagedSymlinksSafe(stagingRoot: string, destinationDir: string): Promise<void> {
-  await walkStagedSymlinks(stagingRoot, stagingRoot, destinationDir);
-}
-
-/**
- * Walk `dir` (a subtree of `stagingRoot`) and reject any escaping symlink. The
- * root is threaded separately from the directory currently being read so a
- * nested link's path relative to the staging *root* — and therefore its final
- * location under the destination — is computed with every ancestor component
- * intact.
- */
-async function walkStagedSymlinks(dir: string, stagingRoot: string, destinationDir: string): Promise<void> {
-  const dirents = await fs.readdir(dir, { withFileTypes: true });
+async function assertStagedSymlinksSafe(stagingDir: string): Promise<void> {
+  const dirents = await fs.readdir(stagingDir, { withFileTypes: true });
   for (const dirent of dirents) {
-    const entryPath = path.join(dir, dirent.name);
+    const entryPath = path.join(stagingDir, dirent.name);
     if (dirent.isSymbolicLink()) {
-      const relFromStaging = path.relative(stagingRoot, entryPath);
-      const finalLinkPath = path.join(destinationDir, relFromStaging);
-      const target = await fs.readlink(entryPath);
-      const lexicalTarget = path.resolve(path.dirname(finalLinkPath), target);
-      // Resolve any *existing* symlink along the target path before the containment
-      // check: a pre-existing symlink in the destination (e.g. `dest/trusted ->
-      // ../outside`) would otherwise redirect an apparently-in-bounds target outside.
-      const resolvedTarget = await realpathExistingPrefix(lexicalTarget);
-      const relToRoot = path.relative(destinationDir, resolvedTarget);
-      if (relToRoot === ".." || relToRoot.startsWith(`..${path.sep}`) || path.isAbsolute(relToRoot)) {
-        throw new ActionableError(
-          `Refusing to extract archive symlink '${relFromStaging}' -> '${target}' ` +
-          "that escapes the destination directory; the archive may be malicious."
-        );
-      }
-    } else if (dirent.isDirectory()) {
-      // Recurse into real subdirectories only — never follow a symlinked directory.
-      await walkStagedSymlinks(entryPath, stagingRoot, destinationDir);
+      throw new ActionableError(
+        `Refusing to extract archive symlink member '${dirent.name}'; symlinks are not ` +
+        "permitted in extracted archives and the archive may be malicious."
+      );
     }
-  }
-}
-
-/**
- * Canonicalize the longest existing prefix of `target` with `fs.realpath` (so any
- * symlinks in that prefix are followed) and re-append the not-yet-existing tail.
- * A plain lexical resolve would miss a symlink already sitting in the destination.
- */
-async function realpathExistingPrefix(target: string): Promise<string> {
-  const tail: string[] = [];
-  let existing = target;
-  for (;;) {
-    try {
-      const real = await fs.realpath(existing);
-      return tail.length ? path.join(real, ...tail.reverse()) : real;
-    } catch (error) {
-      // Expected: `existing` does not exist yet (the link target's tail is not on
-      // disk). Step up one component and keep looking for a real ancestor to
-      // canonicalize; only a genuinely surprising error is worth a trace.
-      logger.debug(`realpath prefix walk: '${existing}' not resolvable (${errorMessage(error)})`);
-      const parent = path.dirname(existing);
-      if (parent === existing) {
-        // Walked to the filesystem root without finding an existing path.
-        return target;
-      }
-      tail.push(path.basename(existing));
-      existing = parent;
+    if (dirent.isDirectory()) {
+      // Recurse into real subdirectories only — never follow a symlinked directory.
+      await assertStagedSymlinksSafe(entryPath);
     }
   }
 }

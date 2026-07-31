@@ -101,6 +101,11 @@ function resolveStringValues(node: ts.Expression, initializers: Map<string, ts.E
   if (ts.isArrayLiteralExpression(node)) {
     return node.elements.flatMap(element => resolveStringValues(element, initializers, seen));
   }
+  if (ts.isSpreadElement(node)) {
+    // `spawn("tar", [...args])` / `Bun.spawn(["tar", ...args])`: unwrap the spread
+    // and resolve the spread expression's own values.
+    return resolveStringValues(node.expression, initializers, seen);
+  }
   if (ts.isIdentifier(node)) {
     if (seen.has(node.text)) {return [];}
     const initializer = initializers.get(node.text);
@@ -190,6 +195,12 @@ describe("archive extraction boundary (issue #4065)", () => {
     expect(directlyExtractsTar('const argv = ["tar", "-xzf", archive]; Bun.spawn(argv);')).toBe(true);
     // A const create-argv is still not extraction.
     expect(directlyExtractsTar('const args = ["-czf", archive]; spawn("tar", args);')).toBe(false);
+  });
+
+  test("unwraps spread elements in the argument list", () => {
+    expect(directlyExtractsTar('const args = ["-xzf", archive]; spawn("tar", [...args]);')).toBe(true);
+    expect(directlyExtractsTar('const rest = ["-xzf", a]; Bun.spawn(["tar", ...rest]);')).toBe(true);
+    expect(directlyExtractsTar('const args = ["-czf", archive]; spawn("tar", [...args]);')).toBe(false);
   });
 
   test("detects long-form --extract / --get and multiline argv", () => {

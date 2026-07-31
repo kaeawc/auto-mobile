@@ -168,7 +168,9 @@ if [ "$HEALTH_RESPONSE" == "FAILED" ]; then
             if ! "${PROJECT_ROOT}/scripts/ios/ctrl-proxy-build-for-testing.sh"; then
                 print_status 1 "CtrlProxy iOS build-for-testing failed"
             else
-                XCTESTRUN_FILE=$(find "${DERIVED_DATA}/Build/Products" -name "*.xctestrun" -type f 2>/dev/null | head -1)
+                XCTESTRUN_FILE=$(find "${DERIVED_DATA}/Build/Products" -maxdepth 1 -type f \
+                    -name "*iphonesimulator*.xctestrun" \
+                    ! -name "automobile-runner-*.xctestrun" 2>/dev/null | head -1)
 
                 if [ -z "${XCTESTRUN_FILE}" ]; then
                     print_status 1 "No CtrlProxy .xctestrun file found after build"

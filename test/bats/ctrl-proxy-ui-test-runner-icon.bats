@@ -136,6 +136,21 @@ PY
   run grep -F 'test-without-building' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
   [ "$status" -eq 0 ]
 
+  run grep -F '! -name "automobile-runner-*.xctestrun"' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F '"*iphonesimulator*.xctestrun"' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
+  [ "$status" -eq 0 ]
+
   run grep -E '^[[:space:]]*nohup xcodebuild test([[:space:]]|$)' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
+  [ "$status" -eq 1 ]
+
+  run grep -F 'command -v xcpretty' "${repository_root}/scripts/ios/ctrl-proxy-build-for-testing.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'BUILD_STATUSES=("${PIPESTATUS[@]}")' "${repository_root}/scripts/ios/ctrl-proxy-build-for-testing.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -E 'xcpretty --color.*\|\| true' "${repository_root}/scripts/ios/ctrl-proxy-build-for-testing.sh"
   [ "$status" -eq 1 ]
 }

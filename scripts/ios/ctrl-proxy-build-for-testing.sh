@@ -102,16 +102,36 @@ echo ""
 
 BUILD_START=$(date +%s)
 
-xcodebuild build-for-testing \
-    -project "${XCODEPROJ}" \
-    -scheme "CtrlProxyApp" \
-    -destination 'generic/platform=iOS Simulator' \
-    -derivedDataPath "${DERIVED_DATA}" \
-    -configuration Debug \
-    CODE_SIGN_IDENTITY="-" \
-    CODE_SIGNING_REQUIRED=NO \
-    CODE_SIGNING_ALLOWED=NO \
-    | xcpretty --color 2>/dev/null || true
+run_xcodebuild() {
+    xcodebuild build-for-testing \
+        -project "${XCODEPROJ}" \
+        -scheme "CtrlProxyApp" \
+        -destination 'generic/platform=iOS Simulator' \
+        -derivedDataPath "${DERIVED_DATA}" \
+        -configuration Debug \
+        CODE_SIGN_IDENTITY="-" \
+        CODE_SIGNING_REQUIRED=NO \
+        CODE_SIGNING_ALLOWED=NO
+}
+
+if command -v xcpretty >/dev/null 2>&1; then
+    set +e
+    run_xcodebuild | xcpretty --color 2>/dev/null
+    BUILD_STATUSES=("${PIPESTATUS[@]}")
+    set -e
+
+    if [ "${BUILD_STATUSES[0]}" -ne 0 ]; then
+        echo -e "${RED}Error: CtrlProxy iOS build-for-testing failed.${NC}"
+        exit "${BUILD_STATUSES[0]}"
+    fi
+    if [ "${BUILD_STATUSES[1]}" -ne 0 ]; then
+        echo -e "${RED}Error: xcpretty failed while formatting the CtrlProxy build.${NC}"
+        exit "${BUILD_STATUSES[1]}"
+    fi
+else
+    echo -e "${YELLOW}xcpretty not found; using raw xcodebuild output.${NC}"
+    run_xcodebuild
+fi
 
 BUILD_END=$(date +%s)
 BUILD_DURATION=$((BUILD_END - BUILD_START))

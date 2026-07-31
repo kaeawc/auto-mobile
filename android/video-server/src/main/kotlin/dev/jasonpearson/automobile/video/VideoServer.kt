@@ -252,7 +252,14 @@ object VideoServer {
 
     // The writer keeps the encoder alive while its LocalSocket client reconnects, replays cached
     // decoder state, and requests a new IDR at attach.
-    streamWriter = VideoStreamWriter(session.socketName, width, height, audioEnabled)
+    streamWriter =
+      VideoStreamWriter(
+        session.socketName,
+        width,
+        height,
+        audioEnabled,
+        expectedToken = session.token,
+      )
     streamWriter!!.startCommandReader { command ->
       if (command == VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME) {
         encoder?.requestKeyFrame()
@@ -270,8 +277,11 @@ object VideoServer {
       throw error
     }
     session.token?.let {
+      // `proto=` advertises the pre-stream token-handshake version so a handshake-aware host can
+      // negotiate before connecting (issue #4729); a pre-handshake host simply ignores the field.
       println(
-        "VIDEO_SESSION_READY token=$it pid=${android.os.Process.myPid()} socket=${session.socketName}"
+        "VIDEO_SESSION_READY token=$it pid=${android.os.Process.myPid()} " +
+          "socket=${session.socketName} proto=${VideoHandshake.PROTOCOL_VERSION}"
       )
     }
 

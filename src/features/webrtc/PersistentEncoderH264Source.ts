@@ -1,7 +1,7 @@
 import { connect as netConnect } from "node:net";
 import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
-import { defaultIdGenerator } from "../../utils/IdGenerator";
+import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
@@ -48,7 +48,11 @@ const STALE_LEASE_WALL_CLOCK_MS = 5 * 60_000;
  * `*.json.tmp` may be mid-rename by a live server; younger files are left alone.
  */
 const STALE_LEASE_FILE_SWEEP_MS = 5 * 60_000;
-const SESSION_READY_PATTERN = /^VIDEO_SESSION_READY token=([^ ]+) pid=(\d+) socket=([^ ]+)$/;
+// The optional trailing `proto=<v>` is the handshake version negotiation channel
+// (issue #4729): a pre-handshake device omits it, a handshake-capable device
+// advertises it. Non-greedy socket capture so the optional group binds correctly.
+const SESSION_READY_PATTERN =
+  /^VIDEO_SESSION_READY token=([^ ]+) pid=(\d+) socket=([^ ]+?)(?: proto=(\d+))?$/;
 /** Server stdout line printed after capture has fully started. */
 const STREAMING_STARTED_MARKER = "Streaming started";
 
@@ -58,6 +62,18 @@ const STREAMING_STARTED_MARKER = "Streaming started";
  * `VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME` in the Kotlin video-server.
  */
 export const VIDEO_SERVER_COMMAND_REQUEST_KEY_FRAME = 0x01;
+/**
+ * Handshake protocol version this client speaks. The server advertises its own
+ * supported version via `proto=<v>` on the readiness line; the client only sends
+ * a handshake when the device advertises a version it understands. Keep in sync
+ * with `VideoHandshake.PROTOCOL_VERSION` in the Kotlin video-server.
+ */
+export const VIDEO_SERVER_HANDSHAKE_VERSION = 1;
+/**
+ * Magic prefix of the pre-stream token handshake frame ("AVMH"). Keep in sync
+ * with `VideoHandshake.MAGIC` in the Kotlin video-server.
+ */
+const VIDEO_SERVER_HANDSHAKE_MAGIC = Buffer.from([0x41, 0x56, 0x4d, 0x48]);
 /** Retry a replaced local ADB socket without tearing down the device encoder. */
 export const DEFAULT_LOCAL_SOCKET_RECONNECT_WINDOW_MS = 5_000;
 export const DEFAULT_LOCAL_SOCKET_RECONNECT_RETRY_MS = 100;
@@ -261,6 +277,13 @@ export interface PersistentEncoderH264SourceOptions {
   /** Injectable session token source for deterministic tests. */
   sessionTokenFactory?: () => string;
   /**
+   * Injectable opaque-socket-name source for deterministic tests. Defaults to a
+   * fresh random id from the canonical {@link IdGenerator}, decoupled from the
+   * session token so the token is never disclosed via `/proc/net/unix` (issue
+   * #4729).
+   */
+  socketNameFactory?: () => string;
+  /**
    * How many bounded, backed-off relaunches of the on-device server to attempt
    * (cumulatively over the source's lifetime) after a post-start server exit
    * before giving up the persistent encoder. Defaults to
@@ -283,8 +306,32 @@ export interface PersistentEncoderH264SourceOptions {
 
 const DEFAULT_READY_TIMEOUT_MS = 10_000;
 
-function socketNameForToken(token: string): string {
-  return `${VIDEO_SERVER_SOCKET_PREFIX}_${token.replaceAll("-", "")}`;
+/**
+ * Build an opaque abstract-socket name whose suffix is a fresh random id from the
+ * canonical {@link IdGenerator}, deliberately unrelated to the session token
+ * (issue #4729). Because abstract socket names are world-readable via
+ * `/proc/net/unix`, embedding the token there would publish the secret; a random
+ * id reveals nothing usable. The `automobile_video_` prefix is retained so the
+ * orphan-forward sweep can still recognize our forwards, and dashes are stripped
+ * so the suffix satisfies the server's `SAFE_SOCKET_NAME` (`[A-Za-z0-9_.-]{1,100}`).
+ */
+function makeOpaqueSocketName(idGenerator: IdGenerator): string {
+  return `${VIDEO_SERVER_SOCKET_PREFIX}_${idGenerator.next().replaceAll("-", "")}`;
+}
+
+/**
+ * Assemble the pre-stream token handshake frame the client sends immediately on
+ * connect (issue #4729): MAGIC(4) + VERSION(1) + TOKEN_LEN(1) + token bytes. Keep
+ * in sync with `VideoHandshake` in the Kotlin video-server.
+ */
+function buildHandshakeFrame(token: string, version: number): Buffer {
+  const tokenBytes = Buffer.from(token, "ascii");
+  const frame = Buffer.alloc(VIDEO_SERVER_HANDSHAKE_MAGIC.length + 2 + tokenBytes.length);
+  let offset = VIDEO_SERVER_HANDSHAKE_MAGIC.copy(frame, 0);
+  offset = frame.writeUInt8(version, offset);
+  offset = frame.writeUInt8(tokenBytes.length, offset);
+  tokenBytes.copy(frame, offset);
+  return frame;
 }
 
 /**
@@ -312,6 +359,9 @@ function parseVideoForwardLine(line: string): { port: number; socketName: string
 function isSafeSessionToken(value: string): boolean {
   return /^[A-Za-z0-9-]{8,80}$/.test(value);
 }
+
+/** Mirrors `VideoSessionArguments.SAFE_SOCKET_NAME` on the device side. */
+const SAFE_SOCKET_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
@@ -434,6 +484,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private readonly localSocketReconnectWindowMs: number;
   private readonly localSocketReconnectRetryMs: number;
   private readonly sessionTokenFactory: () => string;
+  private readonly socketNameFactory: () => string;
   private readonly activeVideoSessionRegistry: ActiveVideoSessionRegistry;
   private readonly maxServerRelaunchAttempts: number;
   private readonly serverRelaunchBackoff: BackoffPolicy;
@@ -443,6 +494,13 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private forwardedPort: number | null = null;
   private session: VideoServerSession | null = null;
   private deviceProcessId: number | null = null;
+  /**
+   * Handshake protocol version negotiated from the device's readiness line
+   * (issue #4729). `null` means the device advertised no `proto=` field (a
+   * pre-handshake jar): the client then connects without sending a handshake so
+   * streaming degrades gracefully instead of hard-breaking.
+   */
+  private negotiatedHandshakeVersion: number | null = null;
   private running = false;
   private teardownPromise: Promise<void> | null = null;
   private resolveStartupAudioHeader: ((header: VideoServerStreamHeader) => void) | undefined;
@@ -478,6 +536,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.localSocketReconnectRetryMs =
       options.localSocketReconnectRetryMs ?? DEFAULT_LOCAL_SOCKET_RECONNECT_RETRY_MS;
     this.sessionTokenFactory = options.sessionTokenFactory ?? (() => defaultIdGenerator.next());
+    this.socketNameFactory =
+      options.socketNameFactory ?? (() => makeOpaqueSocketName(defaultIdGenerator));
     this.activeVideoSessionRegistry =
       options.activeVideoSessionRegistry ?? defaultActiveVideoSessionRegistry;
     const relaunchPolicy = PersistentEncoderH264Source.resolveRelaunchPolicy(options);
@@ -706,7 +766,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       }
     });
 
-    this.deviceProcessId = await this.waitForReady(server);
+    const ready = await this.waitForReady(server);
+    this.deviceProcessId = ready.pid;
+    this.negotiatedHandshakeVersion = this.resolveHandshakeVersion(ready.protocolVersion);
     this.serverStartupInProgress = server;
     this.watchServer(server);
     return this.running ? server : null;
@@ -748,6 +810,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         return;
       }
       this.socket = socket;
+      // Authenticate the connection before anything reads the stream header.
+      this.sendHandshake(socket);
       const startupAudioReady = this.options.audioEnabled
         ? this.waitForStartupAudioReady()
         : null;
@@ -871,20 +935,46 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     if (!isSafeSessionToken(token)) {
       throw new Error("Video server session token factory returned an unsafe token.");
     }
+    const socketName = this.socketNameFactory();
+    if (!SAFE_SOCKET_NAME_PATTERN.test(socketName)) {
+      throw new Error("Video server socket-name factory returned an unsafe socket name.");
+    }
     return {
       token,
-      socketName: socketNameForToken(token),
+      socketName,
       ownerPid: process.pid,
       deviceSerial: this.options.device.deviceId,
     };
   }
 
-  private waitForReady(server: AdbProcess): Promise<number> {
+  /**
+   * Reconcile the device-advertised handshake version with the version this
+   * client speaks (issue #4729). A `null` advertisement (pre-handshake device)
+   * yields `null` — the client will skip the handshake and stream anyway
+   * (graceful degrade). An advertised version this client does not support is
+   * clamped down to the client's version when the client is newer, or accepted
+   * as-is; the on-wire VERSION byte lets the server reject a frame it cannot
+   * parse with an actionable reason rather than a resync storm.
+   */
+  private resolveHandshakeVersion(advertised: number | null): number | null {
+    if (advertised === null) {
+      logger.warn(
+        "[PersistentEncoderH264Source] device advertised no handshake protocol; " +
+        "streaming without a token handshake (defense-in-depth degraded, UID gating still applies)"
+      );
+      return null;
+    }
+    return Math.min(advertised, VIDEO_SERVER_HANDSHAKE_VERSION);
+  }
+
+  private waitForReady(
+    server: AdbProcess
+  ): Promise<{ pid: number; protocolVersion: number | null }> {
     const token = this.session?.token;
     if (!token) {
       throw new Error("Video server session token was unavailable.");
     }
-    return new Promise<number>((resolve, reject) => {
+    return new Promise<{ pid: number; protocolVersion: number | null }>((resolve, reject) => {
       let settled = false;
       let stdoutBuffer = "";
       const finish = (fn: () => void): void => {
@@ -935,7 +1025,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
             finish(() => reject(new ActionableError("video-server returned an invalid session PID")));
             return;
           }
-          finish(() => resolve(pid));
+          const protocolVersion = match[4] !== undefined ? Number.parseInt(match[4], 10) : null;
+          finish(() => resolve({ pid, protocolVersion }));
           return;
         }
       };
@@ -1059,6 +1150,30 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     });
   }
 
+  /**
+   * Send the pre-stream token handshake as the FIRST bytes on a freshly-connected
+   * socket, before the server emits (or the client reads) any stream header (issue
+   * #4729). Skipped when the device advertised no handshake support
+   * ({@link negotiatedHandshakeVersion} is `null`), so a new host degrades
+   * gracefully against a pre-handshake device instead of hard-breaking the stream.
+   * Called on every accept — the initial connect and each socket reconnect — because
+   * the server requires the handshake on every `accept()`.
+   */
+  private sendHandshake(socket: StreamSocket): void {
+    const session = this.session;
+    const version = this.negotiatedHandshakeVersion;
+    if (!session || version === null) {
+      return;
+    }
+    try {
+      socket.write(buildHandshakeFrame(session.token, version));
+    } catch (error) {
+      // A write failure on a just-connected socket surfaces via its own error/close
+      // handler wired immediately after; do not double-report here.
+      logger.debug(`[PersistentEncoderH264Source] handshake write failed: ${error}`);
+    }
+  }
+
   private wireSocket(
     socket: StreamSocket,
     onSocketFailure: (error: Error) => void,
@@ -1175,6 +1290,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
           return;
         }
         this.socket = socket;
+        // The retained server requires the handshake on every accept, including reconnects.
+        this.sendHandshake(socket);
         this.wireSocket(socket, error => this.reconnectSocket(socket, error));
         logger.info("[PersistentEncoderH264Source] reconnected to retained video-server socket");
         return;

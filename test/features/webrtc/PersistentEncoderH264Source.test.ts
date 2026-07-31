@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import {
   InMemoryActiveVideoSessionRegistry,
   PersistentEncoderH264Source,
+  VIDEO_SERVER_HANDSHAKE_VERSION,
   VIDEO_SERVER_LEASE_DIRECTORY,
   VIDEO_SERVER_SOCKET_PREFIX,
   type ActiveVideoSessionRegistry,
@@ -39,8 +40,16 @@ class FakeProcess extends EventEmitter implements SpawnedProcess {
     this.killed.push(signal ?? "SIGTERM");
     return true;
   }
-  ready(token: string = SESSION_TOKEN, socketName: string = SESSION_SOCKET, pid: number = 1234): void {
-    this.stdout.write(Buffer.from(`VIDEO_SESSION_READY token=${token} pid=${pid} socket=${socketName}\n`));
+  ready(
+    token: string = SESSION_TOKEN,
+    socketName: string = SESSION_SOCKET,
+    pid: number = 1234,
+    proto: number | null = VIDEO_SERVER_HANDSHAKE_VERSION
+  ): void {
+    const protoSuffix = proto === null ? "" : ` proto=${proto}`;
+    this.stdout.write(
+      Buffer.from(`VIDEO_SESSION_READY token=${token} pid=${pid} socket=${socketName}${protoSuffix}\n`)
+    );
     this.stdout.write(Buffer.from(`Waiting for client connection on localabstract:${socketName}\n`));
   }
   readyAndStreamingStarted(): void {
@@ -71,6 +80,20 @@ class FakeSocket extends EventEmitter implements StreamSocket {
   feed(chunk: Buffer): void {
     this.emit("data", chunk);
   }
+}
+
+/** Expected pre-stream handshake frame (issue #4729): MAGIC + VERSION + LEN + token. */
+function handshakeFrame(
+  token: string = SESSION_TOKEN,
+  version: number = VIDEO_SERVER_HANDSHAKE_VERSION
+): Buffer {
+  const tokenBytes = Buffer.from(token, "ascii");
+  const frame = Buffer.alloc(6 + tokenBytes.length);
+  Buffer.from([0x41, 0x56, 0x4d, 0x48]).copy(frame, 0);
+  frame.writeUInt8(version, 4);
+  frame.writeUInt8(tokenBytes.length, 5);
+  tokenBytes.copy(frame, 6);
+  return frame;
 }
 
 function streamHeader(width: number, height: number): Buffer {
@@ -224,6 +247,10 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     connector,
     timer,
     sessionTokenFactory: () => SESSION_TOKEN,
+    // Decoupled from the token (issue #4729): a deterministic opaque socket name so
+    // existing forward/socket-name assertions stay stable while the production
+    // default derives it from the canonical IdGenerator.
+    socketNameFactory: () => SESSION_SOCKET,
     ...overrides,
     activeVideoSessionRegistry,
   });
@@ -303,12 +330,13 @@ describe("PersistentEncoderH264Source", () => {
     await startReady(ctx);
 
     expect(ctx.source.requestKeyFrame()).toBe(true);
-    expect(ctx.sockets[0].written).toEqual([Buffer.from([0x01])]);
+    // The handshake frame is written first on connect (issue #4729), then the command byte.
+    expect(ctx.sockets[0].written).toEqual([handshakeFrame(), Buffer.from([0x01])]);
 
     await ctx.source.stop();
     // After stop, no socket is available; the request is a safe no-op.
     expect(ctx.source.requestKeyFrame()).toBe(false);
-    expect(ctx.sockets[0].written).toEqual([Buffer.from([0x01])]);
+    expect(ctx.sockets[0].written).toEqual([handshakeFrame(), Buffer.from([0x01])]);
   });
 
   test("reports null-before-initialization and then precise IDR readiness telemetry", async () => {
@@ -634,7 +662,8 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.source.isRunning).toBe(true);
 
     ctx.sockets[1].feed(streamHeader(480, 1040));
-    expect(ctx.sockets[1].written).toEqual([Buffer.from([0x01])]);
+    // The reconnected socket re-sends the handshake before the keyframe request (issue #4729).
+    expect(ctx.sockets[1].written).toEqual([handshakeFrame(), Buffer.from([0x01])]);
 
     await ctx.source.stop();
   });
@@ -1445,9 +1474,15 @@ describe("PersistentEncoderH264Source", () => {
   });
 
   test("uses separate socket leases for separate device sources", async () => {
-    const first = makeSource({ sessionTokenFactory: () => "first-session" });
+    // Socket name is now decoupled from the token (issue #4729), so each source is
+    // given its own opaque name explicitly rather than deriving it from the token.
+    const first = makeSource({
+      sessionTokenFactory: () => "first-session",
+      socketNameFactory: () => `${VIDEO_SERVER_SOCKET_PREFIX}_firstsession`,
+    });
     const second = makeSource({
       sessionTokenFactory: () => "second-session",
+      socketNameFactory: () => `${VIDEO_SERVER_SOCKET_PREFIX}_secondsession`,
       device: { ...DEVICE, deviceId: "emulator-5556" },
     });
 
@@ -1537,6 +1572,59 @@ describe("PersistentEncoderH264Source", () => {
     test("rejects construction with a non-positive command timeout", () => {
       expect(() => makeSource({ commandTimeoutMs: 0 })).toThrow();
       expect(() => makeSource({ teardownTimeoutMs: -1 })).toThrow();
+    });
+  });
+
+  describe("token handshake and opaque socket name (issue #4729)", () => {
+    test("names the abstract socket opaquely, decoupled from the session token", async () => {
+      const OPAQUE = `${VIDEO_SERVER_SOCKET_PREFIX}_deadbeefcafef00d`;
+      const ctx = makeSource({
+        sessionTokenFactory: () => "secret-token-1234",
+        socketNameFactory: () => OPAQUE,
+      });
+      const startPromise = ctx.source.start();
+      await tick();
+      ctx.processes[0].ready("secret-token-1234", OPAQUE);
+      await tick();
+      await startPromise;
+
+      expect(ctx.sessionSocket()).toBe(OPAQUE);
+      expect(ctx.commands).toContain(`forward tcp:0 localabstract:${OPAQUE}`);
+      const args = ctx.spawnArgs[0].join(" ");
+      expect(args).toContain(`--socket-name ${OPAQUE}`);
+      expect(args).toContain("--session-token secret-token-1234");
+      // The /proc/net/unix disclosure fix: the socket name must not embed the token.
+      expect(ctx.sessionSocket()).not.toContain("secret-token-1234");
+
+      await ctx.source.stop();
+    });
+
+    test("sends the token handshake as the first bytes on connect", async () => {
+      const ctx = makeSource();
+      await startReady(ctx);
+
+      // The handshake is written on connect, before any stream header is read.
+      expect(ctx.sockets[0].written).toEqual([handshakeFrame()]);
+
+      await ctx.source.stop();
+    });
+
+    test("skips the handshake and still streams when the device advertises no proto", async () => {
+      const ctx = makeSource();
+      const startPromise = ctx.source.start();
+      await tick();
+      // A pre-handshake device omits `proto=` on its readiness line.
+      ctx.processes[0].ready(SESSION_TOKEN, SESSION_SOCKET, 1234, null);
+      await tick();
+      await startPromise;
+
+      expect(ctx.sockets[0].written).toEqual([]);
+      // Streaming still works (graceful degrade; UID gating remains the barrier).
+      ctx.sockets[0].feed(streamHeader(480, 1040));
+      ctx.sockets[0].feed(framedPacket(Buffer.from([0x09])));
+      expect(ctx.chunks).toEqual([Buffer.from([0x09])]);
+
+      await ctx.source.stop();
     });
   });
 });

@@ -21,6 +21,17 @@ object VideoStreamProtocol {
    */
   const val COMMAND_REQUEST_KEY_FRAME = 0x01
 
+  /**
+   * The whitelist of host→device command bytes the control channel accepts. Bytes outside this set
+   * are unknown control input and must be ignored rather than forwarded to the handler
+   * (issue #4732), keeping the control surface minimal and making future command additions safe by
+   * construction.
+   */
+  val KNOWN_COMMANDS = setOf(COMMAND_REQUEST_KEY_FRAME)
+
+  /** True when [command] is a recognized control byte that may reach the command handler. */
+  fun isKnownCommand(command: Int): Boolean = command in KNOWN_COMMANDS
+
   /** Bit 63: codec configuration data */
   const val PACKET_FLAG_CONFIG = 1L shl 63
 

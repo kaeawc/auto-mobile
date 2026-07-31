@@ -781,10 +781,17 @@ export class IosH264Source implements H264CaptureSource {
       this.outputWriteHighWaterDurationMs,
       this.lastOutputWriteDurationMs
     );
-    this.lastHelperFrame = {
-      header: { ...frame.header },
-      pixels: Buffer.from(frame.pixels),
-    };
+    // Retain the reference rather than copying the whole frame every frame.
+    // `lastHelperFrame` is only re-read in `requestKeyFrame()` to reprime a
+    // replacement encoder, so paying a full-frame allocation + memcpy on 100%
+    // of frames to serve that rare PLI path is wasteful (~7 MB/frame at
+    // 910x1940 BGRA). This is safe because `frame.pixels` is a fresh
+    // per-frame allocation from `FrameDecoder.takeDetached`, the single-slot
+    // `LatestFrameQueue` never reuses an emitted buffer, and nothing mutates
+    // `frame.pixels` after handoff (`tightlyPackBgraFrame` returns the same
+    // buffer unpadded or a fresh packed buffer, and the pipe write does not
+    // mutate in place). See issue #4735.
+    this.lastHelperFrame = frame;
     if (accepted === false) {
       this.encoderBackpressured = true;
     }

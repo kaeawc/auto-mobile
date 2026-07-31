@@ -1527,7 +1527,6 @@ describe("IosH264Source", () => {
     const firstFrame = frame(2, 2, 0x11);
     await startWithFrame(source, helper, firstFrame);
     expect(encoderSpawns).toHaveLength(1);
-    firstFrame.pixels.fill(0xff);
     emitIdr(encoders[0]);
     await flush();
 
@@ -1555,6 +1554,34 @@ describe("IosH264Source", () => {
 
     expect(chunks).toContainEqual(Buffer.from([0, 0, 0, 1, 0x65]));
     // The deliberate restart must not surface as a source failure.
+    expect(errors).toEqual([]);
+  });
+
+  // Issue #4735: `lastHelperFrame` retains the incoming frame by reference
+  // instead of deep-copying it every frame. Each frame carries its own
+  // `FrameDecoder.takeDetached` allocation and the single-slot queue never
+  // reuses a buffer, so processing later frames must leave the retained
+  // frame's pixels intact and replay them exactly on the next PLI.
+  test("replays the retained latest frame intact after subsequent frames are processed (#4735 no-copy)", async () => {
+    const { source, helper, encoders, encoderSpawns, errors } = createRestartHarness();
+
+    // First frame primes the encoder and becomes `lastHelperFrame`.
+    await startWithFrame(source, helper, frame(2, 2, 0x11));
+    expect(encoderSpawns).toHaveLength(1);
+
+    // Subsequent frames each arrive as independent allocations (mirroring
+    // production `takeDetached` buffers) and advance `lastHelperFrame`.
+    helper.emitFrame(frame(2, 2, 0x22));
+    helper.emitFrame(frame(2, 2, 0x33));
+
+    emitIdr(encoders[0]);
+    await flush();
+
+    // The retained reference must still decode to the latest frame's exact
+    // bytes — not a buffer clobbered by a later frame — when replayed twice
+    // into the replacement encoder.
+    expect(source.requestKeyFrame()).toBe(true);
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x33));
     expect(errors).toEqual([]);
   });
 

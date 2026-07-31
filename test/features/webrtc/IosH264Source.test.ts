@@ -276,6 +276,47 @@ function createReconnectHarness(
   return { source, helpers, encoders, encoderSpawns, chunks, errors };
 }
 
+// A harness that exercises the real default Simulator-window resolver (no
+// `simulatorWindowResolver` override) against a scripted `--list-simulators`
+// window list, capturing the resolved capture target.
+function createResolverHarness(
+  deviceName: string,
+  windows: Array<{ windowID: number; title: string }>
+) {
+  const helper = new FakeFrameCaptureHelper();
+  const encoder = new FakeChildProcess();
+  const helperTargets: CaptureTarget[] = [];
+  const source = new IosH264Source({
+    device: { ...IOS_SIMULATOR, name: deviceName } as BootedDevice,
+    helperPath: FAKE_HELPER_PATH,
+    helperPathExists: fakeHelperPathExists,
+    onData: () => {},
+    createHelper: options => {
+      helperTargets.push(options.target);
+      return helper;
+    },
+    spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+    commandRunner: async (command, args) => {
+      if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
+        return {
+          stdout: JSON.stringify({
+            windows: windows.map(window => ({
+              ...window,
+              applicationName: "Simulator",
+              bundleIdentifier: "com.apple.iphonesimulator",
+            })),
+          }),
+          stderr: "",
+          exitCode: 0,
+          signal: null,
+        };
+      }
+      return successfulCommandRunner(command, args);
+    },
+  });
+  return { source, helper, helperTargets };
+}
+
 async function successfulCommandRunner(_command: string, args: string[]) {
   if (args.includes("-encoders")) {
     return {
@@ -1524,6 +1565,56 @@ describe("IosH264Source", () => {
     });
 
     await expect(source.start()).rejects.toThrow(new RegExp(IOS_WEBRTC_FFMPEG_ENV));
+    expect(helper.started).toBe(false);
+  });
+
+  test("prefers an exact device-name window over an overlapping substring window", async () => {
+    // "iPhone 15" is a substring of the "iPhone 15 Pro" title, so a pure
+    // substring match would flag both windows and fail the many-match guard.
+    const { source, helper, helperTargets } = createResolverHarness("iPhone 15", [
+      { windowID: 42, title: "iPhone 15" },
+      { windowID: 99, title: "iPhone 15 Pro" },
+    ]);
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    ]);
+  });
+
+  test("matches the exact device even when the title appends a runtime segment", async () => {
+    const { source, helper, helperTargets } = createResolverHarness("iPhone 15", [
+      { windowID: 7, title: "iPhone 15 — 17.0" },
+      { windowID: 8, title: "iPhone 15 Pro — 17.0" },
+    ]);
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 7, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    ]);
+  });
+
+  test("falls back to a substring match when no title names the device exactly", async () => {
+    const { source, helper, helperTargets } = createResolverHarness("iPhone 15", [
+      { windowID: 5, title: "Simulator - iPhone 15 (Booted)" },
+    ]);
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 5, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    ]);
+  });
+
+  test("still rejects when two windows name the same device exactly", async () => {
+    const { source, helper } = createResolverHarness("iPhone 15", [
+      { windowID: 1, title: "iPhone 15" },
+      { windowID: 2, title: "iPhone 15" },
+    ]);
+
+    await expect(source.start()).rejects.toThrow(/Multiple iOS Simulator windows matched iPhone 15/);
     expect(helper.started).toBe(false);
   });
 

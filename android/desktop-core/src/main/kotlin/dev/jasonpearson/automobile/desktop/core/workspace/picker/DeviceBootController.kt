@@ -46,15 +46,26 @@ class RealDeviceBootController(
             platform = device.platform.wireName(),
             deviceId = device.id,
           )
-        if (result.success) {
-          // Prefer the daemon's authoritative runtime id; fall back to the requested id only if the
-          // daemon omitted it (older builds), which keeps auto-select best-effort rather than
-          // broken.
-          Result.success(result.deviceId ?: device.id)
-        } else {
-          val message = result.message ?: "Failed to boot ${device.name}"
-          LOG.warn("startDevice reported failure for ${device.name}: $message")
-          Result.failure(IllegalStateException(message))
+        val runtimeId = result.deviceId
+        when {
+          !result.success -> {
+            val message = result.message ?: "Failed to boot ${device.name}"
+            LOG.warn("startDevice reported failure for ${device.name}: $message")
+            Result.failure(IllegalStateException(message))
+          }
+          runtimeId == null -> {
+            // Reject rather than fabricate an id. The shut-down source id would fail
+            // reloadAfterBoot's exact-id match against the real runtime serial, so a booted
+            // device would read "Boot did not complete" and stay unselected; a failure surfaces
+            // a retryable "Boot failed" affordance instead. Only older daemons omit deviceId.
+            LOG.warn("startDevice succeeded for ${device.name} but reported no runtime deviceId")
+            Result.failure(
+              IllegalStateException(
+                "Device booted but the daemon didn't report a runtime id; can't verify it"
+              )
+            )
+          }
+          else -> Result.success(runtimeId)
         }
       } catch (c: CancellationException) {
         // Never swallow structured-concurrency cancellation — let it propagate.

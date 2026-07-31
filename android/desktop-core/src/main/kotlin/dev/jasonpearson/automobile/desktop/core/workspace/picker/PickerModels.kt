@@ -54,16 +54,31 @@ private fun osOfImage(image: DeviceImageInfo): Pair<String?, String?> =
   }
 
 /**
- * Merge the booted-devices and device-images resources into one picker list. Booted devices win
- * over their image entry (deduped by id and by name). Booted devices carry no OS/architecture from
- * the daemon today, so Android API is best-effort parsed from the name.
+ * Merge the booted-devices and device-images resources into one picker list. A booted device wins
+ * over the specific image it came from, reconciled by IDENTITY, not display name:
+ * - an image is hidden when its own id is booted (exact match — e.g. iOS simulators keep their UDID
+ *   across boot); or
+ * - when [sourceImageToRuntimeId] attributes a booted runtime id to that exact source image (an
+ *   in-session boot: `BootDevice(sourceImageId)` -> `StartDeviceResult.deviceId`), so re-keyed
+ *   devices hide their EXACT source, never a positional same-name guess; or
+ * - as a FALLBACK for a booted VIRTUAL device not attributed in-session (already-running /
+ *   externally booted) that the daemon re-keyed off its image id — one same-named image per such
+ *   device, not all same-named images.
+ *
+ * Physical devices are not re-keyed, so they dedup by exact id only and never hide a distinct
+ * same-named shut-down image. This keeps devices that merely share a display name (common for
+ * simulators) from vanishing when a sibling boots. Booted devices carry no OS/architecture from the
+ * daemon today, so Android API is best-effort parsed from the name.
  */
 fun buildPickerDevices(
   booted: List<BootedDeviceInfo>,
   images: List<DeviceImageInfo>,
+  sourceImageToRuntimeId: Map<String, String> = emptyMap(),
 ): List<PickerDevice> {
   val bootedIds = booted.map { it.deviceId }.toSet()
-  val bootedNames = booted.map { it.name }.toSet()
+  val imageIds = images.map { it.deviceId ?: it.name }.toSet()
+  val runtimeToSourceImage =
+    sourceImageToRuntimeId.entries.associate { (source, rt) -> rt to source }
 
   val bootedDevices = booted.map { device ->
     val api =
@@ -79,9 +94,26 @@ fun buildPickerDevices(
     )
   }
 
+  // Exact source images hidden via in-session boot attribution (runtime id -> its source image id).
+  val attributedSourceIds = booted.mapNotNull { runtimeToSourceImage[it.deviceId] }.toSet()
+
+  // Fallback name heuristic ONLY for re-keyed VIRTUAL devices with no in-session attribution
+  // (already-running / externally booted): each hides exactly one same-named image, not all.
+  // Physical devices are excluded — they are not re-keyed and must not hide a distinct sibling.
+  val hideByName =
+    booted
+      .filter {
+        it.isVirtual && it.deviceId !in imageIds && it.deviceId !in runtimeToSourceImage
+      }
+      .groupingBy { it.name }
+      .eachCount()
+
   val shutdownDevices =
     images
-      .filter { (it.deviceId ?: it.name) !in bootedIds && it.name !in bootedNames }
+      .filter { (it.deviceId ?: it.name) !in bootedIds } // exact identity already booted
+      .filter { (it.deviceId ?: it.name) !in attributedSourceIds } // exact in-session source
+      .groupBy { it.name }
+      .flatMap { (name, sameName) -> sameName.drop(hideByName[name] ?: 0) }
       .map { image ->
         val (osKey, osLabel) = osOfImage(image)
         PickerDevice(

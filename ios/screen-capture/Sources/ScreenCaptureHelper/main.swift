@@ -132,8 +132,9 @@ case .help:
 
 case .listDevices:
     CMIOSystem.enableScreenCaptureDevices()
-    // Allow a brief moment for the system to register USB devices.
-    Thread.sleep(forTimeInterval: 0.5)
+    // Poll briefly for the system to register USB devices instead of an
+    // unconditional 0.5s sleep; return as soon as one enumerates (issue #4737).
+    DeviceReadinessPolling.waitUntilReady { !DeviceDiscovery.discover().isEmpty }
     let infos = DeviceDiscovery.discover().map(DeviceDiscovery.toInfo)
     writeJSON(DeviceListResponse(devices: infos))
     exit(0)
@@ -253,7 +254,14 @@ case .captureSimulator(let windowID, let fps, let audio):
 
 case .capture(let deviceID):
     CMIOSystem.enableScreenCaptureDevices()
-    Thread.sleep(forTimeInterval: 0.5)
+    // Poll briefly for the requested device to register instead of an
+    // unconditional 0.5s sleep; return as soon as it enumerates (issue #4737).
+    DeviceReadinessPolling.waitUntilReady {
+        if let id = deviceID {
+            return DeviceDiscovery.find(uniqueID: id) != nil
+        }
+        return !DeviceDiscovery.discover().isEmpty
+    }
 
     let resolved: AVCaptureDevice?
     if let id = deviceID {

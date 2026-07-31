@@ -170,11 +170,28 @@ class VideoStreamWriterTest {
     // Default to the shell UID (2000) so existing tests exercise the allowed path; the UID-gating
     // tests below override it with an app-range UID to drive rejection (issue #4728).
     override val peerUid: Int = 2000,
+    // Scripted response for the pre-stream handshake read (issue #4729). Null means the peer sends
+    // no
+    // bytes, so every readFully returns null (a silent connector -> rejected on timeout/EOF); a
+    // short
+    // array also returns null once exhausted.
+    private val handshake: ByteArray? = null,
     private val onClose: () -> Unit = {},
   ) : VideoClientConnection {
     @Volatile var closed = false
     private val closedLatch = CountDownLatch(1)
+    private var handshakeOffset = 0
     override val inputStream: InputStream = input ?: BlockingUntilClosedInputStream(closedLatch)
+
+    override fun readFully(count: Int, timeoutMs: Long): ByteArray? {
+      val source = handshake ?: return null
+      if (handshakeOffset + count > source.size) {
+        return null
+      }
+      val slice = source.copyOfRange(handshakeOffset, handshakeOffset + count)
+      handshakeOffset += count
+      return slice
+    }
 
     override fun close() {
       if (!closed) {
@@ -208,15 +225,112 @@ class VideoStreamWriterTest {
     now: () -> Long,
     serverSocket: VideoServerSocket,
     audioEnabled: Boolean = false,
+    expectedToken: String? = null,
   ): VideoStreamWriter =
     VideoStreamWriter(
       socketName = "test_socket",
       width = 480,
       height = 800,
       audioEnabled = audioEnabled,
+      expectedToken = expectedToken,
       nowMs = now,
       socketFactory = { serverSocket },
     )
+
+  private fun handshakeFrame(
+    token: String,
+    version: Int = VideoHandshake.PROTOCOL_VERSION,
+  ): ByteArray {
+    val tokenBytes = token.toByteArray(Charsets.US_ASCII)
+    val out = ByteArrayOutputStream()
+    out.write(VideoHandshake.MAGIC)
+    out.write(version)
+    out.write(tokenBytes.size)
+    out.write(tokenBytes)
+    return out.toByteArray()
+  }
+
+  // --- token handshake (issue #4729) ----------------------------------------------------------
+
+  @Test
+  fun validHandshakeAttachesAndReceivesStreamHeader() {
+    var now = 1_000L
+    val token = "session-0001"
+    val output = ScriptedOutputStream()
+    val connection = FakeClientConnection(outputStream = output, handshake = handshakeFrame(token))
+    val attachCount = AtomicInteger()
+    val subject = writer({ now }, FakeServerSocket(listOf({ connection })), expectedToken = token)
+
+    subject.bindServerSocket()
+    subject.acceptClients { attachCount.incrementAndGet() }
+
+    assertEquals("a valid handshake must attach", 1, attachCount.get())
+    assertTrue("an authenticated client must receive the stream header", output.writeCount > 0)
+    assertFalse("an authenticated client stays connected", connection.closed)
+  }
+
+  @Test
+  fun wrongTokenReceivesNoBytesAndIsDisconnected() {
+    var now = 1_000L
+    val output = ScriptedOutputStream()
+    // A well-formed frame carrying the wrong token must be rejected with zero stream bytes.
+    val connection =
+      FakeClientConnection(outputStream = output, handshake = handshakeFrame("session-9999"))
+    val attachCount = AtomicInteger()
+    val subject =
+      writer({ now }, FakeServerSocket(listOf({ connection })), expectedToken = "session-0001")
+
+    subject.bindServerSocket()
+    subject.acceptClients { attachCount.incrementAndGet() }
+
+    assertEquals("a wrong-token peer must never attach", 0, attachCount.get())
+    assertEquals("a wrong-token peer must receive no stream bytes", 0, output.writeCount)
+    assertTrue("a wrong-token peer must be disconnected", connection.closed)
+  }
+
+  @Test
+  fun absentHandshakeWithinTimeoutReceivesNoBytesAndIsDisconnected() {
+    var now = 1_000L
+    val output = ScriptedOutputStream()
+    // handshake = null: the peer presents no bytes, so the bounded read returns null (timeout/EOF).
+    val connection = FakeClientConnection(outputStream = output, handshake = null)
+    val attachCount = AtomicInteger()
+    val subject =
+      writer({ now }, FakeServerSocket(listOf({ connection })), expectedToken = "session-0001")
+
+    subject.bindServerSocket()
+    subject.acceptClients { attachCount.incrementAndGet() }
+
+    assertEquals("a silent connector must never attach", 0, attachCount.get())
+    assertEquals("a silent connector must receive no stream bytes", 0, output.writeCount)
+    assertTrue("a silent connector must be disconnected", connection.closed)
+  }
+
+  @Test
+  fun handshakeRejectionDoesNotDisplaceTheCurrentAuthenticatedClient() {
+    var now = 1_000L
+    val token = "session-0001"
+    val authenticated = FakeClientConnection(handshake = handshakeFrame(token))
+    val intruder = FakeClientConnection(handshake = handshakeFrame("session-9999"))
+    val attachCount = AtomicInteger()
+    val subject =
+      writer(
+        { now },
+        FakeServerSocket(listOf({ authenticated }, { intruder })),
+        expectedToken = token,
+      )
+
+    subject.bindServerSocket()
+    subject.acceptClients { attachCount.incrementAndGet() }
+
+    assertEquals("only the authenticated client attaches", 1, attachCount.get())
+    assertFalse(
+      "the authenticated client must not be displaced by a bad handshake",
+      authenticated.closed,
+    )
+    assertTrue("the intruder must be disconnected", intruder.closed)
+    subject.stop()
+  }
 
   @Test
   fun writeFailureDetachesClientButKeepsEncoderAlive() {

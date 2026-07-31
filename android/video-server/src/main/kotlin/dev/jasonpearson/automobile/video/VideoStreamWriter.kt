@@ -60,6 +60,10 @@ class VideoStreamWriter(
   private val width: Int,
   private val height: Int,
   private val audioEnabled: Boolean = false,
+  // The session token the connecting client must present in the pre-stream handshake (issue #4729).
+  // Null disables the handshake (a token-less/legacy launch), preserving prior behavior; the host
+  // always launches with a token, so production always requires the handshake.
+  private val expectedToken: String? = null,
   private val nowMs: () -> Long = { SystemClock.elapsedRealtime() },
   private val socketFactory: VideoServerSocketFactory = LocalServerSocketFactory,
 ) {
@@ -118,6 +122,14 @@ class VideoStreamWriter(
 
     /** Sentinel for [writeStartedAtMs] meaning no client write is currently in flight. */
     const val NO_WRITE_IN_PROGRESS = Long.MIN_VALUE
+
+    /**
+     * Upper bound on the pre-stream token handshake read (issue #4729). A silent connector that
+     * holds the accept slot without presenting the token is force-rejected after this deadline so
+     * it cannot wedge the acceptor. Kept short: the legitimate host writes the handshake
+     * immediately on connect.
+     */
+    const val HANDSHAKE_READ_TIMEOUT_MS = 2_000L
 
     /**
      * Peer UIDs allowed to receive the screen stream, checked against `SO_PEERCRED` on every
@@ -283,6 +295,21 @@ class VideoStreamWriter(
         continue
       }
 
+      // Require the token handshake before displacing the current client or writing a byte (issue
+      // #4729). Reading happens off `lock` (it is a bounded blocking read) and ahead of the
+      // closeClientLocked() eviction, so a wrong/absent token neither evicts the legitimate client
+      // nor
+      // leaks any stream bytes — the same authenticate-before-evict ordering the UID gate above
+      // keeps.
+      if (!handshakeAccepted(client)) {
+        try {
+          client.close()
+        } catch (_: IOException) {
+          // Best-effort close of a rejected peer; nothing was written, so a failure here is benign.
+        }
+        continue
+      }
+
       val attached =
         synchronized(lock) {
           closeClientLocked()
@@ -307,6 +334,27 @@ class VideoStreamWriter(
       println("Client connected, writing stream header")
       startCommandReaderFor(client)
       onClientConnected()
+    }
+  }
+
+  /**
+   * Validate the client's pre-stream token handshake. Returns true when no token is configured (the
+   * handshake is disabled) or the client presented a well-formed frame carrying the expected token;
+   * false on any mismatch/timeout, logging a machine-parseable reason. Extracted so [acceptClients]
+   * stays under the complexity ratchet and the accept path reads as gate -> gate -> attach.
+   */
+  internal fun handshakeAccepted(client: VideoClientConnection): Boolean {
+    val token = expectedToken ?: return true
+    return when (
+      val result = VideoHandshake.read(client, token, HANDSHAKE_READ_TIMEOUT_MS, nowMs)
+    ) {
+      is VideoHandshake.Result.Accepted -> true
+      is VideoHandshake.Result.Rejected -> {
+        println(
+          "VIDEO_CLIENT_HANDSHAKE_REJECTED socket=$socketName reason=${result.reason}; disconnecting"
+        )
+        false
+      }
     }
   }
 

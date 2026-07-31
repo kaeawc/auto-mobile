@@ -171,6 +171,51 @@ class NavigationFacetTest {
     }
 
   @Test
+  fun `re-pulls the app graph when a same-app update arrives so the graph grows live`() =
+    runComposeUiTest {
+      // A stateful source whose snapshot grows on the 2nd pull: Home -> Home + Details. If the
+      // facet only re-pulls on appId change, a same-app update would leave callCount at 1 and
+      // Details would never render.
+      val calls = AtomicInteger(0)
+      val growingSource =
+        object : NavigationDataSource {
+          override suspend fun getNavigationGraph(): Result<NavigationGraph> {
+            val screens =
+              if (calls.incrementAndGet() >= 2) listOf(screen("Home"), screen("Details"))
+              else listOf(screen("Home"))
+            return Result.Success(NavigationGraph(screens, emptyList()))
+          }
+        }
+      val fake = FakeObservationStream()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { fake },
+              navigationDataSourceProvider = { growingSource },
+            )
+          }
+        }
+      }
+      waitForIdle()
+
+      // First app-A update: pull #1 renders the initial graph.
+      fake.emitNavigation(navUpdate("com.example.app"))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Home").fetchSemanticsNodes().isNotEmpty()
+      }
+
+      // Second app-A update (app A discovered a new screen): must re-pull and render Details.
+      fake.emitNavigation(navUpdate("com.example.app"))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Details").fetchSemanticsNodes().isNotEmpty()
+      }
+      onNodeWithText("Details").assertExists()
+      assertEquals("a same-app update must trigger a second app-scoped pull", 2, calls.get())
+    }
+
+  @Test
   fun `shows the no-app guidance when a connected stream reports a null current app`() =
     runComposeUiTest {
       val fake = FakeObservationStream()

@@ -133,6 +133,11 @@ fun NavigationFacet(
   // True once the connected stream has reported that no app has navigated yet (appId == null).
   // Distinguishes the onboarding "no app" case (-> NoApp) from "haven't heard yet" (-> Loading).
   var noNavigationApp by remember(column.deviceId, streamAttempt) { mutableStateOf(false) }
+  // Incremented on every navigation_update carrying an app so the app-scoped pull re-runs even when
+  // foregroundAppId is unchanged — otherwise a same-app update (app A discovers a new
+  // screen/transition) would only re-assign the identical appId and the graph would never grow
+  // live until retry/app-switch/reopen. Keyed into the pull effect below alongside appId.
+  var updateGeneration by remember(column.deviceId, streamAttempt) { mutableStateOf(0) }
   LaunchedEffect(stream) {
     val current = stream ?: return@LaunchedEffect
     try {
@@ -142,6 +147,8 @@ fun NavigationFacet(
           foregroundAppId = appId
           currentScreen = update.currentScreen
           noNavigationApp = false
+          // Force a re-pull of the app-scoped snapshot for this update (see updateGeneration).
+          updateGeneration++
         } else if (foregroundAppId == null) {
           // Stream says the current app is null and we've never resolved one — onboarding case.
           noNavigationApp = true
@@ -192,6 +199,7 @@ fun NavigationFacet(
     connectionState,
     streamError,
     noNavigationApp,
+    updateGeneration,
   ) {
     // A stream failure is retryable *regardless of whether an app already resolved*. Handling it
     // only when foregroundAppId == null would let a socket EOF after resolution
@@ -221,7 +229,14 @@ fun NavigationFacet(
       state = if (noNavigationApp) NavigationFacetState.NoApp else NavigationFacetState.Loading
       return@LaunchedEffect
     }
-    state = NavigationFacetState.Loading
+    // Only show the Loading spinner for the FIRST pull of an app. A live re-pull (same app, new
+    // updateGeneration) keeps the currently-rendered graph on screen until the fresh snapshot
+    // arrives, so the graph grows in place rather than blanking on every navigation step. A
+    // superseded in-flight pull is cancelled by LaunchedEffect when the keys change (its
+    // CancellationException propagates, so it never writes stale state).
+    if (state !is NavigationFacetState.Resolved) {
+      state = NavigationFacetState.Loading
+    }
     // Read off the UI thread: the resource read hits the daemon and would otherwise block
     // recomposition. Injected test data sources run inline (deterministic). The pull is wrapped so
     // a throwing data source becomes a retryable Error state rather than crashing the Recomposer.

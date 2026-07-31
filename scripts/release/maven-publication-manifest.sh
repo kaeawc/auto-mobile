@@ -166,7 +166,10 @@ while IFS= read -r path; do
   fi
 
   bytes="$(wc -c <"$path" | tr -d ' ')"
-  printf '%s %s %s %s\n' "$coord" "$classifier" "$name" "$bytes" >>"$records"
+  # Tab-delimited so a stray unexpected filename containing spaces cannot shift
+  # the bytes field in the awk aggregation below (Maven names never contain
+  # spaces, but the tool must still count an unexpected file correctly).
+  printf '%s\t%s\t%s\t%s\n' "$coord" "$classifier" "$name" "$bytes" >>"$records"
 
   total_files=$(( total_files + 1 ))
   total_bytes=$(( total_bytes + bytes ))
@@ -180,16 +183,17 @@ echo >&2 "staging: $staging"
 echo "# Maven Central publication manifest"
 echo "# group: $GROUP"
 echo "# columns: coordinate classifier filename bytes"
-sort "$records"
+sort "$records" | tr '\t' ' '
 echo
 # Per-coordinate and per-classifier aggregation runs in awk, not bash associative
 # arrays, so the script works on bash 3.2 (macOS system bash, used by CI's BATS).
+# -F'\t' keeps a space-containing filename in a single field.
 echo "## Per-coordinate totals"
-awk '{ f[$1]++; b[$1] += $4 } END { for (c in f) printf "%s files=%d bytes=%d\n", c, f[c], b[c] }' \
+awk -F'\t' '{ f[$1]++; b[$1] += $4 } END { for (c in f) printf "%s files=%d bytes=%d\n", c, f[c], b[c] }' \
   "$records" | sort
 echo
 echo "## Classifier totals"
-awk -v classes="$CLASSES" '
+awk -F'\t' -v classes="$CLASSES" '
   { c[$2]++ }
   END {
     n = split(classes, a, " ")
@@ -200,7 +204,7 @@ awk -v classes="$CLASSES" '
 ' "$records"
 echo
 echo "## Release total"
-coord_n="$(cut -d' ' -f1 "$records" | sort -u | wc -l | tr -d ' ')"
+coord_n="$(cut -f1 "$records" | sort -u | wc -l | tr -d ' ')"
 echo "coordinates=$coord_n files=$total_files bytes=$total_bytes"
 
 exit_code=0
@@ -208,6 +212,13 @@ exit_code=0
 if [ -n "$budget_file" ]; then
   [ -f "$budget_file" ] || { echo "error: budget file not found: $budget_file" >&2; exit 2; }
   command -v jq >/dev/null 2>&1 || { echo "error: jq is required for --budget" >&2; exit 2; }
+  # An empty or truncated file makes jq succeed with no output, which would read
+  # as "no limits" -- require exactly one JSON object first, so a broken policy
+  # file fails closed instead of silently disabling the budget.
+  jq -e 'type == "object"' "$budget_file" >/dev/null 2>&1 || {
+    echo "error: budget file must be a single JSON object: $budget_file" >&2
+    exit 2
+  }
   # Validate the whole budget shape in jq and fail closed on anything malformed,
   # so nothing silently disables the budget -- not a `// ` coalescing a false/null
   # field NOR a non-object `perRelease` (e.g. `false`) collapsing to `{}`. Rule:

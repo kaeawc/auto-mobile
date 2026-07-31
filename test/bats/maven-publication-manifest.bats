@@ -299,3 +299,24 @@ JSON
   [ "$status" -ne 0 ]
   [[ "$output" != *"BUDGET OK"* ]]
 }
+
+@test "an empty budget file fails closed, not silently unlimited" {
+  local budget="$STAGE/empty-budget.json"
+  : >"$budget"
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"BUDGET OK"* ]]
+}
+
+@test "an unexpected filename with a space keeps correct byte subtotals" {
+  local dir="$STAGE/$GROUP_PATH/auto-mobile-protocol/0.0.47"
+  head -c 7 /dev/zero >"$dir/stray file.jar" # space in the name
+  run bash "$SCRIPT" "$STAGE"
+  [ "$status" -eq 0 ]
+  # The per-coordinate subtotal must not collapse to bytes=0 from field shifting;
+  # the independent byte oracle still equals the grand total.
+  local expected
+  expected="$(find "$STAGE" -type f -exec cat {} + | wc -c | tr -d ' ')"
+  [[ "$output" == *"bytes=$expected"* ]]
+  [[ "$output" == *"stray file.jar"* ]]
+}

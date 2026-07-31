@@ -30,6 +30,8 @@ export interface WebRtcStreamSocketRequest extends SocketRequest {
   size?: { width: number; height: number };
   /** iOS Simulator capture rate; integer in the range documented by the seam. */
   iosSimulatorFps?: number;
+  /** Android video-server capture rate (`--fps`); integer in the documented range. */
+  androidFps?: number;
   /** Enable optional audio capture/publishing. */
   audio?: boolean;
   /** Override the environment's Trickle ICE setting for this stream. */

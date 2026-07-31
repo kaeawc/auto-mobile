@@ -245,7 +245,7 @@ async function startReady(ctx: ReturnType<typeof makeSource>): Promise<void> {
 
 describe("PersistentEncoderH264Source", () => {
   test("pushes the jar, launches the server with overrides, forwards, and forwards frames", async () => {
-    const ctx = makeSource({ bitrateBps: 1_500_000, size: { width: 480, height: 1040 }, quality: "low" });
+    const ctx = makeSource({ bitrateBps: 1_500_000, size: { width: 480, height: 1040 }, quality: "low", fps: 24 });
     await startReady(ctx);
 
     expect(ctx.commands.some(c => c.startsWith("push") && c.includes("/data/local/tmp/automobile-video.jar"))).toBe(true);
@@ -256,6 +256,7 @@ describe("PersistentEncoderH264Source", () => {
     expect(args).toContain("CLASSPATH=/data/local/tmp/automobile-video.jar app_process /");
     expect(args).toContain("--quality low");
     expect(args).toContain("--bit-rate 1500000");
+    expect(args).toContain("--fps 24");
     expect(args).toContain("--size 480x1040");
     expect(args).toContain(`--session-token ${SESSION_TOKEN}`);
     expect(args).toContain(`--socket-name ${SESSION_SOCKET}`);
@@ -264,6 +265,16 @@ describe("PersistentEncoderH264Source", () => {
     ctx.sockets[0].feed(streamHeader(480, 1040));
     ctx.sockets[0].feed(framedPacket(Buffer.from([0, 0, 0, 1, 0x67])));
     expect(ctx.chunks).toEqual([Buffer.from([0, 0, 0, 1, 0x67])]);
+
+    await ctx.source.stop();
+  });
+
+  test("omits --fps when no frame rate is requested, letting the preset default apply", async () => {
+    const ctx = makeSource();
+    await startReady(ctx);
+
+    const args = ctx.spawnArgs[0].join(" ");
+    expect(args).not.toContain("--fps");
 
     await ctx.source.stop();
   });

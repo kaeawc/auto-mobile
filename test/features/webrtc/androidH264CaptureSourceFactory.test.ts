@@ -5,6 +5,7 @@ import {
 } from "../../../src/features/webrtc/androidH264CaptureSourceFactory";
 import type { H264CaptureSource } from "../../../src/features/webrtc/H264CaptureSource";
 import type { AndroidH264SourceOptions } from "../../../src/features/webrtc/AndroidH264Source";
+import type { PersistentEncoderH264SourceOptions } from "../../../src/features/webrtc/PersistentEncoderH264Source";
 import type { BootedDevice } from "../../../src/models";
 
 const DEVICE: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "t" } as BootedDevice;
@@ -141,6 +142,43 @@ describe("createAndroidH264CaptureSource", () => {
     await starting;
 
     expect(persistent.stopped).toBe(1);
+  });
+
+  test("forwards the caller's quality and fps to the persistent source", () => {
+    let captured: PersistentEncoderH264SourceOptions | undefined;
+    const deps: AndroidH264CaptureSourceDeps = {
+      createPersistent: options => {
+        captured = options;
+        return new FakeSource();
+      },
+      createScreenrecord: () => new FakeSource(),
+    };
+    createAndroidH264CaptureSource(
+      { ...baseOptions(), quality: "high", fps: 24 },
+      "/tmp/automobile-video.jar",
+      deps
+    );
+    expect(captured?.quality).toBe("high");
+    expect(captured?.fps).toBe(24);
+  });
+
+  test("forwards the caller's quality and fps on the audio-enabled persistent path", () => {
+    let captured: PersistentEncoderH264SourceOptions | undefined;
+    const deps: AndroidH264CaptureSourceDeps = {
+      createPersistent: options => {
+        captured = options;
+        return new FakeSource();
+      },
+      createScreenrecord: () => new FakeSource(),
+    };
+    createAndroidH264CaptureSource(
+      { ...baseOptions(), audioEnabled: true, quality: "low", fps: 30 },
+      "/tmp/automobile-video.jar",
+      deps
+    );
+    expect(captured?.quality).toBe("low");
+    expect(captured?.fps).toBe(30);
+    expect(captured?.audioEnabled).toBe(true);
   });
 
   test("passes the provided jar path to the persistent source", () => {

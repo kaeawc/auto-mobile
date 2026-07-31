@@ -37,6 +37,14 @@ interface VideoClientConnection {
   val outputStream: OutputStream
   val inputStream: InputStream
 
+  /**
+   * The connecting peer's OS-level process UID, read from `SO_PEERCRED`
+   * (`LocalSocket.getPeerCredentials().getUid()`). Abstract-namespace local sockets carry no
+   * filesystem ACL, so this kernel-supplied credential is the only trustworthy peer identity the
+   * writer can gate on before emitting any stream bytes (issue #4728).
+   */
+  val peerUid: Int
+
   fun close()
 }
 
@@ -61,6 +69,9 @@ internal class LocalSocketConnection(private val socket: LocalSocket) : VideoCli
 
   override val inputStream: InputStream
     get() = socket.inputStream
+
+  override val peerUid: Int
+    get() = socket.peerCredentials.uid
 
   override fun close() {
     socket.close()

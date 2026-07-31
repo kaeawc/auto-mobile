@@ -70,8 +70,10 @@ premise carried in #2424/#2920:
   the same JSC-WASM-JIT crash class as `@jimp/wasm-webp`.
 
 Conclusion: "fundamentally fix for all platforms" is not in our control (it
-needs an upstream Bun fix, unbounded timeline). We instead pin sharp to the
-known-good 0.34.5 on macOS/Linux and give Windows a non-sharp, non-WASM path.
+needs an upstream Bun fix, unbounded timeline). We gave Windows a non-sharp,
+non-WASM path. (Originally this also pinned sharp to 0.34.5 on macOS/Linux; that
+pin was lifted 2026-07-31 when 0.35.3 was validated under Bun — see the update
+note above.)
 
 ## Decision
 
@@ -168,13 +170,17 @@ which we reject).
 
 ## Dependency & build management — the anti-treadmill work
 
-Freezing sharp is part of the deliverable (this is what #2920 lacked):
+Pinning the sharp matrix coherently is part of the deliverable (this is what
+#2920 lacked):
 
-- `package.json`: add `sharp@0.34.5` + the 24 `@img/*` optionalDependencies
-  pinned exactly to `0.34.5`/`1.2.4`. Keep `jimp`/`@jimp/core`. Remove
-  `@jimp/wasm-webp`.
-- **Dependabot ignore** rules for `sharp` and every `@img/*` (comment linking
-  this doc + the crash), so the 0.35.x bump can't auto-land.
+- `package.json`: `sharp@0.35.3` + the `@img/*` optionalDependencies pinned to
+  `0.35.3` (`@img/sharp-libvips-*` at `1.3.2`). Keep `jimp`/`@jimp/core`. Remove
+  `@jimp/wasm-webp`. (Originally `0.34.5`/`1.2.4`; bumped 2026-07-31 — see the
+  update note above.)
+- **Dependabot `groups`** rule keying `sharp` + every `@img/sharp-*` together, so
+  the native matrix always bumps in a single PR and can never split partially.
+  (This replaced the original freeze `ignore` block once 0.35.3 was validated
+  under Bun on macOS + Linux.)
 - `build.ts` externals: add `sharp` + `@img/sharp-*` back (external + lazy, as
   the old `loadSharp.ts` did); keep `jimp`/`@jimp/*` external.
 - Re-check the NPM-unpacked-size benchmark (30 MB threshold; ~14 MB today).

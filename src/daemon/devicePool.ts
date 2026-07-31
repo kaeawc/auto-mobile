@@ -1046,9 +1046,9 @@ export class DevicePool {
 
     const avdName = device.avdName;
     this.rebootingAndroidAvdNames.add(avdName);
-    await this.stopTrackedEmulatorProcess(device.id);
-    await this.removeDevice(device.id);
     try {
+      await this.stopTrackedEmulatorProcess(device.id);
+      await this.removeDevice(device.id);
       const target: DeviceInfo = {
         name: avdName,
         platform: "android",
@@ -1080,8 +1080,12 @@ export class DevicePool {
       return;
     }
 
-    if (!("exitCode" in childProcess) || childProcess.exitCode !== null) {
+    const exitCode = (childProcess as { exitCode?: number | null }).exitCode;
+    if (exitCode === undefined) {
       childProcess.kill();
+      return;
+    }
+    if (exitCode !== null) {
       return;
     }
 

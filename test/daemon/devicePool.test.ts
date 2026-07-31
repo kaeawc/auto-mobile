@@ -967,6 +967,39 @@ describe("DevicePool", () => {
       }
     });
 
+    test("recovers an emulator after a failed intentional shutdown is cleared", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      try {
+        const images: DeviceInfo[] = [
+          { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+        ];
+        const manager = new FakeDeviceManagerWithStartedProcess(images);
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          manager,
+          new DefaultRetryExecutor(fakeTimer)
+        );
+
+        await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
+        devicePool.markIntentionalShutdown("emulator-5554");
+        devicePool.clearIntentionalShutdown("emulator-5554");
+        manager.childProcess.emit("exit", 1, null);
+        await new Promise(resolve => setImmediate(resolve));
+
+        expect(manager.startedDevices).toHaveLength(2);
+      } finally {
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
     test("ignores an old emulator process exit after same-serial recovery", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";

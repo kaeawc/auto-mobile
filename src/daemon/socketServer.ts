@@ -2,6 +2,8 @@ import { createServer, Server as NetServer, Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
+import path from "node:path";
+import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   StreamableHTTPClientTransport,
@@ -289,6 +291,12 @@ export class UnixSocketServer {
    * Start the Unix socket server
    */
   async start(): Promise<void> {
+    // Owner-only (0o700) socket directory so the control socket is not
+    // world-traversable. On macOS socket-file permission bits are not reliably
+    // enforced on connect(), so the containing directory's mode is the primary
+    // access control (issue #4750).
+    await ensureSecureDir(path.dirname(this.socketPath));
+
     // Remove existing socket file if it exists
     if (existsSync(this.socketPath)) {
       await unlink(this.socketPath);
@@ -319,7 +327,12 @@ export class UnixSocketServer {
       this.server!.listen(this.socketPath, () => {
         this.socketFileIdentity = this.readSocketFileIdentity();
         logger.info(`Unix socket server listening on ${this.socketPath}`);
-        resolve();
+        // Restrict the bound socket to the owner (0o600) before start() resolves,
+        // so no client can connect while it is still world-accessible. listen()
+        // creates the socket at the umask default (issue #4750).
+        secureFile(this.socketPath)
+          .then(resolve)
+          .catch(reject);
       });
 
       this.server!.on("error", error => {

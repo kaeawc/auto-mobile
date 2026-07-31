@@ -56,12 +56,13 @@ private fun osOfImage(image: DeviceImageInfo): Pair<String?, String?> =
 /**
  * Merge the booted-devices and device-images resources into one picker list. A booted device wins
  * over the specific image it came from, reconciled by IDENTITY, not display name: an image is
- * hidden only when its own id is booted, or — because the daemon re-keys a booted device to a
- * runtime serial that no longer matches its image id — when it is the source of a re-keyed booted
- * device of the same name (one image per such device, not all same-named images). This keeps
- * distinct devices that merely share a display name (common for simulators) from vanishing when a
- * sibling boots. Booted devices carry no OS/architecture from the daemon today, so Android API is
- * best-effort parsed from the name.
+ * hidden only when its own id is booted, or — because the daemon re-keys a booted VIRTUAL device to
+ * a runtime serial that no longer matches its image id — when it is the source of a re-keyed
+ * virtual device of the same name (one image per such device, not all same-named images). Physical
+ * devices are not re-keyed, so they dedup by exact id only and never hide a same-named shut-down
+ * image. This keeps distinct devices that merely share a display name (common for simulators) from
+ * vanishing when a sibling boots. Booted devices carry no OS/architecture from the daemon today, so
+ * Android API is best-effort parsed from the name.
  */
 fun buildPickerDevices(
   booted: List<BootedDeviceInfo>,
@@ -84,9 +85,12 @@ fun buildPickerDevices(
     )
   }
 
-  // Count, per display name, the booted devices whose runtime id is NOT itself an image id — these
-  // were re-keyed on boot, so each hides exactly ONE same-named image (its source).
-  val hideByName = booted.filter { it.deviceId !in imageIds }.groupingBy { it.name }.eachCount()
+  // Per display name, count the booted VIRTUAL devices whose runtime id is not itself an image id:
+  // these were re-keyed on boot, so each hides exactly ONE same-named image (its source). Physical
+  // devices are excluded — they are not re-keyed, so they dedup by exact id (above) only and must
+  // not hide a distinct same-named shut-down image.
+  val hideByName =
+    booted.filter { it.isVirtual && it.deviceId !in imageIds }.groupingBy { it.name }.eachCount()
 
   val shutdownDevices =
     images

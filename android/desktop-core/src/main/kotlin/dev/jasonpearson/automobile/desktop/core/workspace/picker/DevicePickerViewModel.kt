@@ -99,6 +99,7 @@ class DevicePickerViewModel(
   private var bootingIds: Set<String> = emptySet()
   private var bootErrors: Map<String, String> = emptyMap()
   private var selectedIds: Set<String> = emptySet()
+  private var filters: PickerFilters = PickerFilters()
 
   // Monotonic load/emission generation, claimed at the start of every load()/reloadAfterBoot(). It
   // guards ONLY the stale device-LIST emission: a fetch that resumes after a newer one began does
@@ -195,6 +196,7 @@ class DevicePickerViewModel(
       when (val current = _state.value) {
         is DevicePickerUiState.Content ->
           current.copy(
+            filters = filters,
             selectedIds = selectedIds,
             bootingIds = bootingIds,
             bootErrors = bootErrors,
@@ -206,16 +208,14 @@ class DevicePickerViewModel(
   /** Rebuild Content from a device list, merging the pruned persistent state. */
   private fun emitContent(devices: List<PickerDevice>) {
     pruneState(devices)
-    _state.update { current ->
-      val prev = current as? DevicePickerUiState.Content
+    _state.value =
       DevicePickerUiState.Content(
         devices = devices,
-        filters = prev?.filters ?: PickerFilters(),
+        filters = filters,
         selectedIds = selectedIds,
         bootingIds = bootingIds,
         bootErrors = bootErrors,
       )
-    }
   }
 
   /**
@@ -234,7 +234,12 @@ class DevicePickerViewModel(
   /** Reflect the persistent state onto the live Content (no device reload). */
   private fun syncState() {
     updateContent {
-      it.copy(selectedIds = selectedIds, bootingIds = bootingIds, bootErrors = bootErrors)
+      it.copy(
+        filters = filters,
+        selectedIds = selectedIds,
+        bootingIds = bootingIds,
+        bootErrors = bootErrors,
+      )
     }
   }
 
@@ -336,7 +341,8 @@ class DevicePickerViewModel(
   }
 
   private fun updateFilters(transform: (PickerFilters) -> PickerFilters) {
-    updateContent { it.copy(filters = transform(it.filters)) }
+    filters = transform(filters)
+    syncState()
   }
 
   private fun updateContent(

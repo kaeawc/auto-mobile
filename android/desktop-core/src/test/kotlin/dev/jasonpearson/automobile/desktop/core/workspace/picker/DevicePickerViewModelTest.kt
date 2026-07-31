@@ -491,6 +491,26 @@ class DevicePickerViewModelTest {
       )
     }
 
+  @Test
+  fun `applied filters and search query survive a refresh`() = testScope.runTest {
+    val v = vm()
+    v.onAction(DevicePickerAction.TogglePlatform(Platform.Android))
+    v.onAction(DevicePickerAction.ToggleState(DeviceState.Booted))
+    v.onAction(DevicePickerAction.SetQuery("pixel"))
+    with(content(v).filters) {
+      assertEquals(setOf(Platform.Android), platforms)
+      assertTrue(DeviceState.Booted in states)
+      assertEquals("pixel", query)
+    }
+
+    v.onAction(DevicePickerAction.Refresh) // Content -> Loading -> Content swap
+    with(content(v).filters) {
+      assertEquals(setOf(Platform.Android), platforms) // survived the swap (persistent field)
+      assertTrue(DeviceState.Booted in states)
+      assertEquals("pixel", query)
+    }
+  }
+
   private companion object {
     const val SINGLE_BOOTED_PIXEL8 =
       """{"totalCount":1,"androidCount":1,"iosCount":0,"virtualCount":1,"physicalCount":0,""" +

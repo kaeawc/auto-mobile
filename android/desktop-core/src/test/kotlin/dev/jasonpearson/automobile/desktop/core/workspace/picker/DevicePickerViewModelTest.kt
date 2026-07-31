@@ -177,4 +177,46 @@ class DevicePickerViewModelTest {
     assertTrue(boot.bootRequests.isEmpty())
     assertTrue(content(v).bootingIds.isEmpty())
   }
+
+  @Test
+  fun `a refresh mid-boot preserves the guard and cannot issue a second startDevice`() =
+    testScope.runTest {
+      val boot = FakeDeviceBootController().apply { autoComplete = false } // hold the boot open
+      val v = vm(bootController = boot)
+      v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
+      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds)
+      // Reopen/refresh while the boot is still in flight — load() swaps Content out and back.
+      v.onAction(DevicePickerAction.Refresh)
+      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds) // guard survived the reload
+      v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // clicking again must not re-boot
+      assertEquals(1, boot.bootRequests.size)
+      boot.complete() // release; device still shut down on reload -> boot did not complete
+    }
+
+  @Test
+  fun `a boot completing after a mid-boot refresh still auto-selects the booted device`() =
+    testScope.runTest {
+      val resources = fake()
+      val boot = FakeDeviceBootController().apply { autoComplete = false }
+      val v = vm(resourceClient = resources, bootController = boot)
+      v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
+      v.onAction(DevicePickerAction.Refresh) // state cycled Loading -> Content, guard preserved
+      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds)
+      // The daemon finished the boot; it now reports the device booted under a runtime serial.
+      resources.bootedDevicesResponse =
+        """
+        {"totalCount":2,"androidCount":2,"iosCount":0,"virtualCount":2,"physicalCount":0,
+         "lastUpdated":"x","devices":[
+           {"name":"Pixel 8 API 35","platform":"android","deviceId":"emulator-5554",
+            "source":"local","isVirtual":true,"status":"booted"},
+           {"name":"Pixel 6 API 33","platform":"android","deviceId":"emulator-5556",
+            "source":"local","isVirtual":true,"status":"booted"}]}
+        """
+          .trimIndent()
+      boot.complete() // reloadAfterBoot fetches -> device booted -> auto-select by name
+      val c = content(v)
+      assertTrue("emulator-5556" in c.selectedIds)
+      assertTrue(c.bootingIds.isEmpty())
+      assertTrue(c.devices.any { it.id == "emulator-5556" && it.state == DeviceState.Booted })
+    }
 }

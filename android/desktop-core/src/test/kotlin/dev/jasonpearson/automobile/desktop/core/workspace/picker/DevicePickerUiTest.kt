@@ -11,7 +11,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -52,21 +51,17 @@ class DevicePickerUiTest {
   }
 
   @Test
-  fun `a booting card shows Booting and is not re-triggerable`() = runComposeUiTest {
-    var action: DevicePickerAction? = null
+  fun `a booting card shows Booting and offers no boot affordance`() = runComposeUiTest {
     setContent {
       MaterialTheme {
-        DevicePicker(
-          content(bootingIds = setOf("i15")),
-          onAction = { action = it },
-          onClose = {},
-        )
+        DevicePicker(content(bootingIds = setOf("i15")), onAction = {}, onClose = {})
       }
     }
+    // No boot/retry affordance while a boot is in flight — the card is a passive "Booting…".
     onNodeWithText("Booting…").assertIsDisplayed()
+    onNodeWithText("Click to boot").assertDoesNotExist()
     onNodeWithContentDescription("Boot iPhone 15").assertDoesNotExist()
-    onNodeWithContentDescription("Booting iPhone 15").performClick()
-    assertNull(action) // a boot in flight is not clickable
+    onNodeWithContentDescription("Retry boot iPhone 15").assertDoesNotExist()
   }
 
   @Test

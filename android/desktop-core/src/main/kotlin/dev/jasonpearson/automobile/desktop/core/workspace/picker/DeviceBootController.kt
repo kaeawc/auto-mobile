@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace.picker
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +48,9 @@ class RealDeviceBootController(
           LOG.warn("startDevice reported failure for ${device.name}: $message")
           Result.failure(IllegalStateException(message))
         }
+      } catch (c: CancellationException) {
+        // Never swallow structured-concurrency cancellation — let it propagate.
+        throw c
       } catch (e: Exception) {
         LOG.warn("startDevice threw for ${device.name}: ${e.message}", e)
         Result.failure(e)

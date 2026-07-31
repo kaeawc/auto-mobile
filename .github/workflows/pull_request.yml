@@ -888,8 +888,9 @@ jobs:
       # (validate-markdown-bash.bats, #4118) is the first bats-tested script that
       # shells out to the real shellcheck binary — every other shell validator
       # scans with grep — and the macOS runner image does not ship shellcheck, so
-      # without this the whole suite mysteriously failed (#4801).
-      - name: "Install BATS and shellcheck"
+      # without this the whole suite mysteriously failed (#4801). The step name is
+      # pinned to "Install BATS" by test/scripts/batsInstallHoist.test.ts (#4126).
+      - name: "Install BATS"
         shell: bash
         background: true
         id: install-bats

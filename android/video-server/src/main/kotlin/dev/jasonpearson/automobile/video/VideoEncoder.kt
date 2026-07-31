@@ -13,7 +13,8 @@ import android.view.Surface
  * Configures the encoder for low-latency streaming with:
  * - H.264 Baseline profile for maximum compatibility
  * - Surface input for zero-copy GPU rendering
- * - CBR bitrate mode for consistent bandwidth
+ * - VBR bitrate mode so bursty screen content lets idle frames stay cheap and transitions borrow
+ *   headroom
  * - Frame repeat for idle screen optimization
  */
 class VideoEncoder(
@@ -64,10 +65,16 @@ class VideoEncoder(
           MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline,
         )
 
-        // CBR for consistent bitrate
+        // VBR (not CBR) for bursty screen-automation content. The transport is
+        // adb forward over USB, so CBR's predictable pacing buys little here while
+        // it pads idle frames to hit the target bitrate and starves transitions of
+        // headroom (#4740). VBR treats KEY_BIT_RATE as a ceiling: idle stretches
+        // stay cheap and transitions borrow the headroom. CQ (constant quality)
+        // was evaluated but rejected — it swaps the bitrate target for KEY_QUALITY
+        // tuning that varies per device and cannot be bounded on the egress path.
         setInteger(
           MediaFormat.KEY_BITRATE_MODE,
-          MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR,
+          MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR,
         )
 
         // Request low latency mode on Android 11+ (API 30)

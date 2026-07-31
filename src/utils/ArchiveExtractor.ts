@@ -1,7 +1,9 @@
+import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { ActionableError } from "../models/ActionableError";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "./HostCommandExecutor";
+import { logger } from "./logger";
 
 /** Default extraction timeout — a local `tar` unpack should complete well within this. */
 const DEFAULT_EXTRACTION_TIMEOUT_MS = 120000;
@@ -47,7 +49,10 @@ export function assertArchiveEntriesSafe(entries: string[], destinationDir: stri
     if (!entry) {
       continue;
     }
-    if (path.isAbsolute(entry) || /^[a-zA-Z]:[\\/]/.test(entry) || entry.startsWith("\\")) {
+    // Reject any drive-letter prefix, with or without a following separator: a
+    // *drive-relative* entry like `C:evil` (no slash) is not caught by
+    // path.isAbsolute on POSIX but resolves against another drive's cwd on Windows.
+    if (path.isAbsolute(entry) || /^[a-zA-Z]:/.test(entry) || entry.startsWith("\\")) {
       throw new ActionableError(
         `Refusing to extract archive entry '${rawEntry}' with an absolute path; the archive may be malicious.`
       );
@@ -85,18 +90,26 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
     await fs.mkdir(destinationDir, { recursive: true });
     // Resolve the destination to its real, symlink-free path, then extract into a
     // fresh staging directory created *inside* it (same filesystem, so the later
-    // rename is atomic and never crosses devices). tar writes — including any
-    // archive-internal symlink entries — are confined to this staging tree, so a
-    // symlinked parent of the destination cannot redirect them outside the
-    // intended directory. Only the validated top-level results are then moved
-    // into place. On any failure the staging tree is always removed.
+    // rename is atomic and never crosses devices). Extracting into the realpath'd
+    // staging tree confines writes when a *parent* of the destination is a symlink.
+    // It does NOT, on its own, contain a symlink *member* of the archive: the
+    // lexical name check never sees entry types, and tar happily creates a symlink
+    // pointing outside the tree. `assertStagedSymlinksSafe` is the guard that
+    // actually rejects those, after extraction and before anything is moved into
+    // place. On any failure the staging tree is always removed — with its
+    // permissions restored first, so a restrictive archive-set directory mode
+    // (e.g. a `0555` `./` member) cannot strand it.
     const realDestination = await fs.realpath(destinationDir);
     const stagingDir = await fs.mkdtemp(path.join(realDestination, ".am-extract-"));
     try {
       await this.runExtraction(archivePath, stagingDir, timeoutMs, request.signal);
+      await assertStagedSymlinksSafe(stagingDir, realDestination);
+      // A malicious `./` member can leave the staging root unwritable, which would
+      // fail the rename below; restore owner write/traverse before moving.
+      await fs.chmod(stagingDir, 0o700).catch(() => undefined);
       await this.moveExtractedInto(stagingDir, realDestination);
     } finally {
-      await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
+      await removeStagingTree(stagingDir);
     }
   }
 
@@ -125,8 +138,20 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
     for (const name of names) {
       const from = path.join(stagingDir, name);
       const to = path.join(destinationDir, name);
-      await fs.rm(to, { recursive: true, force: true }).catch(() => undefined);
-      await fs.rename(from, to);
+      try {
+        await fs.rm(to, { recursive: true, force: true });
+      } catch (error) {
+        // Best-effort removal of a prior copy; the rename below still overwrites or
+        // reports. Log so a surprising failure here leaves a trace.
+        logger.debug(`could not remove prior '${to}' before move: ${errorMessage(error)}`);
+      }
+      try {
+        await fs.rename(from, to);
+      } catch (error) {
+        throw new ActionableError(
+          `Failed to move extracted entry into place ('${from}' -> '${to}'): ${errorMessage(error)}.`
+        );
+      }
     }
   }
 
@@ -143,6 +168,65 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
         `Unable to inspect archive '${archivePath}' before extraction: ${errorMessage(error)}. ` +
         "The archive may be missing or corrupt."
       );
+    }
+  }
+}
+
+/**
+ * Reject any staged symlink member whose target would resolve outside the
+ * destination once the tree is moved into place. A self-contained link (target
+ * stays inside the destination, e.g. a versioned `lib/*.dylib` link) is allowed;
+ * an escaping link (absolute target, or a relative target that climbs past the
+ * root) is rejected. `tar` creates symlink members without complaint and the
+ * lexical name check never sees their type, so this is the guard that contains
+ * them. Targets are validated against each link's *final* location under the
+ * destination, since a relative target's meaning shifts when the tree is moved.
+ */
+async function assertStagedSymlinksSafe(stagingDir: string, destinationDir: string): Promise<void> {
+  const dirents = await fs.readdir(stagingDir, { withFileTypes: true });
+  for (const dirent of dirents) {
+    const entryPath = path.join(stagingDir, dirent.name);
+    if (dirent.isSymbolicLink()) {
+      const relFromStaging = path.relative(stagingDir, entryPath);
+      const finalLinkPath = path.join(destinationDir, relFromStaging);
+      const target = await fs.readlink(entryPath);
+      const resolvedTarget = path.resolve(path.dirname(finalLinkPath), target);
+      const relToRoot = path.relative(destinationDir, resolvedTarget);
+      if (relToRoot === ".." || relToRoot.startsWith(`..${path.sep}`) || path.isAbsolute(relToRoot)) {
+        throw new ActionableError(
+          `Refusing to extract archive symlink '${relFromStaging}' -> '${target}' ` +
+          "that escapes the destination directory; the archive may be malicious."
+        );
+      }
+    } else if (dirent.isDirectory()) {
+      // Recurse into real subdirectories only — never follow a symlinked directory.
+      await assertStagedSymlinksSafe(entryPath, destinationDir);
+    }
+  }
+}
+
+/**
+ * Remove the staging tree, restoring owner write/traverse permissions first so a
+ * restrictive archive-set directory mode (e.g. a `0555` or `000` `./` member)
+ * cannot strand the `.am-extract-*` directory. Best-effort: the mkdtemp name is
+ * unique, so a leftover is harmless, but log it rather than swallowing silently.
+ */
+async function removeStagingTree(stagingDir: string): Promise<void> {
+  try {
+    await restoreOwnerWritable(stagingDir);
+    await fs.rm(stagingDir, { recursive: true, force: true });
+  } catch (error) {
+    logger.debug(`best-effort staging cleanup failed for '${stagingDir}': ${errorMessage(error)}`);
+  }
+}
+
+/** Recursively grant owner rwx on every real directory so removal can proceed. */
+async function restoreOwnerWritable(dir: string): Promise<void> {
+  await fs.chmod(dir, 0o700).catch(() => undefined);
+  const dirents: Dirent[] = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const dirent of dirents) {
+    if (dirent.isDirectory() && !dirent.isSymbolicLink()) {
+      await restoreOwnerWritable(path.join(dir, dirent.name));
     }
   }
 }

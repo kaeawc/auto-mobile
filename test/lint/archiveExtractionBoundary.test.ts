@@ -21,10 +21,12 @@ function repoRelative(file: string): string {
  * contains `x` (`-x`, `-xf`, `-xzf`, `-vxf`, …). It deliberately does NOT match
  * create/list flags (`-c…`, `-t…`, which carry no `x`), the `-C` change-dir
  * option (uppercase), or the double-dash `--exclude` (an extract bundle is
- * single-dash only). Residual limits: the arg array must be a single-line
- * literal, the command name must be the literal `"tar"` (a path- or
- * variable-resolved `tar` is not caught here — the host-shell boundary guards
- * the shell-string path), and args built from variables are not inspected.
+ * single-dash only). Residual limits: the command name must be the literal
+ * `"tar"` — a path- or variable-resolved `tar` is not caught here. The shell-string
+ * form of that (`exec("/usr/bin/tar …")`) is covered by the host-shell boundary
+ * guard, but an argv-first path-qualified tar (`spawn("/usr/bin/tar", ["-x", …])`)
+ * is caught by neither; it requires deliberately bypassing the HostCommandExecutor
+ * seam. Args built from variables are not inspected.
  */
 function directlyExtractsTar(source: string): boolean {
   const launcher = "(?:spawn|spawnSync|execFile|execFileSync|exec|executeCommand|Bun\\.spawn)";
@@ -33,10 +35,23 @@ function directlyExtractsTar(source: string): boolean {
   // Shell-string form: exec("tar -xzf …") / exec("tar -C dst --extract -f …").
   const shellString = new RegExp(`${launcher}\\s*\\(\\s*["'\`]\\s*tar\\s+[^"'\`]*${extractFlag}`, "i");
   // Argv-first form: executeCommand("tar", ["-xzf", …]) / spawn("tar", ["-C", d, "-x", …]).
-  // The extract flag may appear at any position in the (single-line) array literal.
+  // The extract flag may appear at any position in the array literal.
   const argvForm = new RegExp(`${launcher}\\s*\\(\\s*["'\`]tar["'\`]\\s*,\\s*\\[[^\\]]*["'\`]${extractFlag}["'\`]`, "i");
-  return shellString.test(source) || argvForm.test(source);
+  // Array-first form: Bun.spawn(["tar", "-xzf", …]) — command and args in one array
+  // literal, command first. Bun's spawn uses exactly this shape, so without it the
+  // `Bun.spawn` alternation above would advertise coverage the regex can't deliver.
+  const arrayFirstForm = new RegExp(`${launcher}\\s*\\(\\s*\\[\\s*["'\`]tar["'\`][^\\]]*${extractFlag}`, "i");
+  return shellString.test(source) || argvForm.test(source) || arrayFirstForm.test(source);
 }
+
+/**
+ * Files allowed to reference `tar` extraction outside the owner, each with a
+ * concrete reason. Keep empty unless a production diagnostic cannot use the owner.
+ * Shared by both the enforcing test and the stale-exception ratchet so the ratchet
+ * validates the exceptions that are actually in force.
+ */
+const EXCEPTIONS = new Map<string, string>([
+]);
 
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
@@ -48,12 +63,9 @@ function sourceFiles(directory: string): string[] {
 
 describe("archive extraction boundary (issue #4065)", () => {
   test("only ArchiveExtractor directly runs tar extraction", () => {
-    const exceptions = new Map<string, string>([
-      // Diagnostic-only references are allowed only with a concrete reason here.
-    ]);
     const offenders = sourceFiles(join(ROOT, "src")).flatMap(file => {
       const repoPath = repoRelative(file);
-      if (repoPath === OWNER || exceptions.has(repoPath)) {return [];}
+      if (repoPath === OWNER || EXCEPTIONS.has(repoPath)) {return [];}
       const source = readFileSync(file, "utf8");
       return directlyExtractsTar(source)
         ? [`${repoPath} directly runs tar extraction; route it through ${OWNER} instead.`]
@@ -98,10 +110,16 @@ describe("archive extraction boundary (issue #4065)", () => {
     expect(directlyExtractsTar('executeCommand("tar", ["--exclude", pattern, "-czf", archivePath]);')).toBe(false);
   });
 
+  test("detects array-first tar extraction (Bun.spawn's single-array signature)", () => {
+    expect(directlyExtractsTar('Bun.spawn(["tar", "-xzf", archivePath, "-C", dir]);')).toBe(true);
+    expect(directlyExtractsTar('spawn(["tar", "-x", "-f", archivePath]);')).toBe(true);
+    // Extract flag after a leading -C change-dir option, still one array.
+    expect(directlyExtractsTar('Bun.spawn(["tar", "-C", dir, "--extract", "-f", archivePath]);')).toBe(true);
+    // Creation in array-first form is still not extraction.
+    expect(directlyExtractsTar('Bun.spawn(["tar", "-czf", archivePath, dir]);')).toBe(false);
+  });
+
   test("every documented exception still exists", () => {
-    const exceptions = new Map<string, string>([
-      // Keep this list empty unless a production diagnostic cannot use the owner.
-    ]);
-    expect([...exceptions.keys()].filter(path => !sourceFiles(join(ROOT, "src")).some(file => repoRelative(file) === path))).toEqual([]);
+    expect([...EXCEPTIONS.keys()].filter(path => !sourceFiles(join(ROOT, "src")).some(file => repoRelative(file) === path))).toEqual([]);
   });
 });

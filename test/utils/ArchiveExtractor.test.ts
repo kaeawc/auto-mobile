@@ -38,12 +38,20 @@ function execResult(stdout: string): ExecResult {
 class RecordingExecutor implements HostCommandExecutor {
   public readonly calls: Array<{ file: string; args: string[]; options?: HostCommandOptions }> = [];
   public listing = "";
+  public listError: Error | null = null;
   public extractError: Error | null = null;
   public filesToWrite: string[] = [];
+  // Symlink members tar would create in the staging dir (name-only listings hide these).
+  public symlinksToWrite: Array<{ path: string; target: string }> = [];
+  // Mode a malicious `./` member would leave on the staging dir after extraction.
+  public stagingModeAfterExtract: number | null = null;
 
   async executeCommand(file: string, args: string[] = [], options?: HostCommandOptions): Promise<ExecResult> {
     this.calls.push({ file, args, options });
     if (args[0] === "-tzf") {
+      if (this.listError) {
+        throw this.listError;
+      }
       return execResult(this.listing);
     }
     if (this.extractError) {
@@ -55,6 +63,14 @@ class RecordingExecutor implements HostCommandExecutor {
       const target = path.join(destDir, rel);
       await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
       await fs.writeFile(target, "payload", { mode: 0o600 });
+    }
+    for (const link of this.symlinksToWrite) {
+      const linkPath = path.join(destDir, link.path);
+      await fs.mkdir(path.dirname(linkPath), { recursive: true, mode: 0o700 });
+      await fs.symlink(link.target, linkPath);
+    }
+    if (this.stagingModeAfterExtract !== null) {
+      await fs.chmod(destDir, this.stagingModeAfterExtract);
     }
     return execResult("");
   }
@@ -208,5 +224,74 @@ describe("DefaultArchiveExtractor", () => {
       expect(call.options?.timeoutMs).toBe(5000);
       expect(call.options?.signal).toBe(controller.signal);
     }
+  });
+
+  test("wraps a failing listing (missing or corrupt archive) in an actionable error", async () => {
+    const destinationDir = await makeTempDir();
+    const executor = new RecordingExecutor();
+    executor.listError = new Error("tar: Error opening archive: Unrecognized archive format");
+    const extractor = new DefaultArchiveExtractor(executor);
+
+    const thrown = await extractor
+      .extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir })
+      .catch(error => error);
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect((thrown as ActionableError).message).toContain("missing or corrupt");
+    // Listing failed, so extraction was never attempted and nothing was written.
+    expect(executor.calls).toHaveLength(1);
+    expect(await fs.readdir(destinationDir)).toEqual([]);
+  });
+
+  test("rejects a staged symlink member whose target escapes the destination", async () => {
+    const destinationDir = await makeTempDir();
+    const executor = new RecordingExecutor();
+    // `tar -tzf` reports only the benign member name; the symlink type/target is hidden.
+    executor.listing = "pkg/\npkg/tool";
+    executor.symlinksToWrite = [{ path: "pkg/tool", target: "../../../outside/payload" }];
+    const extractor = new DefaultArchiveExtractor(executor);
+
+    const thrown = await extractor
+      .extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir })
+      .catch(error => error);
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect((thrown as ActionableError).message).toContain("escapes the destination");
+    // Nothing escaped: the staging tree was cleaned up, destination left empty.
+    expect(await fs.readdir(destinationDir)).toEqual([]);
+  });
+
+  test("allows a self-contained symlink whose target stays inside the destination", async () => {
+    const destinationDir = await makeTempDir();
+    const executor = new RecordingExecutor();
+    executor.listing = "lib/\nlib/libwebp.7.dylib\nlib/libwebp.dylib";
+    executor.filesToWrite = ["lib/libwebp.7.dylib"];
+    // Versioned dylib link, same directory — a normal shape for a lib archive.
+    executor.symlinksToWrite = [{ path: "lib/libwebp.dylib", target: "libwebp.7.dylib" }];
+    const extractor = new DefaultArchiveExtractor(executor);
+
+    await extractor.extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir });
+
+    // The link landed in place and still resolves inside the destination.
+    const linkPath = path.join(destinationDir, "lib", "libwebp.dylib");
+    expect((await fs.lstat(linkPath)).isSymbolicLink()).toBe(true);
+    expect(await fs.readlink(linkPath)).toBe("libwebp.7.dylib");
+  });
+
+  test("recovers when a malicious `./` member leaves the staging dir unwritable", async () => {
+    const destinationDir = await makeTempDir();
+    const executor = new RecordingExecutor();
+    executor.listing = "pkg/\npkg/bin/tool";
+    executor.filesToWrite = ["pkg/bin/tool"];
+    // tar applies a `0555` `./` member's mode to the staging root, which would break
+    // both the rename out and the best-effort cleanup unless permissions are restored.
+    executor.stagingModeAfterExtract = 0o555;
+    const extractor = new DefaultArchiveExtractor(executor);
+
+    await extractor.extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir });
+
+    // Results landed and no `.am-extract-*` staging tree was stranded.
+    expect(await fs.readFile(path.join(destinationDir, "pkg", "bin", "tool"), "utf8")).toBe("payload");
+    expect(await fs.readdir(destinationDir)).toEqual(["pkg"]);
   });
 });

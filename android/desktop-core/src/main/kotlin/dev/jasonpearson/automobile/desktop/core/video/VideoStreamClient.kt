@@ -95,6 +95,14 @@ class VideoStreamClient(
     encodeDefaults = true
   },
   private val decoderFactory: () -> H264Decoder = { H264Decoder() },
+  /**
+   * Supplies the daemon session UUID that authenticates the `subscribe` request against the
+   * stream-socket session guard (issue #4751). Resolved at connect time so a session established
+   * after construction is still used. Null (the default) omits the `sessionUuid` field via
+   * [explicitNulls] = false, so the daemon rejects the subscribe unless it was started with
+   * `AUTOMOBILE_DAEMON_STREAM_AUTH=0`. The desktop cannot yet populate it -- see issue #4924.
+   */
+  private val sessionUuidProvider: () -> String? = { null },
 ) : VideoStreamSource {
 
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -161,7 +169,11 @@ class VideoStreamClient(
         writer.write(
           json.encodeToString(
             serializer<VideoStreamRequest>(),
-            VideoStreamRequest(id = UUID.randomUUID().toString(), deviceId = deviceId),
+            VideoStreamRequest(
+              id = UUID.randomUUID().toString(),
+              sessionUuid = sessionUuidProvider(),
+              deviceId = deviceId,
+            ),
           )
         )
         writer.newLine()
@@ -254,6 +266,12 @@ class VideoStreamClient(
 internal data class VideoStreamRequest(
   val id: String,
   val action: String = "subscribe",
+  /**
+   * Daemon session UUID authenticating this subscribe against the stream-socket session guard
+   * (issue #4751). Omitted when null (see [explicitNulls] = false above), matching the escape-hatch
+   * path; a non-null value must resolve to a live daemon session. See issue #4924.
+   */
+  val sessionUuid: String? = null,
   val deviceId: String? = null,
 )
 

@@ -99,6 +99,37 @@ class VideoStreamClientTest {
   }
 
   @Test
+  fun `subscribe carries the session uuid the provider supplies`() = runBlocking {
+    // #4751 stream-socket auth: a resolved daemon session UUID authenticates the subscribe.
+    val server = relay(payload = sampleH264())
+    val client =
+      VideoStreamClient(
+        socketPathValue = server.socketPath.toString(),
+        sessionUuidProvider = { "session-abc" },
+      )
+
+    client.connect("emulator-5554")
+    server.awaitFirstFrameFrom(client)
+
+    assertEquals("session-abc", server.awaitRequest()["sessionUuid"]?.jsonPrimitive?.content)
+    client.dispose()
+  }
+
+  @Test
+  fun `subscribe omits the session uuid when the provider returns null`() = runBlocking {
+    // Default: the desktop holds no daemon session identity yet (issue #4924); the field must be
+    // omitted so a pre-#4751 daemon still accepts the subscribe.
+    val server = relay(payload = sampleH264())
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+
+    client.connect("emulator-5554")
+    server.awaitFirstFrameFrom(client)
+
+    assertTrue(!server.awaitRequest().containsKey("sessionUuid"))
+    client.dispose()
+  }
+
+  @Test
   fun `a refused subscribe surfaces the daemon's reason`() = runBlocking {
     val server = relay(success = false, error = "No connected device with id ghost.")
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())

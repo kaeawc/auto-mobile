@@ -175,6 +175,14 @@ function makeSource(overrides: Record<string, unknown> = {}) {
           : "");
       return { stdout, stderr: "", exitCode: 0 };
     }
+    if (command.includes("stat -c")) {
+      // The orphan-file sweep listing (`NOW <epoch>` + `<mtime> <path>` rows).
+      return {
+        stdout: (overrides.leaseFileListing as string | undefined) ?? "",
+        stderr: "",
+        exitCode: 0,
+      };
+    }
     if (command.includes(`for f in ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json`)) {
       return { stdout: leaseOutput, stderr: "", exitCode: 0 };
     }
@@ -1025,6 +1033,186 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.commands).toContain("forward --remove tcp:61234");
     expect(ctx.commands).toContain("shell kill -2 987");
     expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/stale-session.json`);
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("reconciles a lease with valid wall clock but no elapsed-realtime via the wall-clock fallback", async () => {
+    // heartbeatElapsedRealtimeMs absent (validator tolerates it). FakeTimer.now()
+    // is 0, so heartbeatAtMs=-400_000 => 400s wall age >= 5min threshold => stale.
+    const leaseNoElapsed = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_stale",
+      sessionToken: "stale-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: -400_000,
+      heartbeatAtMs: -400_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: leaseNoElapsed,
+      forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
+      processCommandLine:
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("shell kill -2 987");
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/stale-session.json`);
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("does NOT reconcile a lease with no elapsed-realtime whose wall clock is recent", async () => {
+    // heartbeatAtMs=-1_000 => 1s wall age (now()=0) << 5min threshold => keep.
+    const freshNoElapsed = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_fresh",
+      sessionToken: "fresh-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: -1_000,
+      heartbeatAtMs: -1_000,
+    });
+    const ctx = makeSource({ leaseOutput: freshNoElapsed });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).not.toContain("shell kill -2 987");
+    expect(ctx.commands).not.toContain("forward --remove tcp:61234");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("reconciles a previous-boot lease written under a renumbered emulator serial", async () => {
+    // Serial differs (emulator-5556 vs the device's emulator-5554), but a
+    // negative elapsed age proves it predates the current boot => reclaim.
+    const staleLeaseOldSerial = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_stale",
+      sessionToken: "stale-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: "emulator-5556",
+      forwardPort: 61234,
+      startedAtMs: -40_000,
+      heartbeatAtMs: -31_000,
+      heartbeatElapsedRealtimeMs: 120_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: staleLeaseOldSerial,
+      deviceUptimeMs: 5_000,
+      forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
+      processCommandLine:
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --remove tcp:61234");
+    expect(ctx.commands).toContain("shell kill -2 987");
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/stale-session.json`);
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("does NOT reconcile a same-boot lease under a different serial", async () => {
+    // Positive, fresh elapsed age (not previous-boot) + a different serial is
+    // too ambiguous to reclaim.
+    const freshOtherSerial = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_other",
+      sessionToken: "other-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: "emulator-5556",
+      forwardPort: 61234,
+      startedAtMs: 95_000,
+      heartbeatAtMs: 95_000,
+      heartbeatElapsedRealtimeMs: 95_000,
+    });
+    const ctx = makeSource({ leaseOutput: freshOtherSerial, deviceUptimeMs: 100_000 });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).not.toContain("shell kill -2 987");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("sweeps an unparseable *.json and an orphaned *.json.tmp older than the age threshold", async () => {
+    // Directory has a corrupt .json (not a valid lease => not in known tokens)
+    // and an orphaned .json.tmp. Device clock is 1_000_000s; both files are old.
+    const oldMtime = 1_000_000 - 600; // 600s old >= 5min threshold
+    const ctx = makeSource({
+      leaseOutput: "not-json-at-all\n",
+      leaseFileListing:
+        `NOW 1000000\n` +
+        `${oldMtime} ${VIDEO_SERVER_LEASE_DIRECTORY}/corrupt.json\n` +
+        `${oldMtime} ${VIDEO_SERVER_LEASE_DIRECTORY}/leftover.json.tmp\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/corrupt.json`);
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/leftover.json.tmp`);
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("leaves young unparseable/.tmp files and valid leases alone during the sweep", async () => {
+    const youngMtime = 1_000_000 - 10; // 10s old << 5min threshold
+    const validLease = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_fresh",
+      sessionToken: "fresh-session",
+      pid: 988,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61235,
+      startedAtMs: 95_000,
+      heartbeatAtMs: 95_000,
+      heartbeatElapsedRealtimeMs: 95_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: validLease,
+      deviceUptimeMs: 100_000,
+      leaseFileListing:
+        `NOW 1000000\n` +
+        `${youngMtime} ${VIDEO_SERVER_LEASE_DIRECTORY}/corrupt.json\n` +
+        `${youngMtime} ${VIDEO_SERVER_LEASE_DIRECTORY}/leftover.json.tmp\n` +
+        `990000 ${VIDEO_SERVER_LEASE_DIRECTORY}/fresh-session.json\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).not.toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/corrupt.json`);
+    expect(ctx.commands).not.toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/leftover.json.tmp`);
+    // A valid, current lease file is never swept even though its mtime is old.
+    expect(ctx.commands).not.toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/fresh-session.json`);
 
     ctx.processes[0].ready();
     await startPromise;

@@ -27,6 +27,21 @@ const VIDEO_SERVER_MAIN_CLASS = "dev.jasonpearson.automobile.video.VideoServer";
 export const VIDEO_SERVER_LEASE_DIRECTORY = "/data/local/tmp/automobile-video-sessions";
 /** A device heartbeat older than this is eligible for owned stale cleanup. */
 const STALE_LEASE_MS = 30_000;
+/**
+ * Fallback staleness threshold for a lease that predates the
+ * `heartbeatElapsedRealtimeMs` field (see `hasValidLeaseHeartbeat`). The
+ * monotonic elapsed-realtime clock is unavailable, so we fall back to the
+ * always-written wall-clock `heartbeatAtMs`. Wall clock can jump (NTP, manual
+ * set, timezone), so this is deliberately several minutes rather than the 30 s
+ * monotonic window — a jump smaller than this cannot cause a false reclaim.
+ */
+const STALE_LEASE_WALL_CLOCK_MS = 5 * 60_000;
+/**
+ * A lease *file* (unparseable `*.json` or orphaned `*.json.tmp`) whose mtime is
+ * older than this is swept during reconcile. Conservative because a
+ * `*.json.tmp` may be mid-rename by a live server; younger files are left alone.
+ */
+const STALE_LEASE_FILE_SWEEP_MS = 5 * 60_000;
 const SESSION_READY_PATTERN = /^VIDEO_SESSION_READY token=([^ ]+) pid=(\d+) socket=([^ ]+)$/;
 /** Server stdout line printed after capture has fully started. */
 const STREAMING_STARTED_MARKER = "Streaming started";
@@ -219,6 +234,49 @@ function parseLeases(output: string): VideoServerLease[] {
         return [];
       }
     });
+}
+
+/** Basenames the sweep is allowed to `rm`; guards against odd device output. */
+const LEASE_FILE_NAME_PATTERN = /^[A-Za-z0-9_.-]+\.json(?:\.tmp)?$/;
+
+/**
+ * Parse the `sweepOrphanLeaseFiles` listing: a leading `NOW <epochSeconds>`
+ * line emitted by `date +%s`, followed by `<mtimeSeconds> <path>` rows from
+ * `stat -c '%Y %n'`. Returns the device wall clock in ms plus each file's
+ * basename and mtime in ms. Rows whose basename fails the safe-name pattern are
+ * dropped so the caller never issues a surprising `rm`.
+ */
+function parseLeaseFileListing(output: string): {
+  nowEpochMs: number | null;
+  files: { name: string; mtimeMs: number }[];
+} {
+  let nowEpochMs: number | null = null;
+  const files: { name: string; mtimeMs: number }[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    if (trimmed.startsWith("NOW ")) {
+      const seconds = Number.parseInt(trimmed.slice(4).trim(), 10);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        nowEpochMs = seconds * 1_000;
+      }
+      continue;
+    }
+    const separator = trimmed.indexOf(" ");
+    if (separator <= 0) {
+      continue;
+    }
+    const mtimeSeconds = Number.parseInt(trimmed.slice(0, separator), 10);
+    const path = trimmed.slice(separator + 1).trim();
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    if (!Number.isFinite(mtimeSeconds) || mtimeSeconds < 0 || !LEASE_FILE_NAME_PATTERN.test(name)) {
+      continue;
+    }
+    files.push({ name, mtimeMs: mtimeSeconds * 1_000 });
+  }
+  return { nowEpochMs, files };
 }
 
 /**
@@ -1116,6 +1174,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       return;
     }
 
+    // Sweep corrupt/orphaned files regardless of how many leases parsed: a
+    // wholly-unparseable directory yields zero leases but still needs cleanup.
+    await this.sweepOrphanLeaseFiles(adb, new Set(leases.map(lease => `${lease.token}.json`)));
+
     if (leases.length === 0) {
       return;
     }
@@ -1126,25 +1188,114 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
 
     for (const lease of leases) {
-      const heartbeatElapsedRealtimeMs = lease.heartbeatElapsedRealtimeMs;
-      if (
-        lease.deviceSerial !== this.options.device.deviceId ||
-        heartbeatElapsedRealtimeMs === undefined
-      ) {
-        continue;
-      }
-      const ageMs = deviceElapsedRealtimeMs - heartbeatElapsedRealtimeMs;
-      // elapsedRealtime resets when Android reboots. A negative age therefore
-      // proves this persisted lease belongs to a previous boot.
-      if (ageMs >= 0 && ageMs < STALE_LEASE_MS) {
+      const decision = this.classifyLeaseForReclaim(lease, deviceElapsedRealtimeMs);
+      if (decision === null) {
         continue;
       }
       logger.info(
-        `[PersistentEncoderH264Source] stale-session-cleanup token=${lease.token} ageMs=${ageMs}`
+        `[PersistentEncoderH264Source] stale-session-cleanup token=${lease.token} reason=${decision}`
       );
       await this.removeForwardIfMatching(adb, lease.forwardPort, lease.socketName);
       await this.terminateProcessIfMatching(adb, lease);
       await this.removeLeaseIfMatching(adb, lease);
+    }
+  }
+
+  /**
+   * Decide whether a parsed lease should be reclaimed, returning a short reason
+   * string when it should and `null` when it should be left alone.
+   *
+   * Precedence deliberately puts the reboot check FIRST: emulator serials are
+   * port-based (`emulator-5554` -> `emulator-5556` across restarts), so a lease
+   * written under a prior serial is on the SAME device filesystem and must not
+   * be stranded. A negative elapsed-realtime age proves the lease predates the
+   * current boot, which is safe to reclaim regardless of the recorded serial.
+   * Only for leases NOT provably from a previous boot do we fall back to the
+   * conservative same-serial staleness checks.
+   */
+  private classifyLeaseForReclaim(
+    lease: VideoServerLease,
+    deviceElapsedRealtimeMs: number
+  ): string | null {
+    const elapsedRealtimeMs = lease.heartbeatElapsedRealtimeMs;
+    if (elapsedRealtimeMs !== undefined && deviceElapsedRealtimeMs - elapsedRealtimeMs < 0) {
+      // elapsedRealtime resets when Android reboots. A negative age therefore
+      // proves this persisted lease belongs to a previous boot.
+      return "previous-boot";
+    }
+
+    if (lease.deviceSerial !== this.options.device.deviceId) {
+      // Same-boot lease under a different serial: too ambiguous to reclaim.
+      return null;
+    }
+
+    if (elapsedRealtimeMs === undefined) {
+      // Legacy/edge lease without the monotonic field. Fall back to the
+      // always-written wall clock with a conservative multi-minute threshold so
+      // the validator's tolerance and this loop stop disagreeing (issue #4783).
+      const wallAgeMs = this.timer.now() - lease.heartbeatAtMs;
+      return wallAgeMs >= STALE_LEASE_WALL_CLOCK_MS ? "wall-clock-stale" : null;
+    }
+
+    const ageMs = deviceElapsedRealtimeMs - elapsedRealtimeMs;
+    return ageMs >= STALE_LEASE_MS ? "elapsed-stale" : null;
+  }
+
+  /**
+   * Remove lease files that can never be reconciled through the normal path:
+   * unparseable `*.json` (basename not among the parsed lease tokens) and
+   * orphaned `*.json.tmp` files left by a SIGKILL between `writeText` and
+   * `renameTo`. Only files older than `STALE_LEASE_FILE_SWEEP_MS` (by device
+   * mtime) are swept, so a file mid-rename by a live server is left alone.
+   */
+  private async sweepOrphanLeaseFiles(
+    adb: ReturnType<AdbClientFactory["create"]>,
+    knownLeaseFileNames: ReadonlySet<string>
+  ): Promise<void> {
+    let listing: { nowEpochMs: number | null; files: { name: string; mtimeMs: number }[] };
+    try {
+      const command =
+        `printf 'NOW %s\\n' "$(date +%s)"; ` +
+        `for f in ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json.tmp; do ` +
+        '[ -f "$f" ] || continue; stat -c \'%Y %n\' "$f"; done';
+      const result = await this.withTimeout(
+        adb.executeCommand(`shell sh -c ${shellQuote(command)}`),
+        this.teardownTimeoutMs,
+        "adb list stale video session lease files"
+      );
+      listing = parseLeaseFileListing(result.stdout);
+    } catch (error) {
+      logger.debug(`[PersistentEncoderH264Source] unable to list video session lease files: ${error}`);
+      return;
+    }
+
+    if (listing.nowEpochMs === null) {
+      logger.debug("[PersistentEncoderH264Source] lease-file sweep skipped: no device clock in listing");
+      return;
+    }
+
+    for (const file of listing.files) {
+      const isTmp = file.name.endsWith(".json.tmp");
+      // A parseable, known `*.json` lease is handled by the reconcile loop.
+      if (!isTmp && knownLeaseFileNames.has(file.name)) {
+        continue;
+      }
+      const ageMs = listing.nowEpochMs - file.mtimeMs;
+      if (ageMs < STALE_LEASE_FILE_SWEEP_MS) {
+        continue;
+      }
+      logger.info(
+        `[PersistentEncoderH264Source] stale-lease-file-sweep name=${file.name} ageMs=${ageMs}`
+      );
+      try {
+        await this.withTimeout(
+          adb.executeCommand(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${file.name}`),
+          this.teardownTimeoutMs,
+          "adb remove stale video session lease file"
+        );
+      } catch (error) {
+        logger.debug(`[PersistentEncoderH264Source] stale-lease-file sweep failed name=${file.name}: ${error}`);
+      }
     }
   }
 

@@ -56,9 +56,7 @@ export class ListInstalledApps {
     try {
       switch (this.device.platform) {
         case "ios":
-          // iOS: list installed apps via simctl
-          const apps = await this.simctl.listApps();
-          return apps.map((app: any) => app.bundleId);
+          return await this.executeIos();
         case "android":
           // For backward compatibility, just return package names
           const detailedApps = await this.executeDetailed();
@@ -113,7 +111,7 @@ export class ListInstalledApps {
       return null;
     }
 
-    const foregroundApp = await this.adb.getForegroundApp();
+    const foregroundApp = this.device.platform === "android" ? await this.adb.getForegroundApp() : null;
     logger.info(`[ListInstalledApps] Using cached installed apps list (age ${cacheAgeMs}ms, rows ${cachedRows.length})`);
     return this.buildInstalledAppsFromRows(cachedRows, foregroundApp);
   }
@@ -274,6 +272,53 @@ export class ListInstalledApps {
     }
 
     return installedApps;
+  }
+
+  private async executeIos(): Promise<string[]> {
+    try {
+      if (this.cacheEnabled) {
+        const cachedApps = await this.getCachedInstalledApps();
+        if (cachedApps) {
+          return this.flattenPackageNames(cachedApps);
+        }
+      }
+
+      const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(this.device.deviceId);
+      const apps = await this.simctl.listApps(this.device.deviceId);
+      const bundleIds = apps
+        .map(app => this.extractIosBundleId(app))
+        .filter((bundleId): bundleId is string => bundleId !== undefined);
+
+      if (this.cacheEnabled) {
+        const timestampMs = this.timer.now();
+        const entries = bundleIds.map(bundleId => ({
+          device_id: this.device.deviceId,
+          user_id: 0,
+          package_name: bundleId,
+          is_system: 0,
+          installed_at: timestampMs,
+          last_verified_at: timestampMs
+        }));
+        await getInstalledAppsCacheWriteCoordinator().commitRebuild(this.device.deviceId, cacheGeneration, () =>
+          getDbWriteBarrier().track(() =>
+            this.installedAppsRepository.replaceInstalledApps(this.device.deviceId, entries)
+          ).then(() => undefined)
+        );
+      }
+      return bundleIds;
+    } catch (error) {
+      logger.warn("Failed to list installed iOS apps:", error);
+      return [];
+    }
+  }
+
+  private extractIosBundleId(app: unknown): string | undefined {
+    if (!app || typeof app !== "object") {
+      return undefined;
+    }
+    const record = app as Record<string, unknown>;
+    const bundleId = record.bundleId ?? record.bundleIdentifier;
+    return typeof bundleId === "string" && bundleId.length > 0 ? bundleId : undefined;
   }
 
   // Why: PackageManager runs as the service user, so cross-user queries

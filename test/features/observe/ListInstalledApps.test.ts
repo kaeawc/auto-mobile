@@ -6,6 +6,7 @@ import { BootedDevice, AndroidUser } from "../../../src/models";
 import type { NewInstalledApp } from "../../../src/db/types";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 
 describe("ListInstalledApps", function() {
   let listInstalledApps: ListInstalledApps;
@@ -279,6 +280,31 @@ describe("ListInstalledApps", function() {
   });
 
   describe("cache", function() {
+    test("caches iOS bundle IDs and rebuilds after the cache is marked stale", async function() {
+      const iosDevice: BootedDevice = {
+        deviceId: "ios-cache-device",
+        platform: "ios"
+      } as BootedDevice;
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1_000);
+      const simctl = new FakeSimctl();
+      simctl.setInstalledApps([{ bundleId: "com.example.cached" }]);
+      const list = new ListInstalledApps(
+        iosDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        simctl,
+        { cacheEnabled: true, installedAppsRepository: repo, timer }
+      );
+
+      await expect(list.execute()).resolves.toEqual(["com.example.cached"]);
+      simctl.setInstalledApps([{ bundleIdentifier: "com.example.updated" }]);
+      await expect(list.execute()).resolves.toEqual(["com.example.cached"]);
+
+      await repo.markDeviceStale(iosDevice.deviceId);
+      await expect(list.execute()).resolves.toEqual(["com.example.updated"]);
+    });
+
     test("should use cached apps when fresh", async function() {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();

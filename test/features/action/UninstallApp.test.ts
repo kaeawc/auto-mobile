@@ -44,7 +44,9 @@ describe("UninstallApp (iOS simulator)", () => {
       fakeSimctl.setInstalledApps([]);
     };
 
-    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const repo = new FakeInstalledAppsRepository();
+    await repo.upsertInstalledApp(iosSimDevice.deviceId, 0, "com.example.app", false, 1_000);
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller, repo);
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -53,6 +55,7 @@ describe("UninstallApp (iOS simulator)", () => {
     expect(result.packageName).toBe("com.example.app");
     expect(fakeUninstaller.calls[0]?.isSimulator).toBe(true);
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(true);
+    expect(await repo.getLatestVerification(iosSimDevice.deviceId)).toBe(0);
   });
 
   test("returns success when app is not installed", async () => {

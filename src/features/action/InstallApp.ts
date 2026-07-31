@@ -337,6 +337,8 @@ export class InstallApp {
 
     const downgraded = await perf.track("simctlInstall", () => this.installiOSSimulatorWithDowngradeRecovery(appPath, signal));
 
+    await this.markInstalledAppsCacheStale(true);
+
     if (signal?.aborted) {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
@@ -415,6 +417,7 @@ export class InstallApp {
         // Best-effort terminate; proceed with uninstall regardless.
       }
       await this.simctl.uninstallApp(bundleId, this.device.deviceId);
+      await this.markInstalledAppsCacheStale(true);
       if (signal?.aborted) {
         throw new Error(OPERATION_CANCELLED_MESSAGE);
       }
@@ -434,6 +437,7 @@ export class InstallApp {
 
     try {
       await perf.track("devicectlInstall", () => this.deviceAppInstaller.installApp(this.device.deviceId, ipaPath));
+      await this.markInstalledAppsCacheStale(true);
     } catch (error) {
       const text = this.extractErrorText(error);
       if (this.isiOSDowngradeError(text)) {

@@ -117,6 +117,7 @@ export class UninstallApp {
 
       // Uninstall the app via simctl (simulator) or devicectl (physical)
       await this.deviceAppUninstaller.uninstallApp(this.device.deviceId, bundleId, simulator);
+      await this.markInstalledAppsCacheStale();
 
       // Verify the app was uninstalled
       const isStillInstalled = (await listApps.execute()).find(app => app === bundleId) !== undefined;

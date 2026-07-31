@@ -123,6 +123,31 @@ export class NavigationRepository {
   }
 
   /**
+   * List every app that has a persisted navigation graph, newest-updated first.
+   *
+   * Device-independent: reads only persisted rows so the desktop can populate an
+   * offline app picker. "Has a graph" means at least one recorded screen, so a
+   * bare app row created by `getOrCreateApp`/`setCurrentApp` with no nodes is
+   * excluded via a single EXISTS subquery over navigation_nodes (no row-by-row
+   * probing). app_id is the PRIMARY KEY, so results are already distinct.
+   */
+  async listApps(): Promise<Array<Pick<NavigationApp, "app_id" | "updated_at">>> {
+    const db = this.getDb();
+    return db
+      .selectFrom("navigation_apps")
+      .select(["app_id", "updated_at"])
+      .where(({ exists, selectFrom }) =>
+        exists(
+          selectFrom("navigation_nodes")
+            .select("navigation_nodes.id")
+            .whereRef("navigation_nodes.app_id", "=", "navigation_apps.app_id")
+        )
+      )
+      .orderBy("updated_at", "desc")
+      .execute();
+  }
+
+  /**
    * Get or create a navigation node (screen).
    */
   async getOrCreateNode(

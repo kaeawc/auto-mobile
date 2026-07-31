@@ -15,14 +15,16 @@ import {
   NavigationGraphSummaryProvider,
   NavigationGraphNodeDetail,
   NavigationGraphNodeResource,
-  NavigationGraphNodeResourceProvider
+  NavigationGraphNodeResourceProvider,
+  NavigationAppSummary,
+  NavigationAppListProvider
 } from "../../src/utils/interfaces/NavigationGraph";
 
 /**
  * Fake implementation of NavigationGraph for testing.
  * Allows full control over navigation graph state and behavior.
  */
-export class FakeNavigationGraphManager implements NavigationGraph, NavigationGraphSummaryProvider, NavigationGraphNodeResourceProvider {
+export class FakeNavigationGraphManager implements NavigationGraph, NavigationGraphSummaryProvider, NavigationGraphNodeResourceProvider, NavigationAppListProvider {
   private currentAppId: string | null = null;
   private currentScreen: string | null = null;
   private nodes: Map<string, NavigationNode> = new Map();
@@ -33,6 +35,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
   private nextNodeId = 1;
   private nextEdgeId = 1;
   private graphUpdateListeners: Array<() => void> = [];
+  private appsWithGraph: NavigationAppSummary[] = [];
 
   // Call tracking
   private methodCalls: Map<string, any[][]> = new Map();
@@ -77,6 +80,13 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
       to: edge.to,
       toolName: edge.interaction?.toolName ?? null
     });
+  }
+
+  /**
+   * Set the apps that listAppsWithGraph will return.
+   */
+  setAppsWithGraph(apps: NavigationAppSummary[]): void {
+    this.appsWithGraph = [...apps];
   }
 
   /**
@@ -145,7 +155,13 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
     this.nextEdgeId = 1;
     this.graphUpdateListeners = [];
     this.pathResult = null;
+    this.appsWithGraph = [];
     this.methodCalls.clear();
+  }
+
+  async listAppsWithGraph(): Promise<NavigationAppSummary[]> {
+    this.trackCall("listAppsWithGraph", []);
+    return [...this.appsWithGraph];
   }
 
   // ==================== NavigationGraph Interface ====================

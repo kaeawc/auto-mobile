@@ -245,6 +245,31 @@ export interface NavigationGraphHistoryPage {
 }
 
 /**
+ * Summary of an app that has a persisted navigation graph. Enables enumerating
+ * apps for an offline picker without a connected device.
+ */
+export interface NavigationAppSummary {
+  /** Application package id (e.g. "com.example.app"). */
+  appId: string;
+  /**
+   * Human-readable name when known. The persisted navigation schema has no
+   * display-name column, so this is currently always null; the field exists so
+   * a name source can be wired without a breaking response-shape change.
+   */
+  displayName: string | null;
+  /** ISO-8601 timestamp of the app's most recent navigation-graph update. */
+  lastUpdated: string;
+}
+
+/**
+ * Provider that enumerates apps which have a persisted navigation graph.
+ * Device-independent — reads only persisted rows.
+ */
+export interface NavigationAppListProvider {
+  listAppsWithGraph(): Promise<NavigationAppSummary[]>;
+}
+
+/**
  * Provider interface for navigation graph summaries.
  */
 export interface NavigationGraphSummaryProvider {

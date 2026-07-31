@@ -7,12 +7,15 @@ import {
   NavigationGraphSummaryProvider,
   NavigationGraphNodeResource,
   NavigationGraphNodeResourceProvider,
-  NavigationGraphHistoryProvider
+  NavigationGraphHistoryProvider,
+  NavigationAppSummary,
+  NavigationAppListProvider
 } from "../utils/interfaces/NavigationGraph";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
 
 export const NAVIGATION_RESOURCE_URIS = {
+  APPS: "automobile:navigation/apps",
   GRAPH: "automobile:navigation/graph",
   GRAPH_WITH_APP_ID: "automobile:navigation/graph?appId={appId}",
   NODE_BY_ID: "automobile:navigation/nodes/{nodeId}",
@@ -27,13 +30,17 @@ export const NAVIGATION_RESOURCE_URIS = {
 
 export type NavigationGraphResourceContent = NavigationGraphSummary;
 export type NavigationNodeResourceContent = NavigationGraphNodeResource;
+export interface NavigationAppsResourceContent {
+  apps: NavigationAppSummary[];
+}
 
 const GRAPH_RESOURCE_UPDATE_DEBOUNCE_MS = 1000;
 
 type NavigationGraphResourceProvider =
   NavigationGraphSummaryProvider &
   NavigationGraphNodeResourceProvider &
-  NavigationGraphHistoryProvider;
+  NavigationGraphHistoryProvider &
+  NavigationAppListProvider;
 
 let navigationGraphProvider: NavigationGraphResourceProvider | null = null;
 
@@ -51,6 +58,7 @@ function scheduleNavigationGraphUpdate(): void {
   updateTimeout = defaultTimer.setTimeout(() => {
     updateTimeout = null;
     void ResourceRegistry.notifyResourcesUpdated([
+      NAVIGATION_RESOURCE_URIS.APPS,
       NAVIGATION_RESOURCE_URIS.GRAPH,
       NAVIGATION_RESOURCE_URIS.HISTORY,
     ]);
@@ -101,6 +109,29 @@ async function getNavigationGraphResource(appId?: string): Promise<ResourceConte
       mimeType: "application/json",
       text: JSON.stringify({
         error: `Failed to retrieve navigation graph: ${error}`
+      }, null, 2)
+    };
+  }
+}
+
+async function getNavigationAppsResource(): Promise<ResourceContent> {
+  const uri = NAVIGATION_RESOURCE_URIS.APPS;
+
+  try {
+    const apps = await getNavigationGraphProvider().listAppsWithGraph();
+    const payload: NavigationAppsResourceContent = { apps };
+    return {
+      uri,
+      mimeType: "application/json",
+      text: JSON.stringify(payload, null, 2)
+    };
+  } catch (error) {
+    logger.error(`[NavigationResources] Failed to list apps with navigation graph: ${error}`);
+    return {
+      uri,
+      mimeType: "application/json",
+      text: JSON.stringify({
+        error: `Failed to list apps with navigation graph: ${error}`
       }, null, 2)
     };
   }
@@ -277,6 +308,14 @@ export function registerNavigationResources(options: {
   }
 
   attachGraphUpdateListener(getNavigationGraphProvider());
+
+  ResourceRegistry.register(
+    NAVIGATION_RESOURCE_URIS.APPS,
+    "Navigation Apps",
+    "Apps that have a persisted navigation graph (appId, displayName, lastUpdated). No connected device required.",
+    "application/json",
+    () => getNavigationAppsResource()
+  );
 
   ResourceRegistry.register(
     NAVIGATION_RESOURCE_URIS.GRAPH,

@@ -27,6 +27,8 @@ import {
   NavigationGraphNodeDetail,
   NavigationGraphNodeResource,
   NavigationGraphNodeResourceProvider,
+  NavigationAppSummary,
+  NavigationAppListProvider,
   NavigationSuggestionInfo,
   UIState,
   ScrollPosition,
@@ -45,7 +47,7 @@ export type {
  * Provides methods for tracking screen visits, recording navigation events,
  * and querying navigation paths.
  */
-export interface NavigationGraphService extends NavigationGraph, NavigationGraphSummaryProvider, NavigationGraphHistoryProvider, NavigationGraphNodeResourceProvider {
+export interface NavigationGraphService extends NavigationGraph, NavigationGraphSummaryProvider, NavigationGraphHistoryProvider, NavigationGraphNodeResourceProvider, NavigationAppListProvider {
   // App management
   setCurrentApp(appId: string): Promise<void>;
   getCurrentAppId(): string | null;
@@ -1302,6 +1304,21 @@ export class NavigationGraphManager implements NavigationGraphService {
       edges,
       currentScreen: appId === this.currentAppId ? this.currentScreen : null,
     };
+  }
+
+  /**
+   * List every app that has a persisted navigation graph, newest-updated first.
+   * Device-independent (reads persisted rows only) so the desktop can populate an
+   * offline app picker. displayName is null: the persisted schema has no
+   * display-name column (see NavigationAppSummary).
+   */
+  public async listAppsWithGraph(): Promise<NavigationAppSummary[]> {
+    const apps = await this.repository.listApps();
+    return apps.map(app => ({
+      appId: app.app_id,
+      displayName: null,
+      lastUpdated: app.updated_at,
+    }));
   }
 
   /**

@@ -79,6 +79,35 @@ describe("NavigationGraphManager", () => {
     });
   });
 
+  describe("listAppsWithGraph", () => {
+    test("maps persisted apps with nodes to summaries and omits display name", async () => {
+      const repo = new NavigationRepository(harness.db);
+      await repo.getOrCreateApp("com.example.graph");
+      await repo.getOrCreateNode("com.example.graph", "Home", 1000);
+      await harness.db
+        .updateTable("navigation_apps")
+        .set({ updated_at: "2026-01-05T00:00:00.000Z" })
+        .where("app_id", "=", "com.example.graph")
+        .execute();
+
+      const apps = await manager.listAppsWithGraph();
+
+      const seeded = apps.find(app => app.appId === "com.example.graph");
+      expect(seeded).toEqual({
+        appId: "com.example.graph",
+        displayName: null,
+        lastUpdated: "2026-01-05T00:00:00.000Z",
+      });
+    });
+
+    test("excludes apps that have a row but no persisted nodes", async () => {
+      // beforeEach sets current app "com.test.app" via setCurrentApp, which
+      // creates the app row but records no nodes — so it must not appear.
+      const apps = await manager.listAppsWithGraph();
+      expect(apps.some(app => app.appId === "com.test.app")).toBe(false);
+    });
+  });
+
   describe("setCurrentApp", () => {
     test("should set the current app", async () => {
       await manager.setCurrentApp("com.example.app");

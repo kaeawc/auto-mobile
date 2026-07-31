@@ -4,6 +4,7 @@ import {
   NAVIGATION_RESOURCE_URIS,
   NavigationGraphResourceContent,
   NavigationNodeResourceContent,
+  NavigationAppsResourceContent,
   setNavigationGraphProvider
 } from "../../../src/server/navigationResources";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
@@ -196,6 +197,91 @@ describe("MCP Navigation Graph Resource", () => {
     expect(nodeResource.isCurrentScreen).toBe(true);
     expect(nodeResource.edgesFrom).toHaveLength(1);
     expect(nodeResource.edgesTo).toHaveLength(0);
+  });
+
+  test("should include navigation apps resource in list", async () => {
+    const { client } = fixture.getContext();
+
+    const listResourcesResponseSchema = z.object({
+      resources: z.array(z.object({
+        uri: z.string(),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        mimeType: z.string().optional()
+      }))
+    });
+
+    const result = await client.request({
+      method: "resources/list",
+      params: {}
+    }, listResourcesResponseSchema);
+
+    const resource = result.resources.find(
+      (r: any) => r.uri === NAVIGATION_RESOURCE_URIS.APPS
+    );
+
+    expect(resource).toBeDefined();
+    expect(resource?.name).toBe("Navigation Apps");
+    expect(resource?.mimeType).toBe("application/json");
+  });
+
+  test("should list apps that have a persisted navigation graph", async () => {
+    fakeGraph.setAppsWithGraph([
+      { appId: "com.example.b", displayName: null, lastUpdated: "2026-01-02T00:00:00.000Z" },
+      { appId: "com.example.a", displayName: null, lastUpdated: "2026-01-01T00:00:00.000Z" }
+    ]);
+
+    const { client } = fixture.getContext();
+    const readResourceResponseSchema = z.object({
+      contents: z.array(z.object({
+        uri: z.string(),
+        mimeType: z.string().optional(),
+        text: z.string().optional()
+      }))
+    });
+
+    const result = await client.request({
+      method: "resources/read",
+      params: {
+        uri: NAVIGATION_RESOURCE_URIS.APPS
+      }
+    }, readResourceResponseSchema);
+
+    const content = result.contents[0];
+    expect(content.uri).toBe(NAVIGATION_RESOURCE_URIS.APPS);
+    expect(content.mimeType).toBe("application/json");
+    expect(content.text).toBeDefined();
+
+    const payload: NavigationAppsResourceContent = JSON.parse(content.text!);
+    expect(payload.apps).toHaveLength(2);
+    expect(payload.apps[0]?.appId).toBe("com.example.b");
+    expect(payload.apps[0]?.lastUpdated).toBe("2026-01-02T00:00:00.000Z");
+    expect(payload.apps[0]?.displayName).toBeNull();
+    expect(payload.apps[1]?.appId).toBe("com.example.a");
+  });
+
+  test("should return an empty list when no apps have a persisted graph", async () => {
+    const { client } = fixture.getContext();
+    const readResourceResponseSchema = z.object({
+      contents: z.array(z.object({
+        uri: z.string(),
+        mimeType: z.string().optional(),
+        text: z.string().optional()
+      }))
+    });
+
+    const result = await client.request({
+      method: "resources/read",
+      params: {
+        uri: NAVIGATION_RESOURCE_URIS.APPS
+      }
+    }, readResourceResponseSchema);
+
+    const content = result.contents[0];
+    expect(content.text).toBeDefined();
+
+    const payload: NavigationAppsResourceContent = JSON.parse(content.text!);
+    expect(payload.apps).toEqual([]);
   });
 
   test("should return navigation node resource by screen name", async () => {

@@ -12,6 +12,18 @@ import ScreenCaptureCore
 // latency is not misreported as a missing Screen Recording entitlement.
 let simulatorPermissionTimeoutSeconds: TimeInterval = 10.0
 
+// Exit status used when a capture stream dies *after* it started delivering
+// frames (a mid-stream `SCStream`/`AVCaptureSession` fatal error). The helper
+// deliberately exits with a non-zero, non-`1` code instead of leaving a dead
+// stream spinning `RunLoop.main`: the parent supervisor (`IosH264Source`) owns
+// bounded reconnect and re-launches a fresh helper on any non-zero exit, so a
+// deterministic process signal is a stronger contract than a live-but-silent
+// process the supervisor can only detect by string-matching an `error:` stderr
+// line. `1` is already used for startup failures; `70` (EX_SOFTWARE) marks the
+// distinct "was running, then the stream failed" case for log triage. See
+// issue #4768.
+let midStreamFatalExitCode: Int32 = 70
+
 // A command-line process has no AppKit application by default. ScreenCaptureKit
 // reaches CoreGraphics when creating an SCStream, and CoreGraphics aborts with
 // CGS_REQUIRE_INIT unless this connection is initialized first.
@@ -185,7 +197,11 @@ case .captureSimulator(let windowID, let fps, let audio):
     let metricsReporter = FrameMetricsReporter(writer: writer, output: logError)
     metricsReporter.start()
     let simSession = SimulatorCaptureSession(writer: writer) { error in
+        // A mid-stream ScreenCaptureKit fatal error: exit deterministically so
+        // the supervisor's bounded reconnect re-establishes capture, rather than
+        // leaving RunLoop.main spinning on a dead stream (issue #4768).
         logError("error: ScreenCaptureKit stream stopped: \(error)")
+        exit(midStreamFatalExitCode)
     }
     let firstFrameSignal = simSession.firstFrameSignal
 
@@ -260,7 +276,12 @@ case .capture(let deviceID):
     let metricsReporter = FrameMetricsReporter(writer: writer, output: logError)
     metricsReporter.start()
     let captureSession = DeviceCaptureSession(writer: writer) { error in
+        // A mid-stream AVCaptureSession fatal error (runtime error / interruption
+        // once running): exit deterministically so the supervisor's bounded
+        // reconnect re-establishes capture instead of leaving a dead session
+        // spinning RunLoop.main (issue #4768).
         logError("error: iOS device capture failed: \(error)")
+        exit(midStreamFatalExitCode)
     }
 
     do {

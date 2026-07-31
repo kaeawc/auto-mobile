@@ -240,6 +240,42 @@ function createRestartHarness(
   return { source, helper, encoders, encoderSpawns, chunks, errors };
 }
 
+// A harness that hands out a *fresh* helper per createHelper call and a fresh
+// encoder per spawn, so a running-phase reconnect (which tears down the failed
+// helper/encoder and establishes new ones) is observable as additional
+// helper/encoder instances rather than re-listening on a shared emitter.
+function createReconnectHarness(
+  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {}
+) {
+  const helpers: FakeFrameCaptureHelper[] = [];
+  const encoders: FakeChildProcess[] = [];
+  const encoderSpawns: Array<{ command: string; args: string[] }> = [];
+  const chunks: Buffer[] = [];
+  const errors: Error[] = [];
+  const source = new IosH264Source({
+    device: IOS_DEVICE,
+    helperPath: FAKE_HELPER_PATH,
+    helperPathExists: fakeHelperPathExists,
+    onData: chunk => chunks.push(chunk),
+    onError: error => errors.push(error),
+    createHelper: () => {
+      const helper = new FakeFrameCaptureHelper();
+      helpers.push(helper);
+      return helper;
+    },
+    spawner: (command, args) => {
+      encoderSpawns.push({ command, args });
+      const encoder = new FakeChildProcess();
+      encoders.push(encoder);
+      return encoder as unknown as ChildProcessWithoutNullStreams;
+    },
+    simulatorWindowResolver: async () => 42,
+    commandRunner: successfulCommandRunner,
+    ...overrides,
+  });
+  return { source, helpers, encoders, encoderSpawns, chunks, errors };
+}
+
 async function successfulCommandRunner(_command: string, args: string[]) {
   if (args.includes("-encoders")) {
     return {
@@ -1106,7 +1142,11 @@ describe("IosH264Source", () => {
   });
 
   test("reports post-start encoder exits with buffered stderr as source failures", async () => {
-    const { source, helper, encoder, errors } = createHarness();
+    // Reconnect disabled so this asserts the terminal failure surface directly;
+    // the bounded-reconnect path has dedicated coverage below.
+    const { source, helper, encoder, errors } = createHarness(IOS_DEVICE, {
+      runningReconnectMaxAttempts: 0,
+    });
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
     encoder.stderr.push("Error: cannot create VideoToolbox compression session\n");
@@ -1122,7 +1162,9 @@ describe("IosH264Source", () => {
   });
 
   test("reports a fatal capture-helper diagnostic after startup", async () => {
-    const { source, helper, errors } = createHarness();
+    const { source, helper, errors } = createHarness(IOS_DEVICE, {
+      runningReconnectMaxAttempts: 0,
+    });
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
     helper.emitStderr("Error: AVCaptureSession runtime error: media services were reset");
@@ -1145,6 +1187,7 @@ describe("IosH264Source", () => {
       createHelper: () => helper,
       spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
       commandRunner: successfulCommandRunner,
+      runningReconnectMaxAttempts: 0,
     });
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
@@ -1279,14 +1322,119 @@ describe("IosH264Source", () => {
     expect(helper.stopped).toBe(true);
   });
 
-  test("fails when frame dimensions change after the encoder starts", async () => {
-    const { source, helper, errors } = createHarness();
+  test("reconfigures the encoder in place when frame dimensions change mid-stream", async () => {
+    // A size change (rotation) restarts only the encoder at the new geometry
+    // rather than failing the whole source (issue #4768). Use the restart
+    // harness so the second encoder spawn is observable.
+    const { source, helper, encoders, encoderSpawns, errors } = createRestartHarness();
 
-    await startWithFrame(source, helper, frame(2, 1, 0x11));
-    helper.emitFrame(frame(3, 1, 0x22));
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(4, 2, 0x11));
+    await started;
+
+    helper.emitFrame(frame(6, 4, 0x22));
     await flush();
 
-    expect(errors[0].message).toContain("changed size");
+    // A second encoder was spawned at the new size, and no error was surfaced.
+    expect(errors).toEqual([]);
+    expect(encoderSpawns).toHaveLength(2);
+    expect(encoderSpawns[0].args.join(" ")).toContain("-s 4x2");
+    expect(encoderSpawns[1].args.join(" ")).toContain("-s 6x4");
+    // The outgoing encoder is reaped (SIGTERM sent).
+    expect(encoders[0].killed).toBe(true);
+    // The new frame was written to the fresh encoder.
+    expect(encoders[1].getStdinData().length).toBeGreaterThan(0);
+  });
+
+  test("reconnects after a running-phase helper exit and resumes without onError", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, encoders, errors } = createReconnectHarness({ timer });
+
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+    expect(helpers).toHaveLength(1);
+
+    // A mid-stream helper exit triggers a bounded reconnect, not a teardown.
+    helpers[0].emit("exit", { code: 70, signal: null });
+    await flush();
+    expect(errors).toEqual([]);
+
+    // First backoff (500ms) elapses and capture is re-established.
+    timer.advanceTime(500);
+    await flush();
+    expect(helpers).toHaveLength(2);
+    expect(helpers[1].started).toBe(true);
+
+    helpers[1].emitFrame(frame(2, 2, 0x22));
+    await flush();
+
+    // The reconnected helper's frame is encoded; no error was ever surfaced.
+    expect(errors).toEqual([]);
+    expect(encoders).toHaveLength(2);
+    expect(encoders[1].getStdinData().length).toBeGreaterThan(0);
+    expect(helpers[0].stopped).toBe(true);
+  });
+
+  test("surfaces onError after exhausting bounded reconnect attempts", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, errors } = createReconnectHarness({
+      timer,
+      firstFrameTimeoutMs: 50,
+      runningReconnectMaxAttempts: 2,
+    });
+
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    helpers[0].emit("exit", { code: 70, signal: null });
+    await flush();
+
+    // Attempt 1: backoff 500ms, then the re-established helper never produces a
+    // frame and times out.
+    timer.advanceTime(500);
+    await flush();
+    expect(helpers).toHaveLength(2);
+    timer.advanceTime(50);
+    await flush();
+
+    // Attempt 2: backoff 1000ms, then times out again — exhausting the budget.
+    timer.advanceTime(1000);
+    await flush();
+    expect(helpers).toHaveLength(3);
+    timer.advanceTime(50);
+    await flush();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("screen-capture-helper exited");
+  });
+
+  test("a stop() during the reconnect backoff cancels the cycle", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, errors } = createReconnectHarness({ timer });
+
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    helpers[0].emit("exit", { code: 70, signal: null });
+    await flush();
+
+    // Stop while the first backoff is still pending.
+    await source.stop();
+
+    // Advancing past the backoff must not spin up a replacement helper.
+    timer.advanceTime(5_000);
+    await flush();
+
+    expect(helpers).toHaveLength(1);
+    expect(errors).toEqual([]);
+    expect(helpers[0].stopped).toBe(true);
   });
 
   test("rejects startup when simulator capture reports missing Screen Recording permission", async () => {

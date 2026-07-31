@@ -108,6 +108,8 @@ describe("DevicePool", () => {
 
   class FakeChildProcess extends EventEmitter {
     pid = 12345;
+    exitCode: number | null | undefined = undefined;
+    signalCode: NodeJS.Signals | null | undefined = undefined;
     kill(): boolean {
       return false;
     }
@@ -144,6 +146,20 @@ describe("DevicePool", () => {
         deviceId: "emulator-5554",
         source: device.source,
       };
+    }
+  }
+
+  class FakeDeviceManagerWithExitedRecoveryProcess extends FakeDeviceManagerWithDistinctStartedProcesses {
+    override async startDevice(
+      device: DeviceInfo,
+      timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS
+    ): Promise<FakeChildProcess> {
+      const childProcess = await super.startDevice(device, timeoutMs);
+      if (this.childProcesses.length === 2) {
+        childProcess.exitCode = 1;
+        childProcess.signalCode = null;
+      }
+      return childProcess;
     }
   }
 
@@ -1093,6 +1109,39 @@ describe("DevicePool", () => {
 
         expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-2");
         expect(sessionManager.getSession("session-2")).not.toBeNull();
+      } finally {
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
+    test("evicts a recovery process that exited before tracking was attached", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      try {
+        const images: DeviceInfo[] = [
+          { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+        ];
+        const manager = new FakeDeviceManagerWithExitedRecoveryProcess(images);
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          manager,
+          new DefaultRetryExecutor(fakeTimer)
+        );
+
+        await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+        manager.childProcesses[0]!.emit("exit", 1, null);
+        await new Promise(resolve => setImmediate(resolve));
+        await new Promise(resolve => setImmediate(resolve));
+
+        expect(manager.childProcesses).toHaveLength(2);
+        expect(devicePool.getDevice("emulator-5554")).toBeNull();
       } finally {
         if (originalRebootOnDeath === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;

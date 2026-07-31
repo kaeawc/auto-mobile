@@ -1112,7 +1112,12 @@ export class DevicePool {
     }
 
     this.startedDeviceProcesses.set(device.deviceId, childProcess);
-    childProcess.once("exit", (code, signal) => {
+    let exitHandled = false;
+    const handleExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      if (exitHandled) {
+        return;
+      }
+      exitHandled = true;
       if (this.startedDeviceProcesses.get(device.deviceId) !== childProcess) {
         return;
       }
@@ -1122,7 +1127,13 @@ export class DevicePool {
           error
         );
       });
-    });
+    };
+    childProcess.once("exit", handleExit);
+    const exitCode = (childProcess as { exitCode?: number | null }).exitCode;
+    const signalCode = (childProcess as { signalCode?: NodeJS.Signals | null }).signalCode;
+    if (exitCode !== undefined && (exitCode !== null || signalCode != null)) {
+      handleExit(exitCode, signalCode ?? null);
+    }
   }
 
   private async evictStartedDeviceAfterProcessExit(

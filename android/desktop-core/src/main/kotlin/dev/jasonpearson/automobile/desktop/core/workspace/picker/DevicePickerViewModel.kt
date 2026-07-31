@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.workspace.picker
 
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo
+import dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser
 import dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClient
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
@@ -96,6 +98,12 @@ class DevicePickerViewModel(
   private var bootingIds: Set<String> = emptySet()
   private var bootErrors: Map<String, String> = emptyMap()
 
+  // Monotonic load/emission generation. Every load() and reloadAfterBoot() claims the next value at
+  // its start; an in-flight load that resumes after a newer one has begun drops its emission rather
+  // than clobbering fresher post-boot state (a stale Refresh restoring the shut-down card and
+  // dropping the just-booted selection).
+  private var loadGeneration: Long = 0
+
   init {
     load()
   }
@@ -121,33 +129,47 @@ class DevicePickerViewModel(
   }
 
   private fun load() {
+    val generation = ++loadGeneration
     _state.value = DevicePickerUiState.Loading
     scope.launch {
       try {
         val devices = fetchDevices()
+        if (generation != loadGeneration) return@launch // superseded by a newer load/reload
         LOG.info("Picker loaded ${devices.size} devices")
         emitContent(devices)
       } catch (c: CancellationException) {
         throw c // don't turn cancellation into a load error
       } catch (e: Exception) {
         LOG.warn("Failed to load picker devices: ${e.message}", e)
-        _state.value = DevicePickerUiState.Error(e.message ?: "Failed to load devices")
+        if (generation == loadGeneration) {
+          _state.value = DevicePickerUiState.Error(e.message ?: "Failed to load devices")
+        }
       }
     }
   }
 
-  // Resource reads hit the daemon (blocking) — keep them off the UI thread.
+  // Resource reads hit the daemon (blocking) — keep them off the UI thread. A read that returns
+  // ResourceReadResult.Error throws rather than degrading to an empty list: a partial read (booted
+  // fails, images succeed) must NOT reconstruct a just-booted device as Shutdown, and a total
+  // failure must not empty the picker and prune live boot state — callers retain the prior
+  // snapshot.
   private suspend fun fetchDevices(): List<PickerDevice> =
-    withContext(ioDispatcher) {
-      val booted =
-        (resourceClient.readResource(BOOTED_URI) as? ResourceReadResult.Success)?.let {
-          DeviceResourceParser.parseBootedDevices(it.content)?.devices
-        } ?: emptyList()
-      val images =
-        (resourceClient.readResource(IMAGES_URI) as? ResourceReadResult.Success)?.let {
-          DeviceResourceParser.parseDeviceImages(it.content)?.images
-        } ?: emptyList()
-      buildPickerDevices(booted, images)
+    withContext(ioDispatcher) { buildPickerDevices(readBootedDevices(), readDeviceImages()) }
+
+  private suspend fun readBootedDevices(): List<BootedDeviceInfo> =
+    when (val result = resourceClient.readResource(BOOTED_URI)) {
+      is ResourceReadResult.Success ->
+        DeviceResourceParser.parseBootedDevices(result.content)?.devices ?: emptyList()
+      is ResourceReadResult.Error ->
+        throw IllegalStateException("Failed to read booted devices: ${result.message}")
+    }
+
+  private suspend fun readDeviceImages(): List<DeviceImageInfo> =
+    when (val result = resourceClient.readResource(IMAGES_URI)) {
+      is ResourceReadResult.Success ->
+        DeviceResourceParser.parseDeviceImages(result.content)?.images ?: emptyList()
+      is ResourceReadResult.Error ->
+        throw IllegalStateException("Failed to read device images: ${result.message}")
     }
 
   /**
@@ -193,8 +215,9 @@ class DevicePickerViewModel(
     syncBootState()
     scope.launch {
       val result = bootController.boot(device)
-      if (result.isSuccess) {
-        reloadAfterBoot(device)
+      val runtimeDeviceId = result.getOrNull()
+      if (runtimeDeviceId != null) {
+        reloadAfterBoot(device, runtimeDeviceId)
       } else {
         val message = result.exceptionOrNull()?.message ?: "Failed to boot ${device.name}"
         bootingIds = bootingIds - deviceId
@@ -205,11 +228,14 @@ class DevicePickerViewModel(
   }
 
   /**
-   * Reload after a boot succeeded and auto-select the now-booted device so Observe is usable. A
-   * booted device is re-keyed by the daemon (its id becomes a runtime serial), so it is matched
-   * back by name, not by the shut-down id.
+   * Reload after a boot succeeded and auto-select the started device so Observe is usable. The
+   * device is selected by [runtimeDeviceId] — the exact id the daemon assigned it — never by
+   * display name, which is ambiguous when two identically-named devices boot concurrently. A read
+   * failure retains the prior snapshot (see [fetchDevices]) rather than fabricating a shut-down
+   * card.
    */
-  private suspend fun reloadAfterBoot(bootedDevice: PickerDevice) {
+  private suspend fun reloadAfterBoot(bootedDevice: PickerDevice, runtimeDeviceId: String) {
+    val generation = ++loadGeneration
     val devices =
       try {
         fetchDevices()
@@ -223,15 +249,16 @@ class DevicePickerViewModel(
         return
       }
     val nowBooted = devices.firstOrNull {
-      it.name == bootedDevice.name && it.state == DeviceState.Booted
+      it.id == runtimeDeviceId && it.state == DeviceState.Booted
     }
     bootingIds = bootingIds - bootedDevice.id
     bootErrors =
       if (nowBooted != null) bootErrors - bootedDevice.id
       else bootErrors + (bootedDevice.id to "Boot did not complete")
+    if (generation != loadGeneration) return // a newer load/reload will emit fresher state
     emitContent(devices)
     if (nowBooted != null) {
-      updateContent { it.copy(selectedIds = it.selectedIds + nowBooted.id) }
+      updateContent { it.copy(selectedIds = it.selectedIds + runtimeDeviceId) }
     }
   }
 

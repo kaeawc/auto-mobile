@@ -12,6 +12,7 @@ import {
   APPS_RESOURCE_URIS,
   APP_RESOURCE_TEMPLATES,
   invalidateInstalledAppsCache,
+  invalidateInstalledAppResourceCache,
   notifyInstalledAppResourceUpdated
 } from "./appResources";
 import { logger } from "../utils/logger";
@@ -236,7 +237,7 @@ export function registerAppTools(
       throw new ActionableError(`Failed to launch app: ${error}`);
     } finally {
       try {
-        invalidateInstalledAppsCache(device.deviceId);
+        invalidateInstalledAppResourceCache(device.deviceId);
         await notifyInstalledAppResourceUpdated(device.deviceId);
       } catch (error) {
         logger.warn(`[AppTools] Failed to refresh app resources after launch: ${error}`);
@@ -261,7 +262,7 @@ export function registerAppTools(
       throw new ActionableError(`Failed to terminate app: ${error}`);
     } finally {
       try {
-        invalidateInstalledAppsCache(device.deviceId);
+        invalidateInstalledAppResourceCache(device.deviceId);
         await notifyInstalledAppResourceUpdated(device.deviceId);
       } catch (error) {
         logger.warn(`[AppTools] Failed to refresh app resources after terminate: ${error}`);

@@ -1,10 +1,16 @@
 import Ajv2020 from "ajv/dist/2020";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerAppTools, resetListAppsToolDependencies, setListAppsToolDependencies } from "../../src/server/appTools";
-import { APP_RESOURCE_TEMPLATES, APPS_RESOURCE_URIS } from "../../src/server/appResources";
+import {
+  APP_RESOURCE_TEMPLATES,
+  APPS_RESOURCE_URIS,
+  invalidateInstalledAppResourceCache,
+  invalidateInstalledAppsCache
+} from "../../src/server/appResources";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeToolUtils } from "../fakes/FakeToolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 
 const resolveWithFakeTimer = async <T>(
   promise: Promise<T>,
@@ -103,6 +109,16 @@ describe("listApps tool", () => {
     expect(content?.type).toBe("text");
     expect(content?.text).toBeDefined();
     expect(JSON.parse(content!.text)).toEqual(payload);
+  });
+
+  test("keeps foreground resource invalidation separate from package cache dirtying", () => {
+    const deviceId = "foreground-only-resource-device";
+
+    invalidateInstalledAppResourceCache(deviceId);
+    expect(getInstalledAppsCacheWriteCoordinator().isDirty(deviceId)).toBe(false);
+
+    invalidateInstalledAppsCache(deviceId);
+    expect(getInstalledAppsCacheWriteCoordinator().isDirty(deviceId)).toBe(true);
   });
 });
 

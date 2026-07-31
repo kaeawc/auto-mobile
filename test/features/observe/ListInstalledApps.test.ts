@@ -6,6 +6,20 @@ import { BootedDevice, AndroidUser } from "../../../src/models";
 import type { NewInstalledApp } from "../../../src/db/types";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { getInstalledAppsCacheWriteCoordinator } from "../../../src/db/installedAppsCacheWriteCoordinator";
+
+class FailsFirstInstalledAppsReplaceRepository extends FakeInstalledAppsRepository {
+  private failNextReplace = true;
+
+  override async replaceInstalledApps(deviceId: string, apps: NewInstalledApp[]): Promise<void> {
+    if (this.failNextReplace) {
+      this.failNextReplace = false;
+      throw new Error("transient cache write failure");
+    }
+    await super.replaceInstalledApps(deviceId, apps);
+  }
+}
 
 describe("ListInstalledApps", function() {
   let listInstalledApps: ListInstalledApps;
@@ -14,7 +28,10 @@ describe("ListInstalledApps", function() {
 
   beforeEach(function() {
     mockDevice = {
-      deviceId: "test-device",
+      // The installed-apps write coordinator is process-global. Keep this
+      // fixture distinct from generic device fixtures in concurrently loaded
+      // test files so their invalidations cannot bypass this seeded cache.
+      deviceId: "list-installed-apps-test-device",
       platform: "android"
     } as BootedDevice;
 
@@ -279,6 +296,74 @@ describe("ListInstalledApps", function() {
   });
 
   describe("cache", function() {
+    test("lists iOS bundle IDs live after an out-of-band app change", async function() {
+      const iosDevice: BootedDevice = {
+        deviceId: "ios-cache-device",
+        platform: "ios"
+      } as BootedDevice;
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1_000);
+      const simctl = new FakeSimctl();
+      simctl.setInstalledApps([{ bundleId: "com.example.cached" }]);
+      const list = new ListInstalledApps(
+        iosDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        simctl,
+        { cacheEnabled: true, installedAppsRepository: repo, timer }
+      );
+
+      await expect(list.execute()).resolves.toEqual(["com.example.cached"]);
+      simctl.setInstalledApps([{ bundleIdentifier: "com.example.updated" }]);
+      await expect(list.execute()).resolves.toEqual(["com.example.updated"]);
+    });
+
+    test("preserves iOS app metadata for the apps resource path", async function() {
+      const iosDevice: BootedDevice = {
+        deviceId: "ios-metadata-cache-device",
+        platform: "ios"
+      } as BootedDevice;
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1_000);
+      const simctl = new FakeSimctl();
+      simctl.setInstalledApps([{
+        bundleId: "com.example.cached",
+        bundleDisplayName: "Cached App",
+        bundleShortVersionString: "1.2.3",
+        bundlePath: "/Applications/Cached.app"
+      }]);
+      const list = new ListInstalledApps(
+        iosDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        simctl,
+        { cacheEnabled: true, installedAppsRepository: repo, timer }
+      );
+
+      await expect(list.executeIosDetailed()).resolves.toEqual([{
+        bundleId: "com.example.cached",
+        bundleDisplayName: "Cached App",
+        bundleShortVersionString: "1.2.3",
+        bundlePath: "/Applications/Cached.app"
+      }]);
+      expect(simctl.getMethodCallCount("listApps")).toBe(1);
+    });
+
+    test("normalizes all supported iOS bundle ID fields", async function() {
+      const iosDevice: BootedDevice = { deviceId: "ios-bundle-id-fields", platform: "ios" } as BootedDevice;
+      const simctl = new FakeSimctl();
+      simctl.setInstalledApps([
+        { bundleID: "  com.example.bundle-id  " },
+        { CFBundleIdentifier: "com.example.cf-bundle-id" }
+      ]);
+      const list = new ListInstalledApps(iosDevice, new FakeAdbClientFactory(fakeAdb), simctl);
+
+      await expect(list.execute()).resolves.toEqual([
+        "com.example.bundle-id",
+        "com.example.cf-bundle-id"
+      ]);
+    });
+
     test("should use cached apps when fresh", async function() {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
@@ -359,6 +444,112 @@ describe("ListInstalledApps", function() {
       const stored = await repo.listInstalledApps(mockDevice.deviceId);
       expect(stored.some(row => row.package_name === "com.example.fresh")).toBe(true);
       expect(stored.some(row => row.package_name === "com.stale.app")).toBe(false);
+    });
+
+    test("should rebuild immediately when a package mutation marks the cache stale", async function() {
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      const now = timer.now();
+      await repo.replaceInstalledApps(mockDevice.deviceId, [{
+        device_id: mockDevice.deviceId,
+        user_id: 0,
+        package_name: "com.removed.app",
+        is_system: 0,
+        installed_at: now,
+        last_verified_at: now
+      }]);
+      await repo.markDeviceStale(mockDevice.deviceId);
+
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+        stdout: "package:com.installed.app\n",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
+        stdout: "",
+        stderr: ""
+      });
+
+      const cachedList = new ListInstalledApps(
+        mockDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        null,
+        { cacheEnabled: true, installedAppsRepository: repo, timer }
+      );
+      const result = await cachedList.executeDetailed();
+
+      expect(result.profiles[0].map(app => app.packageName)).toEqual(["com.installed.app"]);
+      expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
+    });
+
+    test("rebuilds a dirty cache after a stale-marker write fails", async function() {
+      const device: BootedDevice = { deviceId: "dirty-cache-device", platform: "android" } as BootedDevice;
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1_000);
+      await repo.replaceInstalledApps(device.deviceId, [{
+        device_id: device.deviceId,
+        user_id: 0,
+        package_name: "com.example.stale",
+        is_system: 0,
+        installed_at: timer.now(),
+        last_verified_at: timer.now()
+      }]);
+      await expect(getInstalledAppsCacheWriteCoordinator().invalidate(device.deviceId, async () => {
+        throw new Error("transient stale-marker failure");
+      })).rejects.toThrow("transient stale-marker failure");
+
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+        stdout: "package:com.example.fresh\n",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+      const list = new ListInstalledApps(
+        device,
+        new FakeAdbClientFactory(fakeAdb),
+        null,
+        { cacheEnabled: true, installedAppsRepository: repo, timer }
+      );
+
+      await expect(list.executeDetailed()).resolves.toMatchObject({
+        profiles: { 0: [{ packageName: "com.example.fresh" }] }
+      });
+      expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
+      expect(getInstalledAppsCacheWriteCoordinator().isDirty(device.deviceId)).toBe(false);
+    });
+
+    test("returns the live result and retries after a cache replacement failure", async function() {
+      const device: BootedDevice = { deviceId: "replace-failure-device", platform: "android" } as BootedDevice;
+      const repo = new FailsFirstInstalledAppsReplaceRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1_000);
+      await expect(getInstalledAppsCacheWriteCoordinator().invalidate(device.deviceId, async () => {
+        throw new Error("stale cache row");
+      })).rejects.toThrow("stale cache row");
+
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+        stdout: "package:com.example.live\n",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+      const list = new ListInstalledApps(
+        device,
+        new FakeAdbClientFactory(fakeAdb),
+        null,
+        { cacheEnabled: true, installedAppsRepository: repo, timer }
+      );
+
+      await expect(list.executeDetailed()).resolves.toMatchObject({
+        profiles: { 0: [{ packageName: "com.example.live" }] }
+      });
+      expect(getInstalledAppsCacheWriteCoordinator().isDirty(device.deviceId)).toBe(true);
+
+      await expect(list.executeDetailed()).resolves.toMatchObject({
+        profiles: { 0: [{ packageName: "com.example.live" }] }
+      });
+      expect(getInstalledAppsCacheWriteCoordinator().isDirty(device.deviceId)).toBe(false);
     });
   });
 });

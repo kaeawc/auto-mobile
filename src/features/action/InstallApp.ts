@@ -15,6 +15,9 @@ import { logger } from "../../utils/logger";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
+import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
+import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -29,6 +32,7 @@ export class InstallApp {
   private device: BootedDevice;
   private deviceAppInstaller: DeviceAppInstaller;
   private plist: PlistReader;
+  private installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository();
 
   constructor(
     device: BootedDevice,
@@ -38,7 +42,8 @@ export class InstallApp {
     performanceTrackerFactory: () => PerformanceTracker = createGlobalPerformanceTracker,
     simctl: SimCtlClient | null = null,
     deviceAppInstaller: DeviceAppInstaller | null = null,
-    plist: PlistReader = new PlistClient()
+    plist: PlistReader = new PlistClient(),
+    installedAppsRepository?: InstalledAppsStore
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -48,6 +53,7 @@ export class InstallApp {
     this.simctl = simctl || new SimCtlClient(device);
     this.deviceAppInstaller = deviceAppInstaller || new DeviceAppManager();
     this.plist = plist;
+    this.setInstalledAppsRepository(installedAppsRepository);
   }
 
   private isSimulator(): boolean {
@@ -146,6 +152,10 @@ export class InstallApp {
     const installArgs = `install --user ${targetUserId} -r "${artifactPath}"`;
     let installAttempt = await perf.track("adbInstall", () => this.runAndroidInstall(installArgs, signal));
 
+    if (installAttempt.success) {
+      await this.markInstalledAppsCacheStale(true);
+    }
+
     if (!installAttempt.success && this.isAndroidDowngradeError(installAttempt.output)) {
       // The installed version is newer than the artifact. `adb install -r` cannot
       // downgrade a package, so the default behavior is to uninstall the existing
@@ -158,8 +168,10 @@ export class InstallApp {
       }
       logger.warn(`[InstallApp] Version downgrade detected for ${packageName}; uninstalling existing version and reinstalling.`);
       await perf.track("downgradeUninstall", () => this.uninstallAndroidForDowngrade(packageName!, targetUserId, signal));
+      await this.markInstalledAppsCacheStale(true);
       installAttempt = await perf.track("adbReinstall", () => this.runAndroidInstall(installArgs, signal));
       if (installAttempt.success) {
+        await this.markInstalledAppsCacheStale(true);
         warnings.push(
           `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`
         );
@@ -202,6 +214,27 @@ export class InstallApp {
   }
 
   private static readonly ANDROID_DOWNGRADE_MARKER = "INSTALL_FAILED_VERSION_DOWNGRADE";
+
+  private setInstalledAppsRepository(installedAppsRepository?: InstalledAppsStore): void {
+    if (installedAppsRepository) {
+      this.installedAppsRepository = installedAppsRepository;
+    }
+  }
+
+  private async markInstalledAppsCacheStale(success: boolean): Promise<void> {
+    if (!success) {
+      return;
+    }
+    try {
+      await getInstalledAppsCacheWriteCoordinator().invalidate(this.device.deviceId, () =>
+        getDbWriteBarrier().track(() =>
+          this.installedAppsRepository.markDeviceStale(this.device.deviceId)
+        ).then(() => undefined)
+      );
+    } catch (error) {
+      logger.warn(`[InstallApp] Failed to invalidate installed apps cache: ${error}`);
+    }
+  }
 
   /**
    * Run an `adb install` command, capturing failures (whether reported as a
@@ -305,6 +338,8 @@ export class InstallApp {
 
     const downgraded = await perf.track("simctlInstall", () => this.installiOSSimulatorWithDowngradeRecovery(appPath, signal));
 
+    await this.markInstalledAppsCacheStale(true);
+
     if (signal?.aborted) {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
@@ -383,6 +418,7 @@ export class InstallApp {
         // Best-effort terminate; proceed with uninstall regardless.
       }
       await this.simctl.uninstallApp(bundleId, this.device.deviceId);
+      await this.markInstalledAppsCacheStale(true);
       if (signal?.aborted) {
         throw new Error(OPERATION_CANCELLED_MESSAGE);
       }
@@ -402,6 +438,7 @@ export class InstallApp {
 
     try {
       await perf.track("devicectlInstall", () => this.deviceAppInstaller.installApp(this.device.deviceId, ipaPath));
+      await this.markInstalledAppsCacheStale(true);
     } catch (error) {
       const text = this.extractErrorText(error);
       if (this.isiOSDowngradeError(text)) {

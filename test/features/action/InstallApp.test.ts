@@ -1,5 +1,5 @@
 import { expect, describe, test, beforeEach, afterEach } from "bun:test";
-import { InstallApp, type DeviceAppInstaller } from "../../../src/features/action/InstallApp";
+import { InstallApp as ProductionInstallApp, type DeviceAppInstaller } from "../../../src/features/action/InstallApp";
 import { createPerformanceTracker, type TimingEntry } from "../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -8,11 +8,31 @@ import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsLocator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import path from "path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
+
+// Keep action tests isolated from the production SQLite repository even when a
+// scenario does not need to inspect stale-marker rows explicitly.
+class InstallApp extends ProductionInstallApp {
+  constructor(...args: ConstructorParameters<typeof ProductionInstallApp>) {
+    const [device, adbFactory, hostExecutor, buildToolsLocator, performanceTrackerFactory, simctl, deviceAppInstaller, plist, repository] = args;
+    super(
+      device,
+      adbFactory,
+      hostExecutor,
+      buildToolsLocator,
+      performanceTrackerFactory,
+      simctl,
+      deviceAppInstaller,
+      plist,
+      repository ?? new FakeInstalledAppsRepository()
+    );
+  }
+}
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
@@ -56,6 +76,15 @@ class FakeDeviceAppInstaller implements DeviceAppInstaller {
     if (this.shouldThrow) {
       throw this.shouldThrow;
     }
+  }
+}
+
+class CountingInstalledAppsRepository extends FakeInstalledAppsRepository {
+  markStaleCalls = 0;
+
+  override async markDeviceStale(deviceId: string): Promise<void> {
+    this.markStaleCalls++;
+    await super.markDeviceStale(deviceId);
   }
 }
 
@@ -159,6 +188,34 @@ describe("InstallApp", () => {
     expect((installEntry.children as TimingEntry[]).length).toBeGreaterThan(0);
   });
 
+  test("marks the Android installed-apps cache stale after a successful install", async () => {
+    const apkPath = "/tmp/app-debug.apk";
+    const repo = new FakeInstalledAppsRepository();
+    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
+
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+    fakeHost.setCommandResponse("aapt2", createExecResult("package: name='com.example.app' versionCode='1'"));
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
+    fakeAdb.setCommandResponse("shell pm list packages --user 0 -f com.example.app", createExecResult("0"));
+    fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
+
+    const installApp = new InstallApp(
+      device,
+      fakeAdbFactory,
+      fakeHost,
+      fakeLocator,
+      () => createPerformanceTracker(true, fakeTimer),
+      null,
+      null,
+      undefined,
+      repo
+    );
+
+    await installApp.execute(apkPath);
+
+    expect(await repo.getLatestVerification(device.deviceId)).toBe(0);
+  });
+
   test("falls back to package diffing when aapt is unavailable", async () => {
     class SequencedFakeAdbExecutor extends FakeAdbExecutor {
       private listPackagesResponses: ExecResult[] = [];
@@ -219,6 +276,8 @@ describe("InstallApp", () => {
   test("returns a warning when aapt is unavailable and install fails", async () => {
     const apkPath = "/tmp/app-debug.apk";
     const perf = createPerformanceTracker(true, fakeTimer);
+    const repo = new FakeInstalledAppsRepository();
+    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
 
     fakeLocator.setTool(null);
 
@@ -227,13 +286,64 @@ describe("InstallApp", () => {
       fakeAdbFactory,
       fakeHost,
       fakeLocator,
-      () => perf
+      () => perf,
+      null,
+      null,
+      undefined,
+      repo
     );
 
     const result = await installApp.execute(apkPath);
 
     expect(result.success).toBe(false);
     expect(result.warning).toContain("aapt2");
+    expect(await repo.getLatestVerification(device.deviceId)).toBe(1_000);
+  });
+
+  test("invalidates the cache before package discovery after a successful install", async () => {
+    class PackageDiscoveryFailureAdb extends FakeAdbExecutor {
+      private listPackagesCalls = 0;
+
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal
+      ): Promise<ExecResult> {
+        if (command === "shell pm list packages --user 0") {
+          this.listPackagesCalls++;
+          if (this.listPackagesCalls === 2) {
+            throw new Error("ADB disconnected after install");
+          }
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+
+    const apkPath = "/tmp/app-debug.apk";
+    const repo = new FakeInstalledAppsRepository();
+    const adb = new PackageDiscoveryFailureAdb();
+    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
+    fakeLocator.setTool(null);
+    adb.setCommandResponse("shell pm list packages --user 0", createExecResult("package:com.example.previous\n"));
+    adb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
+
+    const installApp = new InstallApp(
+      device,
+      { create: () => adb },
+      fakeHost,
+      fakeLocator,
+      () => createPerformanceTracker(true, fakeTimer),
+      null,
+      null,
+      undefined,
+      repo
+    );
+
+    await expect(installApp.execute(apkPath)).rejects.toThrow("ADB disconnected after install");
+
+    expect(await repo.getLatestVerification(device.deviceId)).toBe(0);
   });
 
   test("installs iOS .app on simulator via simctl and detects new bundle id", async () => {
@@ -245,6 +355,8 @@ describe("InstallApp", () => {
       [{ bundleId: "com.example.old" }, { bundleId: "com.example.new" }]
     ]);
     fakeHost.setCommandResponse("plutil", createExecResult("com.example.unused\n"));
+    const repo = new FakeInstalledAppsRepository();
+    await repo.upsertInstalledApp(iosSimulatorDevice.deviceId, 0, "com.example.old", false, 1_000);
 
     const installApp = new InstallApp(
       iosSimulatorDevice,
@@ -252,7 +364,10 @@ describe("InstallApp", () => {
       fakeHost,
       null,
       () => perf,
-      sequencedSimctl
+      sequencedSimctl,
+      null,
+      undefined,
+      repo
     );
 
     const result = await installApp.execute(appPath);
@@ -262,6 +377,7 @@ describe("InstallApp", () => {
     expect(result.upgrade).toBe(false);
     expect(sequencedSimctl.wasMethodCalled("installApp")).toBe(true);
     expect(fakeHost.wasCommandExecuted("plutil")).toBe(false);
+    expect(await repo.getLatestVerification(iosSimulatorDevice.deviceId)).toBe(0);
   });
 
   test("installs iOS .ipa on physical device via devicectl", async () => {
@@ -623,8 +739,19 @@ describe("InstallApp", () => {
       createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
       createExecResult("Success")
     ]);
+    const repo = new CountingInstalledAppsRepository();
 
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const installApp = new InstallApp(
+      device,
+      fakeAdbFactory,
+      fakeHost,
+      fakeLocator,
+      () => perf,
+      null,
+      null,
+      undefined,
+      repo
+    );
     const result = await installApp.execute(apkPath);
 
     expect(result.success).toBe(true);
@@ -632,6 +759,40 @@ describe("InstallApp", () => {
     expect(result.packageName).toBe("com.example.app");
     expect(result.warning).toContain("uninstalled it and reinstalled");
     expect(fakeAdb.wasCommandExecuted("uninstall com.example.app")).toBe(true);
+    expect(repo.markStaleCalls).toBe(2);
+  });
+
+  test("invalidates the cache when downgrade recovery uninstalls but reinstall fails", async () => {
+    const apkPath = "/tmp/app-debug.apk";
+    const perf = createPerformanceTracker(true, fakeTimer);
+    const repo = new FakeInstalledAppsRepository();
+    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.app", false, 1_000);
+
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+    fakeHost.setCommandResponse("aapt2", createExecResult("package: name='com.example.app' versionCode='1'"));
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+    fakeAdb.setCommandResponse("shell pm list packages --user 0 -f com.example.app", createExecResult("1"));
+    fakeAdb.setCommandResponseSequence(`install --user 0 -r "${apkPath}"`, [
+      createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
+      createExecResult("", "Failure [INSTALL_FAILED_INVALID_APK]")
+    ]);
+
+    const installApp = new InstallApp(
+      device,
+      fakeAdbFactory,
+      fakeHost,
+      fakeLocator,
+      () => perf,
+      null,
+      null,
+      undefined,
+      repo
+    );
+
+    const result = await installApp.execute(apkPath);
+
+    expect(result.success).toBe(false);
+    expect(await repo.getLatestVerification(device.deviceId)).toBe(0);
   });
 
   test("Android downgrade without a resolvable package name surfaces a clear error", async () => {

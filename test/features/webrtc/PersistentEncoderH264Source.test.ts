@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
 import { PassThrough } from "node:stream";
 import {
   InMemoryActiveVideoSessionRegistry,
@@ -28,6 +29,9 @@ const FORWARD_PORT = "45999";
 const SESSION_TOKEN = "session-0001";
 const SESSION_SOCKET = `${VIDEO_SERVER_SOCKET_PREFIX}_session0001`;
 const VIDEO_SERVER_MAIN_CLASS = "dev.jasonpearson.automobile.video.VideoServer";
+// SHA-256 hex of a session token, matching the device's `sessionTokenSha256Hex` (issue #4731). The
+// lease persists only this hash, so fixtures build `sessionTokenHash` from it.
+const hashToken = (token: string): string => createHash("sha256").update(token, "ascii").digest("hex");
 // Flush the nextTick + microtask queues so the source's async launch steps and
 // the PassThrough `data` emissions settle (no fake timer involved here).
 const tick = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
@@ -153,7 +157,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     | undefined;
   const processCommandLine =
     (overrides.processCommandLine as string | undefined) ??
-    `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`;
+    `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000automobile_video_stale`;
 
   // Command substrings whose ADB call should hang forever, exercising the
   // injected withTimeout bound under FakeTimer (never a real wait).
@@ -585,7 +589,7 @@ describe("PersistentEncoderH264Source", () => {
     const lease = JSON.stringify({
       version: 1,
       socketName: SESSION_SOCKET,
-      sessionToken: SESSION_TOKEN,
+      sessionTokenHash: hashToken(SESSION_TOKEN),
       pid: 1234,
       ownerPid: process.pid,
       deviceSerial: DEVICE.deviceId,
@@ -597,7 +601,7 @@ describe("PersistentEncoderH264Source", () => {
     const ctx = makeSource({
       leaseOutput: lease,
       processCommandLine:
-        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000${SESSION_TOKEN}`,
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000${SESSION_SOCKET}`,
     });
 
     const startPromise = ctx.source.start();
@@ -607,7 +611,7 @@ describe("PersistentEncoderH264Source", () => {
     await expect(startPromise).rejects.toThrow(/exited before ready/);
 
     expect(ctx.commands).toContain("shell kill -2 1234");
-    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${SESSION_TOKEN}.json`);
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${SESSION_SOCKET}.json`);
   });
 
   test("rejects start when the server exits before ready", async () => {
@@ -927,11 +931,14 @@ describe("PersistentEncoderH264Source", () => {
     expect(lateSocket.destroyed).toBe(true);
   });
 
-  test("removes this source's forward when a matching-token lease has different identity", async () => {
+  test("removes this source's forward when the lease for this socket has a different session identity", async () => {
+    // The lease file is named by our socket, but its persisted token hash belongs to a different
+    // session (a socket-name reuse). Ownership fails the hash check (issue #4731), so we clean only
+    // our own forward and never kill the other session's process.
     const mismatchedLease = JSON.stringify({
-      version: 1,
-      socketName: "automobile_video_replacement",
-      sessionToken: SESSION_TOKEN,
+      version: 2,
+      socketName: SESSION_SOCKET,
+      sessionTokenHash: hashToken("someone-elses-token"),
       pid: 5678,
       ownerPid: process.pid,
       deviceSerial: DEVICE.deviceId,
@@ -966,7 +973,7 @@ describe("PersistentEncoderH264Source", () => {
     const staleLease = JSON.stringify({
       version: 1,
       socketName: "automobile_video_stale",
-      sessionToken: "stale-session",
+      sessionTokenHash: hashToken("stale-session"),
       pid: 987,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -979,7 +986,7 @@ describe("PersistentEncoderH264Source", () => {
       leaseOutput: staleLease,
       forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
       processCommandLine:
-        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000automobile_video_stale`,
     });
 
     const startPromise = ctx.source.start();
@@ -987,7 +994,7 @@ describe("PersistentEncoderH264Source", () => {
 
     expect(ctx.commands).toContain("forward --remove tcp:61234");
     expect(ctx.commands).toContain("shell kill -2 987");
-    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/stale-session.json`);
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/automobile_video_stale.json`);
 
     ctx.processes[0].ready();
     await startPromise;
@@ -998,7 +1005,7 @@ describe("PersistentEncoderH264Source", () => {
     const staleLease = JSON.stringify({
       version: 1,
       socketName: "automobile_video_stale",
-      sessionToken: "stale-session",
+      sessionTokenHash: hashToken("stale-session"),
       pid: 987,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -1010,7 +1017,7 @@ describe("PersistentEncoderH264Source", () => {
     const freshLease = JSON.stringify({
       version: 1,
       socketName: "automobile_video_fresh",
-      sessionToken: "fresh-session",
+      sessionTokenHash: hashToken("fresh-session"),
       pid: 988,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -1023,7 +1030,7 @@ describe("PersistentEncoderH264Source", () => {
       leaseOutput: `${staleLease}\n${freshLease}\n`,
       forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
       processCommandLine:
-        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000automobile_video_stale`,
     });
 
     const startPromise = ctx.source.start();
@@ -1044,7 +1051,7 @@ describe("PersistentEncoderH264Source", () => {
     const staleLease = JSON.stringify({
       version: 1,
       socketName: "automobile_video_stale",
-      sessionToken: "stale-session",
+      sessionTokenHash: hashToken("stale-session"),
       pid: 987,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -1057,7 +1064,7 @@ describe("PersistentEncoderH264Source", () => {
       leaseOutput: staleLease,
       forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:someone_elses_socket\n`,
       processCommandLine:
-        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000automobile_video_stale`,
     });
 
     const startPromise = ctx.source.start();
@@ -1134,7 +1141,7 @@ describe("PersistentEncoderH264Source", () => {
     const liveLease = JSON.stringify({
       version: 1,
       socketName: "automobile_video_live",
-      sessionToken: "live-session",
+      sessionTokenHash: hashToken("live-session"),
       pid: 4321,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -1169,11 +1176,11 @@ describe("PersistentEncoderH264Source", () => {
     expect(registry.active(DEVICE.deviceId).has(SESSION_SOCKET)).toBe(false);
   });
 
-  test("refuses stale cleanup when the PID command line does not contain the lease token", async () => {
+  test("refuses stale cleanup when the PID command line does not contain the lease socket name", async () => {
     const staleLease = JSON.stringify({
       version: 1,
       socketName: "automobile_video_stale",
-      sessionToken: "stale-session",
+      sessionTokenHash: hashToken("stale-session"),
       pid: 987,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -1186,7 +1193,7 @@ describe("PersistentEncoderH264Source", () => {
       leaseOutput: staleLease,
       forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
       processCommandLine:
-        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000another-session`,
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000automobile_video_other`,
     });
 
     const startPromise = ctx.source.start();
@@ -1200,11 +1207,11 @@ describe("PersistentEncoderH264Source", () => {
     await ctx.source.stop();
   });
 
-  test("refuses stale cleanup when the lease token is not the --session-token value", async () => {
+  test("refuses stale cleanup when the lease socket name is not the --socket-name value", async () => {
     const staleLease = JSON.stringify({
       version: 1,
       socketName: "automobile_video_stale",
-      sessionToken: "stale-session",
+      sessionTokenHash: hashToken("stale-session"),
       pid: 987,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -1217,7 +1224,7 @@ describe("PersistentEncoderH264Source", () => {
       leaseOutput: staleLease,
       forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
       processCommandLine:
-        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000other-session\u0000--quality\u0000stale-session`,
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000automobile_video_other\u0000--quality\u0000automobile_video_stale`,
     });
 
     const startPromise = ctx.source.start();
@@ -1235,7 +1242,7 @@ describe("PersistentEncoderH264Source", () => {
     const freshLeaseWithOldWallClock = JSON.stringify({
       version: 1,
       socketName: "automobile_video_fresh",
-      sessionToken: "fresh-session",
+      sessionTokenHash: hashToken("fresh-session"),
       pid: 987,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -1264,7 +1271,7 @@ describe("PersistentEncoderH264Source", () => {
     const staleLeaseBeforeReboot = JSON.stringify({
       version: 1,
       socketName: "automobile_video_stale",
-      sessionToken: "stale-session",
+      sessionTokenHash: hashToken("stale-session"),
       pid: 987,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -1278,7 +1285,7 @@ describe("PersistentEncoderH264Source", () => {
       deviceUptimeMs: 5_000,
       forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
       processCommandLine:
-        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000automobile_video_stale`,
     });
 
     const startPromise = ctx.source.start();
@@ -1286,7 +1293,7 @@ describe("PersistentEncoderH264Source", () => {
 
     expect(ctx.commands).toContain("forward --remove tcp:61234");
     expect(ctx.commands).toContain("shell kill -2 987");
-    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/stale-session.json`);
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/automobile_video_stale.json`);
 
     ctx.processes[0].ready();
     await startPromise;
@@ -1299,7 +1306,7 @@ describe("PersistentEncoderH264Source", () => {
     const leaseNoElapsed = JSON.stringify({
       version: 1,
       socketName: "automobile_video_stale",
-      sessionToken: "stale-session",
+      sessionTokenHash: hashToken("stale-session"),
       pid: 987,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -1311,14 +1318,14 @@ describe("PersistentEncoderH264Source", () => {
       leaseOutput: leaseNoElapsed,
       forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
       processCommandLine:
-        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000automobile_video_stale`,
     });
 
     const startPromise = ctx.source.start();
     await tick();
 
     expect(ctx.commands).toContain("shell kill -2 987");
-    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/stale-session.json`);
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/automobile_video_stale.json`);
 
     ctx.processes[0].ready();
     await startPromise;
@@ -1330,7 +1337,7 @@ describe("PersistentEncoderH264Source", () => {
     const freshNoElapsed = JSON.stringify({
       version: 1,
       socketName: "automobile_video_fresh",
-      sessionToken: "fresh-session",
+      sessionTokenHash: hashToken("fresh-session"),
       pid: 987,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -1357,7 +1364,7 @@ describe("PersistentEncoderH264Source", () => {
     const staleLeaseOldSerial = JSON.stringify({
       version: 1,
       socketName: "automobile_video_stale",
-      sessionToken: "stale-session",
+      sessionTokenHash: hashToken("stale-session"),
       pid: 987,
       ownerPid: 456,
       deviceSerial: "emulator-5556",
@@ -1371,7 +1378,7 @@ describe("PersistentEncoderH264Source", () => {
       deviceUptimeMs: 5_000,
       forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
       processCommandLine:
-        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000automobile_video_stale`,
     });
 
     const startPromise = ctx.source.start();
@@ -1379,7 +1386,7 @@ describe("PersistentEncoderH264Source", () => {
 
     expect(ctx.commands).toContain("forward --remove tcp:61234");
     expect(ctx.commands).toContain("shell kill -2 987");
-    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/stale-session.json`);
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/automobile_video_stale.json`);
 
     ctx.processes[0].ready();
     await startPromise;
@@ -1392,7 +1399,7 @@ describe("PersistentEncoderH264Source", () => {
     const freshOtherSerial = JSON.stringify({
       version: 1,
       socketName: "automobile_video_other",
-      sessionToken: "other-session",
+      sessionTokenHash: hashToken("other-session"),
       pid: 987,
       ownerPid: 456,
       deviceSerial: "emulator-5556",
@@ -1441,7 +1448,7 @@ describe("PersistentEncoderH264Source", () => {
     const validLease = JSON.stringify({
       version: 1,
       socketName: "automobile_video_fresh",
-      sessionToken: "fresh-session",
+      sessionTokenHash: hashToken("fresh-session"),
       pid: 988,
       ownerPid: 456,
       deviceSerial: DEVICE.deviceId,
@@ -1457,7 +1464,7 @@ describe("PersistentEncoderH264Source", () => {
         `NOW 1000000\n` +
         `${youngMtime} ${VIDEO_SERVER_LEASE_DIRECTORY}/corrupt.json\n` +
         `${youngMtime} ${VIDEO_SERVER_LEASE_DIRECTORY}/leftover.json.tmp\n` +
-        `990000 ${VIDEO_SERVER_LEASE_DIRECTORY}/fresh-session.json\n`,
+        `990000 ${VIDEO_SERVER_LEASE_DIRECTORY}/automobile_video_fresh.json\n`,
     });
 
     const startPromise = ctx.source.start();
@@ -1466,7 +1473,7 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.commands).not.toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/corrupt.json`);
     expect(ctx.commands).not.toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/leftover.json.tmp`);
     // A valid, current lease file is never swept even though its mtime is old.
-    expect(ctx.commands).not.toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/fresh-session.json`);
+    expect(ctx.commands).not.toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/automobile_video_fresh.json`);
 
     ctx.processes[0].ready();
     await startPromise;
@@ -1557,7 +1564,7 @@ describe("PersistentEncoderH264Source", () => {
       // readLease's `shell cat <lease>.json` is only hit during cleanup, so it
       // hangs teardown without affecting the successful start.
       const ctx = makeSource({
-        hangCommands: [`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/${SESSION_TOKEN}.json`],
+        hangCommands: [`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/${SESSION_SOCKET}.json`],
       });
       await startReady(ctx);
 

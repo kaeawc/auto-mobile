@@ -421,6 +421,7 @@ export class DevicePool {
     if (!isAndroidRebootOnDeathEnabled() || device.platform !== "android" || !device.avdName) {
       return false;
     }
+    const avdName = device.avdName;
     try {
       resetAdbDeviceListCache();
       const discovery = await this.deviceManager.getBootedDevicesDetailed("android");
@@ -429,7 +430,7 @@ export class DevicePool {
         return true;
       }
       if (!discovery.devices.some(candidate =>
-        candidate.deviceId === device.id && candidate.name === device.avdName
+        this.criteriaMatcher.androidRediscoveryMatches(candidate, device.id, avdName)
       )) {
         return false;
       }
@@ -556,7 +557,12 @@ export class DevicePool {
       }
     }
 
-    if (!this.hasSufficientCapacityIncludingRecovery(stats.total, requiredCount, platform)) {
+    if (!this.criteriaMatcher.hasSufficientCapacityIncludingAndroidRecovery(
+      stats.total,
+      requiredCount,
+      this.recoveringAndroidImages.size,
+      platform
+    )) {
       throw new ActionableError(
         `Not enough devices in pool: need ${requiredCount}, have ${stats.total}.\n` +
         `Device pool status:\n` +
@@ -965,20 +971,10 @@ export class DevicePool {
     return (platform === undefined || platform === "android") && this.recoveringAndroidImages.size > 0;
   }
 
-  private hasSufficientCapacityIncludingRecovery(
-    pooledDeviceCount: number,
-    requiredCount: number,
-    platform?: Platform
-  ): boolean {
-    const pendingRecoveryCount = platform === undefined || platform === "android"
-      ? this.recoveringAndroidImages.size
-      : 0;
-    return pooledDeviceCount + pendingRecoveryCount >= requiredCount;
-  }
-
   private hasPendingAndroidRecoveryMatching(criteria?: DeviceAllocationCriteria): boolean {
-    return Array.from(this.recoveringAndroidImages.values()).some(image =>
-      this.criteriaMatcher.deviceImageMatchesCriteria(image, criteria)
+    return this.criteriaMatcher.someDeviceImageMatchesCriteria(
+      this.recoveringAndroidImages.values(),
+      criteria
     );
   }
 

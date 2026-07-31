@@ -5,6 +5,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -468,6 +469,49 @@ class VideoStreamWriterTest {
       received.await(2, TimeUnit.SECONDS),
     )
     assertEquals(VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME, lastCommand.get())
+  }
+
+  @Test
+  fun commandReaderIgnoresUnknownBytesButStillForwardsKeyFrameRequests() {
+    var now = 1_000L
+    val keyFrameReceived = CountDownLatch(1)
+    val forwarded = CopyOnWriteArrayList<Int>()
+    // An unknown control byte (0x02) precedes the sole known command (0x01), then EOF. The unknown
+    // byte must never reach the handler; the keyframe request still must (issue #4732).
+    val unknownCommand: Int = VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME + 1
+    val connection =
+      FakeClientConnection(
+        input =
+          ByteArrayInputStream(
+            byteArrayOf(
+              unknownCommand.toByte(),
+              VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME.toByte(),
+            )
+          )
+      )
+    val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
+
+    subject.startCommandReader { command ->
+      forwarded.add(command)
+      if (command == VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME) {
+        keyFrameReceived.countDown()
+      }
+    }
+    subject.bindServerSocket()
+    subject.acceptClients {}
+
+    assertTrue(
+      "the whitelisted keyframe request must still be forwarded",
+      keyFrameReceived.await(2, TimeUnit.SECONDS),
+    )
+    // The unknown byte was read before the known one; by the time 0x01 arrives it would already
+    // have
+    // been forwarded if it were not filtered. So the handler must have seen only the known command.
+    assertEquals(
+      "only the whitelisted command byte may reach the handler",
+      listOf(VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME),
+      forwarded.toList(),
+    )
   }
 
   // --- peer-UID gating (SO_PEERCRED, issue #4728) ---------------------------------------------

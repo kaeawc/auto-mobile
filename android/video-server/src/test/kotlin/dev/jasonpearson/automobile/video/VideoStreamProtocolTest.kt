@@ -2,9 +2,28 @@ package dev.jasonpearson.automobile.video
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VideoStreamProtocolTest {
+  @Test
+  fun onlyTheRequestKeyFrameByteIsAKnownCommand() {
+    assertTrue(VideoStreamProtocol.isKnownCommand(VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME))
+    assertEquals(
+      setOf(VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME),
+      VideoStreamProtocol.KNOWN_COMMANDS,
+    )
+    // Every other byte the reader could pull off input.read() (0x00 and 0x02..0xFF) is unknown.
+    assertFalse(VideoStreamProtocol.isKnownCommand(0x00))
+    for (byte in 0x02..0xFF) {
+      assertFalse(
+        "byte $byte must not be a known command",
+        VideoStreamProtocol.isKnownCommand(byte),
+      )
+    }
+  }
+
   @Test
   fun legacyHeaderUsesH264WidthAndHeight() {
     val expected =

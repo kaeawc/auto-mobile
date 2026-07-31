@@ -437,6 +437,17 @@ class VideoStreamWriter(
             while (!stopped && isCurrentClient(client)) {
               val command = input.read()
               if (command < 0) break
+              // Whitelist control bytes before forwarding (issue #4732). Unknown values are
+              // unauthenticated control input on the shared socket; ignoring (and debug-logging)
+              // them keeps the control surface minimal. Once the #4729 handshake authenticates the
+              // connection this channel is implicitly authenticated too, but we validate anyway for
+              // defense-in-depth. The reader still reads one byte per iteration and buffers
+              // nothing,
+              // so an unknown-byte flood cannot grow memory or wedge the daemon-threaded reader.
+              if (!VideoStreamProtocol.isKnownCommand(command)) {
+                println("VIDEO_COMMAND_IGNORED socket=$socketName unknown command byte=$command")
+                continue
+              }
               commandHandler?.invoke(command)
             }
           } catch (_: IOException) {

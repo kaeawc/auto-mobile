@@ -231,3 +231,47 @@ P "x" file'
   [ "$status" -ne 0 ]
   [[ "$output" == *"gnu-grep-P"* ]]
 }
+
+# --- regression cases for the three follow-up P2 threads on the gate itself ---
+
+@test "still flags a GNUism carried by a command substitution inside double quotes" {
+  # Masking prose must not erase executable command substitutions: the -d here
+  # actually runs, so the block must still fail.
+  write_block bad 'stamp="$(date -d yesterday +%s)"'
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-date-d"* ]]
+}
+
+@test "still flags a GNUism carried by a backtick substitution inside double quotes" {
+  write_block bad 'out="`grep -P foo bar`"'
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-grep-P"* ]]
+}
+
+@test "does NOT flag a GNUism name inside double-quoted prose (no substitution)" {
+  write_block ok 'echo "grep -P is not available on stock macOS"'
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}
+
+@test "flags the long-option readlink --canonicalize" {
+  write_block bad 'p=$(readlink --canonicalize /some/link)'
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-readlink-f"* ]]
+}
+
+@test "flags a suffixless sed --in-place" {
+  write_block bad "sed --in-place 's/a/b/' file"
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-sed-inplace"* ]]
+}
+
+@test "does NOT flag sed --in-place=SUFFIX (explicit backup suffix)" {
+  write_block ok "sed --in-place=.bak 's/a/b/' file"
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}

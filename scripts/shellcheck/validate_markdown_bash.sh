@@ -111,15 +111,21 @@ ends_with_continuation() {
   (( ${#run} % 2 == 1 ))
 }
 
-# Blank the CONTENTS of quoted spans and drop a trailing `#` comment so a GNUism
-# NAME that only appears inside quoted prose or a comment — `echo "grep -P …"`,
+# Blank INERT string content and drop a trailing `#` comment so a GNUism NAME
+# that only appears inside quoted prose or a comment — `echo "grep -P …"`,
 # `foo # date -d note` — does not trip the executable-token scan. Heuristic, not
 # a shell parser; the `# md-bash-lint-ok` escape hatch still covers the rest.
-# Quotes are blanked first so a `#` inside a string is gone before the comment
-# strip, which only fires on a whitespace-delimited `#` (never `$#`/`${#a}`).
+#
+# Single-quoted spans are always inert (no expansion) and are blanked. A
+# double-quoted span is blanked ONLY when it holds no command substitution —
+# the `[^"$\`]` class bails on `$`/backtick — so a real GNUism inside `"$(date
+# -d …)"` or a backtick survives the mask and is still flagged. Quotes are
+# blanked before the comment strip so a `#` inside a string is already gone; the
+# strip then fires only on a whitespace-delimited `#` (never `$#`/`${#a}`).
 mask_noncode() {
   printf '%s' "$1" \
-    | sed -E "s/'[^']*'/''/g; s/\"[^\"]*\"/\"\"/g" \
+    | sed -E "s/'[^']*'/''/g" \
+    | sed -E 's/"[^"$`]*"/""/g' \
     | sed -E 's/[[:space:]]#.*$//'
 }
 
@@ -142,13 +148,14 @@ check_logical_line() {
   # `=value`). This is the exact class behind #4117.
   if printf '%s' "$line" | grep -qE '\bgrep\b[^|]*(-[A-Za-z]*P|--perl-regexp)'; then
     label="gnu-grep-P"; hint="grep -P/-oP/--perl-regexp is GNU-only PCRE; /usr/bin/grep on macOS rejects it (#4117)."
-  elif printf '%s' "$line" | grep -qE '\bsed\b[^|]*[[:space:]]-i([[:space:]]|$)' \
+  elif printf '%s' "$line" | grep -qE '\bsed\b[^|]*[[:space:]](-i([[:space:]]|$)|--in-place([[:space:]]|$))' \
     && ! printf '%s' "$raw" | grep -qE "\bsed\b[^|]*[[:space:]]-i[[:space:]]+(''|\"\")"; then
     # `sed -i ''`/`sed -i ""` is the portable BSD empty-suffix form the hint
-    # recommends — flag only the suffixless `sed -i <script>` / `sed -i` spelling.
-    label="gnu-sed-inplace"; hint="sed -i without a suffix is GNU-only; BSD/macOS needs sed -i '' or a temp file."
-  elif printf '%s' "$line" | grep -qE '\breadlink\b[^|]*-[A-Za-z]*f'; then
-    label="gnu-readlink-f"; hint="readlink -f is GNU-only; use a portable path resolver (cd/pwd -P)."
+    # recommends — flag only the suffixless `sed -i`/`sed --in-place <script>`
+    # spelling; an explicit `--in-place=SUFFIX` carries its suffix and is skipped.
+    label="gnu-sed-inplace"; hint="sed -i/--in-place without a suffix is GNU-only; BSD/macOS needs sed -i '' or a temp file."
+  elif printf '%s' "$line" | grep -qE '\breadlink\b[^|]*(-[A-Za-z]*f|--canonicalize)'; then
+    label="gnu-readlink-f"; hint="readlink -f/--canonicalize is GNU-only; use a portable path resolver (cd/pwd -P)."
   elif printf '%s' "$line" | grep -qE '\b(mapfile|readarray)\b'; then
     label="bash4-mapfile"; hint="mapfile/readarray is bash 4+; /bin/bash on macOS is 3.2. Use a read loop."
   elif printf '%s' "$line" | grep -qE '\bdate\b[^|]*([[:space:]]-d([[:space:]]|$|[^-[:space:]])|[[:space:]]--date([[:space:]=]|$))'; then

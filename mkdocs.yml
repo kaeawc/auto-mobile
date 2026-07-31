@@ -55,7 +55,14 @@ markdown_extensions:
       smart_enable: all
   - pymdownx.caret
   - pymdownx.inlinehilite
-  - pymdownx.magiclink
+  - pymdownx.magiclink:
+      # Auto-link bare `#NNNN` issue/PR references (and commit hashes) to this
+      # repo in the rendered docs, so committed Markdown can keep the clean bare
+      # form while readers still get clickable links. Pairs with the AGENTS.md /
+      # CLAUDE.md rule that exempts Markdown files from explicit links.
+      repo_url_shorthand: true
+      user: kaeawc
+      repo: auto-mobile
   - pymdownx.smartsymbols
   - pymdownx.superfences:
       custom_fences:

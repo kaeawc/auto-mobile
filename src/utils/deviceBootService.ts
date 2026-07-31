@@ -30,6 +30,7 @@ export interface DeviceBootProgress {
 export interface DeviceBootResult {
   device: BootedDevice;
   source: "booted" | "cold-boot";
+  sourceImage?: DeviceInfo;
   processId?: number;
   provisioned: boolean;
 }
@@ -175,6 +176,7 @@ export class DeviceBootService {
     return {
       device: enrichBootedDevice(ready, image),
       source: "cold-boot",
+      sourceImage: image,
       processId: handle?.pid,
       provisioned,
     };

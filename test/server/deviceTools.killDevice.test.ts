@@ -16,8 +16,10 @@ import {
 } from "../../src/server/videoRecordingManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { DeviceSessionRepository } from "../../src/db/DeviceSessionRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 
 class FailingKillDeviceManager extends FakeDeviceUtils {
   readonly childProcess = new EventEmitter() as ChildProcess;
@@ -38,6 +40,16 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
   override async killDevice(): Promise<void> {
     throw new Error("adb emu kill failed");
   }
+}
+
+class SuccessfulKillDeviceManager extends FailingKillDeviceManager {
+  override async killDevice(): Promise<void> {}
+}
+
+class FakeDeviceSessionRepository extends DeviceSessionRepository {
+  override async upsertActiveSession(): Promise<void> {}
+  override async markReleased(): Promise<void> {}
+  override async recordActivity(): Promise<void> {}
 }
 
 describe("killDevice handler", () => {
@@ -64,6 +76,7 @@ describe("killDevice handler", () => {
       deviceManagerFactory: () => manager,
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
     });
     registerDeviceTools();
   });
@@ -87,7 +100,8 @@ describe("killDevice handler", () => {
 
   test("a failed explicit shutdown remains eligible for later crash recovery", async () => {
     const timer = new FakeTimer();
-    sessionManager = new SessionManager(timer);
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
     const image: DeviceInfo = {
       name: "Pixel 8",
       platform: "android",
@@ -100,9 +114,10 @@ describe("killDevice handler", () => {
       sessionManager,
       "daemon-session",
       timer,
-      undefined,
+      new FakeInstalledAppsRepository(),
       manager,
-      new DefaultRetryExecutor(timer)
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
@@ -122,5 +137,55 @@ describe("killDevice handler", () => {
     await new Promise(resolve => setImmediate(resolve));
 
     expect(manager.getCallCount("startDevice")).toBe(2);
+  });
+
+  test("a successful explicit shutdown does not reboot the emulator", async () => {
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    successfulManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+    await tool.handler({
+      device: {
+        name: image.name,
+        platform: "android",
+        deviceId: "emulator-5554",
+      },
+    });
+    successfulManager.childProcess.emit("exit", 0, null);
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(successfulManager.getCallCount("startDevice")).toBe(1);
+    expect(pool.getDevice("emulator-5554")).toBeNull();
   });
 });

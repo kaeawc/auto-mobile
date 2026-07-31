@@ -3,7 +3,7 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { ActionableError, BootedDevice, SomePlatform } from "../models";
+import { ActionableError, BootedDevice, DeviceInfo, SomePlatform } from "../models";
 import type { FormFactor, StartDeviceResult } from "../models/DeviceMatchCriteria";
 import { BOOTED_DEVICE_RESOURCE_URIS, notifyBootedDeviceResourcesUpdated } from "./bootedDeviceResources";
 import { DEVICE_IMAGE_RESOURCE_URIS, notifyDeviceImageResourcesUpdated } from "./deviceImageResources";
@@ -113,6 +113,7 @@ export interface DeviceToolsDependencies {
   ensureCtrlProxyReady?: (device: BootedDevice, perf: ReturnType<typeof createPerformanceTracker>) => Promise<void>;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
+  clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
   idGenerator: IdGenerator;
 }
 
@@ -120,6 +121,14 @@ async function defaultNotifyResourcesChanged(): Promise<void> {
   await notifyBootedDeviceResourcesUpdated();
   await notifyDeviceImageResourcesUpdated();
   await syncInstalledAppResources();
+}
+
+async function defaultClearInstalledAppsForDevice(deviceId: string): Promise<void> {
+  const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
+  const repo = new InstalledAppsRepository();
+  await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
+    getDbWriteBarrier().track(() => repo.clearDeviceSession(deviceId)).then(() => undefined)
+  );
 }
 
 let moduleDependencies: DeviceToolsDependencies | null = null;
@@ -132,6 +141,7 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       notifyResourcesChanged: defaultNotifyResourcesChanged,
       deviceCreationGateFactory: () => getDeviceCreationGate(),
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
+      clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       idGenerator: defaultIdGenerator,
     };
   }
@@ -147,6 +157,8 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
     deviceCreationGateFactory: deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
+    clearInstalledAppsForDevice:
+      deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
   };
 }
@@ -160,7 +172,8 @@ export function registerDeviceTools() {
   const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
     try {
 
-      const deviceUtils = getDeviceToolsDependencies().deviceManagerFactory();
+      const deps = getDeviceToolsDependencies();
+      const deviceUtils = deps.deviceManagerFactory();
       const imageList = await deviceUtils.listDeviceImages(args.platform);
 
       return createJSONToolResponse({
@@ -225,7 +238,11 @@ export function registerDeviceTools() {
       // A ready device may reuse an existing serial. Invalidate daemon-side
       // per-device state before any later await lets socket traffic reach it.
       if (DaemonState.getInstance().isInitialized()) {
-        DaemonState.getInstance().getDevicePool().notifyDeviceReady(boot.device.deviceId);
+        const pool = DaemonState.getInstance().getDevicePool();
+        if (boot.source === "cold-boot") {
+          pool.clearIntentionalShutdown(boot.device.deviceId);
+        }
+        pool.notifyDeviceReady(boot.device.deviceId);
       }
 
       if (boot.source === "cold-boot" || boot.provisioned) {
@@ -233,7 +250,14 @@ export function registerDeviceTools() {
         await deps.notifyResourcesChanged();
         perf.endOperation("notifyResources");
       }
-      return await buildBootedResponse(boot.device, boot.source, perf, args, boot.processId);
+      return await buildBootedResponse(
+        boot.device,
+        boot.source,
+        perf,
+        args,
+        boot.processId,
+        boot.sourceImage
+      );
     } catch (error) {
       perf.end();
       if (error instanceof ActionableError) {
@@ -306,6 +330,7 @@ export function registerDeviceTools() {
     perf: ReturnType<typeof createPerformanceTracker>,
     args: StartDeviceArgs,
     processId?: number,
+    sourceImage?: DeviceInfo,
   ) {
     // Ensure iOS automation proxy is installed and running before returning.
     // This avoids the first observe/tap call paying the full setup cost.
@@ -323,14 +348,14 @@ export function registerDeviceTools() {
     if (isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
       sessionId = await DaemonState.getInstance()
         .getDevicePool()
-        .autolockDevice(device.deviceId, device.platform, args.__mcpSessionId);
+        .autolockDevice(device.deviceId, device.platform, args.__mcpSessionId, sourceImage);
     }
     if (!sessionId) {
       sessionId = deps.idGenerator.next();
       if (DaemonState.getInstance().isInitialized()) {
         sessionId = await DaemonState.getInstance()
           .getDevicePool()
-          .bindOrReuseDeviceSession(sessionId, device.deviceId, device.platform);
+          .bindOrReuseDeviceSession(sessionId, device.deviceId, device.platform, sourceImage);
       }
     }
 
@@ -397,7 +422,8 @@ export function registerDeviceTools() {
         perf.endOperation("stopCtrlProxy");
       }
 
-      const deviceUtils = getDeviceToolsDependencies().deviceManagerFactory();
+      const deps = getDeviceToolsDependencies();
+      const deviceUtils = deps.deviceManagerFactory();
       perf.startOperation("killProcess");
       const devicePool = DaemonState.getInstance().isInitialized()
         ? DaemonState.getInstance().getDevicePool()
@@ -414,17 +440,11 @@ export function registerDeviceTools() {
       perf.endOperation("killProcess");
 
       perf.startOperation("cleanup");
-      const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
-      const repo = new InstalledAppsRepository();
-      await getInstalledAppsCacheWriteCoordinator().invalidate(args.device.deviceId, () =>
-        getDbWriteBarrier().track(() => repo.clearDeviceSession(args.device.deviceId)).then(() => undefined)
-      );
+      await deps.clearInstalledAppsForDevice(args.device.deviceId);
       perf.endOperation("cleanup");
 
       perf.startOperation("notifyResources");
-      await notifyBootedDeviceResourcesUpdated();
-      await notifyDeviceImageResourcesUpdated();
-      await syncInstalledAppResources();
+      await deps.notifyResourcesChanged();
       perf.endOperation("notifyResources");
 
       perf.end();

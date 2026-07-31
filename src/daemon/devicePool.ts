@@ -112,6 +112,7 @@ export class DevicePool {
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
   private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
+  private readonly suppressedAutoStartImageKeyByDeviceId: Map<string, string> = new Map();
   private daemonSessionId: string;
   private installedAppsRepository: InstalledAppsStore;
   private deviceManager: PlatformDeviceManager;
@@ -122,6 +123,7 @@ export class DevicePool {
   private readonly onDeviceReady: DeviceReadyListener | undefined;
   private readonly androidDeviceReboot: AndroidDeviceReboot;
   private readonly rebootingAndroidAvdNames: Set<string> = new Set();
+  private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly intentionallyStoppedDeviceIds: Set<string> = new Set();
 
@@ -312,10 +314,13 @@ export class DevicePool {
    */
   async addDevice(device: BootedDevice, sourceImage?: DeviceInfo): Promise<void> {
     this.clearAutoStartSuppressionForBootedDevice(device);
+    if (sourceImage) {
+      this.intentionallyStoppedDeviceIds.delete(device.deviceId);
+    }
     const existing = this.devices.get(device.deviceId);
     if (existing) {
       if (sourceImage?.platform === "android") {
-        existing.avdName ??= sourceImage.name;
+        existing.avdName = sourceImage.name;
       }
       // A successful (re)boot of an errored, idle device clears its failure state so
       // criteria autoboot can hand it out instead of failing with "no devices match".
@@ -354,6 +359,13 @@ export class DevicePool {
     this.notifyDeviceReady(device.deviceId);
   }
 
+  private recordSourceAndroidAvd(deviceId: string, sourceImage?: DeviceInfo): void {
+    const device = this.devices.get(deviceId);
+    if (device?.platform === "android" && sourceImage?.platform === "android") {
+      device.avdName = sourceImage.name;
+    }
+  }
+
   /**
    * Remove device from pool
    */
@@ -389,10 +401,14 @@ export class DevicePool {
       await this.removeDevice(deviceId);
       return;
     }
-    if (mayBeStaleSignal && await this.wasRebootedAndroidDeviceRediscovered(device)) {
+    const rediscovered = mayBeStaleSignal && await this.wasRebootedAndroidDeviceRediscovered(device);
+    if (this.devices.get(deviceId) !== device || rediscovered) {
       return;
     }
     if (await this.rebootDisconnectedAndroidDevice(device)) {
+      return;
+    }
+    if (this.devices.get(deviceId) !== device) {
       return;
     }
     this.suppressAutoStartForDevice(device);
@@ -419,7 +435,7 @@ export class DevicePool {
       return true;
     } catch (error) {
       logger.warn(`[DevicePool] Could not verify rebooted Android emulator ${device.id}: ${error}`, error);
-      return false;
+      return true;
     }
   }
 
@@ -427,11 +443,12 @@ export class DevicePool {
     if (this.devices.get(device.id) !== device) {
       return false;
     }
-    return !await this.wasRebootedAndroidDeviceRediscovered(device);
+    const rediscovered = await this.wasRebootedAndroidDeviceRediscovered(device);
+    return this.devices.get(device.id) === device && !rediscovered;
   }
 
   markIntentionalShutdown(deviceId: string): void {
-    if (this.devices.has(deviceId)) {
+    if (this.devices.has(deviceId) || this.recoveringAndroidDeviceIds.has(deviceId)) {
       this.intentionallyStoppedDeviceIds.add(deviceId);
     }
   }
@@ -535,7 +552,7 @@ export class DevicePool {
       }
     }
 
-    if (stats.total < requiredCount) {
+    if (this.isUnavailableWithoutPendingRecovery(stats.total >= requiredCount, platform)) {
       throw new ActionableError(
         `Not enough devices in pool: need ${requiredCount}, have ${stats.total}.\n` +
         `Device pool status:\n` +
@@ -706,7 +723,7 @@ export class DevicePool {
 
     for (const request of requests) {
       const candidates = this.getDevicesMatchingCriteria(request.criteria);
-      if (candidates.length === 0) {
+      if (this.isUnavailableWithoutPendingRecovery(candidates.length > 0, request.criteria?.platform)) {
         const summary = this.criteriaMatcher.formatCriteriaSummary(request.criteria);
         throw new ActionableError(
           `No devices match criteria for session ${request.sessionId}${summary}.\n` +
@@ -818,7 +835,7 @@ export class DevicePool {
           device
         );
         await this.addDevice(ready, device);
-        this.trackStartedDeviceProcess(ready, childProcess);
+        await this.trackStartedDeviceProcess(ready, childProcess);
         started++;
       }
 
@@ -883,7 +900,7 @@ export class DevicePool {
         device
       );
       await this.addDevice(ready, device);
-      this.trackStartedDeviceProcess(ready, childProcess);
+      await this.trackStartedDeviceProcess(ready, childProcess);
       return this.devices.get(ready.deviceId) ?? null;
     } catch (error) {
       logger.warn(`[DevicePool] Failed to start device for criteria ${this.criteriaMatcher.formatCriteriaSummary(criteria)}: ${error}`);
@@ -940,6 +957,18 @@ export class DevicePool {
     );
   }
 
+  private hasPendingAndroidRecovery(platform?: Platform): boolean {
+    return (platform === undefined || platform === "android") && this.rebootingAndroidAvdNames.size > 0;
+  }
+
+  private isUnavailableWithoutPendingRecovery(available: boolean, platform?: Platform): boolean {
+    return !available && !this.hasPendingAndroidRecovery(platform);
+  }
+
+  private shouldWaitForDevice(busyDevices: number, pendingRecovery: boolean): boolean {
+    return busyDevices > 0 || pendingRecovery;
+  }
+
   /**
    * Ensure device pool has been refreshed at least once
    */
@@ -984,7 +1013,10 @@ export class DevicePool {
     return device.platform === "android" && consolePortFromSerial(device.id) !== null;
   }
 
-  private async ensurePooledDevicePresentForUse(device: PooledDevice): Promise<boolean> {
+  private async ensurePooledDevicePresentForUse(
+    device: PooledDevice,
+    deferRecovery: boolean = false
+  ): Promise<boolean> {
     if (!this.shouldValidatePooledDevicePresence(device)) {
       return true;
     }
@@ -1003,6 +1035,16 @@ export class DevicePool {
       return true;
     }
 
+    if (deferRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
+      const eviction = this.evictMissingPooledDevice(device, "not present in adb devices", true);
+      if (this.devices.get(device.id) === device) {
+        device.status = "error";
+      }
+      void eviction.catch(error => {
+        logger.warn(`[DevicePool] Deferred eviction failed for ${device.id}: ${error}`, error);
+      });
+      return false;
+    }
     await this.evictMissingPooledDevice(device, "not present in adb devices", true);
     return false;
   }
@@ -1052,9 +1094,20 @@ export class DevicePool {
     }
 
     const avdName = device.avdName;
+    const recoveryDeviceIds = new Set([device.id]);
     this.rebootingAndroidAvdNames.add(avdName);
+    this.recoveringAndroidDeviceIds.add(device.id);
     try {
-      await this.stopTrackedEmulatorProcess(device.id);
+      try {
+        await this.stopTrackedEmulatorProcess(device.id);
+      } catch (error) {
+        logger.warn(`[DevicePool] Could not terminate disconnected emulator ${device.id}: ${error}`, error);
+        return false;
+      }
+      const current = this.devices.get(device.id);
+      if (current && current !== device) {
+        return true;
+      }
       await this.removeDevice(device.id);
       const target: DeviceInfo = {
         name: avdName,
@@ -1062,22 +1115,65 @@ export class DevicePool {
         isRunning: false,
         source: "local",
       };
+      let intentionallyStopped = false;
       const recovered = await this.androidDeviceReboot.run(target, async () => {
+        if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
+          intentionallyStopped = true;
+          return;
+        }
         const childProcess = await this.deviceManager.startDevice(target);
-        const ready = this.criteriaMatcher.withDeviceImageMetadata(
-          await waitForDeviceReadyOrCancel(this.deviceManager, target, childProcess),
-          target
-        );
-        await this.addDevice(ready, target);
-        this.trackStartedDeviceProcess(ready, childProcess);
+        let ready: BootedDevice | undefined;
+        try {
+          ready = this.criteriaMatcher.withDeviceImageMetadata(
+            await waitForDeviceReadyOrCancel(this.deviceManager, target, childProcess),
+            target
+          );
+          recoveryDeviceIds.add(ready.deviceId);
+          this.recoveringAndroidDeviceIds.add(ready.deviceId);
+          if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
+            intentionallyStopped = true;
+            return;
+          }
+          await this.addDevice(ready, target);
+          if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
+            intentionallyStopped = true;
+            await this.removeDevice(ready.deviceId);
+            return;
+          }
+          await this.trackStartedDeviceProcess(ready, childProcess);
+        } catch (error) {
+          if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
+            intentionallyStopped = true;
+            if (ready) {
+              await this.removeDevice(ready.deviceId);
+            }
+            return;
+          }
+          throw error;
+        }
       });
+      if (intentionallyStopped) {
+        logger.info(`[DevicePool] Cancelled Android emulator ${avdName} recovery after intentional shutdown`);
+        return true;
+      }
       if (recovered) {
         logger.info(`[DevicePool] Restarted Android emulator ${avdName} after disconnect`);
       }
       return recovered;
     } finally {
       this.rebootingAndroidAvdNames.delete(avdName);
+      for (const deviceId of recoveryDeviceIds) {
+        this.recoveringAndroidDeviceIds.delete(deviceId);
+      }
     }
+  }
+
+  private consumeIntentionalShutdown(deviceIds: ReadonlySet<string>): boolean {
+    let consumed = false;
+    for (const deviceId of deviceIds) {
+      consumed = this.intentionallyStoppedDeviceIds.delete(deviceId) || consumed;
+    }
+    return consumed;
   }
 
   private async stopTrackedEmulatorProcess(deviceId: string): Promise<void> {
@@ -1099,11 +1195,36 @@ export class DevicePool {
     const exited = new Promise<void>(resolve => {
       childProcess.once("exit", () => resolve());
     });
-    childProcess.kill();
-    await Promise.race([exited, this.timer.sleep(1_000)]);
+    childProcess.kill("SIGTERM");
+    if (await this.waitForTrackedProcessExit(exited, 1_000)) {
+      return;
+    }
+    childProcess.kill("SIGKILL");
+    if (!await this.waitForTrackedProcessExit(exited, 1_000)) {
+      throw new Error(`emulator process ${childProcess.pid ?? "unknown"} did not exit after SIGKILL`);
+    }
   }
 
-  private trackStartedDeviceProcess(device: BootedDevice, childProcess: ChildProcess | null | undefined): void {
+  private async waitForTrackedProcessExit(exited: Promise<void>, timeoutMs: number): Promise<boolean> {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        exited.then(() => true),
+        new Promise<boolean>(resolve => {
+          timeout = this.timer.setTimeout(() => resolve(false), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
+  }
+
+  private async trackStartedDeviceProcess(
+    device: BootedDevice,
+    childProcess: ChildProcess | null | undefined
+  ): Promise<void> {
     if (device.platform !== "android" || consolePortFromSerial(device.deviceId) === null) {
       return;
     }
@@ -1132,7 +1253,12 @@ export class DevicePool {
     const exitCode = (childProcess as { exitCode?: number | null }).exitCode;
     const signalCode = (childProcess as { signalCode?: NodeJS.Signals | null }).signalCode;
     if (exitCode !== undefined && (exitCode !== null || signalCode !== null && signalCode !== undefined)) {
-      handleExit(exitCode, signalCode ?? null);
+      exitHandled = true;
+      await this.evictStartedDeviceAfterProcessExit(device.deviceId, exitCode, signalCode ?? null);
+      throw new Error(
+        `Android emulator ${device.deviceId} exited before process tracking completed ` +
+        `(code=${exitCode ?? "null"}, signal=${signalCode ?? "none"})`
+      );
     }
   }
 
@@ -1154,13 +1280,20 @@ export class DevicePool {
   }
 
   private suppressAutoStartForDevice(device: PooledDevice): void {
+    const imageKey = `${device.platform}:${device.avdName ?? device.name}`;
     this.suppressedAutoStartDeviceImageKeys.add(device.id);
-    this.suppressedAutoStartDeviceImageKeys.add(`${device.platform}:${device.avdName ?? device.name}`);
+    this.suppressedAutoStartDeviceImageKeys.add(imageKey);
+    this.suppressedAutoStartImageKeyByDeviceId.set(device.id, imageKey);
   }
 
   private clearAutoStartSuppressionForBootedDevice(device: BootedDevice): void {
+    const rememberedImageKey = this.suppressedAutoStartImageKeyByDeviceId.get(device.deviceId);
     this.suppressedAutoStartDeviceImageKeys.delete(device.deviceId);
     this.suppressedAutoStartDeviceImageKeys.delete(`${device.platform}:${device.name}`);
+    if (rememberedImageKey) {
+      this.suppressedAutoStartDeviceImageKeys.delete(rememberedImageKey);
+      this.suppressedAutoStartImageKeyByDeviceId.delete(device.deviceId);
+    }
   }
 
   /**
@@ -1279,7 +1412,8 @@ export class DevicePool {
     return this.tryAssignFrom(
       sessionId,
       () => this.getDevicesByPlatform(platform),
-      "platform pool empty"
+      "platform pool empty",
+      () => this.hasPendingAndroidRecovery(platform)
     );
   }
 
@@ -1296,7 +1430,8 @@ export class DevicePool {
     return this.tryAssignFrom(
       sessionId,
       () => this.getDevicesMatchingCriteria(criteria),
-      "criteria pool empty"
+      "criteria pool empty",
+      () => this.hasPendingAndroidRecovery(criteria?.platform)
     );
   }
 
@@ -1314,7 +1449,8 @@ export class DevicePool {
   private async tryAssignFrom(
     sessionId: string,
     selectCandidates: () => PooledDevice[],
-    emptyCandidatePoolReason: string
+    emptyCandidatePoolReason: string,
+    hasPendingRecovery: () => boolean
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -1365,7 +1501,7 @@ export class DevicePool {
 
         return {
           success: false,
-          shouldWait: busyDevices > 0, // Wait if devices are busy, fail if none exist
+          shouldWait: this.shouldWaitForDevice(busyDevices, hasPendingRecovery()),
           totalDevices,
           livenessUnknown,
         };
@@ -1402,7 +1538,7 @@ export class DevicePool {
     while (device) {
       const skippedDeviceId = device.id;
       if (this.shouldValidatePooledDevicePresence(device)) {
-        if (await this.ensurePooledDevicePresentForUse(device)) {
+        if (await this.ensurePooledDevicePresentForUse(device, true)) {
           return { device, livenessUnknown };
         }
         candidates = candidates.filter(candidate => candidate.id !== skippedDeviceId);
@@ -1586,17 +1722,23 @@ export class DevicePool {
    * selection. If the device is already bound to a live session, reuse that
    * session so repeated startDevice calls stay idempotent.
    */
-  async bindOrReuseDeviceSession(sessionId: string, deviceId: string, platform: Platform): Promise<string> {
+  async bindOrReuseDeviceSession(
+    sessionId: string,
+    deviceId: string,
+    platform: Platform,
+    sourceImage?: DeviceInfo
+  ): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
       const alreadyPooled = this.devices.has(deviceId);
       if (alreadyPooled) {
+        this.recordSourceAndroidAvd(deviceId, sourceImage);
         this.notifyDeviceReady(deviceId);
       }
       if (!alreadyPooled) {
         const bootedDevices = await this.deviceManager.getBootedDevices(platform);
         const booted = bootedDevices.find(d => d.deviceId === deviceId);
         if (booted) {
-          await this.addDevice(booted);
+          await this.addDevice(booted, sourceImage);
         }
       }
 
@@ -1659,7 +1801,12 @@ export class DevicePool {
    * @param platform - Device platform
    * @returns The generated session ID, or undefined if autolock is disabled
    */
-  async autolockDevice(deviceId: string, platform: Platform, mcpSessionId?: string): Promise<string | undefined> {
+  async autolockDevice(
+    deviceId: string,
+    platform: Platform,
+    mcpSessionId?: string,
+    sourceImage?: DeviceInfo
+  ): Promise<string | undefined> {
     if (!isDevicePoolAutolockEnabled()) {
       return undefined;
     }
@@ -1669,13 +1816,14 @@ export class DevicePool {
     // Ensure device is in the pool (it may have been freshly booted)
     const alreadyPooled = this.devices.has(deviceId);
     if (alreadyPooled) {
+      this.recordSourceAndroidAvd(deviceId, sourceImage);
       this.notifyDeviceReady(deviceId);
     }
     if (!alreadyPooled) {
       const bootedDevices = await this.deviceManager.getBootedDevices(platform);
       const booted = bootedDevices.find(d => d.deviceId === deviceId);
       if (booted) {
-        await this.addDevice(booted);
+        await this.addDevice(booted, sourceImage);
       }
     }
 

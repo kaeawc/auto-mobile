@@ -275,3 +275,20 @@ P "x" file'
   run bash "$ABS" "$FIX"
   [ "$status" -eq 0 ]
 }
+
+@test "flags a GNUism inside a block-quoted fenced block" {
+  # `> ```bash` is valid CommonMark; every line carries the `>` prefix. The
+  # extractor must strip the container prefix and still scan the body.
+  printf '> ```bash\n> grep -P "x" file\n> ```\n' > "$FIX/bq.md"
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-grep-P"* ]]
+}
+
+@test "does NOT strip a leading > redirection in an ordinary (unquoted) block" {
+  # A block that did NOT open with a `>` prefix must keep its lines verbatim, so
+  # a redirection is never mistaken for a block-quote marker.
+  printf '```bash\n: > file.txt\necho done\n```\n' > "$FIX/redir.md"
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}

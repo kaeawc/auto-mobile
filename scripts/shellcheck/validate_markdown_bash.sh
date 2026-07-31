@@ -26,6 +26,14 @@
 #   * carries an explicit `# md-bash-lint: skip` directive on its own line.
 # Individual lines may be exempted with a trailing `# md-bash-lint-ok` comment.
 #
+# This is a line-oriented HEURISTIC, not a shell tokenizer: it coalesces `\`
+# line-continuations and masks inert string/comment text, but it deliberately
+# does NOT resolve option bundles (`date -ud`), variable/array data-flow
+# (`args=(-P …); grep "${args[@]}"`), or other spellings that need a real parser
+# to disambiguate without risking false positives on legitimate docs. Those
+# residual bypasses are accepted; a block that genuinely needs one is covered by
+# the `# md-bash-lint: skip` escape hatch above.
+#
 # Usage:
 #   scripts/shellcheck/validate_markdown_bash.sh                 # canonical targets
 #   scripts/shellcheck/validate_markdown_bash.sh FILE_OR_DIR...  # explicit targets (tests)
@@ -213,21 +221,36 @@ process_file() {
   # AT LEAST as many backticks as the opener, so a block opened with ``` may be
   # closed with ```` (a longer fence) — matching only an exact 3-backtick close
   # would swallow the rest of the file as one block.
+  #
+  # A fence can also live inside a block quote (`> ```bash`), where every line of
+  # the block carries the same `>` container prefix. When the OPENING fence
+  # carries one, that prefix is stripped from the body and the closing fence too;
+  # a block opened without one is left untouched, so a bare `> file` redirection
+  # inside an ordinary block is never mistaken for a quote marker.
   local awk_out
   awk_out="$(awk '
+    function strip_bq(s) { sub(/^[[:space:]]*((>[[:space:]]?)+)/, "", s); return s }
     function fence_len(s,   m) {
       sub(/^[[:space:]]+/, "", s)
       m = 0
       while (substr(s, m + 1, 1) == "`") { m++ }
       return m
     }
-    !inblock && $0 ~ /^[[:space:]]*`{3,}bash[[:space:]]*$/ {
-      inblock = 1; openlen = fence_len($0); print "@@ " NR; next
+    !inblock {
+      stripped = strip_bq($0)
+      if (stripped ~ /^[[:space:]]*`{3,}bash[[:space:]]*$/) {
+        inblock = 1; openlen = fence_len(stripped); bqmode = ($0 != stripped)
+        print "@@ " NR; next
+      }
+      next
     }
-    inblock && $0 ~ /^[[:space:]]*`{3,}[[:space:]]*$/ && fence_len($0) >= openlen {
-      inblock = 0; print "@@END"; next
+    {
+      line = bqmode ? strip_bq($0) : $0
+      if (line ~ /^[[:space:]]*`{3,}[[:space:]]*$/ && fence_len(line) >= openlen) {
+        inblock = 0; print "@@END"; next
+      }
+      print "@@L " line
     }
-    inblock { print "@@L " $0 }
     # CommonMark lets a fenced block end at end-of-document with no closing
     # fence; flush it so a file that trails off inside ```bash is still scanned.
     END { if (inblock) print "@@END" }

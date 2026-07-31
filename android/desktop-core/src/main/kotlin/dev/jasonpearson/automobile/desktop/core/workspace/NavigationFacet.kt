@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationDataSource
@@ -38,6 +39,9 @@ private sealed interface NavigationFacetState {
 
   /** The resolved app has no recorded navigation graph. */
   data object Empty : NavigationFacetState
+
+  /** The observation stream never connected (e.g. daemon socket unavailable); retryable. */
+  data class ConnectionError(val message: String) : NavigationFacetState
 
   data class Error(val message: String) : NavigationFacetState
 
@@ -78,8 +82,13 @@ fun NavigationFacet(
 ) {
   val graph = LocalAutoMobileGraph.current
 
+  // Bumped by the connection-error Retry to tear down and recreate the stream. The full automatic
+  // reconnect-on-recovery (backoff, no user action) is the shared workspace-facet reconnect
+  // lifecycle tracked in #4868 — deliberately not built here; a manual retry is enough for now.
+  var streamAttempt by remember(column.deviceId) { mutableStateOf(0) }
+
   var stream by remember(column.deviceId) { mutableStateOf<ObservationStream?>(null) }
-  DisposableEffect(column.deviceId) {
+  DisposableEffect(column.deviceId, streamAttempt) {
     val connected =
       observationStreamFactory(column.deviceId).also { it.connect(deviceId = column.deviceId) }
     // Prompt the daemon to emit the current foreground app so we can resolve which app's graph to
@@ -103,6 +112,18 @@ fun NavigationFacet(
     }
   }
 
+  // Mirror the stream's connection state so a socket that never connects surfaces a retryable
+  // connection-error instead of an indefinite "Resolving…". Reset per stream attempt so a stale
+  // Disconnected doesn't leak across a reconnect.
+  var connectionState by
+    remember(column.deviceId, streamAttempt) {
+      mutableStateOf<ConnectionState>(ConnectionState.Connecting)
+    }
+  LaunchedEffect(stream) {
+    val current = stream ?: return@LaunchedEffect
+    current.connectionState.collect { connectionState = it }
+  }
+
   val sourceProvider =
     navigationDataSourceProvider
       ?: { appId ->
@@ -113,12 +134,25 @@ fun NavigationFacet(
   var state by
     remember(column.deviceId) { mutableStateOf<NavigationFacetState>(NavigationFacetState.Loading) }
 
-  LaunchedEffect(column.deviceId, foregroundAppId, attempt) {
+  LaunchedEffect(column.deviceId, foregroundAppId, attempt, connectionState) {
     val appId = foregroundAppId
     if (appId == null) {
-      // No foreground app resolved yet: never pull with a null app id (that would surface the
-      // wrong/global graph). Stay in Loading until the stream reports the foreground app.
-      state = NavigationFacetState.Loading
+      // No foreground app resolved yet. We resolve the appId *from* the stream, so a stream that
+      // never connects would otherwise hang here forever (the daemon-socket-unavailable dead-end).
+      // Surface a retryable connection-error in that case; otherwise stay in Loading until the
+      // stream reports the foreground app. Never pull with a null app id (that would surface the
+      // wrong/global graph).
+      state =
+        when (connectionState) {
+          is ConnectionState.Disconnected ->
+            NavigationFacetState.ConnectionError(
+              (connectionState as ConnectionState.Disconnected).reason
+                ?: "Not connected to the AutoMobile daemon"
+            )
+          is ConnectionState.Error ->
+            NavigationFacetState.ConnectionError((connectionState as ConnectionState.Error).message)
+          else -> NavigationFacetState.Loading
+        }
       return@LaunchedEffect
     }
     state = NavigationFacetState.Loading
@@ -147,7 +181,21 @@ fun NavigationFacet(
     NavigationFacetState.Loading -> NavigationFacetNote("Resolving navigation graph…")
     NavigationFacetState.Empty ->
       NavigationFacetNote("No navigation graph recorded for this app yet")
-    is NavigationFacetState.Error -> NavigationFacetError(current.message) { attempt++ }
+    is NavigationFacetState.ConnectionError ->
+      // Retry tears down and recreates the stream, re-attempting connect + appId resolution.
+      NavigationFacetError(
+        message = current.message,
+        retryContentDescription = "Retry connecting to the AutoMobile daemon",
+      ) {
+        streamAttempt++
+      }
+    is NavigationFacetState.Error ->
+      NavigationFacetError(
+        message = current.message,
+        retryContentDescription = "Retry loading navigation graph",
+      ) {
+        attempt++
+      }
     is NavigationFacetState.Resolved ->
       NavigationDashboard(
         providedGraph = current.graph,
@@ -168,9 +216,15 @@ private fun NavigationFacetNote(text: String) {
   }
 }
 
-/** Error state with a Retry affordance that re-runs the app-scoped navigation-graph pull. */
+/**
+ * Error state with a Retry affordance; [retryContentDescription] names what the retry re-attempts.
+ */
 @Composable
-private fun NavigationFacetError(message: String, onRetry: () -> Unit) {
+private fun NavigationFacetError(
+  message: String,
+  retryContentDescription: String,
+  onRetry: () -> Unit,
+) {
   Column(
     Modifier.fillMaxSize(),
     verticalArrangement = Arrangement.Center,
@@ -182,7 +236,7 @@ private fun NavigationFacetError(message: String, onRetry: () -> Unit) {
       color = MaterialTheme.colorScheme.primary,
       modifier =
         Modifier.padding(top = 8.dp).clickable(onClick = onRetry).semantics {
-          contentDescription = "Retry loading navigation graph"
+          contentDescription = retryContentDescription
         },
     )
   }

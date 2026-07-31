@@ -290,6 +290,52 @@ class NavigationFacetTest {
   }
 
   @Test
+  fun `surfaces a retryable connection error when the stream never connects and retry recreates it`() =
+    runComposeUiTest {
+      val created = mutableListOf<FakeObservationStream>()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = {
+                FakeObservationStream(failConnect = true).also { created.add(it) }
+              },
+              navigationDataSourceProvider = {
+                StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
+              },
+            )
+          }
+        }
+      }
+
+      // The socket never connects and the facet resolves the app id FROM the stream, so without
+      // this path it would hang on "Resolving…" forever. Instead it must surface a retryable
+      // connection error.
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Socket not found", substring = true).fetchSemanticsNodes().isNotEmpty()
+      }
+      onNodeWithText("Socket not found", substring = true).assertExists()
+      assertTrue(
+        "must not be stuck on the indefinite Resolving state",
+        onAllNodesWithText("Resolving navigation graph", substring = true)
+          .fetchSemanticsNodes()
+          .isEmpty(),
+      )
+      onNodeWithContentDescription("Retry connecting to the AutoMobile daemon").assertExists()
+      assertEquals(1, created.size)
+
+      // Retry tears down and recreates the stream (re-attempting connect + appId resolution).
+      onNodeWithContentDescription("Retry connecting to the AutoMobile daemon").performClick()
+      waitUntil(timeoutMillis = 5_000) { created.size >= 2 }
+      assertTrue("retry should recreate the observation stream", created.size >= 2)
+      assertTrue(
+        "recreated stream should have been connected",
+        created.last().connectCallCount >= 1,
+      )
+    }
+
+  @Test
   fun `reconnects to a new device when the column device changes`() = runComposeUiTest {
     val streams = mutableMapOf<String, FakeObservationStream>()
     val deviceId = mutableStateOf("dev-1")

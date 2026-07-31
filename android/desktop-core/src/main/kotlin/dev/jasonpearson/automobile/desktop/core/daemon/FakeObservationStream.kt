@@ -12,8 +12,12 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * In-memory [ObservationStream] for UI tests: records subscription lifecycle (connect/disconnect/
  * dispose, requested navigation graph) and lets tests emit updates onto each flow, with no socket.
+ *
+ * When [failConnect] is true, [connect] leaves the stream disconnected (mirroring the real client
+ * swallowing a socket-unavailable failure) so tests can exercise the retryable connection-error
+ * path.
  */
-class FakeObservationStream : ObservationStream {
+class FakeObservationStream(private val failConnect: Boolean = false) : ObservationStream {
   private fun <T> flow() =
     MutableSharedFlow<T>(
       replay = 1,
@@ -61,8 +65,18 @@ class FakeObservationStream : ObservationStream {
   override fun connect(deviceId: String?) {
     connectCallCount++
     lastConnectedDeviceId = deviceId
+    if (failConnect) {
+      connected = false
+      _connectionState.value = ConnectionState.Disconnected("Socket not found")
+      return
+    }
     connected = true
     _connectionState.value = ConnectionState.Connected()
+  }
+
+  /** Push a connection-state transition onto [connectionState] (e.g. a mid-session drop). */
+  fun emitConnectionState(state: ConnectionState) {
+    _connectionState.value = state
   }
 
   override fun disconnect() {

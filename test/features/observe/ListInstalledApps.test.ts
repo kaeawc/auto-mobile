@@ -28,7 +28,10 @@ describe("ListInstalledApps", function() {
 
   beforeEach(function() {
     mockDevice = {
-      deviceId: "test-device",
+      // The installed-apps write coordinator is process-global. Keep this
+      // fixture distinct from generic device fixtures in concurrently loaded
+      // test files so their invalidations cannot bypass this seeded cache.
+      deviceId: "list-installed-apps-test-device",
       platform: "android"
     } as BootedDevice;
 

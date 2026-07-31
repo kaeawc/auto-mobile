@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { ActionableError, toActionableError } from "../../src/models/ActionableError";
 import {
   buildSnapshot,
+  excludeIncompleteNpmDay,
   mergeSnapshot,
   parseSnapshots,
   serializeSnapshots,
@@ -45,6 +46,7 @@ interface GithubReleaseAsset {
 
 interface GithubRelease {
   tag_name: string;
+  draft: boolean;
   assets: GithubReleaseAsset[];
 }
 
@@ -84,6 +86,12 @@ async function fetchGithubAssetCounts(): Promise<GithubAssetCount[]> {
       break;
     }
     for (const release of releases) {
+      // The authenticated releases endpoint returns drafts to callers with push
+      // access (this job's token has it); never publish unreleased draft metadata
+      // to the public dashboard.
+      if (release.draft) {
+        continue;
+      }
       for (const asset of release.assets ?? []) {
         counts.push({
           tag: release.tag_name,
@@ -104,7 +112,10 @@ async function fetchNpmDailyCounts(): Promise<NpmDayCount[]> {
   const to = new Date();
   const from = new Date(to.getTime() - NPM_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   const range = `${utcDateString(from)}:${utcDateString(to)}`;
-  const url = `https://api.npmjs.org/downloads/range/${range}/${NPM_PACKAGE}`;
+  // Percent-encode the scoped package so the "/" is not read as a path separator.
+  // The unencoded form currently also resolves, but the encoded form is the
+  // documented contract; both return 200 today.
+  const url = `https://api.npmjs.org/downloads/range/${range}/${encodeURIComponent(NPM_PACKAGE)}`;
   let response: Response;
   try {
     response = await fetch(url, { headers: { "User-Agent": "auto-mobile-download-metrics" } });
@@ -136,10 +147,36 @@ export async function collect(
   dataFile: string,
   now: Date
 ): Promise<{ date: string; wrote: boolean }> {
-  const [github, npm] = await Promise.all([
+  // Fetch the two independent sources without coupling their failure modes: a
+  // transient npm outage must not discard GitHub counts we already have.
+  const [githubResult, npmResult] = await Promise.allSettled([
     sources.fetchGithubAssetCounts(),
     sources.fetchNpmDailyCounts(),
   ]);
+
+  // GitHub cumulative counts are the core metric; without them there is no useful
+  // snapshot, so a GitHub failure fails the run (it retries on the next schedule).
+  if (githubResult.status === "rejected") {
+    throw toActionableError(githubResult.reason, "Failed to fetch GitHub release download counts");
+  }
+  const github = githubResult.value;
+
+  // npm is best-effort: on failure, write a GitHub-only snapshot. The dashboard
+  // merges npm across snapshots, so earlier days survive a one-day npm gap.
+  let npmRaw: NpmDayCount[] = [];
+  if (npmResult.status === "fulfilled") {
+    npmRaw = npmResult.value;
+  } else {
+    process.stderr.write(
+      `WARN: npm download fetch failed; writing GitHub-only snapshot for ${utcDateString(now)}. ` +
+        `${String(npmResult.reason)}\n`
+    );
+  }
+
+  // The npm range is requested through "today", but the job runs a few hours
+  // into the UTC day, so today's count is partial. Drop it and store only
+  // complete days.
+  const npm = excludeIncompleteNpmDay(npmRaw, now);
 
   const date = utcDateString(now);
   const snapshot = buildSnapshot(date, github, npm);

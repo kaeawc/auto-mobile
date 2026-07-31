@@ -67,21 +67,52 @@ when the docs site was last rebuilt.
   // assetKey -> stable identity across snapshots.
   function key(tag, asset) { return tag + " · " + asset; }
 
+  // Compare release tags newest-first by numeric version segments, so 0.0.100
+  // sorts ahead of 0.0.47 (a lexical compare would invert them). Non-numeric
+  // pre-release labels fall back to a reversed string compare.
+  function cmpTagDesc(a, b) {
+    var pa = String(a).replace(/^v/, "").split(/[.\-+]/);
+    var pb = String(b).replace(/^v/, "").split(/[.\-+]/);
+    for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+      var na = parseInt(pa[i], 10), nb = parseInt(pb[i], 10);
+      if (!isNaN(na) && !isNaN(nb)) {
+        if (na !== nb) { return nb - na; }
+      } else {
+        var sa = pa[i] || "", sb = pb[i] || "";
+        if (sa !== sb) { return sa < sb ? 1 : -1; }
+      }
+    }
+    return 0;
+  }
+
+  // Whole-day difference between two YYYY-MM-DD UTC dates (later - earlier).
+  function utcDayDifference(earlier, later) {
+    var MS_PER_DAY = 24 * 60 * 60 * 1000;
+    return Math.round(
+      (Date.parse(later + "T00:00:00.000Z") - Date.parse(earlier + "T00:00:00.000Z")) / MS_PER_DAY
+    );
+  }
+
   // Build cumulative series and daily-delta series per asset from all snapshots.
   function buildAssetSeries(snapshots) {
     var ordered = snapshots.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; });
     var dates = ordered.map(function (s) { return s.date; });
     var series = {}; // key -> { tag, asset, cumulative: [{date,value}], delta: [{date,value|null}] }
-    var lastCum = {};
+    var last = {}; // key -> { cumulative, date }
     ordered.forEach(function (snap) {
       (snap.github || []).forEach(function (g) {
         var k = key(g.tag, g.asset);
         if (!series[k]) { series[k] = { tag: g.tag, asset: g.asset, cumulative: [], delta: [] }; }
-        var prior = lastCum[k];
-        var delta = prior === undefined ? null : Math.max(0, g.cumulative - prior);
+        var prior = last[k];
+        // Only a prior observation on the immediately preceding calendar day
+        // yields a real daily delta; a gap (missing intermediate snapshot) is
+        // unknowable and rendered as null.
+        var delta = (prior === undefined || utcDayDifference(prior.date, snap.date) !== 1)
+          ? null
+          : Math.max(0, g.cumulative - prior.cumulative);
         series[k].cumulative.push({ date: snap.date, value: g.cumulative });
         series[k].delta.push({ date: snap.date, value: delta });
-        lastCum[k] = g.cumulative;
+        last[k] = { cumulative: g.cumulative, date: snap.date };
       });
     });
     return { dates: dates, series: series };
@@ -140,8 +171,14 @@ when the docs site was last rebuilt.
     });
   }
 
-  function lineChart(dates, seriesList, valueFor) {
-    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img" });
+  function lineChart(title, dates, seriesList, valueFor) {
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": title });
+    svg.appendChild(el("title", {}, title));
+    // Position each point by its snapshot date's index in the GLOBAL date axis,
+    // not its index within one asset's (possibly sparse) series — a release that
+    // first appears in a later snapshot must plot at the correct right-hand x.
+    var indexByDate = {};
+    dates.forEach(function (d, i) { indexByDate[d] = i; });
     var max = 1;
     seriesList.forEach(function (s) {
       s.points.forEach(function (p) { if (valueFor(p) != null && valueFor(p) > max) { max = valueFor(p); } });
@@ -149,12 +186,14 @@ when the docs site was last rebuilt.
     axes(svg, max, dates);
     seriesList.forEach(function (s) {
       var d = "";
-      s.points.forEach(function (p, i) {
+      var penUp = true; // start a fresh subpath after any gap (null value)
+      s.points.forEach(function (p) {
         var v = valueFor(p);
-        if (v == null) { return; }
-        var x = scaleX(i, dates.length);
+        if (v == null) { penUp = true; return; }
+        var x = scaleX(indexByDate[p.date], dates.length);
         var y = scaleY(v, max);
-        d += (d === "" ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1) + " ";
+        d += (penUp ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1) + " ";
+        penUp = false;
         svg.appendChild(el("circle", { cx: x, cy: y, r: 2.5, fill: s.color }));
       });
       if (d) { svg.appendChild(el("path", { d: d, class: "dl-chart-line", stroke: s.color })); }
@@ -162,8 +201,9 @@ when the docs site was last rebuilt.
     return svg;
   }
 
-  function barChart(labels, values, color) {
-    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img" });
+  function barChart(title, labels, values, color) {
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": title });
+    svg.appendChild(el("title", {}, title));
     var max = 1;
     values.forEach(function (v) { if (v > max) { max = v; } });
     axes(svg, max, labels);
@@ -213,7 +253,7 @@ when the docs site was last rebuilt.
     // Group by release tag.
     var tags = [];
     keys.forEach(function (k) { var t = built.series[k].tag; if (tags.indexOf(t) < 0) { tags.push(t); } });
-    tags.sort(function (a, b) { return a < b ? 1 : -1; }); // newest tag first
+    tags.sort(cmpTagDesc); // newest release first, version-aware (0.0.100 > 0.0.47)
 
     tags.forEach(function (tag) {
       var tagKeys = keys.filter(function (k) { return built.series[k].tag === tag; });
@@ -223,21 +263,24 @@ when the docs site was last rebuilt.
 
       var cumWrap = section(root, "Release " + tag + " — cumulative downloads", null);
       legend(cumWrap, legendEntries);
-      cumWrap.appendChild(lineChart(built.dates, tagKeys.map(function (k) {
-        return { color: colorFor[k], points: built.series[k].cumulative };
-      }), function (p) { return p.value; }));
+      cumWrap.appendChild(lineChart("Release " + tag + " cumulative downloads per asset",
+        built.dates, tagKeys.map(function (k) {
+          return { color: colorFor[k], points: built.series[k].cumulative };
+        }), function (p) { return p.value; }));
 
       var deltaWrap = section(root, "Release " + tag + " — daily downloads", "First snapshot is a day-0 seed (no delta shown).");
       legend(deltaWrap, legendEntries);
-      deltaWrap.appendChild(lineChart(built.dates, tagKeys.map(function (k) {
-        return { color: colorFor[k], points: built.series[k].delta };
-      }), function (p) { return p.value; }));
+      deltaWrap.appendChild(lineChart("Release " + tag + " daily downloads per asset",
+        built.dates, tagKeys.map(function (k) {
+          return { color: colorFor[k], points: built.series[k].delta };
+        }), function (p) { return p.value; }));
     });
 
     var npm = buildNpmSeries(snapshots);
     var npmWrap = section(root, "npm — @kaeawc/auto-mobile daily downloads",
       "True daily counts from the npm registry (own axis — npm dwarfs asset counts).");
     npmWrap.appendChild(barChart(
+      "npm @kaeawc/auto-mobile daily downloads",
       npm.map(function (n) { return n.day; }),
       npm.map(function (n) { return n.downloads; }),
       "#59a14f"
@@ -247,17 +290,23 @@ when the docs site was last rebuilt.
   function run() {
     var root = document.getElementById("dl-metrics");
     if (!root) { return; }
-    fetch(DATA_URL, { cache: "no-store" })
+    // Bound the fetch with an AbortController so a stalled GitHub response can't
+    // leave the page stuck on "Loading…"; clear the timer once it settles.
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, 15000);
+    fetch(DATA_URL, { cache: "no-store", signal: controller.signal })
       .then(function (r) {
         if (!r.ok) { throw new Error("HTTP " + r.status); }
         return r.text();
       })
       .then(function (text) { render(root, parseJsonl(text)); })
       .catch(function (err) {
+        var reason = err && err.name === "AbortError" ? "request timed out" : String(err.message || err);
         root.innerHTML = '<p class="dl-error">Could not load download metrics from GitHub (' +
-          String(err.message || err) + '). The data file is committed on main at ' +
+          reason + '). The data file is committed on main at ' +
           'docs/metrics/data/downloads.jsonl.</p>';
-      });
+      })
+      .finally(function () { clearTimeout(timer); });
   }
 
   if (document.readyState === "loading") {

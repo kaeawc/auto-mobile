@@ -29,6 +29,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+          # Always operate on main, regardless of the ref a workflow_dispatch was
+          # triggered from — otherwise the privileged push below would publish the
+          # dispatch branch's commits to protected main.
+          ref: main
           # Full history so the direct push to main isn't rejected as a shallow
           # update, and the admin token so it bypasses the green-main ruleset.
           fetch-depth: 0
@@ -62,6 +66,20 @@ jobs:
           git commit -m "chore(metrics): daily release download snapshot [skip ci]"
 
           # main can advance between checkout and push; rebase our single data
-          # commit on top and retry once so a concurrent push doesn't wedge us.
-          git pull --rebase origin main
-          git push origin HEAD:main
+          # commit on top and retry so a concurrent push doesn't wedge us. The
+          # push runs inside `if` so a failure is caught (not aborted by the -e
+          # in set -euo pipefail) and the loop can retry.
+          pushed=false
+          for attempt in 1 2 3 4 5; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              pushed=true
+              break
+            fi
+            echo "Push attempt ${attempt} failed (main advanced?); retrying after backoff…"
+            sleep $((attempt * 3))
+          done
+
+          if [ "${pushed}" != "true" ]; then
+            echo "Failed to push snapshot to main after 5 attempts" >&2
+            exit 1
+          fi

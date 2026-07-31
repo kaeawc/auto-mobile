@@ -316,15 +316,40 @@ JSON
   [[ "$output" != *"BUDGET OK"* ]]
 }
 
+# Sum the per-coordinate `bytes=` subtotals; a field-shift bug would make this
+# disagree with the release grand total (which is a bash scalar, computed
+# independently of the awk aggregation).
+per_coordinate_byte_sum() {
+  printf '%s\n' "$1" | awk '
+    /^dev[.].*files=.*bytes=/ { for (i = 1; i <= NF; i++) if ($i ~ /^bytes=/) { sub(/bytes=/, "", $i); s += $i } }
+    END { print s + 0 }'
+}
+
 @test "an unexpected filename with a space keeps correct byte subtotals" {
   local dir="$STAGE/$GROUP_PATH/auto-mobile-protocol/0.0.47"
   head -c 7 /dev/zero >"$dir/stray file.jar" # space in the name
   run bash "$SCRIPT" "$STAGE"
   [ "$status" -eq 0 ]
-  # The per-coordinate subtotal must not collapse to bytes=0 from field shifting;
-  # the independent byte oracle still equals the grand total.
-  local expected
-  expected="$(find "$STAGE" -type f -exec cat {} + | wc -c | tr -d ' ')"
-  [[ "$output" == *"bytes=$expected"* ]]
+  local oracle
+  oracle="$(find "$STAGE" -type f -exec cat {} + | wc -c | tr -d ' ')"
+  [[ "$output" == *"coordinates=2 files=111 bytes=$oracle"* ]]
+  [ "$(per_coordinate_byte_sum "$output")" -eq "$oracle" ]
   [[ "$output" == *"stray file.jar"* ]]
+}
+
+@test "an unexpected filename with a tab keeps correct byte subtotals" {
+  local dir="$STAGE/$GROUP_PATH/auto-mobile-protocol/0.0.47"
+  head -c 7 /dev/zero >"$dir/$(printf 'tabbed\tfile').jar" # literal tab in the name
+  run bash "$SCRIPT" "$STAGE"
+  [ "$status" -eq 0 ]
+  local oracle
+  oracle="$(find "$STAGE" -type f -exec cat {} + | wc -c | tr -d ' ')"
+  # bytes=$NF keeps the byte count correct despite the extra tab field.
+  [ "$(per_coordinate_byte_sum "$output")" -eq "$oracle" ]
+}
+
+@test "a staging path with multiple trailing slashes is handled" {
+  run bash "$SCRIPT" "$STAGE//" --strict
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"files=110"* ]]
 }

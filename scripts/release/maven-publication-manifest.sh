@@ -67,7 +67,11 @@ done
 
 [ -n "$staging" ] || { echo "error: no staging directory given" >&2; usage >&2; exit 2; }
 [ -d "$staging" ] || { echo "error: staging directory not found: $staging" >&2; exit 2; }
-staging="${staging%/}" # so ${path#"$staging"/} strips cleanly
+# Strip every trailing slash (not just one) so ${path#"$staging"/} strips cleanly;
+# keep "/" itself non-empty.
+while [ "$staging" != "/" ] && [ "$staging" != "${staging%/}" ]; do
+  staging="${staging%/}"
+done
 
 group_path="${GROUP//.//}"
 
@@ -189,7 +193,10 @@ echo
 # arrays, so the script works on bash 3.2 (macOS system bash, used by CI's BATS).
 # -F'\t' keeps a space-containing filename in a single field.
 echo "## Per-coordinate totals"
-awk -F'\t' '{ f[$1]++; b[$1] += $4 } END { for (c in f) printf "%s files=%d bytes=%d\n", c, f[c], b[c] }' \
+# bytes is the LAST field ($NF), not $4, so even a filename containing tabs (which
+# would add fields) cannot shift the byte count -- coord ($1) and classifier ($2)
+# precede the name, so they are never shifted either.
+awk -F'\t' '{ f[$1]++; b[$1] += $NF } END { for (c in f) printf "%s files=%d bytes=%d\n", c, f[c], b[c] }' \
   "$records" | LC_ALL=C sort
 echo
 echo "## Classifier totals"

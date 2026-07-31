@@ -80,8 +80,18 @@ fun WorkspaceShell(
   // Body of the health sheet opened by clicking the status dot. Hoisted like [facetContent] so the
   // host (or a test) can substitute content; defaults to the live [DiagnosticsDashboard].
   healthSheetContent: @Composable () -> Unit = { DefaultHealthSheetBody() },
+  // Two-device compare surface opened by the top-bar ⧉ Compare glyph. Hoisted like the other bodies
+  // so a test can assert routing without opening real streams; defaults to [TwoDeviceCompareView].
+  compareContent: @Composable (DeviceColumn, DeviceColumn) -> Unit = { a, b ->
+    TwoDeviceCompareView(columnA = a, columnB = b)
+  },
 ) {
   var showHealthSheet by remember { mutableStateOf(false) }
+  var showCompare by remember { mutableStateOf(false) }
+  val comparePair = (state as? WorkspaceUiState.Content)?.let(::compareColumns)
+  // A pane closing can drop the observed count below two; retire any open compare so it can't
+  // linger with a stale pair.
+  if (comparePair == null && showCompare) showCompare = false
   Box(modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
       TopBar(
@@ -90,6 +100,8 @@ fun WorkspaceShell(
         onOpenPicker = onOpenPicker,
         onOpenPalette = onOpenPalette,
         onStatusClick = { showHealthSheet = true },
+        canCompare = comparePair != null,
+        onCompare = { showCompare = true },
       )
       when (state) {
         is WorkspaceUiState.Empty -> EmptyState(onOpenPicker, Modifier.weight(1f).fillMaxWidth())
@@ -121,7 +133,39 @@ fun WorkspaceShell(
         content = healthSheetContent,
       )
     }
+    if (showCompare && comparePair != null) {
+      CompareOverlay(
+        columnA = comparePair.first,
+        columnB = comparePair.second,
+        onDismiss = { showCompare = false },
+        content = compareContent,
+      )
+    }
   }
+}
+
+/**
+ * Pick the two device columns to compare: the focused column plus the first other observed column
+ * **of the same platform**. Returns null when there is no same-platform second device, so the ⧉
+ * Compare entry stays hidden and the overlay never opens with an incomparable pair. If more than
+ * two same-platform devices are observed, only the focused device and one other are compared (N-way
+ * compare is deferred).
+ *
+ * Same-platform only because the structural diff key embeds `className`, which is platform-specific
+ * (`android.widget.FrameLayout` vs `XCUIElementTypeApplication`): an Android-to-iOS pair would
+ * share no keys and every node would read as only-in-one, a meaningless diff. Cross-platform
+ * structural-role normalization is deferred to issue #4872.
+ */
+internal fun compareColumns(content: WorkspaceUiState.Content): Pair<DeviceColumn, DeviceColumn>? {
+  val focused =
+    content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
+      ?: content.columns.firstOrNull()
+      ?: return null
+  val other =
+    content.columns.firstOrNull {
+      it.deviceId != focused.deviceId && it.platform == focused.platform
+    } ?: return null
+  return focused to other
 }
 
 @Composable
@@ -131,6 +175,8 @@ private fun TopBar(
   onOpenPicker: () -> Unit,
   onOpenPalette: () -> Unit,
   onStatusClick: () -> Unit,
+  canCompare: Boolean,
+  onCompare: () -> Unit,
 ) {
   Row(
     modifier =
@@ -151,6 +197,20 @@ private fun TopBar(
       Text("  +", color = Accent, fontWeight = FontWeight.Bold)
     }
     Spacer(Modifier.weight(1f))
+    // ⧉ Compare opens the two-device hierarchy-diff surface; only meaningful with >1 device, so it
+    // is shown only when at least two devices are observed.
+    if (canCompare) {
+      Text(
+        "⧉",
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier =
+          Modifier.clickable { onCompare() }
+            .semantics { contentDescription = "Compare two devices" }
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+      )
+      Spacer(Modifier.width(8.dp))
+    }
     // Quick-jump command palette (⌘K).
     Text(
       "⌘K",
@@ -245,6 +305,63 @@ private fun HealthSheetOverlay(onDismiss: () -> Unit, content: @Composable () ->
       // Constrain the body to the height below the title row so a fillMaxSize() body can't overflow
       // the header out of the panel.
       Box(Modifier.weight(1f).fillMaxWidth()) { content() }
+    }
+  }
+}
+
+/**
+ * Full-window overlay hosting the two-device compare surface: a dimmed scrim (click-away to
+ * dismiss) with a large centered panel that renders [content] for the chosen [columnA]/[columnB].
+ * Mirrors [HealthSheetOverlay]; sized larger because it hosts two device panes side by side.
+ */
+@Composable
+private fun CompareOverlay(
+  columnA: DeviceColumn,
+  columnB: DeviceColumn,
+  onDismiss: () -> Unit,
+  content: @Composable (DeviceColumn, DeviceColumn) -> Unit,
+) {
+  Box(
+    modifier =
+      Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+      ) {
+        onDismiss()
+      },
+    contentAlignment = Alignment.Center,
+  ) {
+    Column(
+      modifier =
+        Modifier.fillMaxWidth(0.95f)
+          .fillMaxHeight(0.9f)
+          .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
+          // Swallow clicks on the panel so they don't dismiss via the scrim.
+          .clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+          ) {}
+          .padding(16.dp)
+          .semantics { contentDescription = "Compare devices" }
+    ) {
+      Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+          "Compare — ${columnA.name} vs ${columnB.name}",
+          style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+          "✕",
+          style = MaterialTheme.typography.titleMedium,
+          color = MaterialTheme.colorScheme.onSurface,
+          modifier =
+            Modifier.clickable { onDismiss() }
+              .semantics { contentDescription = "Close compare" }
+              .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+      }
+      Spacer(Modifier.height(8.dp))
+      Box(Modifier.weight(1f).fillMaxWidth()) { content(columnA, columnB) }
     }
   }
 }

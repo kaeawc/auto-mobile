@@ -90,6 +90,8 @@ nav:
       - 'Accessibility': using/a11y.md
       - 'TalkBack Testing': using/talkback.md
       - 'VoiceOver Testing': using/voiceover.md
+  - 'Metrics':
+      - 'Release Downloads': metrics/downloads.md
   - 'Design Docs':
       - 'Overview': design-docs/index.md
       - 'Status Glossary': design-docs/status-glossary.md

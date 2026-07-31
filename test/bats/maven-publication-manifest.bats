@@ -198,17 +198,28 @@ JSON
 
 @test "preflight against a pre-staged dir emits the manifest and writes MANIFEST_OUT" {
   local preflight="$REPO_ROOT/scripts/release/maven-publication-manifest-preflight.sh"
-  local out="$STAGE/manifest.txt"
+  # MANIFEST_OUT must live OUTSIDE the staging tree (see the guard test below).
+  local out
+  out="$(mktemp)"
   STAGING_DIR="$STAGE" MANIFEST_OUT="$out" run bash "$preflight"
   [ "$status" -eq 0 ]
   [[ "$output" == *"files=110"* ]]
   [ -f "$out" ]
   grep -q "files=110" "$out"
+  rm -f "$out"
+}
+
+@test "preflight rejects a MANIFEST_OUT inside the staging tree" {
+  local preflight="$REPO_ROOT/scripts/release/maven-publication-manifest-preflight.sh"
+  STAGING_DIR="$STAGE" MANIFEST_OUT="$STAGE/manifest.txt" run bash "$preflight"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"STAGING_DIR"* ]]
 }
 
 @test "preflight appends a totals block to GITHUB_STEP_SUMMARY when set" {
   local preflight="$REPO_ROOT/scripts/release/maven-publication-manifest-preflight.sh"
-  local summary="$STAGE/summary.md"
+  local summary
+  summary="$(mktemp)"
   STAGING_DIR="$STAGE" GITHUB_STEP_SUMMARY="$summary" run bash "$preflight"
   [ "$status" -eq 0 ]
   [ -f "$summary" ]
@@ -216,6 +227,7 @@ JSON
   grep -q "Release total" "$summary"
   # The full per-file body is NOT dumped into the summary; only totals onward.
   ! grep -q "auto-mobile-protocol-0.0.47.jar " "$summary"
+  rm -f "$summary"
 }
 
 @test "preflight requires VERSION when it must stage (no STAGING_DIR)" {
@@ -223,4 +235,33 @@ JSON
   run env -u VERSION -u STAGING_DIR bash "$preflight"
   [ "$status" -ne 0 ]
   [[ "$output" == *"VERSION"* ]]
+}
+
+@test "--help prints the header only, never the executable lines" {
+  run bash "$SCRIPT" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" != *"set -euo pipefail"* ]]
+  [[ "$output" != *'budget_file=""'* ]]
+}
+
+@test "a symlinked staging directory is traversed, not counted as one file" {
+  local link
+  link="$(mktemp -d)/link"
+  ln -s "$STAGE" "$link"
+  run bash "$SCRIPT" "$link"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"files=110"* ]]
+  rm -rf "$(dirname "$link")"
+}
+
+@test "a non-integer budget threshold fails closed, not a false BUDGET OK" {
+  local budget="$STAGE/bad-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": { "maxFiles": 0.5, "maxBytes": 0.5 } }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"integer"* ]]
+  [[ "$output" != *"BUDGET OK"* ]]
 }

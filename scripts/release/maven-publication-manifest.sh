@@ -34,7 +34,10 @@ strict=0
 staging=""
 
 usage() {
-  sed -n '2,33p' "$0" | sed 's/^#\{1,2\} \{0,1\}//'
+  # Print the contiguous header comment block (line 2 to the first non-comment
+  # line), stripping the leading "# ". Robust to line-number drift, so it never
+  # leaks `set -euo pipefail` or the variable declarations into --help output.
+  awk 'NR == 1 { next } /^#/ { sub(/^#+ ?/, ""); print; next } { exit }' "$0"
 }
 
 while [ $# -gt 0 ]; do
@@ -120,7 +123,18 @@ total_files=0
 total_bytes=0
 
 records="$(mktemp)"
-trap 'rm -f "$records"' EXIT
+files_list="$(mktemp)"
+trap 'rm -f "$records" "$files_list"' EXIT
+
+# Enumerate the staged files first, and fail closed if traversal errors (e.g. an
+# unreadable subtree) -- otherwise the error happens inside a process
+# substitution where set -euo pipefail cannot see it, and the script would emit a
+# partial manifest with exit 0. -H follows a command-line symlink to the repo dir
+# so a symlinked staging path is traversed rather than counted as one file.
+if ! find -H "$staging" -type f >"$files_list"; then
+  echo "error: could not fully read staging directory: $staging" >&2
+  exit 2
+fi
 
 # Known classifiers, printed in a fixed order for a stable classifier-totals line.
 CLASSES="main-jar main-aar sources-jar javadoc-jar pom module maven-metadata signature checksum signature-checksum unexpected"
@@ -159,7 +173,7 @@ while IFS= read -r path; do
   if [ "$classifier" = unexpected ]; then
     unexpected_count=$(( unexpected_count + 1 ))
   fi
-done < <(find "$staging" -type f | sort)
+done < <(sort "$files_list")
 
 echo >&2 "staging: $staging"
 
@@ -198,6 +212,15 @@ if [ -n "$budget_file" ]; then
   limits="$(jq -r '(.perRelease // {}) | "\(.maxFiles // "") \(.maxBytes // "")"' "$budget_file")"
   max_files="${limits%% *}"
   max_bytes="${limits##* }"
+  # Fail closed on a malformed threshold: a non-integer (e.g. 0.5) would reach
+  # bash's integer-only -gt, print "integer expression expected", evaluate false,
+  # and silently report BUDGET OK -- even under --strict.
+  for v in "$max_files" "$max_bytes"; do
+    if [ -n "$v" ] && ! printf '%s' "$v" | grep -qE '^[0-9]+$'; then
+      echo "error: budget thresholds must be non-negative integers (got '$v')" >&2
+      exit 2
+    fi
+  done
   breached=0
   reasons=""
   if [ -n "$max_files" ] && [ "$total_files" -gt "$max_files" ]; then

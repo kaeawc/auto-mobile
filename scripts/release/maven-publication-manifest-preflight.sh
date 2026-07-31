@@ -56,6 +56,23 @@ else
   )
 fi
 
+# Writing the manifest into the staging tree would make a second run enumerate
+# the previous manifest as an unexpected file, inflating totals and breaking the
+# deterministic before/after comparison the manifest exists to provide. Reject it.
+if [ -n "${MANIFEST_OUT:-}" ] && [ -d "$staging_dir" ]; then
+  staging_abs="$(cd "$staging_dir" && pwd -P)"
+  out_parent="$(dirname "$MANIFEST_OUT")"
+  if [ -d "$out_parent" ]; then
+    out_abs="$(cd "$out_parent" && pwd -P)/$(basename "$MANIFEST_OUT")"
+    case "$out_abs" in
+      "$staging_abs"/*)
+        echo "error: MANIFEST_OUT ($MANIFEST_OUT) must not be inside STAGING_DIR ($staging_dir)" >&2
+        exit 2
+        ;;
+    esac
+  fi
+fi
+
 # Advisory only: no --strict, so the generator exits 0 even over budget or with
 # unexpected files. The full manifest and the WARN lines still surface below.
 manifest="$("$generator" "$staging_dir" --budget "$budget")"

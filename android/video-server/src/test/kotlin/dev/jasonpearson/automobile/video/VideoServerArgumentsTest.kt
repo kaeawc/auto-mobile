@@ -60,6 +60,29 @@ class VideoServerArgumentsTest {
     assertNull(VideoServer.parseIntFlag(arrayOf(), "--bit-rate"))
   }
 
+  // --- VideoServer.resolveFps -----------------------------------------------------------------
+
+  @Test
+  fun resolveFpsFallsBackToThePresetDefaultWhenFlagIsAbsent() {
+    // The preset default is now 30fps for every preset, decoupled from resolution/bitrate.
+    assertEquals(30, VideoServer.resolveFps(arrayOf(), QualityPreset.MEDIUM))
+    assertEquals(30, VideoServer.resolveFps(arrayOf("--quality", "high"), QualityPreset.HIGH))
+  }
+
+  @Test
+  fun resolveFpsHonorsAnExplicitPositiveFlag() {
+    assertEquals(24, VideoServer.resolveFps(arrayOf("--fps", "24"), QualityPreset.MEDIUM))
+    assertEquals(15, VideoServer.resolveFps(arrayOf("--fps", "15"), QualityPreset.HIGH))
+  }
+
+  @Test
+  fun resolveFpsIgnoresNonPositiveOrMalformedFlagAndUsesThePresetDefault() {
+    assertEquals(30, VideoServer.resolveFps(arrayOf("--fps", "0"), QualityPreset.MEDIUM))
+    assertEquals(30, VideoServer.resolveFps(arrayOf("--fps", "-5"), QualityPreset.MEDIUM))
+    assertEquals(30, VideoServer.resolveFps(arrayOf("--fps", "abc"), QualityPreset.MEDIUM))
+    assertEquals(30, VideoServer.resolveFps(arrayOf("--fps"), QualityPreset.MEDIUM))
+  }
+
   // --- VideoServer.parseSizeFlag --------------------------------------------------------------
 
   @Test

@@ -23,6 +23,21 @@ export const WEBRTC_IOS_SIMULATOR_FPS_MAX = SIMULATOR_FPS_MAX;
 export const WEBRTC_IOS_SIMULATOR_FPS_DEFAULT = 15;
 
 /**
+ * Safe range for the Android video-server capture rate, forwarded to the
+ * persistent encoder as `--fps`. Kept generous so any reasonable interactive
+ * rate is accepted; the device encoder clamps beyond its own capability.
+ */
+export const WEBRTC_ANDROID_FPS_MIN = 1;
+export const WEBRTC_ANDROID_FPS_MAX = 60;
+/**
+ * Default Android capture rate. 30fps is smooth for UI automation (mostly static
+ * frames with occasional transitions) while roughly halving MediaCodec encode
+ * load and bitrate versus the old preset-locked 60fps. Raise it per-worker with
+ * `AUTOMOBILE_WEBRTC_ANDROID_FPS` when a scenario needs it.
+ */
+export const WEBRTC_ANDROID_FPS_DEFAULT = 30;
+
+/**
  * WebRTC streaming configuration. On a CI worker this is typically supplied
  * once via environment variables so `webrtcStream` can be started with no
  * per-call arguments; individual tool calls may override any field.
@@ -46,6 +61,11 @@ export interface WebRtcStreamingConfig {
    */
   iosSimulatorFps: number;
   /**
+   * Frame rate forwarded to the Android video-server as `--fps`, in
+   * `[WEBRTC_ANDROID_FPS_MIN, WEBRTC_ANDROID_FPS_MAX]`. iOS ignores it.
+   */
+  androidFps: number;
+  /**
    * Use trickle ICE: publish the WHIP offer immediately and send local
    * candidates incrementally (HTTP PATCH) instead of blocking on ICE gathering.
    * Opt-in — the ingest server must support the WHIP PATCH trickle extension.
@@ -62,6 +82,7 @@ export interface WebRtcStreamingOverrides {
   bitrateKbps?: number;
   size?: { width: number; height: number };
   iosSimulatorFps?: number;
+  androidFps?: number;
   trickleIce?: boolean;
   audioEnabled?: boolean;
 }
@@ -74,6 +95,7 @@ export const WEBRTC_ENV = {
   BITRATE_KBPS: "AUTOMOBILE_WEBRTC_BITRATE_KBPS",
   MAX_SIZE: "AUTOMOBILE_WEBRTC_MAX_SIZE",
   IOS_SIMULATOR_FPS: "AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS",
+  ANDROID_FPS: "AUTOMOBILE_WEBRTC_ANDROID_FPS",
   TRICKLE_ICE: "AUTOMOBILE_WEBRTC_TRICKLE_ICE",
   AUDIO: "AUTOMOBILE_WEBRTC_AUDIO",
 } as const;
@@ -186,6 +208,9 @@ export function resolveWebRtcStreamingConfig(
   const iosSimulatorFps = overrides.iosSimulatorFps === undefined
     ? parseIosSimulatorFps(env[WEBRTC_ENV.IOS_SIMULATOR_FPS]) ?? WEBRTC_IOS_SIMULATOR_FPS_DEFAULT
     : validateIosSimulatorFps(overrides.iosSimulatorFps);
+  const androidFps = overrides.androidFps === undefined
+    ? parseAndroidFps(env[WEBRTC_ENV.ANDROID_FPS]) ?? WEBRTC_ANDROID_FPS_DEFAULT
+    : validateAndroidFps(overrides.androidFps);
   const trickleIce = overrides.trickleIce ?? parseBooleanFlag(env[WEBRTC_ENV.TRICKLE_ICE]);
   const audioEnabled = overrides.audioEnabled ?? parseBooleanFlag(env[WEBRTC_ENV.AUDIO]);
 
@@ -196,6 +221,7 @@ export function resolveWebRtcStreamingConfig(
     bitrateKbps,
     size,
     iosSimulatorFps,
+    androidFps,
     trickleIce,
     audioEnabled,
   };
@@ -216,6 +242,26 @@ function validateIosSimulatorFps(value: number, raw: string = String(value)): nu
   ) {
     throw new ActionableError(
       `Invalid iOS Simulator capture fps "${raw}"; expected an integer in [${WEBRTC_IOS_SIMULATOR_FPS_MIN}, ${WEBRTC_IOS_SIMULATOR_FPS_MAX}]. Set ${WEBRTC_ENV.IOS_SIMULATOR_FPS} or pass iosSimulatorFps.`
+    );
+  }
+  return value;
+}
+
+function parseAndroidFps(raw: string | undefined): number | undefined {
+  if (!raw || !raw.trim()) {
+    return undefined;
+  }
+  return validateAndroidFps(Number(raw.trim()), raw.trim());
+}
+
+function validateAndroidFps(value: number, raw: string = String(value)): number {
+  if (
+    !Number.isInteger(value) ||
+    value < WEBRTC_ANDROID_FPS_MIN ||
+    value > WEBRTC_ANDROID_FPS_MAX
+  ) {
+    throw new ActionableError(
+      `Invalid Android capture fps "${raw}"; expected an integer in [${WEBRTC_ANDROID_FPS_MIN}, ${WEBRTC_ANDROID_FPS_MAX}]. Set ${WEBRTC_ENV.ANDROID_FPS} or pass androidFps.`
     );
   }
   return value;

@@ -23,8 +23,10 @@ import dev.jasonpearson.automobile.video.wrappers.DisplayControl
  *
  * ## Quality presets
  * - `low`: 540p @ 2 Mbps @ 30fps
- * - `medium`: 720p @ 4 Mbps @ 60fps (default)
- * - `high`: 1080p @ 8 Mbps @ 60fps
+ * - `medium`: 720p @ 4 Mbps @ 30fps (default)
+ * - `high`: 1080p @ 8 Mbps @ 30fps
+ *
+ * The preset frame rate is only a default; `--fps <n>` overrides it.
  */
 object VideoServer {
   @Volatile private var running = true
@@ -48,6 +50,7 @@ object VideoServer {
     running = true
     val quality = parseQuality(args)
     val bitrateOverride = parseIntFlag(args, "--bit-rate")
+    val fps = resolveFps(args, quality)
     val sizeOverride = parseSizeFlag(args)
     val audioEnabled = args.contains("--audio")
     val session = VideoSessionArguments.parse(args)
@@ -63,9 +66,7 @@ object VideoServer {
     val (outputWidth, outputHeight) =
       sizeOverride ?: calculateOutputDimensions(displayInfo, quality)
     val bitrate = bitrateOverride ?: quality.bitrate
-    println(
-      "Output: ${outputWidth}x${outputHeight} @ ${bitrate / 1_000_000}Mbps @ ${quality.fps}fps"
-    )
+    println("Output: ${outputWidth}x${outputHeight} @ ${bitrate / 1_000_000}Mbps @ ${fps}fps")
     println("Audio: ${if (audioEnabled) "enabled" else "disabled"}")
 
     // Install shutdown hook for clean termination
@@ -88,7 +89,7 @@ object VideoServer {
         outputHeight,
         displayInfo.densityDpi,
         bitrate,
-        quality.fps,
+        fps,
         audioEnabled,
         session,
       )
@@ -127,6 +128,14 @@ object VideoServer {
     return QualityPreset.MEDIUM
   }
 
+  /**
+   * Resolve the effective frame rate: an explicit positive `--fps <n>` wins, otherwise fall back to
+   * the preset default. The frame rate is intentionally decoupled from the quality preset so a host
+   * can lower it (e.g. to 30fps for UI automation) without also lowering resolution/bitrate.
+   */
+  internal fun resolveFps(args: Array<String>, quality: QualityPreset): Int =
+    parseIntFlag(args, "--fps") ?: quality.fps
+
   /** Read the integer value following [flag], or null if absent/invalid. */
   internal fun parseIntFlag(args: Array<String>, flag: String): Int? {
     val index = args.indexOf(flag)
@@ -163,14 +172,15 @@ object VideoServer {
       Options:
         --quality, -q <preset>  Quality preset: low, medium, high (default: medium)
         --bit-rate <bps>        Override the preset bitrate (bits per second)
+        --fps <n>               Override the preset frame rate (frames per second)
         --size <WxH>            Override the output resolution (e.g. 720x1280)
         --audio                 Capture device playback audio as 8 kHz mono PCM16
         --help, -h              Show this help message
 
       Quality presets:
         low     540p @ 2 Mbps @ 30fps
-        medium  720p @ 4 Mbps @ 60fps
-        high    1080p @ 8 Mbps @ 60fps
+        medium  720p @ 4 Mbps @ 30fps
+        high    1080p @ 8 Mbps @ 30fps
       """
         .trimIndent()
     )

@@ -130,6 +130,13 @@ export interface PersistentEncoderH264SourceOptions {
   size?: { width: number; height: number };
   audioEnabled?: boolean;
   quality?: "low" | "medium" | "high";
+  /**
+   * Frame rate to request from the device encoder via `--fps`. When omitted the
+   * video-server falls back to the quality preset's default (30fps). Decoupled
+   * from `quality` so the host can lower the rate without also lowering
+   * resolution/bitrate.
+   */
+  fps?: number;
   /** Local path to the built `automobile-video.jar`. Required to run. */
   jarPath: string;
   adbFactory?: AdbClientFactory;
@@ -620,6 +627,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     ];
     if (this.options.bitrateBps && this.options.bitrateBps > 0) {
       args.push("--bit-rate", String(Math.round(this.options.bitrateBps)));
+    }
+    if (Number.isInteger(this.options.fps) && (this.options.fps as number) > 0) {
+      args.push("--fps", String(this.options.fps));
     }
     if (this.options.size) {
       args.push("--size", `${this.options.size.width}x${this.options.size.height}`);

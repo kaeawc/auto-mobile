@@ -104,8 +104,10 @@ fun NavigationFacet(
   column: DeviceColumn,
   observationStreamFactory: (String) -> ObservationStream = { ObservationStreamClient() },
   navigationDataSourceProvider: ((String) -> NavigationDataSource)? = null,
-  // Injectable so the resolution-timeout backstop is testable without a real 10s wait.
-  resolveTimeoutMs: Long = RESOLVE_TIMEOUT_MS,
+  // The resolution-timeout backstop's wait, injected as a suspend seam so tests can drive it
+  // deterministically (e.g. awaiting a CompletableDeferred) with zero wall time instead of a real
+  // 10s delay under a real-clock test dispatcher. Production uses the real delay.
+  resolveTimeout: suspend () -> Unit = { delay(RESOLVE_TIMEOUT_MS) },
 ) {
   val graph = LocalAutoMobileGraph.current
 
@@ -209,7 +211,7 @@ fun NavigationFacet(
     if (streamError != null) return@LaunchedEffect
     if (foregroundAppId != null || noNavigationApp) return@LaunchedEffect
     if (connectionState !is ConnectionState.Connected) return@LaunchedEffect
-    delay(resolveTimeoutMs)
+    resolveTimeout()
     // Still unresolved after the window (any resolution would have cancelled this effect).
     streamError = "No navigation data received from the daemon"
   }

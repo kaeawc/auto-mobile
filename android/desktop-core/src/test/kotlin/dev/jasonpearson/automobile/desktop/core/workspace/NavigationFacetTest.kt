@@ -777,6 +777,10 @@ class NavigationFacetTest {
   fun `times out to a retryable error when the daemon never sends a navigation payload`() =
     runComposeUiTest {
       val created = mutableListOf<FakeObservationStream>()
+      // Drive the timeout deterministically with zero wall time: the seam awaits this gate, and the
+      // test completes it to fire the timeout. No real delay() under the real-clock test
+      // dispatcher.
+      val fireTimeout = CompletableDeferred<Unit>()
       setContent {
         CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
           MaterialTheme {
@@ -786,16 +790,17 @@ class NavigationFacetTest {
               navigationDataSourceProvider = {
                 StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
               },
-              // Small window so the backstop fires fast; no real 10s wait.
-              resolveTimeoutMs = 200L,
+              resolveTimeout = { fireTimeout.await() },
             )
           }
         }
       }
+      waitForIdle()
 
       // The stream connects but the daemon never sends a navigation payload (silently no update).
-      // Without the backstop the facet would sit on "Resolving…" forever; instead it must surface
-      // the retryable error.
+      // Fire the timeout; without the backstop the facet would sit on "Resolving…" forever, but it
+      // must instead surface the retryable error.
+      fireTimeout.complete(Unit)
       waitUntil(timeoutMillis = 5_000) {
         onAllNodesWithText("No navigation data received", substring = true)
           .fetchSemanticsNodes()

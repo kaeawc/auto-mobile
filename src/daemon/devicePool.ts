@@ -424,7 +424,7 @@ export class DevicePool {
   }
 
   async isCurrentDisconnectedDevice(device: PooledDevice): Promise<boolean> {
-    if (this.devices.get(device.id) !== device || this.intentionallyStoppedDeviceIds.has(device.id)) {
+    if (this.devices.get(device.id) !== device) {
       return false;
     }
     return !await this.wasRebootedAndroidDeviceRediscovered(device);
@@ -915,7 +915,7 @@ export class DevicePool {
       if (excludedImageIds.has(this.criteriaMatcher.getDeviceImageKey(image))) {
         continue;
       }
-      if (this.suppressedAutoStartDeviceImageKeys.has(this.criteriaMatcher.getDeviceImageKey(image))) {
+      if (this.isAutoStartSuppressed(image)) {
         continue;
       }
       if (image.deviceId && bootedIds.has(image.deviceId)) {
@@ -931,6 +931,13 @@ export class DevicePool {
     }
 
     return candidates;
+  }
+
+  private isAutoStartSuppressed(image: DeviceInfo): boolean {
+    return (
+      this.suppressedAutoStartDeviceImageKeys.has(this.criteriaMatcher.getDeviceImageKey(image)) ||
+      (image.platform === "android" && this.rebootingAndroidAvdNames.has(image.name))
+    );
   }
 
   /**

@@ -147,6 +147,60 @@ describe("DevicePool", () => {
     }
   }
 
+  class DeferredRecoveryDeviceManager extends FakeDeviceManager {
+    readonly childProcesses: FakeChildProcess[] = [];
+    private readonly recoveryStartedPromise: Promise<void>;
+    private readonly recoveryReleasePromise: Promise<void>;
+    private resolveRecoveryStarted!: () => void;
+    private resolveRecoveryRelease!: () => void;
+
+    constructor() {
+      super();
+      this.recoveryStartedPromise = new Promise(resolve => {
+        this.resolveRecoveryStarted = resolve;
+      });
+      this.recoveryReleasePromise = new Promise(resolve => {
+        this.resolveRecoveryRelease = resolve;
+      });
+    }
+
+    override async startDevice(device: DeviceInfo, timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS): Promise<FakeChildProcess> {
+      if (this.childProcesses.length === 0) {
+        await super.startDevice(device, timeoutMs);
+      } else if (this.childProcesses.length === 1) {
+        this.bootedDevices = [];
+        this.resolveRecoveryStarted();
+      }
+      const childProcess = new FakeChildProcess();
+      this.childProcesses.push(childProcess);
+      return childProcess;
+    }
+
+    override async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
+      if (this.childProcesses.length === 2) {
+        await this.recoveryReleasePromise;
+      }
+      return {
+        name: device.name,
+        platform: device.platform,
+        deviceId: "emulator-5554",
+        source: device.source,
+      };
+    }
+
+    override async isDeviceImageRunning(): Promise<boolean> {
+      return false;
+    }
+
+    async waitForRecoveryStart(): Promise<void> {
+      await this.recoveryStartedPromise;
+    }
+
+    releaseRecovery(): void {
+      this.resolveRecoveryRelease();
+    }
+  }
+
   // Hands back a spawned handle from startDevice, then fails readiness — used to
   // assert the pool cancels a hung boot via handle.kill() (issue #3952). Reuses
   // FakeChildProcess, adding only a kill counter.
@@ -242,6 +296,17 @@ describe("DevicePool", () => {
       await devicePool.addDevice(ready, source);
 
       expect(devicePool.getDevice("emulator-5554")?.avdName).toBe("Pixel 8");
+    });
+
+    test("intentional shutdown remains a current disconnect for monitor cleanup", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
+      const device = devicePool.getDevice("emulator-5554");
+      if (!device) {
+        throw new Error("expected pooled device");
+      }
+      devicePool.markIntentionalShutdown(device.id);
+
+      expect(await devicePool.isCurrentDisconnectedDevice(device)).toBe(true);
     });
   });
 
@@ -1029,6 +1094,41 @@ describe("DevicePool", () => {
         expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-2");
         expect(sessionManager.getSession("session-2")).not.toBeNull();
       } finally {
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
+    test("does not launch an AVD while recovery already owns its boot", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const manager = new DeferredRecoveryDeviceManager();
+      manager.deviceImages = [
+        { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+      ];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer)
+      );
+      try {
+        await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+        manager.childProcesses[0]!.emit("exit", 1, null);
+        await manager.waitForRecoveryStart();
+
+        await expect(
+          devicePool.assignMultipleDevices(["session-2"], 1_000, "android")
+        ).rejects.toThrow("Not enough devices in pool");
+        expect(manager.childProcesses).toHaveLength(2);
+      } finally {
+        manager.releaseRecovery();
+        await new Promise(resolve => setImmediate(resolve));
         if (originalRebootOnDeath === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
         } else {

@@ -115,9 +115,6 @@ classify_metadata() {
   esac
 }
 
-declare -A coord_files=()
-declare -A coord_bytes=()
-declare -A class_count=()
 unexpected_count=0
 total_files=0
 total_bytes=0
@@ -127,7 +124,6 @@ trap 'rm -f "$records"' EXIT
 
 # Known classifiers, printed in a fixed order for a stable classifier-totals line.
 CLASSES="main-jar main-aar sources-jar javadoc-jar pom module maven-metadata signature checksum signature-checksum unexpected"
-for c in $CLASSES; do class_count["$c"]=0; done
 
 while IFS= read -r path; do
   name="${path##*/}"
@@ -158,9 +154,6 @@ while IFS= read -r path; do
   bytes="$(wc -c <"$path" | tr -d ' ')"
   printf '%s %s %s %s\n' "$coord" "$classifier" "$name" "$bytes" >>"$records"
 
-  coord_files["$coord"]=$(( ${coord_files["$coord"]:-0} + 1 ))
-  coord_bytes["$coord"]=$(( ${coord_bytes["$coord"]:-0} + bytes ))
-  class_count["$classifier"]=$(( ${class_count["$classifier"]:-0} + 1 ))
   total_files=$(( total_files + 1 ))
   total_bytes=$(( total_bytes + bytes ))
   if [ "$classifier" = unexpected ]; then
@@ -175,22 +168,26 @@ echo "# group: $GROUP"
 echo "# columns: coordinate classifier filename bytes"
 sort "$records"
 echo
+# Per-coordinate and per-classifier aggregation runs in awk, not bash associative
+# arrays, so the script works on bash 3.2 (macOS system bash, used by CI's BATS).
 echo "## Per-coordinate totals"
-if [ "${#coord_files[@]}" -gt 0 ]; then
-  while IFS= read -r coord; do
-    echo "$coord files=${coord_files[$coord]} bytes=${coord_bytes[$coord]}"
-  done < <(printf '%s\n' "${!coord_files[@]}" | sort)
-fi
+awk '{ f[$1]++; b[$1] += $4 } END { for (c in f) printf "%s files=%d bytes=%d\n", c, f[c], b[c] }' \
+  "$records" | sort
 echo
 echo "## Classifier totals"
-line=""
-for c in $CLASSES; do
-  line="$line $c=${class_count[$c]}"
-done
-printf '%s\n' "${line# }"
+awk -v classes="$CLASSES" '
+  { c[$2]++ }
+  END {
+    n = split(classes, a, " ")
+    out = ""
+    for (i = 1; i <= n; i++) out = out (i > 1 ? " " : "") a[i] "=" (c[a[i]] + 0)
+    print out
+  }
+' "$records"
 echo
 echo "## Release total"
-echo "coordinates=${#coord_files[@]} files=$total_files bytes=$total_bytes"
+coord_n="$(cut -d' ' -f1 "$records" | sort -u | wc -l | tr -d ' ')"
+echo "coordinates=$coord_n files=$total_files bytes=$total_bytes"
 
 exit_code=0
 

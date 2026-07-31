@@ -217,6 +217,7 @@ nav:
       - 'Standard Library First': contributing/stdlib-first.md
       - 'Apple Signing & Notarization': release/apple-signing-setup.md
       - 'Windows & Linux Signing (research)': release/windows-linux-signing-research.md
+      - 'Maven Publication Manifest': release/maven-publication-manifest.md
       - 'Dependency Decisions':
           - 'fast-check': decisions/fast-check.md
       - 'Codex Automation Thread Report': codex-automation-thread-spam-report.md

@@ -231,52 +231,17 @@ class DevicePickerViewModelTest {
     }
 
   @Test
-  fun `concurrent boots of two same-named devices each auto-select their own runtime id`() =
+  fun `boots are serialized - a second boot while one is in flight is ignored`() =
     testScope.runTest {
-      // Two shut-down AVDs share a display name; only the exact runtime id disambiguates them.
-      val resources =
-        FakeMcpResourceClient().apply {
-          bootedDevicesResponse = bootedJson()
-          deviceImagesResponse =
-            """
-            {"totalCount":2,"androidCount":2,"iosCount":0,"lastUpdated":"x","images":[
-              {"name":"Pixel 8","platform":"android","deviceId":"avd_a","target":"android-34"},
-              {"name":"Pixel 8","platform":"android","deviceId":"avd_b","target":"android-34"}]}
-            """
-              .trimIndent()
-        }
-      // Runtime ids the "daemon" assigns; a name-based auto-select could not tell these apart.
-      val runtimeIds = mapOf("avd_a" to "emu-A", "avd_b" to "emu-B")
-      val bootedSoFar = mutableListOf<String>()
-      val boot =
-        object : DeviceBootController {
-          val gates = mutableMapOf<String, CompletableDeferred<Unit>>()
-          val requests = mutableListOf<PickerDevice>()
-
-          override suspend fun boot(device: PickerDevice): Result<String> {
-            requests += device
-            val gate = CompletableDeferred<Unit>()
-            gates[device.id] = gate
-            gate.await()
-            val runtimeId = runtimeIds.getValue(device.id)
-            bootedSoFar += runtimeId
-            resources.bootedDevicesResponse = bootedJson(*bootedSoFar.toTypedArray())
-            return Result.success(runtimeId)
-          }
-        }
-      val v = DevicePickerViewModel(resources, boot, testScope, UnconfinedTestDispatcher())
-
-      v.onAction(DevicePickerAction.BootDevice("avd_a")) // in flight
-      v.onAction(DevicePickerAction.BootDevice("avd_b")) // in flight, both booting
-      boot.gates.getValue("avd_a").complete(Unit)
-      boot.gates.getValue("avd_b").complete(Unit)
-
-      val c = content(v)
-      // Each completion selected ITS OWN runtime id — the second did not re-select the first.
-      assertEquals(setOf("emu-A", "emu-B"), c.selectedIds)
-      assertTrue(c.devices.any { it.id == "emu-A" && it.state == DeviceState.Booted })
-      assertTrue(c.devices.any { it.id == "emu-B" && it.state == DeviceState.Booted })
-      assertEquals(2, boot.requests.size)
+      // A boot is held open; a click on another shut-down card must be a no-op (no 2nd
+      // startDevice).
+      val boot = FakeDeviceBootController().apply { autoComplete = false }
+      val v = vm(bootController = boot)
+      v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // in flight (held)
+      v.onAction(DevicePickerAction.BootDevice("iphone-15")) // ignored — a boot is already running
+      assertEquals(listOf("Pixel_6_API_33"), boot.bootRequests.map { it.id })
+      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds)
+      boot.complete() // release so runTest can finish
     }
 
   @Test
@@ -453,42 +418,87 @@ class DevicePickerViewModelTest {
     }
 
   @Test
-  fun `a superseded boot reload still syncs its selection into the current Content`() =
+  fun `a boot reload superseded by a refresh still syncs its selection`() = testScope.runTest {
+    // Boots are serialized, but a Refresh can still supersede a boot's reload list emission. The
+    // selection must survive that via syncState, not only via the (dropped) list emission.
+    val client =
+      ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)
+    val boot =
+      FakeDeviceBootController().apply {
+        autoComplete = false
+        result = Result.success("emulator-5556")
+        onSuccess = { client.bootedJson = TWO_BOOTED_PIXEL8_AND_6 }
+      }
+    val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
+    v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // boot in flight (held)
+
+    // Let the boot resolve so its reload starts, then stall that reload on the images gate.
+    val reloadGate = CompletableDeferred<Unit>()
+    client.imagesGate = reloadGate
+    boot.complete() // reloadAfterBoot (gen N) reads booted, stalls on the images gate
+    client.imagesGate = null
+
+    v.onAction(DevicePickerAction.Refresh) // gen N+1: reads (ungated) and emits — no selection yet
+    assertTrue("emulator-5556" !in content(v).selectedIds)
+
+    reloadGate.complete(Unit) // reload resumes: records selection + syncs; stale list emit dropped
+    val c = content(v)
+    assertTrue("emulator-5556" in c.selectedIds) // selection synced despite the dropped list emit
+    assertEquals(
+      setOf("emulator-5556"),
+      c.devices
+        .filter { it.id in c.selectedIds && it.state == DeviceState.Booted }
+        .map { it.id }
+        .toSet(),
+    )
+  }
+
+  @Test
+  fun `booting the second of two same-named images hides that source, not the first`() =
+    testScope.runTest {
+      val resources =
+        FakeMcpResourceClient().apply {
+          bootedDevicesResponse = bootedJson()
+          deviceImagesResponse = TWO_SAMENAME_IMAGES // avd_a, avd_b both "Pixel 8"
+        }
+      val boot =
+        FakeDeviceBootController().apply {
+          result = Result.success("emu-b")
+          onSuccess = { resources.bootedDevicesResponse = bootedJsonNamed("Pixel 8" to "emu-b") }
+        }
+      val v = vm(resourceClient = resources, bootController = boot)
+
+      v.onAction(DevicePickerAction.BootDevice("avd_b")) // boot the SECOND same-named image
+      val c = content(v)
+      // The started device shows once; its EXACT source (avd_b) is hidden; avd_a stays bootable.
+      assertTrue(c.devices.any { it.id == "emu-b" && it.state == DeviceState.Booted })
+      assertTrue(c.devices.any { it.id == "avd_a" && it.state == DeviceState.Shutdown })
+      assertTrue(c.devices.none { it.id == "avd_b" })
+      assertEquals(1, c.devices.count { it.state == DeviceState.Booted })
+    }
+
+  @Test
+  fun `a malformed booted payload after boot retains the snapshot, not a fabricated shutdown`() =
     testScope.runTest {
       val client =
-        ScriptableResourceClient(bootedJson = bootedJson(), imagesJson = TWO_SAMENAME_IMAGES)
-      val bootedRuntime = mutableListOf<String>()
-      val boot = GatedBootController(mapOf("avd_a" to "emu-a", "avd_b" to "emu-b"))
-      boot.onBooted = { runtimeId ->
-        bootedRuntime += runtimeId
-        client.bootedJson = bootedJsonNamed(*bootedRuntime.map { "Pixel 8" to it }.toTypedArray())
-      }
+        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = TWO_IMAGES_8_6)
+      val boot =
+        FakeDeviceBootController().apply {
+          result = Result.success("emulator-5556")
+          onSuccess = { client.bootedJson = "{ not valid json" } // malformed Success -> parse null
+        }
       val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
-      v.onAction(DevicePickerAction.BootDevice("avd_a")) // in flight
-      v.onAction(DevicePickerAction.BootDevice("avd_b")) // in flight
-
-      // A's reload claims the earlier generation, reads booted, then stalls on the images gate.
-      val imagesGate = CompletableDeferred<Unit>()
-      client.imagesGate = imagesGate
-      boot.release("avd_a")
-      client.imagesGate = null // B's newer reload is not gated
-
-      boot.release("avd_b") // B (newer generation) reloads and emits — only B selected so far
-      assertEquals(setOf("emu-b"), content(v).selectedIds)
-
-      imagesGate.complete(
-        Unit
-      ) // A resumes: its stale LIST emission is dropped, but its selection syncs
-      val c = content(v)
-      // The emitted Content selection must match what observeSelected() would use — BOTH ids.
-      assertEquals(setOf("emu-a", "emu-b"), c.selectedIds)
-      assertEquals(
-        setOf("emu-a", "emu-b"),
-        c.devices
-          .filter { it.id in c.selectedIds && it.state == DeviceState.Booted }
-          .map { it.id }
-          .toSet(),
+      assertTrue(
+        content(v).devices.any { it.id == "emulator-5554" && it.state == DeviceState.Booted }
       )
+
+      v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
+      val c = content(v)
+      // Parse-null takes the same failure path as a read Error: prior snapshot retained + retry,
+      // NOT
+      // a fabricated shut-down card that would permit a duplicate start.
+      assertTrue(c.devices.any { it.id == "emulator-5554" && it.state == DeviceState.Booted })
+      assertTrue(c.bootErrors.containsKey("Pixel_6_API_33"))
     }
 
   @Test
@@ -586,30 +596,4 @@ private class ScriptableResourceClient(var bootedJson: String, private val image
   override suspend fun listResources(): List<ResourceInfo> = emptyList()
 
   override fun close() {}
-}
-
-/**
- * Boot controller whose per-device completions are individually gated ([release]) so a test can
- * reorder overlapping boots. On completion it returns the mapped runtime id and invokes [onBooted]
- * (typically to append that id to a resource fake's booted list).
- */
-private class GatedBootController(private val runtimeIds: Map<String, String>) :
-  DeviceBootController {
-  val requests: MutableList<PickerDevice> = mutableListOf()
-  var onBooted: (String) -> Unit = {}
-  private val gates = mutableMapOf<String, CompletableDeferred<Unit>>()
-
-  override suspend fun boot(device: PickerDevice): Result<String> {
-    requests += device
-    val gate = CompletableDeferred<Unit>()
-    gates[device.id] = gate
-    gate.await()
-    val runtimeId = runtimeIds.getValue(device.id)
-    onBooted(runtimeId)
-    return Result.success(runtimeId)
-  }
-
-  fun release(deviceId: String) {
-    gates.getValue(deviceId).complete(Unit)
-  }
 }

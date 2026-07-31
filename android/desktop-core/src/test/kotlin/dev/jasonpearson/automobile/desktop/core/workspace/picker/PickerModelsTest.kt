@@ -46,6 +46,21 @@ class PickerModelsTest {
   }
 
   @Test
+  fun `an in-session attribution hides the exact source image, not a positional same-named one`() {
+    // Booting the SECOND same-named image: the map attributes avd_b -> emu-b, so avd_a must
+    // survive.
+    val devices =
+      buildPickerDevices(
+        booted = listOf(booted("Pixel 8", "emu-b", isVirtual = true)),
+        images = listOf(image("Pixel 8", "avd_a"), image("Pixel 8", "avd_b")),
+        sourceImageToRuntimeId = mapOf("avd_b" to "emu-b"),
+      )
+    assertTrue(devices.any { it.id == "emu-b" && it.state == DeviceState.Booted })
+    assertTrue(devices.any { it.id == "avd_a" && it.state == DeviceState.Shutdown })
+    assertTrue(devices.none { it.id == "avd_b" })
+  }
+
+  @Test
   fun `an image whose exact id is booted is hidden regardless of virtual flag`() {
     // e.g. an iOS simulator whose UDID is stable across boot — dedup by exact identity.
     val devices =

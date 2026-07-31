@@ -101,6 +101,12 @@ class DevicePickerViewModel(
   private var selectedIds: Set<String> = emptySet()
   private var filters: PickerFilters = PickerFilters()
 
+  // In-session boot attribution: source image id -> the runtime id the daemon assigned it on boot.
+  // Lets the merge hide a re-keyed booted device's EXACT source image (not a positional same-named
+  // guess). Pruned to devices still booted; devices booted outside this session fall back to the
+  // name heuristic in buildPickerDevices.
+  private var bootedImageRuntimeIds: Map<String, String> = emptyMap()
+
   // Monotonic load/emission generation, claimed at the start of every load()/reloadAfterBoot(). It
   // guards ONLY the stale device-LIST emission: a fetch that resumes after a newer one began does
   // not overwrite the fresher list. It never gates the persistent state above (recorded before the
@@ -149,17 +155,20 @@ class DevicePickerViewModel(
   }
 
   // Resource reads hit the daemon (blocking) — keep them off the UI thread. A read that returns
-  // ResourceReadResult.Error throws rather than degrading to an empty list: a partial read (booted
-  // fails, images succeed) must NOT reconstruct a just-booted device as Shutdown, and a total
-  // failure must not empty the picker and prune live boot state — callers retain the prior
-  // snapshot.
+  // ResourceReadResult.Error, or a Success whose payload fails to parse (malformed/truncated JSON),
+  // throws rather than degrading to an empty list: a partial/garbled read must NOT reconstruct a
+  // just-booted device as Shutdown (which would permit a duplicate start), and a total failure must
+  // not empty the picker and prune live boot state — callers retain the prior snapshot.
   private suspend fun fetchDevices(): List<PickerDevice> =
-    withContext(ioDispatcher) { buildPickerDevices(readBootedDevices(), readDeviceImages()) }
+    withContext(ioDispatcher) {
+      buildPickerDevices(readBootedDevices(), readDeviceImages(), bootedImageRuntimeIds)
+    }
 
   private suspend fun readBootedDevices(): List<BootedDeviceInfo> =
     when (val result = resourceClient.readResource(BOOTED_URI)) {
       is ResourceReadResult.Success ->
-        DeviceResourceParser.parseBootedDevices(result.content)?.devices ?: emptyList()
+        DeviceResourceParser.parseBootedDevices(result.content)?.devices
+          ?: throw IllegalStateException("Malformed booted-devices payload")
       is ResourceReadResult.Error ->
         throw IllegalStateException("Failed to read booted devices: ${result.message}")
     }
@@ -167,7 +176,8 @@ class DevicePickerViewModel(
   private suspend fun readDeviceImages(): List<DeviceImageInfo> =
     when (val result = resourceClient.readResource(IMAGES_URI)) {
       is ResourceReadResult.Success ->
-        DeviceResourceParser.parseDeviceImages(result.content)?.images ?: emptyList()
+        DeviceResourceParser.parseDeviceImages(result.content)?.images
+          ?: throw IllegalStateException("Malformed device-images payload")
       is ResourceReadResult.Error ->
         throw IllegalStateException("Failed to read device images: ${result.message}")
     }
@@ -229,6 +239,8 @@ class DevicePickerViewModel(
     bootingIds = bootingIds intersect shutdownIds
     bootErrors = bootErrors.filterKeys { it in shutdownIds }
     selectedIds = selectedIds intersect bootedIds
+    // Keep only attributions whose runtime device is still booted (drop killed/replaced ids).
+    bootedImageRuntimeIds = bootedImageRuntimeIds.filterValues { it in bootedIds }
   }
 
   /** Reflect the persistent state onto the live Content (no device reload). */
@@ -244,7 +256,11 @@ class DevicePickerViewModel(
   }
 
   private fun bootDevice(deviceId: String) {
-    if (deviceId in bootingIds) return // already booting — no double-boot
+    // Boots are serialized: at most one in flight. A click on any shut-down card while a boot is
+    // running is a no-op. This structurally removes overlapping reloads (and their generation
+    // reordering hazards); the next card can boot once this one finishes. A failed boot leaves
+    // bootingIds empty, so retrying (clicking the same card again) is still allowed.
+    if (bootingIds.isNotEmpty()) return
     val content = _state.value as? DevicePickerUiState.Content ?: return
     val device = content.devices.firstOrNull { it.id == deviceId } ?: return
     if (device.state != DeviceState.Shutdown) return // only shut-down cards boot
@@ -269,12 +285,16 @@ class DevicePickerViewModel(
    * Reload after a boot succeeded and auto-select the started device so Observe is usable.
    * Selection keys on [runtimeDeviceId] — the exact id the daemon assigned — never the display name
    * (ambiguous for identically-named devices). The selection is recorded in the persistent state
-   * BEFORE the generation guard, so two overlapping boots both stick even if their emissions are
-   * superseded. A read failure resolves to a terminal state (retained snapshot or Error), never a
+   * BEFORE the generation guard, so a concurrent Refresh that supersedes this reload's list
+   * emission still carries the selection (boots themselves are serialized, so reloads never
+   * overlap). A read failure resolves to a terminal state (retained snapshot or Error), never a
    * stranded Loading, and never fabricates a shut-down card from a partial read (see
    * [fetchDevices]).
    */
   private suspend fun reloadAfterBoot(bootedDevice: PickerDevice, runtimeDeviceId: String) {
+    // Record the exact source-image -> runtime-id attribution BEFORE the reload, so this very fetch
+    // hides the started device's own source image by id (not a positional same-name guess).
+    bootedImageRuntimeIds = bootedImageRuntimeIds + (bootedDevice.id to runtimeDeviceId)
     val generation = ++loadGeneration
     val devices =
       try {

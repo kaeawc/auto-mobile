@@ -142,6 +142,15 @@ PY
   run grep -F '"*iphonesimulator*.xctestrun"' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
   [ "$status" -eq 0 ]
 
+  run grep -F 'automobile-runner-${BOOTED_SIMULATOR}.xctestrun' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_PORT' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'CtrlProxyUITests.EnvironmentVariables.AUTOMOBILE_DEVICE_ID' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
+  [ "$status" -eq 0 ]
+
   run grep -E '^[[:space:]]*nohup xcodebuild test([[:space:]]|$)' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
   [ "$status" -eq 1 ]
 

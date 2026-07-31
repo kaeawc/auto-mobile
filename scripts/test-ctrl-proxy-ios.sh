@@ -175,15 +175,18 @@ if [ "$HEALTH_RESPONSE" == "FAILED" ]; then
                 if [ -z "${XCTESTRUN_FILE}" ]; then
                     print_status 1 "No CtrlProxy .xctestrun file found after build"
                 else
+                    RUNNER_XCTESTRUN_FILE="$(dirname "${XCTESTRUN_FILE}")/automobile-runner-${BOOTED_SIMULATOR}.xctestrun"
+                    cp "${XCTESTRUN_FILE}" "${RUNNER_XCTESTRUN_FILE}"
+                    plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_PORT" -string "${PORT}" "${RUNNER_XCTESTRUN_FILE}"
+                    plutil -replace "CtrlProxyUITests.EnvironmentVariables.AUTOMOBILE_DEVICE_ID" -string "${BOOTED_SIMULATOR}" "${RUNNER_XCTESTRUN_FILE}"
+
                     print_info "Starting patched CtrlProxy iOS in background..."
 
                     cd "${CTRL_PROXY_IOS_DIR}"
                     nohup xcodebuild test-without-building \
-                        -xctestrun "${XCTESTRUN_FILE}" \
+                        -xctestrun "${RUNNER_XCTESTRUN_FILE}" \
                         -destination "id=${BOOTED_SIMULATOR}" \
                         -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService \
-                        "CTRL_PROXY_IOS_PORT=${PORT}" \
-                        "AUTOMOBILE_DEVICE_ID=${BOOTED_SIMULATOR}" \
                         > "$LOG_FILE" 2>&1 &
 
                     XCODEBUILD_PID=$!

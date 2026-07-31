@@ -198,20 +198,20 @@ when the docs site was last rebuilt.
     seriesList.forEach(function (s) {
       var d = "";
       var penUp = true; // start a fresh subpath after any gap (null value)
-      var prevGlobalIndex = -1; // last plotted point's index on the GLOBAL date axis
+      var prevDate = null; // last plotted point's snapshot date
       s.points.forEach(function (p) {
         var v = valueFor(p);
         if (v == null) { penUp = true; return; }
-        var gi = indexByDate[p.date];
-        // Lift the pen across absent observations too: a sparse series skips the
-        // dates where the asset was missing, so a jump of more than one global
-        // date index is a gap and must render as a break, not a line through it.
-        if (prevGlobalIndex >= 0 && gi - prevGlobalIndex > 1) { penUp = true; }
-        var x = scaleX(gi, dates.length);
+        // Lift the pen across absent observations by comparing CALENDAR days, not
+        // array indexes: `dates` holds only recorded snapshots, so a fully-missing
+        // day (no snapshot at all) leaves adjacent indexes; only utcDayDifference
+        // detects it. More than one day between plotted points is a gap → break.
+        if (prevDate !== null && utcDayDifference(prevDate, p.date) > 1) { penUp = true; }
+        var x = scaleX(indexByDate[p.date], dates.length);
         var y = scaleY(v, max);
         d += (penUp ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1) + " ";
         penUp = false;
-        prevGlobalIndex = gi;
+        prevDate = p.date;
         svg.appendChild(el("circle", { cx: x, cy: y, r: 2.5, fill: s.color }));
       });
       if (d) { svg.appendChild(el("path", { d: d, class: "dl-chart-line", stroke: s.color })); }

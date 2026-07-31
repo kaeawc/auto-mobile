@@ -36,6 +36,10 @@ import {
 const REPO = "kaeawc/auto-mobile";
 const NPM_PACKAGE = "@kaeawc/auto-mobile";
 const NPM_WINDOW_DAYS = 90;
+// Per-request deadline so a source that stalls without settling can't hang the
+// job (and, via Promise.allSettled, block the GitHub-only degradation path). A
+// timed-out fetch aborts and is handled like any other fetch failure.
+const REQUEST_TIMEOUT_MS = Number(process.env.METRICS_REQUEST_TIMEOUT_MS ?? 20000);
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(scriptDir, "..", "..");
@@ -83,7 +87,7 @@ async function fetchGithubReleasesPage(url: string, page: number): Promise<Githu
   for (let attempt = 1; attempt <= GITHUB_FETCH_ATTEMPTS; attempt++) {
     let response: Response;
     try {
-      response = await fetch(url, { headers });
+      response = await fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       if (response.ok) {
         // Parse the body INSIDE the retryable attempt: a connection failure while
         // reading the body is just as transient as one during the fetch, so it
@@ -163,7 +167,10 @@ async function fetchNpmDailyCounts(): Promise<NpmDayCount[]> {
   const url = `https://api.npmjs.org/downloads/range/${range}/${encodeURIComponent(NPM_PACKAGE)}`;
   let response: Response;
   try {
-    response = await fetch(url, { headers: { "User-Agent": "auto-mobile-download-metrics" } });
+    response = await fetch(url, {
+      headers: { "User-Agent": "auto-mobile-download-metrics" },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
   } catch (error) {
     throw toActionableError(error, "Failed to fetch npm download range");
   }

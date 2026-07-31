@@ -118,10 +118,23 @@ order_tokens() {
 }
 
 @test "workflow calls the script and drops the fragile rebase loop" {
-  # Regression guard for the wiring: serialized job + script invocation.
-  grep -q "group: release-download-metrics" "$WORKFLOW"
-  grep -q "cancel-in-progress: false" "$WORKFLOW"
-  grep -q "bash scripts/metrics/push-download-snapshot.sh" "$WORKFLOW"
-  # The fragile rebase-and-push loop must not come back.
-  ! grep -q "git pull --rebase origin main" "$WORKFLOW"
+  # Regression guard for the wiring. Parse the YAML with a real parser and assert
+  # against the STRUCTURE (the snapshot job's concurrency + an executable step
+  # that runs the script) rather than grepping raw text, so a value hiding in a
+  # comment, dead YAML, or another job cannot keep this green while the scheduled
+  # job stops running the collector.
+  run python3 - "$WORKFLOW" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+conc = wf.get("concurrency", {})
+assert conc.get("group") == "release-download-metrics", "concurrency group"
+assert conc.get("cancel-in-progress") is False, "cancel-in-progress false"
+job = wf["jobs"]["snapshot"]
+runs = "\n".join(s.get("run", "") for s in job["steps"])
+assert "bash scripts/metrics/push-download-snapshot.sh" in runs, "script invoked in a snapshot step"
+assert "git pull --rebase origin main" not in runs, "fragile rebase loop must not return"
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ok"* ]]
 }

@@ -134,6 +134,10 @@ export class ListInstalledApps {
   }
 
   private async getCachedInstalledApps(): Promise<InstalledAppsByProfile | null> {
+    if (getInstalledAppsCacheWriteCoordinator().isDirty(this.device.deviceId)) {
+      return null;
+    }
+
     const lastVerifiedAt = await this.installedAppsRepository.getLatestVerification(this.device.deviceId);
     if (!lastVerifiedAt) {
       return null;
@@ -300,11 +304,14 @@ export class ListInstalledApps {
     logger.info(`Found ${profileAppCount} user app(s) across ${users.length} user(s); ${installedApps.system.length} system app(s) deduped`);
 
     if (this.cacheEnabled && !hadUserErrors) {
-      await getInstalledAppsCacheWriteCoordinator().commitRebuild(this.device.deviceId, cacheGeneration, () =>
+      const committed = await getInstalledAppsCacheWriteCoordinator().commitRebuild(this.device.deviceId, cacheGeneration, () =>
         getDbWriteBarrier().track(() =>
           this.installedAppsRepository.replaceInstalledApps(this.device.deviceId, cacheEntries)
         ).then(() => undefined)
       );
+      if (committed) {
+        getInstalledAppsCacheWriteCoordinator().markRebuilt(this.device.deviceId, cacheGeneration);
+      }
     } else if (this.cacheEnabled && hadUserErrors) {
       logger.warn("[ListInstalledApps] Skipping cache update due to user listing errors");
     }

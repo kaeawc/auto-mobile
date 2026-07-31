@@ -9,18 +9,33 @@ import { type DbWriteBarrier, getDbWriteBarrier } from "./dbWriteBarrier";
 export interface InstalledAppsCacheWriteCoordinator {
   beginRebuild(deviceId: string): number;
   commitRebuild(deviceId: string, generation: number, write: () => Promise<void>): Promise<boolean>;
+  isDirty(deviceId: string): boolean;
+  markRebuilt(deviceId: string, generation: number): boolean;
   invalidateWithoutWrite(deviceId: string): void;
   invalidate(deviceId: string, write: () => Promise<void>): Promise<void>;
 }
 
 export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledAppsCacheWriteCoordinator {
   private generations = new Map<string, number>();
+  private dirtyGenerations = new Map<string, number>();
   private tails = new Map<string, Promise<unknown>>();
 
   constructor(private readonly getBarrier: () => DbWriteBarrier = getDbWriteBarrier) {}
 
   beginRebuild(deviceId: string): number {
     return this.generations.get(deviceId) ?? 0;
+  }
+
+  isDirty(deviceId: string): boolean {
+    return this.dirtyGenerations.has(deviceId);
+  }
+
+  markRebuilt(deviceId: string, generation: number): boolean {
+    if ((this.generations.get(deviceId) ?? 0) !== generation) {
+      return false;
+    }
+    this.dirtyGenerations.delete(deviceId);
+    return true;
   }
 
   async commitRebuild(deviceId: string, generation: number, write: () => Promise<void>): Promise<boolean> {
@@ -46,7 +61,11 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
   }
 
   invalidateWithoutWrite(deviceId: string): void {
-    this.generations.set(deviceId, (this.generations.get(deviceId) ?? 0) + 1);
+    const generation = (this.generations.get(deviceId) ?? 0) + 1;
+    this.generations.set(deviceId, generation);
+    // A failed stale-marker write leaves old DB rows physically fresh. Keep the
+    // cache bypassed until ListInstalledApps successfully commits a replacement.
+    this.dirtyGenerations.set(deviceId, generation);
   }
 
   private async enqueue<T>(deviceId: string, work: () => Promise<T>): Promise<T> {

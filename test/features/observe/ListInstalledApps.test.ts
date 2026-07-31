@@ -7,6 +7,7 @@ import type { NewInstalledApp } from "../../../src/db/types";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { getInstalledAppsCacheWriteCoordinator } from "../../../src/db/installedAppsCacheWriteCoordinator";
 
 describe("ListInstalledApps", function() {
   let listInstalledApps: ListInstalledApps;
@@ -449,6 +450,43 @@ describe("ListInstalledApps", function() {
 
       expect(result.profiles[0].map(app => app.packageName)).toEqual(["com.installed.app"]);
       expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
+    });
+
+    test("rebuilds a dirty cache after a stale-marker write fails", async function() {
+      const device: BootedDevice = { deviceId: "dirty-cache-device", platform: "android" } as BootedDevice;
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1_000);
+      await repo.replaceInstalledApps(device.deviceId, [{
+        device_id: device.deviceId,
+        user_id: 0,
+        package_name: "com.example.stale",
+        is_system: 0,
+        installed_at: timer.now(),
+        last_verified_at: timer.now()
+      }]);
+      await expect(getInstalledAppsCacheWriteCoordinator().invalidate(device.deviceId, async () => {
+        throw new Error("transient stale-marker failure");
+      })).rejects.toThrow("transient stale-marker failure");
+
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+        stdout: "package:com.example.fresh\n",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+      const list = new ListInstalledApps(
+        device,
+        new FakeAdbClientFactory(fakeAdb),
+        null,
+        { cacheEnabled: true, installedAppsRepository: repo, timer }
+      );
+
+      await expect(list.executeDetailed()).resolves.toMatchObject({
+        profiles: { 0: [{ packageName: "com.example.fresh" }] }
+      });
+      expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
+      expect(getInstalledAppsCacheWriteCoordinator().isDirty(device.deviceId)).toBe(false);
     });
   });
 });

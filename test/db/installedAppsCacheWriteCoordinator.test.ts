@@ -126,4 +126,19 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     await Promise.all([first, second]);
     expect(writes).toEqual(["first", "second"]);
   });
+
+  test("keeps a device dirty when an invalidation write fails until a current rebuild succeeds", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceId = "device-5";
+
+    await expect(coordinator.invalidate(deviceId, async () => {
+      throw new Error("transient DB failure");
+    })).rejects.toThrow("transient DB failure");
+    expect(coordinator.isDirty(deviceId)).toBe(true);
+
+    const generation = coordinator.beginRebuild(deviceId);
+    await expect(coordinator.commitRebuild(deviceId, generation, async () => undefined)).resolves.toBe(true);
+    expect(coordinator.markRebuilt(deviceId, generation)).toBe(true);
+    expect(coordinator.isDirty(deviceId)).toBe(false);
+  });
 });

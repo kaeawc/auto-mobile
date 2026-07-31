@@ -108,9 +108,14 @@ when the docs site was last rebuilt.
         // yields a real daily delta; a gap (missing intermediate snapshot) is
         // unknowable and rendered as null. A cumulative DECREASE (asset
         // re-published / counter reset) is likewise unknowable, so it is null
-        // rather than a false 0.
+        // rather than a false 0. A CHANGED GitHub asset id (asset deleted and
+        // re-uploaded under the same tag+filename gets a new id) means the two
+        // cumulative counts belong to different counters, so it is null too —
+        // even when the value did not decrease.
         var delta;
         if (prior === undefined || utcDayDifference(prior.date, snap.date) !== 1) {
+          delta = null;
+        } else if (prior.id != null && g.id != null && prior.id !== g.id) {
           delta = null;
         } else {
           var change = g.cumulative - prior.cumulative;
@@ -118,7 +123,7 @@ when the docs site was last rebuilt.
         }
         series[k].cumulative.push({ date: snap.date, value: g.cumulative });
         series[k].delta.push({ date: snap.date, value: delta });
-        last[k] = { cumulative: g.cumulative, date: snap.date };
+        last[k] = { cumulative: g.cumulative, date: snap.date, id: g.id };
       });
     });
     return { dates: dates, series: series };
@@ -193,13 +198,20 @@ when the docs site was last rebuilt.
     seriesList.forEach(function (s) {
       var d = "";
       var penUp = true; // start a fresh subpath after any gap (null value)
+      var prevGlobalIndex = -1; // last plotted point's index on the GLOBAL date axis
       s.points.forEach(function (p) {
         var v = valueFor(p);
         if (v == null) { penUp = true; return; }
-        var x = scaleX(indexByDate[p.date], dates.length);
+        var gi = indexByDate[p.date];
+        // Lift the pen across absent observations too: a sparse series skips the
+        // dates where the asset was missing, so a jump of more than one global
+        // date index is a gap and must render as a break, not a line through it.
+        if (prevGlobalIndex >= 0 && gi - prevGlobalIndex > 1) { penUp = true; }
+        var x = scaleX(gi, dates.length);
         var y = scaleY(v, max);
         d += (penUp ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1) + " ";
         penUp = false;
+        prevGlobalIndex = gi;
         svg.appendChild(el("circle", { cx: x, cy: y, r: 2.5, fill: s.color }));
       });
       if (d) { svg.appendChild(el("path", { d: d, class: "dl-chart-line", stroke: s.color })); }

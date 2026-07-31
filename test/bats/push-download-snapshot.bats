@@ -34,9 +34,12 @@ FAKE
   chmod +x "${BIN_DIR}/git"
 
   # Fake `bun` (the collector): the fake `git diff` decides whether a change
-  # exists, so this only needs to succeed.
+  # exists, so this only needs to succeed. It records a `bun-collect` marker in
+  # the SAME ordered log the fake `git` writes to, so a test can prove the
+  # collector runs AFTER `git reset` (on fresh main) on every attempt.
   cat > "${BIN_DIR}/bun" <<'FAKE'
 #!/usr/bin/env bash
+echo "bun-collect" >> "${FAKE_GIT_LOG}"
 exit 0
 FAKE
   chmod +x "${BIN_DIR}/bun"
@@ -51,6 +54,17 @@ run_push() {
     FAKE_GIT_LOG="$GIT_LOG" FAKE_GIT_STATE="$GIT_STATE" \
     SNAPSHOT_RETRY_SLEEP=0 "$@" \
     bash "$SCRIPT"
+}
+
+# Collapse the command log to just the ordered fetch/reset/collect markers, one
+# token per line, so a test can assert the exact per-attempt regeneration order.
+# The collector (`bun-collect`) MUST land after `reset` on every attempt.
+order_tokens() {
+  awk '
+    /fetch origin main/          { print "fetch"; next }
+    /reset --hard origin\/main/  { print "reset"; next }
+    /bun-collect/                { print "collect" }
+  ' "$GIT_LOG" | tr "\n" " "
 }
 
 @test "pushes on the first attempt when the snapshot changed" {
@@ -70,11 +84,15 @@ run_push() {
 }
 
 @test "regenerates the snapshot after resetting to fresh main" {
-  # The collector (bun) must run on top of the reset, not once before.
+  # The collector (bun) must run on top of the reset, not once before. Assert the
+  # exact per-attempt order fetch -> reset -> collect: this FAILS if the collector
+  # were moved before the reset (order would be fetch collect reset) or skipped
+  # entirely (the trailing "collect" token would be absent).
   run_push FAKE_GIT_DIFF_RC=1
   [ "$status" -eq 0 ]
   grep -q "fetch origin main" "$GIT_LOG"
   grep -q "reset --hard origin/main" "$GIT_LOG"
+  [ "$(order_tokens)" = "fetch reset collect " ]
 }
 
 @test "retries after losing a race, then succeeds — without rebasing" {
@@ -86,6 +104,9 @@ run_push() {
   [ "$(grep -c 'push origin HEAD:main' "$GIT_LOG")" -eq 2 ]
   [ "$(grep -c 'reset --hard origin/main' "$GIT_LOG")" -eq 2 ]
   ! grep -q "rebase" "$GIT_LOG"
+  # The collector must regenerate on fresh main for EACH attempt (never skipped
+  # on the retry): fetch -> reset -> collect repeated once per attempt.
+  [ "$(order_tokens)" = "fetch reset collect fetch reset collect " ]
 }
 
 @test "fails cleanly after exhausting all attempts" {

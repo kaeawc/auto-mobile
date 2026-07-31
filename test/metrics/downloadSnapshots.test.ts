@@ -134,6 +134,28 @@ describe("downloadSnapshots pure logic", () => {
     expect(day2?.delta).toBeNull();
   });
 
+  test("computeAssetDailyDeltas: changed asset id yields null even when cumulative did not decrease", () => {
+    // Same tag+filename on consecutive days, but the asset was deleted and
+    // re-uploaded, so it carries a NEW GitHub id (111 -> 222). The counter reset
+    // to a fresh 8; a naive tag+name diff would fabricate a delta of 3 (8 - 5).
+    const snapshots = [
+      buildSnapshot("2026-07-29", [{ tag: "v1", asset: "a.apk", cumulative: 5, id: 111 }], []),
+      buildSnapshot("2026-07-30", [{ tag: "v1", asset: "a.apk", cumulative: 8, id: 222 }], []),
+    ];
+    const day2 = computeAssetDailyDeltas(snapshots).find(d => d.date === "2026-07-30");
+    expect(day2?.delta).toBeNull(); // not 3 — identity changed
+    expect(day2?.cumulative).toBe(8);
+  });
+
+  test("computeAssetDailyDeltas: stable asset id with a normal increase still yields a numeric delta", () => {
+    const snapshots = [
+      buildSnapshot("2026-07-29", [{ tag: "v1", asset: "a.apk", cumulative: 5, id: 111 }], []),
+      buildSnapshot("2026-07-30", [{ tag: "v1", asset: "a.apk", cumulative: 8, id: 111 }], []),
+    ];
+    const day2 = computeAssetDailyDeltas(snapshots).find(d => d.date === "2026-07-30");
+    expect(day2?.delta).toBe(3); // same id, honest daily delta
+  });
+
   test("computeAssetDailyDeltas: missing asset in later snapshot produces no row, does not carry forward", () => {
     const snapshots = [
       buildSnapshot("2026-07-29", [

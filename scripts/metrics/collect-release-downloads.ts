@@ -42,6 +42,7 @@ const REPO_ROOT = path.resolve(scriptDir, "..", "..");
 const DATA_FILE = path.join(REPO_ROOT, "docs", "metrics", "data", "downloads.jsonl");
 
 interface GithubReleaseAsset {
+  id: number;
   name: string;
   download_count: number;
 }
@@ -83,8 +84,15 @@ async function fetchGithubReleasesPage(url: string, page: number): Promise<Githu
     let response: Response;
     try {
       response = await fetch(url, { headers });
+      if (response.ok) {
+        // Parse the body INSIDE the retryable attempt: a connection failure while
+        // reading the body is just as transient as one during the fetch, so it
+        // must retry rather than abort collection with attempts still remaining.
+        return (await response.json()) as GithubRelease[];
+      }
     } catch (error) {
-      // Network-level throw: transient, so retry until attempts are exhausted.
+      // Network-level throw during the fetch OR the body read: transient, so
+      // retry until attempts are exhausted.
       lastError = error;
       if (attempt < GITHUB_FETCH_ATTEMPTS) {
         await sleep(GITHUB_RETRY_BASE_MS * attempt);
@@ -92,9 +100,7 @@ async function fetchGithubReleasesPage(url: string, page: number): Promise<Githu
       }
       throw toActionableError(error, `Failed to fetch GitHub releases page ${page}`);
     }
-    if (response.ok) {
-      return (await response.json()) as GithubRelease[];
-    }
+    // Reached only when the response arrived but is not ok (response is assigned).
     // 4xx (auth/not-found) is not transient — fail fast without retrying.
     if (response.status < 500) {
       throw new ActionableError(
@@ -133,6 +139,9 @@ async function fetchGithubAssetCounts(): Promise<GithubAssetCount[]> {
           tag: release.tag_name,
           asset: asset.name,
           cumulative: asset.download_count ?? 0,
+          // Pin the counter's identity: a deleted+re-uploaded asset gets a new
+          // id, letting the delta logic reject a replacement's cumulative jump.
+          id: asset.id,
         });
       }
     }

@@ -28,10 +28,14 @@ import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
 import dev.jasonpearson.automobile.desktop.core.datasource.RealNavigationDataSource
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoader
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+private val LOG = LoggerFactory.getLogger("NavigationFacet")
 
 private sealed interface NavigationFacetState {
   /** No foreground app resolved yet, or the app-scoped pull is in flight. */
@@ -101,14 +105,29 @@ fun NavigationFacet(
     }
   }
 
+  // A throw surfaced by either stream-collection flow (socket read error, parse failure) below.
+  // Compose does NOT isolate exceptions thrown inside a LaunchedEffect — an unguarded `collect`
+  // that throws propagates to the Recomposer root and crashes the app. So both collectors funnel
+  // any non-cancellation throw into this state, which the state-gating effect turns into a
+  // retryable ConnectionError instead of a crash. Reset per stream attempt so Retry clears it.
+  var streamError by remember(column.deviceId, streamAttempt) { mutableStateOf<String?>(null) }
+
   // Foreground app for THIS pane's device, resolved from the nav stream. Reset when the pane's
   // device changes so a new device re-resolves its own foreground app.
   var foregroundAppId by remember(column.deviceId) { mutableStateOf<String?>(null) }
   LaunchedEffect(stream) {
     val current = stream ?: return@LaunchedEffect
-    current.navigationUpdates.collect { update ->
-      val appId = update.appId
-      if (appId != null) foregroundAppId = appId
+    try {
+      current.navigationUpdates.collect { update ->
+        val appId = update.appId
+        if (appId != null) foregroundAppId = appId
+      }
+    } catch (c: CancellationException) {
+      // Normal cancellation on dispose / device change — must propagate.
+      throw c
+    } catch (e: Exception) {
+      LOG.warn("Navigation stream collection failed: ${e.message}", e)
+      streamError = e.message ?: "Navigation stream error"
     }
   }
 
@@ -121,7 +140,14 @@ fun NavigationFacet(
     }
   LaunchedEffect(stream) {
     val current = stream ?: return@LaunchedEffect
-    current.connectionState.collect { connectionState = it }
+    try {
+      current.connectionState.collect { connectionState = it }
+    } catch (c: CancellationException) {
+      throw c
+    } catch (e: Exception) {
+      LOG.warn("Connection-state collection failed: ${e.message}", e)
+      streamError = e.message ?: "Connection-state stream error"
+    }
   }
 
   val sourceProvider =
@@ -134,22 +160,24 @@ fun NavigationFacet(
   var state by
     remember(column.deviceId) { mutableStateOf<NavigationFacetState>(NavigationFacetState.Loading) }
 
-  LaunchedEffect(column.deviceId, foregroundAppId, attempt, connectionState) {
+  LaunchedEffect(column.deviceId, foregroundAppId, attempt, connectionState, streamError) {
     val appId = foregroundAppId
     if (appId == null) {
       // No foreground app resolved yet. We resolve the appId *from* the stream, so a stream that
-      // never connects would otherwise hang here forever (the daemon-socket-unavailable dead-end).
-      // Surface a retryable connection-error in that case; otherwise stay in Loading until the
-      // stream reports the foreground app. Never pull with a null app id (that would surface the
-      // wrong/global graph).
+      // never connects (or throws mid-collect) would otherwise hang here forever (the
+      // daemon-socket-unavailable dead-end). Surface a retryable connection-error in that case;
+      // otherwise stay in Loading until the stream reports the foreground app. Never pull with a
+      // null app id (that would surface the wrong/global graph).
+      val error = streamError
       state =
-        when (connectionState) {
-          is ConnectionState.Disconnected ->
+        when {
+          error != null -> NavigationFacetState.ConnectionError(error)
+          connectionState is ConnectionState.Disconnected ->
             NavigationFacetState.ConnectionError(
               (connectionState as ConnectionState.Disconnected).reason
                 ?: "Not connected to the AutoMobile daemon"
             )
-          is ConnectionState.Error ->
+          connectionState is ConnectionState.Error ->
             NavigationFacetState.ConnectionError((connectionState as ConnectionState.Error).message)
           else -> NavigationFacetState.Loading
         }
@@ -157,18 +185,26 @@ fun NavigationFacet(
     }
     state = NavigationFacetState.Loading
     // Read off the UI thread: the resource read hits the daemon and would otherwise block
-    // recomposition. Injected test data sources run inline (deterministic).
+    // recomposition. Injected test data sources run inline (deterministic). The pull is wrapped so
+    // a throwing data source becomes a retryable Error state rather than crashing the Recomposer.
     state =
-      when (
-        val result = withContext(Dispatchers.IO) { sourceProvider(appId).getNavigationGraph() }
-      ) {
-        is Result.Success ->
-          if (result.data.screens.isEmpty()) NavigationFacetState.Empty
-          else NavigationFacetState.Resolved(result.data)
-        is Result.Error ->
-          NavigationFacetState.Error(result.message ?: "Failed to load navigation graph")
-        // A one-shot read resolves to Success/Error; treat a stray Loading as retryable.
-        Result.Loading -> NavigationFacetState.Error("Navigation graph is still loading")
+      try {
+        when (
+          val result = withContext(Dispatchers.IO) { sourceProvider(appId).getNavigationGraph() }
+        ) {
+          is Result.Success ->
+            if (result.data.screens.isEmpty()) NavigationFacetState.Empty
+            else NavigationFacetState.Resolved(result.data)
+          is Result.Error ->
+            NavigationFacetState.Error(result.message ?: "Failed to load navigation graph")
+          // A one-shot read resolves to Success/Error; treat a stray Loading as retryable.
+          Result.Loading -> NavigationFacetState.Error("Navigation graph is still loading")
+        }
+      } catch (c: CancellationException) {
+        throw c
+      } catch (e: Exception) {
+        LOG.warn("Navigation graph pull failed: ${e.message}", e)
+        NavigationFacetState.Error(e.message ?: "Failed to load navigation graph")
       }
   }
 

@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationDataSource
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
@@ -21,6 +22,8 @@ import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.SharedFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -332,6 +335,52 @@ class NavigationFacetTest {
       assertTrue(
         "recreated stream should have been connected",
         created.last().connectCallCount >= 1,
+      )
+    }
+
+  /** A [SharedFlow] that throws on collection, to simulate a stream read/parse failure. */
+  private fun throwingNavFlow(error: Throwable): SharedFlow<NavigationGraphStreamUpdate> =
+    object : SharedFlow<NavigationGraphStreamUpdate> {
+      override val replayCache: List<NavigationGraphStreamUpdate> = emptyList()
+
+      override suspend fun collect(collector: FlowCollector<NavigationGraphStreamUpdate>): Nothing =
+        throw error
+    }
+
+  @Test
+  fun `routes a throwing stream collection to the retryable error state instead of crashing`() =
+    runComposeUiTest {
+      // A stream whose navigation-updates flow throws on collect. An unguarded LaunchedEffect
+      // collect would propagate this to the Recomposer root and crash the app; the facet must
+      // instead land in the retryable error state.
+      val throwing =
+        object : ObservationStream by FakeObservationStream() {
+          override val navigationUpdates = throwingNavFlow(RuntimeException("stream read error"))
+        }
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { throwing },
+              navigationDataSourceProvider = {
+                StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
+              },
+            )
+          }
+        }
+      }
+
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("stream read error", substring = true).fetchSemanticsNodes().isNotEmpty()
+      }
+      onNodeWithText("stream read error", substring = true).assertExists()
+      onNodeWithContentDescription("Retry connecting to the AutoMobile daemon").assertExists()
+      assertTrue(
+        "must not be stuck on the indefinite Resolving state",
+        onAllNodesWithText("Resolving navigation graph", substring = true)
+          .fetchSemanticsNodes()
+          .isEmpty(),
       )
     }
 

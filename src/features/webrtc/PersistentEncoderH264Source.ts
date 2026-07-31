@@ -1,4 +1,5 @@
 import { connect as netConnect } from "node:net";
+import { createHash } from "node:crypto";
 import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
@@ -191,7 +192,13 @@ export const defaultActiveVideoSessionRegistry: ActiveVideoSessionRegistry =
 
 interface RawVideoServerLease {
   socketName: string;
-  sessionToken: string;
+  /**
+   * SHA-256 hex of the session token (issue #4731). The lease never stores the raw token — it is
+   * the on-wire auth secret (issue #4729), so cleartext-at-rest would be a disclosure path. A lease
+   * owner re-derives this hash from the token it holds (see {@link hashSessionToken}) to confirm
+   * ownership; foreign-lease reclaim matches on the non-secret `socketName` instead.
+   */
+  sessionTokenHash: string;
   ownerPid: number;
   deviceSerial: string;
   pid: number;
@@ -201,7 +208,20 @@ interface RawVideoServerLease {
   heartbeatElapsedRealtimeMs?: number;
 }
 
-interface VideoServerLease extends VideoServerSession, Omit<RawVideoServerLease, "sessionToken"> {}
+/**
+ * A validated lease read back from the device. Identical to the on-disk record: the raw token is no
+ * longer recoverable from disk, so a parsed lease carries only the non-secret `socketName` (the
+ * filename/id the reconcile+sweep match on) and the token's hash.
+ */
+type VideoServerLease = RawVideoServerLease;
+
+/**
+ * SHA-256 hex of a session token, matching the device's `sessionTokenSha256Hex` (issue #4731). Used
+ * to confirm an owned lease belongs to this session without the token ever touching disk.
+ */
+function hashSessionToken(token: string): string {
+  return createHash("sha256").update(token, "ascii").digest("hex");
+}
 
 const defaultConnector: SocketConnector = (port, signal) =>
   new Promise<StreamSocket>((resolve, reject) => {
@@ -360,6 +380,11 @@ function isSafeSessionToken(value: string): boolean {
   return /^[A-Za-z0-9-]{8,80}$/.test(value);
 }
 
+/** Lowercase SHA-256 hex, the only token-derived value now persisted (issue #4731). */
+function isSessionTokenHash(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
 /** Mirrors `VideoSessionArguments.SAFE_SOCKET_NAME` on the device side. */
 const SAFE_SOCKET_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
 
@@ -383,9 +408,11 @@ function isVideoServerLease(value: unknown): value is RawVideoServerLease {
   }
   const lease = value as Record<string, unknown>;
   return [
-    typeof lease.sessionToken === "string",
-    typeof lease.sessionToken === "string" && isSafeSessionToken(lease.sessionToken),
+    isSessionTokenHash(lease.sessionTokenHash),
     typeof lease.socketName === "string",
+    // The socket name is the on-disk filename/id (issue #4731); require the safe shape so it is
+    // never interpolated into a `cat`/`rm` path we did not expect.
+    typeof lease.socketName === "string" && SAFE_SOCKET_NAME_PATTERN.test(lease.socketName),
     typeof lease.deviceSerial === "string",
     isPositiveInteger(lease.ownerPid),
     isPositiveInteger(lease.pid),
@@ -405,12 +432,7 @@ function parseLeases(output: string): VideoServerLease[] {
         if (!isVideoServerLease(parsed)) {
           return [];
         }
-        return [
-          {
-            ...parsed,
-            token: parsed.sessionToken,
-          },
-        ];
+        return [parsed];
       } catch (error) {
         logger.debug(`[PersistentEncoderH264Source] ignoring malformed video session lease: ${error}`);
         return [];
@@ -1616,7 +1638,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
 
     // Sweep corrupt/orphaned files regardless of how many leases parsed: a
     // wholly-unparseable directory yields zero leases but still needs cleanup.
-    await this.sweepOrphanLeaseFiles(adb, new Set(leases.map(lease => `${lease.token}.json`)));
+    await this.sweepOrphanLeaseFiles(adb, new Set(leases.map(lease => `${lease.socketName}.json`)));
 
     // Sweep host forwards with no backing lease at all (device server
     // self-expired and deleted its own lease, or the daemon was SIGKILLed). Runs
@@ -1638,7 +1660,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         continue;
       }
       logger.info(
-        `[PersistentEncoderH264Source] stale-session-cleanup token=${lease.token} reason=${decision}`
+        `[PersistentEncoderH264Source] stale-session-cleanup socket=${lease.socketName} reason=${decision}`
       );
       await this.removeForwardIfMatching(adb, lease.forwardPort, lease.socketName);
       await this.terminateProcessIfMatching(adb, lease);
@@ -1802,7 +1824,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     expectedProcessId: number | null
   ): Promise<void> {
     const adb = this.adbFactory.create(this.options.device);
-    const lease = await this.readLease(adb, session.token);
+    const lease = await this.readLease(adb, session.socketName);
     if (lease && this.isOwnedSessionLease(lease, session, expectedProcessId)) {
       await this.removeForwardIfMatching(adb, lease.forwardPort, lease.socketName);
       await this.removeOwnedForward(adb, port, session.socketName, lease.forwardPort);
@@ -1812,7 +1834,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
     if (lease) {
       logger.warn(
-        `[PersistentEncoderH264Source] refusing owned-session process cleanup token=${session.token}: lease identity or PID mismatch`
+        `[PersistentEncoderH264Source] refusing owned-session process cleanup socket=${session.socketName}: lease identity or PID mismatch`
       );
       await this.removeOwnedForward(adb, port, session.socketName);
       return;
@@ -1828,7 +1850,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     // A cancellation can arrive after the server persisted its lease but before
     // VIDEO_SESSION_READY handed its PID back to the host. The lease identity
     // plus terminateProcessIfMatching's argv check still make owned cleanup safe.
-    return lease.token === session.token &&
+    // The token itself is no longer on disk (issue #4731), so ownership is confirmed by
+    // re-hashing this session's token and matching the persisted hash.
+    return lease.sessionTokenHash === hashSessionToken(session.token) &&
       lease.socketName === session.socketName &&
       lease.ownerPid === session.ownerPid &&
       lease.deviceSerial === session.deviceSerial &&
@@ -1848,15 +1872,15 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
 
   private async readLease(
     adb: ReturnType<AdbClientFactory["create"]>,
-    token: string
+    socketName: string
   ): Promise<VideoServerLease | null> {
     try {
       const result = await this.withTimeout(
-        adb.executeCommand(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/${token}.json`),
+        adb.executeCommand(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/${socketName}.json`),
         this.teardownTimeoutMs,
         "adb read owned video session lease"
       );
-      return parseLeases(result.stdout).find(lease => lease.token === token) ?? null;
+      return parseLeases(result.stdout).find(lease => lease.socketName === socketName) ?? null;
     } catch (error) {
       logger.debug(`[PersistentEncoderH264Source] unable to read owned video session lease: ${error}`);
       return null;
@@ -1874,16 +1898,19 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         "adb read video-server process cmdline"
       );
       const argv = commandLine.stdout.split("\u0000");
+      // Match the non-secret `--socket-name` argv token, not `--session-token` (issue #4731): the
+      // lease no longer carries the raw token, and the opaque socket name gives the same PID-reuse
+      // protection — a recycled PID running something else will not carry our socket name.
       const ownsSession = argv.some(
         (argument, index) =>
-          argument === "--session-token" && argv[index + 1] === lease.token
+          argument === "--socket-name" && argv[index + 1] === lease.socketName
       );
       if (
         !argv.includes(VIDEO_SERVER_MAIN_CLASS) ||
         !ownsSession
       ) {
         logger.warn(
-          `[PersistentEncoderH264Source] refusing stale-session process cleanup token=${lease.token}: PID/token mismatch`
+          `[PersistentEncoderH264Source] refusing stale-session process cleanup socket=${lease.socketName}: PID/socket mismatch`
         );
         return;
       }
@@ -1894,7 +1921,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       );
     } catch (error) {
       logger.debug(
-        `[PersistentEncoderH264Source] stale-session process cleanup skipped token=${lease.token}: ${error}`
+        `[PersistentEncoderH264Source] stale-session process cleanup skipped socket=${lease.socketName}: ${error}`
       );
     }
   }
@@ -1936,17 +1963,17 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     adb: ReturnType<AdbClientFactory["create"]>,
     lease: VideoServerLease
   ): Promise<void> {
-    const current = await this.readLease(adb, lease.token);
+    const current = await this.readLease(adb, lease.socketName);
     if (
-      current?.token !== lease.token ||
-      current.socketName !== lease.socketName ||
+      current?.socketName !== lease.socketName ||
+      current.sessionTokenHash !== lease.sessionTokenHash ||
       current.pid !== lease.pid
     ) {
       return;
     }
     try {
       await this.withTimeout(
-        adb.executeCommand(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${lease.token}.json`),
+        adb.executeCommand(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${lease.socketName}.json`),
         this.teardownTimeoutMs,
         "adb remove video session lease"
       );

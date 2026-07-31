@@ -203,6 +203,29 @@ class VideoStreamWriterTest {
   }
 
   /**
+   * A connection whose [readFully] increments [handshakeReads] and always returns null (a silent
+   * peer). Lets a test assert that a rate-limited connection is dropped *before* the token
+   * handshake ever reads from it, i.e. the guard bounds the expensive per-connection work, not just
+   * the attach.
+   */
+  private class HandshakeCountingConnection(override val peerUid: Int = 2000) :
+    VideoClientConnection {
+    val handshakeReads = AtomicInteger()
+    @Volatile var closed = false
+    override val outputStream: OutputStream = ByteArrayOutputStream()
+    override val inputStream: InputStream = ByteArrayInputStream(ByteArray(0))
+
+    override fun readFully(count: Int, timeoutMs: Long): ByteArray? {
+      handshakeReads.incrementAndGet()
+      return null
+    }
+
+    override fun close() {
+      closed = true
+    }
+  }
+
+  /**
    * Drives [VideoStreamWriter.acceptClients] deterministically: each queued action produces the
    * next `accept()` result (a connection, a thrown [IOException], or the end of the queue which
    * returns `null` so the acceptor loop stops).
@@ -514,6 +537,84 @@ class VideoStreamWriterTest {
     assertEquals("only the allowed client attaches", 1, attachCount.get())
     assertFalse("the allowed client must not be displaced by a rejected peer", allowed.closed)
     assertTrue("the intruder must be disconnected", intruder.closed)
+    subject.stop()
+  }
+
+  // --- connection-storm rate limit (issue #4730) ----------------------------------------------
+
+  @Test
+  fun rateLimiterAdmitsUpToMaxThenRejectsWithinWindow() {
+    var now = 1_000L
+    val limiter = ConnectionRateLimiter({ now }, maxConnections = 3, windowMs = 1_000L)
+
+    assertTrue(limiter.tryAdmit())
+    assertTrue(limiter.tryAdmit())
+    assertTrue(limiter.tryAdmit())
+    assertFalse("a 4th admission in the same window is throttled", limiter.tryAdmit())
+
+    // Still inside the window: capacity has not returned.
+    now = 1_500L
+    assertFalse("mid-window the budget is still exhausted", limiter.tryAdmit())
+
+    // Once the window slides past the earliest admissions, capacity frees up again.
+    now = 2_001L
+    assertTrue("capacity returns after the window slides past old admissions", limiter.tryAdmit())
+  }
+
+  @Test
+  fun connectionStormBeyondRateLimitIsDroppedWithoutDisturbingAdmittedClients() {
+    val now = 1_000L
+    val max = VideoStreamWriter.MAX_ACCEPTS_PER_RATE_WINDOW
+    // Every connection is an allowed peer with the handshake disabled, so only the rate limit — not
+    // the UID gate or token handshake — can reject one. A storm of max + 5 lands in one window.
+    val connections = List(max + 5) { FakeClientConnection() }
+    val attachCount = AtomicInteger()
+    val subject = writer({ now }, FakeServerSocket(connections.map { conn -> { conn } }))
+
+    subject.bindServerSocket()
+    subject.acceptClients { attachCount.incrementAndGet() }
+
+    assertEquals("only the rate-limit budget of connections is admitted", max, attachCount.get())
+    // The last admitted connection is the current client and stays attached.
+    assertFalse("the last admitted client stays attached", connections[max - 1].closed)
+    // Earlier admits were displaced by the reconnect of the next admitted client.
+    for (i in 0 until max - 1) {
+      assertTrue("displaced admitted connection $i must be closed", connections[i].closed)
+    }
+    // Every connection beyond the budget is dropped in O(1) without ever attaching.
+    for (i in max until connections.size) {
+      assertTrue("throttled connection $i must be closed", connections[i].closed)
+    }
+    subject.stop()
+  }
+
+  @Test
+  fun throttledConnectionNeverReachesTheTokenHandshake() {
+    val now = 1_000L
+    val max = VideoStreamWriter.MAX_ACCEPTS_PER_RATE_WINDOW
+    val token = "session-0001"
+    // Fill the budget with allowed peers that carry no handshake bytes: with the handshake enabled
+    // they would each block for the full HANDSHAKE_READ_TIMEOUT_MS. Once the budget is exhausted
+    // the
+    // storm connections must be dropped by the rate limit BEFORE that blocking read, proving the
+    // guard bounds the expensive per-connection work rather than merely the attach.
+    val budgetFillers = List(max) { FakeClientConnection(handshake = handshakeFrame(token)) }
+    val stormBeyondBudget = List(3) { HandshakeCountingConnection() }
+    val actions: List<() -> VideoClientConnection?> =
+      budgetFillers.map { c -> { c } } + stormBeyondBudget.map { c -> { c } }
+    val subject = writer({ now }, FakeServerSocket(actions), expectedToken = token)
+
+    subject.bindServerSocket()
+    subject.acceptClients {}
+
+    for ((i, conn) in stormBeyondBudget.withIndex()) {
+      assertEquals(
+        "throttled storm connection $i must be dropped before the handshake read",
+        0,
+        conn.handshakeReads.get(),
+      )
+      assertTrue("throttled storm connection $i must be closed", conn.closed)
+    }
     subject.stop()
   }
 

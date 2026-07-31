@@ -51,6 +51,41 @@ internal class ReconnectWindow(
 }
 
 /**
+ * Sliding-window admission limiter for the accept loop (issue #4730). Bounds how many connections
+ * the single `video-client-acceptor` thread will carry into the bounded token handshake per
+ * [windowMs], so a connection storm cannot wedge that thread inside repeated
+ * [VideoStreamWriter.HANDSHAKE_READ_TIMEOUT_MS] reads or churn CPU. Timestamps are supplied by an
+ * injected monotonic clock so the limit is deterministically fake-testable; only the acceptor
+ * thread touches an instance, so it needs no internal synchronization.
+ */
+internal class ConnectionRateLimiter(
+  private val clock: () -> Long,
+  private val maxConnections: Int,
+  private val windowMs: Long,
+) {
+  // Bounded by maxConnections: a rejected attempt records nothing, so the deque never grows beyond
+  // the admitted set still inside the trailing window.
+  private val admittedAtMs = ArrayDeque<Long>()
+
+  /**
+   * Record an admission at the current time and report whether it is within the rate. Evicts
+   * timestamps that fell out of the trailing [windowMs] first, then admits (and remembers) the
+   * attempt only while fewer than [maxConnections] remain in the window; otherwise returns false
+   * and remembers nothing, so a sustained storm neither grows the deque nor advances the window.
+   */
+  fun tryAdmit(): Boolean {
+    val now = clock()
+    val cutoff = now - windowMs
+    while (admittedAtMs.isNotEmpty() && admittedAtMs.first() <= cutoff) {
+      admittedAtMs.removeFirst()
+    }
+    if (admittedAtMs.size >= maxConnections) return false
+    admittedAtMs.addLast(now)
+    return true
+  }
+}
+
+/**
  * Writes encoded video packets to a LocalSocket using the VideoStreamProtocol binary framing. A
  * disconnected client is replaceable: the writer retains codec configuration plus the latest
  * complete keyframe and replays them before live packets to the next client.
@@ -82,6 +117,9 @@ class VideoStreamWriter(
   private val lock = Any()
   private val packetCache = VideoPacketCache()
   private val reconnectWindow = ReconnectWindow(nowMs, CLIENT_RECONNECT_WINDOW_MS)
+  // Bounds the accept loop's per-connection handshake work against a storm (issue #4730).
+  private val connectionRateLimiter =
+    ConnectionRateLimiter(nowMs, MAX_ACCEPTS_PER_RATE_WINDOW, ACCEPT_RATE_WINDOW_MS)
 
   // Decouple encode from transport (#4749): the encode loop offers to a drop-oldest single-slot
   // handoff and returns immediately; this dedicated thread drains it into the socket, so a stalled
@@ -130,6 +168,19 @@ class VideoStreamWriter(
      * immediately on connect.
      */
     const val HANDSHAKE_READ_TIMEOUT_MS = 2_000L
+
+    /**
+     * Admission ceiling for the accept loop: at most this many connections per
+     * [ACCEPT_RATE_WINDOW_MS] are carried into the bounded token handshake (issue #4730). A
+     * connection storm past this budget is dropped in O(1) — after the cheap UID gate, before the
+     * blocking handshake read — so it can neither wedge the single acceptor thread inside repeated
+     * [HANDSHAKE_READ_TIMEOUT_MS] reads nor churn CPU. Generous relative to legitimate reconnects,
+     * which arrive at most a few times per session recovery.
+     */
+    const val MAX_ACCEPTS_PER_RATE_WINDOW = 10
+
+    /** Trailing window over which [MAX_ACCEPTS_PER_RATE_WINDOW] admissions are counted. */
+    const val ACCEPT_RATE_WINDOW_MS = 1_000L
 
     /**
      * Peer UIDs allowed to receive the screen stream, checked against `SO_PEERCRED` on every
@@ -291,6 +342,26 @@ class VideoStreamWriter(
           client.close()
         } catch (_: IOException) {
           // Best-effort close of a rejected peer; nothing was written, so a failure here is benign.
+        }
+        continue
+      }
+
+      // Bound the accept loop against a connection storm (issue #4730). The check sits after the
+      // O(1) UID gate — so untrusted app-UID floods are already filtered and never consume the
+      // budget or throttle a legitimate host reconnect — and ahead of the blocking token handshake,
+      // which is the expensive per-connection work a flood would otherwise use to wedge this single
+      // acceptor thread for HANDSHAKE_READ_TIMEOUT_MS each. Over-budget connections are dropped in
+      // O(1) without touching shared state, so the attached client is undisturbed.
+      if (!connectionRateLimiter.tryAdmit()) {
+        println(
+          "VIDEO_CLIENT_RATE_LIMITED socket=$socketName exceeded " +
+            "$MAX_ACCEPTS_PER_RATE_WINDOW accepts/${ACCEPT_RATE_WINDOW_MS}ms; disconnecting"
+        )
+        try {
+          client.close()
+        } catch (_: IOException) {
+          // Best-effort close of a throttled peer; nothing was written, so a failure here is
+          // benign.
         }
         continue
       }

@@ -148,6 +148,11 @@ build_ctrl_proxy_ios() {
     return 1
   fi
 
+  if ! "${PROJECT_ROOT}/scripts/ios/patch-ctrl-proxy-ui-test-runner-icon.sh" --derived-data "${DERIVED_DATA_PATH}"; then
+    log_error "Failed to patch the CtrlProxy UI-test runner icon."
+    return 1
+  fi
+
   return 0
 }
 

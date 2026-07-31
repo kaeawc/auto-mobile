@@ -154,6 +154,8 @@ if [ "${ALL_FOUND}" = false ]; then
     exit 1
 fi
 
+"${SCRIPT_DIR}/patch-ctrl-proxy-ui-test-runner-icon.sh" --derived-data "${DERIVED_DATA}"
+
 echo ""
 echo -e "${GREEN}Build completed in ${BUILD_DURATION}s${NC}"
 echo -e "${GREEN}xctestrun: ${XCTESTRUN_FILE}${NC}"

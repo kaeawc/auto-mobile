@@ -31,7 +31,14 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
 
   async invalidate(deviceId: string, write: () => Promise<void>): Promise<void> {
     this.invalidateWithoutWrite(deviceId);
-    await this.enqueue(deviceId, write);
+    try {
+      await this.enqueue(deviceId, write);
+    } finally {
+      // A rebuild can begin after the first fence but before the DB stale-marker
+      // commits. Bump again once that write settles so it cannot publish a
+      // snapshot read from the old rows while it was in flight.
+      this.invalidateWithoutWrite(deviceId);
+    }
   }
 
   invalidateWithoutWrite(deviceId: string): void {

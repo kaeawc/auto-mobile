@@ -38,4 +38,32 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     await expect(staleRebuild).resolves.toBe(false);
     expect(writes).toEqual(["rebuild", "invalidate"]);
   });
+
+  test("fences a rebuild that starts while an invalidation write is in flight", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceId = "device-2";
+    let releaseInvalidation: (() => void) | undefined;
+    const invalidationStarted = new Promise<void>(resolve => {
+      releaseInvalidation = resolve;
+    });
+    let releaseInvalidationWrite: (() => void) | undefined;
+    const invalidationWrite = new Promise<void>(resolve => {
+      releaseInvalidationWrite = resolve;
+    });
+
+    const invalidation = coordinator.invalidate(deviceId, async () => {
+      releaseInvalidation?.();
+      await invalidationWrite;
+    });
+    await invalidationStarted;
+
+    const generationDuringInvalidation = coordinator.beginRebuild(deviceId);
+    const rebuild = coordinator.commitRebuild(deviceId, generationDuringInvalidation, async () => {
+      throw new Error("A stale rebuild must not commit");
+    });
+    releaseInvalidationWrite?.();
+
+    await invalidation;
+    await expect(rebuild).resolves.toBe(false);
+  });
 });

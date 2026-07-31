@@ -171,6 +171,7 @@ export class InstallApp {
       await this.markInstalledAppsCacheStale(true);
       installAttempt = await perf.track("adbReinstall", () => this.runAndroidInstall(installArgs, signal));
       if (installAttempt.success) {
+        await this.markInstalledAppsCacheStale(true);
         warnings.push(
           `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`
         );

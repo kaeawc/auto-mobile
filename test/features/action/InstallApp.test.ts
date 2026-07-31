@@ -60,6 +60,15 @@ class FakeDeviceAppInstaller implements DeviceAppInstaller {
   }
 }
 
+class CountingInstalledAppsRepository extends FakeInstalledAppsRepository {
+  markStaleCalls = 0;
+
+  override async markDeviceStale(deviceId: string): Promise<void> {
+    this.markStaleCalls++;
+    await super.markDeviceStale(deviceId);
+  }
+}
+
 function fakePlist(bundleId: string): PlistReader {
   return {
     readJsonFile: async () => ({}),
@@ -711,8 +720,19 @@ describe("InstallApp", () => {
       createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
       createExecResult("Success")
     ]);
+    const repo = new CountingInstalledAppsRepository();
 
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const installApp = new InstallApp(
+      device,
+      fakeAdbFactory,
+      fakeHost,
+      fakeLocator,
+      () => perf,
+      null,
+      null,
+      undefined,
+      repo
+    );
     const result = await installApp.execute(apkPath);
 
     expect(result.success).toBe(true);
@@ -720,6 +740,7 @@ describe("InstallApp", () => {
     expect(result.packageName).toBe("com.example.app");
     expect(result.warning).toContain("uninstalled it and reinstalled");
     expect(fakeAdb.wasCommandExecuted("uninstall com.example.app")).toBe(true);
+    expect(repo.markStaleCalls).toBe(2);
   });
 
   test("invalidates the cache when downgrade recovery uninstalls but reinstall fails", async () => {

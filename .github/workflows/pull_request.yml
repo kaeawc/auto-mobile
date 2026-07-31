@@ -884,8 +884,12 @@ jobs:
       # Linux) and independent of the Bun setup below, which only writes
       # node_modules. Background it so the two overlap, then re-sync at the
       # barrier before `bats test/bats/`, the sole consumer of both. Mechanism
-      # per #3779.
-      - name: "Install BATS"
+      # per #3779. shellcheck is installed here too: the markdown-bash gate
+      # (validate-markdown-bash.bats, #4118) is the first bats-tested script that
+      # shells out to the real shellcheck binary — every other shell validator
+      # scans with grep — and the macOS runner image does not ship shellcheck, so
+      # without this the whole suite mysteriously failed (#4801).
+      - name: "Install BATS and shellcheck"
         shell: bash
         background: true
         id: install-bats
@@ -899,6 +903,14 @@ jobs:
             # capture stderr in run output. Install bats-core from source.
             git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
             sudo /tmp/bats-core/install.sh /usr/local
+          fi
+          if command -v shellcheck &>/dev/null; then
+            echo "shellcheck already installed: $(shellcheck --version | awk '/^version:/{print $2}')"
+          elif command -v brew &>/dev/null; then
+            brew install shellcheck
+          else
+            echo "shellcheck missing and no package manager to install it" >&2
+            exit 1
           fi
 
       - name: "Setup Bun"

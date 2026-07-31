@@ -163,3 +163,71 @@ date -d yesterday'
   [ "$status" -ne 0 ]
   [[ "$output" == *"gnu-grep-P"* ]]
 }
+
+# --- regression cases for the five P2 review threads on PR #4801 ---
+
+@test "flags the long-option date --date=STRING" {
+  write_block bad 'date --date=yesterday +%s'
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-date-d"* ]]
+}
+
+@test "flags an attached short date -dSTRING" {
+  write_block bad 'date -dyesterday +%s'
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-date-d"* ]]
+}
+
+@test "does NOT flag a portable date +FORMAT that contains -d" {
+  # The `-d` in the +%Y-%m-%d format string must not read as the -d option.
+  write_block ok 'stamp=$(date +%Y-%m-%d)'
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}
+
+@test "does NOT flag the portable sed -i '' empty-suffix form" {
+  # This is the exact BSD/macOS spelling the gnu-sed-inplace hint recommends;
+  # flagging it would punish the correction it asks for.
+  write_block ok "sed -i '' 's/a/b/' file"
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}
+
+@test "still flags a suffixless sed -i <script>" {
+  write_block bad "sed -i 's/a/b/' file"
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-sed-inplace"* ]]
+}
+
+@test "does NOT flag a GNUism name that only appears inside a string literal" {
+  write_block ok 'echo "grep -P is unavailable on stock macOS grep"'
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}
+
+@test "does NOT flag a GNUism name in a trailing inline comment" {
+  write_block ok 'echo ok  # remember: date -d is GNU-only'
+  run bash "$ABS" "$FIX"
+  [ "$status" -eq 0 ]
+}
+
+@test "flags a GNUism in a fence that runs to EOF with no closing fence" {
+  # CommonMark ends the block at EOF; the extractor must still scan it.
+  printf '```bash\ngrep -P "x" file\n' > "$FIX/eof.md"
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-grep-P"* ]]
+}
+
+@test "flags a token split mid-word across a continuation (grep -\\ then P)" {
+  # bash removes the backslash-newline with no inserted space, so `grep -` and a
+  # following unindented `P` rejoin as `grep -P`. The join must not insert a space.
+  write_block bad 'grep -\
+P "x" file'
+  run bash "$ABS" "$FIX"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gnu-grep-P"* ]]
+}

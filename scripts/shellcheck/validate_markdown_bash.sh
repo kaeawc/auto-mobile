@@ -111,32 +111,55 @@ ends_with_continuation() {
   (( ${#run} % 2 == 1 ))
 }
 
+# Blank the CONTENTS of quoted spans and drop a trailing `#` comment so a GNUism
+# NAME that only appears inside quoted prose or a comment — `echo "grep -P …"`,
+# `foo # date -d note` — does not trip the executable-token scan. Heuristic, not
+# a shell parser; the `# md-bash-lint-ok` escape hatch still covers the rest.
+# Quotes are blanked first so a `#` inside a string is gone before the comment
+# strip, which only fires on a whitespace-delimited `#` (never `$#`/`${#a}`).
+mask_noncode() {
+  printf '%s' "$1" \
+    | sed -E "s/'[^']*'/''/g; s/\"[^\"]*\"/\"\"/g" \
+    | sed -E 's/[[:space:]]#.*$//'
+}
+
 # GNU-only footgun check for a single LOGICAL line. Skips comment-only lines and
-# lines carrying `# md-bash-lint-ok`. Args: FILE SRCLINE LINE.
+# lines carrying `# md-bash-lint-ok`. Args: FILE SRCLINE RAWLINE.
 check_logical_line() {
-  local file="$1" srcline="$2" line="$3"
-  [[ "$line" =~ ^[[:space:]]*# ]] && return
-  printf '%s' "$line" | grep -q 'md-bash-lint-ok' && return
+  local file="$1" srcline="$2" raw="$3"
+  [[ "$raw" =~ ^[[:space:]]*# ]] && return
+  printf '%s' "$raw" | grep -q 'md-bash-lint-ok' && return
+
+  # Name-based checks run on the masked line so GNUism words in strings/comments
+  # do not false-positive. sed is special: masking `sed -i 's/a/b/'` collapses it
+  # to `sed -i ''`, indistinguishable from the portable empty-suffix form, so its
+  # empty-suffix EXCLUSION is judged on the raw spelling instead.
+  local line
+  line="$(mask_noncode "$raw")"
 
   local label="" hint=""
   # grep PCRE: short `-P`/`-oP` and the long `--perl-regexp` (with optional
   # `=value`). This is the exact class behind #4117.
   if printf '%s' "$line" | grep -qE '\bgrep\b[^|]*(-[A-Za-z]*P|--perl-regexp)'; then
     label="gnu-grep-P"; hint="grep -P/-oP/--perl-regexp is GNU-only PCRE; /usr/bin/grep on macOS rejects it (#4117)."
-  elif printf '%s' "$line" | grep -qE '\bsed\b[^|]*[[:space:]]-i([[:space:]]|$)'; then
+  elif printf '%s' "$line" | grep -qE '\bsed\b[^|]*[[:space:]]-i([[:space:]]|$)' \
+    && ! printf '%s' "$raw" | grep -qE "\bsed\b[^|]*[[:space:]]-i[[:space:]]+(''|\"\")"; then
+    # `sed -i ''`/`sed -i ""` is the portable BSD empty-suffix form the hint
+    # recommends — flag only the suffixless `sed -i <script>` / `sed -i` spelling.
     label="gnu-sed-inplace"; hint="sed -i without a suffix is GNU-only; BSD/macOS needs sed -i '' or a temp file."
   elif printf '%s' "$line" | grep -qE '\breadlink\b[^|]*-[A-Za-z]*f'; then
     label="gnu-readlink-f"; hint="readlink -f is GNU-only; use a portable path resolver (cd/pwd -P)."
   elif printf '%s' "$line" | grep -qE '\b(mapfile|readarray)\b'; then
     label="bash4-mapfile"; hint="mapfile/readarray is bash 4+; /bin/bash on macOS is 3.2. Use a read loop."
-  elif printf '%s' "$line" | grep -qE '\bdate\b[^|]*[[:space:]]-d([[:space:]]|$)'; then
-    label="gnu-date-d"; hint="date -d is GNU-only; BSD/macOS date uses -v/-j -f."
+  elif printf '%s' "$line" | grep -qE '\bdate\b[^|]*([[:space:]]-d([[:space:]]|$|[^-[:space:]])|[[:space:]]--date([[:space:]=]|$))'; then
+    # -d / -dSTRING (attached) / --date / --date=STRING are all GNU-only.
+    label="gnu-date-d"; hint="date -d/--date is GNU-only; BSD/macOS date uses -v/-j -f."
   fi
 
   if [[ -n "$label" ]]; then
     printf '%s%s%s %s:%s\n    %s\n    %s→ %s%s\n' \
       "$RED" "[$label]" "$NC" "$file" "$srcline" \
-      "$(printf '%s' "$line" | sed 's/^[[:space:]]*//')" "$YELLOW" "$hint" "$NC" >&2
+      "$(printf '%s' "$raw" | sed 's/^[[:space:]]*//')" "$YELLOW" "$hint" "$NC" >&2
     violations=$((violations + 1))
   fi
 }
@@ -152,8 +175,12 @@ scan_gnuisms() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     n=$((n + 1))
     if [[ "$pending" -eq 1 ]]; then
-      # Drop the joining backslash and splice onto the continued line.
-      buf="${buf%\\} $line"
+      # Drop the joining backslash and splice DIRECTLY onto the continued line —
+      # bash removes a backslash-newline with no inserted space, so a token split
+      # mid-word (`grep -\`<newline>`P …`) must rejoin as `grep -P`, not `grep - P`.
+      # Any intended separation is already carried by the next line's own leading
+      # whitespace.
+      buf="${buf%\\}$line"
     else
       buf="$line"; bufline=$((start + n - 1))
     fi
@@ -194,6 +221,9 @@ process_file() {
       inblock = 0; print "@@END"; next
     }
     inblock { print "@@L " $0 }
+    # CommonMark lets a fenced block end at end-of-document with no closing
+    # fence; flush it so a file that trails off inside ```bash is still scanned.
+    END { if (inblock) print "@@END" }
   ' "$file")"
   [[ -z "$awk_out" ]] && return
 

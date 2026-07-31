@@ -15,34 +15,16 @@ updates:
     open-pull-requests-limit: 10
     # Set versioning strategy appropriate for a library/package
     versioning-strategy: "increase-if-necessary"
-    ignore:
-      # Frozen by docs/design-docs/image-backend.md: sharp 0.35.x can abort
-      # under Bun; keep 0.34.5/@img 1.2.4 pinned until the Bun interop issue is fixed.
-      - dependency-name: "sharp"
-      - dependency-name: "@img/sharp-darwin-arm64"
-      - dependency-name: "@img/sharp-darwin-x64"
-      - dependency-name: "@img/sharp-libvips-darwin-arm64"
-      - dependency-name: "@img/sharp-libvips-darwin-x64"
-      - dependency-name: "@img/sharp-libvips-linux-arm"
-      - dependency-name: "@img/sharp-libvips-linux-arm64"
-      - dependency-name: "@img/sharp-libvips-linux-ppc64"
-      - dependency-name: "@img/sharp-libvips-linux-riscv64"
-      - dependency-name: "@img/sharp-libvips-linux-s390x"
-      - dependency-name: "@img/sharp-libvips-linux-x64"
-      - dependency-name: "@img/sharp-libvips-linuxmusl-arm64"
-      - dependency-name: "@img/sharp-libvips-linuxmusl-x64"
-      - dependency-name: "@img/sharp-linux-arm"
-      - dependency-name: "@img/sharp-linux-arm64"
-      - dependency-name: "@img/sharp-linux-ppc64"
-      - dependency-name: "@img/sharp-linux-riscv64"
-      - dependency-name: "@img/sharp-linux-s390x"
-      - dependency-name: "@img/sharp-linux-x64"
-      - dependency-name: "@img/sharp-linuxmusl-arm64"
-      - dependency-name: "@img/sharp-linuxmusl-x64"
-      - dependency-name: "@img/sharp-wasm32"
-      - dependency-name: "@img/sharp-win32-arm64"
-      - dependency-name: "@img/sharp-win32-ia32"
-      - dependency-name: "@img/sharp-win32-x64"
+    groups:
+      # sharp ships libvips as a separately-linked native matrix (top-level
+      # `sharp` + every `@img/sharp-*` platform binary). Bump them together in
+      # one PR so a partial update can never split the matrix — validated safe
+      # under Bun on macOS + Linux (arm64/x64) at 0.35.3; see
+      # docs/design-docs/image-backend.md.
+      sharp:
+        patterns:
+          - "sharp"
+          - "@img/sharp-*"
   # Android Gradle dependencies
   - package-ecosystem: "gradle"
     directory: "/android"

@@ -16,6 +16,32 @@ default PNG `observe`/screenshots are safe.
 We want fast, reliable image processing with **WebP preserved on every
 platform** and no WASM crash surface.
 
+## Update (2026-07-31): sharp upgraded to 0.35.3, pin lifted
+
+The freeze below rested on the claim that "sharp 0.35.x reintroduces the Bun
+crash." That claim is **not reproducible** on any platform AutoMobile runs sharp
+on. Using the standalone repro (`docs/reproductions/sharp-bun-035`, pinning
+`sharp@0.35.3` / libvips 8.18.3) under Bun 1.3.14:
+
+- **darwin/arm64** — passes (full WebP lossy/lossless/near-lossless + metadata).
+- **linux/arm64** and **linux/amd64** (`oven/bun:1.3.14` containers) — pass. This
+  closes the Linux gap the record previously left unverified.
+
+The two "open crash" issues the freeze cited do not apply: [bun#20372](https://github.com/oven-sh/bun/issues/20372)
+is a resource-starved fly.io *inpainting* segfault (512 MB shared vCPU), not a
+load/startup abort; [bun#29352](https://github.com/oven-sh/bun/issues/29352) is
+**closed** and was a Bun *Windows path-handling* bug unrelated to libvips — and
+Windows never uses sharp (it routes to jimp + bundled cwebp). Staying on 0.34.5
+also carried unpatched libvips CVEs (GHSA-f88m-g3jw-g9cj) fixed in 8.18.3.
+
+**Change:** `sharp 0.34.5 → 0.35.3`, `@img/sharp-* → 0.35.3`,
+`@img/sharp-libvips-* → 1.3.2`. The `.github/dependabot.yml` freeze `ignore`
+block is replaced by a `groups` rule so the top-level `sharp` + every
+`@img/sharp-*` binary bump together (the matrix must never split partially).
+sharp 0.35 also moved its published types to ESM (`export default sharp`), so
+`loadSharp.ts`'s `SharpFactory` now resolves the default export. The
+macOS/Linux-only / Windows-non-sharp architecture below is otherwise unchanged.
+
 ## Root-cause context (corrected)
 
 Primary-source research (sharp/libvips/Bun trackers, 2026-07) overturned the
@@ -33,8 +59,10 @@ premise carried in #2424/#2920:
   untriaged class of crashes ([bun#20372](https://github.com/oven-sh/bun/issues/20372),
   [bun#29352](https://github.com/oven-sh/bun/issues/29352)). No released sharp
   (0.34→0.35.3) or Bun version fixes it.
-- **sharp 0.34.5** (libvips 8.17.3 / `@img` 1.2.4) demonstrably runs under Bun;
-  **0.35.x** (libvips 8.18.3 / `@img` 1.3.x) reintroduces the crash.
+- **sharp 0.34.5** (libvips 8.17.3 / `@img` 1.2.4) demonstrably runs under Bun.
+  This section originally claimed **0.35.x** (libvips 8.18.3 / `@img` 1.3.x)
+  "reintroduces the crash" — see the 2026-07-31 update above: that is not
+  reproducible on macOS or Linux, and sharp is now on 0.35.3.
 - sharp **cannot** be made reliable on **Windows** under Bun: global-libvips
   build-from-source is unsupported on Windows, and there is a distinct open
   Windows-only Bun+sharp crash ([bun#29352](https://github.com/oven-sh/bun/issues/29352)).
@@ -47,7 +75,8 @@ known-good 0.34.5 on macOS/Linux and give Windows a non-sharp, non-WASM path.
 
 ## Decision
 
-- **macOS/Linux**: sharp **0.34.5**, pinned and frozen.
+- **macOS/Linux**: sharp **0.35.3** (was 0.34.5, pinned and frozen; pin lifted
+  2026-07-31 — see the update note above).
 - **Windows**: pure-JS **jimp** (resize/crop/PNG/pixels) + bundled native
   **cwebp/dwebp** for the WebP codec.
 - **WebP is invariant across all platforms** — never downgraded to PNG.

@@ -35,6 +35,8 @@ ASSET_CATALOG="${PROJECT_ROOT}/ios/control-proxy/CtrlProxyApp/Assets.xcassets"
 SIMULATOR_PRODUCTS="${DERIVED_DATA}/Build/Products/Debug-iphonesimulator"
 RUNNER_APP="${SIMULATOR_PRODUCTS}/CtrlProxyUITests-Runner.app"
 RUNNER_INFO_PLIST="${RUNNER_APP}/Info.plist"
+PLIST_BUDDY="${PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
+PLUTIL="${PLUTIL:-plutil}"
 
 if [[ ! -d "${RUNNER_APP}" || ! -f "${RUNNER_INFO_PLIST}" ]]; then
     echo "CtrlProxy UI-test runner not found: ${RUNNER_APP}" >&2
@@ -43,6 +45,16 @@ fi
 
 if [[ ! -d "${ASSET_CATALOG}" ]]; then
     echo "CtrlProxy asset catalog not found: ${ASSET_CATALOG}" >&2
+    exit 1
+fi
+
+if [[ ! -x "${PLIST_BUDDY}" ]]; then
+    echo "PlistBuddy not found: ${PLIST_BUDDY}" >&2
+    exit 1
+fi
+
+if ! command -v "${PLUTIL}" >/dev/null 2>&1; then
+    echo "plutil not found: ${PLUTIL}" >&2
     exit 1
 fi
 
@@ -65,9 +77,9 @@ for icon_artifact in Assets.car AppIcon60x60@2x.png AppIcon76x76@2x~ipad.png; do
     cp "${PATCH_DIRECTORY}/${icon_artifact}" "${RUNNER_APP}/${icon_artifact}"
 done
 
-/usr/libexec/PlistBuddy -c "Merge ${PATCH_DIRECTORY}/icon-info.plist :" "${RUNNER_INFO_PLIST}"
-plutil -replace CFBundleDisplayName -string CtrlProxy "${RUNNER_INFO_PLIST}"
-plutil -replace CFBundleName -string CtrlProxy "${RUNNER_INFO_PLIST}"
+"${PLIST_BUDDY}" -c "Merge ${PATCH_DIRECTORY}/icon-info.plist :" "${RUNNER_INFO_PLIST}"
+"${PLUTIL}" -replace CFBundleDisplayName -string CtrlProxy "${RUNNER_INFO_PLIST}"
+"${PLUTIL}" -replace CFBundleName -string CtrlProxy "${RUNNER_INFO_PLIST}"
 
 # The simulator accepts an ad-hoc signature, while a stale signature rejects
 # the copied asset catalog during installation.

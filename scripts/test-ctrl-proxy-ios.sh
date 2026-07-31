@@ -25,6 +25,7 @@ TIMEOUT=5
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
+DERIVED_DATA="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-/tmp/automobile-ctrl-proxy}"
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  CtrlProxy iOS Diagnostic Script${NC}"
@@ -160,65 +161,79 @@ if [ "$HEALTH_RESPONSE" == "FAILED" ]; then
             LOG_FILE="/tmp/ctrl-proxy-ios-$(date +%Y%m%d-%H%M%S).log"
             print_info "Log file: ${LOG_FILE}"
 
-            # Start xcodebuild test in background
+            # Build first so the generated UI-test runner can be branded before
+            # test-without-building installs it on the simulator.
             echo ""
-            print_info "Starting CtrlProxy iOS in background..."
+            print_info "Building CtrlProxy iOS for testing..."
+            if ! "${PROJECT_ROOT}/scripts/ios/ctrl-proxy-build-for-testing.sh"; then
+                print_status 1 "CtrlProxy iOS build-for-testing failed"
+            else
+                XCTESTRUN_FILE=$(find "${DERIVED_DATA}/Build/Products" -name "*.xctestrun" -type f 2>/dev/null | head -1)
 
-            cd "${CTRL_PROXY_IOS_DIR}"
-            nohup xcodebuild test \
-                -scheme CtrlProxyApp \
-                -destination "id=${BOOTED_SIMULATOR}" \
-                -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService \
-                > "$LOG_FILE" 2>&1 &
+                if [ -z "${XCTESTRUN_FILE}" ]; then
+                    print_status 1 "No CtrlProxy .xctestrun file found after build"
+                else
+                    print_info "Starting patched CtrlProxy iOS in background..."
 
-            XCODEBUILD_PID=$!
-            cd - > /dev/null
+                    cd "${CTRL_PROXY_IOS_DIR}"
+                    nohup xcodebuild test-without-building \
+                        -xctestrun "${XCTESTRUN_FILE}" \
+                        -destination "id=${BOOTED_SIMULATOR}" \
+                        -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService \
+                        "CTRL_PROXY_IOS_PORT=${PORT}" \
+                        "AUTOMOBILE_DEVICE_ID=${BOOTED_SIMULATOR}" \
+                        > "$LOG_FILE" 2>&1 &
 
-            print_info "Started xcodebuild with PID: ${XCODEBUILD_PID}"
+                    XCODEBUILD_PID=$!
+                    cd - > /dev/null
 
-            # Wait for service to come up
-            echo ""
-            print_info "Waiting for CtrlProxy iOS to start (up to 60 seconds)..."
+                    print_info "Started xcodebuild with PID: ${XCODEBUILD_PID}"
 
-            MAX_WAIT=60
-            WAITED=0
-            while [ $WAITED -lt $MAX_WAIT ]; do
-                HEALTH_CHECK=$(curl -s --max-time 2 "${HEALTH_URL}" 2>/dev/null || echo "")
-                if [[ "$HEALTH_CHECK" == *"ok"* ]] || [[ "$HEALTH_CHECK" == *"status"* ]]; then
+                    # Wait for service to come up
                     echo ""
-                    print_status 0 "CtrlProxy iOS is now running!"
-                    SERVICE_RUNNING=true
-                    break
-                fi
+                    print_info "Waiting for CtrlProxy iOS to start (up to 60 seconds)..."
 
-                # Check if process is still alive
-                if ! kill -0 $XCODEBUILD_PID 2>/dev/null; then
-                    echo ""
-                    print_status 1 "xcodebuild process exited unexpectedly"
-                    print_info "Check log file for errors: ${LOG_FILE}"
-                    # Show last few lines of log
-                    if [ -f "$LOG_FILE" ]; then
+                    MAX_WAIT=60
+                    WAITED=0
+                    while [ $WAITED -lt $MAX_WAIT ]; do
+                        HEALTH_CHECK=$(curl -s --max-time 2 "${HEALTH_URL}" 2>/dev/null || echo "")
+                        if [[ "$HEALTH_CHECK" == *"ok"* ]] || [[ "$HEALTH_CHECK" == *"status"* ]]; then
+                            echo ""
+                            print_status 0 "CtrlProxy iOS is now running!"
+                            SERVICE_RUNNING=true
+                            break
+                        fi
+
+                        # Check if process is still alive
+                        if ! kill -0 $XCODEBUILD_PID 2>/dev/null; then
+                            echo ""
+                            print_status 1 "xcodebuild process exited unexpectedly"
+                            print_info "Check log file for errors: ${LOG_FILE}"
+                            # Show last few lines of log
+                            if [ -f "$LOG_FILE" ]; then
+                                echo ""
+                                echo -e "  ${YELLOW}Last 10 lines of log:${NC}"
+                                tail -10 "$LOG_FILE" | sed 's/^/    /'
+                            fi
+                            break
+                        fi
+
+                        printf "."
+                        sleep 2
+                        WAITED=$((WAITED + 2))
+                    done
+
+                    if [ "$SERVICE_RUNNING" = false ] && [ $WAITED -ge $MAX_WAIT ]; then
                         echo ""
-                        echo -e "  ${YELLOW}Last 10 lines of log:${NC}"
-                        tail -10 "$LOG_FILE" | sed 's/^/    /'
+                        print_status 1 "Timeout waiting for CtrlProxy iOS to start"
+                        print_info "xcodebuild may still be building. Check: ${LOG_FILE}"
+                        # Show last few lines of log
+                        if [ -f "$LOG_FILE" ]; then
+                            echo ""
+                            echo -e "  ${YELLOW}Last 10 lines of log:${NC}"
+                            tail -10 "$LOG_FILE" | sed 's/^/    /'
+                        fi
                     fi
-                    break
-                fi
-
-                printf "."
-                sleep 2
-                WAITED=$((WAITED + 2))
-            done
-
-            if [ "$SERVICE_RUNNING" = false ] && [ $WAITED -ge $MAX_WAIT ]; then
-                echo ""
-                print_status 1 "Timeout waiting for CtrlProxy iOS to start"
-                print_info "xcodebuild may still be building. Check: ${LOG_FILE}"
-                # Show last few lines of log
-                if [ -f "$LOG_FILE" ]; then
-                    echo ""
-                    echo -e "  ${YELLOW}Last 10 lines of log:${NC}"
-                    tail -10 "$LOG_FILE" | sed 's/^/    /'
                 fi
             fi
         fi

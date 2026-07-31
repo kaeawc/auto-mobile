@@ -31,6 +31,7 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     await invalidation;
     expect(writes).toEqual(["rebuild", "invalidate"]);
 
+    coordinator.invalidateWithoutWrite(deviceId);
     const staleRebuild = coordinator.commitRebuild(deviceId, generation, async () => {
       writes.push("stale-rebuild");
     });

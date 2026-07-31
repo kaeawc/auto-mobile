@@ -7,6 +7,7 @@
 export interface InstalledAppsCacheWriteCoordinator {
   beginRebuild(deviceId: string): number;
   commitRebuild(deviceId: string, generation: number, write: () => Promise<void>): Promise<boolean>;
+  invalidateWithoutWrite(deviceId: string): void;
   invalidate(deviceId: string, write: () => Promise<void>): Promise<void>;
 }
 
@@ -29,8 +30,12 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
   }
 
   async invalidate(deviceId: string, write: () => Promise<void>): Promise<void> {
-    this.generations.set(deviceId, (this.generations.get(deviceId) ?? 0) + 1);
+    this.invalidateWithoutWrite(deviceId);
     await this.enqueue(deviceId, write);
+  }
+
+  invalidateWithoutWrite(deviceId: string): void {
+    this.generations.set(deviceId, (this.generations.get(deviceId) ?? 0) + 1);
   }
 
   private async enqueue<T>(deviceId: string, work: () => Promise<T>): Promise<T> {

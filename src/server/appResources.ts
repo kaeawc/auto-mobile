@@ -6,6 +6,7 @@ import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../utils/ios-cmdline-tools/DeviceAppManager";
 import { BootedDevice, InstalledApp, InstalledAppsByProfile, Platform, SystemInstalledApp } from "../models";
 import { logger } from "../utils/logger";
+import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 // Resource URI templates
@@ -395,8 +396,11 @@ async function ensureAppsCacheEntry(deviceId: string, timer: Timer = defaultTime
     return null;
   }
 
+  const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(deviceId);
   const entry = await fetchAppsForDevice(device, timer);
-  appCacheByDeviceId.set(deviceId, entry);
+  await getInstalledAppsCacheWriteCoordinator().commitRebuild(deviceId, cacheGeneration, async () => {
+    appCacheByDeviceId.set(deviceId, entry);
+  });
   return entry;
 }
 
@@ -721,9 +725,13 @@ function invalidateMetadataCacheForDevice(deviceId: string): void {
 
 export function invalidateInstalledAppsCache(deviceId?: string): void {
   if (deviceId) {
+    getInstalledAppsCacheWriteCoordinator().invalidateWithoutWrite(deviceId);
     appCacheByDeviceId.delete(deviceId);
     invalidateMetadataCacheForDevice(deviceId);
     return;
+  }
+  for (const deviceId of appCacheByDeviceId.keys()) {
+    getInstalledAppsCacheWriteCoordinator().invalidateWithoutWrite(deviceId);
   }
   appCacheByDeviceId.clear();
   appMetadataCacheByKey.clear();
@@ -769,6 +777,7 @@ async function getAppMetadataResource(
     return cached.content;
   }
 
+  const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(deviceId);
   const device = await findBootedDevice(deviceId);
   if (!device) {
     return {
@@ -797,9 +806,11 @@ async function getAppMetadataResource(
       text: JSON.stringify(metadata, null, 2)
     };
 
-    appMetadataCacheByKey.set(cacheKey, {
-      expiresAt: timer.now() + APP_METADATA_CACHE_TTL_MS,
-      content
+    await getInstalledAppsCacheWriteCoordinator().commitRebuild(deviceId, cacheGeneration, async () => {
+      appMetadataCacheByKey.set(cacheKey, {
+        expiresAt: timer.now() + APP_METADATA_CACHE_TTL_MS,
+        content
+      });
     });
 
     return content;

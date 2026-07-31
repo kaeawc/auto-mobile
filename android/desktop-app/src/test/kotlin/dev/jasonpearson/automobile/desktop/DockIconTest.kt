@@ -38,21 +38,39 @@ class DockIconTest {
   private fun oneByOneImage() = BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB)
 
   @Test
-  fun `unsupported installer never consults the loader and installs nothing`() {
-    val installer = FakeDockIconInstaller(isSupported = false)
+  fun `packaged run is a no-op even when supported`() {
+    val installer = FakeDockIconInstaller(isSupported = true)
 
-    setDockIcon(installer) { fail("image loader must not be consulted when unsupported") }
+    setDockIcon(
+      installer = installer,
+      imageLoader = { fail("image loader must not be consulted when packaged") },
+      isPackaged = true,
+    )
 
     assertEquals(0, installer.installCount)
     assertNull(installer.installedImage)
   }
 
   @Test
-  fun `supported installer receives the exact loaded image`() {
+  fun `unsupported installer never consults the loader and installs nothing`() {
+    val installer = FakeDockIconInstaller(isSupported = false)
+
+    setDockIcon(
+      installer = installer,
+      imageLoader = { fail("image loader must not be consulted when unsupported") },
+      isPackaged = false,
+    )
+
+    assertEquals(0, installer.installCount)
+    assertNull(installer.installedImage)
+  }
+
+  @Test
+  fun `supported dev run installs the exact loaded image`() {
     val installer = FakeDockIconInstaller(isSupported = true)
     val expected = oneByOneImage()
 
-    setDockIcon(installer) { expected }
+    setDockIcon(installer = installer, imageLoader = { expected }, isPackaged = false)
 
     assertEquals(1, installer.installCount)
     assertSame(expected, installer.installedImage)
@@ -62,7 +80,7 @@ class DockIconTest {
   fun `missing resource installs nothing and does not throw`() {
     val installer = FakeDockIconInstaller(isSupported = true)
 
-    setDockIcon(installer) { null }
+    setDockIcon(installer = installer, imageLoader = { null }, isPackaged = false)
 
     assertEquals(0, installer.installCount)
     assertNull(installer.installedImage)
@@ -73,7 +91,7 @@ class DockIconTest {
     val installer = FakeDockIconInstaller(isSupported = true, throwOnInstall = true)
 
     // Must return normally despite install() throwing.
-    setDockIcon(installer) { oneByOneImage() }
+    setDockIcon(installer = installer, imageLoader = { oneByOneImage() }, isPackaged = false)
 
     assertEquals(1, installer.installCount)
     assertNull(installer.installedImage)

@@ -46,14 +46,20 @@ internal fun loadBundledImage(resourcePath: String): BufferedImage? =
  * [java.awt.Taskbar.getTaskbar], which initializes the AWT toolkit, so this must run only after
  * `apple.awt.application.name` has been set.
  *
- * The [installer] and [imageLoader] parameters default to the production platform implementations;
- * tests inject fakes to exercise the supported / missing-resource / throwing paths
- * deterministically.
+ * The [installer], [imageLoader], and [isPackaged] parameters default to the production platform
+ * implementations; tests inject fakes to exercise the packaged / supported / missing-resource /
+ * throwing paths deterministically.
  */
 internal fun setDockIcon(
   installer: DockIconInstaller = TaskbarDockIconInstaller(),
   imageLoader: (String) -> BufferedImage? = ::loadBundledImage,
+  isPackaged: Boolean = System.getProperty("jpackage.app-path") != null,
 ) {
+  // A packaged app already gets its padded/masked ICNS from the bundle; overriding at runtime with
+  // the full-bleed PNG (kept full-bleed for Linux) would undo that macOS branding. Only brand
+  // unbundled dev runs, where macOS otherwise shows the generic Java icon. jpackage launchers set
+  // `jpackage.app-path`; gradle run/hotRun never do.
+  if (isPackaged) return
   if (!installer.isSupported) return
   val image = imageLoader("/icons/app-icon.png") ?: return
   try {

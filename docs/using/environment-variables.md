@@ -74,6 +74,24 @@ here for discoverability; most are diagnostic or for advanced testing.
 | `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD` | Skips Android and iOS CtrlProxy downloads/prefetches when set to `1` or `true`. |
 | `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED` | Skips the accessibility service download when it is already installed. |
 
+## Tool capability defaults (`AUTOMOBILE_TOOLSET_*`)
+
+Advanced tools are hidden behind opt-in **tool capabilities** — off by default so
+a fresh MCP session sees only the core surface. These variables set which
+capabilities are enabled the moment a session connects; both forms are consulted
+and their effects union. Unlike most `AUTOMOBILE_*` variables, they have **no**
+legacy `AUTO_MOBILE_*` alias.
+
+| Variable | Purpose |
+|----------|---------|
+| `AUTOMOBILE_TOOLSET_DEFAULTS` | Comma-separated capability names to enable by default (e.g. `clipboard,telephony`). Unknown names are ignored. |
+| `AUTOMOBILE_TOOLSET_<CAP>` | Enable one capability when set to `1`. `<CAP>` is the capability name upper-cased with hyphens replaced by underscores (e.g. `AUTOMOBILE_TOOLSET_ADVANCED_INTERACTION=1`). |
+
+These are only a fallback: an explicit `setToolCapability` choice for a session is
+persisted and overrides the default. See
+[Tool Capabilities & Registration Flags](tool-capabilities.md) for the full list
+of capabilities, the tools each one exposes, and how to toggle them at runtime.
+
 ## Device provisioning opt-in
 
 AutoMobile never creates a simulator or emulator by default — spawning devices on

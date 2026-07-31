@@ -79,6 +79,7 @@ nav:
       - 'Reproducing Bugs': using/reproducing-bugs.md
       - 'UI Tests': using/ui-tests.md
       - 'Hermetic CI Pinning': using/hermetic-ci-pinning.md
+      - 'Tool Capabilities & Registration Flags': using/tool-capabilities.md
       - 'WebRTC Screen Streaming': webrtc-streaming-ci-worker.md
       - 'Environment Variables': using/environment-variables.md
       - 'Performance Analysis':

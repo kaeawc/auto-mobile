@@ -14,11 +14,12 @@ credentials and no remote publish.
 ## How it works
 
 1. **Stage locally.** `android/build.gradle.kts` registers a `centralManifest`
-   Maven repository that points at `android/build/central-manifest/`. Publishing
-   to it (`publishAllPublicationsToCentralManifestRepository`) writes the same
-   files a release uploads — primary artifact, POM, Gradle module metadata,
-   sources and Javadoc jars, PGP signatures, and checksums — into one local
-   directory. It uploads nowhere and does not touch the real Central path.
+   Maven repository that points at `android/build/central-manifest/`, gated behind
+   `-PmavenManifestStaging` so it stays off the production `publish` lifecycle.
+   Publishing to it (`publishAllPublicationsToCentralManifestRepository`) writes
+   the same files a release uploads — primary artifact, POM, Gradle module
+   metadata, sources and Javadoc jars, PGP signatures, and checksums — into one
+   local directory. It uploads nowhere and does not touch the real Central path.
 2. **Enumerate.** `scripts/release/maven-publication-manifest.sh` walks that tree
    and prints a deterministic, path-independent manifest: one line per file
    (`coordinate classifier filename bytes`), per-coordinate subtotals, classifier

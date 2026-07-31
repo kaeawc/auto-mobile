@@ -64,11 +64,17 @@ plugins.withId(libs.plugins.mavenPublish.get().pluginId) {
 // the real Central publication path (publishAllPublicationsToMavenCentral...).
 allprojects {
   plugins.withId("com.vanniktech.maven.publish") {
-    configure<PublishingExtension> {
-      repositories {
-        maven {
-          name = "centralManifest"
-          url = rootProject.layout.buildDirectory.dir("central-manifest").get().asFile.toURI()
+    // Register only when the preflight asks for it (-PmavenManifestStaging). The
+    // production `publish` lifecycle task depends on the publish task of EVERY
+    // configured repository, so registering this unconditionally would make the
+    // real release also write to the local repo. Gating keeps it off that path.
+    if (providers.gradleProperty("mavenManifestStaging").isPresent) {
+      configure<PublishingExtension> {
+        repositories {
+          maven {
+            name = "centralManifest"
+            url = rootProject.layout.buildDirectory.dir("central-manifest").get().asFile.toURI()
+          }
         }
       }
     }

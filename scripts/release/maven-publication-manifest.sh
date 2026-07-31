@@ -209,12 +209,15 @@ if [ -n "$budget_file" ]; then
   [ -f "$budget_file" ] || { echo "error: budget file not found: $budget_file" >&2; exit 2; }
   command -v jq >/dev/null 2>&1 || { echo "error: jq is required for --budget" >&2; exit 2; }
   # jq's // treats only null/false as empty, so a real 0 threshold survives.
-  limits="$(jq -r '(.perRelease // {}) | "\(.maxFiles // "") \(.maxBytes // "")"' "$budget_file")"
-  max_files="${limits%% *}"
-  max_bytes="${limits##* }"
-  # Fail closed on a malformed threshold: a non-integer (e.g. 0.5) would reach
-  # bash's integer-only -gt, print "integer expression expected", evaluate false,
-  # and silently report BUDGET OK -- even under --strict.
+  # @tsv keeps an absent/null threshold as an empty field but preserves false,
+  # floats, and strings verbatim -- unlike `// ""`, which would coalesce a JSON
+  # `false` to empty and slip past the integer check below (disabling the budget).
+  limits="$(jq -r '(.perRelease // {}) | [.maxFiles, .maxBytes] | @tsv' "$budget_file")"
+  max_files="$(printf '%s' "$limits" | cut -f1)"
+  max_bytes="$(printf '%s' "$limits" | cut -f2)"
+  # Fail closed on a malformed threshold: a non-integer (0.5, false, "x") would
+  # reach bash's integer-only -gt, print "integer expression expected", evaluate
+  # false, and silently report BUDGET OK -- even under --strict. Empty = no limit.
   for v in "$max_files" "$max_bytes"; do
     if [ -n "$v" ] && ! printf '%s' "$v" | grep -qE '^[0-9]+$'; then
       echo "error: budget thresholds must be non-negative integers (got '$v')" >&2

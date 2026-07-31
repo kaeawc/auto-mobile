@@ -265,3 +265,15 @@ JSON
   [[ "$output" == *"integer"* ]]
   [[ "$output" != *"BUDGET OK"* ]]
 }
+
+@test "a boolean budget threshold fails closed (jq false-coalescing bypass)" {
+  # jq's `// ""` would turn false into empty and disable the budget silently.
+  local budget="$STAGE/bool-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": { "maxFiles": false } }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"integer"* ]]
+  [[ "$output" != *"BUDGET OK"* ]]
+}

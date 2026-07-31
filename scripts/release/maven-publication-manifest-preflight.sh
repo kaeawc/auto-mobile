@@ -52,7 +52,8 @@ else
   (
     cd "$android_dir"
     rm -rf build/central-manifest
-    ./gradlew ${tasks[@]+"${tasks[@]}"} -PVERSION_NAME="$VERSION" --no-configuration-cache
+    ./gradlew ${tasks[@]+"${tasks[@]}"} -PVERSION_NAME="$VERSION" \
+      -PmavenManifestStaging --no-configuration-cache
   )
 fi
 

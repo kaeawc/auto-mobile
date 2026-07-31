@@ -177,6 +177,20 @@ describe("DevicePool", () => {
     }
   }
 
+  class FakeDeviceManagerWithExitedInitialProcess extends FakeDeviceManagerWithDistinctStartedProcesses {
+    override async startDevice(
+      device: DeviceInfo,
+      timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS
+    ): Promise<FakeChildProcess> {
+      const childProcess = await super.startDevice(device, timeoutMs);
+      if (this.childProcesses.length === 1) {
+        childProcess.exitCode = 1;
+        childProcess.signalCode = null;
+      }
+      return childProcess;
+    }
+  }
+
   class StubbornChildProcess extends EventEmitter {
     readonly pid = 12345;
     readonly exitCode = null;
@@ -1324,7 +1338,7 @@ describe("DevicePool", () => {
 
         await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
         devicePool.markIntentionalShutdown("emulator-5554");
-        manager.childProcess.emit("exit", 0, null);
+        manager.childProcess.emit("exit", 1, null);
         await new Promise(resolve => setImmediate(resolve));
 
         expect(manager.startedDevices).toHaveLength(1);
@@ -1442,6 +1456,36 @@ describe("DevicePool", () => {
       }
     });
 
+    test("accepts a recovered replacement when the initial cold boot exited before tracking", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      try {
+        const images: DeviceInfo[] = [
+          { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+        ];
+        const manager = new FakeDeviceManagerWithExitedInitialProcess(images);
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          manager,
+          new DefaultRetryExecutor(fakeTimer)
+        );
+
+        await expect(devicePool.assignMultipleDevices(["session-1"], 1_000, "android"))
+          .resolves.toEqual(new Map([["session-1", "emulator-5554"]]));
+        expect(manager.childProcesses).toHaveLength(2);
+        expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
+      } finally {
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
     test("retries when a recovery process was killed by a signal before tracking", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
@@ -1504,6 +1548,7 @@ describe("DevicePool", () => {
 
         const assignments = await allocation;
         expect(assignments.get("session-2")).toBe("emulator-5554");
+        expect(manager.childProcesses).toHaveLength(2);
       } finally {
         manager.releaseRecovery();
         await new Promise(resolve => setImmediate(resolve));
@@ -1614,6 +1659,10 @@ describe("DevicePool", () => {
         await devicePool.releaseDevice("emulator-5554");
         manager.bootedDevices = [];
         await devicePool.removeDisconnectedDevice("emulator-5554", false);
+
+        await expect(devicePool.assignMultipleDevices(["session-suppressed"], 1_000, "android"))
+          .rejects.toThrow("Not enough devices in pool");
+        expect(manager.startedDevices).toHaveLength(1);
 
         manager.bootedDevices = [{
           name: "Unknown (emulator-5554)",

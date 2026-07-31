@@ -28,6 +28,8 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
     super();
     Object.assign(this.childProcess, {
       pid: 12345,
+      exitCode: null,
+      signalCode: null,
       kill: () => false,
     });
   }
@@ -133,6 +135,7 @@ describe("killDevice handler", () => {
     };
     await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
 
+    Object.assign(manager.childProcess, { exitCode: 1 });
     manager.childProcess.emit("exit", 1, null);
     await new Promise(resolve => setImmediate(resolve));
 
@@ -146,9 +149,13 @@ describe("killDevice handler", () => {
     manager = successfulManager;
     setDeviceToolsDependencies({
       deviceManagerFactory: () => successfulManager,
-      notifyResourcesChanged: async () => {},
+      notifyResourcesChanged: async () => {
+        throw new Error("resource notification failed");
+      },
       ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
+      clearInstalledAppsForDevice: async () => {
+        throw new Error("cache cleanup failed");
+      },
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     const image: DeviceInfo = {
@@ -182,6 +189,7 @@ describe("killDevice handler", () => {
         deviceId: "emulator-5554",
       },
     });
+    Object.assign(successfulManager.childProcess, { exitCode: 0 });
     successfulManager.childProcess.emit("exit", 0, null);
     await new Promise(resolve => setImmediate(resolve));
 

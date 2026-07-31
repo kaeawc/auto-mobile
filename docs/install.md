@@ -33,7 +33,7 @@ or confirmed ADB disconnect, set this environment variable on the process that
 starts the AutoMobile daemon:
 
 ``` bash
-AUTOMOBILE_ANDROID_REBOOT_ON_DEATH=1 auto-mobile
+AUTOMOBILE_ANDROID_REBOOT_ON_DEATH=1 auto-mobile --daemon restart
 ```
 
 `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH=1` is supported as a compatibility alias.

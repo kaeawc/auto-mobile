@@ -408,7 +408,8 @@ export class DevicePool {
     if (await this.rebootDisconnectedAndroidDevice(device)) {
       return;
     }
-    if (this.devices.get(deviceId) !== device) {
+    const current = this.devices.get(deviceId);
+    if (current && current !== device) {
       return;
     }
     this.suppressAutoStartForDevice(device);
@@ -1250,16 +1251,39 @@ export class DevicePool {
       });
     };
     childProcess.once("exit", handleExit);
-    const exitCode = (childProcess as { exitCode?: number | null }).exitCode;
-    const signalCode = (childProcess as { signalCode?: NodeJS.Signals | null }).signalCode;
-    if (exitCode !== undefined && (exitCode !== null || signalCode !== null && signalCode !== undefined)) {
+    const completedExit = this.getCompletedProcessExit(childProcess);
+    if (completedExit) {
       exitHandled = true;
-      await this.evictStartedDeviceAfterProcessExit(device.deviceId, exitCode, signalCode ?? null);
+      const pooledDeviceAtExit = this.devices.get(device.deviceId);
+      if (await this.handleCompletedProcessExit(device.deviceId, completedExit, pooledDeviceAtExit)) {
+        return;
+      }
       throw new Error(
         `Android emulator ${device.deviceId} exited before process tracking completed ` +
-        `(code=${exitCode ?? "null"}, signal=${signalCode ?? "none"})`
+        `(code=${completedExit.code ?? "null"}, signal=${completedExit.signal ?? "none"})`
       );
     }
+  }
+
+  private getCompletedProcessExit(
+    childProcess: ChildProcess
+  ): { code: number | null; signal: NodeJS.Signals | null } | undefined {
+    const code = (childProcess as { exitCode?: number | null }).exitCode;
+    const signal = (childProcess as { signalCode?: NodeJS.Signals | null }).signalCode;
+    if (code === undefined || code === null && (signal === null || signal === undefined)) {
+      return undefined;
+    }
+    return { code, signal: signal ?? null };
+  }
+
+  private async handleCompletedProcessExit(
+    deviceId: string,
+    exit: { code: number | null; signal: NodeJS.Signals | null },
+    pooledDeviceAtExit: PooledDevice | undefined
+  ): Promise<boolean> {
+    await this.evictStartedDeviceAfterProcessExit(deviceId, exit.code, exit.signal);
+    const replacement = this.devices.get(deviceId);
+    return Boolean(replacement && replacement !== pooledDeviceAtExit);
   }
 
   private async evictStartedDeviceAfterProcessExit(

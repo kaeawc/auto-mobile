@@ -131,6 +131,30 @@ async function defaultClearInstalledAppsForDevice(deviceId: string): Promise<voi
   );
 }
 
+async function clearInstalledAppsAfterShutdown(
+  dependencies: DeviceToolsDependencies,
+  deviceId: string
+): Promise<void> {
+  try {
+    await dependencies.clearInstalledAppsForDevice(deviceId);
+  } catch (error) {
+    // The device is already stopped; the next app verification refreshes stale cache rows.
+    logger.warn(
+      `[DeviceTools] Failed to clear installed apps for ${deviceId} after shutdown: ${error}`,
+      error
+    );
+  }
+}
+
+async function notifyResourcesAfterShutdown(dependencies: DeviceToolsDependencies): Promise<void> {
+  try {
+    await dependencies.notifyResourcesChanged();
+  } catch (error) {
+    // The device is already stopped; resource subscriptions refresh on their next update.
+    logger.warn(`[DeviceTools] Failed to notify resource changes after shutdown: ${error}`, error);
+  }
+}
+
 let moduleDependencies: DeviceToolsDependencies | null = null;
 
 function getDeviceToolsDependencies(): DeviceToolsDependencies {
@@ -428,7 +452,7 @@ export function registerDeviceTools() {
       const devicePool = DaemonState.getInstance().isInitialized()
         ? DaemonState.getInstance().getDevicePool()
         : undefined;
-      if (args.device.platform === "android" && DaemonState.getInstance().isInitialized()) {
+      if (args.device.platform === "android") {
         devicePool?.markIntentionalShutdown(args.device.deviceId);
       }
       try {
@@ -440,11 +464,11 @@ export function registerDeviceTools() {
       perf.endOperation("killProcess");
 
       perf.startOperation("cleanup");
-      await deps.clearInstalledAppsForDevice(args.device.deviceId);
+      await clearInstalledAppsAfterShutdown(deps, args.device.deviceId);
       perf.endOperation("cleanup");
 
       perf.startOperation("notifyResources");
-      await deps.notifyResourcesChanged();
+      await notifyResourcesAfterShutdown(deps);
       perf.endOperation("notifyResources");
 
       perf.end();

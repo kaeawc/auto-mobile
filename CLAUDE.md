@@ -4,12 +4,17 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
 
 ## Key Rules
 - TypeScript only (no JavaScript)
-- Always write GitHub issue and pull request references as clickable Markdown links.
-  This governs prose surfaces — issue and PR bodies, review comments, commit
-  messages, and Markdown docs. It does NOT apply to references inside source
-  code comments, where the bare `#NNNN` form is the established convention
-  (625 bare references in `src/`, zero linked). Linking there renders as noise
-  in an editor and would make the touched file the only inconsistent one.
+- Write GitHub issue and pull request references as clickable Markdown links only
+  in AI-authored prose a human reads directly — issue and PR bodies, review
+  comments, commit messages, and assistant chat responses — where a clickable
+  link genuinely aids navigation for the reader. Do NOT require links in
+  checked-in repository content: neither source code comments (bare `#NNNN` is
+  the established convention — 625 references in `src/`, zero linked) nor Markdown
+  documentation files (under `docs/` and elsewhere), where bare `#NNNN` is
+  likewise fine. Forcing explicit links into committed files renders as noise in
+  an editor and makes the touched file the only inconsistent one. Automated
+  reviewers (e.g. Codex) must NOT flag bare `#NNNN` references that appear in
+  source-code comments or Markdown files; treat those as compliant.
 - After implementation changes, run relevant validation commands
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation

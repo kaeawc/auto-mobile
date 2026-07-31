@@ -16,6 +16,7 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/working
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
+import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -162,6 +163,7 @@ export class InstallApp {
       }
       logger.warn(`[InstallApp] Version downgrade detected for ${packageName}; uninstalling existing version and reinstalling.`);
       await perf.track("downgradeUninstall", () => this.uninstallAndroidForDowngrade(packageName!, targetUserId, signal));
+      await this.markInstalledAppsCacheStale(true);
       installAttempt = await perf.track("adbReinstall", () => this.runAndroidInstall(installArgs, signal));
       if (installAttempt.success) {
         warnings.push(
@@ -220,7 +222,9 @@ export class InstallApp {
       return;
     }
     try {
-      await this.installedAppsRepository.markDeviceStale(this.device.deviceId);
+      await getDbWriteBarrier().track(() =>
+        this.installedAppsRepository.markDeviceStale(this.device.deviceId)
+      );
     } catch (error) {
       logger.warn(`[InstallApp] Failed to invalidate installed apps cache: ${error}`);
     }

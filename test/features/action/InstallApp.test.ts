@@ -670,6 +670,39 @@ describe("InstallApp", () => {
     expect(fakeAdb.wasCommandExecuted("uninstall com.example.app")).toBe(true);
   });
 
+  test("invalidates the cache when downgrade recovery uninstalls but reinstall fails", async () => {
+    const apkPath = "/tmp/app-debug.apk";
+    const perf = createPerformanceTracker(true, fakeTimer);
+    const repo = new FakeInstalledAppsRepository();
+    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.app", false, 1_000);
+
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+    fakeHost.setCommandResponse("aapt2", createExecResult("package: name='com.example.app' versionCode='1'"));
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+    fakeAdb.setCommandResponse("shell pm list packages --user 0 -f com.example.app", createExecResult("1"));
+    fakeAdb.setCommandResponseSequence(`install --user 0 -r "${apkPath}"`, [
+      createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
+      createExecResult("", "Failure [INSTALL_FAILED_INVALID_APK]")
+    ]);
+
+    const installApp = new InstallApp(
+      device,
+      fakeAdbFactory,
+      fakeHost,
+      fakeLocator,
+      () => perf,
+      null,
+      null,
+      undefined,
+      repo
+    );
+
+    const result = await installApp.execute(apkPath);
+
+    expect(result.success).toBe(false);
+    expect(await repo.getLatestVerification(device.deviceId)).toBe(0);
+  });
+
   test("Android downgrade without a resolvable package name surfaces a clear error", async () => {
     const apkPath = "/tmp/app-debug.apk";
     const perf = createPerformanceTracker(true, fakeTimer);

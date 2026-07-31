@@ -360,5 +360,41 @@ describe("ListInstalledApps", function() {
       expect(stored.some(row => row.package_name === "com.example.fresh")).toBe(true);
       expect(stored.some(row => row.package_name === "com.stale.app")).toBe(false);
     });
+
+    test("should rebuild immediately when a package mutation marks the cache stale", async function() {
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      const now = timer.now();
+      await repo.replaceInstalledApps(mockDevice.deviceId, [{
+        device_id: mockDevice.deviceId,
+        user_id: 0,
+        package_name: "com.removed.app",
+        is_system: 0,
+        installed_at: now,
+        last_verified_at: now
+      }]);
+      await repo.markDeviceStale(mockDevice.deviceId);
+
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+        stdout: "package:com.installed.app\n",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
+        stdout: "",
+        stderr: ""
+      });
+
+      const cachedList = new ListInstalledApps(
+        mockDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        null,
+        { cacheEnabled: true, installedAppsRepository: repo, timer }
+      );
+      const result = await cachedList.executeDetailed();
+
+      expect(result.profiles[0].map(app => app.packageName)).toEqual(["com.installed.app"]);
+      expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
+    });
   });
 });

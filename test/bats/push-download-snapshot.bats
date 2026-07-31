@@ -117,24 +117,33 @@ order_tokens() {
   ! grep -q "rebase" "$GIT_LOG"
 }
 
+wiring_requires_yq() {
+  command -v yq >/dev/null 2>&1 && return 0
+  if [[ -n "${CI:-}" ]]; then
+    echo "yq is required in CI to verify workflow wiring" >&2
+    return 1
+  fi
+  skip "yq not installed"
+}
+
 @test "workflow calls the script and drops the fragile rebase loop" {
-  # Regression guard for the wiring. Parse the YAML with a real parser and assert
-  # against the STRUCTURE (the snapshot job's concurrency + an executable step
-  # that runs the script) rather than grepping raw text, so a value hiding in a
-  # comment, dead YAML, or another job cannot keep this green while the scheduled
-  # job stops running the collector.
-  run python3 - "$WORKFLOW" <<'PY'
-import sys, yaml
-wf = yaml.safe_load(open(sys.argv[1]))
-conc = wf.get("concurrency", {})
-assert conc.get("group") == "release-download-metrics", "concurrency group"
-assert conc.get("cancel-in-progress") is False, "cancel-in-progress false"
-job = wf["jobs"]["snapshot"]
-runs = "\n".join(s.get("run", "") for s in job["steps"])
-assert "bash scripts/metrics/push-download-snapshot.sh" in runs, "script invoked in a snapshot step"
-assert "git pull --rebase origin main" not in runs, "fragile rebase loop must not return"
-print("ok")
-PY
+  # Regression guard for the wiring. Parse the YAML with yq (the repo's canonical
+  # workflow parser, see release-workflow-wiring.bats) and assert against the
+  # STRUCTURE — the concurrency group + the snapshot job's step run scripts —
+  # rather than grepping raw text a comment or another job could satisfy.
+  wiring_requires_yq
+
+  run yq -r '.concurrency.group' "$WORKFLOW"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"ok"* ]]
+  [[ "$output" == "release-download-metrics" ]]
+
+  run yq -r '.concurrency."cancel-in-progress"' "$WORKFLOW"
+  [[ "$output" == "false" ]]
+
+  # The snapshot job's step run scripts, joined; the script must be invoked here
+  # and the fragile rebase loop must not reappear.
+  local runs
+  runs="$(yq -r '.jobs.snapshot.steps[] | (.run // "")' "$WORKFLOW")"
+  [[ "$runs" == *"bash scripts/metrics/push-download-snapshot.sh"* ]]
+  [[ "$runs" != *"git pull --rebase origin main"* ]]
 }

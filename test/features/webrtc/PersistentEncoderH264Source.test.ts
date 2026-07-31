@@ -749,12 +749,128 @@ describe("PersistentEncoderH264Source", () => {
     expect(lateSocket.destroyed).toBe(true);
   });
 
-  test("surfaces a post-start server exit via onError", async () => {
-    const ctx = makeSource();
+  test("surfaces a post-start server exit via onError when relaunch is disabled", async () => {
+    const ctx = makeSource({ maxServerRelaunchAttempts: 0 });
     await startReady(ctx);
     ctx.processes[0].exit(137, "SIGKILL");
+    await tick();
     expect(ctx.errors).toHaveLength(1);
     expect(ctx.errors[0].message).toContain("video-server exited");
+    expect(ctx.source.isRunning).toBe(false);
+  });
+
+  test("relaunches the on-device server after a single transient post-start exit", async () => {
+    const ctx = makeSource({ serverRelaunchBackoff: 500, maxServerRelaunchAttempts: 3 });
+    await startReady(ctx);
+
+    ctx.processes[0].exit(137, "SIGKILL");
+    await tick();
+    // Backoff has not elapsed: no relaunch spawn yet, and the source is not failed.
+    expect(ctx.processes).toHaveLength(1);
+    expect(ctx.errors).toEqual([]);
+
+    ctx.timer.advanceTime(500);
+    await tick();
+    await tick(); // teardown of the dead session + fresh launch + spawn
+    expect(ctx.processes).toHaveLength(2);
+
+    ctx.processes[1].ready();
+    await tick();
+    await tick(); // readiness resolves, forward + reconnect
+
+    expect(ctx.source.isRunning).toBe(true);
+    expect(ctx.errors).toEqual([]);
+
+    // Streaming resumes on the relaunched server's socket.
+    const latestSocket = ctx.sockets[ctx.sockets.length - 1];
+    latestSocket.feed(streamHeader(480, 1040));
+    latestSocket.feed(framedPacket(Buffer.from([0, 0, 0, 1, 0x67])));
+    expect(ctx.chunks).toEqual([Buffer.from([0, 0, 0, 1, 0x67])]);
+
+    await ctx.source.stop();
+  });
+
+  test("falls back to screenrecord after repeated post-start exits exhaust the relaunch budget", async () => {
+    const fellBackWith: Error[] = [];
+    const ctx = makeSource({
+      serverRelaunchBackoff: 0,
+      maxServerRelaunchAttempts: 2,
+      onScreenrecordFallback: async (error: Error) => {
+        fellBackWith.push(error);
+      },
+    });
+    await startReady(ctx);
+
+    // Relaunch 1: exit -> recovered on a fresh server.
+    ctx.processes[0].exit(1, null);
+    await tick();
+    await tick();
+    ctx.processes[1].ready();
+    await tick();
+    await tick();
+    expect(ctx.source.isRunning).toBe(true);
+
+    // Relaunch 2: exit -> recovered again (budget now spent).
+    ctx.processes[1].exit(1, null);
+    await tick();
+    await tick();
+    ctx.processes[2].ready();
+    await tick();
+    await tick();
+    expect(ctx.source.isRunning).toBe(true);
+    expect(ctx.processes).toHaveLength(3);
+
+    // Third exit: budget spent -> screenrecord fallback, NOT onError.
+    ctx.processes[2].exit(1, null);
+    await tick();
+    await tick();
+
+    expect(fellBackWith).toHaveLength(1);
+    expect(fellBackWith[0].message).toContain("video-server exited");
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.processes).toHaveLength(3); // no further relaunch attempt
+    expect(ctx.source.isRunning).toBe(false);
+  });
+
+  test("surfaces onError only after the relaunch budget is spent when no fallback is wired", async () => {
+    const ctx = makeSource({ serverRelaunchBackoff: 0, maxServerRelaunchAttempts: 1 });
+    await startReady(ctx);
+
+    // Relaunch 1 recovers.
+    ctx.processes[0].exit(1, null);
+    await tick();
+    await tick();
+    ctx.processes[1].ready();
+    await tick();
+    await tick();
+    expect(ctx.source.isRunning).toBe(true);
+    expect(ctx.errors).toEqual([]);
+
+    // Budget spent: the next exit surfaces via onError.
+    ctx.processes[1].exit(1, null);
+    await tick();
+    await tick();
+    expect(ctx.errors).toHaveLength(1);
+    expect(ctx.errors[0].message).toContain("video-server exited");
+    expect(ctx.source.isRunning).toBe(false);
+    expect(ctx.processes).toHaveLength(2);
+  });
+
+  test("stopping during a relaunch backoff cancels the relaunch without failing", async () => {
+    const ctx = makeSource({ serverRelaunchBackoff: 5000, maxServerRelaunchAttempts: 3 });
+    await startReady(ctx);
+
+    ctx.processes[0].exit(1, null);
+    await tick();
+    expect(ctx.processes).toHaveLength(1); // waiting out the backoff
+
+    await ctx.source.stop();
+    // The backoff never elapses; the relaunch is aborted and no new server spawns.
+    ctx.timer.advanceTime(5000);
+    await tick();
+    expect(ctx.processes).toHaveLength(1);
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.source.isRunning).toBe(false);
   });
 
   test("handles a server error while socket connection is pending", async () => {

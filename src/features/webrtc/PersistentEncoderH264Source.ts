@@ -5,6 +5,12 @@ import { defaultIdGenerator } from "../../utils/IdGenerator";
 import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
+  exponentialBackoff,
+  normalizeBackoff,
+  type BackoffInput,
+  type BackoffPolicy,
+} from "../../utils/Backoff";
+import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -67,6 +73,24 @@ export const DEFAULT_LAUNCH_COMMAND_TIMEOUT_MS = 20_000;
  * reconciliation handles any orphaned device resources.
  */
 export const DEFAULT_TEARDOWN_COMMAND_TIMEOUT_MS = 5_000;
+/**
+ * Default number of bounded, backed-off on-device server relaunch attempts made
+ * across a source's lifetime before it gives up the persistent encoder and falls
+ * back to screenrecord (or, when no fallback is wired, fails via `onError`). The
+ * budget is cumulative — a persistently-broken device that keeps losing its
+ * encoder cannot hot-loop restarts, it exhausts this budget and stops.
+ */
+export const DEFAULT_MAX_SERVER_RELAUNCH_ATTEMPTS = 3;
+/**
+ * Default backoff between post-start server relaunch attempts. Exponential so a
+ * transient hiccup recovers quickly while a hard-broken device backs off before
+ * the budget is spent.
+ */
+export const DEFAULT_SERVER_RELAUNCH_BACKOFF: BackoffInput = exponentialBackoff({
+  initialDelayMs: 1_000,
+  multiplier: 2,
+  maxDelayMs: 8_000,
+});
 
 /** Minimal socket surface the source needs, for injectable testing. */
 export interface StreamSocket {
@@ -236,6 +260,25 @@ export interface PersistentEncoderH264SourceOptions {
   localSocketReconnectRetryMs?: number;
   /** Injectable session token source for deterministic tests. */
   sessionTokenFactory?: () => string;
+  /**
+   * How many bounded, backed-off relaunches of the on-device server to attempt
+   * (cumulatively over the source's lifetime) after a post-start server exit
+   * before giving up the persistent encoder. Defaults to
+   * {@link DEFAULT_MAX_SERVER_RELAUNCH_ATTEMPTS}. Set to `0` to disable relaunch
+   * and surface a post-start loss immediately (fallback/`onError`).
+   */
+  maxServerRelaunchAttempts?: number;
+  /** Backoff between post-start server relaunch attempts. */
+  serverRelaunchBackoff?: BackoffInput;
+  /**
+   * Invoked when relaunch attempts are exhausted, to hand the stream to
+   * screenrecord via the SAME mechanism the initial-start path uses (see
+   * `FallbackH264CaptureSource`). When it resolves, the persistent source is
+   * considered gracefully superseded and does NOT fire `onError`. When it
+   * rejects — or when it is not wired (e.g. the audio path, which requires the
+   * jar) — the post-start loss surfaces via `onError` instead.
+   */
+  onScreenrecordFallback?: (error: Error) => Promise<void>;
 }
 
 const DEFAULT_READY_TIMEOUT_MS = 10_000;
@@ -392,6 +435,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private readonly localSocketReconnectRetryMs: number;
   private readonly sessionTokenFactory: () => string;
   private readonly activeVideoSessionRegistry: ActiveVideoSessionRegistry;
+  private readonly maxServerRelaunchAttempts: number;
+  private readonly serverRelaunchBackoff: BackoffPolicy;
 
   private server: AdbProcess | null = null;
   private socket: StreamSocket | null = null;
@@ -416,6 +461,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private sawStreamingStarted = false;
   private serverStartupInProgress: AdbProcess | null = null;
   private serverStartupFailure: { server: AdbProcess; error: Error } | null = null;
+  private serverRelaunchAttempts = 0;
+  private relaunching = false;
+  private relaunchAbortController: AbortController | null = null;
 
   constructor(options: PersistentEncoderH264SourceOptions) {
     this.options = options;
@@ -432,7 +480,25 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.sessionTokenFactory = options.sessionTokenFactory ?? (() => defaultIdGenerator.next());
     this.activeVideoSessionRegistry =
       options.activeVideoSessionRegistry ?? defaultActiveVideoSessionRegistry;
+    const relaunchPolicy = PersistentEncoderH264Source.resolveRelaunchPolicy(options);
+    this.maxServerRelaunchAttempts = relaunchPolicy.maxAttempts;
+    this.serverRelaunchBackoff = relaunchPolicy.backoff;
     this.validateTimings();
+  }
+
+  /**
+   * Resolve the post-start relaunch policy from options, defaulting the budget
+   * and backoff. Extracted from the constructor so the option-defaulting `??`
+   * branches do not count against the constructor's complexity ratchet.
+   */
+  private static resolveRelaunchPolicy(options: PersistentEncoderH264SourceOptions): {
+    maxAttempts: number;
+    backoff: BackoffPolicy;
+  } {
+    return {
+      maxAttempts: options.maxServerRelaunchAttempts ?? DEFAULT_MAX_SERVER_RELAUNCH_ATTEMPTS,
+      backoff: normalizeBackoff(options.serverRelaunchBackoff ?? DEFAULT_SERVER_RELAUNCH_BACKOFF),
+    };
   }
 
   /**
@@ -446,6 +512,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
     if (this.localSocketReconnectWindowMs <= 0 || this.localSocketReconnectRetryMs <= 0) {
       throw new ActionableError("Local socket reconnect timings must be positive milliseconds.");
+    }
+    if (!Number.isInteger(this.maxServerRelaunchAttempts) || this.maxServerRelaunchAttempts < 0) {
+      throw new ActionableError("Server relaunch attempts must be a non-negative integer.");
     }
   }
 
@@ -496,6 +565,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       return;
     }
     this.running = false;
+    // Cancel any in-flight relaunch wait/loop so stop() settles promptly instead
+    // of blocking on a backoff delay or a relaunch launch attempt.
+    this.relaunchAbortController?.abort();
     await this.beginTeardown();
   }
 
@@ -744,14 +816,14 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         };
         return;
       }
-      this.failIfRunning(new Error(`video-server exited (code=${code}, signal=${signal})`));
+      this.handlePostStartServerLoss(new Error(`video-server exited (code=${code}, signal=${signal})`));
     });
     server.once("error", (error: Error) => {
       if (this.serverStartupInProgress === server) {
         this.serverStartupFailure = { server, error };
         return;
       }
-      this.failIfRunning(error);
+      this.handlePostStartServerLoss(error);
     });
   }
 
@@ -1117,7 +1189,18 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       await this.waitForReconnectRetry(Math.min(this.localSocketReconnectRetryMs, remainingMs), signal);
     }
 
-    if (signal.aborted) {
+    this.failReconnectIfServerRetained(signal, lastError);
+  }
+
+  /**
+   * Terminal decision for the socket-reconnect loop. A socket-only drop against a
+   * still-retained server that never reconnects is fatal. But an aborted signal
+   * (teardown) or a `null` server (the server process itself exited) means this
+   * path does not own the outcome: teardown or the post-start relaunch path
+   * (handlePostStartServerLoss) does, so it must not also fail the source.
+   */
+  private failReconnectIfServerRetained(signal: AbortSignal, lastError: Error): void {
+    if (signal.aborted || this.server === null) {
       return;
     }
     this.failIfRunning(
@@ -1198,6 +1281,147 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         // that late local socket open after either deadline or source teardown.
         void connection.then(socket => socket.destroy(), () => {});
       }
+    }
+  }
+
+  /**
+   * Handle a post-start loss of the on-device server process. Instead of failing
+   * the source immediately, attempt a bounded, backed-off relaunch of the server
+   * (issue #4742); when the relaunch budget is spent, hand the stream to
+   * screenrecord (or fail via `onError` when no fallback is wired). Re-entrant
+   * losses while a relaunch is already in flight are ignored — the in-flight
+   * recovery owns the lifecycle.
+   */
+  private handlePostStartServerLoss(error: Error): void {
+    if (!this.running || this.relaunching) {
+      return;
+    }
+    this.relaunching = true;
+    this.relaunchAbortController = new AbortController();
+    void this.recoverFromServerLoss(error).finally(() => {
+      this.relaunching = false;
+    });
+  }
+
+  private async recoverFromServerLoss(initialError: Error): Promise<void> {
+    const signal = this.relaunchAbortController?.signal ?? new AbortController().signal;
+    let lastError = initialError;
+    while (this.canAttemptRelaunch(signal)) {
+      this.serverRelaunchAttempts++;
+      const outcome = await this.attemptRelaunch(this.serverRelaunchAttempts, lastError, signal);
+      if (outcome.status !== "retry") {
+        // "recovered" (streaming again) or "aborted" (stopped mid-relaunch):
+        // either way the loop is done and no screenrecord fallback is warranted.
+        return;
+      }
+      lastError = outcome.error;
+    }
+    if (this.running && !signal.aborted) {
+      await this.fallBackAfterRelaunchExhausted(lastError);
+    }
+  }
+
+  private canAttemptRelaunch(signal: AbortSignal): boolean {
+    return (
+      this.running &&
+      !signal.aborted &&
+      this.serverRelaunchAttempts < this.maxServerRelaunchAttempts
+    );
+  }
+
+  /**
+   * Run one relaunch attempt: back off, tear down the dead session, then launch a
+   * fresh one. A fresh launch (rather than reusing the retained forward in place)
+   * lets the launch-path reconcile sweep any orphan forward/lease the dead server
+   * left behind — reuse-in-place is the optional optimization the issue defers.
+   */
+  private async attemptRelaunch(
+    attempt: number,
+    lastError: Error,
+    signal: AbortSignal
+  ): Promise<{ status: "recovered" | "aborted" | "retry"; error: Error }> {
+    const delayMs = this.serverRelaunchBackoff.delayForAttempt(attempt);
+    logger.warn(
+      `[PersistentEncoderH264Source] on-device server lost post-start (${lastError.message}); ` +
+      `relaunch attempt ${attempt}/${this.maxServerRelaunchAttempts} after ${delayMs}ms`
+    );
+    await this.delayBeforeRelaunch(delayMs, signal);
+    if (!this.running || signal.aborted) {
+      return { status: "aborted", error: lastError };
+    }
+    await this.beginTeardown();
+    if (!this.running || signal.aborted) {
+      return { status: "aborted", error: lastError };
+    }
+    try {
+      await this.launch();
+      if (!this.running) {
+        return { status: "aborted", error: lastError };
+      }
+      logger.info(
+        `[PersistentEncoderH264Source] on-device server relaunched after ${attempt} attempt(s)`
+      );
+      return { status: "recovered", error: lastError };
+    } catch (error) {
+      const relaunchError = error instanceof Error ? error : new Error(String(error));
+      logger.warn(
+        `[PersistentEncoderH264Source] relaunch attempt ${attempt} failed: ${relaunchError.message}`,
+        error
+      );
+      return { status: "retry", error: relaunchError };
+    }
+  }
+
+  /**
+   * Wait for the backoff interval before the next relaunch, resolving early if
+   * the source is torn down. Zero/negative delays resolve immediately so a
+   * disabled backoff does not schedule a needless timer. Deterministic under
+   * `FakeTimer`.
+   */
+  private delayBeforeRelaunch(ms: number, signal: AbortSignal): Promise<void> {
+    if (ms <= 0 || signal.aborted) {
+      return Promise.resolve();
+    }
+    return new Promise<void>(resolve => {
+      const finish = (): void => {
+        this.timer.clearTimeout(handle);
+        signal.removeEventListener("abort", finish);
+        resolve();
+      };
+      const handle = this.timer.setTimeout(finish, ms);
+      signal.addEventListener("abort", finish, { once: true });
+    });
+  }
+
+  /**
+   * Relaunch budget spent: hand the stream to screenrecord via the injected
+   * fallback (the same mechanism the initial-start path uses), or — when no
+   * fallback is wired (e.g. the audio path) or the fallback itself fails —
+   * surface the loss via `onError`.
+   */
+  private async fallBackAfterRelaunchExhausted(error: Error): Promise<void> {
+    if (!this.running) {
+      return;
+    }
+    const fallback = this.options.onScreenrecordFallback;
+    if (!fallback) {
+      this.failIfRunning(error);
+      return;
+    }
+    logger.warn(
+      `[PersistentEncoderH264Source] relaunch budget of ${this.maxServerRelaunchAttempts} spent; ` +
+      `falling back to screenrecord: ${error.message}`
+    );
+    // Stop feeding persistent data and release device resources, but do NOT fire
+    // onError: the stream continues on the screenrecord source the fallback owns.
+    this.running = false;
+    await this.beginTeardown();
+    try {
+      await fallback(error);
+    } catch (fallbackError) {
+      this.options.onError?.(
+        fallbackError instanceof Error ? fallbackError : new Error(String(fallbackError))
+      );
     }
   }
 

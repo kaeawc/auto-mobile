@@ -1,4 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { WEBRTC_ENV } from "../../src/features/webrtc/webrtcStreamingConfig";
+import {
+  SessionScopedStreamAuthenticator,
+  type StreamAuthSessionManager,
+  type StreamSocketAuthenticator,
+} from "../../src/daemon/streamSocketAuth";
 import { Socket } from "node:net";
 import {
   resolveWebRtcStreamDevice,
@@ -62,9 +68,15 @@ function descriptor(streamId: string, state: WebRtcStreamDescriptor["state"] = "
   };
 }
 
+/** Accepts every request; auth enforcement is exercised in dedicated tests below. */
+const allowAllAuthenticator: StreamSocketAuthenticator = { authorize: () => {} };
+
 class TestableServer extends WebRtcStreamSocketServer {
-  constructor(deps: WebRtcStreamSocketServerDependencies) {
-    super("/fake/webrtc-stream.sock", new FakeTimer(), deps);
+  constructor(
+    deps: WebRtcStreamSocketServerDependencies,
+    authenticator: StreamSocketAuthenticator = allowAllAuthenticator
+  ) {
+    super("/fake/webrtc-stream.sock", new FakeTimer(), deps, authenticator);
   }
   async simulate(socket: FakeSocket, request: WebRtcStreamSocketRequest): Promise<void> {
     await (this as any).processLine(socket as unknown as Socket, JSON.stringify(request));
@@ -104,6 +116,22 @@ function makeDeps(overrides: Partial<WebRtcStreamSocketServerDependencies> = {})
     ...overrides,
   };
 }
+
+// The `https://coord` origin is the trusted coordination server these tests
+// publish to; allow-list it so wire overrides pointing at it pass the #4751
+// origin policy. Loopback overrides are always permitted regardless.
+let previousAllowedOrigins: string | undefined;
+beforeAll(() => {
+  previousAllowedOrigins = process.env[WEBRTC_ENV.WHIP_ALLOWED_ORIGINS];
+  process.env[WEBRTC_ENV.WHIP_ALLOWED_ORIGINS] = "https://coord";
+});
+afterAll(() => {
+  if (previousAllowedOrigins === undefined) {
+    delete process.env[WEBRTC_ENV.WHIP_ALLOWED_ORIGINS];
+  } else {
+    process.env[WEBRTC_ENV.WHIP_ALLOWED_ORIGINS] = previousAllowedOrigins;
+  }
+});
 
 afterEach(() => {
   started = [];
@@ -394,5 +422,111 @@ describe("WebRtcStreamSocketServer", () => {
     const response = lastResponse(socket);
     expect(response.success).toBe(false);
     expect(response.error).toContain("Invalid JSON");
+  });
+
+  describe("authentication (issue #4751)", () => {
+    function fakeSessionManager(
+      overrides: Partial<StreamAuthSessionManager> = {}
+    ): StreamAuthSessionManager {
+      return {
+        getSession: sessionUuid => (sessionUuid === "session-1" ? {} : null),
+        getSessionForDevice: () => null,
+        getDeviceLabels: () => undefined,
+        ...overrides,
+      };
+    }
+
+    function enforcingServer(sm: StreamAuthSessionManager): TestableServer {
+      return new TestableServer(
+        makeDeps(),
+        new SessionScopedStreamAuthenticator(() => sm, "webrtcStream", {} as NodeJS.ProcessEnv)
+      );
+    }
+
+    test("rejects a start with no sessionUuid", async () => {
+      const server = enforcingServer(fakeSessionManager());
+      const socket = new FakeSocket();
+      await server.simulate(socket, { id: "1", action: "start", whipEndpoint: "https://coord/whip" });
+      const response = lastResponse(socket);
+      expect(response.success).toBe(false);
+      expect(response.error).toContain("authenticated daemon session");
+      expect(started).toHaveLength(0);
+    });
+
+    test("rejects a start whose session is unknown/expired", async () => {
+      const server = enforcingServer(fakeSessionManager());
+      const socket = new FakeSocket();
+      await server.simulate(socket, {
+        id: "2",
+        action: "start",
+        sessionUuid: "ghost",
+        whipEndpoint: "https://coord/whip",
+      });
+      const response = lastResponse(socket);
+      expect(response.success).toBe(false);
+      expect(response.error).toContain("not an active daemon session");
+      expect(started).toHaveLength(0);
+    });
+
+    test("accepts a start with a live session", async () => {
+      const server = enforcingServer(fakeSessionManager());
+      const socket = new FakeSocket();
+      await server.simulate(socket, {
+        id: "3",
+        action: "start",
+        sessionUuid: "session-1",
+        whipEndpoint: "https://coord/whip",
+      });
+      expect(lastResponse(socket).success).toBe(true);
+      expect(started).toHaveLength(1);
+    });
+
+    test("rejects targeting a device owned by another session", async () => {
+      const server = enforcingServer(
+        fakeSessionManager({ getSessionForDevice: () => "other-session" })
+      );
+      const socket = new FakeSocket();
+      await server.simulate(socket, {
+        id: "4",
+        action: "start",
+        sessionUuid: "session-1",
+        deviceId: "emulator-5554",
+        whipEndpoint: "https://coord/whip",
+      });
+      const response = lastResponse(socket);
+      expect(response.success).toBe(false);
+      expect(response.error).toContain("different daemon session");
+      expect(started).toHaveLength(0);
+    });
+  });
+
+  describe("WHIP override policy (issue #4751)", () => {
+    test("rejects an arbitrary non-allow-listed WHIP override from the wire", async () => {
+      const server = new TestableServer(makeDeps());
+      const socket = new FakeSocket();
+      await server.simulate(socket, {
+        id: "w1",
+        action: "start",
+        sessionUuid: "session-1",
+        whipEndpoint: "https://attacker.example/whip",
+      });
+      const response = lastResponse(socket);
+      expect(response.success).toBe(false);
+      expect(response.error).toContain("not allow-listed");
+      expect(started).toHaveLength(0);
+    });
+
+    test("permits a loopback http WHIP override", async () => {
+      const server = new TestableServer(makeDeps());
+      const socket = new FakeSocket();
+      await server.simulate(socket, {
+        id: "w2",
+        action: "start",
+        sessionUuid: "session-1",
+        whipEndpoint: "http://127.0.0.1:8000/whip",
+      });
+      expect(lastResponse(socket).success).toBe(true);
+      expect(started).toHaveLength(1);
+    });
   });
 });

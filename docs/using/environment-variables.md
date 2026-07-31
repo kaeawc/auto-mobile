@@ -127,7 +127,7 @@ overridden per request on the `webrtc-stream.sock` control socket.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` | WHIP ingest URL. For MediaMTX use a per-stream path, e.g. `http://host:8889/<stream>/whip` (the stock config is plain HTTP; enable `webrtcEncryption` for `https://`). Required to start a stream unless passed per request. | unset |
+| `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` | WHIP ingest URL. For MediaMTX use a per-stream path, e.g. `https://host:8889/<stream>/whip`. **Policy (issue #4751):** `https:` is required; plaintext `http:` is permitted **only** for loopback hosts (`127.0.0.0/8`, `localhost`, `::1`) because the bearer token and SDP would otherwise travel in cleartext. Set `AUTOMOBILE_WEBRTC_ALLOW_INSECURE_WHIP=1` to re-permit non-loopback `http:`. Required to start a stream unless passed per request. | unset |
 | `AUTOMOBILE_WEBRTC_WHIP_TOKEN` | Bearer token sent as `Authorization: Bearer <token>` on WHIP ingest. | unset |
 | `AUTOMOBILE_WEBRTC_ICE_SERVERS` | Comma-separated STUN/TURN URLs, or a JSON array of `{urls,username,credential}`. | `stun:stun.l.google.com:19302` |
 | `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate (kbps). | encoder default |
@@ -141,6 +141,9 @@ overridden per request on the `webrtc-stream.sock` control socket.
 | `AUTOMOBILE_IOS_WEBRTC_FFMPEG` | Path to the `ffmpeg` binary used to encode iOS helper BGRA frames into H.264 Annex-B. | `ffmpeg` on `PATH` |
 | `AUTOMOBILE_WEBRTC_TRICKLE_ICE` | Enable trickle ICE: publish the WHIP offer immediately and PATCH candidates incrementally instead of blocking on ICE gathering. Requires an ingest server supporting the WHIP trickle extension. | `false` |
 | `AUTOMOBILE_WEBRTC_AUDIO` | Enable optional audio alongside video. Android requires the persistent `video-server` jar and captures shell-privileged `REMOTE_SUBMIX`; iOS supports Simulator-window audio through ScreenCaptureKit. Both emit 8 kHz mono PCM16LE and publish as PCMU. Physical iOS playback capture is unavailable through public APIs. | `false` |
+| `AUTOMOBILE_WEBRTC_WHIP_ALLOWED_ORIGINS` | Comma-separated allow-list of origins (or bare `host[:port]`) that a `whipEndpoint` supplied **over the wire** to the `webrtc-stream` socket may target (issue #4751). Loopback and the daemon's own `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` origin are always trusted. An override to any other origin is rejected so a local process cannot exfiltrate the screen to a destination of its choosing. | unset (only the configured endpoint + loopback allowed) |
+| `AUTOMOBILE_WEBRTC_ALLOW_INSECURE_WHIP` | **Escape hatch (issue #4751).** When `1`/`true`, re-permits non-loopback plaintext `http:` WHIP endpoints **and** accepts an arbitrary (non allow-listed) `whipEndpoint` override from the wire. For advanced setups only — the bearer token and SDP travel in cleartext over `http:`. | `false` |
+| `AUTOMOBILE_DAEMON_STREAM_AUTH` | Governs authentication of the two live-screen daemon sockets (`webrtc-stream`, `video-stream`). When enabled (the default), a `start`/`subscribe` request must carry a `sessionUuid` that resolves to a live daemon session, and may only target a device owned by that same session (issue #4751, extending the #4655 session mechanism). Set to `0`/`false` to disable the check for clients that cannot yet supply a session UUID. | enabled |
 
 ### `automobile-video.jar` resolution
 

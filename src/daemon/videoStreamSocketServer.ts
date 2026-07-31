@@ -13,6 +13,10 @@ import { H264AnnexBParser, nalUnitType, NAL_TYPE_IDR, NAL_TYPE_PPS, NAL_TYPE_SPS
 import { VIDEO_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { BaseSocketServer, getSocketPath } from "./socketServer/index";
 import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
+import {
   encodePacket,
   encodePtsAndFlags,
   encodeStreamHeader,
@@ -76,14 +80,18 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   private readonly captures = new Map<string, DeviceCapture>();
   private readonly socketDeviceIds = new Map<Socket, string>();
 
+  private readonly authenticator: StreamSocketAuthenticator;
+
   constructor(
     private readonly deps: VideoStreamSocketServerDependencies,
     socketPath: string = getSocketPath(VIDEO_STREAM_SOCKET_CONFIG),
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator("video-stream subscribe")
   ) {
     // Idle timeout disabled: this stream is outbound-only after the handshake, and a viewer that
     // never sends another byte is the normal case, not a dead peer.
     super(socketPath, timer, "VideoStream", 0);
+    this.authenticator = authenticator;
   }
 
   /** Devices with an active capture, for diagnostics and tests. */
@@ -134,6 +142,10 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
 
     try {
+      // Authenticate before starting or attaching to any capture (issue #4751):
+      // an unauthenticated or cross-session subscribe is rejected here so it can
+      // never ride along on the raw H.264 screen stream.
+      this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId: request.deviceId });
       const device = await this.deps.resolveDevice(request.deviceId);
       const capture = await this.attach(socket, device, request);
 

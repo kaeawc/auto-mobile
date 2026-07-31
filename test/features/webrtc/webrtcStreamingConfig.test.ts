@@ -10,6 +10,8 @@ import {
   parseIceServers,
   parseSize,
   resolveWebRtcStreamingConfig,
+  assertWhipOverrideAllowed,
+  isLoopbackWhipHost,
 } from "../../../src/features/webrtc/webrtcStreamingConfig";
 import { SIMULATOR_FPS_DEFAULT } from "../../../src/features/screen-stream/IOSScreenCaptureHelper";
 
@@ -249,5 +251,84 @@ describe("resolveWebRtcStreamingConfig", () => {
     expect(() => resolveWebRtcStreamingConfig({}, {} as NodeJS.ProcessEnv)).toThrow(
       /WHIP endpoint/
     );
+  });
+});
+
+describe("WHIP endpoint protocol policy (issue #4751)", () => {
+  const env = { [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip" } as NodeJS.ProcessEnv;
+
+  test("permits https on any host", () => {
+    const config = resolveWebRtcStreamingConfig({ whipEndpoint: "https://remote.example/whip" }, env);
+    expect(config.whipEndpoint).toBe("https://remote.example/whip");
+  });
+
+  test("permits http only on loopback hosts", () => {
+    for (const endpoint of [
+      "http://127.0.0.1:8000/whip",
+      "http://localhost:8000/whip",
+      "http://[::1]:8000/whip",
+    ]) {
+      expect(resolveWebRtcStreamingConfig({ whipEndpoint: endpoint }, env).whipEndpoint).toBe(endpoint);
+    }
+  });
+
+  test("rejects plaintext http on a non-loopback host", () => {
+    expect(() =>
+      resolveWebRtcStreamingConfig({ whipEndpoint: "http://remote.example/whip" }, env)
+    ).toThrow(/only permitted for loopback/);
+  });
+
+  test("the escape hatch re-permits plaintext http anywhere", () => {
+    const hatchEnv = {
+      ...env,
+      [WEBRTC_ENV.ALLOW_INSECURE_WHIP]: "1",
+    } as NodeJS.ProcessEnv;
+    expect(
+      resolveWebRtcStreamingConfig({ whipEndpoint: "http://remote.example/whip" }, hatchEnv).whipEndpoint
+    ).toBe("http://remote.example/whip");
+  });
+
+  test("isLoopbackWhipHost recognizes the loopback block", () => {
+    expect(isLoopbackWhipHost("127.0.0.1")).toBe(true);
+    expect(isLoopbackWhipHost("127.5.5.5")).toBe(true);
+    expect(isLoopbackWhipHost("localhost")).toBe(true);
+    expect(isLoopbackWhipHost("::1")).toBe(true);
+    expect(isLoopbackWhipHost("example.com")).toBe(false);
+    expect(isLoopbackWhipHost("10.0.0.1")).toBe(false);
+  });
+});
+
+describe("assertWhipOverrideAllowed (issue #4751)", () => {
+  test("always permits loopback overrides", () => {
+    expect(() =>
+      assertWhipOverrideAllowed("http://127.0.0.1:8000/whip", {} as NodeJS.ProcessEnv)
+    ).not.toThrow();
+  });
+
+  test("rejects an arbitrary origin with no allow-list configured", () => {
+    expect(() =>
+      assertWhipOverrideAllowed("https://attacker.example/whip", {} as NodeJS.ProcessEnv)
+    ).toThrow(/not allow-listed/);
+  });
+
+  test("permits an origin matching the daemon's configured endpoint", () => {
+    const env = { [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord.example/whip" } as NodeJS.ProcessEnv;
+    expect(() =>
+      assertWhipOverrideAllowed("https://coord.example/whip?streamId=1", env)
+    ).not.toThrow();
+  });
+
+  test("permits an explicitly allow-listed origin, including a bare host entry", () => {
+    const env = {
+      [WEBRTC_ENV.WHIP_ALLOWED_ORIGINS]: "https://a.example, b.example:9000",
+    } as NodeJS.ProcessEnv;
+    expect(() => assertWhipOverrideAllowed("https://a.example/whip", env)).not.toThrow();
+    expect(() => assertWhipOverrideAllowed("https://b.example:9000/whip", env)).not.toThrow();
+    expect(() => assertWhipOverrideAllowed("https://c.example/whip", env)).toThrow(/not allow-listed/);
+  });
+
+  test("the escape hatch accepts any origin", () => {
+    const env = { [WEBRTC_ENV.ALLOW_INSECURE_WHIP]: "1" } as NodeJS.ProcessEnv;
+    expect(() => assertWhipOverrideAllowed("https://attacker.example/whip", env)).not.toThrow();
   });
 });

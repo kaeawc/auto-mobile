@@ -17,6 +17,13 @@ export interface WebRtcIceServerInput {
  */
 export interface WebRtcStreamSocketRequest extends SocketRequest {
   action: WebRtcStreamAction;
+  /**
+   * Session UUID admitting this request (issue #4751). The daemon authenticates
+   * every action against its live session registry (the #4655 session mechanism)
+   * and rejects a request whose session is absent, unknown, or bound to a
+   * different device.
+   */
+  sessionUuid?: string;
   /** Target device id (defaults to the sole connected Android device). */
   deviceId?: string;
   platform?: "android" | "ios";

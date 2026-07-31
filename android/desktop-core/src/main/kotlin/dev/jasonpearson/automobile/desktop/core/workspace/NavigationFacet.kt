@@ -119,13 +119,17 @@ fun NavigationFacet(
   // retryable ConnectionError instead of a crash. Reset per stream attempt so Retry clears it.
   var streamError by remember(column.deviceId, streamAttempt) { mutableStateOf<String?>(null) }
 
-  // Foreground app for THIS pane's device, resolved from the nav stream. Reset when the pane's
-  // device changes so a new device re-resolves its own foreground app.
-  var foregroundAppId by remember(column.deviceId) { mutableStateOf<String?>(null) }
+  // Foreground app for THIS pane's device, resolved from the nav stream. Keyed on streamAttempt as
+  // well as deviceId so a reconnect (Retry) DISCARDS the pre-outage app: otherwise a stream that
+  // drops after resolving app A, while the user switches to app B, would immediately re-pull and
+  // flash stale A on retry (and stay on A if B's first update carries no appId). On reconnect this
+  // resets to null so the facet returns to Resolving/NoApp and re-resolves from the fresh stream.
+  var foregroundAppId by remember(column.deviceId, streamAttempt) { mutableStateOf<String?>(null) }
   // The active screen reported alongside the resolved app. Carried into NavigationDashboard so the
   // canvas's Fog toggle + auto-focus (both gated on a non-null current screen) work under the
-  // app-scoped-pull path, which otherwise bypasses the dashboard's own stream collector.
-  var currentScreen by remember(column.deviceId) { mutableStateOf<String?>(null) }
+  // app-scoped-pull path, which otherwise bypasses the dashboard's own stream collector. Reset on
+  // reconnect alongside foregroundAppId so it can't outlive the app it belonged to.
+  var currentScreen by remember(column.deviceId, streamAttempt) { mutableStateOf<String?>(null) }
   // True once the connected stream has reported that no app has navigated yet (appId == null).
   // Distinguishes the onboarding "no app" case (-> NoApp) from "haven't heard yet" (-> Loading).
   var noNavigationApp by remember(column.deviceId, streamAttempt) { mutableStateOf(false) }

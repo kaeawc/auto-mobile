@@ -452,6 +452,121 @@ class NavigationFacetTest {
       assertTrue("retry should recreate the observation stream", created.size >= 2)
     }
 
+  @Test
+  fun `retry after an outage re-resolves the replacement app and never retains the pre-outage app`() =
+    runComposeUiTest {
+      val created = mutableListOf<FakeObservationStream>()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { FakeObservationStream().also { created.add(it) } },
+              navigationDataSourceProvider = { appId ->
+                // Distinct graph per app so a stale render is detectable by screen name.
+                val label = if (appId == "com.example.b") "Beta" else "Alpha"
+                StubNavigationDataSource(
+                  Result.Success(NavigationGraph(listOf(screen(label)), emptyList()))
+                )
+              },
+            )
+          }
+        }
+      }
+      waitForIdle()
+
+      // Resolve app A; its graph renders.
+      created.first().emitNavigation(navUpdate("com.example.a"))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Alpha").fetchSemanticsNodes().isNotEmpty()
+      }
+
+      // Stream drops mid-session (user then switches to app B during the outage).
+      runOnIdle {
+        created.first().emitConnectionState(ConnectionState.Disconnected("Stream ended"))
+      }
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithContentDescription("Retry connecting to the AutoMobile daemon")
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
+
+      // Retry recreates the stream. The pre-outage app A must be discarded (back to Resolving),
+      // never flashed or retained.
+      onNodeWithContentDescription("Retry connecting to the AutoMobile daemon").performClick()
+      waitUntil(timeoutMillis = 5_000) { created.size >= 2 }
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Resolving navigation graph", substring = true)
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
+      assertTrue(
+        "stale pre-outage app A must not survive a reconnect",
+        onAllNodesWithText("Alpha").fetchSemanticsNodes().isEmpty(),
+      )
+
+      // The fresh stream resolves app B; the facet ends on B, never reverting to A.
+      created.last().emitNavigation(navUpdate("com.example.b"))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Beta").fetchSemanticsNodes().isNotEmpty()
+      }
+      assertTrue(
+        "must not retain app A after resolving app B",
+        onAllNodesWithText("Alpha").fetchSemanticsNodes().isEmpty(),
+      )
+    }
+
+  @Test
+  fun `retry after an outage with a null-app stream shows the no-app guidance not the stale app`() =
+    runComposeUiTest {
+      val created = mutableListOf<FakeObservationStream>()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { FakeObservationStream().also { created.add(it) } },
+              navigationDataSourceProvider = {
+                StubNavigationDataSource(
+                  Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList()))
+                )
+              },
+            )
+          }
+        }
+      }
+      waitForIdle()
+
+      created.first().emitNavigation(navUpdate("com.example.a"))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Alpha").fetchSemanticsNodes().isNotEmpty()
+      }
+      runOnIdle {
+        created.first().emitConnectionState(ConnectionState.Disconnected("Stream ended"))
+      }
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithContentDescription("Retry connecting to the AutoMobile daemon")
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
+
+      onNodeWithContentDescription("Retry connecting to the AutoMobile daemon").performClick()
+      waitUntil(timeoutMillis = 5_000) { created.size >= 2 }
+
+      // Fresh stream reports no current app: the facet must show the no-app guidance, not the
+      // stale pre-outage app.
+      created.last().emitNavigation(navUpdate(appId = null))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Open an app on this device", substring = true)
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
+      assertTrue(
+        "stale pre-outage app must not survive a reconnect that resolves no app",
+        onAllNodesWithText("Alpha").fetchSemanticsNodes().isEmpty(),
+      )
+    }
+
   /** A [SharedFlow] that throws on collection, to simulate a stream read/parse failure. */
   private fun throwingNavFlow(error: Throwable): SharedFlow<NavigationGraphStreamUpdate> =
     object : SharedFlow<NavigationGraphStreamUpdate> {

@@ -352,8 +352,7 @@ async function fetchAppsForDevice(device: BootedDevice, timer: Timer = defaultTi
     };
   }
 
-  const simctl = new SimCtlClient(device);
-  const installedApps = await simctl.listApps();
+  const installedApps = await listInstalledApps.executeIosDetailed();
   const apps: IosInstalledAppInfo[] = [];
   const queryApps: AppsQueryAppInfo[] = [];
 
@@ -690,7 +689,9 @@ export async function syncInstalledAppResources(): Promise<void> {
       try {
         const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
         const repo = new InstalledAppsRepository();
-        await repo.clearDeviceSession(deviceId);
+        await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
+          repo.clearDeviceSession(deviceId)
+        );
         logger.info(`[AppResources] Cleared installed apps cache for disappeared device: ${deviceId}`);
       } catch (error) {
         logger.warn(`[AppResources] Failed to clear cache for device ${deviceId}: ${error}`);

@@ -12,6 +12,8 @@ import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 
 const INSTALLED_APPS_CACHE_TTL_MS = 5 * 60 * 1000;
 
+export type IosInstalledAppRecord = Record<string, unknown>;
+
 interface ListInstalledAppsOptions {
   cacheEnabled?: boolean;
   installedAppsRepository?: InstalledAppsStore;
@@ -56,7 +58,9 @@ export class ListInstalledApps {
     try {
       switch (this.device.platform) {
         case "ios":
-          return await this.executeIos();
+          return (await this.executeIosDetailed()).map(app => this.extractIosBundleId(app)).filter(
+            (bundleId): bundleId is string => bundleId !== undefined
+          );
         case "android":
           // For backward compatibility, just return package names
           const detailedApps = await this.executeDetailed();
@@ -92,6 +96,64 @@ export class ListInstalledApps {
     } catch (error) {
       logger.warn("Failed to list installed apps with details:", error);
       return { profiles: {}, system: [] };
+    }
+  }
+
+  /**
+   * List iOS simulator apps while preserving the optional metadata used by the
+   * app resource. This shares the persistent installed-apps cache with the
+   * package-name-only iOS path.
+   */
+  async executeIosDetailed(): Promise<IosInstalledAppRecord[]> {
+    if (this.device.platform !== "ios") {
+      logger.warn("executeIosDetailed() is only supported on iOS");
+      return [];
+    }
+
+    try {
+      if (this.cacheEnabled) {
+        const cachedApps = await this.getCachedIosApps();
+        if (cachedApps) {
+          return cachedApps;
+        }
+      }
+
+      const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(this.device.deviceId);
+      const apps = await this.simctl.listApps(this.device.deviceId);
+      const appsByBundleId = new Map<string, IosInstalledAppRecord>();
+      for (const app of apps) {
+        if (!app || typeof app !== "object" || Array.isArray(app)) {
+          continue;
+        }
+        const record = app as IosInstalledAppRecord;
+        const bundleId = this.extractIosBundleId(record);
+        if (bundleId) {
+          appsByBundleId.set(bundleId, record);
+        }
+      }
+      const detailedApps = Array.from(appsByBundleId.values());
+
+      if (this.cacheEnabled) {
+        const timestampMs = this.timer.now();
+        const entries = detailedApps.map(app => ({
+          device_id: this.device.deviceId,
+          user_id: 0,
+          package_name: this.extractIosBundleId(app)!,
+          is_system: 0,
+          installed_at: timestampMs,
+          last_verified_at: timestampMs,
+          metadata_json: JSON.stringify(app)
+        }));
+        await getInstalledAppsCacheWriteCoordinator().commitRebuild(this.device.deviceId, cacheGeneration, () =>
+          getDbWriteBarrier().track(() =>
+            this.installedAppsRepository.replaceInstalledApps(this.device.deviceId, entries)
+          ).then(() => undefined)
+        );
+      }
+      return detailedApps;
+    } catch (error) {
+      logger.warn("Failed to list installed iOS apps:", error);
+      return [];
     }
   }
 
@@ -274,49 +336,43 @@ export class ListInstalledApps {
     return installedApps;
   }
 
-  private async executeIos(): Promise<string[]> {
-    try {
-      if (this.cacheEnabled) {
-        const cachedApps = await this.getCachedInstalledApps();
-        if (cachedApps) {
-          return this.flattenPackageNames(cachedApps);
-        }
-      }
-
-      const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(this.device.deviceId);
-      const apps = await this.simctl.listApps(this.device.deviceId);
-      const bundleIds = apps
-        .map(app => this.extractIosBundleId(app))
-        .filter((bundleId): bundleId is string => bundleId !== undefined);
-
-      if (this.cacheEnabled) {
-        const timestampMs = this.timer.now();
-        const entries = bundleIds.map(bundleId => ({
-          device_id: this.device.deviceId,
-          user_id: 0,
-          package_name: bundleId,
-          is_system: 0,
-          installed_at: timestampMs,
-          last_verified_at: timestampMs
-        }));
-        await getInstalledAppsCacheWriteCoordinator().commitRebuild(this.device.deviceId, cacheGeneration, () =>
-          getDbWriteBarrier().track(() =>
-            this.installedAppsRepository.replaceInstalledApps(this.device.deviceId, entries)
-          ).then(() => undefined)
-        );
-      }
-      return bundleIds;
-    } catch (error) {
-      logger.warn("Failed to list installed iOS apps:", error);
-      return [];
+  private async getCachedIosApps(): Promise<IosInstalledAppRecord[] | null> {
+    const lastVerifiedAt = await this.installedAppsRepository.getLatestVerification(this.device.deviceId);
+    if (!lastVerifiedAt || this.timer.now() - lastVerifiedAt > INSTALLED_APPS_CACHE_TTL_MS) {
+      return null;
     }
+
+    const rows = await this.installedAppsRepository.listInstalledApps(this.device.deviceId);
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const apps: IosInstalledAppRecord[] = [];
+    for (const row of rows) {
+      if (!row.metadata_json) {
+        return null;
+      }
+      try {
+        const parsed: unknown = JSON.parse(row.metadata_json);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return null;
+        }
+        const app = parsed as IosInstalledAppRecord;
+        if (this.extractIosBundleId(app) !== row.package_name) {
+          return null;
+        }
+        apps.push(app);
+      } catch (error) {
+        logger.warn(`[ListInstalledApps] Ignoring invalid cached iOS app metadata: ${error}`);
+        return null;
+      }
+    }
+
+    logger.info(`[ListInstalledApps] Using cached iOS installed apps list (rows ${rows.length})`);
+    return apps;
   }
 
-  private extractIosBundleId(app: unknown): string | undefined {
-    if (!app || typeof app !== "object") {
-      return undefined;
-    }
-    const record = app as Record<string, unknown>;
+  private extractIosBundleId(record: IosInstalledAppRecord): string | undefined {
     const bundleId = record.bundleId ?? record.bundleIdentifier;
     return typeof bundleId === "string" && bundleId.length > 0 ? bundleId : undefined;
   }

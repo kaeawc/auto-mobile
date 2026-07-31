@@ -305,6 +305,45 @@ describe("ListInstalledApps", function() {
       await expect(list.execute()).resolves.toEqual(["com.example.updated"]);
     });
 
+    test("caches iOS app metadata for the apps resource path", async function() {
+      const iosDevice: BootedDevice = {
+        deviceId: "ios-metadata-cache-device",
+        platform: "ios"
+      } as BootedDevice;
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1_000);
+      const simctl = new FakeSimctl();
+      simctl.setInstalledApps([{
+        bundleId: "com.example.cached",
+        bundleDisplayName: "Cached App",
+        bundleShortVersionString: "1.2.3",
+        bundlePath: "/Applications/Cached.app"
+      }]);
+      const list = new ListInstalledApps(
+        iosDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        simctl,
+        { cacheEnabled: true, installedAppsRepository: repo, timer }
+      );
+
+      await expect(list.executeIosDetailed()).resolves.toEqual([{
+        bundleId: "com.example.cached",
+        bundleDisplayName: "Cached App",
+        bundleShortVersionString: "1.2.3",
+        bundlePath: "/Applications/Cached.app"
+      }]);
+      simctl.setInstalledApps([{ bundleId: "com.example.updated" }]);
+
+      await expect(list.executeIosDetailed()).resolves.toEqual([{
+        bundleId: "com.example.cached",
+        bundleDisplayName: "Cached App",
+        bundleShortVersionString: "1.2.3",
+        bundlePath: "/Applications/Cached.app"
+      }]);
+      expect(simctl.getMethodCallCount("listApps")).toBe(1);
+    });
+
     test("should use cached apps when fresh", async function() {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();

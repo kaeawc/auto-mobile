@@ -66,4 +66,31 @@ describe("PerDeviceInstalledAppsCacheWriteCoordinator", () => {
     await invalidation;
     await expect(rebuild).resolves.toBe(false);
   });
+
+  test("fences a rebuild that starts while a cache clear is in flight", async () => {
+    const coordinator = new PerDeviceInstalledAppsCacheWriteCoordinator();
+    const deviceId = "device-3";
+    let releaseClear: (() => void) | undefined;
+    const clearStarted = new Promise<void>(resolve => {
+      releaseClear = resolve;
+    });
+    let finishClear: (() => void) | undefined;
+    const clearFinished = new Promise<void>(resolve => {
+      finishClear = resolve;
+    });
+
+    const clear = coordinator.invalidate(deviceId, async () => {
+      releaseClear?.();
+      await clearFinished;
+    });
+    await clearStarted;
+
+    const rebuild = coordinator.commitRebuild(deviceId, coordinator.beginRebuild(deviceId), async () => {
+      throw new Error("A rebuild started before a cache clear must not commit");
+    });
+    finishClear?.();
+
+    await clear;
+    await expect(rebuild).resolves.toBe(false);
+  });
 });

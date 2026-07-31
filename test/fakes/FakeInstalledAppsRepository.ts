@@ -39,7 +39,7 @@ export class FakeInstalledAppsRepository implements InstalledAppsStore {
   async replaceInstalledApps(deviceId: string, apps: NewInstalledApp[]): Promise<void> {
     this.rows = this.rows.filter(row => row.device_id !== deviceId);
     for (const app of apps) {
-      this.rows.push({ ...app });
+      this.rows.push({ metadata_json: null, daemon_session_id: null, device_session_start: null, ...app });
     }
   }
 
@@ -69,6 +69,7 @@ export class FakeInstalledAppsRepository implements InstalledAppsStore {
       is_system: isSystem ? 1 : 0,
       installed_at: timestampMs,
       last_verified_at: timestampMs,
+      metadata_json: null,
       daemon_session_id: null,
       device_session_start: null
     });

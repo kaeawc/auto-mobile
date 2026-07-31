@@ -21,6 +21,7 @@ import { DEVICE_CREATE_ENV_VAR, getDeviceCreationGate, type DeviceCreationGate }
 import { createDefaultDeviceProvisioner, type DeviceProvisioner } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
 import { DeviceBootService } from "../utils/deviceBootService";
+import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -403,7 +404,9 @@ export function registerDeviceTools() {
       perf.startOperation("cleanup");
       const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
       const repo = new InstalledAppsRepository();
-      await repo.clearDeviceSession(args.device.deviceId);
+      await getInstalledAppsCacheWriteCoordinator().invalidate(args.device.deviceId, () =>
+        repo.clearDeviceSession(args.device.deviceId)
+      );
       perf.endOperation("cleanup");
 
       perf.startOperation("notifyResources");

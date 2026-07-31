@@ -24,6 +24,8 @@ interface InstalledAppsTable {
   is_system: number; // SQLite boolean (0/1)
   installed_at: number;
   last_verified_at: number;
+  // iOS simulator app records include optional display metadata used by the apps resource.
+  metadata_json: string | null;
   daemon_session_id: string | null;
   device_session_start: number | null;
 }

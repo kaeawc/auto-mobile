@@ -412,6 +412,7 @@ export function registerVideoRecordingTools(): void {
             outputName: args.outputName,
             maxDurationSeconds: args.maxDuration,
             highlights: args.highlights,
+            ownerSessionUuid: args.sessionUuid,
           });
 
           recordings.push({

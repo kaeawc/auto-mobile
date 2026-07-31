@@ -12,6 +12,10 @@ import {
   TestRecordingResponse,
 } from "./testRecordingSocketTypes";
 import { TEST_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
 
 const resolveDevice = async (
   deviceId?: string,
@@ -52,8 +56,15 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
   TestRecordingCommand,
   TestRecordingResponse
 > {
-  constructor(socketPath: string = getSocketPath(TEST_RECORDING_SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  private readonly authenticator: StreamSocketAuthenticator;
+
+  constructor(
+    socketPath: string = getSocketPath(TEST_RECORDING_SOCKET_CONFIG),
+    timer: Timer = defaultTimer,
+    authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator("testRecording")
+  ) {
     super(socketPath, timer, "TestRecording");
+    this.authenticator = authenticator;
   }
 
   protected async handleRequest(
@@ -66,6 +77,10 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
 
     switch (command) {
       case "start": {
+        // Authorize before touching device state: an unauthenticated or
+        // cross-session caller cannot start a recording on another session's
+        // device (issue #4752).
+        this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId: request.deviceId });
         const platform = ensurePlatform(request.platform);
         const device = await resolveDevice(request.deviceId, platform);
         const result = await startTestRecording(device);
@@ -78,6 +93,15 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
         };
       }
       case "stop": {
+        // Authorize the stop against the active recording's device so a session
+        // that does not own it cannot stop another session's recording — the
+        // recordingId-only guard in stopTestRecording is not an ownership check
+        // (issue #4752).
+        const active = getTestRecordingStatus();
+        this.authenticator.authorize({
+          sessionUuid: request.sessionUuid,
+          deviceId: request.deviceId ?? active?.deviceId,
+        });
         const result = await stopTestRecording(request.recordingId, request.planName);
         return {
           success: true,
@@ -93,6 +117,9 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
         };
       }
       case "status": {
+        // Status reveals the active recording's device/id; require a live
+        // session so it is not readable by an unauthenticated caller (issue #4752).
+        this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId: request.deviceId });
         const recording = getTestRecordingStatus();
         if (!recording) {
           return { success: true };

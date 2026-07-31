@@ -7,7 +7,45 @@ import {
 import { buildVideoArchiveItemUri, VIDEO_RESOURCE_URIS } from "./videoRecordingResourceUris";
 import { logger } from "../utils/logger";
 import * as fs from "fs/promises";
+import * as os from "os";
+import * as path from "path";
 import type { VideoRecordingMetadata } from "../models";
+
+/**
+ * Absolute root every archived recording must live under. A DB row's
+ * `file_path` is resolved against this and rejected if it escapes — closing the
+ * arbitrary-file-read + base64-exfil vector where a poisoned/absolute
+ * `file_path` would otherwise be read straight off disk (issue #4752, the
+ * defense-in-depth confinement item). Mirrors `VideoRecorderService`'s archive
+ * root so a legitimately-stored recording always resolves inside it.
+ */
+export const DEFAULT_VIDEO_ARCHIVE_ROOT = path.join(
+  os.homedir(),
+  ".auto-mobile",
+  "video-archive"
+);
+
+/**
+ * Resolve a stored file path and assert it is contained within `archiveRoot`.
+ * Throws when the path escapes the archive (absolute path outside the root,
+ * `..` traversal, or a symlink-style sibling), so the read never reaches
+ * arbitrary files. Returns the resolved, confined absolute path.
+ */
+export function assertWithinArchiveRoot(filePath: string, archiveRoot: string): string {
+  const resolvedRoot = path.resolve(archiveRoot);
+  const resolved = path.resolve(resolvedRoot, filePath);
+  const relative = path.relative(resolvedRoot, resolved);
+  const escapes =
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative);
+  if (escapes) {
+    throw new Error(
+      `Refusing to read recording file outside the archive root: ${filePath}`
+    );
+  }
+  return resolved;
+}
 
 /**
  * The data-store surface the resource handlers depend on. Injecting it keeps the
@@ -15,10 +53,15 @@ import type { VideoRecordingMetadata } from "../models";
  * database (issue #3067) or touching the real filesystem.
  */
 export interface VideoRecordingResourceStore {
-  getLatest(): Promise<VideoRecordingMetadata | null>;
-  getById(recordingId: string, options?: { touch?: boolean }): Promise<VideoRecordingMetadata | null>;
-  list(): Promise<VideoRecordingMetadata[]>;
+  getLatest(scope?: { ownerSessionUuid?: string }): Promise<VideoRecordingMetadata | null>;
+  getById(
+    recordingId: string,
+    options?: { touch?: boolean; ownerSessionUuid?: string }
+  ): Promise<VideoRecordingMetadata | null>;
+  list(scope?: { ownerSessionUuid?: string }): Promise<VideoRecordingMetadata[]>;
   readFile(filePath: string): Promise<Buffer>;
+  /** Root every recording file must be confined to before it is read. */
+  archiveRoot: string;
 }
 
 const defaultVideoRecordingResourceStore: VideoRecordingResourceStore = {
@@ -26,6 +69,7 @@ const defaultVideoRecordingResourceStore: VideoRecordingResourceStore = {
   getById: getVideoRecordingMetadata,
   list: listVideoRecordings,
   readFile: fs.readFile,
+  archiveRoot: DEFAULT_VIDEO_ARCHIVE_ROOT,
 };
 
 function getVideoMimeType(metadata: VideoRecordingMetadata): string {
@@ -52,7 +96,11 @@ export async function buildVideoResourceContent(
   }
 
   try {
-    const fileBuffer = await store.readFile(metadata.filePath);
+    // Confine the read to the archive root before touching disk: a poisoned or
+    // absolute `file_path` must not turn this resource into an arbitrary-file
+    // read + base64 exfil (issue #4752).
+    const confinedPath = assertWithinArchiveRoot(metadata.filePath, store.archiveRoot);
+    const fileBuffer = await store.readFile(confinedPath);
     const blob = fileBuffer.toString("base64");
     return {
       uri,

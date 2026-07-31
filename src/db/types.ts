@@ -545,6 +545,10 @@ export interface VideoRecordingsTable {
   last_accessed_at: string;
   config_json: string;
   highlights_json: string | null;
+  // Daemon session that started the recording (issue #4752). Nullable: rows that
+  // predate the owner-scoping migration have no known owner and are treated as
+  // legacy/unowned.
+  owner_session_uuid: string | null;
 }
 
 export interface VideoRecordingConfigsTable {

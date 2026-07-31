@@ -52,6 +52,12 @@ interface StartVideoRecordingRequest {
   outputName?: string;
   maxDurationSeconds?: number;
   highlights?: VideoRecordingHighlightInput[];
+  /**
+   * Daemon session that owns this recording (issue #4752). Persisted so later
+   * reads/stops can be scoped to the owner; omitted for internal callers that
+   * do not carry a session (the recording stays legacy/unowned).
+   */
+  ownerSessionUuid?: string;
 }
 
 interface StopVideoRecordingResult {
@@ -597,6 +603,7 @@ export async function startVideoRecording(
     endedAt: undefined,
     lastAccessedAt: active.startedAt,
     config: active.config,
+    ownerSessionUuid: request.ownerSessionUuid,
   });
 
   const highlightSession = createHighlightSession(
@@ -710,21 +717,26 @@ export async function listActiveVideoRecordings(
   });
 }
 
-export async function listVideoRecordings(): Promise<VideoRecordingMetadata[]> {
+export async function listVideoRecordings(
+  scope: { ownerSessionUuid?: string } = {}
+): Promise<VideoRecordingMetadata[]> {
   const { recordingRepository } = await getVideoRecordingDependencies();
   const recordings = await recordingRepository.listRecordings({
     status: ["completed", "interrupted"],
     orderByLastAccessed: "desc",
+    ownerSessionUuid: scope.ownerSessionUuid,
   });
   return recordings.map(toMetadata);
 }
 
 export async function getVideoRecordingMetadata(
   recordingId: string,
-  options?: { touch?: boolean }
+  options?: { touch?: boolean; ownerSessionUuid?: string }
 ): Promise<VideoRecordingMetadata | null> {
   const { recordingRepository, now } = await getVideoRecordingDependencies();
-  const record = await recordingRepository.getRecording(recordingId);
+  const record = await recordingRepository.getRecording(recordingId, {
+    ownerSessionUuid: options?.ownerSessionUuid,
+  });
   if (!record || record.status === "recording") {
     return null;
   }
@@ -740,10 +752,17 @@ export async function getVideoRecordingMetadata(
   return metadata;
 }
 
-export async function getLatestVideoRecordingMetadata(): Promise<VideoRecordingMetadata | null> {
+export async function getLatestVideoRecordingMetadata(
+  scope: { ownerSessionUuid?: string } = {}
+): Promise<VideoRecordingMetadata | null> {
   const { recordingRepository } = await getVideoRecordingDependencies();
-  const latest = await recordingRepository.getLatestRecording();
-  return latest ? toMetadata(latest) : null;
+  const recordings = await recordingRepository.listRecordings({
+    status: ["completed", "interrupted"],
+    orderByLastAccessed: "desc",
+    limit: 1,
+    ownerSessionUuid: scope.ownerSessionUuid,
+  });
+  return recordings[0] ? toMetadata(recordings[0]) : null;
 }
 
 async function deleteVideoRecording(recordingId: string): Promise<boolean> {

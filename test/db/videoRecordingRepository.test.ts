@@ -67,6 +67,52 @@ describe("VideoRecordingRepository", () => {
     expect(result!.config.fps).toBe(15);
   });
 
+  describe("owner-session scoping (issue #4752)", () => {
+    beforeEach(async () => {
+      await repo.insertRecording(
+        makeRecord({ recordingId: "owned-a", status: "completed", ownerSessionUuid: "session-a" })
+      );
+      await repo.insertRecording(
+        makeRecord({ recordingId: "owned-b", status: "completed", ownerSessionUuid: "session-b" })
+      );
+      await repo.insertRecording(
+        makeRecord({ recordingId: "legacy", status: "completed" })
+      );
+    });
+
+    test("insertRecording round-trips the owning session", async () => {
+      const owned = await repo.getRecording("owned-a");
+      expect(owned!.ownerSessionUuid).toBe("session-a");
+      const legacy = await repo.getRecording("legacy");
+      expect(legacy!.ownerSessionUuid).toBeUndefined();
+    });
+
+    test("getRecording rejects a cross-session read but allows the owner and legacy rows", async () => {
+      expect(await repo.getRecording("owned-b", { ownerSessionUuid: "session-a" })).toBeNull();
+      expect((await repo.getRecording("owned-a", { ownerSessionUuid: "session-a" }))!.recordingId).toBe(
+        "owned-a"
+      );
+      // Legacy (null-owner) rows stay readable by any session for back-compat.
+      expect((await repo.getRecording("legacy", { ownerSessionUuid: "session-a" }))!.recordingId).toBe(
+        "legacy"
+      );
+    });
+
+    test("listRecordings owner filter returns only the caller's rows plus legacy rows", async () => {
+      const rows = await repo.listRecordings({
+        status: "completed",
+        ownerSessionUuid: "session-a",
+      });
+      const ids = rows.map(row => row.recordingId).sort();
+      expect(ids).toEqual(["legacy", "owned-a"]);
+    });
+
+    test("listRecordings without an owner scope returns every row (internal maintenance path)", async () => {
+      const rows = await repo.listRecordings({ status: "completed" });
+      expect(rows.map(row => row.recordingId).sort()).toEqual(["legacy", "owned-a", "owned-b"]);
+    });
+  });
+
   test("insertRecording upserts an existing recording id", async () => {
     await repo.insertRecording(makeRecord());
 

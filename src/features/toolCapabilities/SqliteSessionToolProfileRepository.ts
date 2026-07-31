@@ -23,4 +23,10 @@ export class SqliteSessionToolProfileRepository implements SessionToolProfileRep
       }))
       .execute();
   }
+
+  async deleteSession(sessionUuid: string): Promise<void> {
+    await this.db.deleteFrom("session_tool_capabilities")
+      .where("session_uuid", "=", sessionUuid)
+      .execute();
+  }
 }

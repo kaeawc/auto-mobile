@@ -167,11 +167,31 @@ jobs:
             exit 1
           fi
           echo "Notarizing $DMG"
-          xcrun notarytool submit "$DMG" \
+          # `notarytool submit --wait` exits 0 even when Apple's verdict is
+          # Invalid, which previously let the step run on to `stapler staple`
+          # and die with an opaque "Record not found" error 65. Parse the JSON
+          # result instead: anything but Accepted fails the step, after dumping
+          # the notary log so the per-file rejection reasons land in CI output.
+          SUBMISSION_JSON=$(xcrun notarytool submit "$DMG" \
             --key "$APPLE_NOTARY_KEY_PATH" \
             --key-id "$APPLE_NOTARY_KEY_ID" \
             --issuer "$APPLE_NOTARY_ISSUER_ID" \
-            --wait
+            --wait \
+            --output-format json)
+          echo "$SUBMISSION_JSON"
+          SUBMISSION_ID=$(jq -r '.id // empty' <<<"$SUBMISSION_JSON")
+          STATUS=$(jq -r '.status // empty' <<<"$SUBMISSION_JSON")
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "Notarization verdict: ${STATUS:-unknown} (submission ${SUBMISSION_ID:-unknown})" >&2
+            if [ -n "$SUBMISSION_ID" ]; then
+              # Best-effort: the log service can lag right after the verdict.
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --key "$APPLE_NOTARY_KEY_PATH" \
+                --key-id "$APPLE_NOTARY_KEY_ID" \
+                --issuer "$APPLE_NOTARY_ISSUER_ID" >&2 || true
+            fi
+            exit 1
+          fi
           xcrun stapler staple "$DMG"
           xcrun stapler validate "$DMG"
 

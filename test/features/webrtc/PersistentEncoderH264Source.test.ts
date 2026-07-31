@@ -2,9 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import {
+  InMemoryActiveVideoSessionRegistry,
   PersistentEncoderH264Source,
+  VIDEO_SERVER_HANDSHAKE_VERSION,
   VIDEO_SERVER_LEASE_DIRECTORY,
   VIDEO_SERVER_SOCKET_PREFIX,
+  type ActiveVideoSessionRegistry,
   type SocketConnector,
   type StreamSocket,
 } from "../../../src/features/webrtc/PersistentEncoderH264Source";
@@ -37,8 +40,16 @@ class FakeProcess extends EventEmitter implements SpawnedProcess {
     this.killed.push(signal ?? "SIGTERM");
     return true;
   }
-  ready(token: string = SESSION_TOKEN, socketName: string = SESSION_SOCKET, pid: number = 1234): void {
-    this.stdout.write(Buffer.from(`VIDEO_SESSION_READY token=${token} pid=${pid} socket=${socketName}\n`));
+  ready(
+    token: string = SESSION_TOKEN,
+    socketName: string = SESSION_SOCKET,
+    pid: number = 1234,
+    proto: number | null = VIDEO_SERVER_HANDSHAKE_VERSION
+  ): void {
+    const protoSuffix = proto === null ? "" : ` proto=${proto}`;
+    this.stdout.write(
+      Buffer.from(`VIDEO_SESSION_READY token=${token} pid=${pid} socket=${socketName}${protoSuffix}\n`)
+    );
     this.stdout.write(Buffer.from(`Waiting for client connection on localabstract:${socketName}\n`));
   }
   readyAndStreamingStarted(): void {
@@ -69,6 +80,20 @@ class FakeSocket extends EventEmitter implements StreamSocket {
   feed(chunk: Buffer): void {
     this.emit("data", chunk);
   }
+}
+
+/** Expected pre-stream handshake frame (issue #4729): MAGIC + VERSION + LEN + token. */
+function handshakeFrame(
+  token: string = SESSION_TOKEN,
+  version: number = VIDEO_SERVER_HANDSHAKE_VERSION
+): Buffer {
+  const tokenBytes = Buffer.from(token, "ascii");
+  const frame = Buffer.alloc(6 + tokenBytes.length);
+  Buffer.from([0x41, 0x56, 0x4d, 0x48]).copy(frame, 0);
+  frame.writeUInt8(version, 4);
+  frame.writeUInt8(tokenBytes.length, 5);
+  tokenBytes.copy(frame, 6);
+  return frame;
 }
 
 function streamHeader(width: number, height: number): Buffer {
@@ -130,43 +155,34 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     (overrides.processCommandLine as string | undefined) ??
     `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`;
 
+  // Command substrings whose ADB call should hang forever, exercising the
+  // injected withTimeout bound under FakeTimer (never a real wait).
+  const hangCommands = (overrides.hangCommands as string[] | undefined) ?? [];
+  const neverResolves = <T>(): Promise<T> => new Promise<T>(() => {});
+
   const adbFactory: AdbClientFactory = {
     create() {
       return {
         getAdbPathOnly: async () => "adb",
-        executeCommand: async (command: string) => {
+        executeCommand: (command: string) => {
           commands.push(command);
+          if (hangCommands.some(sub => command.includes(sub))) {
+            return neverResolves<{ stdout: string; stderr: string; exitCode: number }>();
+          }
           if (command.startsWith("forward tcp:0")) {
             forwardedSocket = command.split("localabstract:")[1] ?? null;
             if (forwardResult) {
               return forwardResult;
             }
-            return { stdout: `${FORWARD_PORT}\n`, stderr: "", exitCode: 0 };
+            return Promise.resolve({ stdout: `${FORWARD_PORT}\n`, stderr: "", exitCode: 0 });
           }
-          if (command === "forward --list") {
-            const stdout =
-              (overrides.forwardListOutput as string | undefined) ??
-              (forwardedSocket
-                ? `${DEVICE.deviceId} tcp:${FORWARD_PORT} localabstract:${forwardedSocket}\n`
-                : "");
-            return { stdout, stderr: "", exitCode: 0 };
-          }
-          if (command.includes(`for f in ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json`)) {
-            return { stdout: leaseOutput, stderr: "", exitCode: 0 };
-          }
-          if (command.startsWith(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/`)) {
-            return { stdout: leaseOutput, stderr: "", exitCode: 0 };
-          }
-          if (command === "shell cat /proc/uptime") {
-            return { stdout: `${deviceUptimeMs / 1000} 0.00\n`, stderr: "", exitCode: 0 };
-          }
-          if (command.startsWith("shell cat /proc/")) {
-            return { stdout: processCommandLine, stderr: "", exitCode: 0 };
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
+          return Promise.resolve(resolveCommand(command));
         },
         spawn: async (args: string[]) => {
           spawnArgs.push(args);
+          if (overrides.spawnHang === true) {
+            return neverResolves<FakeProcess>();
+          }
           const process = new FakeProcess();
           processes.push(process);
           return process;
@@ -175,12 +191,51 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     },
   };
 
+  function resolveCommand(command: string): { stdout: string; stderr: string; exitCode: number } {
+    if (command === "forward --list") {
+      const stdout =
+        (overrides.forwardListOutput as string | undefined) ??
+        (forwardedSocket
+          ? `${DEVICE.deviceId} tcp:${FORWARD_PORT} localabstract:${forwardedSocket}\n`
+          : "");
+      return { stdout, stderr: "", exitCode: 0 };
+    }
+    if (command.includes("stat -c")) {
+      // The orphan-file sweep listing (`NOW <epoch>` + `<mtime> <path>` rows).
+      return {
+        stdout: (overrides.leaseFileListing as string | undefined) ?? "",
+        stderr: "",
+        exitCode: 0,
+      };
+    }
+    if (command.includes(`for f in ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json`)) {
+      return { stdout: leaseOutput, stderr: "", exitCode: 0 };
+    }
+    if (command.startsWith(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/`)) {
+      return { stdout: leaseOutput, stderr: "", exitCode: 0 };
+    }
+    if (command === "shell cat /proc/uptime") {
+      return { stdout: `${deviceUptimeMs / 1000} 0.00\n`, stderr: "", exitCode: 0 };
+    }
+    if (command.startsWith("shell cat /proc/")) {
+      return { stdout: processCommandLine, stderr: "", exitCode: 0 };
+    }
+    return { stdout: "", stderr: "", exitCode: 0 };
+  }
+
   const connector: SocketConnector = async () => {
     const socket = new FakeSocket();
     sockets.push(socket);
     (overrides.connectorHook as ((socket: FakeSocket) => void) | undefined)?.(socket);
     return socket;
   };
+
+  // Default to a fresh registry per source so the process-lived singleton never
+  // leaks socket-name claims across tests; individual tests may inject a shared
+  // one to exercise sibling-session behavior.
+  const activeVideoSessionRegistry =
+    (overrides.activeVideoSessionRegistry as ActiveVideoSessionRegistry | undefined) ??
+    new InMemoryActiveVideoSessionRegistry();
 
   const source = new PersistentEncoderH264Source({
     device: DEVICE,
@@ -192,7 +247,12 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     connector,
     timer,
     sessionTokenFactory: () => SESSION_TOKEN,
+    // Decoupled from the token (issue #4729): a deterministic opaque socket name so
+    // existing forward/socket-name assertions stay stable while the production
+    // default derives it from the canonical IdGenerator.
+    socketNameFactory: () => SESSION_SOCKET,
     ...overrides,
+    activeVideoSessionRegistry,
   });
 
   return {
@@ -206,6 +266,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     errors,
     timer,
     audioEnabled,
+    activeVideoSessionRegistry,
     sessionSocket: () => forwardedSocket,
   };
 }
@@ -230,7 +291,7 @@ async function startReady(ctx: ReturnType<typeof makeSource>): Promise<void> {
 
 describe("PersistentEncoderH264Source", () => {
   test("pushes the jar, launches the server with overrides, forwards, and forwards frames", async () => {
-    const ctx = makeSource({ bitrateBps: 1_500_000, size: { width: 480, height: 1040 }, quality: "low" });
+    const ctx = makeSource({ bitrateBps: 1_500_000, size: { width: 480, height: 1040 }, quality: "low", fps: 24 });
     await startReady(ctx);
 
     expect(ctx.commands.some(c => c.startsWith("push") && c.includes("/data/local/tmp/automobile-video.jar"))).toBe(true);
@@ -241,6 +302,7 @@ describe("PersistentEncoderH264Source", () => {
     expect(args).toContain("CLASSPATH=/data/local/tmp/automobile-video.jar app_process /");
     expect(args).toContain("--quality low");
     expect(args).toContain("--bit-rate 1500000");
+    expect(args).toContain("--fps 24");
     expect(args).toContain("--size 480x1040");
     expect(args).toContain(`--session-token ${SESSION_TOKEN}`);
     expect(args).toContain(`--socket-name ${SESSION_SOCKET}`);
@@ -253,17 +315,28 @@ describe("PersistentEncoderH264Source", () => {
     await ctx.source.stop();
   });
 
+  test("omits --fps when no frame rate is requested, letting the preset default apply", async () => {
+    const ctx = makeSource();
+    await startReady(ctx);
+
+    const args = ctx.spawnArgs[0].join(" ");
+    expect(args).not.toContain("--fps");
+
+    await ctx.source.stop();
+  });
+
   test("requestKeyFrame sends the request-keyframe command byte to the device", async () => {
     const ctx = makeSource();
     await startReady(ctx);
 
     expect(ctx.source.requestKeyFrame()).toBe(true);
-    expect(ctx.sockets[0].written).toEqual([Buffer.from([0x01])]);
+    // The handshake frame is written first on connect (issue #4729), then the command byte.
+    expect(ctx.sockets[0].written).toEqual([handshakeFrame(), Buffer.from([0x01])]);
 
     await ctx.source.stop();
     // After stop, no socket is available; the request is a safe no-op.
     expect(ctx.source.requestKeyFrame()).toBe(false);
-    expect(ctx.sockets[0].written).toEqual([Buffer.from([0x01])]);
+    expect(ctx.sockets[0].written).toEqual([handshakeFrame(), Buffer.from([0x01])]);
   });
 
   test("reports null-before-initialization and then precise IDR readiness telemetry", async () => {
@@ -589,7 +662,8 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.source.isRunning).toBe(true);
 
     ctx.sockets[1].feed(streamHeader(480, 1040));
-    expect(ctx.sockets[1].written).toEqual([Buffer.from([0x01])]);
+    // The reconnected socket re-sends the handshake before the keyframe request (issue #4729).
+    expect(ctx.sockets[1].written).toEqual([handshakeFrame(), Buffer.from([0x01])]);
 
     await ctx.source.stop();
   });
@@ -704,12 +778,128 @@ describe("PersistentEncoderH264Source", () => {
     expect(lateSocket.destroyed).toBe(true);
   });
 
-  test("surfaces a post-start server exit via onError", async () => {
-    const ctx = makeSource();
+  test("surfaces a post-start server exit via onError when relaunch is disabled", async () => {
+    const ctx = makeSource({ maxServerRelaunchAttempts: 0 });
     await startReady(ctx);
     ctx.processes[0].exit(137, "SIGKILL");
+    await tick();
     expect(ctx.errors).toHaveLength(1);
     expect(ctx.errors[0].message).toContain("video-server exited");
+    expect(ctx.source.isRunning).toBe(false);
+  });
+
+  test("relaunches the on-device server after a single transient post-start exit", async () => {
+    const ctx = makeSource({ serverRelaunchBackoff: 500, maxServerRelaunchAttempts: 3 });
+    await startReady(ctx);
+
+    ctx.processes[0].exit(137, "SIGKILL");
+    await tick();
+    // Backoff has not elapsed: no relaunch spawn yet, and the source is not failed.
+    expect(ctx.processes).toHaveLength(1);
+    expect(ctx.errors).toEqual([]);
+
+    ctx.timer.advanceTime(500);
+    await tick();
+    await tick(); // teardown of the dead session + fresh launch + spawn
+    expect(ctx.processes).toHaveLength(2);
+
+    ctx.processes[1].ready();
+    await tick();
+    await tick(); // readiness resolves, forward + reconnect
+
+    expect(ctx.source.isRunning).toBe(true);
+    expect(ctx.errors).toEqual([]);
+
+    // Streaming resumes on the relaunched server's socket.
+    const latestSocket = ctx.sockets[ctx.sockets.length - 1];
+    latestSocket.feed(streamHeader(480, 1040));
+    latestSocket.feed(framedPacket(Buffer.from([0, 0, 0, 1, 0x67])));
+    expect(ctx.chunks).toEqual([Buffer.from([0, 0, 0, 1, 0x67])]);
+
+    await ctx.source.stop();
+  });
+
+  test("falls back to screenrecord after repeated post-start exits exhaust the relaunch budget", async () => {
+    const fellBackWith: Error[] = [];
+    const ctx = makeSource({
+      serverRelaunchBackoff: 0,
+      maxServerRelaunchAttempts: 2,
+      onScreenrecordFallback: async (error: Error) => {
+        fellBackWith.push(error);
+      },
+    });
+    await startReady(ctx);
+
+    // Relaunch 1: exit -> recovered on a fresh server.
+    ctx.processes[0].exit(1, null);
+    await tick();
+    await tick();
+    ctx.processes[1].ready();
+    await tick();
+    await tick();
+    expect(ctx.source.isRunning).toBe(true);
+
+    // Relaunch 2: exit -> recovered again (budget now spent).
+    ctx.processes[1].exit(1, null);
+    await tick();
+    await tick();
+    ctx.processes[2].ready();
+    await tick();
+    await tick();
+    expect(ctx.source.isRunning).toBe(true);
+    expect(ctx.processes).toHaveLength(3);
+
+    // Third exit: budget spent -> screenrecord fallback, NOT onError.
+    ctx.processes[2].exit(1, null);
+    await tick();
+    await tick();
+
+    expect(fellBackWith).toHaveLength(1);
+    expect(fellBackWith[0].message).toContain("video-server exited");
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.processes).toHaveLength(3); // no further relaunch attempt
+    expect(ctx.source.isRunning).toBe(false);
+  });
+
+  test("surfaces onError only after the relaunch budget is spent when no fallback is wired", async () => {
+    const ctx = makeSource({ serverRelaunchBackoff: 0, maxServerRelaunchAttempts: 1 });
+    await startReady(ctx);
+
+    // Relaunch 1 recovers.
+    ctx.processes[0].exit(1, null);
+    await tick();
+    await tick();
+    ctx.processes[1].ready();
+    await tick();
+    await tick();
+    expect(ctx.source.isRunning).toBe(true);
+    expect(ctx.errors).toEqual([]);
+
+    // Budget spent: the next exit surfaces via onError.
+    ctx.processes[1].exit(1, null);
+    await tick();
+    await tick();
+    expect(ctx.errors).toHaveLength(1);
+    expect(ctx.errors[0].message).toContain("video-server exited");
+    expect(ctx.source.isRunning).toBe(false);
+    expect(ctx.processes).toHaveLength(2);
+  });
+
+  test("stopping during a relaunch backoff cancels the relaunch without failing", async () => {
+    const ctx = makeSource({ serverRelaunchBackoff: 5000, maxServerRelaunchAttempts: 3 });
+    await startReady(ctx);
+
+    ctx.processes[0].exit(1, null);
+    await tick();
+    expect(ctx.processes).toHaveLength(1); // waiting out the backoff
+
+    await ctx.source.stop();
+    // The backoff never elapses; the relaunch is aborted and no new server spawns.
+    ctx.timer.advanceTime(5000);
+    await tick();
+    expect(ctx.processes).toHaveLength(1);
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.source.isRunning).toBe(false);
   });
 
   test("handles a server error while socket connection is pending", async () => {
@@ -881,6 +1071,104 @@ describe("PersistentEncoderH264Source", () => {
     await ctx.source.stop();
   });
 
+  test("sweeps an orphaned forward whose lease is gone after a simulated daemon SIGKILL", async () => {
+    // Device server self-expired: it deleted its own lease, so no lease names
+    // this forward — the lease-driven loop can never reclaim it (issue #4753).
+    const orphanSocket = `${VIDEO_SERVER_SOCKET_PREFIX}_orphaned`;
+    const ctx = makeSource({
+      leaseOutput: "",
+      forwardListOutput: `${DEVICE.deviceId} tcp:52001 localabstract:${orphanSocket}\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --remove tcp:52001");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("does not sweep a concurrently-starting session's forward (forward exists, lease not yet written)", async () => {
+    // A sibling session claimed its socket name before opening its forward; its
+    // lease has not landed yet. The sweep must leave that forward alone.
+    const registry = new InMemoryActiveVideoSessionRegistry();
+    const concurrentSocket = `${VIDEO_SERVER_SOCKET_PREFIX}_concurrent`;
+    registry.add(DEVICE.deviceId, concurrentSocket);
+    const ctx = makeSource({
+      activeVideoSessionRegistry: registry,
+      leaseOutput: "",
+      forwardListOutput: `${DEVICE.deviceId} tcp:52002 localabstract:${concurrentSocket}\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --list");
+    expect(ctx.commands).not.toContain("forward --remove tcp:52002");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("never touches a forward whose destination is not an automobile_video socket", async () => {
+    const ctx = makeSource({
+      leaseOutput: "",
+      forwardListOutput: `${DEVICE.deviceId} tcp:52003 localabstract:some_other_service\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --list");
+    expect(ctx.commands).not.toContain("forward --remove tcp:52003");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("does not sweep a forward that is still backed by a live lease", async () => {
+    const liveLease = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_live",
+      sessionToken: "live-session",
+      pid: 4321,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 52004,
+      startedAtMs: 95_000,
+      heartbeatAtMs: 100_000,
+      heartbeatElapsedRealtimeMs: 95_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: liveLease,
+      forwardListOutput: `${DEVICE.deviceId} tcp:52004 localabstract:automobile_video_live\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).not.toContain("forward --remove tcp:52004");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("clears the session's socket claim on teardown so a later orphan can be swept", async () => {
+    const registry = new InMemoryActiveVideoSessionRegistry();
+    const ctx = makeSource({ activeVideoSessionRegistry: registry });
+
+    await startReady(ctx);
+    expect(registry.active(DEVICE.deviceId).has(SESSION_SOCKET)).toBe(true);
+
+    await ctx.source.stop();
+    expect(registry.active(DEVICE.deviceId).has(SESSION_SOCKET)).toBe(false);
+  });
+
   test("refuses stale cleanup when the PID command line does not contain the lease token", async () => {
     const staleLease = JSON.stringify({
       version: 1,
@@ -1005,10 +1293,196 @@ describe("PersistentEncoderH264Source", () => {
     await ctx.source.stop();
   });
 
+  test("reconciles a lease with valid wall clock but no elapsed-realtime via the wall-clock fallback", async () => {
+    // heartbeatElapsedRealtimeMs absent (validator tolerates it). FakeTimer.now()
+    // is 0, so heartbeatAtMs=-400_000 => 400s wall age >= 5min threshold => stale.
+    const leaseNoElapsed = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_stale",
+      sessionToken: "stale-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: -400_000,
+      heartbeatAtMs: -400_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: leaseNoElapsed,
+      forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
+      processCommandLine:
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("shell kill -2 987");
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/stale-session.json`);
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("does NOT reconcile a lease with no elapsed-realtime whose wall clock is recent", async () => {
+    // heartbeatAtMs=-1_000 => 1s wall age (now()=0) << 5min threshold => keep.
+    const freshNoElapsed = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_fresh",
+      sessionToken: "fresh-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61234,
+      startedAtMs: -1_000,
+      heartbeatAtMs: -1_000,
+    });
+    const ctx = makeSource({ leaseOutput: freshNoElapsed });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).not.toContain("shell kill -2 987");
+    expect(ctx.commands).not.toContain("forward --remove tcp:61234");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("reconciles a previous-boot lease written under a renumbered emulator serial", async () => {
+    // Serial differs (emulator-5556 vs the device's emulator-5554), but a
+    // negative elapsed age proves it predates the current boot => reclaim.
+    const staleLeaseOldSerial = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_stale",
+      sessionToken: "stale-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: "emulator-5556",
+      forwardPort: 61234,
+      startedAtMs: -40_000,
+      heartbeatAtMs: -31_000,
+      heartbeatElapsedRealtimeMs: 120_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: staleLeaseOldSerial,
+      deviceUptimeMs: 5_000,
+      forwardListOutput: `${DEVICE.deviceId} tcp:61234 localabstract:automobile_video_stale\n`,
+      processCommandLine:
+        `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--session-token\u0000stale-session`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --remove tcp:61234");
+    expect(ctx.commands).toContain("shell kill -2 987");
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/stale-session.json`);
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("does NOT reconcile a same-boot lease under a different serial", async () => {
+    // Positive, fresh elapsed age (not previous-boot) + a different serial is
+    // too ambiguous to reclaim.
+    const freshOtherSerial = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_other",
+      sessionToken: "other-session",
+      pid: 987,
+      ownerPid: 456,
+      deviceSerial: "emulator-5556",
+      forwardPort: 61234,
+      startedAtMs: 95_000,
+      heartbeatAtMs: 95_000,
+      heartbeatElapsedRealtimeMs: 95_000,
+    });
+    const ctx = makeSource({ leaseOutput: freshOtherSerial, deviceUptimeMs: 100_000 });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).not.toContain("shell kill -2 987");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("sweeps an unparseable *.json and an orphaned *.json.tmp older than the age threshold", async () => {
+    // Directory has a corrupt .json (not a valid lease => not in known tokens)
+    // and an orphaned .json.tmp. Device clock is 1_000_000s; both files are old.
+    const oldMtime = 1_000_000 - 600; // 600s old >= 5min threshold
+    const ctx = makeSource({
+      leaseOutput: "not-json-at-all\n",
+      leaseFileListing:
+        `NOW 1000000\n` +
+        `${oldMtime} ${VIDEO_SERVER_LEASE_DIRECTORY}/corrupt.json\n` +
+        `${oldMtime} ${VIDEO_SERVER_LEASE_DIRECTORY}/leftover.json.tmp\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/corrupt.json`);
+    expect(ctx.commands).toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/leftover.json.tmp`);
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("leaves young unparseable/.tmp files and valid leases alone during the sweep", async () => {
+    const youngMtime = 1_000_000 - 10; // 10s old << 5min threshold
+    const validLease = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_fresh",
+      sessionToken: "fresh-session",
+      pid: 988,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 61235,
+      startedAtMs: 95_000,
+      heartbeatAtMs: 95_000,
+      heartbeatElapsedRealtimeMs: 95_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: validLease,
+      deviceUptimeMs: 100_000,
+      leaseFileListing:
+        `NOW 1000000\n` +
+        `${youngMtime} ${VIDEO_SERVER_LEASE_DIRECTORY}/corrupt.json\n` +
+        `${youngMtime} ${VIDEO_SERVER_LEASE_DIRECTORY}/leftover.json.tmp\n` +
+        `990000 ${VIDEO_SERVER_LEASE_DIRECTORY}/fresh-session.json\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).not.toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/corrupt.json`);
+    expect(ctx.commands).not.toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/leftover.json.tmp`);
+    // A valid, current lease file is never swept even though its mtime is old.
+    expect(ctx.commands).not.toContain(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/fresh-session.json`);
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
   test("uses separate socket leases for separate device sources", async () => {
-    const first = makeSource({ sessionTokenFactory: () => "first-session" });
+    // Socket name is now decoupled from the token (issue #4729), so each source is
+    // given its own opaque name explicitly rather than deriving it from the token.
+    const first = makeSource({
+      sessionTokenFactory: () => "first-session",
+      socketNameFactory: () => `${VIDEO_SERVER_SOCKET_PREFIX}_firstsession`,
+    });
     const second = makeSource({
       sessionTokenFactory: () => "second-session",
+      socketNameFactory: () => `${VIDEO_SERVER_SOCKET_PREFIX}_secondsession`,
       device: { ...DEVICE, deviceId: "emulator-5556" },
     });
 
@@ -1024,5 +1498,133 @@ describe("PersistentEncoderH264Source", () => {
 
     await first.source.stop();
     await second.source.stop();
+  });
+
+  describe("bounded ADB/socket timeouts", () => {
+    const COMMAND_TIMEOUT_MS = 20_000;
+    const TEARDOWN_TIMEOUT_MS = 5_000;
+
+    // Let the pending withTimeout promise register its FakeTimer setTimeout
+    // before advancing fake time, so the deadline actually fires.
+    async function fireTimeout(ctx: ReturnType<typeof makeSource>, ms: number): Promise<void> {
+      await tick();
+      ctx.timer.advanceTime(ms);
+      await tick();
+    }
+
+    async function expectStartRejects(overrides: Record<string, unknown>): Promise<Error> {
+      const ctx = makeSource(overrides);
+      const startPromise = ctx.source.start();
+      const settled = startPromise.then(() => null, error => error as Error);
+      await fireTimeout(ctx, COMMAND_TIMEOUT_MS);
+      const error = await settled;
+      expect(error).toBeInstanceOf(Error);
+      // The source tore itself down so the factory can fall back to screenrecord.
+      expect(ctx.source.isRunning).toBe(false);
+      return error as Error;
+    }
+
+    test("a hung adb push makes start() reject within the launch timeout", async () => {
+      const error = await expectStartRejects({ hangCommands: ["push \""] });
+      expect(error.message).toContain("adb push video-server jar");
+    });
+
+    test("a hung adb forward makes start() reject within the launch timeout", async () => {
+      const error = await expectStartRejects({ forwardResult: new Promise(() => {}) });
+      expect(error.message).toContain("adb forward video-server socket");
+    });
+
+    test("a hung adb spawn makes start() reject within the launch timeout", async () => {
+      const error = await expectStartRejects({ spawnHang: true });
+      expect(error.message).toContain("adb spawn video-server");
+    });
+
+    test("a hung initial socket connect makes start() reject within the launch timeout", async () => {
+      const ctx = makeSource({ connector: (() => new Promise(() => {})) as SocketConnector });
+      const startPromise = ctx.source.start();
+      const settled = startPromise.then(() => null, error => error as Error);
+      await tick(); // push + spawn
+      ctx.processes[0].ready();
+      await tick(); // ready resolves, forward + connect begins (and hangs)
+      ctx.timer.advanceTime(COMMAND_TIMEOUT_MS);
+      await tick();
+      const error = await settled;
+      expect(error).toBeInstanceOf(Error);
+      expect(ctx.source.isRunning).toBe(false);
+    });
+
+    test("a hung teardown command still lets stop() resolve within the timeout", async () => {
+      // readLease's `shell cat <lease>.json` is only hit during cleanup, so it
+      // hangs teardown without affecting the successful start.
+      const ctx = makeSource({
+        hangCommands: [`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/${SESSION_TOKEN}.json`],
+      });
+      await startReady(ctx);
+
+      const stopPromise = ctx.source.stop();
+      const settled = stopPromise.then(() => "resolved", () => "rejected");
+      await fireTimeout(ctx, TEARDOWN_TIMEOUT_MS);
+      expect(await settled).toBe("resolved");
+      // stop() always winds the source down even when cleanup could not complete.
+      expect(ctx.source.isRunning).toBe(false);
+    });
+
+    test("rejects construction with a non-positive command timeout", () => {
+      expect(() => makeSource({ commandTimeoutMs: 0 })).toThrow();
+      expect(() => makeSource({ teardownTimeoutMs: -1 })).toThrow();
+    });
+  });
+
+  describe("token handshake and opaque socket name (issue #4729)", () => {
+    test("names the abstract socket opaquely, decoupled from the session token", async () => {
+      const OPAQUE = `${VIDEO_SERVER_SOCKET_PREFIX}_deadbeefcafef00d`;
+      const ctx = makeSource({
+        sessionTokenFactory: () => "secret-token-1234",
+        socketNameFactory: () => OPAQUE,
+      });
+      const startPromise = ctx.source.start();
+      await tick();
+      ctx.processes[0].ready("secret-token-1234", OPAQUE);
+      await tick();
+      await startPromise;
+
+      expect(ctx.sessionSocket()).toBe(OPAQUE);
+      expect(ctx.commands).toContain(`forward tcp:0 localabstract:${OPAQUE}`);
+      const args = ctx.spawnArgs[0].join(" ");
+      expect(args).toContain(`--socket-name ${OPAQUE}`);
+      expect(args).toContain("--session-token secret-token-1234");
+      // The /proc/net/unix disclosure fix: the socket name must not embed the token.
+      expect(ctx.sessionSocket()).not.toContain("secret-token-1234");
+
+      await ctx.source.stop();
+    });
+
+    test("sends the token handshake as the first bytes on connect", async () => {
+      const ctx = makeSource();
+      await startReady(ctx);
+
+      // The handshake is written on connect, before any stream header is read.
+      expect(ctx.sockets[0].written).toEqual([handshakeFrame()]);
+
+      await ctx.source.stop();
+    });
+
+    test("skips the handshake and still streams when the device advertises no proto", async () => {
+      const ctx = makeSource();
+      const startPromise = ctx.source.start();
+      await tick();
+      // A pre-handshake device omits `proto=` on its readiness line.
+      ctx.processes[0].ready(SESSION_TOKEN, SESSION_SOCKET, 1234, null);
+      await tick();
+      await startPromise;
+
+      expect(ctx.sockets[0].written).toEqual([]);
+      // Streaming still works (graceful degrade; UID gating remains the barrier).
+      ctx.sockets[0].feed(streamHeader(480, 1040));
+      ctx.sockets[0].feed(framedPacket(Buffer.from([0x09])));
+      expect(ctx.chunks).toEqual([Buffer.from([0x09])]);
+
+      await ctx.source.stop();
+    });
   });
 });

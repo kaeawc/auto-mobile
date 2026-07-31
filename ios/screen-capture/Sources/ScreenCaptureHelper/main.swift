@@ -12,6 +12,18 @@ import ScreenCaptureCore
 // latency is not misreported as a missing Screen Recording entitlement.
 let simulatorPermissionTimeoutSeconds: TimeInterval = 10.0
 
+// Exit status used when a capture stream dies *after* it started delivering
+// frames (a mid-stream `SCStream`/`AVCaptureSession` fatal error). The helper
+// deliberately exits with a non-zero, non-`1` code instead of leaving a dead
+// stream spinning `RunLoop.main`: the parent supervisor (`IosH264Source`) owns
+// bounded reconnect and re-launches a fresh helper on any non-zero exit, so a
+// deterministic process signal is a stronger contract than a live-but-silent
+// process the supervisor can only detect by string-matching an `error:` stderr
+// line. `1` is already used for startup failures; `70` (EX_SOFTWARE) marks the
+// distinct "was running, then the stream failed" case for log triage. See
+// issue #4768.
+let midStreamFatalExitCode: Int32 = 70
+
 // A command-line process has no AppKit application by default. ScreenCaptureKit
 // reaches CoreGraphics when creating an SCStream, and CoreGraphics aborts with
 // CGS_REQUIRE_INIT unless this connection is initialized first.
@@ -120,8 +132,9 @@ case .help:
 
 case .listDevices:
     CMIOSystem.enableScreenCaptureDevices()
-    // Allow a brief moment for the system to register USB devices.
-    Thread.sleep(forTimeInterval: 0.5)
+    // Poll briefly for the system to register USB devices instead of an
+    // unconditional 0.5s sleep; return as soon as one enumerates (issue #4737).
+    DeviceReadinessPolling.waitUntilReady { !DeviceDiscovery.discover().isEmpty }
     let infos = DeviceDiscovery.discover().map(DeviceDiscovery.toInfo)
     writeJSON(DeviceListResponse(devices: infos))
     exit(0)
@@ -185,13 +198,39 @@ case .captureSimulator(let windowID, let fps, let audio):
     let metricsReporter = FrameMetricsReporter(writer: writer, output: logError)
     metricsReporter.start()
     let simSession = SimulatorCaptureSession(writer: writer) { error in
+        // A mid-stream ScreenCaptureKit fatal error: exit deterministically so
+        // the supervisor's bounded reconnect re-establishes capture, rather than
+        // leaving RunLoop.main spinning on a dead stream (issue #4768).
         logError("error: ScreenCaptureKit stream stopped: \(error)")
+        exit(midStreamFatalExitCode)
     }
     let firstFrameSignal = simSession.firstFrameSignal
+
+    // ScreenCaptureKit silently emits no frames when the host process lacks
+    // Screen Recording permission — there's no error to surface. Emit a hint on
+    // stderr if nothing arrives within the deadline; this leaves stdout (the
+    // frame channel) untouched. The timer lives on a dedicated queue — never the
+    // main run loop — so a main-actor-blocked start cannot starve it (issue
+    // #4764). It is *armed* only once capture has started so the measured
+    // 2.6–13s slow-start window cannot trip a false "no frames" warning; a start
+    // that never reaches capture-started is bounded and surfaced by the start
+    // deadline inside SimulatorCaptureSession instead.
+    let permissionHintQueue = DispatchQueue(label: "automobile.simulator-capture.permission-hint")
+    let permissionHintTimer = DispatchSource.makeTimerSource(queue: permissionHintQueue)
+    permissionHintTimer.setEventHandler {
+        if !firstFrameSignal.hasReceivedFrame {
+            logError(
+                "warn: no frames received within \(simulatorPermissionTimeoutSeconds)s. "
+                + "Grant 'Screen Recording' to your terminal/IDE in "
+                + "System Settings → Privacy & Security → Screen Recording."
+            )
+        }
+    }
 
     logError(CaptureStartupMarker.line(.startingCapture(windowID: windowID, fps: fps)))
     installShutdownHandlers {
         metricsReporter.stop()
+        permissionHintTimer.cancel()
         Task { @MainActor in
             await simSession.stop()
             exit(0)
@@ -202,19 +241,10 @@ case .captureSimulator(let windowID, let fps, let audio):
             try await simSession.start(window: window, fps: fps, audio: audio)
             logError(CaptureStartupMarker.line(.captureStarted(windowID: windowID)))
 
-            // ScreenCaptureKit silently emits no frames when the host process
-            // lacks Screen Recording permission — there's no error to surface.
-            // Emit a hint on stderr if nothing arrives within the deadline; this
-            // leaves stdout (the frame channel) untouched.
-            _ = Timer.scheduledTimer(withTimeInterval: simulatorPermissionTimeoutSeconds, repeats: false) { _ in
-                if !firstFrameSignal.hasReceivedFrame {
-                    logError(
-                        "warn: no frames received within \(simulatorPermissionTimeoutSeconds)s. "
-                        + "Grant 'Screen Recording' to your terminal/IDE in "
-                        + "System Settings → Privacy & Security → Screen Recording."
-                    )
-                }
-            }
+            // Measure the no-frames window from capture-started, not from launch,
+            // so the slow-start tail never counts against it.
+            permissionHintTimer.schedule(deadline: .now() + simulatorPermissionTimeoutSeconds)
+            permissionHintTimer.resume()
         } catch {
             logError("error: failed to start simulator capture: \(error)")
             exit(1)
@@ -224,7 +254,14 @@ case .captureSimulator(let windowID, let fps, let audio):
 
 case .capture(let deviceID):
     CMIOSystem.enableScreenCaptureDevices()
-    Thread.sleep(forTimeInterval: 0.5)
+    // Poll briefly for the requested device to register instead of an
+    // unconditional 0.5s sleep; return as soon as it enumerates (issue #4737).
+    DeviceReadinessPolling.waitUntilReady {
+        if let id = deviceID {
+            return DeviceDiscovery.find(uniqueID: id) != nil
+        }
+        return !DeviceDiscovery.discover().isEmpty
+    }
 
     let resolved: AVCaptureDevice?
     if let id = deviceID {
@@ -247,7 +284,12 @@ case .capture(let deviceID):
     let metricsReporter = FrameMetricsReporter(writer: writer, output: logError)
     metricsReporter.start()
     let captureSession = DeviceCaptureSession(writer: writer) { error in
+        // A mid-stream AVCaptureSession fatal error (runtime error / interruption
+        // once running): exit deterministically so the supervisor's bounded
+        // reconnect re-establishes capture instead of leaving a dead session
+        // spinning RunLoop.main (issue #4768).
         logError("error: iOS device capture failed: \(error)")
+        exit(midStreamFatalExitCode)
     }
 
     do {

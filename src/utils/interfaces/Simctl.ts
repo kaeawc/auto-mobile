@@ -5,7 +5,6 @@
 
 // Re-export from new location for backward compatibility
 export type {
-  SimCtl,
   AppleDevice,
   AppleDeviceRuntime,
   AppleDeviceType,

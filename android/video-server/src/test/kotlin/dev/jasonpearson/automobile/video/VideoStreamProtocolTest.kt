@@ -151,6 +151,55 @@ class VideoStreamProtocolTest {
   }
 
   @Test
+  fun framedPacketConcatenatesHeaderThenPayloadInOneBuffer() {
+    val ptsAndFlags =
+      VideoStreamProtocol.ptsAndFlags(
+        presentationTimeUs = 123,
+        isConfig = true,
+        isKeyFrame = true,
+      )
+    val payload = byteArrayOf(0x0a, 0x0b, 0x0c)
+
+    val framed =
+      VideoStreamProtocol.framedPacket(
+        audioEnabled = false,
+        trackId = VideoStreamProtocol.TRACK_ID_VIDEO,
+        ptsAndFlags = ptsAndFlags,
+        data = payload,
+      )
+
+    // Header (12 bytes for legacy) + payload assembled into a single write buffer (issue #4743),
+    // byte-identical to header ++ payload so on-wire framing is unchanged.
+    val header =
+      VideoStreamProtocol.packetHeader(
+        audioEnabled = false,
+        trackId = VideoStreamProtocol.TRACK_ID_VIDEO,
+        ptsAndFlags = ptsAndFlags,
+        size = payload.size,
+      )
+    assertEquals(header.size + payload.size, framed.size)
+    assertArrayEquals(header, framed.copyOfRange(0, header.size))
+    assertArrayEquals(payload, framed.copyOfRange(header.size, framed.size))
+  }
+
+  @Test
+  fun framedPacketUsesLargerMuxHeaderWhenAudioEnabled() {
+    val payload = byteArrayOf(0x01, 0x02)
+
+    val framed =
+      VideoStreamProtocol.framedPacket(
+        audioEnabled = true,
+        trackId = VideoStreamProtocol.TRACK_ID_VIDEO,
+        ptsAndFlags = 5L,
+        data = payload,
+      )
+
+    // Mux packet header is 16 bytes; framed buffer is header ++ payload.
+    assertEquals(16 + payload.size, framed.size)
+    assertArrayEquals(payload, framed.copyOfRange(16, framed.size))
+  }
+
+  @Test
   fun replayedPacketFlagPreservesTheOriginalFlagsAndPts() {
     val original =
       VideoStreamProtocol.ptsAndFlags(

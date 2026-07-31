@@ -97,6 +97,9 @@ function resolveStartOverrides(request: WebRtcStreamSocketRequest): WebRtcStream
   if (request.iosSimulatorFps !== undefined) {
     overrides.iosSimulatorFps = request.iosSimulatorFps;
   }
+  if (request.androidFps !== undefined) {
+    overrides.androidFps = request.androidFps;
+  }
   if (request.audio !== undefined) {
     overrides.audioEnabled = request.audio;
   }

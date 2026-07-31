@@ -128,7 +128,58 @@ class VideoRecordingClientTest {
     val recordings = McpVideoRecordingActions { client }.startRecording("emulator-5554")
 
     assertEquals(1, recordings.size)
+    assertEquals(listOf("setToolCapability", "videoRecording"), client.toolCalls.map { it.name })
+    assertEquals(
+      "screen-artifacts",
+      client.toolCalls.first().arguments["capability"]?.jsonPrimitive?.content,
+    )
     assertEquals("rec-1", recordings.single().recordingId)
+  }
+
+  @Test
+  fun `video actions continue when an older daemon lacks capability controls`() {
+    val delegate = FakeAutoMobileClient()
+    delegate.callToolResult =
+      toolResponse(
+        """{"action":"start","count":1,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/rec-1.mp4"}]}"""
+      )
+    val client =
+      object : AutoMobileClient by delegate {
+        override fun callTool(
+          name: String,
+          arguments: kotlinx.serialization.json.JsonObject,
+        ): JsonElement {
+          if (name == "setToolCapability") {
+            throw McpConnectionException("Unknown tool: setToolCapability")
+          }
+          return delegate.callTool(name, arguments)
+        }
+
+        override fun enableToolCapability(capability: String) {
+          super<AutoMobileClient>.enableToolCapability(capability)
+        }
+      }
+
+    val recordings = McpVideoRecordingActions { client }.startRecording("emulator-5554")
+
+    assertEquals("rec-1", recordings.single().recordingId)
+    assertEquals(listOf("videoRecording"), delegate.toolCalls.map { it.name })
+  }
+
+  @Test
+  fun `video actions reuse the client across operations`() {
+    val client = FakeAutoMobileClient()
+    client.callToolResult = toolResponse("""{"recordings":[]}""")
+    var providerCalls = 0
+    val actions = McpVideoRecordingActions {
+      providerCalls += 1
+      client
+    }
+
+    actions.startRecording("emulator-5554")
+    actions.stopRecording("emulator-5554")
+
+    assertEquals(1, providerCalls)
   }
 
   @Test

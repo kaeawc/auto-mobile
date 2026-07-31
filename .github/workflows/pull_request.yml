@@ -440,6 +440,12 @@ jobs:
               - 'test/integration/mediamtxWebRtcPublisher.integration.test.ts'
               - 'test/bats/mediamtx-webrtc-integration.bats'
               - 'scripts/webrtc/**'
+              # Native encoder sources decide the on-the-wire H.264 profile the
+              # publisher must accept. A profile change here (e.g. Baseline ->
+              # Main) is exactly the #4877 class of regression this job guards, so
+              # exercise it when the native encoders change (issue #4884).
+              - 'android/video-server/**/VideoEncoder.kt'
+              - 'ios/screen-capture/**'
               # This workflow controls WebRTC-job gating, so a change to it must
               # exercise the job rather than being silently skipped.
               - '.github/workflows/pull_request.yml'
@@ -1767,6 +1773,8 @@ jobs:
 
       - name: "Run videoRecording MP4 integration test"
         timeout-minutes: 10
+        env:
+          AUTOMOBILE_TOOLSET_SCREEN_ARTIFACTS: "1"
         run: ./scripts/ios/video-recording-start-stop-integration.sh
 
       # This is a freshly-booted sim, so bring the daemon to ready and warm
@@ -1779,6 +1787,10 @@ jobs:
         env:
           AUTOMOBILE_DAEMON_DEBUG: "1"
           AUTOMOBILE_DAEMON_EMBEDDED_SDK: "1"
+          # These integration workflows exercise advanced tools deliberately;
+          # keep the daemon's ordinary session surface core-only.
+          AUTOMOBILE_TOOLSET_NAVIGATION_MODELING: "1"
+          AUTOMOBILE_TOOLSET_TEST_AUTHORING: "1"
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       # Launch CtrlProxy on the booted sim now (a slow, one-time xcodebuild launch)
@@ -1794,6 +1806,9 @@ jobs:
       - name: "Run iOS navigation graph Simulator workflow"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         timeout-minutes: 5
+        env:
+          # Also supply this on the client in case it restarts the daemon.
+          AUTOMOBILE_TOOLSET_NAVIGATION_MODELING: "1"
         run: |
           ./scripts/ios/navigation-graph-sdk-event-integration.sh "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
 
@@ -1821,6 +1836,8 @@ jobs:
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
           AUTOMOBILE_TEST_RETRY_COUNT: "1"
+          # The plan calls executePlan, an advanced test-authoring tool.
+          AUTOMOBILE_TOOLSET_TEST_AUTHORING: "1"
         run: ./scripts/ci/run-reminders-launch-plan-tests.sh
 
       # Daemon-internal logs (CtrlProxy startup/health/observe timing) are the only
@@ -2310,7 +2327,7 @@ jobs:
               }
             };
 
-            const contextReport = readReport(contextPath, 'Context Thresholds');
+            const contextReport = readReport(contextPath, 'Context Baselines');
             const toolReport = readReport(toolPath, 'Tool Call Throughput');
             const startupReport = readReport(startupPath, 'Startup Performance');
             const npmReport = readReport(npmPath, 'NPM Unpacked Size');
@@ -2325,11 +2342,17 @@ jobs:
             const statuses = [];
             let hasFailures = false;
             let hasMissing = false;
+            let hasBaselineOnly = false;
 
             const trackStatus = (label, report) => {
               if (!report) {
                 statuses.push(`${label}: ⚠️ missing`);
                 hasMissing = true;
+                return;
+              }
+              if (report.enforcement?.enabled === false) {
+                statuses.push(`${label}: 📏`);
+                hasBaselineOnly = true;
                 return;
               }
               const passed = report.passed !== false;
@@ -2340,14 +2363,14 @@ jobs:
               }
             };
 
-            trackStatus('Context Thresholds', contextReport.report);
+            trackStatus('Context Baselines', contextReport.report);
             trackStatus('Tool Call Throughput', toolReport.report);
             trackStatus('Startup', startupReport.report);
             trackStatus('NPM Unpacked Size', npmReport.report);
 
             let overallStatus = '⚠️ PARTIAL';
             if (!hasFailures && !hasMissing) {
-              overallStatus = '✅ PASSED';
+              overallStatus = hasBaselineOnly ? '📏 BASELINES RECORDED' : '✅ PASSED';
             } else if (hasFailures) {
               overallStatus = '❌ FAILED';
             }
@@ -2361,20 +2384,26 @@ jobs:
                 if (!result) {
                   return `| ${label} | n/a | n/a | n/a | ⚠️ |`;
                 }
-                const status = result.passed ? '✅' : '❌';
+                const status = report.enforcement?.enabled === false
+                  ? '📏'
+                  : result.passed ? '✅' : '❌';
                 const actual = typeof result.actual === 'number' ? result.actual.toLocaleString() : 'n/a';
-                const threshold = typeof result.threshold === 'number' ? result.threshold.toLocaleString() : 'n/a';
-                const usage = typeof result.usage === 'number' ? `${result.usage}%` : 'n/a';
-                return `| ${label} | ${actual} | ${threshold} | ${usage} | ${status} |`;
+                const baseline = typeof result.baseline === 'number' ? result.baseline.toLocaleString() : 'n/a';
+                const delta = typeof result.delta === 'number'
+                  ? `${result.delta >= 0 ? '+' : ''}${result.delta.toLocaleString()}`
+                  : 'n/a';
+                return `| ${label} | ${actual} | ${baseline} | ${delta} | ${status} |`;
               };
 
-              body += '### Context Thresholds\n\n';
-              body += '| Category | Actual | Threshold | Usage | Status |\n';
-              body += '|----------|--------|-----------|-------|--------|\n';
-              body += formatRow('Tools', report.results?.tools) + '\n';
+              body += '### Context Baselines\n\n';
+              body += '| Category | Actual | Baseline | Delta | Status |\n';
+              body += '|----------|--------|----------|-------|--------|\n';
+              body += formatRow('Core Tools', report.results?.coreTools) + '\n';
+              body += formatRow('All Tools', report.results?.allTools) + '\n';
               body += formatRow('Resources', report.results?.resources) + '\n';
               body += formatRow('Resource Templates', report.results?.resourceTemplates) + '\n';
-              body += formatRow('**Total**', report.results?.total) + '\n';
+              body += formatRow('**Core Total**', report.results?.coreTotal) + '\n';
+              body += formatRow('**All Total**', report.results?.allTotal) + '\n';
 
               if (Array.isArray(report.violations) && report.violations.length > 0) {
                 body += '\n### ⚠️ Threshold Violations\n\n';
@@ -2383,7 +2412,10 @@ jobs:
                 }
               }
 
-              body += `\n**Overall Status:** ${report.passed ? '✅ PASSED' : '❌ FAILED'}`;
+              const contextStatus = report.enforcement?.enabled === false
+                ? '📏 BASELINES RECORDED (threshold enforcement pending)'
+                : report.passed ? '✅ PASSED' : '❌ FAILED';
+              body += `\n**Overall Status:** ${contextStatus}`;
               if (report.timestamp) {
                 body += `\n\n_Generated at ${report.timestamp}_`;
               }

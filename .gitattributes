@@ -43,3 +43,9 @@ docs/img/auto-mobile.png -filter -diff -merge -text
 docs/img/auto_mobile_sticker_splash.png -filter -diff -merge -text
 docs/img/automobile_system_design.png -filter -diff -merge -text
 docs/img/favicon.ico -filter -diff -merge -text
+# Launcher / app icons consumed by the Android, iOS, and desktop builds — must be
+# direct git blobs, since build & packaging jobs check out with lfs: false.
+android/playground/app/src/main/res/mipmap-*/ic_launcher*.png -filter -diff -merge -text
+ios/Playground/Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png -filter -diff -merge -text
+android/desktop-app/src/main/resources/icons/app-icon.png -filter -diff -merge -text
+android/desktop-app/src/main/resources/icons/app-icon.ico -filter -diff -merge -text

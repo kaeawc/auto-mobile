@@ -24,6 +24,7 @@ export interface WorkflowStep {
   /** Native parallel-steps barrier: a single step id or a list of them. */
   wait?: string | string[];
   if?: string | boolean;
+  env?: Record<string, string | number | boolean>;
 }
 
 const repoRoot = join(import.meta.dir, "../..");
@@ -46,6 +47,7 @@ export interface WorkflowJob {
   "timeout-minutes"?: number;
   /** Set when the job delegates to a reusable workflow. */
   uses?: string;
+  env?: Record<string, string | number | boolean>;
 }
 
 /**

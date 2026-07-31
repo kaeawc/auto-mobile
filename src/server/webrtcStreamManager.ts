@@ -76,7 +76,11 @@ interface WebRtcStreamRecord {
   jarPath: string | null;
   bitrateBps?: number;
   size?: { width: number; height: number };
-  /** iOS Simulator capture rate; ignored by Android and physical-iOS sources. */
+  /**
+   * Capture rate handed to the source. For Android it is `config.androidFps`
+   * (forwarded to the video-server as `--fps`); for iOS it is
+   * `config.iosSimulatorFps`. Physical-iOS captures at its own device rate.
+   */
   fps: number;
   audioEnabled: boolean;
   startedAt: string;
@@ -377,7 +381,7 @@ function createStreamRecord(
     jarPath,
     bitrateBps,
     size: config.size,
-    fps: config.iosSimulatorFps,
+    fps: device.platform === "android" ? config.androidFps : config.iosSimulatorFps,
     audioEnabled: config.audioEnabled,
     startedAt: requestReceived,
     sourceStarted: false,

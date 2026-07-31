@@ -61,6 +61,7 @@ class DeviceSnapshotActionsTest {
     val snapshots = actionsWith(client).listSnapshots()
 
     assertEquals(1, snapshots.size)
+    assertTrue(client.toolCalls.isEmpty())
     assertEquals("nightly", snapshots.single().snapshotName)
     assertEquals("android", snapshots.single().platform)
     assertEquals(2048L, snapshots.single().sizeBytes)
@@ -110,6 +111,22 @@ class DeviceSnapshotActionsTest {
     assertEquals("snap-1", result.snapshotName)
     assertEquals("full", result.snapshotType)
     assertEquals(listOf("old-1"), result.evictedSnapshotNames)
+  }
+
+  @Test
+  fun `snapshot actions reuse the client across operations`() {
+    val client = FakeAutoMobileClient()
+    client.callToolResult = toolResponse("""{"snapshotName":"snap-1","snapshotType":"full"}""")
+    var providerCalls = 0
+    val actions = McpDeviceSnapshotActions {
+      providerCalls += 1
+      client
+    }
+
+    actions.captureSnapshot("emulator-5554")
+    actions.restoreSnapshot("emulator-5554", "snap-1")
+
+    assertEquals(1, providerCalls)
   }
 
   @Test

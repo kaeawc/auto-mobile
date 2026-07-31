@@ -50,40 +50,33 @@ describe("accessibilityTools", () => {
   });
 
   describe("schema validation", () => {
-    test("accepts talkback: true", () => {
-      expect(() => accessibilitySchema.parse({ talkback: true })).not.toThrow();
-    });
+    // Collapsed from 8 hand-rolled siblings into a single table so a failing
+    // row is named, plus the boundary rows the siblings never specified: null,
+    // explicit undefined, and an unknown key (issue #4183 item 18).
+    const cases: ReadonlyArray<{ name: string; input: unknown; valid: boolean }> = [
+      { name: "talkback: true", input: { talkback: true }, valid: true },
+      { name: "talkback: false", input: { talkback: false }, valid: true },
+      { name: "empty object (all params optional)", input: {}, valid: true },
+      { name: "talkback as a string", input: { talkback: "yes" }, valid: false },
+      { name: "talkback as a number", input: { talkback: 1 }, valid: false },
+      { name: "talkback as null", input: { talkback: null }, valid: false },
+      { name: "talkback explicitly undefined", input: { talkback: undefined }, valid: true },
+      { name: "voiceover: true", input: { voiceover: true }, valid: true },
+      { name: "voiceover: false", input: { voiceover: false }, valid: true },
+      { name: "voiceover as a string", input: { voiceover: "yes" }, valid: false },
+      { name: "voiceover as a number", input: { voiceover: 1 }, valid: false },
+      { name: "voiceover as null", input: { voiceover: null }, valid: false },
+      // z.object strips unknown keys rather than rejecting them, so an
+      // unknown key is accepted (verified: accepted, issue #4183 item 18).
+      { name: "an unknown key", input: { unknownKey: true }, valid: true },
+    ];
 
-    test("accepts talkback: false", () => {
-      expect(() => accessibilitySchema.parse({ talkback: false })).not.toThrow();
-    });
-
-    test("accepts empty object (all params optional)", () => {
-      expect(() => accessibilitySchema.parse({})).not.toThrow();
-    });
-
-    test("rejects talkback as a string", () => {
-      expect(() => accessibilitySchema.parse({ talkback: "yes" })).toThrow();
-    });
-
-    test("rejects talkback as a number", () => {
-      expect(() => accessibilitySchema.parse({ talkback: 1 })).toThrow();
-    });
-
-    test("accepts voiceover: true", () => {
-      expect(() => accessibilitySchema.parse({ voiceover: true })).not.toThrow();
-    });
-
-    test("accepts voiceover: false", () => {
-      expect(() => accessibilitySchema.parse({ voiceover: false })).not.toThrow();
-    });
-
-    test("rejects voiceover as a string", () => {
-      expect(() => accessibilitySchema.parse({ voiceover: "yes" })).toThrow();
-    });
-
-    test("rejects voiceover as a number", () => {
-      expect(() => accessibilitySchema.parse({ voiceover: 1 })).toThrow();
+    test.each(cases)("$valid for $name", ({ input, valid }) => {
+      if (valid) {
+        expect(() => accessibilitySchema.parse(input)).not.toThrow();
+      } else {
+        expect(() => accessibilitySchema.parse(input)).toThrow();
+      }
     });
   });
 });

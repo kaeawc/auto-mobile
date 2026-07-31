@@ -579,7 +579,7 @@ describe("webrtcStreamManager", () => {
     expect(listWebRtcStreams()[0].frameMetrics).toEqual(metrics);
   });
 
-  test("threads the resolved iOS Simulator fps into the capture source options", async () => {
+  test("threads the resolved Android fps into the capture source options", async () => {
     let capturedSourceOptions:
       | Parameters<NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>>[0]
       | undefined;
@@ -596,6 +596,30 @@ describe("webrtcStreamManager", () => {
 
     await startWebRtcStream({
       device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT, androidFps: 24 },
+    });
+
+    // Android takes its capture rate from androidFps, not the iOS-tuned default.
+    expect(capturedSourceOptions?.fps).toBe(24);
+  });
+
+  test("threads the resolved iOS Simulator fps into the capture source options", async () => {
+    let capturedSourceOptions:
+      | Parameters<NonNullable<Parameters<typeof setWebRtcStreamManagerDependencies>[0]["createSource"]>>[0]
+      | undefined;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: options => {
+        capturedSourceOptions = options;
+        return new FakeSource() as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => null,
+      now: () => new Date("2026-07-23T00:00:00.000Z"),
+    });
+
+    await startWebRtcStream({
+      device: IOS,
       overrides: { whipEndpoint: ENDPOINT, iosSimulatorFps: 24 },
     });
 

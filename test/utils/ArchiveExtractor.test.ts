@@ -53,8 +53,8 @@ class RecordingExecutor implements HostCommandExecutor {
     const destDir = dashC >= 0 ? args[dashC + 1] : ".";
     for (const rel of this.filesToWrite) {
       const target = path.join(destDir, rel);
-      await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.writeFile(target, "payload");
+      await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+      await fs.writeFile(target, "payload", { mode: 0o600 });
     }
     return execResult("");
   }

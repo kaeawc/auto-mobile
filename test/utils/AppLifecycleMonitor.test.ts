@@ -1,7 +1,6 @@
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { AppLifecycleMonitor, DefaultAppLifecycleMonitor, AppLifecycleEvent } from "../../src/utils/AppLifecycleMonitor";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { AppLifecycleMonitorFactory } from "../../src/utils/factories/AppLifecycleMonitorFactory";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../src/models";
 import { logger } from "../../src/utils/logger";
@@ -23,8 +22,7 @@ describe("AppLifecycleMonitor", () => {
     const fakeFactory: AdbClientFactory = {
       create: () => fakeAdb,
     };
-    AppLifecycleMonitorFactory.setAdbFactory(fakeFactory);
-    monitor = AppLifecycleMonitorFactory.getInstance();
+    monitor = new DefaultAppLifecycleMonitor(fakeFactory);
   });
 
   afterEach(async () => {
@@ -36,16 +34,12 @@ describe("AppLifecycleMonitor", () => {
 
     // Clear all event listeners
     monitor.removeAllListeners();
-
-    // Reset factory
-    AppLifecycleMonitorFactory.reset();
   });
 
   describe("singleton pattern", () => {
     test("should return the same instance", () => {
-      // Use factory to get instance (respects injected fake from beforeEach)
-      const instance1 = AppLifecycleMonitorFactory.getInstance();
-      const instance2 = AppLifecycleMonitorFactory.getInstance();
+      const instance1 = DefaultAppLifecycleMonitor.getInstance();
+      const instance2 = DefaultAppLifecycleMonitor.getInstance();
       expect(instance1).toBe(instance2);
     });
   });
@@ -261,8 +255,8 @@ describe("AppLifecycleMonitor", () => {
   });
 
   describe("type safety", () => {
-    test("factory getInstance returns object with both interface and class-specific methods", () => {
-      const instance = AppLifecycleMonitorFactory.getInstance();
+    test("instance exposes both interface and class-specific methods", () => {
+      const instance = monitor;
 
       // Interface methods are accessible
       expect(typeof instance.trackPackage).toBe("function");

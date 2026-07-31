@@ -105,6 +105,16 @@ export class IOSSimulatorCaptureHelperPool {
       }
       const targetKey = helperTargetKey(lease.options.target, lease.options.binaryPath);
       let entry = this.entries.get(targetKey);
+      if (entry?.failedStopFailed) {
+        // A previous helper.stop() threw and left this entry poisoned. The
+        // failure was already surfaced once (to the awaiting invalidate/best-
+        // effort cleanup). Drop the entry now so this attach can build a fresh
+        // helper instead of re-throwing the same error forever — bounded retry,
+        // not permanent poison of the window target.
+        this.clearEntryIdleTimer(entry);
+        this.entries.delete(targetKey);
+        entry = undefined;
+      }
       if (!entry) {
         // A new CGWindowID proves a reboot/window recreation. Evict any idle
         // session now rather than letting it occupy ScreenCaptureKit resources
@@ -133,9 +143,6 @@ export class IOSSimulatorCaptureHelperPool {
         this.wireHelper(entry);
       }
 
-      if (entry.failedStopFailed) {
-        throw entry.failedStopError;
-      }
       this.clearEntryIdleTimer(entry);
       entry.leases.add(lease);
       lease.entryKey = targetKey;
@@ -258,6 +265,11 @@ export class IOSSimulatorCaptureHelperPool {
     try {
       await entry.helper.stop();
     } catch (error) {
+      // Surface the stop failure to this caller, but record it so it is only
+      // re-thrown to concurrent cleanup of the SAME failed entry — never to a
+      // future attach. attach() drops a failedStopFailed entry and builds a
+      // fresh helper instead, so the failure cannot permanently poison the
+      // window target.
       entry.failedStopFailed = true;
       entry.failedStopError = error;
       throw error;
@@ -276,6 +288,15 @@ export class IOSSimulatorCaptureHelperPool {
     await entry.helper.stop();
   }
 
+  // All pool mutations serialize through one global chain rather than a
+  // per-target queue. attach() mutates cross-target state — it evicts idle
+  // entries belonging to *other* window keys before creating a new helper — so
+  // a per-key queue could stop an entry that a concurrent attach on that key is
+  // adopting. A slow helper.stop() therefore does delay an attach on an
+  // unrelated simulator; that is an accepted trade for the eviction invariant,
+  // since concurrent multi-simulator streaming is rare and the stops are
+  // TTL-bounded best-effort work. Revisit with per-key serialization only after
+  // decoupling the cross-target eviction from attach.
   private enqueue(action: () => Promise<void>): Promise<void> {
     const next = this.transition.then(action, action);
     this.transition = next.catch(() => undefined);

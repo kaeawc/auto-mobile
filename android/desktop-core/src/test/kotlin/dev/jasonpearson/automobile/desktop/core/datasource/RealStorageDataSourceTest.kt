@@ -8,12 +8,37 @@ import dev.jasonpearson.automobile.desktop.core.storage.KeyValueType
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RealStorageDataSourceTest {
+
+  @Test
+  fun `executeSQL enables app data interop before querying`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    client.callToolResult =
+      Json.parseToJsonElement(
+        """{"content":[{"type":"text","text":"{\"type\":\"query\",\"columns\":[],\"rows\":[],\"total\":0}"}]}"""
+      )
+    val dataSource =
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "emulator-5554",
+        packageName = "com.example.app",
+      )
+
+    val result = dataSource.executeSQL("/data/data/com.example.app/databases/app.db", "SELECT 1")
+
+    assertTrue(result is Result.Success)
+    assertEquals(listOf("setToolCapability", "sqlQuery"), client.toolCalls.map { it.name })
+    assertEquals(
+      "app-data-interop",
+      client.toolCalls.first().arguments["capability"]?.toString()?.trim('"'),
+    )
+  }
 
   @Test
   fun `getKeyValueFiles returns error when no clientProvider`() = runBlocking {

@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = "src/utils/ArchiveExtractor.ts";
+
+/** Repo-relative path with forward slashes so comparisons hold on Windows. */
+function repoRelative(file: string): string {
+  return relative(ROOT, file).split(sep).join("/");
+}
 
 /**
  * Detect a production `tar` extraction executed outside the archive-extraction
@@ -47,7 +52,7 @@ describe("archive extraction boundary (issue #4065)", () => {
       // Diagnostic-only references are allowed only with a concrete reason here.
     ]);
     const offenders = sourceFiles(join(ROOT, "src")).flatMap(file => {
-      const repoPath = relative(ROOT, file);
+      const repoPath = repoRelative(file);
       if (repoPath === OWNER || exceptions.has(repoPath)) {return [];}
       const source = readFileSync(file, "utf8");
       return directlyExtractsTar(source)
@@ -97,6 +102,6 @@ describe("archive extraction boundary (issue #4065)", () => {
     const exceptions = new Map<string, string>([
       // Keep this list empty unless a production diagnostic cannot use the owner.
     ]);
-    expect([...exceptions.keys()].filter(path => !sourceFiles(join(ROOT, "src")).some(file => relative(ROOT, file) === path))).toEqual([]);
+    expect([...exceptions.keys()].filter(path => !sourceFiles(join(ROOT, "src")).some(file => repoRelative(file) === path))).toEqual([]);
   });
 });

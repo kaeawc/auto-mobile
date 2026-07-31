@@ -1,12 +1,15 @@
+import type { ChildProcess } from "node:child_process";
 import { constants as fsConstants, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import process from "node:process";
+import type { Writable } from "node:stream";
 import { ActionableError } from "../../../models/ActionableError";
 import { type ArchiveExtractor, DefaultArchiveExtractor } from "../../ArchiveExtractor";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../ChecksumCalculator";
 import { DefaultFileDownloader, type FileDownloader } from "../../FileDownloader";
+import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../../HostCommandExecutor";
 import { logger } from "../../logger";
 
 const LIBWEBP_VERSION = "1.6.0";
@@ -29,6 +32,7 @@ export interface WebpBinaryResolverOptions {
   env?: NodeJS.ProcessEnv;
   fileDownloader?: FileDownloader;
   archiveExtractor?: ArchiveExtractor;
+  processExecutor?: HostProcessExecutor;
   checksumCalculator?: ChecksumCalculator;
 }
 
@@ -37,9 +41,18 @@ export interface ResolvedWebpBinaries {
   dwebp: string;
 }
 
+/**
+ * The single injected boundary that both resolves and executes the libwebp
+ * CLI tools. Consumers pass argv structurally (never shell-interpolated) and
+ * receive the codec output buffer; the owner defines availability, process
+ * lifecycle, child cleanup, and actionable errors. Keep image-transformation
+ * semantics (argv construction, buffer sniffing) in the codec layer.
+ */
 export interface WebpBinaryProvider {
   resolveCwebp(): Promise<string>;
   resolveDwebp(): Promise<string>;
+  runCwebp(args: string[], input: Buffer): Promise<Buffer>;
+  runDwebp(args: string[], input: Buffer): Promise<Buffer>;
 }
 
 export class WebpBinaryResolver implements WebpBinaryProvider {
@@ -50,6 +63,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private readonly env: NodeJS.ProcessEnv;
   private readonly fileDownloader: FileDownloader;
   private readonly archiveExtractor: ArchiveExtractor;
+  private readonly processExecutor: HostProcessExecutor;
   private readonly checksumCalculator: ChecksumCalculator;
 
   constructor(options: WebpBinaryResolverOptions = {}) {
@@ -60,6 +74,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     this.env = options.env ?? process.env;
     this.fileDownloader = options.fileDownloader ?? new DefaultFileDownloader();
     this.archiveExtractor = options.archiveExtractor ?? new DefaultArchiveExtractor();
+    this.processExecutor = options.processExecutor ?? new DefaultHostCommandExecutor();
     this.checksumCalculator = options.checksumCalculator ?? new DefaultChecksumCalculator();
   }
 
@@ -74,6 +89,44 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
 
   async resolveDwebp(): Promise<string> {
     return this.resolveBinary("dwebp", "AUTOMOBILE_DWEBP_PATH");
+  }
+
+  async runCwebp(args: string[], input: Buffer): Promise<Buffer> {
+    const command = await this.resolveCwebp();
+    return this.runCodecProcess("cwebp", command, args, input, "AUTOMOBILE_CWEBP_PATH");
+  }
+
+  async runDwebp(args: string[], input: Buffer): Promise<Buffer> {
+    const command = await this.resolveDwebp();
+    return this.runCodecProcess("dwebp", command, args, input, "AUTOMOBILE_DWEBP_PATH");
+  }
+
+  private async runCodecProcess(
+    toolName: WebpBinary,
+    command: string,
+    args: string[],
+    input: Buffer,
+    envVar: string
+  ): Promise<Buffer> {
+    const child = this.processExecutor.spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+
+    if (!child.stdin || !child.stdout || !child.stderr) {
+      throw new ActionableError(`${toolName} was spawned without piped stdio. Set ${envVar} to a working ${toolName} binary.`);
+    }
+
+    child.stdout.on("data", data => stdout.push(Buffer.isBuffer(data) ? data : Buffer.from(data)));
+    child.stderr.on("data", data => stderr.push(Buffer.isBuffer(data) ? data : Buffer.from(data)));
+    const completion = waitForCompletion(child, child.stdin, toolName, envVar, stderr);
+    try {
+      child.stdin.end(input);
+    } catch (error) {
+      throw actionableProcessError(toolName, envVar, `stdin write failed: ${errorMessage(error)}`);
+    }
+
+    await completion;
+    return Buffer.concat(stdout);
   }
 
   private async resolveBinary(binary: WebpBinary, envVar: string): Promise<string> {
@@ -260,6 +313,36 @@ async function isExecutableFile(filePath: string, platform: NodeJS.Platform): Pr
   }
 }
 
+
+async function waitForCompletion(
+  child: ChildProcess,
+  stdin: Writable,
+  toolName: WebpBinary,
+  envVar: string,
+  stderr: Buffer[]
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", error => {
+      reject(actionableProcessError(toolName, envVar, error.message));
+    });
+    stdin.once("error", error => {
+      reject(actionableProcessError(toolName, envVar, `stdin write failed: ${errorMessage(error)}`));
+    });
+    child.once("close", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const detail = Buffer.concat(stderr).toString("utf8").trim();
+      const suffix = detail ? `: ${detail}` : "";
+      reject(actionableProcessError(toolName, envVar, `exited with code ${code ?? "null"} signal ${signal ?? "null"}${suffix}`));
+    });
+  });
+}
+
+function actionableProcessError(toolName: WebpBinary, envVar: string, detail: string): ActionableError {
+  return new ActionableError(`${toolName} failed (${detail}). Set ${envVar} to a working ${toolName} binary.`);
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

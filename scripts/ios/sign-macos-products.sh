@@ -54,6 +54,9 @@ sign_package() {
   fi
 
   echo "Building ${package_name} (release) for macOS signing..."
+  # `--show-bin-path` reports the release directory but does not build it.
+  # Produce the release artifact before asking SwiftPM where it was placed.
+  (cd "${package_dir}" && swift build -c release)
   local bin_path
   bin_path=$(cd "${package_dir}" && swift build -c release --show-bin-path)
 

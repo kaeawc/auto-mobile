@@ -292,6 +292,54 @@ describe("ScreenshotJobTracker", () => {
     expect(ScreenshotJobTracker.getMostRecentPendingDeviceId()).toBe("device-2");
   });
 
+  test("clear aborts every pending job, removes their parent-signal listeners, and empties the tracker", async () => {
+    const listeners = new Set<EventListenerOrEventListenerObject>();
+    const parentSignal = {
+      aborted: false,
+      addEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
+        listeners.add(cb);
+      },
+      removeEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
+        listeners.delete(cb);
+      }
+    } as unknown as AbortSignal;
+
+    const hang = (signal: AbortSignal) => new Promise<{ success: boolean; error?: string }>(resolve => {
+      signal.addEventListener("abort", () => {
+        resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+      }, { once: true });
+    });
+
+    const jobA = ScreenshotJobTracker.startJob("device-1", hang);
+    const jobB = ScreenshotJobTracker.startJob("device-2", hang, { parentSignal });
+    // Let both runners attach their abort listeners before clearing.
+    await Promise.resolve();
+
+    expect(ScreenshotJobTracker.isPending("device-1")).toBe(true);
+    expect(ScreenshotJobTracker.isPending("device-2")).toBe(true);
+    // The parent-signal-backed job holds exactly one abort listener while live.
+    expect(listeners.size).toBe(1);
+
+    ScreenshotJobTracker.clear();
+
+    // Every in-flight job is aborted synchronously...
+    expect(jobA.signal.aborted).toBe(true);
+    expect(jobB.signal.aborted).toBe(true);
+    // ...the tracker is emptied immediately, before the runners settle...
+    expect(ScreenshotJobTracker.isPending("device-1")).toBe(false);
+    expect(ScreenshotJobTracker.isPending("device-2")).toBe(false);
+    expect(ScreenshotJobTracker.getMostRecentPendingDeviceId()).toBeUndefined();
+    // ...and the long-lived parent-signal listener is removed to prevent leaks.
+    expect(listeners.size).toBe(0);
+
+    // The aborted runners still resolve with the cancellation result.
+    const [rA, rB] = await Promise.all([jobA.promise, jobB.promise]);
+    expect(rA.success).toBe(false);
+    expect(rA.error).toContain(OPERATION_CANCELLED_MESSAGE);
+    expect(rB.success).toBe(false);
+    expect(rB.error).toContain(OPERATION_CANCELLED_MESSAGE);
+  });
+
   test("waitForCompletion returns null when the job times out", async () => {
     ScreenshotJobTracker.startJob("device-2", async signal => {
       return new Promise(resolve => {

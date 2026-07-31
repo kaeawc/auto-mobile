@@ -36,7 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Link
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
-import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
@@ -55,8 +55,10 @@ fun PerformanceDashboard(
   onNavigateToTest: (String) -> Unit = {}, // Navigate to a test
   dataSourceMode: DataSourceMode = DataSourceMode.Fake,
   clientProvider: (() -> AutoMobileClient)? = null, // MCP client for real data
-  observationStreamClient: ObservationStreamClient? =
-    null, // Shared stream client for real-time updates
+  observationStreamClient: ObservationStream? = null, // Per-device stream for real-time updates
+  // Device this dashboard is scoped to; when set, cross-device stream updates are dropped so panes
+  // in a multi-device workspace can't contaminate each other's live metrics. Null = no filtering.
+  deviceId: String? = null,
   // Initial metrics from parent to avoid empty state flicker when opening
   initialFps: Float? = null,
   initialFrameTimeMs: Float? = null,
@@ -201,6 +203,11 @@ fun PerformanceDashboard(
 
     LOG.info("Starting performance updates collection from stream client")
     observationStreamClient.performanceUpdates.collect { update ->
+      // The stream may be server-scoped to one device, but guard against cross-device updates so a
+      // multi-device workspace can't contaminate this pane's metrics.
+      if (deviceId != null && update.deviceId != null && update.deviceId != deviceId) {
+        return@collect
+      }
       LOG.info(
         "Received performance update - fps=${update.fps}, jankFrames=${update.jankFrames}, touchLatencyMs=${update.touchLatencyMs}, ttiMs=${update.timeToInteractiveMs}, screenName=${update.screenName}"
       )

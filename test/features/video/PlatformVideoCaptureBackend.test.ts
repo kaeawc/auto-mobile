@@ -8,7 +8,6 @@ import type {
   VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
-import type { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -16,26 +15,6 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 describe("PlatformVideoCaptureBackend - Unit Tests", () => {
   let backend: PlatformVideoCaptureBackend;
   let tempDir: string;
-
-  test("gives iOS FFmpeg scaling a bounded media-processing timeout", async () => {
-    let request: { timeoutMs?: number } | undefined;
-    const ffmpegClient = {
-      run: async (value: { timeoutMs?: number }) => {
-        request = value;
-        return { stdout: "", stderr: "", exitCode: 0, signal: null };
-      },
-    };
-    const backend = new PlatformVideoCaptureBackend(
-      undefined,
-      undefined,
-      undefined,
-      ffmpegClient as any,
-    );
-
-    await (backend as any).scaleWithFfmpeg("/tmp/input.mov", "/tmp/output.mp4", { width: 1280, height: 720 });
-
-    expect(request?.timeoutMs).toBeGreaterThan(5_000);
-  });
 
   beforeEach(async () => {
     backend = new PlatformVideoCaptureBackend();
@@ -100,30 +79,22 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     });
   });
 
-  test("starts iOS recording through the injected SimCtl argv boundary", async () => {
-    const process = new FakeChildProcess();
-    process.simulateSpawn();
-    let receivedArgs: string[] = [];
-    let receivedOptions: unknown;
-    const simctl = {
-      isAvailable: async () => true,
-      startCommandArgs: async (args: string[], options?: unknown) => {
-        receivedArgs = args;
-        receivedOptions = options;
-        return process as any;
-      },
-    } as SimCtl;
-    backend = new PlatformVideoCaptureBackend(undefined, undefined, () => simctl);
+  // The platform-native `simctl recordVideo` branch was unreachable dead code:
+  // HybridVideoCaptureBackend routes every iOS device to FfmpegVideoProcessingBackend.
+  // The dead branch spawned the recorder with all stdio ignored, so a failed capture
+  // surfaced only an exit code with no stderr to diagnose it. It was removed (issue
+  // #4773); iOS callers are now rejected explicitly so a future mis-wire fails loudly
+  // instead of silently, and the error points at the correct backend.
+  test("rejects iOS recording and points at the ffmpeg backend (issue #4773)", async () => {
     const device: BootedDevice = { platform: "ios", deviceId: "ios-platform-udid", name: "iPhone" };
 
-    await backend.start({
-      recordingId: "recording", outputDirectory: tempDir, outputPath: path.join(tempDir, "video.mp4"),
-      fileName: "video.mp4", startedAt: new Date().toISOString(), qualityPreset: "low", targetBitrateKbps: 1000,
-      maxThroughputMbps: 5, fps: 15, maxArchiveSizeMb: 2048, format: "mp4", device,
-    });
-
-    expect(receivedArgs).toEqual(["io", "ios-platform-udid", "recordVideo", "--codec", "h264", "--force", path.join(tempDir, "video.mp4")]);
-    expect(receivedOptions).toEqual({ stdio: ["ignore", "ignore", "ignore"] });
+    await expect(
+      backend.start({
+        recordingId: "recording", outputDirectory: tempDir, outputPath: path.join(tempDir, "video.mp4"),
+        fileName: "video.mp4", startedAt: new Date().toISOString(), qualityPreset: "low", targetBitrateKbps: 1000,
+        maxThroughputMbps: 5, fps: 15, maxArchiveSizeMb: 2048, format: "mp4", device,
+      })
+    ).rejects.toThrow(/FfmpegVideoProcessingBackend/);
   });
 
   describe("Stop Operation", () => {

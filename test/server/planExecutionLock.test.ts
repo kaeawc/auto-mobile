@@ -64,19 +64,16 @@ describe("Plan execution lock", () => {
       reason: "plan execution in progress",
     });
 
-    try {
-      const { client } = fixture.getContext();
-      await client.request({
+    const { client } = fixture.getContext();
+    await expect(
+      client.request({
         method: "tools/call",
         params: {
           name: "listDeviceImages",
           arguments: { platform: "android" },
         },
-      }, z.any());
-      expect.fail("Expected tool call to be rejected");
-    } catch (error: any) {
-      expect(error.message).toContain("plan execution in progress");
-    }
+      }, z.any())
+    ).rejects.toThrow("plan execution in progress");
   });
 
   test("allows MCP tool calls when no plan is executing", async () => {

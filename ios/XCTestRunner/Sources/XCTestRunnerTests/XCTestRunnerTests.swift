@@ -40,8 +40,11 @@ final class XCTestRunnerTests: XCTestCase {
 
         _ = try executor.execute(testMetadata: metadata)
 
-        XCTAssertEqual(mcpClient.calls.count, 1)
-        let call = mcpClient.calls[0]
+        XCTAssertEqual(mcpClient.calls.count, 2)
+        let capabilityCall = mcpClient.calls[0]
+        XCTAssertEqual(capabilityCall.name, "setToolCapability")
+        XCTAssertEqual(capabilityCall.arguments["capability"] as? String, "test-authoring")
+        let call = mcpClient.calls[1]
         XCTAssertEqual(call.name, "executePlan")
         XCTAssertEqual(call.arguments["platform"] as? String, "ios")
         XCTAssertEqual(call.arguments["startStep"] as? Int, 0)
@@ -92,8 +95,37 @@ final class XCTestRunnerTests: XCTestCase {
 
         _ = try executor.execute(testMetadata: nil)
 
-        XCTAssertEqual(mcpClient.calls.count, 2)
+        XCTAssertEqual(mcpClient.executePlanCalls.count, 2)
         XCTAssertEqual(timer.sleeps, [1])
+    }
+
+    func testExecutePlanFallsBackWhenOlderDaemonLacksCapabilityTool() throws {
+        let mcpClient = FakeMCPClient()
+        mcpClient.capabilityError = MCPClientError.serverError("Unknown tool: setToolCapability")
+        mcpClient.queueResponse(success: true, executedSteps: 1, totalSteps: 1)
+        let config = try AutoMobilePlanExecutor.Configuration(
+            transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
+            planPath: "test-plan.yaml",
+            retryCount: 0,
+            timeoutSeconds: 5,
+            retryDelaySeconds: 0,
+            startStep: 0,
+            parameters: [:],
+            cleanup: nil,
+            planBundle: nil
+        )
+        let executor = AutoMobilePlanExecutor(
+            configuration: config,
+            planLoader: FakePlanLoader(content: "name: Test Plan\nsteps:\n  - tool: observe"),
+            mcpClient: mcpClient,
+            timer: FakeTimer(),
+            logger: NullLogger()
+        )
+
+        let result = try executor.execute(testMetadata: nil)
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(mcpClient.calls.map(\.name), ["setToolCapability", "executePlan"])
     }
 
     func testDaemonSocketPreflightPassesConfiguredRepoRootToDaemonManager() throws {
@@ -183,7 +215,7 @@ final class XCTestRunnerTests: XCTestCase {
 
         _ = try executor.execute(testMetadata: nil)
 
-        guard let encoded = mcpClient.calls.first?.arguments["planContent"] as? String else {
+        guard let encoded = mcpClient.executePlanCalls.first?.arguments["planContent"] as? String else {
             XCTFail("Missing plan content")
             return
         }
@@ -224,7 +256,7 @@ final class XCTestRunnerTests: XCTestCase {
 
         _ = try executor.execute(testMetadata: nil)
 
-        XCTAssertEqual(mcpClient.calls.first?.arguments["platform"] as? String, "android")
+        XCTAssertEqual(mcpClient.executePlanCalls.first?.arguments["platform"] as? String, "android")
     }
 
     func testPlanDevicesPassedToExecutePlan() throws {
@@ -265,7 +297,7 @@ final class XCTestRunnerTests: XCTestCase {
 
         _ = try executor.execute(testMetadata: nil)
 
-        let devices = mcpClient.calls.first?.arguments["devices"] as? [String]
+        let devices = mcpClient.executePlanCalls.first?.arguments["devices"] as? [String]
         XCTAssertEqual(devices, ["ios-1"])
     }
 
@@ -431,8 +463,11 @@ private final class FakeMCPClient: AutoMobileMCPClient {
     }
 
     private var queuedResults: [Result<MCPToolResponse, Error>] = []
+    var capabilityError: Error?
     private(set) var calls: [Call] = []
     private(set) var initializeCount = 0
+
+    var executePlanCalls: [Call] { calls.filter { $0.name == "executePlan" } }
 
     func queueResponse(success: Bool, executedSteps: Int, totalSteps: Int) {
         let payload: [String: Any] = [
@@ -487,6 +522,12 @@ private final class FakeMCPClient: AutoMobileMCPClient {
 
     func callTool(name: String, arguments: [String: Any], timeout _: TimeInterval) throws -> MCPToolResponse {
         calls.append(Call(name: name, arguments: arguments))
+        if name == "setToolCapability" {
+            if let capabilityError {
+                throw capabilityError
+            }
+            return MCPToolResponse(text: "{\"enabled\":true}")
+        }
         guard !queuedResults.isEmpty else {
             return MCPToolResponse(text: "{\"success\":true,\"executedSteps\":0,\"totalSteps\":0}")
         }

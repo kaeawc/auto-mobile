@@ -10,11 +10,18 @@ import type { SessionToolProfileService } from "./SessionToolProfileService";
  * device/routing identity instead of collapsing back onto the base session.
  * Capability enforcement is computed SEPARATELY at each assert call (union of
  * base + derived, Gap B) and is intentionally NOT carried here, so routing and
- * capability can no longer be re-conflated.
+ * capability can no longer be re-conflated. A connection-scoped capability
+ * profile is carried independently so it can participate in that union without
+ * changing nested calls' routing identity.
  */
 type ToolCapabilityContext = {
   routingSessionUuid?: string;
-  sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
+  /** Connection-scoped profile used for policy, distinct from device routing. */
+  capabilitySessionUuid?: string;
+  /** An admitted executePlan may invoke its nested plan steps without per-step opt-ins. */
+  planCapabilitiesAuthorized?: boolean;
+  sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled"> &
+    Partial<Pick<SessionToolProfileService, "setEnabled" | "deleteSession">>;
 };
 
 const toolCapabilityContext = new AsyncLocalStorage<ToolCapabilityContext>();
@@ -26,6 +33,9 @@ export const runWithToolCapabilityContext = async <T>(
   const parent = toolCapabilityContext.getStore();
   return toolCapabilityContext.run({
     routingSessionUuid: context.routingSessionUuid ?? parent?.routingSessionUuid,
+    capabilitySessionUuid: context.capabilitySessionUuid ?? parent?.capabilitySessionUuid,
+    planCapabilitiesAuthorized: context.planCapabilitiesAuthorized
+      ?? parent?.planCapabilitiesAuthorized,
     sessionToolProfileService: context.sessionToolProfileService ?? parent?.sessionToolProfileService,
   }, fn);
 };

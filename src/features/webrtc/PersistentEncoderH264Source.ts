@@ -88,6 +88,67 @@ export interface VideoServerSession {
   deviceSerial: string;
 }
 
+/**
+ * Process-lived memory of which `automobile_video_*` abstract socket names are
+ * currently owned by an in-flight or live capture session on a device.
+ *
+ * The orphan-forward sweep (`sweepOrphanForwards`) uses this to distinguish a
+ * genuinely stranded `adb forward` — one whose device server self-expired and
+ * deleted its own lease, or whose daemon was SIGKILLed — from the forward of a
+ * *concurrently starting* session, which necessarily exists before that
+ * session has written its lease. A session registers its socket name the moment
+ * it is created (before its forward is opened) and unregisters it on teardown,
+ * so any forward reachable during that write-before-lease gap is protected.
+ *
+ * Injected so unit tests stay isolated; the daemon uses a single process-lived
+ * instance so registrations are visible across sibling sessions. A daemon crash
+ * clears the in-memory instance along with the process, which is exactly
+ * correct — the sessions it tracked are dead and their forwards are the orphans
+ * the next `start()` should reclaim.
+ */
+export interface ActiveVideoSessionRegistry {
+  /** Mark a session's abstract socket name as owned on a device. */
+  add(deviceId: string, socketName: string): void;
+  /** Clear a session's socket name once its resources are torn down. */
+  remove(deviceId: string, socketName: string): void;
+  /** Socket names currently owned by a live/in-flight session on the device. */
+  active(deviceId: string): ReadonlySet<string>;
+}
+
+const EMPTY_SOCKET_NAME_SET: ReadonlySet<string> = new Set<string>();
+
+export class InMemoryActiveVideoSessionRegistry implements ActiveVideoSessionRegistry {
+  private readonly byDevice = new Map<string, Set<string>>();
+
+  add(deviceId: string, socketName: string): void {
+    const existing = this.byDevice.get(deviceId);
+    if (existing) {
+      existing.add(socketName);
+      return;
+    }
+    this.byDevice.set(deviceId, new Set([socketName]));
+  }
+
+  remove(deviceId: string, socketName: string): void {
+    const existing = this.byDevice.get(deviceId);
+    if (!existing) {
+      return;
+    }
+    existing.delete(socketName);
+    if (existing.size === 0) {
+      this.byDevice.delete(deviceId);
+    }
+  }
+
+  active(deviceId: string): ReadonlySet<string> {
+    return this.byDevice.get(deviceId) ?? EMPTY_SOCKET_NAME_SET;
+  }
+}
+
+/** Shared across sibling capture sessions in the daemon process. */
+export const defaultActiveVideoSessionRegistry: ActiveVideoSessionRegistry =
+  new InMemoryActiveVideoSessionRegistry();
+
 interface RawVideoServerLease {
   socketName: string;
   sessionToken: string;
@@ -157,6 +218,12 @@ export interface PersistentEncoderH264SourceOptions {
   adbFactory?: AdbClientFactory;
   connector?: SocketConnector;
   timer?: Timer;
+  /**
+   * Registry of socket names owned by live/in-flight sessions, used by the
+   * orphan-forward sweep to avoid removing a concurrently-starting session's
+   * forward. Defaults to a process-lived singleton shared across sessions.
+   */
+  activeVideoSessionRegistry?: ActiveVideoSessionRegistry;
   /** How long to wait for the server to signal readiness (ms). */
   readyTimeoutMs?: number;
   /** Bounded time for a blocking launch-path ADB/socket call (ms). */
@@ -175,6 +242,28 @@ const DEFAULT_READY_TIMEOUT_MS = 10_000;
 
 function socketNameForToken(token: string): string {
   return `${VIDEO_SERVER_SOCKET_PREFIX}_${token.replaceAll("-", "")}`;
+}
+
+/**
+ * Parse one `adb forward --list` row (`<serial> tcp:<port> localabstract:<name>`)
+ * into a video forward, or `null` when the row is not an `automobile_video_*`
+ * TCP forward. Field order is not assumed — the `tcp:`/`localabstract:` tokens
+ * are matched positionally-agnostically, mirroring `removeForwardIfMatching`.
+ */
+function parseVideoForwardLine(line: string): { port: number; socketName: string } | null {
+  const fields = line.trim().split(/\s+/);
+  const destination = fields.find(field =>
+    field.startsWith(`localabstract:${VIDEO_SERVER_SOCKET_PREFIX}_`)
+  );
+  const portField = fields.find(field => field.startsWith("tcp:"));
+  if (destination === undefined || portField === undefined) {
+    return null;
+  }
+  const port = Number.parseInt(portField.slice("tcp:".length), 10);
+  if (!Number.isInteger(port) || port <= 0) {
+    return null;
+  }
+  return { port, socketName: destination.slice("localabstract:".length) };
 }
 
 function isSafeSessionToken(value: string): boolean {
@@ -302,6 +391,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private readonly localSocketReconnectWindowMs: number;
   private readonly localSocketReconnectRetryMs: number;
   private readonly sessionTokenFactory: () => string;
+  private readonly activeVideoSessionRegistry: ActiveVideoSessionRegistry;
 
   private server: AdbProcess | null = null;
   private socket: StreamSocket | null = null;
@@ -340,6 +430,8 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.localSocketReconnectRetryMs =
       options.localSocketReconnectRetryMs ?? DEFAULT_LOCAL_SOCKET_RECONNECT_RETRY_MS;
     this.sessionTokenFactory = options.sessionTokenFactory ?? (() => defaultIdGenerator.next());
+    this.activeVideoSessionRegistry =
+      options.activeVideoSessionRegistry ?? defaultActiveVideoSessionRegistry;
     this.validateTimings();
   }
 
@@ -490,6 +582,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     const session = this.createSession();
     this.session = session;
     this.deviceProcessId = null;
+    // Claim this session's socket name BEFORE reconcile opens/owns any forward,
+    // so a sibling session's concurrent orphan sweep can never mistake our
+    // about-to-be-created forward for a stranded one. Cleared in teardown().
+    this.activeVideoSessionRegistry.add(this.options.device.deviceId, session.socketName);
     await this.reconcileExpiredLeases(adb);
     if (!this.running) {return null;}
     await this.withTimeout(
@@ -1150,6 +1246,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.session = null;
     if (session) {
       await this.cleanupOwnedSession(session, port, deviceProcessId);
+      // Release the socket-name claim only after cleanup removed our forward, so
+      // a sibling sweep cannot reclaim it during the stop()-during-spawn window.
+      this.activeVideoSessionRegistry.remove(this.options.device.deviceId, session.socketName);
     } else if (port !== null) {
       logger.warn(
         `[PersistentEncoderH264Source] refusing forward cleanup port=${port}: session identity is unavailable`
@@ -1177,6 +1276,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     // Sweep corrupt/orphaned files regardless of how many leases parsed: a
     // wholly-unparseable directory yields zero leases but still needs cleanup.
     await this.sweepOrphanLeaseFiles(adb, new Set(leases.map(lease => `${lease.token}.json`)));
+
+    // Sweep host forwards with no backing lease at all (device server
+    // self-expired and deleted its own lease, or the daemon was SIGKILLed). Runs
+    // regardless of lease count — the whole point is that the lease is gone.
+    await this.sweepOrphanForwards(adb, new Set(leases.map(lease => lease.socketName)));
 
     if (leases.length === 0) {
       return;
@@ -1296,6 +1400,58 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       } catch (error) {
         logger.debug(`[PersistentEncoderH264Source] stale-lease-file sweep failed name=${file.name}: ${error}`);
       }
+    }
+  }
+
+  /**
+   * Sweep host `adb forward` entries pointing at an `automobile_video_*` abstract
+   * socket that have no backing lease and are not owned by a live/in-flight
+   * session. This is the only path that can reclaim a forward whose lease is
+   * already gone — the lease-driven loop above removes only forwards *named in*
+   * lease files, so a self-expired server's forward (lease self-deleted) or a
+   * SIGKILLed daemon's forward would otherwise leak until the adb server
+   * restarts (issue #4753).
+   *
+   * `removeForwardIfMatching` re-verifies the port↔destination before removing,
+   * so a port reused by an unrelated service is never touched.
+   */
+  private async sweepOrphanForwards(
+    adb: ReturnType<AdbClientFactory["create"]>,
+    leaseBackedSocketNames: ReadonlySet<string>
+  ): Promise<void> {
+    let stdout: string;
+    try {
+      const listed = await this.withTimeout(
+        adb.executeCommand("forward --list"),
+        this.teardownTimeoutMs,
+        "adb forward --list for orphan sweep"
+      );
+      stdout = listed.stdout;
+    } catch (error) {
+      logger.debug(`[PersistentEncoderH264Source] unable to list forwards for orphan sweep: ${error}`);
+      return;
+    }
+
+    const activeSocketNames = this.activeVideoSessionRegistry.active(this.options.device.deviceId);
+    const orphans: { port: number; socketName: string }[] = [];
+    for (const line of stdout.split(/\r?\n/)) {
+      const forward = parseVideoForwardLine(line);
+      if (forward === null) {
+        continue;
+      }
+      // A lease-backed forward is reclaimed by the lease-driven loop; a forward
+      // owned by a live/in-flight session (including this one) is not stranded.
+      if (leaseBackedSocketNames.has(forward.socketName) || activeSocketNames.has(forward.socketName)) {
+        continue;
+      }
+      orphans.push(forward);
+    }
+
+    for (const orphan of orphans) {
+      logger.info(
+        `[PersistentEncoderH264Source] orphan-forward-sweep port=${orphan.port} socket=${orphan.socketName}`
+      );
+      await this.removeForwardIfMatching(adb, orphan.port, orphan.socketName);
     }
   }
 

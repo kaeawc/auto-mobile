@@ -1525,8 +1525,23 @@ async function defaultResolveSimulatorWindowId(
     );
   }
 
-  const deviceName = device.name.toLowerCase();
-  const matches = windows.filter(window => window.title?.toLowerCase().includes(deviceName));
+  // Prefer a window whose title *names* this device exactly, falling back to a
+  // substring match only when nothing matches exactly. A bare substring match
+  // is ambiguous for overlapping device names ("iPhone 15" also occurs in an
+  // "iPhone 15 Pro" title), which would otherwise trip the many-match guard and
+  // fail to capture even though the right window is present. The window list
+  // exposes no UDID, so the title is the only identifier available.
+  const deviceName = device.name.trim().toLowerCase();
+  const titledWindows = windows.filter(
+    (window): window is SimulatorWindowInfo & { title: string } =>
+      typeof window.title === "string" && window.title.trim().length > 0
+  );
+  const exactMatches = titledWindows.filter(window =>
+    simulatorTitleNamesDeviceExactly(window.title, deviceName)
+  );
+  const matches = exactMatches.length > 0
+    ? exactMatches
+    : titledWindows.filter(window => window.title.toLowerCase().includes(deviceName));
   if (matches.length === 1) {
     return matches[0].windowID;
   }
@@ -1538,5 +1553,23 @@ async function defaultResolveSimulatorWindowId(
   throw new ActionableError(
     `Multiple iOS Simulator windows matched ${device.name}; close extras or use a more specific device.`
   );
+}
+
+/**
+ * True when a Simulator window title names exactly this device rather than
+ * merely containing its name. Matches the bare device-name title the Simulator
+ * uses ("iPhone 15 Pro") and a title that appends a runtime segment after a
+ * dash separator ("iPhone 15 Pro — 17.0"), so "iPhone 15" no longer matches an
+ * "iPhone 15 Pro" window. `deviceName` is expected already trimmed + lowercased.
+ */
+function simulatorTitleNamesDeviceExactly(title: string, deviceName: string): boolean {
+  const normalized = title.trim().toLowerCase();
+  if (normalized === deviceName) {
+    return true;
+  }
+  // Simulator titles may append " — <runtime>" (em/en dash or hyphen) after the
+  // device name; compare the leading segment before that separator exactly.
+  const [leadingSegment] = normalized.split(/\s+[—–-]\s+/, 1);
+  return leadingSegment.trim() === deviceName;
 }
 import { spawn as nodeSpawn } from "node:child_process";

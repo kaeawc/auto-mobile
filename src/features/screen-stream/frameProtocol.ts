@@ -117,6 +117,11 @@ export class FrameDecoder {
       // a synthetic or unusually coalesced stdout chunk carries many frames.
       const available = FRAME_HEADER_SIZE + MAX_RAW_FRAME_BYTES - this.buffer.length;
       if (available === 0) {
+        // Backstop against an unbounded buffer. A corrupt or oversized frame does
+        // NOT reach here: `fieldBoundsError` caps a validated payload at
+        // MAX_RAW_FRAME_BYTES, and `resynchronize` compacts garbage that carries
+        // no validating marker — so every full-buffer state drains, leaving this
+        // throw an infinite-loop guard rather than a real teardown path (#4772).
         if (!this.decodeAvailable(frames, onMalformed, onAudio, onFrame)) {
           throw new Error("FrameDecoder reached its raw-frame buffer limit without a complete frame");
         }

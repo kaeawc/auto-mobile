@@ -106,10 +106,16 @@ when the docs site was last rebuilt.
         var prior = last[k];
         // Only a prior observation on the immediately preceding calendar day
         // yields a real daily delta; a gap (missing intermediate snapshot) is
-        // unknowable and rendered as null.
-        var delta = (prior === undefined || utcDayDifference(prior.date, snap.date) !== 1)
-          ? null
-          : Math.max(0, g.cumulative - prior.cumulative);
+        // unknowable and rendered as null. A cumulative DECREASE (asset
+        // re-published / counter reset) is likewise unknowable, so it is null
+        // rather than a false 0.
+        var delta;
+        if (prior === undefined || utcDayDifference(prior.date, snap.date) !== 1) {
+          delta = null;
+        } else {
+          var change = g.cumulative - prior.cumulative;
+          delta = change < 0 ? null : change;
+        }
         series[k].cumulative.push({ date: snap.date, value: g.cumulative });
         series[k].delta.push({ date: snap.date, value: delta });
         last[k] = { cumulative: g.cumulative, date: snap.date };

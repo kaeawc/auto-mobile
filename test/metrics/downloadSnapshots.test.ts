@@ -10,13 +10,34 @@ import {
   utcDayDifference,
   type DownloadSnapshot,
   type DownloadSources,
+  type FileStore,
   type GithubAssetCount,
   type NpmDayCount,
 } from "../../src/metrics/downloadSnapshots";
 import { collect } from "../../scripts/metrics/collect-release-downloads";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+
+/**
+ * In-memory {@link FileStore} fake — no real temp dirs. `readFile` rejects with
+ * a `{ code: "ENOENT" }` error when the path is absent, matching the CLI's
+ * `node:fs/promises`-backed store, so collect()'s ENOENT handling is exercised.
+ */
+function fakeFiles(seed?: Record<string, string>): FileStore & { store: Map<string, string> } {
+  const store = new Map<string, string>(Object.entries(seed ?? {}));
+  return {
+    store,
+    readFile: async (filePath: string) => {
+      const contents = store.get(filePath);
+      if (contents === undefined) {
+        throw Object.assign(new Error(`ENOENT: no such file ${filePath}`), { code: "ENOENT" });
+      }
+      return contents;
+    },
+    mkdir: async () => {},
+    writeFile: async (filePath: string, data: string) => {
+      store.set(filePath, data);
+    },
+  };
+}
 
 /**
  * The synthetic three-day sample that previously shipped in
@@ -104,13 +125,13 @@ describe("downloadSnapshots pure logic", () => {
     expect(day2?.delta).toBe(37);
   });
 
-  test("computeAssetDailyDeltas: cumulative reset clamps to 0, not negative", () => {
+  test("computeAssetDailyDeltas: cumulative reset yields null (unknown), not a false 0", () => {
     const snapshots = [
       buildSnapshot("2026-07-29", [{ tag: "v1", asset: "a.apk", cumulative: 100 }], []),
       buildSnapshot("2026-07-30", [{ tag: "v1", asset: "a.apk", cumulative: 40 }], []),
     ];
     const day2 = computeAssetDailyDeltas(snapshots).find(d => d.date === "2026-07-30");
-    expect(day2?.delta).toBe(0);
+    expect(day2?.delta).toBeNull();
   });
 
   test("computeAssetDailyDeltas: missing asset in later snapshot produces no row, does not carry forward", () => {
@@ -186,99 +207,141 @@ describe("downloadSnapshots pure logic", () => {
 });
 
 describe("collect() CLI wiring with fakes", () => {
+  const DATA_FILE = "/repo/docs/metrics/data/downloads.jsonl";
+
   test("writes today's snapshot and is idempotent on re-run (no duplicate date)", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "dl-metrics-"));
-    const dataFile = path.join(dir, "downloads.jsonl");
+    const files = fakeFiles();
     const now = new Date("2026-07-31T06:00:00.000Z");
 
-    try {
-      const sources1 = fakeSources(
-        [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 10 }],
-        [{ day: "2026-07-30", downloads: 500 }]
-      );
-      const first = await collect(sources1, dataFile, now);
-      expect(first.date).toBe("2026-07-31");
+    const sources1 = fakeSources(
+      [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 10 }],
+      [{ day: "2026-07-30", downloads: 500 }]
+    );
+    const first = await collect(sources1, files, DATA_FILE, now);
+    expect(first.date).toBe("2026-07-31");
 
-      // Re-run same UTC date with a higher cumulative — must overwrite, not append.
-      const sources2 = fakeSources(
-        [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 14 }],
-        [{ day: "2026-07-30", downloads: 500 }]
-      );
-      await collect(sources2, dataFile, now);
+    // Re-run same UTC date with a higher cumulative — must overwrite, not append.
+    const sources2 = fakeSources(
+      [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 14 }],
+      [{ day: "2026-07-30", downloads: 500 }]
+    );
+    await collect(sources2, files, DATA_FILE, now);
 
-      const snapshots = parseSnapshots(await readFile(dataFile, "utf8"));
-      expect(snapshots).toHaveLength(1);
-      expect(snapshots[0].date).toBe("2026-07-31");
-      expect(snapshots[0].github[0].cumulative).toBe(14);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    const snapshots = parseSnapshots(files.store.get(DATA_FILE) ?? "");
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].date).toBe("2026-07-31");
+    expect(snapshots[0].github[0].cumulative).toBe(14);
+  });
+
+  test("first run (ENOENT) writes a fresh single-snapshot file", async () => {
+    const files = fakeFiles(); // no seed => readFile rejects ENOENT
+    const now = new Date("2026-07-31T06:00:00.000Z");
+    const sources = fakeSources(
+      [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 7 }],
+      [{ day: "2026-07-30", downloads: 42 }]
+    );
+
+    const result = await collect(sources, files, DATA_FILE, now);
+    expect(result).toEqual({ date: "2026-07-31", wrote: true });
+
+    const snapshots = parseSnapshots(files.store.get(DATA_FILE) ?? "");
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].github[0].cumulative).toBe(7);
+    expect(snapshots[0].npm).toEqual([{ day: "2026-07-30", downloads: 42 }]);
+  });
+
+  test("read failure other than ENOENT propagates (does not silently reseed)", async () => {
+    const files = fakeFiles();
+    files.readFile = async () => {
+      throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    };
+    const now = new Date("2026-07-31T06:00:00.000Z");
+    const sources = fakeSources(
+      [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 10 }],
+      [{ day: "2026-07-30", downloads: 5 }]
+    );
+    await expect(collect(sources, files, DATA_FILE, now)).rejects.toThrow();
   });
 
   test("npm-source failure still writes a GitHub-only snapshot (failures are decoupled)", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "dl-metrics-"));
-    const dataFile = path.join(dir, "downloads.jsonl");
+    const files = fakeFiles();
     const now = new Date("2026-07-31T06:00:00.000Z");
 
-    try {
-      const sources: DownloadSources = {
-        fetchGithubAssetCounts: async () => [
-          { tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 10 },
-        ],
-        fetchNpmDailyCounts: async () => {
-          throw new Error("npm 503");
-        },
-      };
-      const result = await collect(sources, dataFile, now);
-      expect(result.date).toBe("2026-07-31");
+    const sources: DownloadSources = {
+      fetchGithubAssetCounts: async () => [
+        { tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 10 },
+      ],
+      fetchNpmDailyCounts: async () => {
+        throw new Error("npm 503");
+      },
+    };
+    const result = await collect(sources, files, DATA_FILE, now);
+    expect(result.date).toBe("2026-07-31");
 
-      const snapshots = parseSnapshots(await readFile(dataFile, "utf8"));
-      expect(snapshots).toHaveLength(1);
-      // GitHub data survived the npm failure; npm degraded to empty for the day.
-      expect(snapshots[0].github[0].cumulative).toBe(10);
-      expect(snapshots[0].npm).toEqual([]);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    const snapshots = parseSnapshots(files.store.get(DATA_FILE) ?? "");
+    expect(snapshots).toHaveLength(1);
+    // GitHub data survived the npm failure; npm degraded to empty for the day.
+    expect(snapshots[0].github[0].cumulative).toBe(10);
+    expect(snapshots[0].npm).toEqual([]);
+  });
+
+  test("npm-source failure preserves the existing same-date npm counts", async () => {
+    const now = new Date("2026-07-31T06:00:00.000Z");
+    // An earlier run today already stored good npm counts for 2026-07-31.
+    const seeded = serializeSnapshots([
+      buildSnapshot(
+        "2026-07-31",
+        [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 9 }],
+        [{ day: "2026-07-30", downloads: 500 }]
+      ),
+    ]);
+    const files = fakeFiles({ [DATA_FILE]: seeded });
+
+    const sources: DownloadSources = {
+      fetchGithubAssetCounts: async () => [
+        { tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 12 },
+      ],
+      fetchNpmDailyCounts: async () => {
+        throw new Error("npm 503");
+      },
+    };
+    await collect(sources, files, DATA_FILE, now);
+
+    const snapshots = parseSnapshots(files.store.get(DATA_FILE) ?? "");
+    expect(snapshots).toHaveLength(1);
+    // GitHub cumulative advanced, but the good npm from the earlier run survives
+    // — it is NOT clobbered with [].
+    expect(snapshots[0].github[0].cumulative).toBe(12);
+    expect(snapshots[0].npm).toEqual([{ day: "2026-07-30", downloads: 500 }]);
   });
 
   test("GitHub-source failure fails the run (no useful snapshot)", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "dl-metrics-"));
-    const dataFile = path.join(dir, "downloads.jsonl");
+    const files = fakeFiles();
     const now = new Date("2026-07-31T06:00:00.000Z");
-    try {
-      const sources: DownloadSources = {
-        fetchGithubAssetCounts: async () => {
-          throw new Error("github 500");
-        },
-        fetchNpmDailyCounts: async () => [{ day: "2026-07-30", downloads: 5 }],
-      };
-      await expect(collect(sources, dataFile, now)).rejects.toThrow();
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    const sources: DownloadSources = {
+      fetchGithubAssetCounts: async () => {
+        throw new Error("github 500");
+      },
+      fetchNpmDailyCounts: async () => [{ day: "2026-07-30", downloads: 5 }],
+    };
+    await expect(collect(sources, files, DATA_FILE, now)).rejects.toThrow();
   });
 
   test("drops the incomplete current UTC day from stored npm counts", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "dl-metrics-"));
-    const dataFile = path.join(dir, "downloads.jsonl");
+    const files = fakeFiles();
     const now = new Date("2026-07-31T05:17:00.000Z");
 
-    try {
-      const sources = fakeSources(
-        [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 10 }],
-        [
-          { day: "2026-07-30", downloads: 1013 },
-          { day: "2026-07-31", downloads: 200 }, // partial day the job ran on
-        ]
-      );
-      await collect(sources, dataFile, now);
+    const sources = fakeSources(
+      [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 10 }],
+      [
+        { day: "2026-07-30", downloads: 1013 },
+        { day: "2026-07-31", downloads: 200 }, // partial day the job ran on
+      ]
+    );
+    await collect(sources, files, DATA_FILE, now);
 
-      const snapshots = parseSnapshots(await readFile(dataFile, "utf8"));
-      expect(snapshots).toHaveLength(1);
-      expect(snapshots[0].npm.map(n => n.day)).toEqual(["2026-07-30"]);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    const snapshots = parseSnapshots(files.store.get(DATA_FILE) ?? "");
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0].npm.map(n => n.day)).toEqual(["2026-07-30"]);
   });
 });

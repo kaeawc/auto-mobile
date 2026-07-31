@@ -216,6 +216,17 @@ JSON
   [[ "$output" == *"STAGING_DIR"* ]]
 }
 
+@test "preflight rejects a symlink MANIFEST_OUT (could redirect into staging)" {
+  local preflight="$REPO_ROOT/scripts/release/maven-publication-manifest-preflight.sh"
+  local link
+  link="$(mktemp -d)/out.txt"
+  ln -s "$STAGE/manifest.txt" "$link" # target inside staging, parent outside
+  STAGING_DIR="$STAGE" MANIFEST_OUT="$link" run bash "$preflight"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"symlink"* ]]
+  rm -rf "$(dirname "$link")"
+}
+
 @test "preflight appends a totals block to GITHUB_STEP_SUMMARY when set" {
   local preflight="$REPO_ROOT/scripts/release/maven-publication-manifest-preflight.sh"
   local summary
@@ -275,5 +286,16 @@ JSON
   run bash "$SCRIPT" "$STAGE" --budget "$budget"
   [ "$status" -ne 0 ]
   [[ "$output" == *"integer"* ]]
+  [[ "$output" != *"BUDGET OK"* ]]
+}
+
+@test "a non-object perRelease fails closed (container-level coalescing)" {
+  # `(.perRelease // {})` would turn false into {} and disable both limits.
+  local budget="$STAGE/container-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": false }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -ne 0 ]
   [[ "$output" != *"BUDGET OK"* ]]
 }

@@ -61,6 +61,13 @@ fi
 # the previous manifest as an unexpected file, inflating totals and breaking the
 # deterministic before/after comparison the manifest exists to provide. Reject it.
 if [ -n "${MANIFEST_OUT:-}" ] && [ -d "$staging_dir" ]; then
+  # A symlink at the output path could redirect the write into the staging tree
+  # even when its resolved parent is outside it, so reject symlink outputs
+  # outright; pwd -P below resolves any symlinks in the parent directories.
+  if [ -L "$MANIFEST_OUT" ]; then
+    echo "error: MANIFEST_OUT ($MANIFEST_OUT) must not be a symlink" >&2
+    exit 2
+  fi
   staging_abs="$(cd "$staging_dir" && pwd -P)"
   out_parent="$(dirname "$MANIFEST_OUT")"
   if [ -d "$out_parent" ]; then

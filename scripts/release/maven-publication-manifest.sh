@@ -208,22 +208,28 @@ exit_code=0
 if [ -n "$budget_file" ]; then
   [ -f "$budget_file" ] || { echo "error: budget file not found: $budget_file" >&2; exit 2; }
   command -v jq >/dev/null 2>&1 || { echo "error: jq is required for --budget" >&2; exit 2; }
-  # jq's // treats only null/false as empty, so a real 0 threshold survives.
-  # @tsv keeps an absent/null threshold as an empty field but preserves false,
-  # floats, and strings verbatim -- unlike `// ""`, which would coalesce a JSON
-  # `false` to empty and slip past the integer check below (disabling the budget).
-  limits="$(jq -r '(.perRelease // {}) | [.maxFiles, .maxBytes] | @tsv' "$budget_file")"
+  # Validate the whole budget shape in jq and fail closed on anything malformed,
+  # so nothing silently disables the budget -- not a `// ` coalescing a false/null
+  # field NOR a non-object `perRelease` (e.g. `false`) collapsing to `{}`. Rule:
+  # perRelease is absent or an object; each threshold is absent or a non-negative
+  # integer. Output is "maxFiles<TAB>maxBytes" (empty field = no limit), or the
+  # sentinel INVALID.
+  limits="$(jq -r '
+    def okint: type == "number" and . >= 0 and (floor == .);
+    def field($v): if $v == null then "" elif ($v | okint) then ($v | tostring) else "INVALID" end;
+    .perRelease as $r
+    | if $r == null then "\t"
+      elif ($r | type) != "object" then "INVALID"
+      else field($r.maxFiles) as $f | field($r.maxBytes) as $y
+        | if ($f == "INVALID" or $y == "INVALID") then "INVALID" else ($f + "\t" + $y) end
+      end
+  ' "$budget_file")"
+  if [ "$limits" = "INVALID" ]; then
+    echo "error: budget perRelease must be an object with non-negative integer maxFiles/maxBytes" >&2
+    exit 2
+  fi
   max_files="$(printf '%s' "$limits" | cut -f1)"
   max_bytes="$(printf '%s' "$limits" | cut -f2)"
-  # Fail closed on a malformed threshold: a non-integer (0.5, false, "x") would
-  # reach bash's integer-only -gt, print "integer expression expected", evaluate
-  # false, and silently report BUDGET OK -- even under --strict. Empty = no limit.
-  for v in "$max_files" "$max_bytes"; do
-    if [ -n "$v" ] && ! printf '%s' "$v" | grep -qE '^[0-9]+$'; then
-      echo "error: budget thresholds must be non-negative integers (got '$v')" >&2
-      exit 2
-    fi
-  done
   breached=0
   reasons=""
   if [ -n "$max_files" ] && [ "$total_files" -gt "$max_files" ]; then

@@ -2,6 +2,7 @@ import com.vanniktech.maven.publish.MavenPublishBaseExtension
 import dev.detekt.gradle.extensions.DetektExtension
 import org.gradle.api.plugins.JavaBasePlugin
 import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.publish.PublishingExtension
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
@@ -51,6 +52,26 @@ plugins.withId(libs.plugins.mavenPublish.get().pluginId) {
   // configuration required to produce unique META-INF/*.kotlin_module file names
   tasks.withType<KotlinCompile>().configureEach {
     compilerOptions { moduleName.set(project.property("POM_ARTIFACT_ID") as String) }
+  }
+}
+
+// Local file repository used only by the Maven publication manifest preflight
+// (issue #4853). Publishing to it stages the exact set of files a release would
+// upload to Maven Central -- primary artifacts, POM, Gradle module metadata,
+// sources and javadoc jars, PGP signatures, and checksums -- into one directory
+// so the preflight can enumerate them deterministically, without Maven Central
+// credentials or a remote publish. It never uploads anywhere and has no effect on
+// the real Central publication path (publishAllPublicationsToMavenCentral...).
+allprojects {
+  plugins.withId("com.vanniktech.maven.publish") {
+    configure<PublishingExtension> {
+      repositories {
+        maven {
+          name = "centralManifest"
+          url = rootProject.layout.buildDirectory.dir("central-manifest").get().asFile.toURI()
+        }
+      }
+    }
   }
 }
 

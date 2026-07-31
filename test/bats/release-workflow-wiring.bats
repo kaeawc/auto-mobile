@@ -337,6 +337,43 @@
   [ -z "$output" ]
 }
 
+@test "release.yml runs the Maven publication manifest preflight before publishing (#4853)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/release.yml"
+  # Both steps live in the release job, and the preflight must precede the
+  # publish so the manifest reflects what is about to be uploaded.
+  local names preflight publish
+  names="$(yq -r '.jobs."verify-and-release".steps[].name' "$workflow")"
+  preflight="$(printf '%s\n' "$names" \
+    | grep -nxF 'Maven Central publication manifest preflight' | cut -d: -f1)"
+  publish="$(printf '%s\n' "$names" \
+    | grep -nxF 'Publish Android Libraries to Maven Central' | cut -d: -f1)"
+  [ -n "$preflight" ]
+  [ -n "$publish" ]
+  [ "$preflight" -lt "$publish" ]
+}
+
+@test "release.yml preflight invokes the manifest script with the budget (#4853)" {
+  wiring_requires_yq
+  local script
+  script="$(yq -r '.jobs."verify-and-release".steps[]
+    | select(.name == "Maven Central publication manifest preflight") | .run' \
+    ".github/workflows/release.yml")"
+  [[ "$script" == *"scripts/release/maven-publication-manifest.sh"* ]]
+  [[ "$script" == *"scripts/release/maven-usage-budget.json"* ]]
+  [[ "$script" == *"publishAllPublicationsToCentralManifestRepository"* ]]
+  [[ "$script" == *"GITHUB_STEP_SUMMARY"* ]]
+}
+
+@test "release.yml uploads the publication manifest artifact (#4853)" {
+  wiring_requires_yq
+  local uses
+  uses="$(yq -r '.jobs."verify-and-release".steps[]
+    | select(.name == "Upload Maven publication manifest") | .uses' \
+    ".github/workflows/release.yml")"
+  [[ "$uses" == actions/upload-artifact@* ]]
+}
+
 # The assertions below parse the workflow as YAML rather than grepping its text.
 # A raw grep is satisfied by any comment or unrelated step containing the string,
 # so it would keep passing while the step it claims to pin was deleted -- and a

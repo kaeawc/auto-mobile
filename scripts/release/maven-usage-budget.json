@@ -1,0 +1,18 @@
+{
+  "$comment": [
+    "Advisory usage budget for the Maven Central publication (issue #4853).",
+    "Consumed by scripts/release/maven-publication-manifest.sh --budget. A breach",
+    "prints a BUDGET WARN and, by default, still exits 0: the preflight reports,",
+    "it never blocks a release, so an urgent security fix always ships. Only",
+    "--strict turns a breach into a non-zero exit.",
+    "Thresholds are per single tagged release across all four Maven coordinates,",
+    "derived from the current Maven Central Usage Center baseline (~200 staged",
+    "files, ~4.5 MiB) with deliberate headroom. Tighten maxBytes after the",
+    "artifact-reduction work (#4851 signature checksums, #4852 Dokka javadoc)",
+    "lands, and raise the ceilings intentionally when a new coordinate is added."
+  ],
+  "perRelease": {
+    "maxFiles": 320,
+    "maxBytes": 8000000
+  }
+}

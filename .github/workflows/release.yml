@@ -378,6 +378,59 @@ jobs:
           echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | \
             base64 -d > android/keystore/release.keystore
 
+      # Preflight: stage every publishable file to a local Maven file repository
+      # (no credentials, no remote upload) and record a deterministic manifest of
+      # exactly what the release would send to Maven Central, with per-coordinate
+      # and release totals. The budget check is advisory -- a breach warns but
+      # never blocks, so a security release always ships (#4853). This also gives
+      # the artifact-reduction work (#4851, #4852) a before/after regression
+      # oracle.
+      - name: Maven Central publication manifest preflight
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey:
+            ${{ secrets.SIGNING_IN_MEMORY_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword:
+            ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId:
+            ${{ secrets.SIGNING_IN_MEMORY_KEY_ID }}
+        run: |
+          set -euo pipefail
+          MANIFEST_OUT="$RUNNER_TEMP/maven-publication-manifest.txt"
+          (
+            cd android
+            rm -rf build/central-manifest
+            ./gradlew \
+              :protocol:publishAllPublicationsToCentralManifestRepository \
+              :test-plan-validation:publishAllPublicationsToCentralManifestRepository \
+              :junit-runner:publishAllPublicationsToCentralManifestRepository \
+              :auto-mobile-sdk:publishAllPublicationsToCentralManifestRepository \
+              -PVERSION_NAME="$VERSION" \
+              --no-configuration-cache
+          )
+          scripts/release/maven-publication-manifest.sh \
+            android/build/central-manifest \
+            --budget scripts/release/maven-usage-budget.json \
+            | tee "$MANIFEST_OUT"
+          {
+            echo "### Maven Central publication manifest"
+            echo ""
+            echo '```'
+            # Totals only in the summary; the full per-file manifest is the
+            # uploaded artifact.
+            sed -n '/## Per-coordinate totals/,$p' "$MANIFEST_OUT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Maven publication manifest
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: maven-publication-manifest
+          path: ${{ runner.temp }}/maven-publication-manifest.txt
+          if-no-files-found: warn
+
       - name: Publish Android Libraries to Maven Central
         continue-on-error: true
         env:

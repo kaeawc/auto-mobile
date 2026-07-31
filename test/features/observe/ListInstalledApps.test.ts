@@ -9,6 +9,18 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../src/db/installedAppsCacheWriteCoordinator";
 
+class FailsFirstInstalledAppsReplaceRepository extends FakeInstalledAppsRepository {
+  private failNextReplace = true;
+
+  override async replaceInstalledApps(deviceId: string, apps: NewInstalledApp[]): Promise<void> {
+    if (this.failNextReplace) {
+      this.failNextReplace = false;
+      throw new Error("transient cache write failure");
+    }
+    await super.replaceInstalledApps(deviceId, apps);
+  }
+}
+
 describe("ListInstalledApps", function() {
   let listInstalledApps: ListInstalledApps;
   let fakeAdb: FakeAdbExecutor;
@@ -334,6 +346,21 @@ describe("ListInstalledApps", function() {
       expect(simctl.getMethodCallCount("listApps")).toBe(1);
     });
 
+    test("normalizes all supported iOS bundle ID fields", async function() {
+      const iosDevice: BootedDevice = { deviceId: "ios-bundle-id-fields", platform: "ios" } as BootedDevice;
+      const simctl = new FakeSimctl();
+      simctl.setInstalledApps([
+        { bundleID: "  com.example.bundle-id  " },
+        { CFBundleIdentifier: "com.example.cf-bundle-id" }
+      ]);
+      const list = new ListInstalledApps(iosDevice, new FakeAdbClientFactory(fakeAdb), simctl);
+
+      await expect(list.execute()).resolves.toEqual([
+        "com.example.bundle-id",
+        "com.example.cf-bundle-id"
+      ]);
+    });
+
     test("should use cached apps when fresh", async function() {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
@@ -486,6 +513,39 @@ describe("ListInstalledApps", function() {
         profiles: { 0: [{ packageName: "com.example.fresh" }] }
       });
       expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
+      expect(getInstalledAppsCacheWriteCoordinator().isDirty(device.deviceId)).toBe(false);
+    });
+
+    test("returns the live result and retries after a cache replacement failure", async function() {
+      const device: BootedDevice = { deviceId: "replace-failure-device", platform: "android" } as BootedDevice;
+      const repo = new FailsFirstInstalledAppsReplaceRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1_000);
+      await expect(getInstalledAppsCacheWriteCoordinator().invalidate(device.deviceId, async () => {
+        throw new Error("stale cache row");
+      })).rejects.toThrow("stale cache row");
+
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+        stdout: "package:com.example.live\n",
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+      const list = new ListInstalledApps(
+        device,
+        new FakeAdbClientFactory(fakeAdb),
+        null,
+        { cacheEnabled: true, installedAppsRepository: repo, timer }
+      );
+
+      await expect(list.executeDetailed()).resolves.toMatchObject({
+        profiles: { 0: [{ packageName: "com.example.live" }] }
+      });
+      expect(getInstalledAppsCacheWriteCoordinator().isDirty(device.deviceId)).toBe(true);
+
+      await expect(list.executeDetailed()).resolves.toMatchObject({
+        profiles: { 0: [{ packageName: "com.example.live" }] }
+      });
       expect(getInstalledAppsCacheWriteCoordinator().isDirty(device.deviceId)).toBe(false);
     });
   });

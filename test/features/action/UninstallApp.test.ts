@@ -1,9 +1,18 @@
 import { expect, describe, test, beforeEach } from "bun:test";
-import { UninstallApp, DeviceAppUninstaller } from "../../../src/features/action/UninstallApp";
+import { UninstallApp as ProductionUninstallApp, DeviceAppUninstaller } from "../../../src/features/action/UninstallApp";
 import type { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
+
+// Keep action tests isolated from the production SQLite repository even when a
+// scenario does not need to inspect stale-marker rows explicitly.
+class UninstallApp extends ProductionUninstallApp {
+  constructor(...args: ConstructorParameters<typeof ProductionUninstallApp>) {
+    const [device, adbFactory, simctl, deviceAppUninstaller, repository] = args;
+    super(device, adbFactory, simctl, deviceAppUninstaller, repository ?? new FakeInstalledAppsRepository());
+  }
+}
 
 class FakeDeviceAppUninstaller implements DeviceAppUninstaller {
   public calls: Array<{ deviceUdid: string; bundleId: string; isSimulator?: boolean }> = [];

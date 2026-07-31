@@ -1,5 +1,5 @@
 import { expect, describe, test, beforeEach, afterEach } from "bun:test";
-import { InstallApp, type DeviceAppInstaller } from "../../../src/features/action/InstallApp";
+import { InstallApp as ProductionInstallApp, type DeviceAppInstaller } from "../../../src/features/action/InstallApp";
 import { createPerformanceTracker, type TimingEntry } from "../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -14,6 +14,25 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
+
+// Keep action tests isolated from the production SQLite repository even when a
+// scenario does not need to inspect stale-marker rows explicitly.
+class InstallApp extends ProductionInstallApp {
+  constructor(...args: ConstructorParameters<typeof ProductionInstallApp>) {
+    const [device, adbFactory, hostExecutor, buildToolsLocator, performanceTrackerFactory, simctl, deviceAppInstaller, plist, repository] = args;
+    super(
+      device,
+      adbFactory,
+      hostExecutor,
+      buildToolsLocator,
+      performanceTrackerFactory,
+      simctl,
+      deviceAppInstaller,
+      plist,
+      repository ?? new FakeInstalledAppsRepository()
+    );
+  }
+}
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,

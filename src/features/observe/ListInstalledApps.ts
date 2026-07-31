@@ -9,10 +9,21 @@ import type { InstalledApp as DbInstalledApp, NewInstalledApp } from "../../db/t
 import { AndroidCtrlProxyClient } from "./android";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
+import { getIosInstalledAppBundleId, type IosInstalledAppRecord } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 
 const INSTALLED_APPS_CACHE_TTL_MS = 5 * 60 * 1000;
 
-export type IosInstalledAppRecord = Record<string, unknown>;
+export type { IosInstalledAppRecord } from "../../utils/ios-cmdline-tools/iosInstalledApp";
+
+export interface InstalledAppsDetailedResult {
+  apps: InstalledAppsByProfile;
+  successful: boolean;
+}
+
+export interface IosInstalledAppsDetailedResult {
+  apps: IosInstalledAppRecord[];
+  successful: boolean;
+}
 
 interface ListInstalledAppsOptions {
   cacheEnabled?: boolean;
@@ -58,7 +69,7 @@ export class ListInstalledApps {
     try {
       switch (this.device.platform) {
         case "ios":
-          return (await this.executeIosDetailed()).map(app => this.extractIosBundleId(app)).filter(
+          return (await this.executeIosDetailed()).map(app => getIosInstalledAppBundleId(app)).filter(
             (bundleId): bundleId is string => bundleId !== undefined
           );
         case "android":
@@ -79,23 +90,32 @@ export class ListInstalledApps {
    * @returns Promise with grouped installed app details
    */
   async executeDetailed(): Promise<InstalledAppsByProfile> {
+    return (await this.executeDetailedResult()).apps;
+  }
+
+  /**
+   * List Android apps and report whether the live listing completed without
+   * partial-user or command failures. Resource caches must not retain a
+   * degraded fallback result.
+   */
+  async executeDetailedResult(): Promise<InstalledAppsDetailedResult> {
     if (this.device.platform !== "android") {
       logger.warn("executeDetailed() is only supported on Android");
-      return { profiles: {}, system: [] };
+      return { apps: { profiles: {}, system: [] }, successful: false };
     }
 
     try {
       if (this.cacheEnabled) {
         const cachedApps = await this.getCachedInstalledApps();
         if (cachedApps) {
-          return cachedApps;
+          return { apps: cachedApps, successful: true };
         }
       }
 
       return await this.rebuildInstalledAppsCache();
     } catch (error) {
       logger.warn("Failed to list installed apps with details:", error);
-      return { profiles: {}, system: [] };
+      return { apps: { profiles: {}, system: [] }, successful: false };
     }
   }
 
@@ -106,9 +126,17 @@ export class ListInstalledApps {
    * Xcode or simctl install/uninstall.
    */
   async executeIosDetailed(): Promise<IosInstalledAppRecord[]> {
+    return (await this.executeIosDetailedResult()).apps;
+  }
+
+  /**
+   * List iOS apps and preserve whether simctl produced a live result so the
+   * resource cache can retry after a transient command failure.
+   */
+  async executeIosDetailedResult(): Promise<IosInstalledAppsDetailedResult> {
     if (this.device.platform !== "ios") {
       logger.warn("executeIosDetailed() is only supported on iOS");
-      return [];
+      return { apps: [], successful: false };
     }
 
     try {
@@ -119,17 +147,17 @@ export class ListInstalledApps {
           continue;
         }
         const record = app as IosInstalledAppRecord;
-        const bundleId = this.extractIosBundleId(record);
+        const bundleId = getIosInstalledAppBundleId(record);
         if (bundleId) {
           appsByBundleId.set(bundleId, record);
         }
       }
       const detailedApps = Array.from(appsByBundleId.values());
 
-      return detailedApps;
+      return { apps: detailedApps, successful: true };
     } catch (error) {
       logger.warn("Failed to list installed iOS apps:", error);
-      return [];
+      return { apps: [], successful: false };
     }
   }
 
@@ -200,7 +228,7 @@ export class ListInstalledApps {
     return installedApps;
   }
 
-  private async rebuildInstalledAppsCache(): Promise<InstalledAppsByProfile> {
+  private async rebuildInstalledAppsCache(): Promise<InstalledAppsDetailedResult> {
     const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(this.device.deviceId);
     const installedApps: InstalledAppsByProfile = { profiles: {}, system: [] };
     const systemAppsMap = new Map<string, SystemInstalledApp>();
@@ -215,7 +243,7 @@ export class ListInstalledApps {
     logger.info(`[ListInstalledApps] Found ${users.length} user(s): ${users.map(u => `${u.userId}:${u.name}`).join(", ")}`);
     if (users.length === 0) {
       logger.warn("[ListInstalledApps] No users reported; skipping cache update");
-      return installedApps;
+      return { apps: installedApps, successful: false };
     }
 
     // Get the current foreground app
@@ -304,24 +332,25 @@ export class ListInstalledApps {
     logger.info(`Found ${profileAppCount} user app(s) across ${users.length} user(s); ${installedApps.system.length} system app(s) deduped`);
 
     if (this.cacheEnabled && !hadUserErrors) {
-      const committed = await getInstalledAppsCacheWriteCoordinator().commitRebuild(this.device.deviceId, cacheGeneration, () =>
-        getDbWriteBarrier().track(() =>
-          this.installedAppsRepository.replaceInstalledApps(this.device.deviceId, cacheEntries)
-        ).then(() => undefined)
-      );
-      if (committed) {
-        getInstalledAppsCacheWriteCoordinator().markRebuilt(this.device.deviceId, cacheGeneration);
+      try {
+        const committed = await getInstalledAppsCacheWriteCoordinator().commitRebuild(this.device.deviceId, cacheGeneration, () =>
+          getDbWriteBarrier().track(() =>
+            this.installedAppsRepository.replaceInstalledApps(this.device.deviceId, cacheEntries)
+          ).then(() => undefined)
+        );
+        if (committed) {
+          getInstalledAppsCacheWriteCoordinator().markRebuilt(this.device.deviceId, cacheGeneration);
+        }
+      } catch (error) {
+        // The live result remains valid even if its persistence fails. Keep a
+        // dirty cache dirty so a later read retries the database write.
+        logger.warn("[ListInstalledApps] Failed to update installed apps cache:", error);
       }
     } else if (this.cacheEnabled && hadUserErrors) {
       logger.warn("[ListInstalledApps] Skipping cache update due to user listing errors");
     }
 
-    return installedApps;
-  }
-
-  private extractIosBundleId(record: IosInstalledAppRecord): string | undefined {
-    const bundleId = record.bundleId ?? record.bundleIdentifier;
-    return typeof bundleId === "string" && bundleId.length > 0 ? bundleId : undefined;
+    return { apps: installedApps, successful: !hadUserErrors };
   }
 
   // Why: PackageManager runs as the service user, so cross-user queries

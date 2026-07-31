@@ -20,6 +20,7 @@ import {
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
+import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 
@@ -1850,7 +1851,9 @@ export class DevicePool {
   private async clearDeviceSessionCache(deviceId: string): Promise<void> {
     try {
       await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
-        this.installedAppsRepository.clearDeviceSession(deviceId)
+        getDbWriteBarrier().track(() =>
+          this.installedAppsRepository.clearDeviceSession(deviceId)
+        ).then(() => undefined)
       );
       logger.info(`[DevicePool] Cleared installed apps cache for device ${deviceId}`);
     } catch (error) {

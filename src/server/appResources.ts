@@ -7,7 +7,9 @@ import { DeviceAppManager } from "../utils/ios-cmdline-tools/DeviceAppManager";
 import { BootedDevice, InstalledApp, InstalledAppsByProfile, Platform, SystemInstalledApp } from "../models";
 import { logger } from "../utils/logger";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
+import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
 
 // Resource URI templates
 export const APP_RESOURCE_TEMPLATES = {
@@ -175,16 +177,6 @@ function readIosAppField(app: Record<string, unknown>, keys: string[]): string |
   return undefined;
 }
 
-function extractIosBundleId(app: Record<string, unknown>): string | null {
-  const bundleId = readIosAppField(app, [
-    "bundleId",
-    "bundleIdentifier",
-    "bundleID",
-    "CFBundleIdentifier"
-  ]);
-  return bundleId ?? null;
-}
-
 function extractIosDisplayName(app: Record<string, unknown>): string | undefined {
   return readIosAppField(app, [
     "bundleDisplayName",
@@ -334,30 +326,38 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
   }
 }
 
-async function fetchAppsForDevice(device: BootedDevice, timer: Timer = defaultTimer): Promise<AppsCacheEntry> {
+interface FetchedAppsCacheEntry {
+  entry: AppsCacheEntry;
+  cacheable: boolean;
+}
+
+async function fetchAppsForDevice(device: BootedDevice, timer: Timer = defaultTimer): Promise<FetchedAppsCacheEntry> {
   const listInstalledApps = new ListInstalledApps(device);
   const lastUpdated = new Date().toISOString();
 
   if (device.platform === "android") {
-    const installedApps = await listInstalledApps.executeDetailed();
-    const { userApps, queryApps } = normalizeAndroidApps(installedApps);
+    const result = await listInstalledApps.executeDetailedResult();
+    const { userApps, queryApps } = normalizeAndroidApps(result.apps);
     const foregroundApp = queryApps.find(app => app.foreground)?.packageName ?? null;
     const message = getAndroidAppsMessage(device.deviceId);
 
     return {
-      expiresAt: timer.now() + APPS_CACHE_TTL_MS,
-      content: createAppsResourceContent(device, userApps, foregroundApp, lastUpdated, message),
-      appsByPackage: buildAppsByPackage(userApps),
-      queryApps
+      cacheable: result.successful,
+      entry: {
+        expiresAt: timer.now() + APPS_CACHE_TTL_MS,
+        content: createAppsResourceContent(device, userApps, foregroundApp, lastUpdated, message),
+        appsByPackage: buildAppsByPackage(userApps),
+        queryApps
+      }
     };
   }
 
-  const installedApps = await listInstalledApps.executeIosDetailed();
+  const result = await listInstalledApps.executeIosDetailedResult();
   const apps: IosInstalledAppInfo[] = [];
   const queryApps: AppsQueryAppInfo[] = [];
 
-  for (const app of installedApps) {
-    const bundleId = extractIosBundleId(app as Record<string, unknown>);
+  for (const app of result.apps) {
+    const bundleId = getIosInstalledAppBundleId(app);
     if (!bundleId) {
       continue;
     }
@@ -377,10 +377,13 @@ async function fetchAppsForDevice(device: BootedDevice, timer: Timer = defaultTi
   }
 
   return {
-    expiresAt: timer.now() + APPS_CACHE_TTL_MS,
-    content: createAppsResourceContent(device, apps, null, lastUpdated),
-    appsByPackage: buildAppsByPackage(apps),
-    queryApps
+    cacheable: result.successful,
+    entry: {
+      expiresAt: timer.now() + APPS_CACHE_TTL_MS,
+      content: createAppsResourceContent(device, apps, null, lastUpdated),
+      appsByPackage: buildAppsByPackage(apps),
+      queryApps
+    }
   };
 }
 
@@ -396,11 +399,13 @@ async function ensureAppsCacheEntry(deviceId: string, timer: Timer = defaultTime
   }
 
   const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(deviceId);
-  const entry = await fetchAppsForDevice(device, timer);
-  await getInstalledAppsCacheWriteCoordinator().commitRebuild(deviceId, cacheGeneration, async () => {
-    appCacheByDeviceId.set(deviceId, entry);
-  });
-  return entry;
+  const result = await fetchAppsForDevice(device, timer);
+  if (result.cacheable && (device.platform !== "android" || !getInstalledAppsCacheWriteCoordinator().isDirty(deviceId))) {
+    await getInstalledAppsCacheWriteCoordinator().commitRebuild(deviceId, cacheGeneration, async () => {
+      appCacheByDeviceId.set(deviceId, result.entry);
+    });
+  }
+  return result.entry;
 }
 
 function decodeQueryParam(value: string | undefined): string | undefined {
@@ -690,7 +695,7 @@ export async function syncInstalledAppResources(): Promise<void> {
         const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
         const repo = new InstalledAppsRepository();
         await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
-          repo.clearDeviceSession(deviceId)
+          getDbWriteBarrier().track(() => repo.clearDeviceSession(deviceId)).then(() => undefined)
         );
         logger.info(`[AppResources] Cleared installed apps cache for disappeared device: ${deviceId}`);
       } catch (error) {
@@ -726,17 +731,25 @@ function invalidateMetadataCacheForDevice(deviceId: string): void {
 
 export function invalidateInstalledAppsCache(deviceId?: string): void {
   if (deviceId) {
+    invalidateInstalledAppResourceCache(deviceId);
     getInstalledAppsCacheWriteCoordinator().invalidateWithoutWrite(deviceId);
-    appCacheByDeviceId.delete(deviceId);
-    invalidateMetadataCacheForDevice(deviceId);
     return;
   }
   const deviceIds = new Set<string>(appCacheByDeviceId.keys());
   for (const entry of appMetadataCacheByKey.values()) {
     deviceIds.add(entry.deviceId);
   }
-  for (const deviceId of deviceIds) {
-    getInstalledAppsCacheWriteCoordinator().invalidateWithoutWrite(deviceId);
+  invalidateInstalledAppResourceCache();
+  for (const cachedDeviceId of deviceIds) {
+    getInstalledAppsCacheWriteCoordinator().invalidateWithoutWrite(cachedDeviceId);
+  }
+}
+
+export function invalidateInstalledAppResourceCache(deviceId?: string): void {
+  if (deviceId) {
+    appCacheByDeviceId.delete(deviceId);
+    invalidateMetadataCacheForDevice(deviceId);
+    return;
   }
   appCacheByDeviceId.clear();
   appMetadataCacheByKey.clear();

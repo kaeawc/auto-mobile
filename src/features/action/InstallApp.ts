@@ -193,7 +193,7 @@ export class InstallApp {
       }
     }
 
-    await this.markInstalledAppsCacheStale();
+    await this.markInstalledAppsCacheStale(success);
 
     perf.end();
     const warning = warnings.length > 0 ? warnings.join(" ") : undefined;
@@ -206,7 +206,11 @@ export class InstallApp {
     };
   }
 
-  private async markInstalledAppsCacheStale(): Promise<void> {
+  private async markInstalledAppsCacheStale(installSucceeded: boolean): Promise<void> {
+    if (!installSucceeded) {
+      return;
+    }
+
     try {
       await getDbWriteBarrier().track(() =>
         this.installedAppsRepository.markDeviceStale(this.device.deviceId)

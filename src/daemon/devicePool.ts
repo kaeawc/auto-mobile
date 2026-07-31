@@ -428,7 +428,9 @@ export class DevicePool {
         logger.warn(`[DevicePool] Retained ${device.id}: Android discovery failed during stale-disconnect check`);
         return true;
       }
-      if (!discovery.devices.some(candidate => candidate.deviceId === device.id)) {
+      if (!discovery.devices.some(candidate =>
+        candidate.deviceId === device.id && candidate.name === device.avdName
+      )) {
         return false;
       }
       logger.info(
@@ -554,7 +556,7 @@ export class DevicePool {
       }
     }
 
-    if (this.isUnavailableWithoutPendingRecovery(stats.total >= requiredCount, platform)) {
+    if (!this.hasSufficientCapacityIncludingRecovery(stats.total, requiredCount, platform)) {
       throw new ActionableError(
         `Not enough devices in pool: need ${requiredCount}, have ${stats.total}.\n` +
         `Device pool status:\n` +
@@ -963,14 +965,21 @@ export class DevicePool {
     return (platform === undefined || platform === "android") && this.recoveringAndroidImages.size > 0;
   }
 
+  private hasSufficientCapacityIncludingRecovery(
+    pooledDeviceCount: number,
+    requiredCount: number,
+    platform?: Platform
+  ): boolean {
+    const pendingRecoveryCount = platform === undefined || platform === "android"
+      ? this.recoveringAndroidImages.size
+      : 0;
+    return pooledDeviceCount + pendingRecoveryCount >= requiredCount;
+  }
+
   private hasPendingAndroidRecoveryMatching(criteria?: DeviceAllocationCriteria): boolean {
     return Array.from(this.recoveringAndroidImages.values()).some(image =>
       this.criteriaMatcher.deviceImageMatchesCriteria(image, criteria)
     );
-  }
-
-  private isUnavailableWithoutPendingRecovery(available: boolean, platform?: Platform): boolean {
-    return !available && !this.hasPendingAndroidRecovery(platform);
   }
 
   private isCriteriaUnavailableWithoutPendingRecovery(

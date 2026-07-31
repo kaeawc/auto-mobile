@@ -469,6 +469,35 @@ describe("DevicePool", () => {
       expect(await devicePool.isCurrentDisconnectedDevice(device)).toBe(true);
     });
 
+    test("does not accept a different AVD that reuses the disconnected emulator serial", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      try {
+        await devicePool.addDevice(ready, {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          source: "local",
+        });
+        const disconnected = devicePool.getDevice(ready.deviceId);
+        if (!disconnected) {
+          throw new Error("expected disconnected pooled device");
+        }
+        fakeDeviceManager.bootedDevices = [
+          createBootedDevice("emulator-5554", "android", "Pixel 9"),
+        ];
+
+        expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe(true);
+      } finally {
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
     test("stale disconnect validation rejects a same-serial replacement added during discovery", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
@@ -1609,6 +1638,41 @@ describe("DevicePool", () => {
             3_000
           )
         ).rejects.toThrow(/No devices match criteria.*simulatorType=Pixel 9/);
+        expect(manager.childProcesses).toHaveLength(2);
+      } finally {
+        manager.releaseRecovery();
+        await new Promise(resolve => setImmediate(resolve));
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
+    test("does not count one pending recovery as capacity for multiple devices", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const manager = new DeferredRecoveryDeviceManager();
+      manager.deviceImages = [
+        { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+      ];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer)
+      );
+      try {
+        await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+        manager.childProcesses[0]!.emit("exit", 1, null);
+        await manager.waitForRecoveryStart();
+
+        await expect(
+          devicePool.assignMultipleDevices(["session-2", "session-3"], 3_000, "android")
+        ).rejects.toThrow("Not enough devices in pool: need 2, have 0");
         expect(manager.childProcesses).toHaveLength(2);
       } finally {
         manager.releaseRecovery();

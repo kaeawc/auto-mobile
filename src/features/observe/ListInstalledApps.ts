@@ -7,6 +7,8 @@ import { InstalledAppsRepository, InstalledAppsStore } from "../../db/installedA
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { InstalledApp as DbInstalledApp, NewInstalledApp } from "../../db/types";
 import { AndroidCtrlProxyClient } from "./android";
+import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
+import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 
 const INSTALLED_APPS_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -159,6 +161,7 @@ export class ListInstalledApps {
   }
 
   private async rebuildInstalledAppsCache(): Promise<InstalledAppsByProfile> {
+    const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(this.device.deviceId);
     const installedApps: InstalledAppsByProfile = { profiles: {}, system: [] };
     const systemAppsMap = new Map<string, SystemInstalledApp>();
     const cacheEntries: NewInstalledApp[] = [];
@@ -261,7 +264,11 @@ export class ListInstalledApps {
     logger.info(`Found ${profileAppCount} user app(s) across ${users.length} user(s); ${installedApps.system.length} system app(s) deduped`);
 
     if (this.cacheEnabled && !hadUserErrors) {
-      await this.installedAppsRepository.replaceInstalledApps(this.device.deviceId, cacheEntries);
+      await getInstalledAppsCacheWriteCoordinator().commitRebuild(this.device.deviceId, cacheGeneration, () =>
+        getDbWriteBarrier().track(() =>
+          this.installedAppsRepository.replaceInstalledApps(this.device.deviceId, cacheEntries)
+        ).then(() => undefined)
+      );
     } else if (this.cacheEnabled && hadUserErrors) {
       logger.warn("[ListInstalledApps] Skipping cache update due to user listing errors");
     }

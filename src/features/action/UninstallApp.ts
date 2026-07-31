@@ -12,6 +12,7 @@ import { logger } from "../../utils/logger";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
+import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 
 export interface DeviceAppUninstaller {
   uninstallApp(deviceUdid: string, bundleId: string, isSimulator?: boolean): Promise<void>;
@@ -227,8 +228,10 @@ export class UninstallApp {
 
   private async markInstalledAppsCacheStale(): Promise<void> {
     try {
-      await getDbWriteBarrier().track(() =>
-        this.installedAppsRepository.markDeviceStale(this.device.deviceId)
+      await getInstalledAppsCacheWriteCoordinator().invalidate(this.device.deviceId, () =>
+        getDbWriteBarrier().track(() =>
+          this.installedAppsRepository.markDeviceStale(this.device.deviceId)
+        ).then(() => undefined)
       );
     } catch (error) {
       logger.warn(`[UninstallApp] Failed to invalidate installed apps cache: ${error}`);

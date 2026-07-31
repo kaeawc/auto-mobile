@@ -41,6 +41,7 @@ import { NavigationScreenshotManager } from "../../navigation/NavigationScreensh
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
+import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedAppsCacheWriteCoordinator";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
@@ -3440,8 +3441,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Fired fire-and-forget on WS close, which happens during shutdown socket
       // teardown — route through the barrier so it drains (or is skipped) before
       // closeDatabase() rather than racing the closing connection (issue #2792).
-      await getDbWriteBarrier().track(() =>
-        this.getInstalledAppsRepository().markDeviceStale(this.device.deviceId)
+      await getInstalledAppsCacheWriteCoordinator().invalidate(this.device.deviceId, () =>
+        getDbWriteBarrier().track(() =>
+          this.getInstalledAppsRepository().markDeviceStale(this.device.deviceId)
+        ).then(() => undefined)
       );
       logger.info(`[CTRL_PROXY] Marked installed apps cache stale (${reason})`);
     } catch (error) {

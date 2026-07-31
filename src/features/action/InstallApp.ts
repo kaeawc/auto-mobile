@@ -17,6 +17,7 @@ import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/Pli
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
+import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -224,8 +225,10 @@ export class InstallApp {
       return;
     }
     try {
-      await getDbWriteBarrier().track(() =>
-        this.installedAppsRepository.markDeviceStale(this.device.deviceId)
+      await getInstalledAppsCacheWriteCoordinator().invalidate(this.device.deviceId, () =>
+        getDbWriteBarrier().track(() =>
+          this.installedAppsRepository.markDeviceStale(this.device.deviceId)
+        ).then(() => undefined)
       );
     } catch (error) {
       logger.warn(`[InstallApp] Failed to invalidate installed apps cache: ${error}`);

@@ -64,6 +64,7 @@ done
 
 [ -n "$staging" ] || { echo "error: no staging directory given" >&2; usage >&2; exit 2; }
 [ -d "$staging" ] || { echo "error: staging directory not found: $staging" >&2; exit 2; }
+staging="${staging%/}" # so ${path#"$staging"/} strips cleanly
 
 group_path="${GROUP//.//}"
 
@@ -175,9 +176,11 @@ echo "# columns: coordinate classifier filename bytes"
 sort "$records"
 echo
 echo "## Per-coordinate totals"
-while IFS= read -r coord; do
-  echo "$coord files=${coord_files[$coord]} bytes=${coord_bytes[$coord]}"
-done < <(printf '%s\n' "${!coord_files[@]}" | sort)
+if [ "${#coord_files[@]}" -gt 0 ]; then
+  while IFS= read -r coord; do
+    echo "$coord files=${coord_files[$coord]} bytes=${coord_bytes[$coord]}"
+  done < <(printf '%s\n' "${!coord_files[@]}" | sort)
+fi
 echo
 echo "## Classifier totals"
 line=""
@@ -187,8 +190,7 @@ done
 printf '%s\n' "${line# }"
 echo
 echo "## Release total"
-coord_n="$(printf '%s\n' "${!coord_files[@]}" | grep -c .)"
-echo "coordinates=$coord_n files=$total_files bytes=$total_bytes"
+echo "coordinates=${#coord_files[@]} files=$total_files bytes=$total_bytes"
 
 exit_code=0
 

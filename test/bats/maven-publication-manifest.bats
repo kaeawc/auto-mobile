@@ -171,6 +171,21 @@ JSON
   [ "$status" -eq 0 ]
 }
 
+@test "an empty (but existing) staging directory reports zero, not a crash" {
+  local empty
+  empty="$(mktemp -d)"
+  run bash "$SCRIPT" "$empty"
+  rmdir "$empty"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"coordinates=0 files=0 bytes=0"* ]]
+}
+
+@test "a trailing slash on the staging path is handled" {
+  run bash "$SCRIPT" "$STAGE/"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"files=110"* ]]
+}
+
 @test "a missing staging directory fails clearly" {
   run bash "$SCRIPT" "$STAGE/does-not-exist"
   [ "$status" -ne 0 ]

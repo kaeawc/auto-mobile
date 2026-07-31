@@ -265,8 +265,14 @@ export function registerDeviceTools() {
         const pool = DaemonState.getInstance().getDevicePool();
         if (boot.source === "cold-boot") {
           pool.clearIntentionalShutdown(boot.device.deviceId);
+          await pool.registerStartedDevice(
+            boot.device,
+            boot.sourceImage,
+            boot.processHandle
+          );
+        } else {
+          pool.notifyDeviceReady(boot.device.deviceId);
         }
-        pool.notifyDeviceReady(boot.device.deviceId);
       }
 
       if (boot.source === "cold-boot" || boot.provisioned) {

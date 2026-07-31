@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import type { ChildProcess } from "child_process";
+import { EventEmitter } from "node:events";
 import { setDeviceToolsDependencies, resetDeviceToolsDependencies, registerDeviceTools, startDeviceSchema } from "../../src/server/deviceTools";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
@@ -16,6 +18,16 @@ const AUTOLOCK_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
 ] as const;
+
+class FakeExitChildProcess extends EventEmitter {
+  readonly pid = 4242;
+  readonly exitCode: number | null | undefined = undefined;
+  readonly signalCode: NodeJS.Signals | null | undefined = undefined;
+
+  kill(): boolean {
+    return true;
+  }
+}
 
 function clearAutolockEnv(): void {
   for (const key of AUTOLOCK_ENV_KEYS) {
@@ -171,6 +183,61 @@ describe("startDevice handler", () => {
     expect(result.deviceId).toBeDefined();
     expect(result.source).toBe("cold-boot");
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
+  });
+
+  it("tracks the process handle for a public Android cold boot", async () => {
+    const recoveryKeys = [
+      "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",
+      "AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH",
+    ] as const;
+    const originalRecoveryEnv = new Map(
+      recoveryKeys.map(key => [key, process.env[key]])
+    );
+    for (const key of recoveryKeys) {
+      delete process.env[key];
+    }
+
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
+    const childProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
+    fakeDeviceUtils.setMockChildProcess(
+      coldBootImage.name,
+      childProcess as unknown as ChildProcess
+    );
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(coldBootImage);
+
+    try {
+      const result = await callStartDevice({ platform: "android" });
+      expect(daemonSessionManager.getSession(result.sessionId as string)).not.toBeNull();
+
+      childProcess.emit("exit", 1, null);
+      await new Promise(resolve => setImmediate(resolve));
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(daemonSessionManager.getSession(result.sessionId as string)).toBeNull();
+      expect(pool.getDevice(androidDevice.deviceId)).toBeNull();
+    } finally {
+      for (const key of recoveryKeys) {
+        const original = originalRecoveryEnv.get(key);
+        if (original === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = original;
+        }
+      }
+    }
   });
 
   it("evicts the pooled device cache before cold-boot resource notifications", async () => {

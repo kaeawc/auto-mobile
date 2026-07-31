@@ -315,7 +315,7 @@ export class DevicePool {
    * Add a new device to the pool
    */
   async addDevice(device: BootedDevice, sourceImage?: DeviceInfo): Promise<void> {
-    this.clearAutoStartSuppressionForBootedDevice(device);
+    this.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
     if (sourceImage) {
       this.intentionallyStoppedDeviceIds.delete(device.deviceId);
     }
@@ -357,6 +357,15 @@ export class DevicePool {
     }
 
     this.notifyDeviceReady(device.deviceId);
+  }
+
+  async registerStartedDevice(
+    device: BootedDevice,
+    sourceImage: DeviceInfo | undefined,
+    childProcess: ChildProcess | null | undefined
+  ): Promise<void> {
+    await this.addDevice(device, sourceImage);
+    await this.trackStartedDeviceProcess(device, childProcess);
   }
 
   private recordSourceAndroidAvd(deviceId: string, sourceImage?: DeviceInfo): void {
@@ -963,6 +972,7 @@ export class DevicePool {
   private isAutoStartSuppressed(image: DeviceInfo): boolean {
     return (
       this.suppressedAutoStartDeviceImageKeys.has(this.criteriaMatcher.getDeviceImageKey(image)) ||
+      this.suppressedAutoStartDeviceImageKeys.has(`${image.platform}:${image.name}`) ||
       (image.platform === "android" && this.recoveringAndroidImages.has(image.name))
     );
   }
@@ -1336,11 +1346,19 @@ export class DevicePool {
     this.suppressedAutoStartImageKeyByDeviceId.set(device.id, imageKey);
   }
 
-  private clearAutoStartSuppressionForBootedDevice(device: BootedDevice): void {
+  private clearAutoStartSuppressionForBootedDevice(
+    device: BootedDevice,
+    sourceImage?: DeviceInfo
+  ): void {
     const rememberedImageKey = this.suppressedAutoStartImageKeyByDeviceId.get(device.deviceId);
+    const observedImageKey = `${device.platform}:${device.name}`;
+    const authoritativeImageKey = sourceImage?.platform === device.platform
+      ? `${sourceImage.platform}:${sourceImage.name}`
+      : observedImageKey;
     this.suppressedAutoStartDeviceImageKeys.delete(device.deviceId);
-    this.suppressedAutoStartDeviceImageKeys.delete(`${device.platform}:${device.name}`);
-    if (rememberedImageKey) {
+    this.suppressedAutoStartDeviceImageKeys.delete(observedImageKey);
+    this.suppressedAutoStartDeviceImageKeys.delete(authoritativeImageKey);
+    if (rememberedImageKey === authoritativeImageKey) {
       this.suppressedAutoStartDeviceImageKeys.delete(rememberedImageKey);
       this.suppressedAutoStartImageKeyByDeviceId.delete(device.deviceId);
     }

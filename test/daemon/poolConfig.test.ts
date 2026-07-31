@@ -13,6 +13,9 @@ const ENV_KEYS = [
   "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",
   "AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH",
 ] as const;
+const ORIGINAL_ENV = new Map<(typeof ENV_KEYS)[number], string | undefined>(
+  ENV_KEYS.map(key => [key, process.env[key]])
+);
 
 function clearEnv(): void {
   for (const key of ENV_KEYS) {
@@ -20,9 +23,20 @@ function clearEnv(): void {
   }
 }
 
+function restoreEnv(): void {
+  for (const key of ENV_KEYS) {
+    const original = ORIGINAL_ENV.get(key);
+    if (original === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = original;
+    }
+  }
+}
+
 describe("poolConfig autolock", () => {
   beforeEach(clearEnv);
-  afterEach(clearEnv);
+  afterEach(restoreEnv);
 
   it("isDevicePoolAutolockEnabled defaults to false", () => {
     expect(isDevicePoolAutolockEnabled()).toBe(false);
@@ -85,7 +99,7 @@ describe("poolConfig autolock", () => {
 
 describe("Android reboot-on-death configuration", () => {
   beforeEach(clearEnv);
-  afterEach(clearEnv);
+  afterEach(restoreEnv);
 
   it("defaults to disabled and accepts only '1'", () => {
     expect(isAndroidRebootOnDeathEnabled()).toBe(false);

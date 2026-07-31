@@ -1790,7 +1790,7 @@ describe("DevicePool", () => {
         expect(manager.startedDevices).toHaveLength(1);
 
         manager.bootedDevices = [{
-          name: "Unknown (emulator-5554)",
+          name: "Pixel 8",
           platform: "android",
           deviceId: "emulator-5554",
         }];
@@ -1801,6 +1801,57 @@ describe("DevicePool", () => {
         await expect(devicePool.assignMultipleDevices(["session-2"], 1_000, "android"))
           .resolves.toEqual(new Map([["session-2", "emulator-5554"]]));
         expect(manager.startedDevices).toHaveLength(2);
+      } finally {
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
+    test("same-serial rediscovery keeps suppression for a different AVD", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const image: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        deviceId: "emulator-5554",
+        source: "local",
+      };
+      const manager = new FakeDeviceManager([image]);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { run: async () => false }
+      );
+      try {
+        await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+        await devicePool.releaseDevice("emulator-5554");
+        manager.bootedDevices = [];
+        await devicePool.removeDisconnectedDevice("emulator-5554", false);
+
+        manager.bootedDevices = [{
+          name: "Pixel 9",
+          platform: "android",
+          deviceId: "emulator-5554",
+        }];
+        await devicePool.refreshDevices();
+        await devicePool.removeDevice("emulator-5554");
+        manager.bootedDevices = [];
+
+        await expect(devicePool.assignMultipleDevices(["session-2"], 1_000, "android"))
+          .rejects.toThrow("Not enough devices in pool");
+        expect(manager.startedDevices).toHaveLength(1);
       } finally {
         if (originalRebootOnDeath === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;

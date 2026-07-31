@@ -90,18 +90,21 @@ class DevicePickerViewModel(
   private val _effect = Channel<DevicePickerEffect>(Channel.BUFFERED)
   val effect = _effect.receiveAsFlow()
 
-  // Active-boot state is authoritative here, NOT on the replaceable Content. load() swaps Content
-  // out for Loading and back (e.g. a Refresh while the picker is reopened mid cold-boot); keeping
-  // the guard on Content would discard it on that swap — re-arming a device for a second
-  // startDevice and losing a completion that resolves while Loading. These fields survive load()
-  // and are merged (pruned against the fresh device list) into every emitted Content.
+  // Persistent, accumulating UI state that is authoritative HERE, not on the replaceable Content.
+  // load() swaps Content out for Loading and back (e.g. a Refresh while the picker is reopened mid
+  // cold-boot); keeping these on Content would discard them on that swap — re-arming a device for a
+  // second startDevice, or dropping selections made across earlier boots. They survive every load()
+  // and are merged, pruned against the fresh device list, into every emitted Content. Loads replace
+  // only the device LIST, never these.
   private var bootingIds: Set<String> = emptySet()
   private var bootErrors: Map<String, String> = emptyMap()
+  private var selectedIds: Set<String> = emptySet()
 
-  // Monotonic load/emission generation. Every load() and reloadAfterBoot() claims the next value at
-  // its start; an in-flight load that resumes after a newer one has begun drops its emission rather
-  // than clobbering fresher post-boot state (a stale Refresh restoring the shut-down card and
-  // dropping the just-booted selection).
+  // Monotonic load/emission generation, claimed at the start of every load()/reloadAfterBoot(). It
+  // guards ONLY the stale device-LIST emission: a fetch that resumes after a newer one began does
+  // not overwrite the fresher list. It never gates the persistent state above (recorded before the
+  // guard), nor the rule that the newest generation ends terminal (Content or Error) — a failure is
+  // never dropped into a stranded Loading.
   private var loadGeneration: Long = 0
 
   init {
@@ -122,7 +125,7 @@ class DevicePickerViewModel(
       is DevicePickerAction.ClearFilter -> clearFilter(action.dimension)
       is DevicePickerAction.ToggleSelect -> toggleSelect(action.deviceId)
       is DevicePickerAction.BootDevice -> bootDevice(action.deviceId)
-      is DevicePickerAction.ClearSelection -> updateContent { it.copy(selectedIds = emptySet()) }
+      is DevicePickerAction.ClearSelection -> clearSelection()
       is DevicePickerAction.ObserveSelected -> observeSelected()
       is DevicePickerAction.Refresh -> load()
     }
@@ -134,16 +137,12 @@ class DevicePickerViewModel(
     scope.launch {
       try {
         val devices = fetchDevices()
-        if (generation != loadGeneration) return@launch // superseded by a newer load/reload
-        LOG.info("Picker loaded ${devices.size} devices")
-        emitContent(devices)
+        emitIfCurrent(generation, devices)
       } catch (c: CancellationException) {
         throw c // don't turn cancellation into a load error
       } catch (e: Exception) {
         LOG.warn("Failed to load picker devices: ${e.message}", e)
-        if (generation == loadGeneration) {
-          _state.value = DevicePickerUiState.Error(e.message ?: "Failed to load devices")
-        }
+        resolveFetchFailure(generation, e)
       }
     }
   }
@@ -173,36 +172,70 @@ class DevicePickerViewModel(
     }
 
   /**
-   * Emit a fresh [DevicePickerUiState.Content] from a reloaded device list, preserving the prior
-   * filters/selection and merging the ViewModel-level boot guard — pruned against the new list so
-   * ids that are now booted or gone are dropped. This is the single place Content is rebuilt, so a
-   * mid-boot reload never drops the "Booting…"/error guard.
+   * Emit the reloaded device list as [DevicePickerUiState.Content] — but ONLY if [generation] is
+   * still the newest. A stale success is dropped: its persistent selection/boot state was already
+   * recorded and a newer emission carries it, so dropping the stale LIST cannot lose it.
    */
+  private fun emitIfCurrent(generation: Long, devices: List<PickerDevice>) {
+    if (generation != loadGeneration) return
+    LOG.info("Picker loaded ${devices.size} devices")
+    emitContent(devices)
+  }
+
+  /**
+   * Resolve a failed fetch to a TERMINAL state for the newest generation so a failure is never left
+   * stranded as [DevicePickerUiState.Loading]: retain the previous [DevicePickerUiState.Content]
+   * snapshot (merging the updated persistent state, e.g. a boot marked failed) when one exists,
+   * else a retryable [DevicePickerUiState.Error]. A stale-generation failure is dropped — the newer
+   * generation will resolve terminally.
+   */
+  private fun resolveFetchFailure(generation: Long, error: Throwable) {
+    if (generation != loadGeneration) return
+    _state.value =
+      when (val current = _state.value) {
+        is DevicePickerUiState.Content ->
+          current.copy(
+            selectedIds = selectedIds,
+            bootingIds = bootingIds,
+            bootErrors = bootErrors,
+          )
+        else -> DevicePickerUiState.Error(error.message ?: "Failed to load devices")
+      }
+  }
+
+  /** Rebuild Content from a device list, merging the pruned persistent state. */
   private fun emitContent(devices: List<PickerDevice>) {
-    pruneBootState(devices)
-    val bootedIds = devices.filter { it.state == DeviceState.Booted }.map { it.id }.toSet()
+    pruneState(devices)
     _state.update { current ->
       val prev = current as? DevicePickerUiState.Content
       DevicePickerUiState.Content(
         devices = devices,
         filters = prev?.filters ?: PickerFilters(),
-        selectedIds = (prev?.selectedIds ?: emptySet()) intersect bootedIds,
+        selectedIds = selectedIds,
         bootingIds = bootingIds,
         bootErrors = bootErrors,
       )
     }
   }
 
-  /** Drop boot guard/error entries for devices that are no longer shut down (booted or gone). */
-  private fun pruneBootState(devices: List<PickerDevice>) {
+  /**
+   * Prune the persistent state against the live list: boot guard/error entries survive only while
+   * their device is still shut down (drop once booted or gone); a selection survives only while its
+   * device is still present and booted.
+   */
+  private fun pruneState(devices: List<PickerDevice>) {
     val shutdownIds = devices.filter { it.state == DeviceState.Shutdown }.map { it.id }.toSet()
+    val bootedIds = devices.filter { it.state == DeviceState.Booted }.map { it.id }.toSet()
     bootingIds = bootingIds intersect shutdownIds
     bootErrors = bootErrors.filterKeys { it in shutdownIds }
+    selectedIds = selectedIds intersect bootedIds
   }
 
-  /** Reflect the current boot fields onto the live Content (no device reload). */
-  private fun syncBootState() {
-    updateContent { it.copy(bootingIds = bootingIds, bootErrors = bootErrors) }
+  /** Reflect the persistent state onto the live Content (no device reload). */
+  private fun syncState() {
+    updateContent {
+      it.copy(selectedIds = selectedIds, bootingIds = bootingIds, bootErrors = bootErrors)
+    }
   }
 
   private fun bootDevice(deviceId: String) {
@@ -212,7 +245,7 @@ class DevicePickerViewModel(
     if (device.state != DeviceState.Shutdown) return // only shut-down cards boot
     bootingIds = bootingIds + deviceId
     bootErrors = bootErrors - deviceId
-    syncBootState()
+    syncState()
     scope.launch {
       val result = bootController.boot(device)
       val runtimeDeviceId = result.getOrNull()
@@ -222,17 +255,19 @@ class DevicePickerViewModel(
         val message = result.exceptionOrNull()?.message ?: "Failed to boot ${device.name}"
         bootingIds = bootingIds - deviceId
         bootErrors = bootErrors + (deviceId to message)
-        syncBootState()
+        syncState()
       }
     }
   }
 
   /**
-   * Reload after a boot succeeded and auto-select the started device so Observe is usable. The
-   * device is selected by [runtimeDeviceId] — the exact id the daemon assigned it — never by
-   * display name, which is ambiguous when two identically-named devices boot concurrently. A read
-   * failure retains the prior snapshot (see [fetchDevices]) rather than fabricating a shut-down
-   * card.
+   * Reload after a boot succeeded and auto-select the started device so Observe is usable.
+   * Selection keys on [runtimeDeviceId] — the exact id the daemon assigned — never the display name
+   * (ambiguous for identically-named devices). The selection is recorded in the persistent state
+   * BEFORE the generation guard, so two overlapping boots both stick even if their emissions are
+   * superseded. A read failure resolves to a terminal state (retained snapshot or Error), never a
+   * stranded Loading, and never fabricates a shut-down card from a partial read (see
+   * [fetchDevices]).
    */
   private suspend fun reloadAfterBoot(bootedDevice: PickerDevice, runtimeDeviceId: String) {
     val generation = ++loadGeneration
@@ -245,37 +280,39 @@ class DevicePickerViewModel(
         LOG.warn("Reload after boot failed for ${bootedDevice.name}: ${e.message}", e)
         bootingIds = bootingIds - bootedDevice.id
         bootErrors = bootErrors + (bootedDevice.id to (e.message ?: "Reload after boot failed"))
-        syncBootState()
+        resolveFetchFailure(generation, e)
         return
       }
-    val nowBooted = devices.firstOrNull {
-      it.id == runtimeDeviceId && it.state == DeviceState.Booted
-    }
+    val nowBooted = devices.any { it.id == runtimeDeviceId && it.state == DeviceState.Booted }
     bootingIds = bootingIds - bootedDevice.id
-    bootErrors =
-      if (nowBooted != null) bootErrors - bootedDevice.id
-      else bootErrors + (bootedDevice.id to "Boot did not complete")
-    if (generation != loadGeneration) return // a newer load/reload will emit fresher state
-    emitContent(devices)
-    if (nowBooted != null) {
-      updateContent { it.copy(selectedIds = it.selectedIds + runtimeDeviceId) }
+    if (nowBooted) {
+      selectedIds = selectedIds + runtimeDeviceId // recorded before the guard — never lost
+      bootErrors = bootErrors - bootedDevice.id
+    } else {
+      bootErrors = bootErrors + (bootedDevice.id to "Boot did not complete")
     }
+    emitIfCurrent(generation, devices)
   }
 
   private fun toggleSelect(deviceId: String) {
-    updateContent { content ->
-      // Booted-only: ignore selection of non-booted devices.
-      val device = content.devices.firstOrNull { it.id == deviceId } ?: return@updateContent content
-      if (device.state != DeviceState.Booted) return@updateContent content
-      content.copy(selectedIds = content.selectedIds.toggle(deviceId))
-    }
+    val content = _state.value as? DevicePickerUiState.Content ?: return
+    // Booted-only: ignore selection of non-booted devices.
+    val device = content.devices.firstOrNull { it.id == deviceId } ?: return
+    if (device.state != DeviceState.Booted) return
+    selectedIds = selectedIds.toggle(deviceId)
+    syncState()
+  }
+
+  private fun clearSelection() {
+    selectedIds = emptySet()
+    syncState()
   }
 
   private fun observeSelected() {
     val content = _state.value as? DevicePickerUiState.Content ?: return
     val columns =
       content.devices
-        .filter { it.id in content.selectedIds && it.state == DeviceState.Booted }
+        .filter { it.id in selectedIds && it.state == DeviceState.Booted }
         .map { DeviceColumn(deviceId = it.id, name = it.name, platform = it.platform) }
     if (columns.isNotEmpty()) {
       scope.launch { _effect.send(DevicePickerEffect.Observe(columns)) }

@@ -283,10 +283,7 @@ class DevicePickerViewModelTest {
   fun `a stale load resuming after a boot completion cannot clobber the fresh state`() =
     testScope.runTest {
       val client =
-        GatedResourceClient(
-          bootedJson = SINGLE_BOOTED_PIXEL8,
-          imagesJson = THREE_IMAGES,
-        )
+        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)
       val boot =
         FakeDeviceBootController().apply {
           autoComplete = false
@@ -318,7 +315,8 @@ class DevicePickerViewModelTest {
   @Test
   fun `a booted-read error after boot retains the snapshot instead of fabricating a shutdown card`() =
     testScope.runTest {
-      val client = ToggleErrorResourceClient()
+      val client =
+        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = TWO_IMAGES_8_6)
       val boot =
         FakeDeviceBootController().apply {
           result = Result.success("emulator-5556")
@@ -343,7 +341,9 @@ class DevicePickerViewModelTest {
   @Test
   fun `a resource read error surfaces as Error state rather than an empty picker`() =
     testScope.runTest {
-      val client = ToggleErrorResourceClient().apply { failBooted = true }
+      val client =
+        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = TWO_IMAGES_8_6)
+          .apply { failBooted = true }
       val v =
         DevicePickerViewModel(
           client,
@@ -351,6 +351,71 @@ class DevicePickerViewModelTest {
           testScope,
           UnconfinedTestDispatcher(),
         )
+      assertTrue(v.state.value is DevicePickerUiState.Error)
+    }
+
+  @Test
+  fun `boot selections accumulate across boots and survive a refresh`() = testScope.runTest {
+    // Two differently-named shut-down devices so both can coexist (booted + shutdown) in the list.
+    val resources =
+      FakeMcpResourceClient().apply {
+        bootedDevicesResponse = bootedJson()
+        deviceImagesResponse =
+          """
+          {"totalCount":2,"androidCount":2,"iosCount":0,"lastUpdated":"x","images":[
+            {"name":"Pixel 6","platform":"android","deviceId":"avd_6","target":"android-33"},
+            {"name":"Pixel 5","platform":"android","deviceId":"avd_5","target":"android-32"}]}
+          """
+            .trimIndent()
+      }
+    val boot = FakeDeviceBootController()
+    val v = vm(resourceClient = resources, bootController = boot)
+
+    boot.result = Result.success("emu-6")
+    boot.onSuccess = {
+      resources.bootedDevicesResponse = bootedJsonNamed("Pixel 6" to "emu-6")
+    }
+    v.onAction(DevicePickerAction.BootDevice("avd_6"))
+    assertEquals(setOf("emu-6"), content(v).selectedIds)
+
+    boot.result = Result.success("emu-5")
+    boot.onSuccess = {
+      resources.bootedDevicesResponse = bootedJsonNamed("Pixel 6" to "emu-6", "Pixel 5" to "emu-5")
+    }
+    v.onAction(DevicePickerAction.BootDevice("avd_5"))
+    assertEquals(setOf("emu-6", "emu-5"), content(v).selectedIds) // accumulated, not replaced
+
+    // A refresh replaces only the device LIST; the accumulated selection must survive the
+    // Loading->Content swap (it lives on the ViewModel, not the discarded Content).
+    v.onAction(DevicePickerAction.Refresh)
+    val c = content(v)
+    assertEquals(setOf("emu-6", "emu-5"), c.selectedIds)
+    assertTrue(c.devices.any { it.id == "emu-6" && it.state == DeviceState.Booted })
+    assertTrue(c.devices.any { it.id == "emu-5" && it.state == DeviceState.Booted })
+  }
+
+  @Test
+  fun `a refresh during boot whose post-boot read fails ends in Error, not stuck Loading`() =
+    testScope.runTest {
+      val client =
+        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = TWO_IMAGES_8_6)
+      val boot = FakeDeviceBootController().apply { autoComplete = false }
+      val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
+      v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // boot in flight (gated)
+
+      // A Refresh sets Loading and stalls mid-read, so state is Loading when the boot resolves.
+      val staleGate = CompletableDeferred<Unit>()
+      client.imagesGate = staleGate
+      v.onAction(DevicePickerAction.Refresh)
+      client.imagesGate = null
+
+      // The post-boot reload's booted read now fails: the newest generation must still resolve to a
+      // terminal Error (retryable) — never leave the Refresh's Loading stranded.
+      client.failBooted = true
+      boot.complete()
+      assertTrue(v.state.value is DevicePickerUiState.Error)
+
+      staleGate.complete(Unit) // stale Refresh resumes; its emission is dropped, Error stands
       assertTrue(v.state.value is DevicePickerUiState.Error)
     }
 
@@ -374,59 +439,49 @@ class DevicePickerViewModelTest {
         """{"name":"Pixel 6 API 33","platform":"android","deviceId":"Pixel_6_API_33","target":"android-33"},""" +
         """{"name":"iPhone 15","platform":"ios","deviceId":"iphone-15","iosVersion":"17.2"}]}"""
 
-    fun bootedJson(vararg deviceIds: String): String {
-      val devices =
-        deviceIds.joinToString(",") { id ->
-          """{"name":"Pixel 8","platform":"android","deviceId":"$id",""" +
+    const val TWO_IMAGES_8_6 =
+      """{"totalCount":2,"androidCount":2,"iosCount":0,"lastUpdated":"x","images":[""" +
+        """{"name":"Pixel 8 API 35","platform":"android","deviceId":"Pixel_8_API_35","target":"android-35"},""" +
+        """{"name":"Pixel 6 API 33","platform":"android","deviceId":"Pixel_6_API_33","target":"android-33"}]}"""
+
+    fun bootedJson(vararg deviceIds: String): String =
+      bootedJsonNamed(*deviceIds.map { "Pixel 8" to it }.toTypedArray())
+
+    fun bootedJsonNamed(vararg devices: Pair<String, String>): String {
+      val entries =
+        devices.joinToString(",") { (name, id) ->
+          """{"name":"$name","platform":"android","deviceId":"$id",""" +
             """"source":"local","isVirtual":true,"status":"booted"}"""
         }
-      val n = deviceIds.size
+      val n = devices.size
       return """{"totalCount":$n,"androidCount":$n,"iosCount":0,"virtualCount":$n,""" +
-        """"physicalCount":0,"lastUpdated":"x","devices":[$devices]}"""
+        """"physicalCount":0,"lastUpdated":"x","devices":[$entries]}"""
     }
   }
 }
 
-/** Resource fake whose device-images read can be gated to reorder a load against a boot. */
-private class GatedResourceClient(var bootedJson: String, private val imagesJson: String) :
+/**
+ * Flexible resource fake: the booted-devices JSON is mutable (a boot "completes" by rewriting it),
+ * either read can be flipped to an error ([failBooted]/[failImages]) to exercise partial/total read
+ * failures, and the device-images read can be gated ([imagesGate]) to reorder a load against a boot
+ * completion.
+ */
+private class ScriptableResourceClient(var bootedJson: String, private val imagesJson: String) :
   McpResourceClient {
   var imagesGate: CompletableDeferred<Unit>? = null
-
-  override suspend fun readResource(uri: String): ResourceReadResult =
-    when (uri) {
-      "automobile:devices/booted" -> ResourceReadResult.Success(bootedJson, "application/json")
-      "automobile:devices/images" -> {
-        imagesGate?.await()
-        ResourceReadResult.Success(imagesJson, "application/json")
-      }
-      else -> ResourceReadResult.Error("unknown resource: $uri")
-    }
-
-  override suspend fun listResources(): List<ResourceInfo> = emptyList()
-
-  override fun close() {}
-}
-
-/** Resource fake whose booted read can be flipped to an error to exercise partial-read handling. */
-private class ToggleErrorResourceClient : McpResourceClient {
   var failBooted: Boolean = false
-
-  private val bootedJson =
-    """{"totalCount":1,"androidCount":1,"iosCount":0,"virtualCount":1,"physicalCount":0,""" +
-      """"lastUpdated":"x","devices":[{"name":"Pixel 8 API 35","platform":"android",""" +
-      """"deviceId":"emulator-5554","source":"local","isVirtual":true,"status":"booted"}]}"""
-
-  private val imagesJson =
-    """{"totalCount":2,"androidCount":2,"iosCount":0,"lastUpdated":"x","images":[""" +
-      """{"name":"Pixel 8 API 35","platform":"android","deviceId":"Pixel_8_API_35","target":"android-35"},""" +
-      """{"name":"Pixel 6 API 33","platform":"android","deviceId":"Pixel_6_API_33","target":"android-33"}]}"""
+  var failImages: Boolean = false
 
   override suspend fun readResource(uri: String): ResourceReadResult =
     when (uri) {
       "automobile:devices/booted" ->
         if (failBooted) ResourceReadResult.Error("transient booted-read failure")
         else ResourceReadResult.Success(bootedJson, "application/json")
-      "automobile:devices/images" -> ResourceReadResult.Success(imagesJson, "application/json")
+      "automobile:devices/images" -> {
+        imagesGate?.await()
+        if (failImages) ResourceReadResult.Error("transient images-read failure")
+        else ResourceReadResult.Success(imagesJson, "application/json")
+      }
       else -> ResourceReadResult.Error("unknown resource: $uri")
     }
 

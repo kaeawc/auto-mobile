@@ -1525,7 +1525,14 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManager();
       manager.deviceImages = [
-        { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+        {
+          name: "pixel_8_api_35",
+          platform: "android",
+          isRunning: false,
+          deviceId: "emulator-5554",
+          deviceType: "Pixel 8",
+          source: "local",
+        },
       ];
       devicePool = new DevicePool(
         sessionManager,
@@ -1540,7 +1547,13 @@ describe("DevicePool", () => {
         manager.childProcesses[0]!.emit("exit", 1, null);
         await manager.waitForRecoveryStart();
 
-        const allocation = devicePool.assignMultipleDevices(["session-2"], 3_000, "android");
+        const allocation = devicePool.assignMultipleDevicesByCriteria(
+          [{
+            sessionId: "session-2",
+            criteria: { platform: "android", simulatorType: "Pixel 8" },
+          }],
+          3_000
+        );
         expect(manager.childProcesses).toHaveLength(2);
         manager.releaseRecovery();
         await new Promise(resolve => setImmediate(resolve));
@@ -1548,6 +1561,54 @@ describe("DevicePool", () => {
 
         const assignments = await allocation;
         expect(assignments.get("session-2")).toBe("emulator-5554");
+        expect(manager.childProcesses).toHaveLength(2);
+      } finally {
+        manager.releaseRecovery();
+        await new Promise(resolve => setImmediate(resolve));
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
+    test("does not defer incompatible criteria allocation for an unrelated recovering AVD", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const manager = new DeferredRecoveryDeviceManager();
+      manager.deviceImages = [
+        {
+          name: "pixel_8_api_35",
+          platform: "android",
+          isRunning: false,
+          deviceId: "emulator-5554",
+          deviceType: "Pixel 8",
+          source: "local",
+        },
+      ];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer)
+      );
+      try {
+        await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+        manager.childProcesses[0]!.emit("exit", 1, null);
+        await manager.waitForRecoveryStart();
+
+        await expect(
+          devicePool.assignMultipleDevicesByCriteria(
+            [{
+              sessionId: "session-2",
+              criteria: { platform: "android", simulatorType: "Pixel 9" },
+            }],
+            3_000
+          )
+        ).rejects.toThrow(/No devices match criteria.*simulatorType=Pixel 9/);
         expect(manager.childProcesses).toHaveLength(2);
       } finally {
         manager.releaseRecovery();

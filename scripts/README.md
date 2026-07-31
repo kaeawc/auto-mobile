@@ -62,17 +62,25 @@ Thresholds are defined in `scripts/context-thresholds.json`:
 
 ```json
 {
-  "version": "1.0.0",
-  "thresholds": {
-    "tools": 14000,
-    "resources": 1000,
-    "resourceTemplates": 2000,
-    "total": 17000
+  "version": "2.0.0",
+  "metadata": {
+    "baseline": {
+      "coreTools": 0,
+      "allTools": 0,
+      "resources": 0,
+      "resourceTemplates": 0,
+      "coreTotal": 0,
+      "allTotal": 0
+    }
   }
 }
 ```
 
-Current thresholds are manually set to allow headroom for resource and template growth while preventing significant regressions.
+The benchmark compares both profiles against their recorded baselines. To record
+a new baseline, run `bun run benchmark-context`, copy its six **Actual** values
+into `metadata.baseline` in the chosen config, then rerun the benchmark to
+verify every delta is zero. Do not copy the zeroes above into a working
+configuration.
 
 ### Observe Output Byte Breakdown
 

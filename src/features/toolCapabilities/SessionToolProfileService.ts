@@ -1,4 +1,4 @@
-/** Tool capabilities that are intentionally absent from the baseline MCP surface. */
+/** Tool capabilities that are opt-in beyond the baseline MCP surface. */
 export const TOOL_CAPABILITIES = [
   "clipboard",
   "advanced-interaction",
@@ -19,15 +19,15 @@ export const TOOL_CAPABILITIES = [
 export type ToolCapability = typeof TOOL_CAPABILITIES[number];
 
 /**
- * Preserve the existing MCP surface until a profile deliberately narrows it.
- * This keeps new session-scoped profiles opt-in and avoids breaking existing
- * agents, scripts, and daemon integrations during an upgrade.
+ * Keep the initial MCP surface to core navigation, app-installation, and device
+ * manipulation tools. Agents opt into each advanced capability explicitly.
  */
-export const DEFAULT_TOOL_CAPABILITIES: ReadonlySet<ToolCapability> = new Set(TOOL_CAPABILITIES);
+export const DEFAULT_TOOL_CAPABILITIES: ReadonlySet<ToolCapability> = new Set();
 
 export interface SessionToolProfileRepository {
   list(sessionUuid: string): Promise<Map<string, boolean>>;
   set(sessionUuid: string, capability: string, enabled: boolean): Promise<void>;
+  deleteSession(sessionUuid: string): Promise<void>;
 }
 
 /**
@@ -44,16 +44,26 @@ export class SessionToolProfileService {
   async isEnabled(sessionUuid: string | undefined, capability: ToolCapability): Promise<boolean> {
     if (!sessionUuid) {
       // tools/list has no device session before an agent's first device-aware
-      // call. Keep that initial list compatible, then refresh it once a
-      // session UUID is bound and its persisted profile can be applied.
-      return true;
+      // call, so only the process-level default can apply. Do not query the
+      // session repository until a session UUID is available.
+      return this.environmentDefaults.has(capability);
     }
     const overrides = await this.repository.list(sessionUuid);
     return overrides.get(capability) ?? this.environmentDefaults.has(capability);
   }
 
+  /** Return an explicit session choice without falling back to process defaults. */
+  async getOverride(sessionUuid: string, capability: ToolCapability): Promise<boolean | undefined> {
+    return (await this.repository.list(sessionUuid)).get(capability);
+  }
+
   async setEnabled(sessionUuid: string, capability: ToolCapability, enabled: boolean): Promise<void> {
     await this.repository.set(sessionUuid, capability, enabled);
+  }
+
+  /** Drop overrides once their routing session has been released. */
+  async deleteSession(sessionUuid: string): Promise<void> {
+    await this.repository.deleteSession(sessionUuid);
   }
 }
 

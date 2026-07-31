@@ -47,8 +47,8 @@ describe("isToolEnabledForAnySession (union semantics)", () => {
     expect(await isToolEnabledForAnySession("observe", [undefined], only("x"))).toBe(true);
   });
 
-  test("keeps the initial surface when no session is bound", async () => {
-    expect(await isToolEnabledForAnySession("clipboard", [undefined, undefined], only("x"))).toBe(true);
+  test("uses the core default when no session is bound", async () => {
+    expect(await isToolEnabledForAnySession("clipboard", [undefined, undefined], only("x"))).toBe(false);
   });
 
   test("enabled when only the base session grants it", async () => {
@@ -62,6 +62,33 @@ describe("isToolEnabledForAnySession (union semantics)", () => {
   test("disabled only when neither base nor derived grants it", async () => {
     const noneEnabled: Pick<SessionToolProfileService, "isEnabled"> = { isEnabled: async () => false };
     expect(await isToolEnabledForAnySession("clipboard", ["base", "base:B"], noneEnabled)).toBe(false);
+  });
+
+  test("an explicit connection disable overrides routing defaults but not a routing opt-in", async () => {
+    const overrides = new Map<string, boolean | undefined>([
+      ["connection", false],
+      ["base", undefined],
+      ["base:B", undefined],
+    ]);
+    const profileService: Pick<SessionToolProfileService, "isEnabled" | "getOverride"> = {
+      isEnabled: async sessionUuid => sessionUuid !== "connection",
+      getOverride: async sessionUuid => overrides.get(sessionUuid),
+    };
+
+    expect(await isToolEnabledForAnySession(
+      "clipboard",
+      ["connection", "base", "base:B"],
+      profileService,
+      "connection",
+    )).toBe(false);
+
+    overrides.set("base:B", true);
+    expect(await isToolEnabledForAnySession(
+      "clipboard",
+      ["connection", "base", "base:B"],
+      profileService,
+      "connection",
+    )).toBe(true);
   });
 });
 

@@ -18,24 +18,28 @@ class FakeRepository implements SessionToolProfileRepository {
     values.set(capability, enabled);
     this.rows.set(sessionUuid, values);
   }
+
+  async deleteSession(sessionUuid: string): Promise<void> {
+    this.rows.delete(sessionUuid);
+  }
 }
 
 describe("SessionToolProfileService", () => {
-  test("keeps the existing surface before a device session binds", async () => {
+  test("hides opt-in capabilities before a device session binds", async () => {
     const service = new SessionToolProfileService(new FakeRepository());
-    expect(await service.isEnabled(undefined, "clipboard")).toBe(true);
-    expect(DEFAULT_TOOL_CAPABILITIES.has("clipboard")).toBe(true);
+    expect(await service.isEnabled(undefined, "clipboard")).toBe(false);
+    expect(DEFAULT_TOOL_CAPABILITIES.has("clipboard")).toBe(false);
   });
 
-  test("keeps the existing surface for an untouched device session", async () => {
+  test("hides opt-in capabilities for an untouched device session", async () => {
     const service = new SessionToolProfileService(new FakeRepository());
-    expect(await service.isEnabled("device-session-1", "clipboard")).toBe(true);
+    expect(await service.isEnabled("device-session-1", "clipboard")).toBe(false);
   });
 
   test.each([
     ["unset", {}],
     ["empty", { AUTOMOBILE_TOOLSET_DEFAULTS: "  " }],
-  ])("uses the declared baseline when defaults are %s", (_description, environment) => {
+  ])("uses the core baseline when defaults are %s", (_description, environment) => {
     expect(getEnvironmentDefaultToolCapabilities(environment)).toEqual(DEFAULT_TOOL_CAPABILITIES);
   });
 
@@ -59,13 +63,13 @@ describe("SessionToolProfileService", () => {
     expect(await restarted.isEnabled("device-session-1", "clipboard")).toBe(false);
   });
 
-  test("lets a session profile narrow the default surface", async () => {
+  test("lets a session profile enable an opt-in capability", async () => {
     const repository = new FakeRepository();
     const service = new SessionToolProfileService(repository);
 
-    await service.setEnabled("device-session-1", "clipboard", false);
+    await service.setEnabled("device-session-1", "clipboard", true);
 
-    expect(await service.isEnabled("device-session-1", "clipboard")).toBe(false);
+    expect(await service.isEnabled("device-session-1", "clipboard")).toBe(true);
   });
 
   test("uses environment defaults only when no session override exists", async () => {
@@ -74,6 +78,16 @@ describe("SessionToolProfileService", () => {
     expect(await service.isEnabled("device-session-1", "clipboard")).toBe(true);
 
     await service.setEnabled("device-session-1", "clipboard", false);
+    expect(await service.isEnabled("device-session-1", "clipboard")).toBe(false);
+  });
+
+  test("removes overrides after the routing session is released", async () => {
+    const repository = new FakeRepository();
+    const service = new SessionToolProfileService(repository);
+    await service.setEnabled("device-session-1", "clipboard", true);
+
+    await service.deleteSession("device-session-1");
+
     expect(await service.isEnabled("device-session-1", "clipboard")).toBe(false);
   });
 });

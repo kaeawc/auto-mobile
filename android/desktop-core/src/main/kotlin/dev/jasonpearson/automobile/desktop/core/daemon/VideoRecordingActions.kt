@@ -55,6 +55,7 @@ interface VideoRecordingActions {
 /** [VideoRecordingActions] backed by the `videoRecording` MCP tool. */
 class McpVideoRecordingActions(private val clientProvider: () -> AutoMobileClient) :
   VideoRecordingActions {
+  private val client by lazy(clientProvider)
 
   override fun startRecording(deviceId: String): List<VideoRecordingArtifact> =
     call(
@@ -81,12 +82,14 @@ class McpVideoRecordingActions(private val clientProvider: () -> AutoMobileClien
     )
   }
 
-  private fun call(arguments: JsonObject): VideoRecordingToolResponse =
-    decodeToolResponse(
+  private fun call(arguments: JsonObject): VideoRecordingToolResponse {
+    client.enableToolCapability("screen-artifacts")
+    return decodeToolResponse(
       recordingJson,
-      clientProvider().callTool("videoRecording", arguments),
+      client.callTool("videoRecording", arguments),
       serializer<VideoRecordingToolResponse>(),
     )
+  }
 }
 
 @Serializable

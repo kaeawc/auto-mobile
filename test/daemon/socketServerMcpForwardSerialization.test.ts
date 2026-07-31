@@ -6,6 +6,7 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { DAEMON_CAPABILITY_PROFILE_PARAM } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
@@ -279,6 +280,104 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(b.success).toBe(true);
     expect(maxInFlight).toBe(1);
     expect(inFlight).toBe(0);
+  });
+
+  test("binds a generated capability profile to the socket and reuses it for discovery", async () => {
+    const clients: FakeMcpClient[] = [];
+    server.mcpClientFactory = async () => {
+      const client: FakeMcpClient = {
+        callTool: async () => ({
+          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a" }) }],
+        }),
+        listTools: async () => ({ tools: [{ name: `profile-client-${clients.length}` }] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      clients.push(client);
+      return client;
+    };
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const set = await client.request("tools/call", {
+        name: "setToolCapability",
+        arguments: { capability: "test-authoring" },
+      });
+      const list = await client.request("tools/list", {});
+
+      expect(set.success).toBe(true);
+      expect(list.result).toEqual({ tools: [{ name: "profile-client-1" }] });
+      // `clients.length` is one while listTools executes: the generated profile
+      // stayed on the socket's loopback transport instead of falling back to an
+      // unbound tools/list client.
+      expect(clients).toHaveLength(1);
+    } finally {
+      client.close();
+    }
+  });
+
+  test("preserves a socket-bound capability profile for a later explicit device call", async () => {
+    const factoryArguments: Array<[string | undefined, string | undefined]> = [];
+    server.mcpClientFactory = async (sessionUuid, capabilityProfileUuid) => {
+      factoryArguments.push([sessionUuid, capabilityProfileUuid]);
+      return {
+        callTool: async () => ({
+          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a" }) }],
+        }),
+        listTools: async () => ({ tools: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      await client.request("tools/call", {
+        name: "setToolCapability",
+        arguments: { capability: "test-authoring" },
+      });
+      const call = await client.request("tools/call", {
+        name: "executePlan",
+        arguments: { sessionUuid: "device-session-a" },
+      });
+
+      expect(call.success).toBe(true);
+      expect(factoryArguments).toEqual([
+        [undefined, undefined],
+        ["device-session-a", "profile-a"],
+      ]);
+    } finally {
+      client.close();
+    }
+  });
+
+  test("creates a loopback client with both an explicit device session and its capability profile", async () => {
+    const factoryArguments: Array<[string | undefined, string | undefined]> = [];
+    server.mcpClientFactory = async (sessionUuid, capabilityProfileUuid) => {
+      factoryArguments.push([sessionUuid, capabilityProfileUuid]);
+      return {
+        callTool: async () => ({ content: [] }),
+        listTools: async () => ({ tools: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    const response = await sendToolsCallWithArgs(socketPath, "executePlan", {
+      sessionUuid: "device-session-a",
+      [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a",
+    });
+
+    expect(response.success).toBe(true);
+    expect(factoryArguments).toEqual([["device-session-a", "profile-a"]]);
   });
 
   test("routes sessionless calls through the client bound by an earlier session-aware call", async () => {

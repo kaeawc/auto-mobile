@@ -40,7 +40,11 @@ export class PlanSchemaValidator {
       verbose: true,
       strict: false
     });
-    addFormats(this.ajv);
+    // Bun installs ajv-formats' compatible Ajv v8 dependency separately from
+    // our direct v8 dependency. They share the runtime plugin contract, but
+    // TypeScript treats their class identities as distinct package instances.
+    // eslint-disable-next-line auto-mobile/no-unknown-cast -- ajv-formats bundles a second compatible Ajv v8 type identity.
+    addFormats(this.ajv as unknown as Parameters<typeof addFormats>[0]);
   }
 
   /**

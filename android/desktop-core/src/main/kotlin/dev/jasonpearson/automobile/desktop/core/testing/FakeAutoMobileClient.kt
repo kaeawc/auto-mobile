@@ -179,6 +179,9 @@ class FakeAutoMobileClient : AutoMobileClient {
   val inputPressButtonCalls = mutableListOf<InputPressButtonCall>()
   val inputTypeTextCalls = mutableListOf<InputTypeTextCall>()
   val inputKeyCalls = mutableListOf<InputKeyCall>()
+  val toolCalls = mutableListOf<ToolCall>()
+
+  data class ToolCall(val name: String, val arguments: JsonObject)
 
   // -- AutoMobileClient implementation --
 
@@ -400,6 +403,7 @@ class FakeAutoMobileClient : AutoMobileClient {
 
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
     calls.add("callTool")
+    toolCalls.add(ToolCall(name, arguments))
     return callToolResult
   }
 

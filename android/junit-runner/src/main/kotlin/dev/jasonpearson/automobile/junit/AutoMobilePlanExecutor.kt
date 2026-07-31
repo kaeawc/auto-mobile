@@ -348,27 +348,55 @@ internal object AutoMobilePlanExecutor {
       appendExecutePlanCleanupArgs(args)
       appendCaptureObserveStepsArgs(args)
 
-      if (options.debugMode) {
-        println(
-          "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)"
-        )
-      }
-
-      DaemonHeartbeat.registerSession(sessionUuid)
+      // Plans use test-authoring tools such as executePlan. Opt this generated
+      // device session in before executing the plan so runner behavior remains
+      // unchanged while interactive MCP clients keep the lean core default.
       response =
-        try {
-          DaemonSocketClientManager.callTool(
-            "executePlan",
-            JsonObject(args),
-            options.effectiveExecutePlanTimeoutMs(),
+        callDaemonToolForAttempt(
+          "setToolCapability",
+          JsonObject(
+            mapOf(
+              "capability" to JsonPrimitive("test-authoring"),
+              "sessionUuid" to JsonPrimitive(sessionUuid),
+            )
+          ),
+          options.effectiveExecutePlanTimeoutMs(),
+        )
+      if (!response.success && !isUnknownToolError(response.error)) {
+        // Treat the prerequisite like executePlan itself: the retry classifier
+        // below handles transient daemon responses rather than throwing before
+        // it has a chance to retry the attempt.
+        outputPayload =
+          response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
+        parsed =
+          ParsedToolResult(
+            false,
+            response.error ?: "Unable to enable the test-authoring capability",
           )
-        } finally {
-          DaemonHeartbeat.unregisterSession(sessionUuid)
+        toolResults = emptyList()
+      } else {
+        if (options.debugMode) {
+          println(
+            "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)"
+          )
         }
-      outputPayload =
-        response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
-      parsed = parseDaemonToolResult(response, json)
-      toolResults = parseToolResults(response, json, options.debugMode)
+
+        DaemonHeartbeat.registerSession(sessionUuid)
+        response =
+          try {
+            callDaemonToolForAttempt(
+              "executePlan",
+              JsonObject(args),
+              options.effectiveExecutePlanTimeoutMs(),
+            )
+          } finally {
+            DaemonHeartbeat.unregisterSession(sessionUuid)
+          }
+        outputPayload =
+          response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
+        parsed = parseDaemonToolResult(response, json)
+        toolResults = parseToolResults(response, json, options.debugMode)
+      }
 
       if (options.debugMode) {
         println("Daemon response:\n$outputPayload")
@@ -393,7 +421,7 @@ internal object AutoMobilePlanExecutor {
       }
 
       println("Retrying plan execution after transient error (attempt $attempt): $errorMessage")
-      Thread.sleep(RETRY_BACKOFF_MS)
+      Thread.sleep(retryBackoffMs)
     }
 
     // Non-transient failure or retries exhausted — attempt recovery if allowed
@@ -842,6 +870,23 @@ internal object AutoMobilePlanExecutor {
   // ── Retry helpers ────────────────────────────────────────────────────────
 
   private const val RETRY_BACKOFF_MS = 2000L
+  @JvmStatic internal var retryBackoffMs: Long = RETRY_BACKOFF_MS
+
+  private fun callDaemonToolForAttempt(
+    toolName: String,
+    arguments: JsonObject,
+    timeoutMs: Long,
+  ): DaemonResponse =
+    try {
+      DaemonSocketClientManager.callTool(toolName, arguments, timeoutMs)
+    } catch (error: DaemonUnavailableException) {
+      DaemonResponse(
+        id = "",
+        type = "mcp_response",
+        success = false,
+        error = error.message ?: "daemon request timeout",
+      )
+    }
 
   private fun isTransientError(errorMessage: String?): Boolean {
     if (errorMessage.isNullOrBlank()) return false
@@ -850,6 +895,9 @@ internal object AutoMobilePlanExecutor {
       normalized.contains("plan execution in progress") ||
       normalized.contains("daemon request timeout")
   }
+
+  private fun isUnknownToolError(errorMessage: String?): Boolean =
+    errorMessage?.contains("unknown tool", ignoreCase = true) == true
 
   // ── Internal types ────────────────────────────────────────────────────────
 

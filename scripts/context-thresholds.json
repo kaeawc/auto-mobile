@@ -1,20 +1,15 @@
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "metadata": {
-    "generatedAt": "2026-07-24",
-    "description": "MCP context usage thresholds with manual headroom for resource/template growth. tools baseline/threshold reconciled to current main: #4390 (observe.scope, ~433 tokens) and #4396 (observe.project, ~108 tokens) both merged over the non-required benchmark without raising the threshold, and #3490 adds openLink's integrated waitFor (the whole predicate surface, previously observe-only) plus absent/settled (~194 tokens after trimming shared waitFor descriptions). #4398 wires the settleObserve + waitForCondition tools and the observe.waitFor for-DSL (~1089 tokens: two new device-aware tools plus the for/pollMs/stableReads compact-schema fields, advertised on both observe and openLink, after trimming shared descriptions).",
+    "generatedAt": "2026-07-30",
+    "description": "Canonical context baselines after core tools became the default profile. The benchmark instantiates the production MCP server, measures the core profile (tools without an opt-in capability) and the complete advertised tool surface, then includes the resources and resource templates shared by both profiles. Thresholds are intentionally omitted until these two baselines have been reviewed.",
     "baseline": {
-      "tools": 16734,
-      "resources": 440,
-      "resourceTemplates": 1885,
-      "total": 19059
-    },
-    "buffer": "custom"
-  },
-  "thresholds": {
-    "tools": 16830,
-    "resources": 1000,
-    "resourceTemplates": 2000,
-    "total": 20000
+      "coreTools": 8465,
+      "allTools": 26184,
+      "resources": 1259,
+      "resourceTemplates": 12137,
+      "coreTotal": 21861,
+      "allTotal": 39580
+    }
   }
 }

@@ -69,4 +69,17 @@ describe("#4124 ffmpeg install hoist", () => {
     expect(videoStep?.run).not.toContain("brew");
     expect(videoStep?.run).toContain("video-recording-start-stop-integration.sh");
   });
+
+  test("advanced iOS integrations opt in without widening the default tool surface", () => {
+    const videoStep = stepNamed(steps, "Run videoRecording MP4 integration test");
+    const daemonStep = stepNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.5)");
+    const navigationStep = stepNamed(steps, "Run iOS navigation graph Simulator workflow");
+    const remindersStep = stepNamed(steps, "Run Reminders integration tests (Xcode 26.5)");
+
+    expect(videoStep?.env?.AUTOMOBILE_TOOLSET_SCREEN_ARTIFACTS).toBe("1");
+    expect(daemonStep?.env?.AUTOMOBILE_TOOLSET_NAVIGATION_MODELING).toBe("1");
+    expect(daemonStep?.env?.AUTOMOBILE_TOOLSET_TEST_AUTHORING).toBe("1");
+    expect(navigationStep?.env?.AUTOMOBILE_TOOLSET_NAVIGATION_MODELING).toBe("1");
+    expect(remindersStep?.env?.AUTOMOBILE_TOOLSET_TEST_AUTHORING).toBe("1");
+  });
 });

@@ -60,9 +60,9 @@ interface DeviceSnapshotActions {
 /** [DeviceSnapshotActions] backed by the `deviceSnapshot` MCP tool and the archive resource. */
 class McpDeviceSnapshotActions(private val clientProvider: () -> AutoMobileClient) :
   DeviceSnapshotActions {
+  private val client by lazy(clientProvider)
 
   override fun listSnapshots(): List<DeviceSnapshotMetadata> {
-    val client = clientProvider()
     val archive =
       decodeResourceResponse(
         snapshotJson,
@@ -104,7 +104,7 @@ class McpDeviceSnapshotActions(private val clientProvider: () -> AutoMobileClien
   }
 
   private fun callSnapshotTool(arguments: JsonObject): DeviceSnapshotToolResponse {
-    val client = clientProvider()
+    client.enableToolCapability("screen-artifacts")
     return decodeToolResponse(
       snapshotJson,
       client.callTool("deviceSnapshot", arguments),

@@ -1,10 +1,11 @@
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike, type DaemonClientFactory } from "./client";
 import { DaemonManager, type DaemonManagerLike } from "./manager";
 import { logger } from "../utils/logger";
-import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS, DAEMON_BOUND_SESSION_REPLAY_TTL_MS } from "./constants";
+import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS, DAEMON_BOUND_SESSION_REPLAY_TTL_MS, DAEMON_CAPABILITY_PROFILE_PARAM } from "./constants";
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
+import { capabilityProfileUuidFromToolResponse, SET_TOOL_CAPABILITY_TOOL_NAME } from "../features/toolCapabilities/toolCapabilityControl";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
@@ -348,6 +349,10 @@ export class DaemonMcpProxy {
   // refreshing it, the remembered UUID is treated as retired so a sessionless
   // call is not rewritten to a released session (issue #4610).
   private boundSessionUuidAt: number | undefined;
+  // A connection-level capability profile is not a daemon device session. It
+  // survives executePlan's device-session release and is forwarded through the
+  // socket only when no explicit/remembered routing session is in use.
+  private capabilityProfileUuid: string | undefined;
   // Monotonic release-epoch counter, bumped every time the daemon signals that a
   // session was released (via handleDaemonNotification). `releasedSessionEpochs`
   // records, per released UUID, the epoch at which it was last released. A
@@ -907,7 +912,7 @@ export class DaemonMcpProxy {
       // reconnect (issue #4610).
       const discoveryEpoch = this.discoveryEpoch;
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("tools/list", this.withBoundSessionUuid({}))
+        this.client!.callDaemonMethod("tools/list", this.withCapabilityProfile(this.withBoundSessionUuid({})))
       );
       const tools = result?.tools ?? [];
       // If a list_changed or bound-session release invalidated this cache WHILE the
@@ -932,7 +937,11 @@ export class DaemonMcpProxy {
     name: string,
     args: Record<string, unknown>
   ): Promise<any> {
-    const forwardedArgs = this.withBoundSessionUuid(args);
+    // An omitted `sessionUuid` on the control tool means the connection profile,
+    // not the proxy's retained device-routing session. Preserve that distinction
+    // after a device has been bound.
+    const routingArgs = name === SET_TOOL_CAPABILITY_TOOL_NAME ? args : this.withBoundSessionUuid(args);
+    const forwardedArgs = this.withCapabilityProfile(routingArgs);
     // Snapshot the release epoch at forward time. If a session-released signal for
     // the SPECIFIC forwarded UUID lands WHILE this call is in flight, that UUID's
     // recorded epoch advances past this snapshot and the completion path below
@@ -942,6 +951,7 @@ export class DaemonMcpProxy {
     const callReleaseEpoch = this.releaseEpoch;
     try {
       const result = await this.withRecoverableReconnect(() => this.client!.callTool(name, forwardedArgs));
+      this.rememberCapabilityProfile(name, args, result);
       // Remember what was actually forwarded, not the caller's raw args. An
       // implicit sessionless call injects the bound UUID into forwardedArgs and
       // extends the live daemon session in getOrCreateSession(); refreshing the
@@ -999,6 +1009,32 @@ export class DaemonMcpProxy {
     return { ...args, sessionUuid: this.boundSessionUuid };
   }
 
+  private withCapabilityProfile(args: Record<string, unknown>): Record<string, unknown> {
+    if (!this.capabilityProfileUuid) {
+      return args;
+    }
+    return { ...args, [DAEMON_CAPABILITY_PROFILE_PARAM]: this.capabilityProfileUuid };
+  }
+
+  private rememberCapabilityProfile(
+    name: string,
+    requestedArgs: Record<string, unknown>,
+    result: unknown,
+  ): void {
+    if (
+      name !== SET_TOOL_CAPABILITY_TOOL_NAME ||
+      (typeof requestedArgs.sessionUuid === "string" && requestedArgs.sessionUuid.trim().length > 0)
+    ) {
+      return;
+    }
+    const sessionUuid = capabilityProfileUuidFromToolResponse(result);
+    if (sessionUuid) {
+      this.capabilityProfileUuid = sessionUuid;
+      this.discoveryEpoch += 1;
+      this.cachedTools = null;
+    }
+  }
+
   private isBoundSessionReplayExpired(): boolean {
     if (this.boundSessionUuid === undefined || this.boundSessionUuidAt === undefined) {
       return false;
@@ -1053,6 +1089,9 @@ export class DaemonMcpProxy {
       this.clearBoundSessionUuid();
       return;
     }
+    if (name === SET_TOOL_CAPABILITY_TOOL_NAME) {
+      return;
+    }
     // A release for the FORWARDED UUID observed WHILE this call was in flight
     // already recorded that UUID's release (handleDaemonNotification).
     // Re-remembering it now would resurrect the freed session and let the next
@@ -1085,7 +1124,7 @@ export class DaemonMcpProxy {
     error: unknown,
     callReleaseEpoch: number,
   ): void {
-    if (name === "executePlan" || this.isRecoverableDaemonSessionError(error)) {
+    if (name === "executePlan" || name === SET_TOOL_CAPABILITY_TOOL_NAME || this.isRecoverableDaemonSessionError(error)) {
       return;
     }
     // As in rememberSessionUuid: a release of the forwarded UUID observed

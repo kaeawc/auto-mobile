@@ -1,376 +1,258 @@
 #!/usr/bin/env bun
 /**
- * Benchmark script to enforce MCP context usage thresholds.
+ * Measure MCP context usage for the default core profile and the full tool
+ * surface. Threshold enforcement is intentionally optional while baselines are
+ * being established.
  *
  * Usage:
  *   bun scripts/benchmark-context-thresholds.ts [--config path/to/config.json] [--output path/to/report.json]
- *
- * Options:
- *   --config    Path to threshold configuration file (default: scripts/context-thresholds.json)
- *   --output    Path to write JSON report file (optional)
- *
- * Exit codes:
- *   0 - All thresholds passed
- *   1 - One or more thresholds exceeded or error occurred
  */
-
-import { Tiktoken } from "js-tiktoken/lite";
-import cl100k_base from "js-tiktoken/ranks/cl100k_base";
-import { ToolRegistry } from "../src/server/toolRegistry";
-import { ResourceRegistry } from "../src/server/resourceRegistry";
-
-// Import all tool registration functions
-import { registerObserveTools } from "../src/server/observeTools";
-import { registerInteractionTools } from "../src/server/interactionTools";
-import { registerAppTools } from "../src/server/appTools";
-import { registerAppFileTools } from "../src/server/appFileTools";
-import { registerUtilityTools } from "../src/server/utilityTools";
-import { registerDeviceTools } from "../src/server/deviceTools";
-import { registerDeepLinkTools } from "../src/server/deepLinkTools";
-import { registerNavigationTools } from "../src/server/navigationTools";
-import { registerPlanTools } from "../src/server/planTools";
-import { registerDoctorTools } from "../src/server/doctorTools";
-
-// Import resource registration functions
-import { registerObservationResources } from "../src/server/observationResources";
-import { registerBootedDeviceResources } from "../src/server/bootedDeviceResources";
-import { registerDeviceImageResources } from "../src/server/deviceImageResources";
-import { registerAppResources } from "../src/server/appResources";
-import { registerAppFileResources } from "../src/server/appFileResources";
-import { registerNavigationResources } from "../src/server/navigationResources";
 
 import fs from "node:fs";
 import path from "node:path";
+import { Tiktoken } from "js-tiktoken/lite";
+import cl100k_base from "js-tiktoken/ranks/cl100k_base";
+import { TOOL_CAPABILITY_BY_NAME } from "../src/features/toolCapabilities/toolCapabilityMap";
+import { ResourceRegistry } from "../src/server/resourceRegistry";
+import { createMcpServer } from "../src/server/index";
+import { ToolRegistry } from "../src/server/toolRegistry";
 
-// Token encoder for Claude models
 const tokenizer = new Tiktoken(cl100k_base);
 
-interface ThresholdConfig {
+export const CONTEXT_MEASUREMENT_KEYS = [
+  "coreTools",
+  "allTools",
+  "resources",
+  "resourceTemplates",
+  "coreTotal",
+  "allTotal",
+] as const;
+
+export type ContextMeasurementKey = typeof CONTEXT_MEASUREMENT_KEYS[number];
+export type ContextMeasurements = Record<ContextMeasurementKey, number>;
+
+export interface ThresholdConfig {
   version: string;
-  thresholds: {
-    tools: number;
-    resources: number;
-    resourceTemplates: number;
-    total: number;
-  };
-  metadata?: {
+  metadata: {
     generatedAt?: string;
     description?: string;
+    baseline: ContextMeasurements;
   };
+  /** Add all six limits only after the recorded baselines have been reviewed. */
+  thresholds?: ContextMeasurements;
 }
 
-interface CategoryResult {
+export interface MeasurementResult {
   actual: number;
-  threshold: number;
-  passed: boolean;
-  usage: number; // percentage
+  baseline: number;
+  delta: number;
+  threshold?: number;
+  passed?: boolean;
+  usage?: number;
 }
 
-interface BenchmarkReport {
+export interface BenchmarkReport {
   timestamp: string;
   passed: boolean;
-  results: {
-    tools: CategoryResult;
-    resources: CategoryResult;
-    resourceTemplates: CategoryResult;
-    total: CategoryResult;
-  };
-  thresholds: ThresholdConfig["thresholds"];
+  enforcement: { enabled: boolean };
+  results: Record<ContextMeasurementKey, MeasurementResult>;
+  baselines: ContextMeasurements;
+  thresholds?: ContextMeasurements;
   violations: string[];
 }
 
-/**
- * Estimate token count for a text string
- */
 function estimateTokens(text: string): number {
-  try {
-    const tokens = tokenizer.encode(text);
-    return tokens.length;
-  } catch (error) {
-    console.error(`Error encoding text: ${error}`);
-    return 0;
-  }
-}
-
-/**
- * Register all tools in the registry
- */
-function registerAllTools(): void {
-  registerObserveTools();
-  registerInteractionTools();
-  registerAppTools();
-  registerAppFileTools();
-  registerUtilityTools();
-  registerDeviceTools();
-  registerDeepLinkTools();
-  registerNavigationTools();
-  registerPlanTools();
-  registerDoctorTools();
-}
-
-/**
- * Register all resources in the registry
- */
-function registerAllResources(): void {
-  registerObservationResources();
-  registerBootedDeviceResources();
-  registerDeviceImageResources();
-  registerAppResources();
-  registerAppFileResources();
-  registerNavigationResources();
-}
-
-/**
- * Estimate tokens for all tool definitions
- */
-function estimateToolTokens(): number {
-  const toolDefinitions = ToolRegistry.getToolDefinitions();
-  let total = 0;
-
-  for (const tool of toolDefinitions) {
-    const toolJson = JSON.stringify(stripOutputSchema(tool), null, 2);
-    total += estimateTokens(toolJson);
-  }
-
-  return total;
+  return tokenizer.encode(text).length;
 }
 
 function stripOutputSchema(tool: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(tool).filter(([key]) => key !== "outputSchema"));
 }
 
-/**
- * Estimate tokens for all resource definitions
- */
-function estimateResourceTokens(): number {
-  const resourceDefinitions = ResourceRegistry.getResourceDefinitions();
-  let total = 0;
+function estimateDefinitions(definitions: readonly Record<string, unknown>[], stripOutputs = false): number {
+  return definitions.reduce((total, definition) => {
+    const measuredDefinition = stripOutputs ? stripOutputSchema(definition) : definition;
+    return total + estimateTokens(JSON.stringify(measuredDefinition, null, 2));
+  }, 0);
+}
 
-  for (const resource of resourceDefinitions) {
-    const resourceJson = JSON.stringify(resource, null, 2);
-    total += estimateTokens(resourceJson);
-  }
-
-  return total;
+export function isCoreTool(toolName: string): boolean {
+  return !TOOL_CAPABILITY_BY_NAME.has(toolName);
 }
 
 /**
- * Estimate tokens for all resource template definitions
+ * Creates the normal MCP server so the benchmark cannot drift from production
+ * registration as new tools or resources are added.
  */
-function estimateResourceTemplateTokens(): number {
-  const templateDefinitions = ResourceRegistry.getTemplateDefinitions();
-  let total = 0;
+export function collectContextMeasurements(): ContextMeasurements {
+  createMcpServer({ daemonMode: true });
 
-  for (const template of templateDefinitions) {
-    const templateJson = JSON.stringify(template, null, 2);
-    total += estimateTokens(templateJson);
-  }
+  const allTools = ToolRegistry.getToolDefinitions();
+  const coreTools = allTools.filter(tool => isCoreTool(tool.name));
+  const resources = ResourceRegistry.getResourceDefinitions();
+  const resourceTemplates = ResourceRegistry.getTemplateDefinitions();
 
-  return total;
-}
-
-/**
- * Load threshold configuration from file
- */
-function loadThresholdConfig(configPath: string): ThresholdConfig {
-  if (!fs.existsSync(configPath)) {
-    console.error(`Threshold configuration file not found: ${configPath}`);
-    process.exit(1);
-  }
-
-  try {
-    const configContent = fs.readFileSync(configPath, "utf-8");
-    const config = JSON.parse(configContent) as ThresholdConfig;
-
-    // Validate configuration
-    if (!config.thresholds) {
-      throw new Error("Missing 'thresholds' section in configuration");
-    }
-
-    const required = ["tools", "resources", "resourceTemplates", "total"];
-    for (const key of required) {
-      if (typeof config.thresholds[key as keyof typeof config.thresholds] !== "number") {
-        throw new Error(`Missing or invalid threshold: ${key}`);
-      }
-    }
-
-    return config;
-  } catch (error) {
-    console.error(`Error loading threshold configuration: ${error}`);
-    process.exit(1);
-  }
-}
-
-/**
- * Check if actual value exceeds threshold
- */
-function checkThreshold(actual: number, threshold: number): CategoryResult {
-  const passed = actual <= threshold;
-  const usage = threshold > 0 ? Math.round((actual / threshold) * 100) : 0;
+  const coreToolsTokens = estimateDefinitions(coreTools, true);
+  const allToolsTokens = estimateDefinitions(allTools, true);
+  const resourceTokens = estimateDefinitions(resources);
+  const resourceTemplateTokens = estimateDefinitions(resourceTemplates);
 
   return {
-    actual,
-    threshold,
-    passed,
-    usage
+    coreTools: coreToolsTokens,
+    allTools: allToolsTokens,
+    resources: resourceTokens,
+    resourceTemplates: resourceTemplateTokens,
+    coreTotal: coreToolsTokens + resourceTokens + resourceTemplateTokens,
+    allTotal: allToolsTokens + resourceTokens + resourceTemplateTokens,
   };
 }
 
-/**
- * Run benchmark and check thresholds
- */
-function runBenchmark(config: ThresholdConfig): BenchmarkReport {
-  console.log("Initializing MCP server components...");
-
-  // Register all tools and resources
-  registerAllTools();
-  registerAllResources();
-
-  console.log("Estimating token usage...\n");
-
-  // Estimate tokens for each category
-  const toolsActual = estimateToolTokens();
-  const resourcesActual = estimateResourceTokens();
-  const resourceTemplatesActual = estimateResourceTemplateTokens();
-  const totalActual = toolsActual + resourcesActual + resourceTemplatesActual;
-
-  // Check each threshold
-  const toolsResult = checkThreshold(toolsActual, config.thresholds.tools);
-  const resourcesResult = checkThreshold(resourcesActual, config.thresholds.resources);
-  const resourceTemplatesResult = checkThreshold(resourceTemplatesActual, config.thresholds.resourceTemplates);
-  const totalResult = checkThreshold(totalActual, config.thresholds.total);
-
-  // Collect violations
+export function evaluateMeasurements(
+  actuals: ContextMeasurements,
+  config: ThresholdConfig,
+): Omit<BenchmarkReport, "timestamp"> {
+  const enforcementEnabled = config.thresholds !== undefined;
   const violations: string[] = [];
-  if (!toolsResult.passed) {
-    violations.push(`Tools: ${toolsResult.actual} tokens exceeds threshold of ${toolsResult.threshold} tokens`);
-  }
-  if (!resourcesResult.passed) {
-    violations.push(`Resources: ${resourcesResult.actual} tokens exceeds threshold of ${resourcesResult.threshold} tokens`);
-  }
-  if (!resourceTemplatesResult.passed) {
-    violations.push(`Resource Templates: ${resourceTemplatesResult.actual} tokens exceeds threshold of ${resourceTemplatesResult.threshold} tokens`);
-  }
-  if (!totalResult.passed) {
-    violations.push(`Total: ${totalResult.actual} tokens exceeds threshold of ${totalResult.threshold} tokens`);
+  const results = {} as Record<ContextMeasurementKey, MeasurementResult>;
+
+  for (const key of CONTEXT_MEASUREMENT_KEYS) {
+    const actual = actuals[key];
+    const baseline = config.metadata.baseline[key];
+    const threshold = config.thresholds?.[key];
+    const passed = threshold === undefined ? undefined : actual <= threshold;
+    if (passed === false) {
+      violations.push(`${key}: ${actual} tokens exceeds threshold of ${threshold} tokens`);
+    }
+    results[key] = {
+      actual,
+      baseline,
+      delta: actual - baseline,
+      ...(threshold === undefined ? {} : {
+        threshold,
+        passed,
+        usage: Math.round((actual / threshold) * 100),
+      }),
+    };
   }
 
-  const passed = violations.length === 0;
+  return {
+    passed: violations.length === 0,
+    enforcement: { enabled: enforcementEnabled },
+    results,
+    baselines: config.metadata.baseline,
+    ...(config.thresholds === undefined ? {} : { thresholds: config.thresholds }),
+    violations,
+  };
+}
 
+function validateMeasurements(
+  values: Partial<Record<ContextMeasurementKey, unknown>>,
+  label: string,
+): asserts values is ContextMeasurements {
+  for (const key of CONTEXT_MEASUREMENT_KEYS) {
+    if (typeof values[key] !== "number") {
+      throw new Error(`Missing or invalid ${label}: ${key}`);
+    }
+  }
+}
+
+export function loadThresholdConfig(configPath: string): ThresholdConfig {
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`Threshold configuration file not found: ${configPath}`);
+  }
+
+  const config = JSON.parse(fs.readFileSync(configPath, "utf-8")) as ThresholdConfig;
+  if (!config.metadata?.baseline) {
+    throw new Error("Missing metadata.baseline section in configuration");
+  }
+  validateMeasurements(config.metadata.baseline, "baseline");
+  if (config.thresholds !== undefined) {
+    validateMeasurements(config.thresholds, "threshold");
+  }
+  return config;
+}
+
+export function runBenchmark(config: ThresholdConfig): BenchmarkReport {
+  console.log("Initializing production MCP server components...");
+  console.log("Measuring core and all-tool context usage...\n");
   return {
     timestamp: new Date().toISOString(),
-    passed,
-    results: {
-      tools: toolsResult,
-      resources: resourcesResult,
-      resourceTemplates: resourceTemplatesResult,
-      total: totalResult
-    },
-    thresholds: config.thresholds,
-    violations
+    ...evaluateMeasurements(collectContextMeasurements(), config),
   };
 }
 
-/**
- * Print benchmark report to console
- */
-function printReport(report: BenchmarkReport): void {
-  console.log("\n" + "=".repeat(80));
-  console.log("MCP CONTEXT THRESHOLD BENCHMARK REPORT");
-  console.log("=".repeat(80) + "\n");
+function formatDelta(delta: number): string {
+  return `${delta >= 0 ? "+" : ""}${delta.toLocaleString()}`;
+}
 
-  const formatRow = (label: string, result: CategoryResult) => {
-    const status = result.passed ? "✓ PASS" : "✗ FAIL";
-    const statusColor = result.passed ? "\x1b[32m" : "\x1b[31m";
-    const resetColor = "\x1b[0m";
+export function printReport(report: BenchmarkReport): void {
+  console.log("\n" + "=".repeat(96));
+  console.log("MCP CONTEXT BASELINE BENCHMARK REPORT");
+  console.log("=".repeat(96) + "\n");
 
-    return `  ${label.padEnd(25)} ${result.actual.toString().padStart(8)} / ${result.threshold.toString().padEnd(8)} (${result.usage.toString().padStart(3)}%)  ${statusColor}${status}${resetColor}`;
+  const formatRow = (label: string, result: MeasurementResult) => {
+    const status = report.enforcement.enabled
+      ? result.passed ? "✓ PASS" : "✗ FAIL"
+      : "• BASELINE";
+    return `  ${label.padEnd(25)} ${result.actual.toString().padStart(8)} ${result.baseline.toString().padStart(10)} ${formatDelta(result.delta).padStart(8)}  ${status}`;
   };
 
-  console.log("Category                     Actual / Threshold       Usage  Status");
-  console.log("-".repeat(80));
-  console.log(formatRow("Tools", report.results.tools));
+  console.log("Category                     Actual   Baseline    Delta  Status");
+  console.log("-".repeat(96));
+  console.log(formatRow("Core Tools", report.results.coreTools));
+  console.log(formatRow("All Tools", report.results.allTools));
   console.log(formatRow("Resources", report.results.resources));
   console.log(formatRow("Resource Templates", report.results.resourceTemplates));
-  console.log("-".repeat(80));
-  console.log(formatRow("TOTAL", report.results.total));
-  console.log("=".repeat(80));
+  console.log("-".repeat(96));
+  console.log(formatRow("CORE TOTAL", report.results.coreTotal));
+  console.log(formatRow("ALL TOTAL", report.results.allTotal));
+  console.log("=".repeat(96));
 
-  if (report.violations.length > 0) {
-    console.log("\n" + "⚠️  THRESHOLD VIOLATIONS:".padStart(40));
-    console.log("-".repeat(80));
+  if (report.enforcement.enabled && report.violations.length > 0) {
+    console.log("\nTHRESHOLD VIOLATIONS:");
     for (const violation of report.violations) {
-      console.log(`  • ${violation}`);
+      console.log(`  - ${violation}`);
     }
-    console.log("-".repeat(80));
   }
 
-  const overallStatus = report.passed ? "✓ PASSED" : "✗ FAILED";
-  const statusColor = report.passed ? "\x1b[32m" : "\x1b[31m";
-  const resetColor = "\x1b[0m";
-  console.log(`\n${statusColor}Overall Status: ${overallStatus}${resetColor}\n`);
+  const status = report.enforcement.enabled
+    ? report.passed ? "✓ PASSED" : "✗ FAILED"
+    : "• BASELINES RECORDED (threshold enforcement pending)";
+  console.log(`\nOverall Status: ${status}\n`);
 }
 
-/**
- * Write benchmark report to JSON file
- */
 function writeReportToFile(report: BenchmarkReport, outputPath: string): void {
-  try {
-    // Ensure parent directory exists
-    const dir = path.dirname(outputPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-
-    const reportJson = JSON.stringify(report, null, 2);
-    fs.writeFileSync(outputPath, reportJson, "utf-8");
-    console.log(`Benchmark report written to: ${outputPath}`);
-  } catch (error) {
-    console.error(`Error writing report to file: ${error}`);
-    process.exit(1);
-  }
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, JSON.stringify(report, null, 2), "utf-8");
+  console.log(`Benchmark report written to: ${outputPath}`);
 }
 
-/**
- * Main execution
- */
-async function main() {
-  const args = process.argv.slice(2);
+export async function main(args = process.argv.slice(2)): Promise<void> {
   let configPath = path.join(__dirname, "context-thresholds.json");
-  let outputPath: string | null = null;
+  let outputPath: string | undefined;
 
-  // Parse command line arguments
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--config" && i + 1 < args.length) {
-      configPath = args[i + 1];
-      i++;
-    } else if (args[i] === "--output" && i + 1 < args.length) {
-      outputPath = args[i + 1];
-      i++;
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === "--config" && args[index + 1]) {
+      configPath = args[++index];
+    } else if (args[index] === "--output" && args[index + 1]) {
+      outputPath = args[++index];
     }
   }
 
-  console.log(`Loading threshold configuration from: ${configPath}\n`);
-
-  // Load threshold configuration
-  const config = loadThresholdConfig(configPath);
-
-  // Run benchmark
-  const report = runBenchmark(config);
-
-  // Print report to console
+  console.log(`Loading context benchmark configuration from: ${configPath}\n`);
+  const report = runBenchmark(loadThresholdConfig(configPath));
   printReport(report);
-
-  // Write report to file if output path specified
   if (outputPath) {
     writeReportToFile(report, outputPath);
   }
-
-  // Exit with appropriate code
-  process.exit(report.passed ? 0 : 1);
+  if (!report.passed) {
+    process.exitCode = 1;
+  }
 }
 
-main().catch(error => {
-  console.error("Fatal error:", error);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch(error => {
+    console.error("Fatal error:", error);
+    process.exitCode = 1;
+  });
+}

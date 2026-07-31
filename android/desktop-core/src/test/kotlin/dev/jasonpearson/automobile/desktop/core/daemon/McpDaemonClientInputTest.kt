@@ -39,6 +39,64 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `capability profile is forwarded across per-request daemon sockets`() {
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(
+              """{"content":[{"type":"text","text":"{\"sessionUuid\":\"profile-a\"}"}]}""",
+              null,
+            ),
+            SocketResponse("""{"tools":[]}""", null),
+            SocketResponse("""{"content":[]}""", null),
+          )
+      )
+      .use { server ->
+        val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
+
+        client.enableToolCapability("screen-artifacts")
+        client.listTools()
+        client.callTool("videoRecording", JsonObject(emptyMap()))
+
+        val requests = server.awaitRequests()
+        assertEquals("setToolCapability", requests[0].params["name"]?.jsonPrimitive?.content)
+        assertEquals("tools/list", requests[1].method)
+        assertEquals(
+          "profile-a",
+          requests[1].params["__autoMobileCapabilityProfileUuid"]?.jsonPrimitive?.content,
+        )
+        assertEquals("videoRecording", requests[2].params["name"]?.jsonPrimitive?.content)
+        val arguments = requests[2].params["arguments"]?.jsonObject
+        assertEquals(
+          "profile-a",
+          arguments?.get("__autoMobileCapabilityProfileUuid")?.jsonPrimitive?.content,
+        )
+      }
+  }
+
+  @Test
+  fun `capability enable tolerates an older daemon without the control tool`() {
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(error = "Unknown tool: setToolCapability"),
+            SocketResponse("""{"content":[]}""", null),
+          )
+      )
+      .use { server ->
+        val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
+
+        client.enableToolCapability("screen-artifacts")
+        client.callTool("videoRecording", JsonObject(emptyMap()))
+
+        assertEquals(
+          listOf("setToolCapability", "videoRecording"),
+          server.awaitRequests().map { it.params["name"]?.jsonPrimitive?.content },
+        )
+      }
+  }
+
+  @Test
   fun `socket requests surface lifecycle failures before opening the socket`() {
     val lifecycle =
       object : DaemonLifecycleEnsurer {

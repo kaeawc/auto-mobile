@@ -90,12 +90,21 @@ interface InternalToolCallOptions {
 interface InternalToolInvocationContext {
   args: Record<string, unknown>;
   routingSessionUuid?: string;
+  capabilitySessionUuid?: string;
+  planCapabilitiesAuthorized: boolean;
   sessionToolProfileService?: Pick<SessionToolProfileService, "isEnabled">;
 }
 
 // Gate reason emitted for `planOnly` tools — hidden from discovery by design,
 // expected in plans (so getToolForPlan does not warn about it).
 const PLAN_ONLY_GATE_REASON = "plan-only tool";
+
+function preservesPlanCapabilityAuthorization(
+  toolName: string,
+  parentAuthorized: boolean | undefined,
+): boolean {
+  return parentAuthorized === true || toolName === "executePlan";
+}
 
 interface ToolRegistrationOptions {
   supportsProgress?: boolean;
@@ -265,6 +274,8 @@ export interface PlanLifecycleInput {
   // (issue #4611 Gap D). Invoked AFTER a real release for every session freed —
   // base and derived label sessions alike — never optimistically.
   sessionBindingReleaseHandler?: SessionBindingReleaseHandler;
+  /** Removes persisted capability overrides for sessions actually released. */
+  sessionToolProfileService?: Partial<Pick<SessionToolProfileService, "deleteSession">>;
 }
 
 interface PlanLifecycleManager {
@@ -634,6 +645,27 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
   }
 }
 
+function responseText(response: any): unknown {
+  const first = Array.isArray(response?.content) ? response.content[0] : undefined;
+  return first?.type === "text" ? first.text : undefined;
+}
+
+function unwrapToolResponse(response: any): any {
+  if (!response || typeof response !== "object" || "success" in response) {
+    return response;
+  }
+  const text = responseText(response);
+  if (typeof text !== "string") {
+    return response;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && "success" in parsed ? parsed : response;
+  } catch {
+    return response;
+  }
+}
+
 export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
   constructor(
     private readonly createArtifactWriter: ObservationArtifactWriterFactory =
@@ -646,22 +678,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     // Unwrap MCP response envelope to get the inner result for success/error checks.
     // Tools may return { content: [{ type: "text", text: '{"success":false,...}' }] }
     // instead of a plain { success, error } object.
-    let unwrapped = response;
-    if (
-      response && typeof response === "object" &&
-      !("success" in response) &&
-      Array.isArray(response.content) && response.content.length > 0
-    ) {
-      const first = response.content[0];
-      if (first?.type === "text" && typeof first.text === "string") {
-        try {
-          const parsed = JSON.parse(first.text);
-          if (parsed && typeof parsed === "object" && "success" in parsed) {
-            unwrapped = parsed;
-          }
-        } catch { /* not JSON — use original response */ }
-      }
-    }
+    const unwrapped = unwrapToolResponse(response);
 
     const toolSuccess = unwrapped && typeof unwrapped === "object" && "success" in unwrapped
       ? unwrapped.success !== false
@@ -768,7 +785,17 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 // executePlan cleanup and the auto-release guard without a live daemon session.
 export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
   async afterExecution(input: PlanLifecycleInput): Promise<void> {
-    const { name, args, baseSessionUuid, cleanupService, device, sessionUuid, shouldResolveDevice, sessionBindingReleaseHandler } = input;
+    const {
+      name,
+      args,
+      baseSessionUuid,
+      cleanupService,
+      device,
+      sessionUuid,
+      shouldResolveDevice,
+      sessionBindingReleaseHandler,
+      sessionToolProfileService,
+    } = input;
     if (device && name === "executePlan" && args?.cleanupAppId) {
       await cleanupService.cleanup(device, {
         appId: args.cleanupAppId,
@@ -804,10 +831,9 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         // later sessionless tools/list or tools/call stops enforcing a released
         // profile (issue #4611 Gap D). Best-effort: the handler swallows its own
         // failures, but the release itself has already succeeded regardless.
-        if (sessionBindingReleaseHandler) {
-          for (const releasedUuid of releasedSessionUuids) {
-            sessionBindingReleaseHandler.onSessionReleased(releasedUuid);
-          }
+        for (const releasedUuid of releasedSessionUuids) {
+          sessionBindingReleaseHandler?.onSessionReleased(releasedUuid);
+          await sessionToolProfileService?.deleteSession?.(releasedUuid);
         }
       } catch (releaseError) {
         logger.warn(`Failed to auto-release session ${sessionUuid}: ${releaseError}`);
@@ -946,16 +972,33 @@ export class ToolRegistryClass {
         // product decision): a tool is enabled if EITHER grants it, so a derived
         // label may re-enable a tool the base narrowed away.
         const capabilityDerivedSessionUuid = resolvedTarget.capabilitySessionUuid ?? resolvedTarget.sessionUuid;
-        await this.assertToolEnabledUnion(
-          name,
-          capabilityDerivedSessionUuid,
-          resolvedTarget.baseSessionUuid,
-          getToolCapabilityContext()?.sessionToolProfileService,
-        );
+        if (!capabilityContext?.planCapabilitiesAuthorized) {
+          await this.assertToolEnabledUnion(
+            name,
+            capabilityDerivedSessionUuid,
+            resolvedTarget.baseSessionUuid,
+            getToolCapabilityContext()?.sessionToolProfileService,
+            capabilityContext?.capabilitySessionUuid,
+          );
+        }
         return await runWithToolCapabilityContext(
           // Bind the ROUTING session (Gap C), not the base/capability session, so
           // nested calls re-inject the correct derived routing UUID.
-          { routingSessionUuid: resolvedTarget.sessionUuid },
+          {
+            routingSessionUuid: resolvedTarget.sessionUuid,
+            // Preserve the connection profile, if any. The derived session is
+            // supplied separately to the union assertion above; replacing the
+            // connection identity here would lose an opt-in when nested calls
+            // route through a labeled or explicitly selected device session.
+            capabilitySessionUuid: capabilityContext?.capabilitySessionUuid,
+            // The outer executePlan tool has already passed its test-authoring
+            // capability gate, so its declarative steps are authorized by that
+            // admission. Other tool handlers retain normal per-tool policy.
+            planCapabilitiesAuthorized: preservesPlanCapabilityAuthorization(
+              name,
+              capabilityContext?.planCapabilitiesAuthorized,
+            ),
+          },
           async () => {
             try {
               let response: any | undefined;
@@ -1006,6 +1049,7 @@ export class ToolRegistryClass {
                 sessionUuid: resolvedTarget.sessionUuid,
                 shouldResolveDevice: resolvedTarget.shouldResolveDevice,
                 sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
+                sessionToolProfileService: getToolCapabilityContext()?.sessionToolProfileService,
               });
             }
           }
@@ -1095,7 +1139,9 @@ export class ToolRegistryClass {
         signal,
         options.targetDevice,
         invocation.routingSessionUuid,
+        invocation.capabilitySessionUuid,
         invocation.sessionToolProfileService,
+        invocation.planCapabilitiesAuthorized,
       ),
     );
   }
@@ -1116,6 +1162,8 @@ export class ToolRegistryClass {
         ? { ...args, sessionUuid }
         : args,
       routingSessionUuid: sessionUuid,
+      capabilitySessionUuid: context?.capabilitySessionUuid,
+      planCapabilitiesAuthorized: context?.planCapabilitiesAuthorized === true,
       sessionToolProfileService: options.sessionToolProfileService ?? context?.sessionToolProfileService,
     };
   }
@@ -1127,7 +1175,9 @@ export class ToolRegistryClass {
     signal: AbortSignal | undefined,
     targetDevice: BootedDevice | undefined,
     sessionUuid: string | undefined,
+    capabilitySessionUuid: string | undefined,
     sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
+    allowPlanCapabilities: boolean,
   ): Promise<any> {
     // Honor the UNION of the base + derived `${base}:${label}` sessions here too
     // (issue #4611). `sessionUuid` is the ambient ROUTING session — a derived
@@ -1136,7 +1186,15 @@ export class ToolRegistryClass {
     // narrowed away. The `targetDevice` path below bypasses the device-aware
     // wrapper's own union gate entirely, so this pre-gate is the ONLY enforcement
     // point for it and must apply the union as well.
-    await this.assertToolEnabledUnion(tool.name, sessionUuid, undefined, sessionToolProfileService);
+    if (!allowPlanCapabilities) {
+      await this.assertToolEnabledUnion(
+        tool.name,
+        sessionUuid,
+        undefined,
+        sessionToolProfileService,
+        capabilitySessionUuid,
+      );
+    }
     if (targetDevice && tool.deviceAwareHandler) {
       return tool.deviceAwareHandler(targetDevice, markInternalToolCall(args), progress, signal);
     }
@@ -1165,6 +1223,7 @@ export class ToolRegistryClass {
     derivedSessionUuid: string | undefined,
     explicitBaseSessionUuid: string | undefined,
     sessionToolProfileService: Pick<SessionToolProfileService, "isEnabled"> | undefined,
+    connectionCapabilityProfileUuid?: string,
   ): Promise<void> {
     const sessionManager = DaemonState.getInstance().isInitialized()
       ? DaemonState.getInstance().getSessionManager()
@@ -1175,8 +1234,9 @@ export class ToolRegistryClass {
     );
     await assertToolEnabledForAnySession(
       toolName,
-      [baseSessionUuid, derivedSessionUuid],
+      [connectionCapabilityProfileUuid, baseSessionUuid, derivedSessionUuid],
       sessionToolProfileService,
+      connectionCapabilityProfileUuid,
     );
   }
 

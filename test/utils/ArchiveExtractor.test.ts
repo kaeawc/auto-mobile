@@ -291,7 +291,8 @@ describe("DefaultArchiveExtractor", () => {
 
     const linkPath = path.join(destinationDir, "pkg", "lib", "tool");
     expect((await fs.lstat(linkPath)).isSymbolicLink()).toBe(true);
-    expect(await fs.readlink(linkPath)).toBe("../shared/file");
+    // readlink returns backslashes on Windows; normalize before comparing.
+    expect((await fs.readlink(linkPath)).split(path.sep).join("/")).toBe("../shared/file");
   });
 
   test("rejects a nested symlink whose target escapes from its real landing path", async () => {

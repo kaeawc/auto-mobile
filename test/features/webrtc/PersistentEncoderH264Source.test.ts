@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import {
+  InMemoryActiveVideoSessionRegistry,
   PersistentEncoderH264Source,
   VIDEO_SERVER_LEASE_DIRECTORY,
   VIDEO_SERVER_SOCKET_PREFIX,
+  type ActiveVideoSessionRegistry,
   type SocketConnector,
   type StreamSocket,
 } from "../../../src/features/webrtc/PersistentEncoderH264Source";
@@ -205,6 +207,13 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     return socket;
   };
 
+  // Default to a fresh registry per source so the process-lived singleton never
+  // leaks socket-name claims across tests; individual tests may inject a shared
+  // one to exercise sibling-session behavior.
+  const activeVideoSessionRegistry =
+    (overrides.activeVideoSessionRegistry as ActiveVideoSessionRegistry | undefined) ??
+    new InMemoryActiveVideoSessionRegistry();
+
   const source = new PersistentEncoderH264Source({
     device: DEVICE,
     onData: chunk => chunks.push(chunk),
@@ -216,6 +225,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     timer,
     sessionTokenFactory: () => SESSION_TOKEN,
     ...overrides,
+    activeVideoSessionRegistry,
   });
 
   return {
@@ -229,6 +239,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     errors,
     timer,
     audioEnabled,
+    activeVideoSessionRegistry,
     sessionSocket: () => forwardedSocket,
   };
 }
@@ -913,6 +924,104 @@ describe("PersistentEncoderH264Source", () => {
     ctx.processes[0].ready();
     await startPromise;
     await ctx.source.stop();
+  });
+
+  test("sweeps an orphaned forward whose lease is gone after a simulated daemon SIGKILL", async () => {
+    // Device server self-expired: it deleted its own lease, so no lease names
+    // this forward — the lease-driven loop can never reclaim it (issue #4753).
+    const orphanSocket = `${VIDEO_SERVER_SOCKET_PREFIX}_orphaned`;
+    const ctx = makeSource({
+      leaseOutput: "",
+      forwardListOutput: `${DEVICE.deviceId} tcp:52001 localabstract:${orphanSocket}\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --remove tcp:52001");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("does not sweep a concurrently-starting session's forward (forward exists, lease not yet written)", async () => {
+    // A sibling session claimed its socket name before opening its forward; its
+    // lease has not landed yet. The sweep must leave that forward alone.
+    const registry = new InMemoryActiveVideoSessionRegistry();
+    const concurrentSocket = `${VIDEO_SERVER_SOCKET_PREFIX}_concurrent`;
+    registry.add(DEVICE.deviceId, concurrentSocket);
+    const ctx = makeSource({
+      activeVideoSessionRegistry: registry,
+      leaseOutput: "",
+      forwardListOutput: `${DEVICE.deviceId} tcp:52002 localabstract:${concurrentSocket}\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --list");
+    expect(ctx.commands).not.toContain("forward --remove tcp:52002");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("never touches a forward whose destination is not an automobile_video socket", async () => {
+    const ctx = makeSource({
+      leaseOutput: "",
+      forwardListOutput: `${DEVICE.deviceId} tcp:52003 localabstract:some_other_service\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).toContain("forward --list");
+    expect(ctx.commands).not.toContain("forward --remove tcp:52003");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("does not sweep a forward that is still backed by a live lease", async () => {
+    const liveLease = JSON.stringify({
+      version: 1,
+      socketName: "automobile_video_live",
+      sessionToken: "live-session",
+      pid: 4321,
+      ownerPid: 456,
+      deviceSerial: DEVICE.deviceId,
+      forwardPort: 52004,
+      startedAtMs: 95_000,
+      heartbeatAtMs: 100_000,
+      heartbeatElapsedRealtimeMs: 95_000,
+    });
+    const ctx = makeSource({
+      leaseOutput: liveLease,
+      forwardListOutput: `${DEVICE.deviceId} tcp:52004 localabstract:automobile_video_live\n`,
+    });
+
+    const startPromise = ctx.source.start();
+    await tick();
+
+    expect(ctx.commands).not.toContain("forward --remove tcp:52004");
+
+    ctx.processes[0].ready();
+    await startPromise;
+    await ctx.source.stop();
+  });
+
+  test("clears the session's socket claim on teardown so a later orphan can be swept", async () => {
+    const registry = new InMemoryActiveVideoSessionRegistry();
+    const ctx = makeSource({ activeVideoSessionRegistry: registry });
+
+    await startReady(ctx);
+    expect(registry.active(DEVICE.deviceId).has(SESSION_SOCKET)).toBe(true);
+
+    await ctx.source.stop();
+    expect(registry.active(DEVICE.deviceId).has(SESSION_SOCKET)).toBe(false);
   });
 
   test("refuses stale cleanup when the PID command line does not contain the lease token", async () => {

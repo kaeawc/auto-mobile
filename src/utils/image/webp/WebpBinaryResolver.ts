@@ -6,6 +6,7 @@ import * as path from "node:path";
 import process from "node:process";
 import type { Writable } from "node:stream";
 import { ActionableError } from "../../../models/ActionableError";
+import { type ArchiveExtractor, DefaultArchiveExtractor } from "../../ArchiveExtractor";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../ChecksumCalculator";
 import { DefaultFileDownloader, type FileDownloader } from "../../FileDownloader";
 import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../../HostCommandExecutor";
@@ -30,6 +31,7 @@ export interface WebpBinaryResolverOptions {
   arch?: NodeJS.Architecture;
   env?: NodeJS.ProcessEnv;
   fileDownloader?: FileDownloader;
+  archiveExtractor?: ArchiveExtractor;
   processExecutor?: HostProcessExecutor;
   checksumCalculator?: ChecksumCalculator;
 }
@@ -60,6 +62,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private readonly arch: NodeJS.Architecture;
   private readonly env: NodeJS.ProcessEnv;
   private readonly fileDownloader: FileDownloader;
+  private readonly archiveExtractor: ArchiveExtractor;
   private readonly processExecutor: HostProcessExecutor;
   private readonly checksumCalculator: ChecksumCalculator;
 
@@ -70,6 +73,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     this.arch = options.arch ?? process.arch;
     this.env = options.env ?? process.env;
     this.fileDownloader = options.fileDownloader ?? new DefaultFileDownloader();
+    this.archiveExtractor = options.archiveExtractor ?? new DefaultArchiveExtractor();
     this.processExecutor = options.processExecutor ?? new DefaultHostCommandExecutor();
     this.checksumCalculator = options.checksumCalculator ?? new DefaultChecksumCalculator();
   }
@@ -224,7 +228,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     const archivePath = path.join(this.cacheDir, archive.archiveName);
     await this.fileDownloader.download(`${WEBP_DOWNLOAD_BASE_URL}/${archive.archiveName}`, archivePath);
     await this.verifyArchiveChecksum(archive, archivePath);
-    await this.processExecutor.executeCommand("tar", ["-xzf", archivePath, "-C", this.cacheDir]);
+    await this.archiveExtractor.extractTarGz({ archivePath, destinationDir: this.cacheDir });
   }
 
   private async verifyArchiveChecksum(archive: WebpArchiveInfo, archivePath: string): Promise<void> {

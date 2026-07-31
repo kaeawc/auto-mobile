@@ -30,6 +30,43 @@ export function h264SpsLevelIdc(nal: Buffer): number | undefined {
   return profileLevelId ? Number.parseInt(profileLevelId.slice(4, 6), 16) : undefined;
 }
 
+/** Result of validating an encoded SPS against the negotiated send profile. */
+export interface H264SpsSendCompatibility {
+  /** Whether the SPS may be sent over the negotiated constrained-baseline track. */
+  compatible: boolean;
+  /** Human-readable reason when `compatible` is false; omitted when compatible. */
+  reason?: string;
+}
+
+/**
+ * Decide whether an encoded SPS NAL from a capture source may be sent on the
+ * WHIP track, given the profile and level AutoMobile negotiates.
+ *
+ * This is the single source of truth for the runtime acceptance gate: the
+ * publisher's `onSps` hook delegates here so the decision cannot drift between
+ * the real send path and the fast profile-negotiation test. A source whose SPS
+ * this function rejects will never render — that is exactly the #4877 regression
+ * (a global Main-profile switch made this reject the Baseline SPS that the iOS
+ * ffmpeg and synthetic sources actually emit).
+ */
+export function evaluateH264SpsForSend(sps: Buffer): H264SpsSendCompatibility {
+  const profileLevelId = h264SpsProfileLevelId(sps);
+  if (profileLevelId && !isCompatibleConstrainedBaselineProfile(profileLevelId)) {
+    return {
+      compatible: false,
+      reason: `H.264 SPS profile ${profileLevelId.slice(0, 4)} is incompatible with negotiated constrained baseline.`,
+    };
+  }
+  const levelIdc = h264SpsLevelIdc(sps);
+  if (levelIdc !== undefined && levelIdc > WEBRTC_H264_LEVEL_IDC) {
+    return {
+      compatible: false,
+      reason: `H.264 SPS level ${levelIdc} exceeds negotiated level ${WEBRTC_H264_LEVEL_IDC}.`,
+    };
+  }
+  return { compatible: true };
+}
+
 /** Whether a profile-level-id is compatible with AutoMobile constrained baseline. */
 export function isCompatibleConstrainedBaselineProfile(profileLevelId: string): boolean {
   // Accept the whole Baseline family (profile_idc 66 / 0x42), regardless of the

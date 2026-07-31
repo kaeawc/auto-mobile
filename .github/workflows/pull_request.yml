@@ -440,6 +440,12 @@ jobs:
               - 'test/integration/mediamtxWebRtcPublisher.integration.test.ts'
               - 'test/bats/mediamtx-webrtc-integration.bats'
               - 'scripts/webrtc/**'
+              # Native encoder sources decide the on-the-wire H.264 profile the
+              # publisher must accept. A profile change here (e.g. Baseline ->
+              # Main) is exactly the #4877 class of regression this job guards, so
+              # exercise it when the native encoders change (issue #4884).
+              - 'android/video-server/**/VideoEncoder.kt'
+              - 'ios/screen-capture/**'
               # This workflow controls WebRTC-job gating, so a change to it must
               # exercise the job rather than being silently skipped.
               - '.github/workflows/pull_request.yml'

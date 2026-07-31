@@ -14,8 +14,11 @@ internal class ReconnectWindow(
   private val clock: () -> Long,
   private val durationMs: Long,
 ) {
-  private var clientlessSinceMs: Long? = null
-  private var clientAttached = false
+  // @Volatile: expiry is polled off the write lock (VideoStreamWriter.reconnectWindowExpired) so a
+  // transport write wedged while holding that lock can never starve the self-expiry check (issue
+  // #4784). Mutations still happen under the writer's lock; only these reads are lock-free.
+  @Volatile private var clientlessSinceMs: Long = NO_CLIENTLESS
+  @Volatile private var clientAttached = false
 
   fun start() {
     clientAttached = false
@@ -24,7 +27,7 @@ internal class ReconnectWindow(
 
   fun onClientAttached() {
     clientAttached = true
-    clientlessSinceMs = null
+    clientlessSinceMs = NO_CLIENTLESS
   }
 
   fun onClientDetached() {
@@ -33,8 +36,17 @@ internal class ReconnectWindow(
   }
 
   fun isExpired(): Boolean {
-    val clientlessSince = clientlessSinceMs ?: return false
-    return !clientAttached && clock() - clientlessSince >= durationMs
+    if (clientAttached) return false
+    val clientlessSince = clientlessSinceMs
+    if (clientlessSince == NO_CLIENTLESS) return false
+    return clock() - clientlessSince >= durationMs
+  }
+
+  private companion object {
+    /**
+     * Sentinel for "a client is (or may be) attached", i.e. the clientless window is not running.
+     */
+    const val NO_CLIENTLESS = Long.MIN_VALUE
   }
 }
 
@@ -74,6 +86,16 @@ class VideoStreamWriter(
   // @Volatile: assigned on the thread that calls start(), read by stop() on the shutdown hook.
   @Volatile private var writerThread: Thread? = null
 
+  // Write-stall watchdog (#4784): a half-open transport (host suspended, adb dropped without RST)
+  // lets output.write() block forever while the writer thread holds `lock`. Neither the write (no
+  // IOException) nor the command reader (no EOF) observes the dead consumer, so the reconnect
+  // window never resumes. We stamp when a client write enters the blocking call and clear it on
+  // return; the watchdog reads the stamp off the lock and force-closes the client when a write has
+  // been in flight past the deadline, which makes the wedged write throw and run the normal detach.
+  // @Volatile: written under `lock` on the writer/acceptor thread, read off-lock by the watchdog.
+  @Volatile private var writeStartedAtMs: Long = NO_WRITE_IN_PROGRESS
+  @Volatile private var watchdogThread: Thread? = null
+
   @Volatile private var stopped = false
 
   companion object {
@@ -82,6 +104,20 @@ class VideoStreamWriter(
 
     /** Upper bound on how long [stop] waits for the transport writer thread to unwind. */
     const val WRITER_JOIN_TIMEOUT_MS = 200L
+
+    /**
+     * A client write in flight longer than this is treated as a wedged half-open transport: the
+     * watchdog force-closes the client so the blocked write throws and the normal detach +
+     * reconnect window runs. Kept in the reconnect-window order of magnitude so a genuinely
+     * slow-but-alive consumer is not detached for a transient congestion blip.
+     */
+    const val WRITE_STALL_TIMEOUT_MS = 5_000L
+
+    /** How often the watchdog thread polls for a stalled write. */
+    const val WRITE_STALL_POLL_MS = 500L
+
+    /** Sentinel for [writeStartedAtMs] meaning no client write is currently in flight. */
+    const val NO_WRITE_IN_PROGRESS = Long.MIN_VALUE
 
     /** "h264" as big-endian int: 0x68323634 */
     const val CODEC_ID_H264 = VideoStreamProtocol.CODEC_ID_H264
@@ -115,6 +151,11 @@ class VideoStreamWriter(
         isDaemon = true
         start()
       }
+    watchdogThread =
+      Thread({ runWriteWatchdog() }, "video-write-watchdog").apply {
+        isDaemon = true
+        start()
+      }
     Thread(
         { acceptClients(onClientConnected) },
         "video-client-acceptor",
@@ -133,6 +174,49 @@ class VideoStreamWriter(
       val frame = handoff.take() ?: break
       synchronized(lock) { writePacketDataLocked(TRACK_ID_VIDEO, frame.ptsAndFlags, frame.data) }
     }
+  }
+
+  /**
+   * The write-stall watchdog loop. Polls [checkWriteStall] off the write lock so it can act while
+   * the writer thread is wedged inside a blocking [OutputStream.write] holding `lock`. Runs on its
+   * own daemon thread; unit tests call [checkWriteStall] directly with an injected clock instead.
+   */
+  private fun runWriteWatchdog() {
+    while (!stopped) {
+      checkWriteStall()
+      try {
+        Thread.sleep(WRITE_STALL_POLL_MS)
+      } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+        return
+      }
+    }
+  }
+
+  /**
+   * Force-detach a client whose transport write has been in flight past [WRITE_STALL_TIMEOUT_MS].
+   *
+   * Deliberately lock-free: the wedged write holds `lock`, so this must NOT take `lock`. Closing
+   * the client socket makes the blocked `output.write` throw [IOException], which runs the writer
+   * thread's own catch ([closeClientLocked] + [ReconnectWindow.onClientDetached]) and lets the
+   * reconnect window resume counting toward self-expiry.
+   *
+   * @return true when it force-closed a stalled client this call, false otherwise.
+   */
+  internal fun checkWriteStall(): Boolean {
+    val startedAt = writeStartedAtMs
+    if (startedAt == NO_WRITE_IN_PROGRESS) return false
+    if (nowMs() - startedAt < WRITE_STALL_TIMEOUT_MS) return false
+    val client = clientSocket ?: return false
+    println(
+      "VIDEO_CLIENT_WRITE_STALL socket=$socketName force-closing after ${nowMs() - startedAt}ms"
+    )
+    try {
+      client.close()
+    } catch (_: IOException) {
+      // Already gone; the wedged write will still observe the close and throw.
+    }
+    return true
   }
 
   /**
@@ -252,26 +336,44 @@ class VideoStreamWriter(
       writePacketDataLocked(TRACK_ID_AUDIO, ptsUs and PTS_MASK, data)
     }
 
-  /** True once the initial or replacement client misses the bounded reconnect window. */
-  fun reconnectWindowExpired(): Boolean =
-    synchronized(lock) {
-      reconnectWindow.isExpired()
-    }
+  /**
+   * True once the initial or replacement client misses the bounded reconnect window.
+   *
+   * Lock-free by design (#4784): [ReconnectWindow] state is volatile, so a transport write wedged
+   * inside `lock` on the writer thread cannot starve the encode loop's self-expiry poll.
+   */
+  fun reconnectWindowExpired(): Boolean = reconnectWindow.isExpired()
 
   private fun writeStreamHeaderLocked() {
-    if (audioEnabled) {
-      outputStream!!.write(
+    val header =
+      if (audioEnabled) {
         VideoStreamProtocol.muxHeader(
           width,
           height,
           AudioCapture.SAMPLE_RATE_HZ,
           AudioCapture.CHANNELS,
         )
-      )
-    } else {
-      outputStream!!.write(VideoStreamProtocol.legacyHeader(width, height))
+      } else {
+        VideoStreamProtocol.legacyHeader(width, height)
+      }
+    trackingWriteStall {
+      outputStream!!.write(header)
+      outputStream!!.flush()
     }
-    outputStream!!.flush()
+  }
+
+  /**
+   * Run a blocking client I/O action while advertising to the watchdog that a write is in flight. A
+   * stamp of [nowMs] is published before the action and cleared after (success or throw) so
+   * [checkWriteStall] can force-close a client whose write never returns.
+   */
+  private inline fun trackingWriteStall(action: () -> Unit) {
+    writeStartedAtMs = nowMs()
+    try {
+      action()
+    } finally {
+      writeStartedAtMs = NO_WRITE_IN_PROGRESS
+    }
   }
 
   private fun replayCachedVideoLocked() {
@@ -293,8 +395,11 @@ class VideoStreamWriter(
     try {
       // One write per packet: header + payload are framed into a single buffer so each packet
       // costs one syscall instead of two and the header is never split from its payload across
-      // TCP segments (issue #4743).
-      output.write(VideoStreamProtocol.framedPacket(audioEnabled, trackId, ptsAndFlags, data))
+      // TCP segments (issue #4743). Stamped for the write-stall watchdog (#4784) so a wedged
+      // half-open transport is force-detached instead of orphaning the server.
+      trackingWriteStall {
+        output.write(VideoStreamProtocol.framedPacket(audioEnabled, trackId, ptsAndFlags, data))
+      }
       return true
     } catch (e: IOException) {
       println("Error writing packet: ${e.message}")
@@ -337,6 +442,9 @@ class VideoStreamWriter(
       }
     }
     writerThread = null
+    // The watchdog only sleeps and reads volatiles; interrupt its sleep so it exits promptly.
+    watchdogThread?.interrupt()
+    watchdogThread = null
     synchronized(lock) {
       closeClientLocked()
     }

@@ -32,6 +32,104 @@ class VideoStreamWriterTest {
     assertTrue(window.isExpired())
   }
 
+  // --- write-stall watchdog (#4784) -----------------------------------------------------------
+
+  /**
+   * Succeeds for the first [blockFromWriteIndex] writes, then parks the writer inside `write()`
+   * until [release] (invoked when the owning connection is force-closed), whereupon it throws to
+   * mimic a socket closed under a blocked write. Rendezvous latches only coordinate the two
+   * threads; the stall deadline itself is driven purely by the injected clock.
+   */
+  private class BlockingOutputStream(private val blockFromWriteIndex: Int) : OutputStream() {
+    private var writeCount = 0
+    private val writeEntered = CountDownLatch(1)
+    private val unblock = CountDownLatch(1)
+
+    fun awaitWriteEntered(t: Long, u: TimeUnit): Boolean = writeEntered.await(t, u)
+
+    fun release() = unblock.countDown()
+
+    override fun write(b: Int) = record()
+
+    override fun write(b: ByteArray) = record()
+
+    override fun write(b: ByteArray, off: Int, len: Int) = record()
+
+    private fun record() {
+      if (writeCount >= blockFromWriteIndex) {
+        writeEntered.countDown()
+        unblock.await()
+        throw IOException("socket closed during blocked write")
+      }
+      writeCount++
+    }
+  }
+
+  @Test
+  fun blockedWriteIsForceClosedByWatchdogAndWindowExpiresLockFree() {
+    var now = 1_000L
+    // Header (write index 0) lands; the next packet write parks until the client is force-closed.
+    val blocking = BlockingOutputStream(blockFromWriteIndex = 1)
+    val connection = FakeClientConnection(outputStream = blocking, onClose = blocking::release)
+    val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
+
+    subject.bindServerSocket()
+    subject.acceptClients {}
+    assertFalse(connection.closed)
+
+    // Simulate the transport writer thread wedged in a blocking packet write.
+    val writeThread = Thread { subject.writeAudioPacket(byteArrayOf(1, 2, 3), ptsUs = 0) }
+    writeThread.start()
+    assertTrue(
+      "the packet write must reach the blocking output stream",
+      blocking.awaitWriteEntered(2, TimeUnit.SECONDS),
+    )
+
+    // Expiry polling is lock-free: it returns even while the write holds `lock` (a client is
+    // attached, so it is simply not expired yet).
+    assertFalse(subject.reconnectWindowExpired())
+
+    // Before the stall deadline the watchdog leaves the client alone.
+    now = 1_000L + VideoStreamWriter.WRITE_STALL_TIMEOUT_MS - 1
+    assertFalse(subject.checkWriteStall())
+    assertFalse(connection.closed)
+
+    // At the deadline the watchdog force-closes the client out of band.
+    now = 1_000L + VideoStreamWriter.WRITE_STALL_TIMEOUT_MS
+    val stallStartMs = now
+    assertTrue(subject.checkWriteStall())
+    assertTrue("stalled write must force-close the client", connection.closed)
+
+    // The wedged write unblocks (throws), runs the detach path, and the writer thread finishes.
+    writeThread.join(TimeUnit.SECONDS.toMillis(2))
+    assertFalse("the force-close must unblock the wedged write", writeThread.isAlive)
+
+    // The reconnect window now counts from the detach; advancing past it self-expires — lock-free.
+    now = stallStartMs + VideoStreamWriter.CLIENT_RECONNECT_WINDOW_MS
+    assertTrue(subject.reconnectWindowExpired())
+
+    subject.stop()
+  }
+
+  @Test
+  fun watchdogIgnoresWritesThatMakeProgress() {
+    var now = 1_000L
+    val connection = FakeClientConnection()
+    val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
+
+    subject.bindServerSocket()
+    subject.acceptClients {}
+
+    // A write that completed promptly leaves no in-flight stamp, so no matter how far the clock
+    // advances the watchdog must not tear down a healthy client.
+    assertTrue(subject.writeAudioPacket(byteArrayOf(1, 2, 3), ptsUs = 0))
+    now = 1_000_000L
+    assertFalse(subject.checkWriteStall())
+    assertFalse(connection.closed)
+
+    subject.stop()
+  }
+
   // --- socket/stream seam driven by fakes -----------------------------------------------------
 
   /**
@@ -69,6 +167,7 @@ class VideoStreamWriterTest {
   private class FakeClientConnection(
     override val outputStream: OutputStream = ByteArrayOutputStream(),
     input: InputStream? = null,
+    private val onClose: () -> Unit = {},
   ) : VideoClientConnection {
     @Volatile var closed = false
     private val closedLatch = CountDownLatch(1)
@@ -78,6 +177,7 @@ class VideoStreamWriterTest {
       if (!closed) {
         closed = true
         closedLatch.countDown()
+        onClose()
       }
     }
   }

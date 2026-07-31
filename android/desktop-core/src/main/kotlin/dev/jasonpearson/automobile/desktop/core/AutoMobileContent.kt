@@ -635,32 +635,30 @@ fun AutoMobileContent(
     }
   }
 
-  // One client owns the MCP connection profile for this connected process. The
-  // dashboard can then opt in once and reuse that profile across its operations.
-  val connectedClient: AutoMobileClient? =
+  // Client provider function for dashboards to access MCP data
+  val clientProvider: (() -> AutoMobileClient)? =
     remember(connectedMcpProcess) {
       LOG.info(
-        "connected client being computed, connectedMcpProcess=${connectedMcpProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}"
+        "clientProvider being computed, connectedMcpProcess=${connectedMcpProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}"
       )
       connectedMcpProcess?.let { process ->
-        when (process.connectionType) {
-          McpConnectionType.UnixSocket -> {
-            val socketPath = process.socketPath ?: DaemonSocketPaths.socketPath()
-            McpDaemonClient(socketPath)
-          }
-          McpConnectionType.StreamableHttp -> {
-            val port = process.port ?: 3000
-            McpHttpClient("http://localhost:$port/auto-mobile/streamable")
-          }
-          McpConnectionType.Stdio -> {
-            throw UnsupportedOperationException("Cannot connect to STDIO process externally")
+        {
+          when (process.connectionType) {
+            McpConnectionType.UnixSocket -> {
+              val socketPath = process.socketPath ?: DaemonSocketPaths.socketPath()
+              McpDaemonClient(socketPath)
+            }
+            McpConnectionType.StreamableHttp -> {
+              val port = process.port ?: 3000
+              McpHttpClient("http://localhost:$port/auto-mobile/streamable")
+            }
+            McpConnectionType.Stdio -> {
+              throw UnsupportedOperationException("Cannot connect to STDIO process externally")
+            }
           }
         }
       }
     }
-  DisposableEffect(connectedClient) { onDispose { connectedClient?.close() } }
-  val clientProvider: (() -> AutoMobileClient)? =
-    remember(connectedClient) { connectedClient?.let { client -> { client } } }
 
   // Device snapshots span two transports: the verbs are MCP tool/resource calls, while the
   // retention config is its own Unix socket. Both are null in Fake mode so the dashboard renders

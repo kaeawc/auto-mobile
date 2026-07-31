@@ -410,7 +410,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     ) {
       connectionProfileUuid = requestedCapabilityProfileUuid;
       sessionToolBinding.bindCapabilityProfile(sessionId, connectionProfileUuid);
-      capabilitySessionUuid = connectionProfileUuid;
     }
     // Capability enforcement honors the UNION of the base and the derived
     // `${base}:${label}` device-label sessions (issue #4611): a tool is enabled

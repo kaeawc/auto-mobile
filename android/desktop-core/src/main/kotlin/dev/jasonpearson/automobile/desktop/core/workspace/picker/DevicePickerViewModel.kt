@@ -291,6 +291,11 @@ class DevicePickerViewModel(
     } else {
       bootErrors = bootErrors + (bootedDevice.id to "Boot did not complete")
     }
+    // Persistent state (esp. the selection) is reflected onto the CURRENT Content unconditionally,
+    // so it never diverges from what observeSelected() reads — even when this reload's device-LIST
+    // emission is dropped as stale below. Selection is persistent state, not tied to which list
+    // wins.
+    syncState()
     emitIfCurrent(generation, devices)
   }
 

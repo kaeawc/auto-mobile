@@ -419,6 +419,78 @@ class DevicePickerViewModelTest {
       assertTrue(v.state.value is DevicePickerUiState.Error)
     }
 
+  @Test
+  fun `booting one of two same-named shut-down devices leaves the other bootable`() =
+    testScope.runTest {
+      val resources =
+        FakeMcpResourceClient().apply {
+          bootedDevicesResponse = bootedJson()
+          deviceImagesResponse = TWO_SAMENAME_IMAGES
+        }
+      val boot = FakeDeviceBootController()
+      val v = vm(resourceClient = resources, bootController = boot)
+      assertEquals(
+        setOf("avd_a", "avd_b"),
+        content(v).devices.filter { it.state == DeviceState.Shutdown }.map { it.id }.toSet(),
+      )
+
+      boot.result = Result.success("emu-a")
+      boot.onSuccess = { resources.bootedDevicesResponse = bootedJsonNamed("Pixel 8" to "emu-a") }
+      v.onAction(DevicePickerAction.BootDevice("avd_a"))
+
+      // Booting avd_a must NOT make its same-named sibling avd_b disappear (the round bug).
+      val afterFirst = content(v)
+      assertTrue(afterFirst.devices.any { it.id == "emu-a" && it.state == DeviceState.Booted })
+      assertTrue(afterFirst.devices.any { it.id == "avd_b" && it.state == DeviceState.Shutdown })
+
+      boot.result = Result.success("emu-b")
+      boot.onSuccess = {
+        resources.bootedDevicesResponse =
+          bootedJsonNamed("Pixel 8" to "emu-a", "Pixel 8" to "emu-b")
+      }
+      v.onAction(DevicePickerAction.BootDevice("avd_b")) // the sibling really is still bootable
+      assertTrue(content(v).devices.any { it.id == "emu-b" && it.state == DeviceState.Booted })
+    }
+
+  @Test
+  fun `a superseded boot reload still syncs its selection into the current Content`() =
+    testScope.runTest {
+      val client =
+        ScriptableResourceClient(bootedJson = bootedJson(), imagesJson = TWO_SAMENAME_IMAGES)
+      val bootedRuntime = mutableListOf<String>()
+      val boot = GatedBootController(mapOf("avd_a" to "emu-a", "avd_b" to "emu-b"))
+      boot.onBooted = { runtimeId ->
+        bootedRuntime += runtimeId
+        client.bootedJson = bootedJsonNamed(*bootedRuntime.map { "Pixel 8" to it }.toTypedArray())
+      }
+      val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
+      v.onAction(DevicePickerAction.BootDevice("avd_a")) // in flight
+      v.onAction(DevicePickerAction.BootDevice("avd_b")) // in flight
+
+      // A's reload claims the earlier generation, reads booted, then stalls on the images gate.
+      val imagesGate = CompletableDeferred<Unit>()
+      client.imagesGate = imagesGate
+      boot.release("avd_a")
+      client.imagesGate = null // B's newer reload is not gated
+
+      boot.release("avd_b") // B (newer generation) reloads and emits — only B selected so far
+      assertEquals(setOf("emu-b"), content(v).selectedIds)
+
+      imagesGate.complete(
+        Unit
+      ) // A resumes: its stale LIST emission is dropped, but its selection syncs
+      val c = content(v)
+      // The emitted Content selection must match what observeSelected() would use — BOTH ids.
+      assertEquals(setOf("emu-a", "emu-b"), c.selectedIds)
+      assertEquals(
+        setOf("emu-a", "emu-b"),
+        c.devices
+          .filter { it.id in c.selectedIds && it.state == DeviceState.Booted }
+          .map { it.id }
+          .toSet(),
+      )
+    }
+
   private companion object {
     const val SINGLE_BOOTED_PIXEL8 =
       """{"totalCount":1,"androidCount":1,"iosCount":0,"virtualCount":1,"physicalCount":0,""" +
@@ -443,6 +515,12 @@ class DevicePickerViewModelTest {
       """{"totalCount":2,"androidCount":2,"iosCount":0,"lastUpdated":"x","images":[""" +
         """{"name":"Pixel 8 API 35","platform":"android","deviceId":"Pixel_8_API_35","target":"android-35"},""" +
         """{"name":"Pixel 6 API 33","platform":"android","deviceId":"Pixel_6_API_33","target":"android-33"}]}"""
+
+    // Two DISTINCT images that share a display name — the simulator/AVD sibling case.
+    const val TWO_SAMENAME_IMAGES =
+      """{"totalCount":2,"androidCount":2,"iosCount":0,"lastUpdated":"x","images":[""" +
+        """{"name":"Pixel 8","platform":"android","deviceId":"avd_a","target":"android-34"},""" +
+        """{"name":"Pixel 8","platform":"android","deviceId":"avd_b","target":"android-34"}]}"""
 
     fun bootedJson(vararg deviceIds: String): String =
       bootedJsonNamed(*deviceIds.map { "Pixel 8" to it }.toTypedArray())
@@ -488,4 +566,30 @@ private class ScriptableResourceClient(var bootedJson: String, private val image
   override suspend fun listResources(): List<ResourceInfo> = emptyList()
 
   override fun close() {}
+}
+
+/**
+ * Boot controller whose per-device completions are individually gated ([release]) so a test can
+ * reorder overlapping boots. On completion it returns the mapped runtime id and invokes [onBooted]
+ * (typically to append that id to a resource fake's booted list).
+ */
+private class GatedBootController(private val runtimeIds: Map<String, String>) :
+  DeviceBootController {
+  val requests: MutableList<PickerDevice> = mutableListOf()
+  var onBooted: (String) -> Unit = {}
+  private val gates = mutableMapOf<String, CompletableDeferred<Unit>>()
+
+  override suspend fun boot(device: PickerDevice): Result<String> {
+    requests += device
+    val gate = CompletableDeferred<Unit>()
+    gates[device.id] = gate
+    gate.await()
+    val runtimeId = runtimeIds.getValue(device.id)
+    onBooted(runtimeId)
+    return Result.success(runtimeId)
+  }
+
+  fun release(deviceId: String) {
+    gates.getValue(deviceId).complete(Unit)
+  }
 }

@@ -54,16 +54,21 @@ private fun osOfImage(image: DeviceImageInfo): Pair<String?, String?> =
   }
 
 /**
- * Merge the booted-devices and device-images resources into one picker list. Booted devices win
- * over their image entry (deduped by id and by name). Booted devices carry no OS/architecture from
- * the daemon today, so Android API is best-effort parsed from the name.
+ * Merge the booted-devices and device-images resources into one picker list. A booted device wins
+ * over the specific image it came from, reconciled by IDENTITY, not display name: an image is
+ * hidden only when its own id is booted, or — because the daemon re-keys a booted device to a
+ * runtime serial that no longer matches its image id — when it is the source of a re-keyed booted
+ * device of the same name (one image per such device, not all same-named images). This keeps
+ * distinct devices that merely share a display name (common for simulators) from vanishing when a
+ * sibling boots. Booted devices carry no OS/architecture from the daemon today, so Android API is
+ * best-effort parsed from the name.
  */
 fun buildPickerDevices(
   booted: List<BootedDeviceInfo>,
   images: List<DeviceImageInfo>,
 ): List<PickerDevice> {
   val bootedIds = booted.map { it.deviceId }.toSet()
-  val bootedNames = booted.map { it.name }.toSet()
+  val imageIds = images.map { it.deviceId ?: it.name }.toSet()
 
   val bootedDevices = booted.map { device ->
     val api =
@@ -79,9 +84,15 @@ fun buildPickerDevices(
     )
   }
 
+  // Count, per display name, the booted devices whose runtime id is NOT itself an image id — these
+  // were re-keyed on boot, so each hides exactly ONE same-named image (its source).
+  val hideByName = booted.filter { it.deviceId !in imageIds }.groupingBy { it.name }.eachCount()
+
   val shutdownDevices =
     images
-      .filter { (it.deviceId ?: it.name) !in bootedIds && it.name !in bootedNames }
+      .filter { (it.deviceId ?: it.name) !in bootedIds } // exact identity already booted
+      .groupBy { it.name }
+      .flatMap { (name, sameName) -> sameName.drop(hideByName[name] ?: 0) }
       .map { image ->
         val (osKey, osLabel) = osOfImage(image)
         PickerDevice(

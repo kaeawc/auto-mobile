@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -66,13 +67,13 @@ class NavigationFacetTest {
     }
   }
 
-  private fun navUpdate(appId: String?) =
+  private fun navUpdate(appId: String?, currentScreen: String? = null) =
     NavigationGraphStreamUpdate(
       timestamp = 1L,
       appId = appId,
       nodes = emptyList(),
       edges = emptyList(),
-      currentScreen = null,
+      currentScreen = currentScreen,
     )
 
   @Test
@@ -167,6 +168,73 @@ class NavigationFacetTest {
         onAllNodesWithText("Home").fetchSemanticsNodes().isNotEmpty()
       }
       onAllNodesWithText("Home").fetchSemanticsNodes().isNotEmpty()
+    }
+
+  @Test
+  fun `shows the no-app guidance when a connected stream reports a null current app`() =
+    runComposeUiTest {
+      val fake = FakeObservationStream()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { fake },
+              navigationDataSourceProvider = {
+                StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
+              },
+            )
+          }
+        }
+      }
+      waitForIdle()
+
+      // Fresh daemon / onboarding: the stream is connected but reports no current app (appId null).
+      // The facet must guide the user rather than hang on the indefinite Resolving spinner.
+      fake.emitNavigation(navUpdate(appId = null))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Open an app on this device", substring = true)
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
+      onNodeWithText("Open an app on this device", substring = true).assertExists()
+      assertTrue(
+        "null-app must not leave the facet stuck on Resolving",
+        onAllNodesWithText("Resolving navigation graph", substring = true)
+          .fetchSemanticsNodes()
+          .isEmpty(),
+      )
+    }
+
+  @Test
+  fun `carries the current screen into the dashboard so Fog and auto-focus are enabled`() =
+    runComposeUiTest {
+      val fake = FakeObservationStream()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { fake },
+              navigationDataSourceProvider = {
+                StubNavigationDataSource(
+                  Result.Success(NavigationGraph(listOf(screen("Home")), emptyList()))
+                )
+              },
+            )
+          }
+        }
+      }
+      waitForIdle()
+
+      // The nav update carries both the resolved app and its current screen. Under the
+      // app-scoped-pull path the dashboard bypasses its own stream collector, so unless the facet
+      // threads currentScreen through, the canvas's Fog toggle stays disabled.
+      fake.emitNavigation(navUpdate(appId = "com.example.app", currentScreen = "Home"))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithContentDescription("Fog focus available").fetchSemanticsNodes().isNotEmpty()
+      }
+      onNodeWithContentDescription("Fog focus available").assertExists()
     }
 
   @Test

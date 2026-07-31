@@ -58,6 +58,8 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -837,7 +839,11 @@ fun NavigationCanvasView(
             .padding(start = 12.dp, top = 44.dp)
             .graphicsLayer { alpha = if (fogEnabled) 1f else 0.4f }
             .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-            .padding(8.dp),
+            .padding(8.dp)
+            .semantics {
+              contentDescription =
+                if (fogEnabled) "Fog focus available" else "Fog focus unavailable"
+            },
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {

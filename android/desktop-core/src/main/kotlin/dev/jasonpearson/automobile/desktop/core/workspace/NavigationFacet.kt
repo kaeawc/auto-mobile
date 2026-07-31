@@ -41,6 +41,13 @@ private sealed interface NavigationFacetState {
   /** No foreground app resolved yet, or the app-scoped pull is in flight. */
   data object Loading : NavigationFacetState
 
+  /**
+   * The stream is connected but reports no app has navigated yet (fresh daemon / onboarding): the
+   * `navigation_update`'s appId is null. Distinct from [Loading] ("haven't heard from the stream
+   * yet") so the first-run case doesn't hang on an indefinite spinner.
+   */
+  data object NoApp : NavigationFacetState
+
   /** The resolved app has no recorded navigation graph. */
   data object Empty : NavigationFacetState
 
@@ -115,12 +122,26 @@ fun NavigationFacet(
   // Foreground app for THIS pane's device, resolved from the nav stream. Reset when the pane's
   // device changes so a new device re-resolves its own foreground app.
   var foregroundAppId by remember(column.deviceId) { mutableStateOf<String?>(null) }
+  // The active screen reported alongside the resolved app. Carried into NavigationDashboard so the
+  // canvas's Fog toggle + auto-focus (both gated on a non-null current screen) work under the
+  // app-scoped-pull path, which otherwise bypasses the dashboard's own stream collector.
+  var currentScreen by remember(column.deviceId) { mutableStateOf<String?>(null) }
+  // True once the connected stream has reported that no app has navigated yet (appId == null).
+  // Distinguishes the onboarding "no app" case (-> NoApp) from "haven't heard yet" (-> Loading).
+  var noNavigationApp by remember(column.deviceId, streamAttempt) { mutableStateOf(false) }
   LaunchedEffect(stream) {
     val current = stream ?: return@LaunchedEffect
     try {
       current.navigationUpdates.collect { update ->
         val appId = update.appId
-        if (appId != null) foregroundAppId = appId
+        if (appId != null) {
+          foregroundAppId = appId
+          currentScreen = update.currentScreen
+          noNavigationApp = false
+        } else if (foregroundAppId == null) {
+          // Stream says the current app is null and we've never resolved one — onboarding case.
+          noNavigationApp = true
+        }
       }
     } catch (c: CancellationException) {
       // Normal cancellation on dispose / device change — must propagate.
@@ -160,7 +181,14 @@ fun NavigationFacet(
   var state by
     remember(column.deviceId) { mutableStateOf<NavigationFacetState>(NavigationFacetState.Loading) }
 
-  LaunchedEffect(column.deviceId, foregroundAppId, attempt, connectionState, streamError) {
+  LaunchedEffect(
+    column.deviceId,
+    foregroundAppId,
+    attempt,
+    connectionState,
+    streamError,
+    noNavigationApp,
+  ) {
     // A stream failure is retryable *regardless of whether an app already resolved*. Handling it
     // only when foregroundAppId == null would let a socket EOF after resolution
     // (Disconnected("Stream ended")) silently retain a dead stream and miss later foreground-app
@@ -183,9 +211,10 @@ fun NavigationFacet(
     val appId = foregroundAppId
     if (appId == null) {
       // Stream is healthy but no foreground app resolved yet. We resolve the appId *from* the
-      // stream, so stay in Loading until it reports one. Never pull with a null app id (that would
-      // surface the wrong/global graph).
-      state = NavigationFacetState.Loading
+      // stream, so never pull with a null app id (that would surface the wrong/global graph). If
+      // the stream has explicitly reported "no current app" show the NoApp guidance; otherwise
+      // we simply haven't heard yet, so stay in Loading.
+      state = if (noNavigationApp) NavigationFacetState.NoApp else NavigationFacetState.Loading
       return@LaunchedEffect
     }
     state = NavigationFacetState.Loading
@@ -220,6 +249,8 @@ fun NavigationFacet(
 
   when (val current = state) {
     NavigationFacetState.Loading -> NavigationFacetNote("Resolving navigation graph…")
+    NavigationFacetState.NoApp ->
+      NavigationFacetNote("Open an app on this device to build its navigation graph")
     NavigationFacetState.Empty ->
       NavigationFacetNote("No navigation graph recorded for this app yet")
     is NavigationFacetState.ConnectionError ->
@@ -240,6 +271,7 @@ fun NavigationFacet(
     is NavigationFacetState.Resolved ->
       NavigationDashboard(
         providedGraph = current.graph,
+        providedCurrentScreen = currentScreen,
         clientProvider = clientProvider,
         settingsProvider = graph.settingsProvider,
         selectedAppId = foregroundAppId,

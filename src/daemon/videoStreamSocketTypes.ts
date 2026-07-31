@@ -17,6 +17,13 @@ export type VideoStreamAction = "subscribe" | "unsubscribe";
 export interface VideoStreamSocketRequest {
   id?: string;
   action: VideoStreamAction;
+  /**
+   * Session UUID admitting this subscribe request (issue #4751). The daemon
+   * authenticates against its live session registry (the #4655 session
+   * mechanism) so an unauthenticated process cannot ride along on the raw H.264
+   * screen stream, and rejects a subscribe to a device owned by another session.
+   */
+  sessionUuid?: string;
   /** Device to mirror. Defaults to the sole connected device when omitted. */
   deviceId?: string;
   /** Encoder bitrate hint, passed through to the capture source. */

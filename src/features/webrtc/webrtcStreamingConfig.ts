@@ -98,6 +98,20 @@ export const WEBRTC_ENV = {
   ANDROID_FPS: "AUTOMOBILE_WEBRTC_ANDROID_FPS",
   TRICKLE_ICE: "AUTOMOBILE_WEBRTC_TRICKLE_ICE",
   AUDIO: "AUTOMOBILE_WEBRTC_AUDIO",
+  /**
+   * Escape hatch (issue #4751). When truthy, re-permits plaintext `http://`
+   * WHIP endpoints on non-loopback hosts AND accepts an arbitrary (non
+   * allow-listed) WHIP override from the wire. Off by default; the bearer token
+   * and SDP travel in cleartext over `http://`, so this is for advanced setups
+   * only.
+   */
+  ALLOW_INSECURE_WHIP: "AUTOMOBILE_WEBRTC_ALLOW_INSECURE_WHIP",
+  /**
+   * Comma-separated allow-list of origins (or bare `host[:port]`) that a WHIP
+   * endpoint supplied over the wire may target (issue #4751). Loopback and the
+   * daemon's own {@link WHIP_ENDPOINT} origin are always trusted.
+   */
+  WHIP_ALLOWED_ORIGINS: "AUTOMOBILE_WEBRTC_WHIP_ALLOWED_ORIGINS",
 } as const;
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -215,7 +229,7 @@ export function resolveWebRtcStreamingConfig(
   const audioEnabled = overrides.audioEnabled ?? parseBooleanFlag(env[WEBRTC_ENV.AUDIO]);
 
   return {
-    whipEndpoint: validateWhipEndpoint(whipEndpoint),
+    whipEndpoint: validateWhipEndpoint(whipEndpoint, env),
     bearerToken: overrides.bearerToken ?? env[WEBRTC_ENV.WHIP_TOKEN] ?? undefined,
     iceServers,
     bitrateKbps,
@@ -292,15 +306,125 @@ function validateSize(size: { width: number; height: number }): { width: number;
   return { width, height };
 }
 
-function validateWhipEndpoint(endpoint: string): string {
+const LOOPBACK_WHIP_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
+
+/**
+ * Whether a WHIP endpoint hostname is loopback, for which plaintext `http://` is
+ * acceptable (dev/CI on the same host). Covers `localhost`, the whole
+ * `127.0.0.0/8` block, and IPv6 `::1` (with or without brackets).
+ */
+export function isLoopbackWhipHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+  if (LOOPBACK_WHIP_HOSTNAMES.has(host)) {
+    return true;
+  }
+  return /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+/** Whether the plaintext/arbitrary-WHIP escape hatch (issue #4751) is enabled. */
+export function isInsecureWhipAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseBooleanFlag(env[WEBRTC_ENV.ALLOW_INSECURE_WHIP]);
+}
+
+function whipUrlOrThrow(endpoint: string): URL {
   const trimmed = endpoint.trim();
+  let url: URL;
   try {
-    const url = new URL(trimmed);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new Error("unsupported protocol");
-    }
+    url = new URL(trimmed);
   } catch {
     throw new ActionableError(`Invalid WHIP endpoint "${trimmed}"; expected an absolute http(s) URL.`);
   }
-  return trimmed;
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new ActionableError(`Invalid WHIP endpoint "${trimmed}"; expected an absolute http(s) URL.`);
+  }
+  return url;
+}
+
+/**
+ * Validate a WHIP endpoint's protocol (issue #4751): require `https:`, allowing
+ * plaintext `http:` only for explicit loopback. The
+ * {@link WEBRTC_ENV.ALLOW_INSECURE_WHIP} escape hatch re-permits `http:`
+ * everywhere for advanced setups.
+ */
+function validateWhipEndpoint(endpoint: string, env: NodeJS.ProcessEnv = process.env): string {
+  const url = whipUrlOrThrow(endpoint);
+  if (
+    url.protocol === "http:" &&
+    !isLoopbackWhipHost(url.hostname) &&
+    !isInsecureWhipAllowed(env)
+  ) {
+    throw new ActionableError(
+      `Refusing plaintext WHIP endpoint "${endpoint.trim()}": http:// is only permitted for loopback ` +
+        `(127.0.0.1/localhost/::1) because the bearer token and SDP would travel in cleartext. Use https://, ` +
+        `or set ${WEBRTC_ENV.ALLOW_INSECURE_WHIP}=1 to allow insecure endpoints (not recommended).`
+    );
+  }
+  return endpoint.trim();
+}
+
+function parseWhipAllowedOrigins(raw: string | undefined): string[] {
+  if (!raw || !raw.trim()) {
+    return [];
+  }
+  return raw
+    .split(",")
+    .map(entry => entry.trim())
+    .filter(entry => entry.length > 0);
+}
+
+function toOrigin(candidate: string): string | undefined {
+  // Permit bare `host[:port]` allow-list entries by assuming https; an entry
+  // with an explicit scheme is parsed as-is. `canParse` avoids a throwing parse
+  // on a malformed allow-list entry (which is skipped, not an error).
+  const normalized = candidate.includes("://") ? candidate : `https://${candidate}`;
+  if (!URL.canParse(normalized)) {
+    return undefined;
+  }
+  const origin = new URL(normalized).origin;
+  return origin === "null" ? undefined : origin;
+}
+
+/**
+ * Restrict a WHIP endpoint supplied OVER THE WIRE to trusted origins (issue
+ * #4751) so a local process cannot exfiltrate the screen to a destination of its
+ * choosing. Trust anchors: loopback (always), the daemon's own configured
+ * {@link WEBRTC_ENV.WHIP_ENDPOINT} origin, and any origins in
+ * {@link WEBRTC_ENV.WHIP_ALLOWED_ORIGINS}. Fully bypassed by the
+ * {@link WEBRTC_ENV.ALLOW_INSECURE_WHIP} escape hatch.
+ */
+export function assertWhipOverrideAllowed(
+  endpoint: string,
+  env: NodeJS.ProcessEnv = process.env
+): void {
+  if (isInsecureWhipAllowed(env)) {
+    return;
+  }
+  const url = whipUrlOrThrow(endpoint);
+  if (isLoopbackWhipHost(url.hostname)) {
+    return;
+  }
+
+  const allowedOrigins = new Set<string>();
+  const configured = env[WEBRTC_ENV.WHIP_ENDPOINT];
+  if (configured && configured.trim()) {
+    const origin = toOrigin(configured.trim());
+    if (origin) {
+      allowedOrigins.add(origin);
+    }
+  }
+  for (const entry of parseWhipAllowedOrigins(env[WEBRTC_ENV.WHIP_ALLOWED_ORIGINS])) {
+    const origin = toOrigin(entry);
+    if (origin) {
+      allowedOrigins.add(origin);
+    }
+  }
+
+  if (!allowedOrigins.has(url.origin)) {
+    throw new ActionableError(
+      `Refusing WHIP endpoint override "${endpoint.trim()}": its origin ${url.origin} is not allow-listed. ` +
+        `Add it to ${WEBRTC_ENV.WHIP_ALLOWED_ORIGINS} (comma-separated origins), align it with the daemon's ` +
+        `${WEBRTC_ENV.WHIP_ENDPOINT}, or set ${WEBRTC_ENV.ALLOW_INSECURE_WHIP}=1 to accept arbitrary ` +
+        `destinations (not recommended).`
+    );
+  }
 }

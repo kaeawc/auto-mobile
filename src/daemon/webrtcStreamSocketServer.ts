@@ -19,6 +19,11 @@ import type {
   WebRtcStreamSocketResponse,
 } from "./webrtcStreamSocketTypes";
 import type { WebRtcStreamingOverrides } from "../features/webrtc";
+import { assertWhipOverrideAllowed } from "../features/webrtc/webrtcStreamingConfig";
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
 
 /** Injectable dependencies so the server can be tested without a device pool. */
 export interface WebRtcStreamSocketServerDependencies {
@@ -124,14 +129,17 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
 > {
   private readonly injectedDeps?: WebRtcStreamSocketServerDependencies;
   private resolvedDeps: WebRtcStreamSocketServerDependencies | null = null;
+  private readonly authenticator: StreamSocketAuthenticator;
 
   constructor(
     socketPath: string = getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
-    deps?: WebRtcStreamSocketServerDependencies
+    deps?: WebRtcStreamSocketServerDependencies,
+    authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator("webrtcStream")
   ) {
     super(socketPath, timer, "WebRtcStream");
     this.injectedDeps = deps;
+    this.authenticator = authenticator;
   }
 
   /** Resolve dependencies, lazily loading the (werift-heavy) manager on first use. */
@@ -156,6 +164,9 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   protected async handleRequest(
     request: WebRtcStreamSocketRequest
   ): Promise<WebRtcStreamSocketResponse> {
+    // Authenticate before touching device state or the WebRTC stack (issue
+    // #4751). An unauthenticated or cross-session request is rejected here.
+    this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId: request.deviceId });
     const deps = await this.getDeps();
     switch (request.action) {
       case "start":
@@ -185,6 +196,12 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     deps: WebRtcStreamSocketServerDependencies,
     request: WebRtcStreamSocketRequest
   ): Promise<WebRtcStreamSocketResponse> {
+    // A WHIP endpoint supplied over the wire may only target a trusted origin
+    // (issue #4751); the protocol (https-or-loopback) is enforced downstream in
+    // resolveWebRtcStreamingConfig.
+    if (request.whipEndpoint) {
+      assertWhipOverrideAllowed(request.whipEndpoint);
+    }
     const device = await deps.resolveDevice(request.deviceId, request.platform ?? "android");
     const stream = await deps.startStream({
       device,

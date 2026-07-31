@@ -7,6 +7,11 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { BootedDevice } from "../../src/models";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
 import { VideoStreamSocketServer } from "../../src/daemon/videoStreamSocketServer";
+import {
+  SessionScopedStreamAuthenticator,
+  type StreamAuthSessionManager,
+  type StreamSocketAuthenticator,
+} from "../../src/daemon/streamSocketAuth";
 import { CODEC_ID_H264 } from "../../src/daemon/videoStreamFraming";
 import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream/IOSScreenCaptureHelper";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../src/features/webrtc/webrtcStreamingConfig";
@@ -46,8 +51,15 @@ interface Harness {
 
 const harnesses: Harness[] = [];
 
+/** Accepts every request; auth enforcement is exercised in dedicated tests below. */
+const allowAllAuthenticator: StreamSocketAuthenticator = { authorize: () => {} };
+
 async function startHarness(
-  options: { startError?: Error; resolveError?: Error } = {}
+  options: {
+    startError?: Error;
+    resolveError?: Error;
+    authenticator?: StreamSocketAuthenticator;
+  } = {}
 ): Promise<Harness> {
   const dir = mkdtempSync(path.join(tmpdir(), "amvs-"));
   const socketPath = path.join(dir, "video-stream.sock");
@@ -73,7 +85,9 @@ async function startHarness(
       },
       nowUs: () => 1_000n,
     },
-    socketPath
+    socketPath,
+    defaultTimer,
+    options.authenticator ?? allowAllAuthenticator
   );
   await server.start();
 
@@ -240,7 +254,9 @@ describe("VideoStreamSocketServer", () => {
           },
           nowUs: () => 1_000n,
         },
-        socketPath
+        socketPath,
+        defaultTimer,
+        allowAllAuthenticator
       );
       void server.start().then(() => {
         harnesses.push({
@@ -289,7 +305,9 @@ describe("VideoStreamSocketServer", () => {
         },
         nowUs: () => 1_000n,
       },
-      socketPath
+      socketPath,
+      defaultTimer,
+      allowAllAuthenticator
     );
     await server.start();
     harnesses.push({
@@ -454,5 +472,78 @@ describe("VideoStreamSocketServer", () => {
 
     expect(h.sources[0].stopped).toBe(true);
     expect(h.server.activeDeviceIds()).toHaveLength(0);
+  });
+
+  describe("authentication (issue #4751)", () => {
+    function fakeSessionManager(
+      overrides: Partial<StreamAuthSessionManager> = {}
+    ): StreamAuthSessionManager {
+      return {
+        getSession: sessionUuid => (sessionUuid === "session-1" ? {} : null),
+        getSessionForDevice: () => null,
+        getDeviceLabels: () => undefined,
+        ...overrides,
+      };
+    }
+
+    function enforcing(sm: StreamAuthSessionManager): StreamSocketAuthenticator {
+      return new SessionScopedStreamAuthenticator(() => sm, "video-stream subscribe", {} as NodeJS.ProcessEnv);
+    }
+
+    test("rejects an unauthenticated subscribe and starts no capture", async () => {
+      const h = await startHarness({ authenticator: enforcing(fakeSessionManager()) });
+
+      const { ack } = await subscribe(h.socketPath);
+
+      expect(ack.success).toBe(false);
+      expect(String(ack.error)).toContain("authenticated daemon session");
+      expect(h.server.activeDeviceIds()).toHaveLength(0);
+      expect(h.sources).toHaveLength(0);
+    });
+
+    test("rejects a subscribe whose session is unknown/expired", async () => {
+      const h = await startHarness({ authenticator: enforcing(fakeSessionManager()) });
+
+      const { ack } = await subscribe(h.socketPath, {
+        action: "subscribe",
+        deviceId: DEVICE.deviceId,
+        sessionUuid: "ghost",
+      });
+
+      expect(ack.success).toBe(false);
+      expect(String(ack.error)).toContain("not an active daemon session");
+      expect(h.sources).toHaveLength(0);
+    });
+
+    test("accepts a subscribe with a live session", async () => {
+      const h = await startHarness({ authenticator: enforcing(fakeSessionManager()) });
+
+      const { ack } = await subscribe(h.socketPath, {
+        action: "subscribe",
+        deviceId: DEVICE.deviceId,
+        sessionUuid: "session-1",
+      });
+
+      expect(ack.success).toBe(true);
+      expect(h.server.activeDeviceIds()).toEqual([DEVICE.deviceId]);
+    });
+
+    test("rejects riding along on a device owned by another session", async () => {
+      const h = await startHarness({
+        authenticator: enforcing(
+          fakeSessionManager({ getSessionForDevice: () => "other-session" })
+        ),
+      });
+
+      const { ack } = await subscribe(h.socketPath, {
+        action: "subscribe",
+        deviceId: DEVICE.deviceId,
+        sessionUuid: "session-1",
+      });
+
+      expect(ack.success).toBe(false);
+      expect(String(ack.error)).toContain("different daemon session");
+      expect(h.sources).toHaveLength(0);
+    });
   });
 });

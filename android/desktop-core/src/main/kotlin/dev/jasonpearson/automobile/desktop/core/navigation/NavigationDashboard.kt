@@ -50,6 +50,16 @@ fun NavigationDashboard(
   // panes correct: the active-device fetch would otherwise briefly show the wrong device's graph
   // until the first stream push. The default preserves the existing (non-facet) fetch behavior.
   streamOnly: Boolean = false,
+  // When non-null the caller has already resolved the graph to render (e.g. an app-scoped pull in
+  // [dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet]); the dashboard renders it
+  // directly and runs neither the internal data-source fetch nor the stream collector. The default
+  // (null) preserves the existing self-fetching behavior.
+  providedGraph: NavigationGraph? = null,
+  // The active screen to pair with [providedGraph]. Because a provided graph bypasses the internal
+  // stream collector (which normally sets `currentObservedScreen`), the caller must pass the
+  // current screen here or the canvas's Fog toggle + auto-focus (both gated on a non-null current
+  // screen) stay dead. Only consulted when [providedGraph] is non-null.
+  providedCurrentScreen: String? = null,
 ) {
   val graph = LocalAutoMobileGraph.current
   var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
@@ -64,18 +74,35 @@ fun NavigationDashboard(
   // Fog mode settings - read from persisted settings (fog+auto are one combined toggle)
   var fogModeEnabled by remember { mutableStateOf(settingsProvider.fogModeEnabled) }
 
-  // Track current screen and app from navigation stream
-  var currentObservedScreen by remember { mutableStateOf<String?>(null) }
+  // Track current screen and app from navigation stream (or, under the provided-graph path, from
+  // [providedCurrentScreen] — the stream collector is skipped there).
+  var currentObservedScreen by remember {
+    mutableStateOf(if (providedGraph != null) providedCurrentScreen else null)
+  }
   var lastObservedAppId by remember { mutableStateOf<String?>(null) }
   // Incremented when we want the canvas to re-fit to show the entire graph
   var fitToViewTrigger by remember { mutableStateOf(0) }
 
   // Fetch navigation data from data source
-  var navigationGraph by remember { mutableStateOf<NavigationGraph?>(null) }
-  var isLoading by remember { mutableStateOf(true) }
+  var navigationGraph by remember { mutableStateOf(providedGraph) }
+  var isLoading by remember { mutableStateOf(providedGraph == null) }
   var error by remember { mutableStateOf<String?>(null) }
 
-  LaunchedEffect(dataSourceMode, clientProvider, selectedAppId, streamOnly) {
+  // Caller-provided graph wins: render it directly and keep it in sync across recompositions,
+  // bypassing the internal fetch and stream collector below. The paired current screen is threaded
+  // through so Fog/auto-focus stay live even though the stream collector is skipped.
+  LaunchedEffect(providedGraph, providedCurrentScreen) {
+    if (providedGraph != null) {
+      navigationGraph = providedGraph
+      currentObservedScreen = providedCurrentScreen
+      isLoading = false
+      error = null
+    }
+  }
+
+  LaunchedEffect(dataSourceMode, clientProvider, selectedAppId, streamOnly, providedGraph) {
+    // A caller-provided graph is authoritative; never run the internal fetch.
+    if (providedGraph != null) return@LaunchedEffect
     // Stream-only: never run the active-device data-source fetch — the graph is driven solely by
     // this pane's per-device stream. Gated on streamOnly directly (not stream presence): the facet
     // attaches its stream via DisposableEffect AFTER first composition, so keying on the attached
@@ -124,7 +151,8 @@ fun NavigationDashboard(
   }
 
   // Request latest navigation graph on composition entry and when stream client becomes available
-  LaunchedEffect(observationStreamClient) {
+  LaunchedEffect(observationStreamClient, providedGraph) {
+    if (providedGraph != null) return@LaunchedEffect
     if (observationStreamClient != null) {
       kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         observationStreamClient.requestNavigationGraph()
@@ -133,7 +161,8 @@ fun NavigationDashboard(
   }
 
   // Collect real-time navigation updates from the stream
-  LaunchedEffect(observationStreamClient, selectedAppId) {
+  LaunchedEffect(observationStreamClient, selectedAppId, providedGraph) {
+    if (providedGraph != null) return@LaunchedEffect
     if (observationStreamClient == null) return@LaunchedEffect
 
     LOG.info("Starting navigation updates collection from stream client")

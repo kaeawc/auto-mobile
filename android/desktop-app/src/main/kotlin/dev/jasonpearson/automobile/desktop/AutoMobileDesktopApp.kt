@@ -24,6 +24,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.FailuresFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NetworkFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
 import dev.jasonpearson.automobile.desktop.core.workspace.PerformanceFacet
@@ -222,9 +223,10 @@ fun AutoMobileDesktopApp(
 /**
  * Real docked-facet content for a pane, wired to the per-device facets in desktop-core: Logs
  * (telemetry), Storage (auto-resolved app, Android-only), Network (per-device `getNetworkGraph`
- * tool call), Performance (per-device observation stream, filtered by deviceId), and Failures
- * (cross-device aggregate). Navigation (#4837 — nav updates lack a deviceId and broadcast to all
- * panes) and Test (per-device daemon resource, #4715) fall back to the placeholder for now.
+ * tool call), Performance (per-device observation stream, filtered by deviceId), Failures
+ * (cross-device aggregate), and Navigation (#4837 Phase C — app-scoped graph pulled by the pane
+ * device's foreground app). Test (per-device daemon resource, #4715) falls back to the placeholder
+ * for now.
  */
 @Composable
 private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
@@ -240,10 +242,11 @@ private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
     Tool.Network -> NetworkFacet(column)
     Tool.Performance -> PerformanceFacet(column)
     Tool.Failures -> FailuresFacet(column)
-    // Navigation is intentionally NOT wired: nav-graph stream updates carry no deviceId and the
-    // daemon broadcasts them to all panes, so two panes would cross-contaminate (#4837). The facet
-    // + streamOnly support exist; wire once the deviceId contract lands. Test (per-device daemon
-    // resource, #4715) likewise stays on the placeholder.
+    // Navigation is app-scoped (#4837 Phase C): the facet resolves the pane device's foreground app
+    // from the stream, then pulls that app's persisted graph by appId — so same-app panes share the
+    // graph and a foreign broadcast can't overwrite a pane (the #4838 contamination). Test
+    // (per-device daemon resource, #4715) still falls back to the placeholder.
+    Tool.Navigation -> NavigationFacet(column)
     else -> WorkspaceFacetPlaceholder(tool)
   }
 }

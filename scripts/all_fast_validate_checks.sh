@@ -45,6 +45,7 @@ add_check "lychee" "\"$PROJECT_ROOT/scripts/lychee/validate_lychee.sh\"" "docs,l
 add_check "dependabot" "\"$PROJECT_ROOT/scripts/validate_dependabot.sh\"" "config,yaml" "Validate Dependabot config"
 add_check "debug-tags" "\"$PROJECT_ROOT/scripts/validate-no-debug-log-tags.sh\"" "lint" "Reject stray [*-DEBUG] log tags in src/"
 add_check "dependency-decisions" "\"$PROJECT_ROOT/scripts/check-stdlib-first.sh\"" "lint,dependencies" "Require a decision record for new direct dependencies"
+add_check "sharp-matrix" "bun \"$PROJECT_ROOT/scripts/check-sharp-matrix-coherence.ts\"" "lint,dependencies" "Reject partial sharp/@img native-matrix version bumps"
 add_check "shell-quote-boundary" "bun \"$PROJECT_ROOT/scripts/check-no-local-shell-quote.ts\"" "lint,conventions" "Require the canonical shell-quoting helper"
 add_check "host-shell-boundary" "bun \"$PROJECT_ROOT/scripts/check-host-shell-boundary.ts\"" "lint,conventions" "Reject new direct production host-shell execution"
 add_check "security-boundary" "bash \"$PROJECT_ROOT/scripts/check-no-new-direct-security.sh\"" "lint,conventions" "Require SecurityClient for macOS security execution"

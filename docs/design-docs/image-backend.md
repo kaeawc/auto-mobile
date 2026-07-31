@@ -73,11 +73,12 @@ premise carried in #2424/#2920:
 - `sharp-wasm32` is **not** a Windows option — it is a WASM build and would hit
   the same JSC-WASM-JIT crash class as `@jimp/wasm-webp`.
 
-Conclusion: "fundamentally fix for all platforms" is not in our control (it
-needs an upstream Bun fix, unbounded timeline). We gave Windows a non-sharp,
-non-WASM path. (Originally this also pinned sharp to 0.34.5 on macOS/Linux; that
-pin was lifted 2026-07-31 when 0.35.3 was validated under Bun — see the update
-note above.)
+Conclusion: sharp covers macOS and Linux (0.35.3, validated under Bun — see the
+2026-07-31 update above), and Windows takes a non-sharp, non-WASM path because
+global-libvips build-from-source is unsupported there. (Originally this section
+concluded that an all-platform sharp solution "needs an upstream Bun fix" and
+pinned sharp to 0.34.5 on macOS/Linux; both conclusions are superseded — the pin
+was lifted 2026-07-31.)
 
 ## Decision
 
@@ -238,15 +239,17 @@ resolution (Windows).
    drop the plugin before cwebp exists.)
 4. **doctor check + docs** — cache-portability contract, close #2974.
 
-## Contribution track (non-blocking)
+## Contribution track (non-blocking) — resolved
 
-The realistic upstream leverage is Bun-side, not sharp-side. As an independent
-task off the critical path: build a minimal reproducible repro of the
-0.35.x-under-Bun abort and attach it to
+This section originally proposed building a minimal repro of the
+"0.35.x-under-Bun abort" to attach to
 [bun#20372](https://github.com/oven-sh/bun/issues/20372)/[bun#29352](https://github.com/oven-sh/bun/issues/29352)
-(reference the closed-for-no-repro
-[sharp#4042](https://github.com/lovell/sharp/issues/4042)). If Bun fixes the
-interop, sharp can later be unfrozen and Windows collapsed onto it.
+(cf. [sharp#4042](https://github.com/lovell/sharp/issues/4042)), and to unfreeze
+sharp once Bun fixed the interop. **That work is done and its premise did not
+hold**: the repro (`docs/reproductions/sharp-bun-035`) shows 0.35.3 loading and
+running cleanly under Bun on macOS and Linux, so there is no abort to report
+upstream and no Bun fix to wait for. sharp was unfrozen to 0.35.3 on 2026-07-31.
+Windows stays on jimp + cwebp for the global-libvips reason above, not a Bun bug.
 
 ### Issue #3014 upstream repro record
 

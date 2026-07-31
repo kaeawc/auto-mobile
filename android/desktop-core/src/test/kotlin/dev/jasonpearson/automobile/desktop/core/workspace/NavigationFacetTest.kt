@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
@@ -336,6 +337,51 @@ class NavigationFacetTest {
         "recreated stream should have been connected",
         created.last().connectCallCount >= 1,
       )
+    }
+
+  @Test
+  fun `surfaces the reconnect affordance when the stream drops after an app resolved`() =
+    runComposeUiTest {
+      val created = mutableListOf<FakeObservationStream>()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { FakeObservationStream().also { created.add(it) } },
+              navigationDataSourceProvider = {
+                StubNavigationDataSource(
+                  Result.Success(NavigationGraph(listOf(screen("Home")), emptyList()))
+                )
+              },
+            )
+          }
+        }
+      }
+      waitForIdle()
+
+      // App resolves and its graph renders.
+      created.first().emitNavigation(navUpdate("com.example.app"))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Home").fetchSemanticsNodes().isNotEmpty()
+      }
+
+      // Socket EOF *after* resolution: without post-resolution handling the facet would silently
+      // retain a dead stream. It must instead expose the retryable reconnect affordance.
+      runOnIdle {
+        created.first().emitConnectionState(ConnectionState.Disconnected("Stream ended"))
+      }
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Stream ended", substring = true).fetchSemanticsNodes().isNotEmpty()
+      }
+      onNodeWithText("Stream ended", substring = true).assertExists()
+      onNodeWithContentDescription("Retry connecting to the AutoMobile daemon").assertExists()
+      assertEquals(1, created.size)
+
+      // Retry recreates the stream (reusing the streamAttempt mechanism).
+      onNodeWithContentDescription("Retry connecting to the AutoMobile daemon").performClick()
+      waitUntil(timeoutMillis = 5_000) { created.size >= 2 }
+      assertTrue("retry should recreate the observation stream", created.size >= 2)
     }
 
   /** A [SharedFlow] that throws on collection, to simulate a stream read/parse failure. */

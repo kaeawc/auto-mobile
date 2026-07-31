@@ -161,26 +161,31 @@ fun NavigationFacet(
     remember(column.deviceId) { mutableStateOf<NavigationFacetState>(NavigationFacetState.Loading) }
 
   LaunchedEffect(column.deviceId, foregroundAppId, attempt, connectionState, streamError) {
+    // A stream failure is retryable *regardless of whether an app already resolved*. Handling it
+    // only when foregroundAppId == null would let a socket EOF after resolution
+    // (Disconnected("Stream ended")) silently retain a dead stream and miss later foreground-app
+    // changes. So surface the retryable ConnectionError on any Disconnected/Error (or a
+    // mid-collect throw captured in streamError); Retry recreates the stream (streamAttempt) and
+    // re-resolves. Automatic reconnect-on-recovery (backoff, no user action) is #4868 — not built
+    // here. Note: transient Connecting/Reconnecting are NOT failures and fall through.
+    val failureMessage =
+      streamError
+        ?: when (val cs = connectionState) {
+          is ConnectionState.Disconnected -> cs.reason ?: "Not connected to the AutoMobile daemon"
+          is ConnectionState.Error -> cs.message
+          else -> null
+        }
+    if (failureMessage != null) {
+      state = NavigationFacetState.ConnectionError(failureMessage)
+      return@LaunchedEffect
+    }
+
     val appId = foregroundAppId
     if (appId == null) {
-      // No foreground app resolved yet. We resolve the appId *from* the stream, so a stream that
-      // never connects (or throws mid-collect) would otherwise hang here forever (the
-      // daemon-socket-unavailable dead-end). Surface a retryable connection-error in that case;
-      // otherwise stay in Loading until the stream reports the foreground app. Never pull with a
-      // null app id (that would surface the wrong/global graph).
-      val error = streamError
-      state =
-        when {
-          error != null -> NavigationFacetState.ConnectionError(error)
-          connectionState is ConnectionState.Disconnected ->
-            NavigationFacetState.ConnectionError(
-              (connectionState as ConnectionState.Disconnected).reason
-                ?: "Not connected to the AutoMobile daemon"
-            )
-          connectionState is ConnectionState.Error ->
-            NavigationFacetState.ConnectionError((connectionState as ConnectionState.Error).message)
-          else -> NavigationFacetState.Loading
-        }
+      // Stream is healthy but no foreground app resolved yet. We resolve the appId *from* the
+      // stream, so stay in Loading until it reports one. Never pull with a null app id (that would
+      // surface the wrong/global graph).
+      state = NavigationFacetState.Loading
       return@LaunchedEffect
     }
     state = NavigationFacetState.Loading

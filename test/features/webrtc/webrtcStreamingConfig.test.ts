@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  WEBRTC_ANDROID_FPS_DEFAULT,
+  WEBRTC_ANDROID_FPS_MAX,
+  WEBRTC_ANDROID_FPS_MIN,
   WEBRTC_ENV,
   WEBRTC_IOS_SIMULATOR_FPS_DEFAULT,
   WEBRTC_IOS_SIMULATOR_FPS_MAX,
@@ -184,6 +187,53 @@ describe("resolveWebRtcStreamingConfig", () => {
         [WEBRTC_ENV.IOS_SIMULATOR_FPS]: "not-a-number",
       } as NodeJS.ProcessEnv)
     ).toThrow(/integer in \[5, 60\]/);
+  });
+
+  test("defaults the Android capture rate to 30fps, not the iOS-tuned rate", () => {
+    const config = resolveWebRtcStreamingConfig(
+      { whipEndpoint: "https://coord/whip" },
+      {} as NodeJS.ProcessEnv
+    );
+    expect(config.androidFps).toBe(WEBRTC_ANDROID_FPS_DEFAULT);
+    // Pin the literal: the issue calls for lowering the Android default to 30fps.
+    expect(WEBRTC_ANDROID_FPS_DEFAULT).toBe(30);
+    expect(WEBRTC_ANDROID_FPS_DEFAULT).toBeGreaterThanOrEqual(WEBRTC_ANDROID_FPS_MIN);
+    expect(WEBRTC_ANDROID_FPS_DEFAULT).toBeLessThanOrEqual(WEBRTC_ANDROID_FPS_MAX);
+  });
+
+  test("reads the Android capture rate from the environment", () => {
+    const env = {
+      [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
+      [WEBRTC_ENV.ANDROID_FPS]: "24",
+    } as NodeJS.ProcessEnv;
+    expect(resolveWebRtcStreamingConfig({}, env).androidFps).toBe(24);
+  });
+
+  test("Android fps override takes precedence over the environment", () => {
+    const env = {
+      [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
+      [WEBRTC_ENV.ANDROID_FPS]: "24",
+    } as NodeJS.ProcessEnv;
+    expect(resolveWebRtcStreamingConfig({ androidFps: 48 }, env).androidFps).toBe(48);
+  });
+
+  test("rejects an Android fps outside the documented safe range", () => {
+    const endpoint = { whipEndpoint: "https://coord/whip" };
+    expect(() =>
+      resolveWebRtcStreamingConfig({ ...endpoint, androidFps: WEBRTC_ANDROID_FPS_MIN - 1 })
+    ).toThrow(/integer in \[1, 60\]/);
+    expect(() =>
+      resolveWebRtcStreamingConfig({ ...endpoint, androidFps: WEBRTC_ANDROID_FPS_MAX + 1 })
+    ).toThrow(/integer in \[1, 60\]/);
+    expect(() =>
+      resolveWebRtcStreamingConfig({ ...endpoint, androidFps: 29.5 })
+    ).toThrow(/integer in \[1, 60\]/);
+    expect(() =>
+      resolveWebRtcStreamingConfig({}, {
+        [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
+        [WEBRTC_ENV.ANDROID_FPS]: "not-a-number",
+      } as NodeJS.ProcessEnv)
+    ).toThrow(/integer in \[1, 60\]/);
   });
 
   test("falls back to a default STUN server", () => {

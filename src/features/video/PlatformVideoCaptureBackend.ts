@@ -1,20 +1,12 @@
-import path from "node:path";
-import { promises as fsPromises } from "node:fs";
-import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { ActionableError, BootedDevice } from "../../models";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
-import { DefaultFfmpegClient, type FfmpegClient } from "../../utils/media/FfmpegClient";
 import {
   createExitTracker,
   getFileSize,
-  PROCESS_EXIT_TIMEOUT_MS,
-  waitForExit,
-  waitForSpawn,
   type ProcessExitState,
   type TrackedChildProcess,
 } from "../../utils/ChildProcessTracker";
@@ -26,8 +18,6 @@ import type {
 } from "./VideoRecorderService";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
 
-const FFMPEG_SCALE_TIMEOUT_MS = 60_000;
-
 interface AndroidBackendHandle {
   kind: "android";
   process: TrackedChildProcess;
@@ -38,18 +28,7 @@ interface AndroidBackendHandle {
   deviceTempPath: string;
 }
 
-interface IosBackendHandle {
-  kind: "ios";
-  process: TrackedChildProcess;
-  exitState: ProcessExitState;
-  exitPromise: Promise<void>;
-  stderr: string[];
-  rawOutputPath: string;
-  outputPath: string;
-  resolution?: { width: number; height: number };
-}
-
-type BackendHandle = AndroidBackendHandle | IosBackendHandle;
+type BackendHandle = AndroidBackendHandle;
 
 export function clampBitrateKbps(config: VideoCaptureConfig): number {
   const maxBitrateKbps = Math.max(0, Math.floor(config.maxThroughputMbps * 1000));
@@ -60,12 +39,23 @@ export function clampBitrateKbps(config: VideoCaptureConfig): number {
   return Math.min(config.targetBitrateKbps, maxBitrateKbps);
 }
 
+/**
+ * Platform-native video capture backend.
+ *
+ * Android recordings use `adb shell screenrecord` on the device. iOS recordings
+ * are intentionally NOT handled here: {@link HybridVideoCaptureBackend} routes
+ * every iOS device to `FfmpegVideoProcessingBackend`, whose `startIos` drives
+ * `simctl … recordVideo` with the SIGINT + moov-atom flush + materialization wait
+ * that a robust iOS capture needs. The former platform-native `simctl recordVideo`
+ * branch here spawned the recorder with all stdio ignored, so a failed recording
+ * surfaced only an exit code with no stderr to diagnose it — and it was unreachable
+ * in production. It was removed rather than hardened (issue #4773); iOS callers are
+ * rejected explicitly so a future mis-wire fails loudly instead of silently.
+ */
 export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   constructor(
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
     private readonly timer: Timer = defaultTimer,
-    private readonly simctlFactory: (device: BootedDevice) => SimCtl = device => new SimCtlClient(device),
-    private readonly ffmpegClient: FfmpegClient = new DefaultFfmpegClient(),
   ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
@@ -79,7 +69,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
 
     if (device.platform === "ios") {
-      return this.startIos(device, config);
+      throw new ActionableError(
+        "iOS video recording is not handled by PlatformVideoCaptureBackend. " +
+          "Route iOS devices through FfmpegVideoProcessingBackend (HybridVideoCaptureBackend does this automatically)."
+      );
     }
 
     throw new ActionableError(`Unsupported platform for video recording: ${device.platform}`);
@@ -87,120 +80,107 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
   async stop(handle: RecordingHandle): Promise<RecordingResult> {
     const backendHandle = handle.backendHandle as BackendHandle | undefined;
-    if (!backendHandle) {
+    if (!backendHandle || backendHandle.kind !== "android") {
       throw new Error("Missing backend handle for video recording.");
     }
 
     logger.info(`[VideoCapture] Stopping recording ${handle.recordingId}`);
 
-    if (backendHandle.kind === "android") {
-      // Stop screenrecord on the *device* with SIGINT first. If we only SIGINT the host
-      // `adb shell screenrecord` process, ADB can drop the session before the device writes
-      // the MP4 moov atom — leading to tiny/corrupt files that show a single frozen frame.
-      // NOTE: pkill -2 signals *all* screenrecord processes on the device. This is fine for
-      // single-recording usage but would interfere with concurrent recordings on the same device.
-      const adbForStop = this.adbFactory.create(backendHandle.device);
-      try {
-        const pk = await adbForStop.executeCommand("shell pkill -2 screenrecord", 8000);
-        logger.info(
-          `[VideoCapture] Device pkill -2 screenrecord completed (out=${pk.stdout.trim().slice(0, 120)} err=${pk.stderr.trim().slice(0, 160)})`
-        );
-      } catch (error) {
-        logger.warn(
-          `[VideoCapture] Device-side pkill -2 screenrecord failed; will rely on host SIGINT: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-
-      // Wait for the host adb process to exit now that remote screenrecord should have finalized
-      const gracefulExitTimeout = 10000;
-      let timeoutId: NodeJS.Timeout | undefined;
-      const timeoutPromise = new Promise<void>(resolve => {
-        timeoutId = this.timer.setTimeout(() => {
-          if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
-            logger.info(`[VideoCapture] Sending SIGINT to host adb after pkill wait`);
-            backendHandle.process.kill("SIGINT");
-          }
-          resolve();
-        }, gracefulExitTimeout);
-      });
-
-      await Promise.race([backendHandle.exitPromise, timeoutPromise]);
-      if (timeoutId) {
-        // Disarm through the injected timer, not the global clearTimeout. Once
-        // the host adb has exited the 10 s SIGINT callback is stale; leaving it
-        // armed (as global clearTimeout would, since the handle came from
-        // this.timer.setTimeout) fires a SIGINT after the recording finished
-        // (issue #4170).
-        this.timer.clearTimeout(timeoutId);
-      }
-
-      if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
-        logger.warn(`[VideoCapture] screenrecord still running after SIGINT; sending SIGKILL`);
-        backendHandle.process.kill("SIGKILL");
-        await backendHandle.exitPromise;
-      } else {
-        await backendHandle.exitPromise;
-      }
-
-      logger.info(`[VideoCapture] Process exited with code: ${backendHandle.exitState.exitCode}, signal: ${backendHandle.exitState.signal}`);
-
-      // Give screenrecord extra time to finalize the file on device
-      // Even though the process has exited, file writes may still be in progress
-      logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
-      await this.timer.sleep(1000);
-    } else {
-      await waitForExit(backendHandle.process, backendHandle.exitPromise, {
-        timeoutMs: PROCESS_EXIT_TIMEOUT_MS,
-      });
+    // Stop screenrecord on the *device* with SIGINT first. If we only SIGINT the host
+    // `adb shell screenrecord` process, ADB can drop the session before the device writes
+    // the MP4 moov atom — leading to tiny/corrupt files that show a single frozen frame.
+    // NOTE: pkill -2 signals *all* screenrecord processes on the device. This is fine for
+    // single-recording usage but would interfere with concurrent recordings on the same device.
+    const adbForStop = this.adbFactory.create(backendHandle.device);
+    try {
+      const pk = await adbForStop.executeCommand("shell pkill -2 screenrecord", 8000);
       logger.info(
-        `[VideoCapture] Process exited with code: ${backendHandle.exitState.exitCode}, signal: ${backendHandle.exitState.signal}`
+        `[VideoCapture] Device pkill -2 screenrecord completed (out=${pk.stdout.trim().slice(0, 120)} err=${pk.stderr.trim().slice(0, 160)})`
+      );
+    } catch (error) {
+      logger.warn(
+        `[VideoCapture] Device-side pkill -2 screenrecord failed; will rely on host SIGINT: ${error instanceof Error ? error.message : String(error)}`
       );
     }
 
-    if (backendHandle.kind === "android") {
-      // Pull the file from the device
-      logger.info(`[VideoCapture] Pulling file from device: ${backendHandle.deviceTempPath} -> ${handle.outputPath}`);
-      const adb = this.adbFactory.create(backendHandle.device);
-      const pullArgs = ["pull", backendHandle.deviceTempPath, handle.outputPath];
-      try {
-        const pullProcess = await adb.spawn(pullArgs);
-
-        await new Promise<void>((resolve, reject) => {
-          pullProcess.once("exit", code => {
-            if (code === 0) {
-              logger.info(`[VideoCapture] File pulled successfully`);
-              resolve();
-            } else {
-              reject(new Error(`adb pull failed with exit code ${code}`));
-            }
-          });
-          pullProcess.once("error", err => reject(err));
-        });
-      } finally {
-        // Always clean up the /sdcard temp file, even when the pull failed —
-        // otherwise a failed pull leaks the temp recording on the device on
-        // every stop (issue #4170).
-        logger.info(`[VideoCapture] Cleaning up temp file on device`);
-        const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
-        try {
-          const rmProcess = await adb.spawn(rmArgs);
-
-          await new Promise<void>(resolve => {
-            rmProcess.once("exit", () => {
-              logger.info(`[VideoCapture] Temp file cleaned up`);
-              resolve();
-            });
-            rmProcess.once("error", err => {
-              logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
-              resolve();
-            });
-          });
-        } catch (err) {
-          logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+    // Wait for the host adb process to exit now that remote screenrecord should have finalized
+    const gracefulExitTimeout = 10000;
+    let timeoutId: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<void>(resolve => {
+      timeoutId = this.timer.setTimeout(() => {
+        if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
+          logger.info(`[VideoCapture] Sending SIGINT to host adb after pkill wait`);
+          backendHandle.process.kill("SIGINT");
         }
-      }
+        resolve();
+      }, gracefulExitTimeout);
+    });
+
+    await Promise.race([backendHandle.exitPromise, timeoutPromise]);
+    if (timeoutId) {
+      // Disarm through the injected timer, not the global clearTimeout. Once
+      // the host adb has exited the 10 s SIGINT callback is stale; leaving it
+      // armed (as global clearTimeout would, since the handle came from
+      // this.timer.setTimeout) fires a SIGINT after the recording finished
+      // (issue #4170).
+      this.timer.clearTimeout(timeoutId);
+    }
+
+    if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
+      logger.warn(`[VideoCapture] screenrecord still running after SIGINT; sending SIGKILL`);
+      backendHandle.process.kill("SIGKILL");
+      await backendHandle.exitPromise;
     } else {
-      await this.finalizeIosRecording(backendHandle);
+      await backendHandle.exitPromise;
+    }
+
+    logger.info(`[VideoCapture] Process exited with code: ${backendHandle.exitState.exitCode}, signal: ${backendHandle.exitState.signal}`);
+
+    // Give screenrecord extra time to finalize the file on device
+    // Even though the process has exited, file writes may still be in progress
+    logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
+    await this.timer.sleep(1000);
+
+    // Pull the file from the device
+    logger.info(`[VideoCapture] Pulling file from device: ${backendHandle.deviceTempPath} -> ${handle.outputPath}`);
+    const adb = this.adbFactory.create(backendHandle.device);
+    const pullArgs = ["pull", backendHandle.deviceTempPath, handle.outputPath];
+    try {
+      const pullProcess = await adb.spawn(pullArgs);
+
+      await new Promise<void>((resolve, reject) => {
+        pullProcess.once("exit", code => {
+          if (code === 0) {
+            logger.info(`[VideoCapture] File pulled successfully`);
+            resolve();
+          } else {
+            reject(new Error(`adb pull failed with exit code ${code}`));
+          }
+        });
+        pullProcess.once("error", err => reject(err));
+      });
+    } finally {
+      // Always clean up the /sdcard temp file, even when the pull failed —
+      // otherwise a failed pull leaks the temp recording on the device on
+      // every stop (issue #4170).
+      logger.info(`[VideoCapture] Cleaning up temp file on device`);
+      const rmArgs = ["shell", "rm", backendHandle.deviceTempPath];
+      try {
+        const rmProcess = await adb.spawn(rmArgs);
+
+        await new Promise<void>(resolve => {
+          rmProcess.once("exit", () => {
+            logger.info(`[VideoCapture] Temp file cleaned up`);
+            resolve();
+          });
+          rmProcess.once("error", err => {
+            logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+            resolve();
+          });
+        });
+      } catch (err) {
+        logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
+      }
     }
 
     const sizeBytes = await getFileSize(handle.outputPath);
@@ -290,145 +270,11 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     };
   }
 
-  private async startIos(
-    device: BootedDevice,
-    config: VideoCaptureConfig
-  ): Promise<RecordingHandle> {
-    const simctl = this.simctlFactory(device);
-    const available = await simctl.isAvailable();
-    if (!available) {
-      throw new ActionableError("simctl is not available. Install Xcode command line tools.");
-    }
-
-    const rawOutputPath = config.resolution
-      ? path.join(config.outputDirectory, `raw-${config.fileName}`)
-      : config.outputPath;
-
-    const args = [
-      "io",
-      device.deviceId,
-      "recordVideo",
-      "--codec",
-      "h264",
-      "--force",
-      rawOutputPath,
-    ];
-
-    const process = await simctl.startCommandArgs(args, { stdio: ["ignore", "ignore", "ignore"] });
-
-    try {
-      await waitForSpawn(process);
-    } catch (error) {
-      throw new ActionableError(`Failed to start iOS recording: ${error}`);
-    }
-
-    const stderr: string[] = [];
-    const { exitState, exitPromise } = createExitTracker(process, stderr);
-
-    const backendHandle: IosBackendHandle = {
-      kind: "ios",
-      process,
-      exitState,
-      exitPromise,
-      stderr,
-      rawOutputPath,
-      outputPath: config.outputPath,
-      resolution: config.resolution,
-    };
-
-    return {
-      recordingId: config.recordingId,
-      outputPath: config.outputPath,
-      startedAt: config.startedAt,
-      backendHandle,
-    };
-  }
-
   private resolveAndroidTimeLimit(maxDurationSeconds?: number): number {
     if (maxDurationSeconds && maxDurationSeconds > 0) {
       return Math.min(maxDurationSeconds, ANDROID_SCREENRECORD_MAX_SECONDS);
     }
 
     return ANDROID_SCREENRECORD_MAX_SECONDS;
-  }
-
-  private async finalizeIosRecording(handle: IosBackendHandle): Promise<void> {
-    const needsScale = Boolean(handle.resolution);
-    if (!needsScale) {
-      if (handle.rawOutputPath !== handle.outputPath) {
-        await this.replaceOutputFile(handle.rawOutputPath, handle.outputPath);
-      }
-      return;
-    }
-
-    const resolution = handle.resolution!;
-    const ffmpegAvailable = await this.isFfmpegAvailable();
-    if (!ffmpegAvailable) {
-      logger.warn("[VideoCapture] FFmpeg not available; keeping original iOS recording.");
-      await this.replaceOutputFile(handle.rawOutputPath, handle.outputPath);
-      return;
-    }
-
-    try {
-      await this.scaleWithFfmpeg(handle.rawOutputPath, handle.outputPath, resolution);
-      await fsPromises.rm(handle.rawOutputPath, { recursive: true, force: true });
-    } catch (error) {
-      logger.warn(`[VideoCapture] Failed to scale iOS recording: ${error}`);
-      await this.replaceOutputFile(handle.rawOutputPath, handle.outputPath);
-    }
-  }
-
-  private async replaceOutputFile(sourcePath: string, destinationPath: string): Promise<void> {
-    if (sourcePath === destinationPath) {
-      return;
-    }
-
-    const sourceExists = await pathExists(sourcePath);
-    if (!sourceExists) {
-      logger.warn(`[VideoCapture] Missing iOS recording at ${sourcePath}`);
-      return;
-    }
-
-    await fsPromises.rm(destinationPath, { recursive: true, force: true });
-    await fsPromises.rename(sourcePath, destinationPath);
-  }
-
-  private async isFfmpegAvailable(): Promise<boolean> {
-    try {
-      await this.ffmpegClient.probe();
-      return true;
-    } catch (error) {
-      logger.debug(`[PlatformVideoCaptureBackend] FFmpeg probe failed; preserving the original recording: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
-  }
-
-  private async scaleWithFfmpeg(
-    inputPath: string,
-    outputPath: string,
-    resolution: { width: number; height: number }
-  ): Promise<void> {
-    const args = [
-      "-y",
-      "-i",
-      inputPath,
-      "-vf",
-      `scale=${resolution.width}:${resolution.height}`,
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-pix_fmt",
-      "yuv420p",
-      "-movflags",
-      "+faststart",
-      outputPath,
-    ];
-    await this.ffmpegClient.run({
-      args,
-      context: "iOS recording scale",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeoutMs: FFMPEG_SCALE_TIMEOUT_MS,
-    });
   }
 }

@@ -55,7 +55,14 @@ markdown_extensions:
       smart_enable: all
   - pymdownx.caret
   - pymdownx.inlinehilite
-  - pymdownx.magiclink
+  - pymdownx.magiclink:
+      # Auto-link bare `#NNNN` issue/PR references (and commit hashes) to this
+      # repo in the rendered docs, so committed Markdown can keep the clean bare
+      # form while readers still get clickable links. Pairs with the AGENTS.md /
+      # CLAUDE.md rule that exempts Markdown files from explicit links.
+      repo_url_shorthand: true
+      user: kaeawc
+      repo: auto-mobile
   - pymdownx.smartsymbols
   - pymdownx.superfences:
       custom_fences:
@@ -79,6 +86,7 @@ nav:
       - 'Reproducing Bugs': using/reproducing-bugs.md
       - 'UI Tests': using/ui-tests.md
       - 'Hermetic CI Pinning': using/hermetic-ci-pinning.md
+      - 'Tool Capabilities & Registration Flags': using/tool-capabilities.md
       - 'WebRTC Screen Streaming': webrtc-streaming-ci-worker.md
       - 'Environment Variables': using/environment-variables.md
       - 'Performance Analysis':
@@ -90,6 +98,8 @@ nav:
       - 'Accessibility': using/a11y.md
       - 'TalkBack Testing': using/talkback.md
       - 'VoiceOver Testing': using/voiceover.md
+  - 'Metrics':
+      - 'Release Downloads': metrics/downloads.md
   - 'Design Docs':
       - 'Overview': design-docs/index.md
       - 'Status Glossary': design-docs/status-glossary.md
@@ -206,6 +216,7 @@ nav:
       - 'Overview': contributing.md
       - 'Standard Library First': contributing/stdlib-first.md
       - 'Apple Signing & Notarization': release/apple-signing-setup.md
+      - 'Windows & Linux Signing (research)': release/windows-linux-signing-research.md
       - 'Dependency Decisions':
           - 'fast-check': decisions/fast-check.md
       - 'Codex Automation Thread Report': codex-automation-thread-spam-report.md

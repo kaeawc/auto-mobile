@@ -27,12 +27,21 @@ export interface H264CaptureSourceOptions {
   bitrateBps?: number;
   size?: { width: number; height: number };
   /**
-   * Capture frame rate, carrying `WebRtcStreamingConfig.iosSimulatorFps`.
+   * Device video-server quality preset. Selects resolution and default bitrate;
+   * the persistent Android encoder forwards it as `--quality`. Frame rate is
+   * carried separately by {@link fps} so it can be tuned independently. When
+   * omitted the device defaults to `medium`.
+   */
+  quality?: "low" | "medium" | "high";
+  /**
+   * Capture frame rate.
    *
-   * Only the iOS Simulator source uses it to *request* a capture rate. Android
-   * ignores it entirely, and physical iOS captures at its own AVFoundation rate
-   * — but on both iOS paths it still sets ffmpeg's declared rawvideo input rate
-   * and therefore the GOP length, so it is not inert there.
+   * On Android it is forwarded to the video-server as `--fps`, overriding the
+   * quality preset's default (carrying `WebRtcStreamingConfig.androidFps`). On
+   * iOS Simulator it requests a capture rate (carrying
+   * `WebRtcStreamingConfig.iosSimulatorFps`); physical iOS captures at its own
+   * AVFoundation rate but still takes its declared rawvideo input rate and GOP
+   * length from it.
    */
   fps?: number;
   audioEnabled?: boolean;

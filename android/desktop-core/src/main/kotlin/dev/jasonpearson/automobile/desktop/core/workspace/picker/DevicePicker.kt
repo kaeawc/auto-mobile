@@ -236,15 +236,31 @@ private fun DeviceGrid(
       DeviceCard(
         device = device,
         selected = device.id in content.selectedIds,
-        onClick = { onAction(DevicePickerAction.ToggleSelect(device.id)) },
+        booting = device.id in content.bootingIds,
+        error = content.bootErrors[device.id],
+        onClick = {
+          if (device.state == DeviceState.Booted) {
+            onAction(DevicePickerAction.ToggleSelect(device.id))
+          } else {
+            onAction(DevicePickerAction.BootDevice(device.id))
+          }
+        },
       )
     }
   }
 }
 
 @Composable
-private fun DeviceCard(device: PickerDevice, selected: Boolean, onClick: () -> Unit) {
+private fun DeviceCard(
+  device: PickerDevice,
+  selected: Boolean,
+  booting: Boolean,
+  error: String?,
+  onClick: () -> Unit,
+) {
   val booted = device.state == DeviceState.Booted
+  // A shut-down card boots on click (unless a boot is already in flight); a booted card selects.
+  val clickable = booted || !booting
   Column(
     modifier =
       Modifier.fillMaxWidth()
@@ -253,11 +269,8 @@ private fun DeviceCard(device: PickerDevice, selected: Boolean, onClick: () -> U
           color = if (selected) Accent else MaterialTheme.colorScheme.outlineVariant,
           shape = RoundedCornerShape(6.dp),
         )
-        .then(if (booted) Modifier.clickable(onClick = onClick) else Modifier)
-        .semantics {
-          contentDescription =
-            if (booted) "Select ${device.name}" else "${device.name} (not booted)"
-        }
+        .then(if (clickable) Modifier.clickable(onClick = onClick) else Modifier)
+        .semantics { contentDescription = cardDescription(device, booted, booting, error) }
         .padding(12.dp)
   ) {
     Text("${device.platform.emoji}  ${device.name}", style = MaterialTheme.typography.bodyLarge)
@@ -267,7 +280,7 @@ private fun DeviceCard(device: PickerDevice, selected: Boolean, onClick: () -> U
           if (device.platform == Platform.Ios) "iOS" else "Android",
           device.osLabel,
           device.architecture,
-          if (booted) "booted" else "shutdown",
+          if (booted) "booted" else "Shut down",
         )
         .joinToString(" · ")
     Text(
@@ -277,13 +290,33 @@ private fun DeviceCard(device: PickerDevice, selected: Boolean, onClick: () -> U
     )
     if (!booted) {
       Text(
-        "Boot to observe (soon)",
+        bootAffordance(booting, error),
         style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.outline,
+        color = if (error != null) MaterialTheme.colorScheme.error else Accent,
       )
     }
   }
 }
+
+private fun cardDescription(
+  device: PickerDevice,
+  booted: Boolean,
+  booting: Boolean,
+  error: String?,
+): String =
+  when {
+    booted -> "Select ${device.name}"
+    booting -> "Booting ${device.name}"
+    error != null -> "Retry boot ${device.name}"
+    else -> "Boot ${device.name}"
+  }
+
+private fun bootAffordance(booting: Boolean, error: String?): String =
+  when {
+    booting -> "Booting…"
+    error != null -> "Boot failed · Click to retry"
+    else -> "Click to boot"
+  }
 
 private fun toggle(
   dimension: FilterDimension,

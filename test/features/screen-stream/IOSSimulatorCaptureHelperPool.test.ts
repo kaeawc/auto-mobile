@@ -194,6 +194,49 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     }
   });
 
+  test("drops a poisoned entry after a failed stop so the next attach gets a fresh helper", async () => {
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const first = pool.acquire(simulatorOptions(42));
+    first.on("error", () => {});
+    await first.start();
+    // The next stop() throws exactly once, then the fake reports as stopped.
+    helpers[0].stopError = new Error("stop failed");
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+
+    try {
+      helpers[0].emit("error", new Error("capture failed"));
+      await flushMicrotasks();
+
+      // Failed cleanup surfaced its error, and the poisoned entry was dropped.
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining("failed helper stop failed: Error: stop failed")
+      );
+      expect(helpers[0].stops).toBe(1);
+
+      // A later attach to the SAME window key must create a fresh helper rather
+      // than re-throwing the sticky stop failure forever.
+      helpers[0].stopError = null;
+      const second = pool.acquire(simulatorOptions(42));
+      await second.start();
+
+      expect(helpers).toHaveLength(2);
+      expect(helpers[1].starts).toBe(1);
+      expect(second.isStarted).toBe(true);
+      await second.stop();
+    } finally {
+      warning.mockRestore();
+      await first.stop();
+      await pool.shutdown();
+    }
+  });
+
   test("does not create a helper when a lease stops before its queued attachment", async () => {
     const timer = new FakeTimer();
     const helpers: FakeSimulatorHelper[] = [];

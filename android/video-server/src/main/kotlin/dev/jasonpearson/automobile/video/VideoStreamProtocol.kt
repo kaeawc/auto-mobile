@@ -70,4 +70,22 @@ object VideoStreamProtocol {
     } else {
       ByteBuffer.allocate(12).putLong(ptsAndFlags).putInt(size).array()
     }
+
+  /**
+   * Assemble the packet header and payload into a single contiguous buffer so each packet can be
+   * emitted with one `write` syscall and its header is never split from its payload across TCP
+   * segments (issue #4743).
+   */
+  fun framedPacket(
+    audioEnabled: Boolean,
+    trackId: Int,
+    ptsAndFlags: Long,
+    data: ByteArray,
+  ): ByteArray {
+    val header = packetHeader(audioEnabled, trackId, ptsAndFlags, data.size)
+    val framed = ByteArray(header.size + data.size)
+    System.arraycopy(header, 0, framed, 0, header.size)
+    System.arraycopy(data, 0, framed, header.size, data.size)
+    return framed
+  }
 }

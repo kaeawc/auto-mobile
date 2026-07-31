@@ -8,6 +8,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceUtils";
 import * as os from "os";
 
@@ -99,6 +100,21 @@ describe("startDevice handler", () => {
     expect(result.osVersion).toBe("14");
     expect(result.sessionId).toBeDefined();
     expect(typeof result.sessionId).toBe("string");
+  });
+
+  it("sources the fallback sessionId from the injected IdGenerator", async () => {
+    // Daemon is not initialized here, so the session UUID is minted directly by
+    // the injected generator rather than the pool — proving the randomUUID() call
+    // was routed onto the IdGenerator seam (issue #3511).
+    setDeviceToolsDependencies({ idGenerator: new CountingIdGenerator("session") });
+    registerDeviceTools();
+
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.sessionId).toBe("session-1");
   });
 
   it("fails closed on an unusable iOS runner override, before touching the cached runner (#4221)", async () => {

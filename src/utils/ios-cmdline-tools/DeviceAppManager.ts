@@ -746,13 +746,14 @@ export class DeviceAppManager implements DeviceUrlLauncher {
   }
 
   /**
-   * Resolve the on-device installed bundle path for `bundleId` via
-   * `devicectl device info apps --bundle-id`. Returns null when the app isn't
-   * installed (no matching bundle entry / no resolvable path); devicectl exec or
-   * JSON-read failures propagate so a broken devicectl surfaces rather than
-   * masquerading as "not installed". macOS-only (callers guard the platform).
+   * Query the on-device `devicectl device info apps --bundle-id` payload and
+   * return the matching bundle entry (raw devicectl record), or null when the
+   * app isn't installed. devicectl exec / JSON-read failures PROPAGATE so a
+   * broken devicectl surfaces rather than masquerading as "not installed".
+   * macOS-only (callers guard the platform). Shared core behind
+   * {@link resolveInstalledBundlePathOnDevice} and {@link getInstalledAppInfo}.
    */
-  private async resolveInstalledBundlePathOnDevice(deviceUdid: string, bundleId: string): Promise<string | null> {
+  private async queryInstalledAppEntry(deviceUdid: string, bundleId: string): Promise<Record<string, unknown> | null> {
     const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-"));
     const jsonPath = join(tempDir, "apps.json");
     try {
@@ -770,14 +771,45 @@ export class DeviceAppManager implements DeviceUrlLauncher {
 
       const raw = await this.deps.readFile(jsonPath);
       const data = JSON.parse(raw) as unknown;
-      const entry = findBundleEntry(data, bundleId);
-      if (!entry) {
-        return null;
-      }
-      return extractBundlePath(entry);
+      return findBundleEntry(data, bundleId);
     } finally {
       await this.deps.rm(tempDir);
     }
+  }
+
+  /**
+   * Best-effort metadata read: return the on-device `devicectl device info apps`
+   * bundle entry for `bundleId`, or null. Unlike {@link queryInstalledAppEntry},
+   * this is non-throwing — it returns null off macOS (no devicectl) and logs a
+   * warning then returns null on any devicectl/JSON failure, matching the
+   * diagnostic contract of the app-metadata resource that consumes it (a lookup
+   * failure degrades to "no metadata" rather than surfacing as an error).
+   */
+  public async getInstalledAppInfo(deviceUdid: string, bundleId: string): Promise<Record<string, unknown> | null> {
+    if (this.deps.platform() !== "darwin") {
+      return null;
+    }
+    try {
+      return await this.queryInstalledAppEntry(deviceUdid, bundleId);
+    } catch (error) {
+      this.deps.logger.warn(`[DeviceAppManager] Failed to get physical device app info for ${bundleId}: ${getErrorMessage(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * Resolve the on-device installed bundle path for `bundleId` via
+   * `devicectl device info apps --bundle-id`. Returns null when the app isn't
+   * installed (no matching bundle entry / no resolvable path); devicectl exec or
+   * JSON-read failures propagate so a broken devicectl surfaces rather than
+   * masquerading as "not installed". macOS-only (callers guard the platform).
+   */
+  private async resolveInstalledBundlePathOnDevice(deviceUdid: string, bundleId: string): Promise<string | null> {
+    const entry = await this.queryInstalledAppEntry(deviceUdid, bundleId);
+    if (!entry) {
+      return null;
+    }
+    return extractBundlePath(entry);
   }
 
   /**

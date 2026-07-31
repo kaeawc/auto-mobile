@@ -74,6 +74,24 @@ here for discoverability; most are diagnostic or for advanced testing.
 | `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD` | Skips Android and iOS CtrlProxy downloads/prefetches when set to `1` or `true`. |
 | `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED` | Skips the accessibility service download when it is already installed. |
 
+## Tool capability defaults (`AUTOMOBILE_TOOLSET_*`)
+
+Advanced tools are hidden behind opt-in **tool capabilities** — off by default so
+a fresh MCP session sees only the core surface. These variables set which
+capabilities are enabled the moment a session connects; both forms are consulted
+and their effects union. Unlike most `AUTOMOBILE_*` variables, they have **no**
+legacy `AUTO_MOBILE_*` alias.
+
+| Variable | Purpose |
+|----------|---------|
+| `AUTOMOBILE_TOOLSET_DEFAULTS` | Comma-separated capability names to enable by default (e.g. `clipboard,telephony`). Unknown names are ignored. |
+| `AUTOMOBILE_TOOLSET_<CAP>` | Enable one capability when set to `1`. `<CAP>` is the capability name upper-cased with hyphens replaced by underscores (e.g. `AUTOMOBILE_TOOLSET_ADVANCED_INTERACTION=1`). |
+
+These are only a fallback: an explicit `setToolCapability` choice for a session is
+persisted and overrides the default. See
+[Tool Capabilities & Registration Flags](tool-capabilities.md) for the full list
+of capabilities, the tools each one exposes, and how to toggle them at runtime.
+
 ## Device provisioning opt-in
 
 AutoMobile never creates a simulator or emulator by default — spawning devices on
@@ -115,6 +133,7 @@ overridden per request on the `webrtc-stream.sock` control socket.
 | `AUTOMOBILE_WEBRTC_BITRATE_KBPS` | Target encoder bitrate (kbps). | encoder default |
 | `AUTOMOBILE_WEBRTC_MAX_SIZE` | Capture downscale as `WIDTHxHEIGHT` (e.g. `720x1280`). | native |
 | `AUTOMOBILE_WEBRTC_IOS_SIMULATOR_FPS` | iOS Simulator WebRTC capture rate. Integer in `[5, 60]`; values outside the range are rejected at stream start. Separate from the generic screen-capture rate used for MCP observation. | `15` |
+| `AUTOMOBILE_WEBRTC_ANDROID_FPS` | Android video-server WebRTC capture rate, forwarded to the on-device encoder as `--fps`. Integer in `[1, 60]`; values outside the range are rejected at stream start. Decoupled from the quality preset so the rate can be tuned without changing resolution/bitrate. | `30` |
 | `AUTOMOBILE_VIDEO_SERVER_JAR` | Explicit path to a built `automobile-video.jar` (persistent on-device encoder). Highest resolution precedence: when set it is used directly, ahead of the cached/downloaded release jar and the Gradle build output. | (resolution precedence, see below) |
 | `AUTOMOBILE_REQUIRE_VIDEO_SERVER` | When `1`/`true`, a degrade-to-`screenrecord` case returns `success: false` with a typed `capture_start_failed` screenshot fallback instead. For CI that must run the persistent encoder. A checksum mismatch has the same typed failure and is never accepted. | unset |
 | `AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD` | When `1`/`true`, never fetch the jar from the network: resolve from the local override or Gradle build output only. Dedicated flag — **not** `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD` (the CtrlProxy APK is mandatory; the jar is optional and degrades). | unset |

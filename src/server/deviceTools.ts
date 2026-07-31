@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
 import { createJSONToolResponse } from "../utils/toolUtils";
@@ -111,6 +111,7 @@ export interface DeviceToolsDependencies {
   ensureCtrlProxyReady?: (device: BootedDevice, perf: ReturnType<typeof createPerformanceTracker>) => Promise<void>;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
+  idGenerator: IdGenerator;
 }
 
 async function defaultNotifyResourcesChanged(): Promise<void> {
@@ -129,6 +130,7 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       notifyResourcesChanged: defaultNotifyResourcesChanged,
       deviceCreationGateFactory: () => getDeviceCreationGate(),
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
+      idGenerator: defaultIdGenerator,
     };
   }
   return moduleDependencies;
@@ -143,6 +145,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
     deviceCreationGateFactory: deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
+    idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
   };
 }
 
@@ -321,7 +324,7 @@ export function registerDeviceTools() {
         .autolockDevice(device.deviceId, device.platform, args.__mcpSessionId);
     }
     if (!sessionId) {
-      sessionId = randomUUID();
+      sessionId = deps.idGenerator.next();
       if (DaemonState.getInstance().isInitialized()) {
         sessionId = await DaemonState.getInstance()
           .getDevicePool()

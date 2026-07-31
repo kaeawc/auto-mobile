@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { ActionableError } from "../../../src/models/ActionableError";
 import {
+  MAX_PACKET_BYTES,
+  MAX_TRACK_COUNT,
   VIDEO_SERVER_CODEC_ID_AMUX,
   VIDEO_SERVER_CODEC_ID_H264,
   VIDEO_SERVER_CODEC_ID_PCM16,
@@ -196,6 +199,78 @@ describe("VideoServerStreamParser", () => {
     expect(packets[0].data).toHaveLength(0);
     expect(packets[0].ptsUs).toBe(7);
     expect(packets[1].ptsUs).toBe(8);
+  });
+
+  test("throws a bounded parse error when a video packet declares a size over the cap", () => {
+    // A framing desync decodes an arbitrary 32-bit size. Rather than buffer the
+    // bogus length forever, the parser must fail fast so the socket wiring can
+    // reconnect. Only the 12-byte header is fed — no unbounded payload wait.
+    const { parser } = collect();
+    parser.push(streamHeader(1920, 1080));
+    const bogusHeader = Buffer.alloc(12);
+    bogusHeader.writeBigUInt64BE(0n, 0);
+    bogusHeader.writeUInt32BE(MAX_PACKET_BYTES + 1, 8);
+    expect(() => parser.push(bogusHeader)).toThrow(ActionableError);
+  });
+
+  test("throws a bounded parse error when a mux header declares a trackCount over the cap", () => {
+    const { parser } = collect();
+    const bogusMuxHeader = Buffer.alloc(12);
+    bogusMuxHeader.writeUInt32BE(VIDEO_SERVER_CODEC_ID_AMUX, 0);
+    bogusMuxHeader.writeUInt32BE(0, 4);
+    bogusMuxHeader.writeUInt32BE(MAX_TRACK_COUNT + 1, 8);
+    expect(() => parser.push(bogusMuxHeader)).toThrow(ActionableError);
+  });
+
+  test("throws a bounded parse error when a mux packet declares a size over the cap", () => {
+    const { parser } = collect();
+    parser.push(muxHeader());
+    const bogusMuxPacketHeader = Buffer.alloc(16);
+    bogusMuxPacketHeader.writeUInt32BE(VIDEO_SERVER_TRACK_ID_VIDEO, 0);
+    bogusMuxPacketHeader.writeBigUInt64BE(0n, 4);
+    bogusMuxPacketHeader.writeUInt32BE(MAX_PACKET_BYTES + 1, 12);
+    expect(() => parser.push(bogusMuxPacketHeader)).toThrow(ActionableError);
+  });
+
+  test("parses a legitimate maximum-size keyframe delivered in large chunks", () => {
+    // MAX_PACKET_BYTES must be comfortably above a real keyframe; the boundary
+    // itself must still parse, not trip the cap.
+    const { parser, packets } = collect();
+    parser.push(streamHeader(1920, 1080));
+    const payload = Buffer.alloc(MAX_PACKET_BYTES, 0x5a);
+    const framed = packet(payload, FLAG_KEY_FRAME, 99);
+    const CHUNK = 1024 * 1024;
+    for (let offset = 0; offset < framed.length; offset += CHUNK) {
+      parser.push(framed.subarray(offset, Math.min(offset + CHUNK, framed.length)));
+    }
+    expect(packets).toHaveLength(1);
+    expect(packets[0].data.length).toBe(MAX_PACKET_BYTES);
+    expect(packets[0].keyFrame).toBe(true);
+    expect(packets[0].ptsUs).toBe(99);
+  });
+
+  test("reassembles a large IDR split across many chunks and drains cleanly", () => {
+    // The chunk-list accumulator must not re-copy the whole partial buffer on
+    // every segment (the former O(n^2) Buffer.concat). Delivering a large frame
+    // one small segment at a time exercises the cursor/compaction path; a
+    // trailing packet proves the buffer reset once the frame drained.
+    const { parser, packets } = collect();
+    parser.push(streamHeader(1280, 720));
+    const idr = Buffer.alloc(512 * 1024, 0x41);
+    idr[0] = 0x00; idr[1] = 0x00; idr[2] = 0x00; idr[3] = 0x01; idr[4] = 0x65;
+    const framed = packet(idr, FLAG_KEY_FRAME, 4242);
+    const CHUNK = 1024;
+    for (let offset = 0; offset < framed.length; offset += CHUNK) {
+      parser.push(framed.subarray(offset, Math.min(offset + CHUNK, framed.length)));
+    }
+    expect(packets).toHaveLength(1);
+    expect(packets[0].data).toEqual(idr);
+
+    // Buffer state is clean after draining: a small trailing packet parses.
+    parser.push(packet(Buffer.from([0xbb]), 0n, 4243));
+    expect(packets).toHaveLength(2);
+    expect(packets[1].data).toEqual(Buffer.from([0xbb]));
+    expect(packets[1].ptsUs).toBe(4243);
   });
 
   test("a mux header declaring zero tracks yields no header and drops later packets", () => {

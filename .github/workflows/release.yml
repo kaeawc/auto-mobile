@@ -277,19 +277,16 @@ jobs:
             NOTES="Release v${VERSION}"
           fi
 
-          # Add checksum to notes
-          NOTES="${NOTES}"$'\n\n'"## CtrlProxy APK"$'\n\n'\
-            '"**SHA256 Checksum:** \`${APK_CHECKSUM}\`"$'\n\n'\
-            '"Download the APK from the release assets below."
-          NOTES="${NOTES}"$'\n\n'"## CtrlProxy iOS IPA"$'\n\n'\
-            '"**SHA256 Checksum:** \`${IPA_CHECKSUM}\`"$'\n\n'\
-            '"Download the IPA from the release assets below."
-          NOTES="${NOTES}"$'\n\n'"## video-server jar"$'\n\n'\
-            '"**SHA256 Checksum:** \`${VIDEO_JAR_CHECKSUM}\`"$'\n\n'\
-            '"Download automobile-video.jar from the release assets below."
-          NOTES="${NOTES}"$'\n\n'"## macOS screen-capture-helper"$'\n\n'\
-            '"**SHA256 Checksum:** \`${SCREEN_CAPTURE_HELPER_CHECKSUM}\`"$'\n\n'\
-            '"Download screen-capture-helper-macos-universal.zip from the release assets below."
+          # Add checksum to notes. Each section is a single-line concatenation of
+          # adjacent quoted strings ("..."$'\n\n'"..."). Do NOT split these across
+          # backslash-continued lines: the continuation indentation inserts an
+          # unquoted space between tokens, which ends the NOTES= assignment early
+          # and makes bash try to run the remainder as a command (exit 127). The
+          # Desktop App line below is the canonical form to match.
+          NOTES="${NOTES}"$'\n\n'"## CtrlProxy APK"$'\n\n'"**SHA256 Checksum:** \`${APK_CHECKSUM}\`"$'\n\n'"Download the APK from the release assets below."
+          NOTES="${NOTES}"$'\n\n'"## CtrlProxy iOS IPA"$'\n\n'"**SHA256 Checksum:** \`${IPA_CHECKSUM}\`"$'\n\n'"Download the IPA from the release assets below."
+          NOTES="${NOTES}"$'\n\n'"## video-server jar"$'\n\n'"**SHA256 Checksum:** \`${VIDEO_JAR_CHECKSUM}\`"$'\n\n'"Download automobile-video.jar from the release assets below."
+          NOTES="${NOTES}"$'\n\n'"## macOS screen-capture-helper"$'\n\n'"**SHA256 Checksum:** \`${SCREEN_CAPTURE_HELPER_CHECKSUM}\`"$'\n\n'"Download screen-capture-helper-macos-universal.zip from the release assets below."
           NOTES="${NOTES}"$'\n\n'"## Desktop App"$'\n\n'"Native installers are attached below: macOS \`.dmg\` (signed & notarized), Windows \`.msi\`, and Linux \`.deb\`."
 
           # Save to file for GitHub release
@@ -328,7 +325,14 @@ jobs:
           REPO: ${{ github.repository }}
         run: bash scripts/release/update-brew-formula.sh
 
+      # MCP Registry, Maven Central, and the Docker image are best-effort
+      # distribution channels: a failure in any of them must not block the
+      # canonical GitHub Release (and its artifacts) that runs after them.
+      # continue-on-error neutralizes their failures so `success()` stays true
+      # for the GitHub Release step, while the failed step still shows red in the
+      # UI so the drift is visible and fixable.
       - name: Install mcp-publisher
+        continue-on-error: true
         run: |
           URL="https://github.com/modelcontextprotocol/registry"
           URL="$URL/releases/latest/download"
@@ -336,6 +340,7 @@ jobs:
           curl -L "$URL" | tar xz mcp-publisher
 
       - name: Publish to MCP Registry
+        continue-on-error: true
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -351,6 +356,7 @@ jobs:
           ./mcp-publisher publish
 
       - name: Set up Java
+        continue-on-error: true
         uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
@@ -358,18 +364,22 @@ jobs:
           cache: 'gradle'
 
       - name: Setup Android SDK
+        continue-on-error: true
         uses: android-actions/setup-android@v3
 
       - name: Make gradlew executable
+        continue-on-error: true
         run: chmod +x android/gradlew
 
       - name: Setup Release Keystore
+        continue-on-error: true
         run: |
           mkdir -p android/keystore
           echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | \
             base64 -d > android/keystore/release.keystore
 
       - name: Publish Android Libraries to Maven Central
+        continue-on-error: true
         env:
           VERSION: ${{ steps.version.outputs.version }}
           ORG_GRADLE_PROJECT_mavenCentralUsername:
@@ -410,6 +420,7 @@ jobs:
             --no-configuration-cache
 
       - name: Free Disk Space
+        continue-on-error: true
         uses: endersonmenezes/free-disk-space@v3
         with:
           remove_android: true      # ~14 GB
@@ -421,21 +432,26 @@ jobs:
           use_rmz: true            # 3x faster deletion
 
       - name: Clean up Docker
+        continue-on-error: true
         run: docker system prune -af --volumes
 
       - name: Set up QEMU
+        continue-on-error: true
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        continue-on-error: true
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract Docker metadata
+        continue-on-error: true
         id: docker_meta
         uses: docker/metadata-action@v5
         with:
@@ -447,6 +463,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
+        continue-on-error: true
         uses: docker/build-push-action@v6
         with:
           context: .

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ProgressCallback, RegisteredTool, ToolRegistry } from "../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 import { ActionableError } from "../../src/models/ActionableError";
+import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
 
 /**
  * Unit guard for the `ToolRegistry.callInternal` seam (#3108).
@@ -122,6 +123,41 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     );
     expect(response).toBe(SENTINEL);
     expect(captured[0].args[INTERNAL_NO_DIFF_PARAM]).toBe(true);
+  });
+
+  test("admits an executePlan-authorized step without separately enabling its capability", async () => {
+    registerCapturingTool("clipboard");
+    const profileService = { isEnabled: async () => false };
+
+    await runWithToolCapabilityContext(
+      { planCapabilitiesAuthorized: true, sessionToolProfileService: profileService },
+      () => ToolRegistry.callInternal("clipboard", {}, undefined, undefined, {
+        forPlan: true,
+      }),
+    );
+
+    expect(captured).toHaveLength(1);
+  });
+
+  test("propagates executePlan authorization to nested plan steps", async () => {
+    captured = [];
+    ToolRegistry.register("clipboard", "Mock clipboard", schema, async (args: any) => {
+      captured.push({ args });
+      return SENTINEL;
+    });
+    ToolRegistry.register("criticalSection", "Mock critical section", schema, async () => {
+      return ToolRegistry.callInternal("clipboard", {}, undefined, undefined, { forPlan: true });
+    });
+    const profileService = { isEnabled: async () => false };
+
+    await runWithToolCapabilityContext(
+      { planCapabilitiesAuthorized: true, sessionToolProfileService: profileService },
+      () => ToolRegistry.callInternal("criticalSection", {}, undefined, undefined, {
+        forPlan: true,
+      }),
+    );
+
+    expect(captured).toHaveLength(1);
   });
 
   test("AC3: throws ActionableError when the tool name is unresolved", async () => {

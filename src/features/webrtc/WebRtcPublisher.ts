@@ -13,8 +13,7 @@ import { ReconnectController, type ReconnectState } from "./ReconnectController"
 import { RtpH264TrackWriter } from "./RtpH264TrackWriter";
 import { RtpPcmuTrackWriter } from "./RtpPcmuTrackWriter";
 import {
-  h264SpsProfileLevelId,
-  h264SpsLevelIdc,
+  evaluateH264SpsForSend,
   isCompatibleConstrainedBaselineProfile,
   WEBRTC_H264_LEVEL_IDC,
   WEBRTC_H264_PROFILE_LEVEL_ID,
@@ -445,17 +444,9 @@ export class WebRtcPublisher {
         mtu: this.config.mtu ?? DEFAULT_RTP_MTU,
         timer: this.timer,
         onSps: sps => {
-          const profileLevelId = h264SpsProfileLevelId(sps);
-          if (profileLevelId && !isCompatibleConstrainedBaselineProfile(profileLevelId)) {
-            throw new Error(
-              `H.264 SPS profile ${profileLevelId.slice(0, 4)} is incompatible with negotiated constrained baseline.`
-            );
-          }
-          const levelIdc = h264SpsLevelIdc(sps);
-          if (levelIdc !== undefined && levelIdc > WEBRTC_H264_LEVEL_IDC) {
-            throw new Error(
-              `H.264 SPS level ${levelIdc} exceeds negotiated level ${WEBRTC_H264_LEVEL_IDC}.`
-            );
+          const spsCompatibility = evaluateH264SpsForSend(sps);
+          if (!spsCompatibility.compatible) {
+            throw new Error(spsCompatibility.reason);
           }
         },
         onAccessUnit: event => this.recordAccessUnit(event),

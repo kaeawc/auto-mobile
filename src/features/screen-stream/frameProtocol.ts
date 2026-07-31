@@ -22,6 +22,8 @@
  * out of scope here (issue #4270 tracks the format-level follow-up).
  */
 
+import { BufferQueue } from "../../utils/BufferQueue";
+
 /** Sync marker as a little-endian UInt32; on the wire the bytes read "AMF1". */
 export const FRAME_MAGIC = 0x3146_4d41;
 /** The marker bytes as they appear on the wire (little-endian of FRAME_MAGIC). */
@@ -115,6 +117,11 @@ export class FrameDecoder {
       // a synthetic or unusually coalesced stdout chunk carries many frames.
       const available = FRAME_HEADER_SIZE + MAX_RAW_FRAME_BYTES - this.buffer.length;
       if (available === 0) {
+        // Backstop against an unbounded buffer. A corrupt or oversized frame does
+        // NOT reach here: `fieldBoundsError` caps a validated payload at
+        // MAX_RAW_FRAME_BYTES, and `resynchronize` compacts garbage that carries
+        // no validating marker — so every full-buffer state drains, leaving this
+        // throw an infinite-loop guard rather than a real teardown path (#4772).
         if (!this.decodeAvailable(frames, onMalformed, onAudio, onFrame)) {
           throw new Error("FrameDecoder reached its raw-frame buffer limit without a complete frame");
         }
@@ -307,96 +314,6 @@ function fieldBoundsError(header: FrameHeader): MalformedFrameReason | null {
     return "header_payload_too_large";
   }
   return null;
-}
-
-/**
- * Chunked byte storage prevents repeated whole-frame `Buffer.concat` copies as
- * stdout arrives in pipe-sized pieces. Payload extraction performs one detached
- * copy, which is needed because decoded frames outlive their stdout chunks.
- */
-class BufferQueue {
-  private chunks: Buffer[] = [];
-  private headOffset = 0;
-  length = 0;
-
-  append(chunk: Buffer): void {
-    if (chunk.length === 0) {return;}
-    this.chunks.push(chunk);
-    this.length += chunk.length;
-  }
-
-  peek(length: number): Buffer {
-    if (length > this.length) {
-      throw new RangeError(`cannot peek ${length} bytes from ${this.length}-byte queue`);
-    }
-    const first = this.chunks[0];
-    const firstAvailable = first.length - this.headOffset;
-    if (firstAvailable >= length) {
-      return first.subarray(this.headOffset, this.headOffset + length);
-    }
-    const out = Buffer.allocUnsafe(length);
-    this.copyTo(out, length);
-    return out;
-  }
-
-  takeDetached(length: number): Buffer {
-    if (length > this.length) {
-      throw new RangeError(`cannot take ${length} bytes from ${this.length}-byte queue`);
-    }
-    const out = Buffer.allocUnsafe(length);
-    this.copyTo(out, length);
-    this.discard(length);
-    return out;
-  }
-
-  discard(length: number): void {
-    if (length > this.length) {
-      throw new RangeError(`cannot discard ${length} bytes from ${this.length}-byte queue`);
-    }
-    let remaining = length;
-    while (remaining > 0) {
-      const first = this.chunks[0];
-      const available = first.length - this.headOffset;
-      if (remaining < available) {
-        this.headOffset += remaining;
-        this.length -= remaining;
-        return;
-      }
-      this.chunks.shift();
-      this.headOffset = 0;
-      this.length -= available;
-      remaining -= available;
-    }
-  }
-
-  toBuffer(): Buffer {
-    if (this.length === 0) {return Buffer.alloc(0);}
-    const first = this.chunks[0];
-    if (this.chunks.length === 1) {
-      return first.subarray(this.headOffset);
-    }
-    const out = Buffer.allocUnsafe(this.length);
-    this.copyTo(out, this.length);
-    return out;
-  }
-
-  replace(bytes: Buffer): void {
-    this.chunks = bytes.length === 0 ? [] : [bytes];
-    this.headOffset = 0;
-    this.length = bytes.length;
-  }
-
-  private copyTo(destination: Buffer, length: number): void {
-    let copied = 0;
-    for (let index = 0; copied < length; index++) {
-      const chunk = this.chunks[index];
-      const start = index === 0 ? this.headOffset : 0;
-      const available = chunk.length - start;
-      const count = Math.min(available, length - copied);
-      chunk.copy(destination, copied, start, start + count);
-      copied += count;
-    }
-  }
 }
 
 /**

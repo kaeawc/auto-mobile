@@ -4,24 +4,74 @@ import Foundation
 import ScreenCaptureKit
 import ScreenCaptureCore
 
+/// The subset of `SCStream` operations `SimulatorCaptureSession` drives. Wrapping
+/// them in a protocol is the seam that lets unit tests inject a fake stream and
+/// exercise the session's lifecycle paths (start/stop/reconfigure/fatal-error)
+/// without a real Simulator window or Screen Recording permission (issue #4771).
+/// The signatures match `SCStream`'s exactly so it conforms without adapters.
+protocol CaptureStream: AnyObject {
+    func addStreamOutput(
+        _ output: SCStreamOutput,
+        type: SCStreamOutputType,
+        sampleHandlerQueue: DispatchQueue?
+    ) throws
+    func removeStreamOutput(_ output: SCStreamOutput, type: SCStreamOutputType) throws
+    func startCapture() async throws
+    func stopCapture() async throws
+    func updateConfiguration(_ configuration: SCStreamConfiguration) async throws
+}
+
+extension SCStream: CaptureStream {}
+
 /// Streams BGRA frames from a single iOS Simulator window via ScreenCaptureKit.
 /// The frame rate is configurable (5–60); 5 is the default for typical MCP
 /// automation workloads. Size changes (e.g. device rotation) trigger a stream
 /// reconfiguration so frames don't get cropped.
 final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate {
+    /// Builds the concrete stream for a resolved window. Injected so tests can
+    /// substitute a fake `CaptureStream`; the default wires the real `SCStream`.
+    typealias StreamFactory = (SCContentFilter, SCStreamConfiguration, SCStreamDelegate) -> CaptureStream
+
     private let writer: FrameWriter
     private let onFatalError: (Error) -> Void
+    private let makeStream: StreamFactory
+    /// Diagnostic lines (first-frame marker, reconfigure warnings) go here so
+    /// tests can observe them; the default preserves the stderr behavior.
+    private let diagnosticSink: (String) -> Void
     private let queue = DispatchQueue(label: "automobile.simulator-capture.frames")
     let firstFrameSignal = FirstFrameSignal()
-    private var stream: SCStream?
-    private var configuredPixelWidth: Int = 0
-    private var configuredPixelHeight: Int = 0
-    private var fps: Int = CommandLineOptions.defaultSimulatorFPS
-    private var audioEnabled = false
-    private var windowID: UInt32 = 0
 
-    init(writer: FrameWriter, onFatalError: @escaping (Error) -> Void) {
+    // The following are `internal` (not `private`) so `@testable` tests can seed
+    // and inspect lifecycle state that `start()` would otherwise set only behind
+    // a real `SCWindow`. They are not part of the production API surface.
+    var stream: CaptureStream?
+    var configuredPixelWidth: Int = 0
+    var configuredPixelHeight: Int = 0
+    var fps: Int = CommandLineOptions.defaultSimulatorFPS
+    var audioEnabled = false
+    var windowID: UInt32 = 0
+
+    /// Upper bound on `stream.startCapture()`. ScreenCaptureKit cold-start on
+    /// hosted `macos26` runners is slow-but-finite (measured 2.6–13s); this
+    /// deadline sits above that healthy window yet below the parent supervisor's
+    /// 15s first-frame SIGTERM (`IOS_FIRST_FRAME_TIMEOUT_MS`), so a genuinely
+    /// hung start is surfaced as a specific `error:` line rather than silent
+    /// frame starvation. See issues #4350 / #4764.
+    static let startCaptureDeadlineSeconds: TimeInterval = 14.0
+
+    init(
+        writer: FrameWriter,
+        makeStream: @escaping StreamFactory = { filter, config, delegate in
+            SCStream(filter: filter, configuration: config, delegate: delegate)
+        },
+        diagnosticSink: @escaping (String) -> Void = { line in
+            FileHandle.standardError.write(Data(line.utf8))
+        },
+        onFatalError: @escaping (Error) -> Void
+    ) {
         self.writer = writer
+        self.makeStream = makeStream
+        self.diagnosticSink = diagnosticSink
         self.onFatalError = onFatalError
     }
 
@@ -34,13 +84,52 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         configuredPixelWidth = config.width
         configuredPixelHeight = config.height
 
-        let stream = SCStream(filter: filter, configuration: config, delegate: self)
+        let stream = makeStream(filter, config, self)
+        try await beginCapture(with: stream, audio: audio)
+    }
+
+    /// Wires outputs onto an already-built stream and starts it. Split out from
+    /// `start()` so tests can drive it with a fake `CaptureStream` — the window
+    /// resolution and filter/config construction above need real SCK objects.
+    func beginCapture(with stream: CaptureStream, audio: Bool) async throws {
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         if audio {
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         }
-        try await stream.startCapture()
+        try await SimulatorCaptureSession.startCapture(stream)
         self.stream = stream
+    }
+
+    /// Races `stream.startCapture()` against `startCaptureDeadlineSeconds`.
+    ///
+    /// A hung `startCapture()` does not honor Swift task cancellation, so a
+    /// structured `withThrowingTaskGroup` would block on teardown awaiting the
+    /// very task we are trying to abandon. Instead the two arms run as
+    /// unstructured tasks and the first to finish wins; on timeout the stalled
+    /// capture task is left to be reaped by process exit, which the parent
+    /// triggers immediately after seeing the `error:` diagnostic.
+    private static func startCapture(_ stream: CaptureStream) async throws {
+        let race = StartRaceState()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let capture = Task {
+                do {
+                    try await stream.startCapture()
+                    if race.finish() { continuation.resume() }
+                } catch {
+                    if race.finish() { continuation.resume(throwing: error) }
+                }
+            }
+            Task {
+                let deadlineNanos = UInt64(startCaptureDeadlineSeconds * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: deadlineNanos)
+                if race.finish() {
+                    capture.cancel()
+                    continuation.resume(
+                        throwing: StartCaptureTimeoutError(deadlineSeconds: startCaptureDeadlineSeconds)
+                    )
+                }
+            }
+        }
     }
 
     func stop() async {
@@ -83,28 +172,53 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         }
 
         if writer.write(sampleBuffer: sampleBuffer) {
-            if !firstFrameSignal.hasReceivedFrame {
-                // Emitted from the frame queue to confirm the source actually
-                // started delivering frames — the "captureStarted but no
-                // firstFrame" distinction issue #4350 needs.
-                let marker = CaptureStartupMarker.line(
-                    .firstFrame(windowID: windowID, width: actualWidth, height: actualHeight)
-                )
-                FileHandle.standardError.write(Data("\(marker)\n".utf8))
-            }
-            firstFrameSignal.markReceivedFrame()
+            noteFrameWritten(width: actualWidth, height: actualHeight)
         }
+    }
+
+    /// Emits the first-frame marker exactly once and records that frames are
+    /// flowing. Split out from the frame callback so tests can assert the
+    /// once-only marker emission without synthesizing a `CMSampleBuffer`.
+    func noteFrameWritten(width: Int, height: Int) {
+        if !firstFrameSignal.hasReceivedFrame {
+            // Emitted from the frame queue to confirm the source actually
+            // started delivering frames — the "captureStarted but no
+            // firstFrame" distinction issue #4350 needs.
+            let marker = CaptureStartupMarker.line(
+                .firstFrame(windowID: windowID, width: width, height: height)
+            )
+            diagnosticSink("\(marker)\n")
+        }
+        firstFrameSignal.markReceivedFrame()
     }
 
     // MARK: - SCStreamDelegate
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        handleFatalStop(error: error)
+    }
+
+    /// Routes a stream stop to the fatal-error handler. Split out from the
+    /// delegate callback so tests can drive it without a real `SCStream`.
+    func handleFatalStop(error: Error) {
         onFatalError(error)
     }
 
     // MARK: - Internals
 
     private func reconfigure(width: Int, height: Int) {
+        // Detached task: the retry inside `performReconfiguration` bounds the
+        // recovery so a single transient `updateConfiguration` failure does not
+        // silently strand the stream at stale dimensions (issue #4768).
+        Task {
+            await performReconfiguration(width: width, height: height)
+        }
+    }
+
+    /// Applies a new capture size to the live stream. Split out from
+    /// `reconfigure`'s detached task so tests can `await` it deterministically
+    /// and assert both the success path and the swallowed-failure warning.
+    func performReconfiguration(width: Int, height: Int) async {
         guard let stream = stream else { return }
         configuredPixelWidth = width
         configuredPixelHeight = height
@@ -120,16 +234,23 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         updated.sampleRate = 8_000
         updated.channelCount = 1
 
-        // Fire-and-forget: if the update fails we keep using the old config and
-        // either resync on the next size change or stop with a delegate error.
-        Task {
-            do {
-                try await stream.updateConfiguration(updated)
-            } catch {
-                FileHandle.standardError.write(
-                    Data("warn: failed to update stream configuration: \(error)\n".utf8)
-                )
-            }
+        // Retry once on failure before giving up: `updateConfiguration` can fail
+        // transiently while ScreenCaptureKit is mid-frame, and silently keeping
+        // the stale config would drift delivered pixels away from the size the
+        // supervisor expects — which the TS side then kills on as a mismatch.
+        // The new dimensions are already recorded above, so on ultimate failure
+        // the next size change still attempts a correcting update.
+        do {
+            try await stream.updateConfiguration(updated)
+            return
+        } catch {
+            diagnosticSink("warn: stream configuration update failed; retrying once: \(error)\n")
+        }
+
+        do {
+            try await stream.updateConfiguration(updated)
+        } catch {
+            diagnosticSink("warn: failed to update stream configuration after retry: \(error)\n")
         }
     }
 
@@ -162,6 +283,36 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
             return nil
         }
         return status
+    }
+}
+
+/// Thrown when `SimulatorCaptureSession` gives up waiting on `startCapture()`.
+/// Conforms to `CustomStringConvertible` so `main.swift`'s `error:` line names
+/// the stalled startup stage (`starting-capture` seen, `capture-started`
+/// absent), letting the parent supervisor fail fast with a specific cause
+/// instead of frame starvation. See issues #4350 / #4764.
+struct StartCaptureTimeoutError: Error, CustomStringConvertible {
+    let deadlineSeconds: TimeInterval
+
+    var description: String {
+        "startCapture() exceeded \(deadlineSeconds)s deadline "
+            + "(stage: starting-capture seen, capture-started absent)"
+    }
+}
+
+/// Single-winner guard for the `startCapture()` deadline race. `finish()`
+/// returns `true` exactly once, so the checked continuation is resumed by
+/// whichever arm — capture or timeout — completes first.
+final class StartRaceState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var finished = false
+
+    func finish() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if finished { return false }
+        finished = true
+        return true
     }
 }
 

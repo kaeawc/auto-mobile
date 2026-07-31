@@ -69,10 +69,32 @@ codesign --verify --strict --verbose=2 "${helper_path}"
   ditto -c -k --keepParent "screen-capture-helper" "${archive_path}"
 )
 
-xcrun notarytool submit "${archive_path}" \
-  --key "${APPLE_NOTARY_KEY_PATH}" \
-  --key-id "${APPLE_NOTARY_KEY_ID}" \
-  --issuer "${APPLE_NOTARY_ISSUER_ID}" \
-  --wait
+# `notarytool submit --wait` exits 0 even when Apple's verdict is Invalid, so
+# parsing the JSON result is the only way to catch a rejection: the helper zip
+# is never stapled, so nothing downstream would notice an unnotarized binary.
+# Anything but Accepted fails the script, after dumping the notary log so the
+# per-file rejection reasons land in the output.
+submission_json="$(
+  xcrun notarytool submit "${archive_path}" \
+    --key "${APPLE_NOTARY_KEY_PATH}" \
+    --key-id "${APPLE_NOTARY_KEY_ID}" \
+    --issuer "${APPLE_NOTARY_ISSUER_ID}" \
+    --wait \
+    --output-format json
+)"
+echo "${submission_json}"
+submission_id="$(jq -r '.id // empty' <<<"${submission_json}")"
+status="$(jq -r '.status // empty' <<<"${submission_json}")"
+if [[ "${status}" != "Accepted" ]]; then
+  echo "Notarization verdict: ${status:-unknown} (submission ${submission_id:-unknown})" >&2
+  if [[ -n "${submission_id}" ]]; then
+    # Best-effort: the log service can lag right after the verdict.
+    xcrun notarytool log "${submission_id}" \
+      --key "${APPLE_NOTARY_KEY_PATH}" \
+      --key-id "${APPLE_NOTARY_KEY_ID}" \
+      --issuer "${APPLE_NOTARY_ISSUER_ID}" >&2 || true
+  fi
+  exit 1
+fi
 
 mv "${archive_path}" "${output_path}"

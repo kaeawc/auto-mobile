@@ -31,6 +31,47 @@ teardown() {
   [[ "$output" == *"REPO"* ]]
 }
 
+@test "skips cleanly when GH_TOKEN is unset (optional channel)" {
+  cd "$TEST_ROOT"
+  # No GH_TOKEN and not RENDER_ONLY: the publish is skipped before any network
+  # or git work, so a missing tap token does not fail the release.
+  run env -u GH_TOKEN -u RENDER_ONLY TAG=v0.0.26 REPO=kaeawc/auto-mobile \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipping Homebrew formula publish"* ]]
+}
+
+@test "rejects a zero-padded BREW_TARBALL_FETCH_ATTEMPTS override" {
+  cd "$TEST_ROOT"
+  # "08" is invalid octal in bash arithmetic; without up-front validation the
+  # retry loop would spin forever. Must fail fast, before any fetch.
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile GH_TOKEN=x \
+    BREW_TARBALL_FETCH_ATTEMPTS=08 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"BREW_TARBALL_FETCH_ATTEMPTS"* ]]
+}
+
+@test "rejects a non-numeric BREW_TARBALL_FETCH_DELAY_SECONDS override" {
+  cd "$TEST_ROOT"
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile GH_TOKEN=x \
+    BREW_TARBALL_FETCH_DELAY_SECONDS=abc \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"BREW_TARBALL_FETCH_DELAY_SECONDS"* ]]
+}
+
+@test "exhausts the retry cap for a missing tarball and fails" {
+  cd "$TEST_ROOT"
+  # A version that will never resolve on the registry: the loop should try the
+  # configured number of attempts, then exit non-zero with the count.
+  run env TAG=v0.0.0-does-not-exist REPO=kaeawc/auto-mobile GH_TOKEN=x \
+    BREW_TARBALL_FETCH_ATTEMPTS=2 BREW_TARBALL_FETCH_DELAY_SECONDS=0 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"after 2 attempts"* ]]
+}
+
 @test "RENDER_ONLY writes a formula with the resolved sha256" {
   cd "$TEST_ROOT"
   run env TAG=v0.0.26 REPO=kaeawc/auto-mobile RENDER_ONLY=1 \

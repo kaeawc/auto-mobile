@@ -12,6 +12,7 @@ import {
   IOS_WEBRTC_FFMPEG_ENV_ALIAS,
   IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL,
   IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS,
+  IOS_ENCODER_RESTART_GRACE_MS,
   IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS,
   IosH264Source,
   defaultIosBitrateBps,
@@ -68,6 +69,10 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
 
   emitStderr(line: string): void {
     this.emit("stderr", line);
+  }
+
+  emitReadiness(phase: string, atMs = 0, detail?: string): void {
+    this.emit("readiness", { phase, atMs, detail });
   }
 }
 
@@ -233,6 +238,83 @@ function createRestartHarness(
     ...overrides,
   });
   return { source, helper, encoders, encoderSpawns, chunks, errors };
+}
+
+// A harness that hands out a *fresh* helper per createHelper call and a fresh
+// encoder per spawn, so a running-phase reconnect (which tears down the failed
+// helper/encoder and establishes new ones) is observable as additional
+// helper/encoder instances rather than re-listening on a shared emitter.
+function createReconnectHarness(
+  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {}
+) {
+  const helpers: FakeFrameCaptureHelper[] = [];
+  const encoders: FakeChildProcess[] = [];
+  const encoderSpawns: Array<{ command: string; args: string[] }> = [];
+  const chunks: Buffer[] = [];
+  const errors: Error[] = [];
+  const source = new IosH264Source({
+    device: IOS_DEVICE,
+    helperPath: FAKE_HELPER_PATH,
+    helperPathExists: fakeHelperPathExists,
+    onData: chunk => chunks.push(chunk),
+    onError: error => errors.push(error),
+    createHelper: () => {
+      const helper = new FakeFrameCaptureHelper();
+      helpers.push(helper);
+      return helper;
+    },
+    spawner: (command, args) => {
+      encoderSpawns.push({ command, args });
+      const encoder = new FakeChildProcess();
+      encoders.push(encoder);
+      return encoder as unknown as ChildProcessWithoutNullStreams;
+    },
+    simulatorWindowResolver: async () => 42,
+    commandRunner: successfulCommandRunner,
+    ...overrides,
+  });
+  return { source, helpers, encoders, encoderSpawns, chunks, errors };
+}
+
+// A harness that exercises the real default Simulator-window resolver (no
+// `simulatorWindowResolver` override) against a scripted `--list-simulators`
+// window list, capturing the resolved capture target.
+function createResolverHarness(
+  deviceName: string,
+  windows: Array<{ windowID: number; title: string }>
+) {
+  const helper = new FakeFrameCaptureHelper();
+  const encoder = new FakeChildProcess();
+  const helperTargets: CaptureTarget[] = [];
+  const source = new IosH264Source({
+    device: { ...IOS_SIMULATOR, name: deviceName } as BootedDevice,
+    helperPath: FAKE_HELPER_PATH,
+    helperPathExists: fakeHelperPathExists,
+    onData: () => {},
+    createHelper: options => {
+      helperTargets.push(options.target);
+      return helper;
+    },
+    spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+    commandRunner: async (command, args) => {
+      if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
+        return {
+          stdout: JSON.stringify({
+            windows: windows.map(window => ({
+              ...window,
+              applicationName: "Simulator",
+              bundleIdentifier: "com.apple.iphonesimulator",
+            })),
+          }),
+          stderr: "",
+          exitCode: 0,
+          signal: null,
+        };
+      }
+      return successfulCommandRunner(command, args);
+    },
+  });
+  return { source, helper, helperTargets };
 }
 
 async function successfulCommandRunner(_command: string, args: string[]) {
@@ -414,6 +496,111 @@ describe("IosH264Source", () => {
     helpers[1].emitFrame(frame(1, 1, 0x11));
 
     expect(await started).toBeNull();
+    expect(helpers[0].stopped).toBe(true);
+    expect(helpers[1].started).toBe(true);
+    await source.stop();
+    await pool.shutdown();
+  });
+
+  test("re-resolves a changed Simulator windowID before the silent-capture retry", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const helperTargets: CaptureTarget[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: options => {
+        helperTargets.push(options.target);
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const resolvedWindowIds = [42, 99];
+    let resolveCalls = 0;
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      firstFrameTimeoutMs: 1,
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => resolvedWindowIds[resolveCalls++] ?? 99,
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    timer.advanceTime(1);
+    await flush();
+
+    expect(helpers).toHaveLength(2);
+    helpers[1].emitFrame(frame(1, 1, 0x11));
+
+    expect(await started).toBeNull();
+    // First attempt targeted the initially-resolved window; the retry re-resolved
+    // to the recreated window's new CGWindowID rather than reusing the stale one.
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+      { kind: "simulator", windowID: 99, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    ]);
+    expect(resolveCalls).toBe(2);
+    expect(helpers[0].stopped).toBe(true);
+    expect(helpers[1].started).toBe(true);
+    await source.stop();
+    await pool.shutdown();
+  });
+
+  test("retries with the same windowID when the Simulator window is unchanged", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const helperTargets: CaptureTarget[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: options => {
+        helperTargets.push(options.target);
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    let resolveCalls = 0;
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      firstFrameTimeoutMs: 1,
+      simulatorHelperPool: pool,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => {
+        resolveCalls++;
+        return 42;
+      },
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    timer.advanceTime(1);
+    await flush();
+
+    expect(helpers).toHaveLength(2);
+    helpers[1].emitFrame(frame(1, 1, 0x11));
+
+    expect(await started).toBeNull();
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+      { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    ]);
+    // Re-resolution happens once on retry; the unchanged id preserves prior behavior.
+    expect(resolveCalls).toBe(2);
     expect(helpers[0].stopped).toBe(true);
     expect(helpers[1].started).toBe(true);
     await source.stop();
@@ -699,6 +886,73 @@ describe("IosH264Source", () => {
     expect(helpers[0].stopped).toBe(true);
   });
 
+  test("names the last capture startup stage in the first-frame timeout error", async () => {
+    const timer = new FakeTimer();
+    const helper = new FakeFrameCaptureHelper();
+    const source = new IosH264Source({
+      device: IOS_DEVICE,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      firstFrameTimeoutMs: 1,
+      timer,
+      onData: () => {},
+      createHelper: () => helper,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    // The furthest stage reached wins: capture-started is later than the
+    // earlier permission/resolve markers.
+    helper.emitReadiness("permission-ready");
+    helper.emitReadiness("target-resolved");
+    helper.emitReadiness("capture-started");
+    timer.advanceTime(1);
+
+    const error = await started;
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toBe(
+      "iOS screen capture did not produce a first frame (last stage: capture-started)."
+    );
+  });
+
+  test("adds a hung-start hint when a simulator resolves its window but never starts", async () => {
+    const timer = new FakeTimer();
+    const helper = new FakeFrameCaptureHelper();
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      firstFrameTimeoutMs: 1,
+      timer,
+      onData: () => {},
+      createHelper: () => helper,
+      simulatorWindowResolver: async () => 42,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: successfulCommandRunner,
+    });
+
+    const started = source.start().then(
+      () => null,
+      error => error as Error
+    );
+    await flush();
+    helper.emitReadiness("permission-ready");
+    helper.emitReadiness("target-resolved");
+    timer.advanceTime(1);
+
+    const error = await started;
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toBe(
+      "iOS screen capture did not produce a first frame (last stage: target-resolved). " +
+        "Capture never started after the window resolved (hung start); retry or restart the Simulator."
+    );
+  });
+
   test("requests simulator audio and forwards its PCM16LE chunks unchanged", async () => {
     const audio: Buffer[] = [];
     const { source, helper, helperTargets } = createHarness(IOS_SIMULATOR, {
@@ -929,7 +1183,11 @@ describe("IosH264Source", () => {
   });
 
   test("reports post-start encoder exits with buffered stderr as source failures", async () => {
-    const { source, helper, encoder, errors } = createHarness();
+    // Reconnect disabled so this asserts the terminal failure surface directly;
+    // the bounded-reconnect path has dedicated coverage below.
+    const { source, helper, encoder, errors } = createHarness(IOS_DEVICE, {
+      runningReconnectMaxAttempts: 0,
+    });
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
     encoder.stderr.push("Error: cannot create VideoToolbox compression session\n");
@@ -945,7 +1203,9 @@ describe("IosH264Source", () => {
   });
 
   test("reports a fatal capture-helper diagnostic after startup", async () => {
-    const { source, helper, errors } = createHarness();
+    const { source, helper, errors } = createHarness(IOS_DEVICE, {
+      runningReconnectMaxAttempts: 0,
+    });
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
     helper.emitStderr("Error: AVCaptureSession runtime error: media services were reset");
@@ -968,6 +1228,7 @@ describe("IosH264Source", () => {
       createHelper: () => helper,
       spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
       commandRunner: successfulCommandRunner,
+      runningReconnectMaxAttempts: 0,
     });
 
     await startWithFrame(source, helper, frame(1, 1, 0x11));
@@ -1102,14 +1363,119 @@ describe("IosH264Source", () => {
     expect(helper.stopped).toBe(true);
   });
 
-  test("fails when frame dimensions change after the encoder starts", async () => {
-    const { source, helper, errors } = createHarness();
+  test("reconfigures the encoder in place when frame dimensions change mid-stream", async () => {
+    // A size change (rotation) restarts only the encoder at the new geometry
+    // rather than failing the whole source (issue #4768). Use the restart
+    // harness so the second encoder spawn is observable.
+    const { source, helper, encoders, encoderSpawns, errors } = createRestartHarness();
 
-    await startWithFrame(source, helper, frame(2, 1, 0x11));
-    helper.emitFrame(frame(3, 1, 0x22));
+    const started = source.start();
+    await flush();
+    helper.emitFrame(frame(4, 2, 0x11));
+    await started;
+
+    helper.emitFrame(frame(6, 4, 0x22));
     await flush();
 
-    expect(errors[0].message).toContain("changed size");
+    // A second encoder was spawned at the new size, and no error was surfaced.
+    expect(errors).toEqual([]);
+    expect(encoderSpawns).toHaveLength(2);
+    expect(encoderSpawns[0].args.join(" ")).toContain("-s 4x2");
+    expect(encoderSpawns[1].args.join(" ")).toContain("-s 6x4");
+    // The outgoing encoder is reaped (SIGTERM sent).
+    expect(encoders[0].killed).toBe(true);
+    // The new frame was written to the fresh encoder.
+    expect(encoders[1].getStdinData().length).toBeGreaterThan(0);
+  });
+
+  test("reconnects after a running-phase helper exit and resumes without onError", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, encoders, errors } = createReconnectHarness({ timer });
+
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+    expect(helpers).toHaveLength(1);
+
+    // A mid-stream helper exit triggers a bounded reconnect, not a teardown.
+    helpers[0].emit("exit", { code: 70, signal: null });
+    await flush();
+    expect(errors).toEqual([]);
+
+    // First backoff (500ms) elapses and capture is re-established.
+    timer.advanceTime(500);
+    await flush();
+    expect(helpers).toHaveLength(2);
+    expect(helpers[1].started).toBe(true);
+
+    helpers[1].emitFrame(frame(2, 2, 0x22));
+    await flush();
+
+    // The reconnected helper's frame is encoded; no error was ever surfaced.
+    expect(errors).toEqual([]);
+    expect(encoders).toHaveLength(2);
+    expect(encoders[1].getStdinData().length).toBeGreaterThan(0);
+    expect(helpers[0].stopped).toBe(true);
+  });
+
+  test("surfaces onError after exhausting bounded reconnect attempts", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, errors } = createReconnectHarness({
+      timer,
+      firstFrameTimeoutMs: 50,
+      runningReconnectMaxAttempts: 2,
+    });
+
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    helpers[0].emit("exit", { code: 70, signal: null });
+    await flush();
+
+    // Attempt 1: backoff 500ms, then the re-established helper never produces a
+    // frame and times out.
+    timer.advanceTime(500);
+    await flush();
+    expect(helpers).toHaveLength(2);
+    timer.advanceTime(50);
+    await flush();
+
+    // Attempt 2: backoff 1000ms, then times out again — exhausting the budget.
+    timer.advanceTime(1000);
+    await flush();
+    expect(helpers).toHaveLength(3);
+    timer.advanceTime(50);
+    await flush();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("screen-capture-helper exited");
+  });
+
+  test("a stop() during the reconnect backoff cancels the cycle", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, errors } = createReconnectHarness({ timer });
+
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    helpers[0].emit("exit", { code: 70, signal: null });
+    await flush();
+
+    // Stop while the first backoff is still pending.
+    await source.stop();
+
+    // Advancing past the backoff must not spin up a replacement helper.
+    timer.advanceTime(5_000);
+    await flush();
+
+    expect(helpers).toHaveLength(1);
+    expect(errors).toEqual([]);
+    expect(helpers[0].stopped).toBe(true);
   });
 
   test("rejects startup when simulator capture reports missing Screen Recording permission", async () => {
@@ -1199,6 +1565,56 @@ describe("IosH264Source", () => {
     });
 
     await expect(source.start()).rejects.toThrow(new RegExp(IOS_WEBRTC_FFMPEG_ENV));
+    expect(helper.started).toBe(false);
+  });
+
+  test("prefers an exact device-name window over an overlapping substring window", async () => {
+    // "iPhone 15" is a substring of the "iPhone 15 Pro" title, so a pure
+    // substring match would flag both windows and fail the many-match guard.
+    const { source, helper, helperTargets } = createResolverHarness("iPhone 15", [
+      { windowID: 42, title: "iPhone 15" },
+      { windowID: 99, title: "iPhone 15 Pro" },
+    ]);
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    ]);
+  });
+
+  test("matches the exact device even when the title appends a runtime segment", async () => {
+    const { source, helper, helperTargets } = createResolverHarness("iPhone 15", [
+      { windowID: 7, title: "iPhone 15 — 17.0" },
+      { windowID: 8, title: "iPhone 15 Pro — 17.0" },
+    ]);
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 7, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    ]);
+  });
+
+  test("falls back to a substring match when no title names the device exactly", async () => {
+    const { source, helper, helperTargets } = createResolverHarness("iPhone 15", [
+      { windowID: 5, title: "Simulator - iPhone 15 (Booted)" },
+    ]);
+
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    expect(helperTargets).toEqual([
+      { kind: "simulator", windowID: 5, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
+    ]);
+  });
+
+  test("still rejects when two windows name the same device exactly", async () => {
+    const { source, helper } = createResolverHarness("iPhone 15", [
+      { windowID: 1, title: "iPhone 15" },
+      { windowID: 2, title: "iPhone 15" },
+    ]);
+
+    await expect(source.start()).rejects.toThrow(/Multiple iOS Simulator windows matched iPhone 15/);
     expect(helper.started).toBe(false);
   });
 
@@ -1350,7 +1766,6 @@ describe("IosH264Source", () => {
     const firstFrame = frame(2, 2, 0x11);
     await startWithFrame(source, helper, firstFrame);
     expect(encoderSpawns).toHaveLength(1);
-    firstFrame.pixels.fill(0xff);
     emitIdr(encoders[0]);
     await flush();
 
@@ -1379,6 +1794,96 @@ describe("IosH264Source", () => {
     expect(chunks).toContainEqual(Buffer.from([0, 0, 0, 1, 0x65]));
     // The deliberate restart must not surface as a source failure.
     expect(errors).toEqual([]);
+  });
+
+  // Issue #4735: `lastHelperFrame` retains the incoming frame by reference
+  // instead of deep-copying it every frame. Each frame carries its own
+  // `FrameDecoder.takeDetached` allocation and the single-slot queue never
+  // reuses a buffer, so processing later frames must leave the retained
+  // frame's pixels intact and replay them exactly on the next PLI.
+  test("replays the retained latest frame intact after subsequent frames are processed (#4735 no-copy)", async () => {
+    const { source, helper, encoders, encoderSpawns, errors } = createRestartHarness();
+
+    // First frame primes the encoder and becomes `lastHelperFrame`.
+    await startWithFrame(source, helper, frame(2, 2, 0x11));
+    expect(encoderSpawns).toHaveLength(1);
+
+    // Subsequent frames each arrive as independent allocations (mirroring
+    // production `takeDetached` buffers) and advance `lastHelperFrame`.
+    helper.emitFrame(frame(2, 2, 0x22));
+    helper.emitFrame(frame(2, 2, 0x33));
+
+    emitIdr(encoders[0]);
+    await flush();
+
+    // The retained reference must still decode to the latest frame's exact
+    // bytes — not a buffer clobbered by a later frame — when replayed twice
+    // into the replacement encoder.
+    expect(source.requestKeyFrame()).toBe(true);
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x33));
+    expect(errors).toEqual([]);
+  });
+
+  test("escalates the outgoing encoder to SIGKILL when it ignores SIGTERM within the grace window", async () => {
+    const timer = new FakeTimer();
+    const { source, helper, encoders } = createRestartHarness({ timer }, encoder => {
+      // A slow / signal-ignoring h264_videotoolbox never emits "exit" on SIGTERM.
+      const signals: NodeJS.Signals[] = [];
+      (encoder as unknown as { killSignals: NodeJS.Signals[] }).killSignals = signals;
+      encoder.kill = (signal?: NodeJS.Signals | number): boolean => {
+        signals.push((typeof signal === "number" ? "SIGTERM" : signal ?? "SIGTERM") as NodeJS.Signals);
+        encoder.killed = true;
+        return true;
+      };
+    });
+
+    await startWithFrame(source, helper, frame(2, 2, 0x11));
+    emitIdr(encoders[0]);
+    await flush();
+
+    expect(source.requestKeyFrame()).toBe(true);
+    const oldSignals = (encoders[0] as unknown as { killSignals: NodeJS.Signals[] }).killSignals;
+
+    // The restart SIGTERMs the outgoing encoder but must not force-kill it until
+    // the bounded grace window elapses without an exit.
+    expect(oldSignals).toEqual(["SIGTERM"]);
+
+    timer.advanceTime(IOS_ENCODER_RESTART_GRACE_MS);
+    await flush();
+
+    // A zombie that ignored SIGTERM past the grace window is escalated to SIGKILL
+    // so it cannot linger holding the hardware encoder.
+    expect(oldSignals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  test("does not force-kill the outgoing encoder that exits within the grace window", async () => {
+    const timer = new FakeTimer();
+    const { source, helper, encoders } = createRestartHarness({ timer }, encoder => {
+      const signals: NodeJS.Signals[] = [];
+      (encoder as unknown as { killSignals: NodeJS.Signals[] }).killSignals = signals;
+      encoder.kill = (signal?: NodeJS.Signals | number): boolean => {
+        const name = (typeof signal === "number" ? "SIGTERM" : signal ?? "SIGTERM") as NodeJS.Signals;
+        signals.push(name);
+        encoder.killed = true;
+        if (name === "SIGTERM") {
+          // Honour SIGTERM promptly: exit before the grace window elapses.
+          encoder.emit("exit", null, "SIGTERM");
+        }
+        return true;
+      };
+    });
+
+    await startWithFrame(source, helper, frame(2, 2, 0x11));
+    emitIdr(encoders[0]);
+    await flush();
+
+    expect(source.requestKeyFrame()).toBe(true);
+    await flush();
+    timer.advanceTime(IOS_ENCODER_RESTART_GRACE_MS);
+    await flush();
+
+    const oldSignals = (encoders[0] as unknown as { killSignals: NodeJS.Signals[] }).killSignals;
+    expect(oldSignals).toEqual(["SIGTERM"]);
   });
 
   test("requestKeyFrame throttles a burst of PLIs to at most one restart per interval", async () => {

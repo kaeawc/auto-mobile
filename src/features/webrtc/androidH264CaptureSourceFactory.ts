@@ -22,19 +22,29 @@ const defaultDeps: AndroidH264CaptureSourceDeps = {
 
 /**
  * A capture source that prefers the persistent on-device encoder and
- * transparently falls back to segment-rotated `screenrecord` when the persistent
- * encoder is unavailable or fails to START. A failure AFTER a successful start
- * is NOT caught here — it propagates via the source's `onError` so the publisher
- * runs its normal reconnect loop, exactly as the screenrecord source does.
+ * transparently falls back to segment-rotated `screenrecord` in two cases:
+ *
+ * 1. the persistent encoder is unavailable or fails to START, and
+ * 2. a post-start on-device encoder/server loss exhausts the persistent source's
+ *    bounded relaunch budget (issue #4742) — signalled through the
+ *    `onScreenrecordFallback` callback the persistent source is built with.
+ *
+ * Both cases route through the SAME `switchToScreenrecord` path, so a mid-stream
+ * encoder crash degrades to screenrecord instead of dropping the viewer to
+ * screenshots. A post-start loss that is still WITHIN the relaunch budget is
+ * handled inside the persistent source and never reaches here.
  */
 class FallbackH264CaptureSource implements H264CaptureSource {
   private active: H264CaptureSource | null = null;
   private stopped = false;
+  private readonly persistent: H264CaptureSource;
 
   constructor(
-    private readonly persistent: H264CaptureSource,
+    buildPersistent: (onScreenrecordFallback: (error: Error) => Promise<void>) => H264CaptureSource,
     private readonly buildScreenrecord: () => H264CaptureSource
-  ) {}
+  ) {
+    this.persistent = buildPersistent(error => this.switchToScreenrecord(error));
+  }
 
   async start(): Promise<void> {
     this.stopped = false;
@@ -42,18 +52,28 @@ class FallbackH264CaptureSource implements H264CaptureSource {
     try {
       await this.persistent.start();
     } catch (error) {
-      if (this.stopped || this.active !== this.persistent) {
-        return;
-      }
-      logger.warn(
-        `[webrtc] persistent encoder unavailable, falling back to screenrecord: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-      const screenrecord = this.buildScreenrecord();
-      this.active = screenrecord;
-      await screenrecord.start();
+      await this.switchToScreenrecord(error instanceof Error ? error : new Error(String(error)));
     }
+  }
+
+  /**
+   * Replace the persistent source with a fresh screenrecord source and start it.
+   * Idempotent and safe against teardown: a no-op once stopped or once the active
+   * source is no longer the persistent one (already switched). A throw from
+   * `screenrecord.start()` propagates to the caller — the initial-start path
+   * (publisher) or the persistent source's exhaustion handler (which reports it
+   * via `onError`).
+   */
+  private async switchToScreenrecord(error: Error): Promise<void> {
+    if (this.stopped || this.active !== this.persistent) {
+      return;
+    }
+    logger.warn(
+      `[webrtc] persistent encoder unavailable, falling back to screenrecord: ${error.message}`
+    );
+    const screenrecord = this.buildScreenrecord();
+    this.active = screenrecord;
+    await screenrecord.start();
   }
 
   async stop(): Promise<void> {
@@ -94,32 +114,33 @@ export function createAndroidH264CaptureSource(
     return deps.createScreenrecord(options);
   }
 
-  if (options.audioEnabled) {
-    return deps.createPersistent({
-      device: options.device,
-      onData: options.onData,
-      onAudioData: options.onAudioData,
-      onError: options.onError,
-      bitrateBps: options.bitrateBps,
-      size: options.size,
-      audioEnabled: true,
-      adbFactory: options.adbFactory,
-      timer: options.timer,
-      jarPath,
-    });
-  }
-
-  const persistent = deps.createPersistent({
+  const persistentOptions = (
+    onScreenrecordFallback?: (error: Error) => Promise<void>
+  ): PersistentEncoderH264SourceOptions => ({
     device: options.device,
     onData: options.onData,
     onAudioData: options.onAudioData,
     onError: options.onError,
     bitrateBps: options.bitrateBps,
     size: options.size,
+    quality: options.quality,
+    fps: options.fps,
     audioEnabled: options.audioEnabled,
     adbFactory: options.adbFactory,
     timer: options.timer,
     jarPath,
+    onScreenrecordFallback,
   });
-  return new FallbackH264CaptureSource(persistent, () => deps.createScreenrecord(options));
+
+  if (options.audioEnabled) {
+    // Audio requires the persistent jar (screenrecord cannot carry PCM), so there
+    // is no screenrecord fallback to hand off to: a spent relaunch budget surfaces
+    // via onError and the publisher runs its normal reconnect loop.
+    return deps.createPersistent(persistentOptions());
+  }
+
+  return new FallbackH264CaptureSource(
+    onScreenrecordFallback => deps.createPersistent(persistentOptions(onScreenrecordFallback)),
+    () => deps.createScreenrecord(options)
+  );
 }

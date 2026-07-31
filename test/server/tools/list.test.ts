@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
+import { TOOL_CAPABILITY_BY_NAME } from "../../../src/features/toolCapabilities/toolCapabilityMap";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { z } from "zod";
 import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
@@ -28,14 +29,7 @@ describe("MCP Tools List", () => {
       }
     });
 
-    // Item 14 / D10 (issue #4181): the old empty-list test monkey-patched the
-    // ToolRegistry singleton's getToolDefinitions method — a leak-prone global
-    // mutation that also asserted nothing real (it fed the handler a fake).
-    // Replaced with a real gating guard: the tools/list wire output must mirror
-    // getToolDefinitions() EXACTLY. If the ListTools handler ever served
-    // getAllTools() instead, plan-only tools (barrier/criticalSection in daemon
-    // mode) would leak onto the wire and this set comparison would red.
-    test("tools/list serves exactly getToolDefinitions(), not the full registry", async function() {
+    test("tools/list serves only the core tool profile by default", async function() {
       const { client } = fixture.getContext();
 
       const result = await client.request(
@@ -44,11 +38,14 @@ describe("MCP Tools List", () => {
       );
 
       const wireNames = result.tools.map(tool => tool.name).sort();
-      const advertisedNames = ToolRegistry.getToolDefinitions().map(tool => tool.name).sort();
+      const advertisedNames = ToolRegistry.getToolDefinitions()
+        .filter(tool => !TOOL_CAPABILITY_BY_NAME.has(tool.name))
+        .map(tool => tool.name)
+        .sort();
       const allToolNames = ToolRegistry.getAllTools().map(tool => tool.name).sort();
 
       expect(wireNames).toEqual(advertisedNames);
-      // The wire must never expose more than the advertised set.
+      // The core profile must stay smaller than the full registered surface.
       expect(wireNames.length).toBeLessThanOrEqual(allToolNames.length);
     });
 
@@ -82,6 +79,8 @@ describe("MCP Tools List", () => {
       expect(toolNames).toContain("observe");
       expect(toolNames).toContain("tapOn");
       expect(toolNames).toContain("inputText");
+      expect(toolNames).not.toContain("clipboard");
+      expect(toolNames).not.toContain("openLink");
       expect(toolNames).not.toContain("settleObserve");
       expect(toolNames).not.toContain("waitForCondition");
     });

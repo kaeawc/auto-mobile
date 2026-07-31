@@ -150,6 +150,21 @@ interface AutoMobileClient {
 
   fun callTool(name: String, arguments: JsonObject): JsonElement
 
+  /** Enable one optional server capability for this client connection. */
+  fun enableToolCapability(capability: String) {
+    try {
+      callTool(
+        "setToolCapability",
+        buildJsonObject {
+          put("capability", capability)
+          put("enabled", true)
+        },
+      )
+    } catch (error: McpConnectionException) {
+      if (error.message?.contains("unknown tool", ignoreCase = true) != true) throw error
+    }
+  }
+
   fun close() {}
 }
 

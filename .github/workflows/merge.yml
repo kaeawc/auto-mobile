@@ -1390,11 +1390,11 @@ jobs:
         uses: actions/deploy-pages@v4
 
   # =============================================================================
-  # MCP Context Thresholds
+  # MCP Context Baselines
   # =============================================================================
 
   benchmark-context-thresholds:
-    name: "Benchmark MCP Context Thresholds"
+    name: "Benchmark MCP Context Baselines"
     runs-on: ubuntu-latest
     steps:
       - name: "Git Checkout"
@@ -1404,7 +1404,7 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
-      - name: "Run Context Threshold Benchmark"
+      - name: "Run Context Baseline Benchmark"
         id: benchmark
         run: |
           # Create reports directory
@@ -1428,11 +1428,11 @@ jobs:
         if: always()
         run: |
           if [ "$FAILED" = "true" ]; then
-            echo "::error::MCP context threshold benchmark failed - one or more thresholds were exceeded"
+            echo "::error::MCP context benchmark failed - one or more configured thresholds were exceeded"
             cat reports/context-benchmark.json
             exit 1
           fi
-          echo "::notice::MCP context threshold benchmark passed - all thresholds satisfied"
+          echo "::notice::MCP context baseline benchmark completed"
 
   # =============================================================================
   # Auto-update README Test Count Badges

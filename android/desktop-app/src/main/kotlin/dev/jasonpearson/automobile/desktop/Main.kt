@@ -8,7 +8,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.KeyShortcut
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.MenuBar
@@ -19,6 +24,7 @@ import androidx.compose.ui.window.rememberWindowState
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
+import dev.jasonpearson.automobile.desktop.core.workspace.isCommandPaletteShortcut
 import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
 import dev.zacsweers.metro.createGraphFactory
 import java.io.IOException
@@ -120,11 +126,28 @@ fun main() {
     // object, so the menu items below toggle real UI state.
     val menuBarActions = remember { MenuBarActions() }
 
+    // Global ⌘K/Ctrl+K opens the command palette. The window key handler only decides *whether* the
+    // shortcut fired (via the pure, tested isCommandPaletteShortcut) and bumps this counter; the
+    // workspace observes the bump and opens the palette (guarding onboarding/picker). A counter,
+    // not a Boolean, so repeat presses each register even while the palette is already open.
+    var openPaletteRequest by remember { mutableStateOf(0) }
+
     Window(
       onCloseRequest = { isWindowVisible = false },
       title = "AutoMobile",
       state = windowState,
       visible = isWindowVisible,
+      onPreviewKeyEvent = { event ->
+        if (
+          event.type == KeyEventType.KeyDown &&
+            isCommandPaletteShortcut(event.key, event.isMetaPressed, event.isCtrlPressed)
+        ) {
+          openPaletteRequest++
+          true
+        } else {
+          false
+        }
+      },
     ) {
       CompositionLocalProvider(LocalAutoMobileGraph provides graph) {
         MenuBar {
@@ -170,9 +193,13 @@ fun main() {
               shortcut = platformShortcut(Key.F, shift = true),
             )
             Item(
+              // ⌘K/Ctrl+K is handled by the window-level onPreviewKeyEvent below (opens the command
+              // palette). No shortcut here — a duplicate Key.K accelerator on this (currently
+              // inert)
+              // item would race the window handler. Re-wiring this menu item + restoring its
+              // shortcut is tracked in #4670.
               "Quick Jump",
               onClick = { menuBarActions.showQuickJump = true },
-              shortcut = platformShortcut(Key.K),
             )
             Separator()
             Item(
@@ -191,7 +218,10 @@ fun main() {
             Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })
           }
         }
-        AutoMobileDesktopApp(menuBarActions = menuBarActions)
+        AutoMobileDesktopApp(
+          menuBarActions = menuBarActions,
+          openPaletteRequest = openPaletteRequest,
+        )
       }
     }
   }

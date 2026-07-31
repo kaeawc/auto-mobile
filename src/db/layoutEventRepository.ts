@@ -1,7 +1,6 @@
 import type { Kysely } from "kysely";
 import type { Database } from "./types";
-import { getDatabase } from "./database";
-import { pruneEventTableByCount, type EventRetentionState } from "./eventRetention";
+import { getDb, createEventRetentionState, cleanupEventTable } from "./eventRepositoryBase";
 
 export interface RecordLayoutEventInput {
   deviceId: string | null;
@@ -18,11 +17,7 @@ export interface RecordLayoutEventInput {
   screenName?: string | null;
 }
 
-const retentionState: EventRetentionState = { cleanupInProgress: false, insertsSinceCleanup: 0 };
-
-function getDb(db?: Kysely<Database>): Kysely<Database> {
-  return db ?? (getDatabase() as unknown as Kysely<Database>);
-}
+const retentionState = createEventRetentionState();
 
 function toLayoutRow(input: RecordLayoutEventInput) {
   return {
@@ -104,5 +99,5 @@ export async function cleanupIfNeeded(
   checkInterval?: number,
   inserted?: number
 ): Promise<void> {
-  await pruneEventTableByCount(db, "layout_events", retentionState, maxRows, checkInterval, inserted);
+  await cleanupEventTable("layout_events", retentionState, db, maxRows, checkInterval, inserted);
 }

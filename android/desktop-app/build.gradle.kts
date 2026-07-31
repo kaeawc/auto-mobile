@@ -1,3 +1,10 @@
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
+import org.gradle.api.artifacts.transform.InputArtifact
+import org.gradle.api.artifacts.transform.TransformAction
+import org.gradle.api.artifacts.transform.TransformOutputs
+import org.gradle.api.artifacts.transform.TransformParameters
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.compose.reload.gradle.ComposeHotRun
 
@@ -56,6 +63,75 @@ val desktopMacPackageVersion: String =
   normalizeSemver(desktopReleaseVersion).let { (major, minor, patch) ->
     "${if (major == 0) 1 else major}.$minor.$patch"
   }
+
+// --- Strip bundled ffmpeg/ffprobe program executables --------------------------
+// The org.bytedeco:ffmpeg:<ver>:<platform> classifier jar ships the ffmpeg and
+// ffprobe CLI programs alongside the libav*/libjni* JNI libraries. The desktop
+// app only uses the JNI bindings (H264Decoder in :desktop-core), so the programs
+// are dead weight — and on macOS they break notarization: Compose's signer
+// re-signs *.dylib/*.jnilib entries inside jars during packaging, but not
+// extensionless Mach-O executables, so Apple's notary service finds the
+// ad-hoc-signed ffmpeg/ffprobe binaries and rejects the DMG as Invalid.
+// Filtering is applied to all platforms uniformly so the shipped runtime
+// classpath does not vary by OS.
+val ffmpegProgramsStripped: Attribute<Boolean> =
+  Attribute.of(
+    "dev.jasonpearson.automobile.desktop.ffmpegProgramsStripped",
+    Boolean::class.javaObjectType,
+  )
+
+abstract class StripFfmpegProgramsTransform : TransformAction<TransformParameters.None> {
+  @get:InputArtifact abstract val inputArtifact: Provider<FileSystemLocation>
+
+  override fun transform(outputs: TransformOutputs) {
+    val input = inputArtifact.get().asFile
+    if (!input.name.startsWith("ffmpeg-")) {
+      outputs.file(input)
+      return
+    }
+    val output = outputs.file("${input.nameWithoutExtension}-no-programs.jar")
+    ZipFile(input).use { zip ->
+      ZipOutputStream(output.outputStream().buffered()).use { out ->
+        for (entry in zip.entries()) {
+          if (isFfmpegProgram(entry)) continue
+          out.putNextEntry(ZipEntry(entry.name).apply { time = entry.time })
+          if (!entry.isDirectory) {
+            zip.getInputStream(entry).use { it.copyTo(out) }
+          }
+          out.closeEntry()
+        }
+      }
+    }
+  }
+
+  private fun isFfmpegProgram(entry: ZipEntry): Boolean {
+    if (entry.isDirectory || !entry.name.startsWith("org/bytedeco/ffmpeg/")) {
+      return false
+    }
+    val fileName = entry.name.substringAfterLast('/')
+    return fileName == "ffmpeg" ||
+      fileName == "ffprobe" ||
+      fileName == "ffmpeg.exe" ||
+      fileName == "ffprobe.exe"
+  }
+}
+
+dependencies {
+  attributesSchema { attribute(ffmpegProgramsStripped) }
+  artifactTypes.named("jar") { attributes.attribute(ffmpegProgramsStripped, false) }
+  registerTransform(StripFfmpegProgramsTransform::class) {
+    from
+      .attribute(ffmpegProgramsStripped, false)
+      .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, "jar")
+    to
+      .attribute(ffmpegProgramsStripped, true)
+      .attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, "jar")
+  }
+}
+
+configurations.named("runtimeClasspath") {
+  attributes.attribute(ffmpegProgramsStripped, true)
+}
 
 dependencies {
   // Shared module (UX, unix socket architecture, settings, data sources)

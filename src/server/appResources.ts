@@ -3,15 +3,10 @@ import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceM
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { GetAppMetadata, IosAppMetadataSource } from "../features/observe/GetAppMetadata";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
-import { findBundleEntry } from "../utils/ios-cmdline-tools/DeviceAppManager";
+import { DeviceAppManager } from "../utils/ios-cmdline-tools/DeviceAppManager";
 import { BootedDevice, InstalledApp, InstalledAppsByProfile, Platform, SystemInstalledApp } from "../models";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { promises as nodeFs } from "fs";
-import { tmpdir as nodeTmpdir } from "os";
-import { join as nodeJoin } from "path";
-import { execFile as nodeExecFile } from "child_process";
-import { promisify } from "util";
 
 // Resource URI templates
 export const APP_RESOURCE_TEMPLATES = {
@@ -748,37 +743,15 @@ function metadataCacheKey(deviceId: string, appId: string): string {
   return `${deviceId}:${appId}`;
 }
 
-const execFileAsync = promisify(nodeExecFile);
-
 function createIosMetadataSource(device: BootedDevice): IosAppMetadataSource {
   const simctl = new SimCtlClient(device);
+  // Physical-device app metadata resolves through DeviceAppManager, the single
+  // typed devicectl boundary (issue #4053) — no direct xcrun composition here.
+  const deviceAppManager = new DeviceAppManager();
   return {
     listApps: (deviceId?: string) => simctl.listApps(deviceId),
-    getPhysicalDeviceAppInfo: async (deviceId: string, bundleId: string) => {
-      // devicectl requires macOS; match DeviceAppManager's platform guard.
-      if (process.platform !== "darwin") {
-        return null;
-      }
-      const tempDir = await nodeFs.mkdtemp(nodeJoin(nodeTmpdir(), "automobile-metadata-"));
-      const jsonPath = nodeJoin(tempDir, "apps.json");
-      try {
-        await execFileAsync("xcrun", [
-          "devicectl", "device", "info", "apps",
-          "--device", deviceId,
-          "--bundle-id", bundleId,
-          "--json-output", jsonPath,
-          "--quiet"
-        ]);
-        const raw = await nodeFs.readFile(jsonPath, "utf-8");
-        const data = JSON.parse(raw);
-        return findBundleEntry(data, bundleId);
-      } catch (error) {
-        logger.warn(`[AppResources] Failed to get physical device app info for ${bundleId}: ${error}`);
-        return null;
-      } finally {
-        await nodeFs.rm(tempDir, { recursive: true, force: true });
-      }
-    }
+    getPhysicalDeviceAppInfo: (deviceId: string, bundleId: string) =>
+      deviceAppManager.getInstalledAppInfo(deviceId, bundleId)
   };
 }
 

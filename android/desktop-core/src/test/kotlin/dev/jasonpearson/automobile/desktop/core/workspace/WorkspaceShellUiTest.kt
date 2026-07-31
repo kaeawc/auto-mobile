@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -280,5 +281,161 @@ class WorkspaceShellUiTest {
       )
     setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
     onNodeWithText("Performance — coming soon", substring = true).assertIsDisplayed()
+  }
+
+  @Test
+  fun `Inspect mode renders the injected inspect content in place of the stream`() =
+    runComposeUiTest {
+      val state =
+        WorkspaceUiState.Content(
+          columns = listOf(col("a", "Pixel 8").copy(mode = InteractionMode.Inspect)),
+          focusedDeviceId = "a",
+        )
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(
+            state = state,
+            onAction = {},
+            onOpenPicker = {},
+            inspectContent = { column -> Text("inspect-slot:${column.deviceId}") },
+          )
+        }
+      }
+      onNodeWithText("inspect-slot:a").assertIsDisplayed()
+      // The device stream is replaced by the inspector while in Inspect mode.
+      onNodeWithText("stream").assertDoesNotExist()
+    }
+
+  @Test
+  fun `Input mode renders the stream and not the inspect content`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          onOpenPicker = {},
+          inspectContent = { Text("inspect-slot") },
+        )
+      }
+    }
+    onNodeWithText("stream").assertIsDisplayed()
+    onNodeWithText("inspect-slot").assertDoesNotExist()
+  }
+
+  @Test
+  fun `toggling Inspect back to Input swaps the stream back in`() = runComposeUiTest {
+    val mode = mutableStateOf(InteractionMode.Inspect)
+    setContent {
+      MaterialTheme {
+        val state =
+          WorkspaceUiState.Content(
+            columns = listOf(col("a", "Pixel 8").copy(mode = mode.value)),
+            focusedDeviceId = "a",
+          )
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          onOpenPicker = {},
+          inspectContent = { Text("inspect-slot") },
+        )
+      }
+    }
+    onNodeWithText("inspect-slot").assertIsDisplayed()
+    onNodeWithText("stream").assertDoesNotExist()
+    runOnIdle { mode.value = InteractionMode.Input }
+    onNodeWithText("inspect-slot").assertDoesNotExist()
+    onNodeWithText("stream").assertIsDisplayed()
+  }
+
+  @Test
+  fun `green status shows no inline detail line`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Green,
+          statusDetail = "Daemon reconnecting",
+        )
+      }
+    }
+    // "Expands only when not green": the detail line stays hidden even if a detail is supplied.
+    onNodeWithContentDescription("Status detail: Daemon reconnecting").assertDoesNotExist()
+  }
+
+  @Test
+  fun `non-green status shows the inline detail line`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Yellow,
+          statusDetail = "Daemon reconnecting",
+        )
+      }
+    }
+    onNodeWithContentDescription("Status detail: Daemon reconnecting").assertIsDisplayed()
+  }
+
+  @Test
+  fun `clicking the status dot opens the health sheet`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Green,
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithText("fake-health-body").assertDoesNotExist()
+    onNodeWithContentDescription("Status: Green").performClick()
+    onNodeWithContentDescription("Health sheet").assertIsDisplayed()
+    onNodeWithText("fake-health-body").assertIsDisplayed()
+  }
+
+  @Test
+  fun `closing the health sheet dismisses it`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Red,
+          statusDetail = "Device offline",
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status: Red").performClick()
+    onNodeWithText("fake-health-body").assertIsDisplayed()
+    onNodeWithContentDescription("Close health sheet").performClick()
+    onNodeWithText("fake-health-body").assertDoesNotExist()
+  }
+
+  @Test
+  fun `clicking the inline detail line also opens the health sheet`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          status = WorkspaceStatus.Yellow,
+          statusDetail = "Daemon reconnecting",
+          healthSheetContent = { Text("fake-health-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Status detail: Daemon reconnecting").performClick()
+    onNodeWithText("fake-health-body").assertIsDisplayed()
   }
 }

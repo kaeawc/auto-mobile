@@ -7,6 +7,7 @@ import type { FileDownloader } from "../../../../src/utils/FileDownloader";
 import { WebpBinaryResolver } from "../../../../src/utils/image/webp/WebpBinaryResolver";
 import { defaultTimer } from "../../../../src/utils/SystemTimer";
 import { FakeChecksumCalculator } from "../../../fakes/FakeChecksumCalculator";
+import { FakeChildProcess } from "../../../fakes/FakeChildProcess";
 import { FakeFileDownloader } from "../../../fakes/FakeFileDownloader";
 import { FakeProcessExecutor } from "../../../fakes/FakeProcessExecutor";
 
@@ -327,5 +328,131 @@ describe("WebpBinaryResolver", () => {
     expect(thrown).toBeInstanceOf(ActionableError);
     expect(thrown.message).toContain("AUTOMOBILE_CWEBP_PATH");
     expect(thrown.message).toContain("cwebp");
+  });
+});
+
+/**
+ * Drive a FakeChildProcess once the codec has written stdin and attached its
+ * listeners. Keying off `stdin` finish makes ordering deterministic regardless
+ * of how long the real filesystem resolution ahead of the spawn takes. Data is
+ * pushed synchronously; `close` fires on a later macrotask so the readable
+ * `data` events flush first.
+ */
+function driveChild(
+  child: FakeChildProcess,
+  { stdout = Buffer.alloc(0), stderr = "", exitCode = 0 }: { stdout?: Buffer; stderr?: string; exitCode?: number } = {}
+): void {
+  child.stdin.on("finish", () => {
+    if (stdout.length > 0) {
+      child.stdout.push(stdout);
+    }
+    child.stdout.push(null);
+    if (stderr) {
+      child.stderr.push(Buffer.from(stderr));
+    }
+    child.stderr.push(null);
+    defaultTimer.setTimeout(() => {
+      child.exitCode = exitCode;
+      child.emit("exit", exitCode, null);
+      child.emit("close", exitCode, null);
+    }, 0);
+  });
+}
+
+async function resolverWithExecutable(
+  binary: "cwebp" | "dwebp",
+  processExecutor: FakeProcessExecutor
+): Promise<WebpBinaryResolver> {
+  const root = await makeTempDir();
+  const binaryPath = path.join(root, "bin", binary);
+  await writeExecutable(binaryPath);
+  const envVar = binary === "cwebp" ? "AUTOMOBILE_CWEBP_PATH" : "AUTOMOBILE_DWEBP_PATH";
+  return new WebpBinaryResolver({
+    projectRoot: root,
+    platform: "darwin",
+    arch: "arm64",
+    env: { [envVar]: binaryPath, PATH: "" },
+    processExecutor
+  });
+}
+
+describe("WebpBinaryResolver codec execution", () => {
+  test("resolves cwebp then spawns it with structural argv over stdin/stdout", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    const child = new FakeChildProcess();
+    driveChild(child, { stdout: Buffer.from("RIFFxxxxWEBPencoded") });
+    processExecutor.setNextSpawnProcess(child);
+    const resolver = await resolverWithExecutable("cwebp", processExecutor);
+    const input = Buffer.from("png-data");
+
+    const output = await resolver.runCwebp(["-q", "60", "-o", "-", "--", "-"], input);
+
+    expect(output.toString()).toBe("RIFFxxxxWEBPencoded");
+    expect(child.getStdinData()).toEqual(input);
+    const spawned = processExecutor.getSpawnedProcesses();
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].args).toEqual(["-q", "60", "-o", "-", "--", "-"]);
+    expect(spawned[0].command).toContain("cwebp");
+  });
+
+  test("runDwebp spawns the resolved dwebp binary", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    const child = new FakeChildProcess();
+    driveChild(child, { stdout: Buffer.from("png-output") });
+    processExecutor.setNextSpawnProcess(child);
+    const resolver = await resolverWithExecutable("dwebp", processExecutor);
+
+    const output = await resolver.runDwebp(["-o", "-", "--", "-"], Buffer.from("RIFFxxxxWEBPdata"));
+
+    expect(output.toString()).toBe("png-output");
+    expect(processExecutor.getSpawnedProcesses()[0].command).toContain("dwebp");
+  });
+
+  test("surfaces non-zero exit with stderr detail as an actionable error", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    const child = new FakeChildProcess();
+    driveChild(child, { stderr: "bad webp", exitCode: 1 });
+    processExecutor.setNextSpawnProcess(child);
+    const resolver = await resolverWithExecutable("cwebp", processExecutor);
+
+    const thrown = await resolver.runCwebp(["-o", "-", "--", "-"], Buffer.from("png")).catch(error => error);
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect(thrown.message).toContain("cwebp");
+    expect(thrown.message).toContain("AUTOMOBILE_CWEBP_PATH");
+    expect(thrown.message).toContain("bad webp");
+  });
+
+  test("surfaces stdin write failures as actionable errors", async () => {
+    const processExecutor = new FakeProcessExecutor();
+    const child = new FakeChildProcess();
+    child.setStdinError("write EPIPE");
+    processExecutor.setNextSpawnProcess(child);
+    const resolver = await resolverWithExecutable("cwebp", processExecutor);
+
+    const thrown = await resolver.runCwebp(["-o", "-", "--", "-"], Buffer.from("png")).catch(error => error);
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect(thrown.message).toContain("cwebp");
+    expect(thrown.message).toContain("AUTOMOBILE_CWEBP_PATH");
+    expect(thrown.message).toContain("write EPIPE");
+  });
+
+  test("propagates missing-binary resolution failures before spawning", async () => {
+    const root = await makeTempDir();
+    const processExecutor = new FakeProcessExecutor();
+    const resolver = new WebpBinaryResolver({
+      projectRoot: root,
+      platform: "win32",
+      arch: "x64",
+      env: { PATH: "" },
+      processExecutor
+    });
+
+    const thrown = await resolver.runCwebp(["-o", "-", "--", "-"], Buffer.from("png")).catch(error => error);
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect(thrown.message).toContain("AUTOMOBILE_CWEBP_PATH");
+    expect(processExecutor.getSpawnedProcesses()).toEqual([]);
   });
 });

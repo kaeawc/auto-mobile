@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 
 describe("session-scoped tool discovery", () => {
   test("does not leak a bound session to another MCP server with the same transport session ID", async () => {
@@ -17,6 +18,26 @@ describe("session-scoped tool discovery", () => {
     expect(binding.bind("transport", "device-session-a")).toBe(true);
     expect(binding.bind("transport", "device-session-a")).toBe(false);
     expect(binding.bind("transport", "device-session-b")).toBe(true);
+  });
+
+  test("retains a generated profile for an unbound stdio transport", () => {
+    const binding = new SessionToolBinding(undefined, undefined, new FakeIdGenerator(["capability-profile-1"]));
+    const sessionUuid = binding.createAndBindCapabilityProfile(undefined);
+
+    expect(sessionUuid).toBe("capability-profile-1");
+    expect(binding.effectiveSessionUuid(undefined)).toBeUndefined();
+    expect(binding.effectiveCapabilityProfileUuid(undefined)).toBe(sessionUuid);
+    // A capability profile is connection state, not a releasable device session.
+    expect(binding.unbindSession(sessionUuid)).toBe(false);
+    expect(binding.effectiveCapabilityProfileUuid(undefined)).toBe(sessionUuid);
+  });
+
+  test("binds a resumed profile to an unbound stdio transport without selecting device routing", () => {
+    const binding = new SessionToolBinding();
+
+    expect(binding.bindCapabilityProfile(undefined, "capability-profile-1")).toBe(true);
+    expect(binding.effectiveSessionUuid(undefined)).toBeUndefined();
+    expect(binding.effectiveCapabilityProfileUuid(undefined)).toBe("capability-profile-1");
   });
 
   test("seeds only a recreated transport's initial session binding", () => {

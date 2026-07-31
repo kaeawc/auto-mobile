@@ -135,6 +135,12 @@ export const MCP_STREAMABLE_PATH = "/auto-mobile/streamable";
  */
 export const DAEMON_SESSION_TOOL_BINDING_HEADER = "x-auto-mobile-session-uuid";
 
+/** Loopback-only header for a persisted connection capability profile. */
+export const DAEMON_CAPABILITY_PROFILE_HEADER = "x-auto-mobile-capability-profile-uuid";
+
+/** Socket RPC field consumed before tool arguments reach the MCP server. */
+export const DAEMON_CAPABILITY_PROFILE_PARAM = "__autoMobileCapabilityProfileUuid";
+
 /**
  * How long the proxy will keep replaying a remembered session binding on
  * sessionless calls before treating it as retired (issue #4610). It mirrors the

@@ -18,9 +18,9 @@ interface ActiveExecution {
   cancelReason?: Error;
 }
 
-type ExecutionScope = "session" | "global";
+export type ExecutionScope = "session" | "global";
 
-interface ExecutionScopeOptions {
+export interface ExecutionScopeOptions {
   scope: ExecutionScope;
   sessionId?: string;
   sessionUuid?: string;

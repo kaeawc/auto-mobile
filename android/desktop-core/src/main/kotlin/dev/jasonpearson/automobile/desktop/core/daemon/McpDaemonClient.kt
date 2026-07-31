@@ -25,6 +25,9 @@ import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 
 private const val DAEMON_CAPABILITIES_METHOD = "daemon/capabilities"
@@ -33,6 +36,10 @@ private const val OLD_DAEMON_CAPABILITIES_ERROR = "Unsupported daemon method: da
 private const val OLD_DAEMON_APPEND_MODE_ERROR = "input/typeText unsupported params: mode"
 private const val UNSUPPORTED_APPEND_MODE_ERROR =
   "The connected daemon does not support input/typeText mode:append. Restart or update the daemon before typing into the device."
+private const val SET_TOOL_CAPABILITY_TOOL_NAME = "setToolCapability"
+private const val DAEMON_CAPABILITY_PROFILE_PARAM = "__autoMobileCapabilityProfileUuid"
+
+@Serializable private data class CapabilityProfileResponse(val sessionUuid: String)
 
 class McpDaemonClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
@@ -58,6 +65,7 @@ class McpDaemonClient(
 
   private val testRecordingClient = TestRecordingSocketClient()
   private var daemonCapabilities: CachedDaemonCapabilities? = null
+  private var capabilityProfileUuid: String? = null
 
   override fun ping() {
     val response = sendRequest("ide/ping")
@@ -80,7 +88,15 @@ class McpDaemonClient(
   }
 
   override fun listTools(): List<McpTool> {
-    val response = sendRequest("tools/list")
+    val response =
+      sendRequest(
+        "tools/list",
+        capabilityProfileUuid?.let { profileUuid ->
+          buildJsonObject {
+            put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(profileUuid))
+          }
+        } ?: JsonObject(emptyMap()),
+      )
     ensureSuccess(response)
     val result = json.decodeFromJsonElement(serializer<ListToolsResult>(), response.result!!)
     return result.tools
@@ -489,16 +505,53 @@ class McpDaemonClient(
   }
 
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
+    val profileUuid = capabilityProfileUuid
+    val routedArguments =
+      if (name == SET_TOOL_CAPABILITY_TOOL_NAME || profileUuid == null) arguments
+      else
+        buildJsonObject {
+          arguments.forEach { (key, value) -> put(key, value) }
+          put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(profileUuid))
+        }
     val response =
       sendRequest(
         "tools/call",
         buildJsonObject {
           put("name", JsonPrimitive(name))
-          put("arguments", arguments)
+          put("arguments", routedArguments)
         },
       )
     ensureSuccess(response)
     return response.result ?: JsonObject(emptyMap())
+  }
+
+  override fun enableToolCapability(capability: String) {
+    val response =
+      try {
+        callTool(
+          SET_TOOL_CAPABILITY_TOOL_NAME,
+          buildJsonObject {
+            put("capability", JsonPrimitive(capability))
+            put("enabled", JsonPrimitive(true))
+            capabilityProfileUuid?.let {
+              put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(it))
+            }
+          },
+        )
+      } catch (error: McpConnectionException) {
+        if (error.message?.contains("unknown tool", ignoreCase = true) != true) throw error
+        return
+      }
+    val text =
+      response.jsonObject["content"]
+        ?.jsonArray
+        ?.firstOrNull { it.jsonObject["type"]?.jsonPrimitive?.content == "text" }
+        ?.jsonObject
+        ?.get("text")
+        ?.jsonPrimitive
+        ?.content
+        ?: throw DaemonUnavailableException("Capability control response missing profile UUID")
+    capabilityProfileUuid = json.decodeFromString<CapabilityProfileResponse>(text).sessionUuid
   }
 
   private fun sendInputRequest(method: String, params: JsonObject): InputActionResult {

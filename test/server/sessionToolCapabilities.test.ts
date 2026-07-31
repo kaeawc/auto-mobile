@@ -9,6 +9,9 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { registerToolCapabilityTools } from "../../src/server/toolCapabilityTools";
+import { getToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
+import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 
 describe("session tool capability MCP enforcement", () => {
   let fixture: McpTestFixture | undefined;
@@ -55,6 +58,151 @@ describe("session tool capability MCP enforcement", () => {
 
     expect(isEnabled).toHaveBeenCalledWith("device-session-1", "clipboard");
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  test("denies an opt-in tool before a device session is bound", async () => {
+    fixture = new McpTestFixture();
+    await fixture.setup();
+
+    ToolRegistry.clearTools();
+    const handler = mock(async () => ({ content: [{ type: "text", text: "ok" }] }));
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), handler);
+
+    await expect(fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "clipboard", arguments: {} },
+      },
+      z.any()
+    )).rejects.toThrow("requires the 'clipboard' capability");
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  test("rejects a capability write when the injected profile service is read-only", async () => {
+    fixture = new McpTestFixture({
+      sessionToolProfileService: { isEnabled: async () => false },
+    });
+    await fixture.setup();
+
+    await expect(fixture.client.request(
+      { method: "tools/call", params: { name: "setToolCapability", arguments: { capability: "clipboard" } } },
+      z.any(),
+    )).rejects.toThrow("read-only");
+  });
+
+  test("invokes an injected capability writer with its service receiver", async () => {
+    const profileService = {
+      calls: 0,
+      isEnabled: async () => false,
+      async setEnabled(): Promise<void> {
+        this.calls += 1;
+      },
+    };
+    fixture = new McpTestFixture({ sessionToolProfileService: profileService });
+    await fixture.setup();
+
+    await fixture.client.request(
+      { method: "tools/call", params: { name: "setToolCapability", arguments: { capability: "clipboard" } } },
+      z.any(),
+    );
+
+    expect(profileService.calls).toBe(1);
+  });
+
+  test("advertises enabled as an optional defaulted control parameter", async () => {
+    fixture = new McpTestFixture();
+    await fixture.setup();
+
+    const definition = ToolRegistry.getToolDefinitions().find(tool => tool.name === "setToolCapability");
+    const schema = definition?.inputSchema as { required?: string[] } | undefined;
+    expect(schema?.required).toEqual(["capability"]);
+  });
+
+  test("lets a core capability control tool opt in a stdio session before device binding", async () => {
+    const enabled = new Set<string>();
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> &
+      Pick<SessionToolProfileService, "setEnabled"> = {
+        isEnabled: async (_sessionUuid, capability) => enabled.has(capability),
+        setEnabled: async (_sessionUuid, capability, value) => {
+          if (value) {
+            enabled.add(capability);
+          } else {
+            enabled.delete(capability);
+          }
+        },
+      };
+    fixture = new McpTestFixture({ sessionToolProfileService: profileService });
+    await fixture.setup();
+
+    ToolRegistry.register(
+      "clipboard",
+      "clipboard",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ok" }] })
+    );
+
+    const result = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "setToolCapability", arguments: { capability: "clipboard" } },
+      },
+      z.any()
+    );
+    const payload = JSON.parse(result.content[0].text) as { sessionUuid: string; capability: string; enabled: boolean };
+    expect(payload).toMatchObject({ capability: "clipboard", enabled: true });
+    expect(payload.sessionUuid).toMatch(/^[0-9a-f-]{36}$/);
+
+    const listed = await fixture.client.listTools();
+    expect(listed.tools.some(tool => tool.name === "clipboard")).toBe(true);
+    await expect(fixture.client.request(
+      { method: "tools/call", params: { name: "clipboard", arguments: {} } },
+      z.any()
+    )).resolves.toBeDefined();
+  });
+
+  test("keeps a generated connection profile after a plan-style device-session release", async () => {
+    const enabledProfiles = new Set<string>();
+    const profileService: Pick<SessionToolProfileService, "isEnabled"> &
+      Pick<SessionToolProfileService, "setEnabled"> = {
+        isEnabled: async (sessionUuid, capability) =>
+          capability !== "test-authoring" || (sessionUuid !== undefined && enabledProfiles.has(sessionUuid)),
+        setEnabled: async (sessionUuid, capability, value) => {
+          if (capability === "test-authoring" && value) {
+            enabledProfiles.add(sessionUuid);
+          }
+        },
+      };
+    fixture = new McpTestFixture({ sessionToolProfileService: profileService });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    registerToolCapabilityTools();
+    ToolRegistry.register(
+      "executePlan",
+      "executePlan",
+      z.object({}),
+      async () => ({
+        content: [{ type: "text", text: JSON.stringify({ routingSessionUuid: getToolCapabilityContext()?.routingSessionUuid }) }],
+      }),
+    );
+
+    const optIn = await fixture.client.request(
+      { method: "tools/call", params: { name: "setToolCapability", arguments: { capability: "test-authoring" } } },
+      z.any(),
+    );
+    const profileUuid = (JSON.parse(optIn.content[0].text) as { sessionUuid: string }).sessionUuid;
+
+    const plan = await fixture.client.request(
+      { method: "tools/call", params: { name: "executePlan", arguments: {} } },
+      z.any(),
+    );
+    expect(JSON.parse(plan.content[0].text)).toEqual({});
+
+    // A plan lifecycle release may clear device-session bindings, but it must
+    // not erase the independent connection capability profile.
+    SessionReleaseBroadcaster.emit(profileUuid);
+    const listed = await fixture.client.listTools();
+    expect(listed.tools.map(tool => tool.name)).toContain("executePlan");
   });
 
   test("denies a disabled device-aware tool when its schema strips sessionUuid", async () => {

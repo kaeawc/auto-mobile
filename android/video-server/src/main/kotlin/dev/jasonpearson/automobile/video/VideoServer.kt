@@ -23,8 +23,10 @@ import dev.jasonpearson.automobile.video.wrappers.DisplayControl
  *
  * ## Quality presets
  * - `low`: 540p @ 2 Mbps @ 30fps
- * - `medium`: 720p @ 4 Mbps @ 60fps (default)
- * - `high`: 1080p @ 8 Mbps @ 60fps
+ * - `medium`: 720p @ 4 Mbps @ 30fps (default)
+ * - `high`: 1080p @ 8 Mbps @ 30fps
+ *
+ * The preset frame rate is only a default; `--fps <n>` overrides it.
  */
 object VideoServer {
   @Volatile private var running = true
@@ -32,8 +34,8 @@ object VideoServer {
   @Volatile private var encoder: VideoEncoder? = null
   // Volatile: the encode loop reads it for forceFrame() while the shutdown hook nulls it (#4383).
   @Volatile private var capture: ScreenCapture? = null
-  private var audioCapture: AudioCapture? = null
-  private var streamWriter: VideoStreamWriter? = null
+  @Volatile private var audioCapture: AudioCapture? = null
+  @Volatile private var streamWriter: VideoStreamWriter? = null
   @Volatile private var sessionLease: VideoSessionLease? = null
 
   @JvmStatic
@@ -48,6 +50,7 @@ object VideoServer {
     running = true
     val quality = parseQuality(args)
     val bitrateOverride = parseIntFlag(args, "--bit-rate")
+    val fps = resolveFps(args, quality)
     val sizeOverride = parseSizeFlag(args)
     val audioEnabled = args.contains("--audio")
     val session = VideoSessionArguments.parse(args)
@@ -63,9 +66,7 @@ object VideoServer {
     val (outputWidth, outputHeight) =
       sizeOverride ?: calculateOutputDimensions(displayInfo, quality)
     val bitrate = bitrateOverride ?: quality.bitrate
-    println(
-      "Output: ${outputWidth}x${outputHeight} @ ${bitrate / 1_000_000}Mbps @ ${quality.fps}fps"
-    )
+    println("Output: ${outputWidth}x${outputHeight} @ ${bitrate / 1_000_000}Mbps @ ${fps}fps")
     println("Audio: ${if (audioEnabled) "enabled" else "disabled"}")
 
     // Install shutdown hook for clean termination
@@ -88,7 +89,7 @@ object VideoServer {
         outputHeight,
         displayInfo.densityDpi,
         bitrate,
-        quality.fps,
+        fps,
         audioEnabled,
         session,
       )
@@ -100,7 +101,7 @@ object VideoServer {
     }
   }
 
-  private fun parseQuality(args: Array<String>): QualityPreset {
+  internal fun parseQuality(args: Array<String>): QualityPreset {
     var i = 0
     while (i < args.size) {
       when (args[i]) {
@@ -127,8 +128,16 @@ object VideoServer {
     return QualityPreset.MEDIUM
   }
 
+  /**
+   * Resolve the effective frame rate: an explicit positive `--fps <n>` wins, otherwise fall back to
+   * the preset default. The frame rate is intentionally decoupled from the quality preset so a host
+   * can lower it (e.g. to 30fps for UI automation) without also lowering resolution/bitrate.
+   */
+  internal fun resolveFps(args: Array<String>, quality: QualityPreset): Int =
+    parseIntFlag(args, "--fps") ?: quality.fps
+
   /** Read the integer value following [flag], or null if absent/invalid. */
-  private fun parseIntFlag(args: Array<String>, flag: String): Int? {
+  internal fun parseIntFlag(args: Array<String>, flag: String): Int? {
     val index = args.indexOf(flag)
     if (index < 0 || index + 1 >= args.size) {
       return null
@@ -137,7 +146,7 @@ object VideoServer {
   }
 
   /** Parse `--size WxH` into an even-rounded (width, height) pair, or null. */
-  private fun parseSizeFlag(args: Array<String>): Pair<Int, Int>? {
+  internal fun parseSizeFlag(args: Array<String>): Pair<Int, Int>? {
     val index = args.indexOf("--size")
     if (index < 0 || index + 1 >= args.size) {
       return null
@@ -163,14 +172,15 @@ object VideoServer {
       Options:
         --quality, -q <preset>  Quality preset: low, medium, high (default: medium)
         --bit-rate <bps>        Override the preset bitrate (bits per second)
+        --fps <n>               Override the preset frame rate (frames per second)
         --size <WxH>            Override the output resolution (e.g. 720x1280)
         --audio                 Capture device playback audio as 8 kHz mono PCM16
         --help, -h              Show this help message
 
       Quality presets:
         low     540p @ 2 Mbps @ 30fps
-        medium  720p @ 4 Mbps @ 60fps
-        high    1080p @ 8 Mbps @ 60fps
+        medium  720p @ 4 Mbps @ 30fps
+        high    1080p @ 8 Mbps @ 30fps
       """
         .trimIndent()
     )
@@ -242,7 +252,14 @@ object VideoServer {
 
     // The writer keeps the encoder alive while its LocalSocket client reconnects, replays cached
     // decoder state, and requests a new IDR at attach.
-    streamWriter = VideoStreamWriter(session.socketName, width, height, audioEnabled)
+    streamWriter =
+      VideoStreamWriter(
+        session.socketName,
+        width,
+        height,
+        audioEnabled,
+        expectedToken = session.token,
+      )
     streamWriter!!.startCommandReader { command ->
       if (command == VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME) {
         encoder?.requestKeyFrame()
@@ -260,8 +277,11 @@ object VideoServer {
       throw error
     }
     session.token?.let {
+      // `proto=` advertises the pre-stream token-handshake version so a handshake-aware host can
+      // negotiate before connecting (issue #4729); a pre-handshake host simply ignores the field.
       println(
-        "VIDEO_SESSION_READY token=$it pid=${android.os.Process.myPid()} socket=${session.socketName}"
+        "VIDEO_SESSION_READY token=$it pid=${android.os.Process.myPid()} " +
+          "socket=${session.socketName} proto=${VideoHandshake.PROTOCOL_VERSION}"
       )
     }
 
@@ -281,11 +301,14 @@ object VideoServer {
     // Encoding loop
     val bufferInfo = MediaCodec.BufferInfo()
     while (running) {
+      // Snapshot the volatile streamWriter the shutdown hook nulls concurrently; a null
+      // means teardown has begun, so exit the loop cleanly instead of throwing (#4748).
+      val currentWriter = encodeLoopSnapshot(streamWriter) ?: break
       val index = encoder!!.dequeueOutputBuffer(bufferInfo, 100_000) // 100ms timeout
       if (index >= 0) {
         val buffer = encoder!!.getOutputBuffer(index)
         if (buffer != null) {
-          val success = streamWriter!!.writePacket(buffer, bufferInfo)
+          val success = currentWriter.writePacket(buffer, bufferInfo)
           if (!success) {
             println("Client disconnected")
             break
@@ -307,7 +330,7 @@ object VideoServer {
         capture?.forceFrame()
       }
 
-      if (streamWriter!!.reconnectWindowExpired()) {
+      if (currentWriter.reconnectWindowExpired()) {
         println("VIDEO_CLIENT_RECONNECT_EXPIRED socket=${session.socketName}")
         running = false
       }
@@ -315,6 +338,14 @@ object VideoServer {
 
     running = false
   }
+
+  /**
+   * Snapshot a volatile field the shutdown hook may null on another thread. The encode loop calls
+   * this instead of a `!!` deref so a concurrent null observed mid-shutdown yields a clean stop
+   * signal (null) rather than a [NullPointerException] (#4748). Kept as a seam so the loop's
+   * null-tolerance is unit-testable without the Android capture stack.
+   */
+  internal fun <T : Any> encodeLoopSnapshot(field: T?): T? = field
 
   private fun shutdown() {
     running = false

@@ -13,10 +13,6 @@
     "src/features/video/index.ts",
     "src/features/webrtc/index.ts",
     "src/models/index.ts",
-    "src/utils/interfaces/PlanExecutor.ts",
-    "src/utils/interfaces/PlanSerializer.ts",
-    "src/utils/interfaces/index.ts",
-    "src/utils/ios-cmdline-tools/DeviceAppInspector.ts",
     "src/utils/screenshot-utils.ts",
     "src/vision/index.ts",
     "test/helpers/test-database.ts"

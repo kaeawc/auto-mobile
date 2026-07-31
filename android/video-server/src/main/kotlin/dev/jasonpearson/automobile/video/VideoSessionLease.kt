@@ -4,6 +4,7 @@ import android.os.SystemClock
 import android.system.Os
 import java.io.File
 import java.security.MessageDigest
+import java.util.HexFormat
 import org.json.JSONObject
 
 /**
@@ -68,11 +69,8 @@ private object JsonVideoSessionLeaseSerializer : VideoSessionLeaseSerializer {
  * re-derives to prove ownership.
  */
 internal fun sessionTokenSha256Hex(token: String): String =
-  MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.US_ASCII)).joinToString(
-    ""
-  ) {
-    "%02x".format(it.toInt() and 0xFF)
-  }
+  HexFormat.of()
+    .formatHex(MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.US_ASCII)))
 
 object VideoSessionArguments {
   private const val DEFAULT_SOCKET_NAME = "automobile_video"

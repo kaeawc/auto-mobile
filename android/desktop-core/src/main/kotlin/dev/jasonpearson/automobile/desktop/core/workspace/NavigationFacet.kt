@@ -56,7 +56,12 @@ private sealed interface NavigationFacetState {
 
   data class Error(val message: String) : NavigationFacetState
 
-  data class Resolved(val graph: NavigationGraph) : NavigationFacetState
+  /**
+   * A rendered graph, tagged with the [appId] it belongs to. The tag lets a live re-pull retain the
+   * on-screen graph only when it's the SAME app (a generation refresh); an in-place app switch (A
+   * -> B) must instead hide A's graph and show Loading until B's snapshot arrives.
+   */
+  data class Resolved(val appId: String, val graph: NavigationGraph) : NavigationFacetState
 }
 
 /**
@@ -229,12 +234,16 @@ fun NavigationFacet(
       state = if (noNavigationApp) NavigationFacetState.NoApp else NavigationFacetState.Loading
       return@LaunchedEffect
     }
-    // Only show the Loading spinner for the FIRST pull of an app. A live re-pull (same app, new
-    // updateGeneration) keeps the currently-rendered graph on screen until the fresh snapshot
-    // arrives, so the graph grows in place rather than blanking on every navigation step. A
-    // superseded in-flight pull is cancelled by LaunchedEffect when the keys change (its
-    // CancellationException propagates, so it never writes stale state).
-    if (state !is NavigationFacetState.Resolved) {
+    // Retain the on-screen graph during a pull ONLY for a same-app refresh (a new
+    // updateGeneration for the already-displayed app): the graph then grows in place rather than
+    // blanking on every navigation step. For the FIRST pull of an app OR an in-place app switch
+    // (A -> B, appId changed) we must hide the old graph and show Loading until the new snapshot
+    // arrives — otherwise B would render stale A while getNavigationGraph(B) runs. A superseded
+    // in-flight pull is cancelled by LaunchedEffect when the keys change (its CancellationException
+    // propagates, so it never writes stale state).
+    val displayed = state
+    val sameAppRefresh = displayed is NavigationFacetState.Resolved && displayed.appId == appId
+    if (!sameAppRefresh) {
       state = NavigationFacetState.Loading
     }
     // Read off the UI thread: the resource read hits the daemon and would otherwise block
@@ -247,7 +256,7 @@ fun NavigationFacet(
         ) {
           is Result.Success ->
             if (result.data.screens.isEmpty()) NavigationFacetState.Empty
-            else NavigationFacetState.Resolved(result.data)
+            else NavigationFacetState.Resolved(appId, result.data)
           is Result.Error ->
             NavigationFacetState.Error(result.message ?: "Failed to load navigation graph")
           // A one-shot read resolves to Success/Error; treat a stray Loading as retryable.

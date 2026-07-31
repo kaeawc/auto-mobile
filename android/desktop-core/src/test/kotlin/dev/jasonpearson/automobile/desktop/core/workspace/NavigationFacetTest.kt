@@ -24,6 +24,7 @@ import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.SharedFlow
 import org.junit.Assert.assertEquals
@@ -214,6 +215,119 @@ class NavigationFacetTest {
       onNodeWithText("Details").assertExists()
       assertEquals("a same-app update must trigger a second app-scoped pull", 2, calls.get())
     }
+
+  @Test
+  fun `an in-place app switch hides the previous app graph and shows Loading until the new one resolves`() =
+    runComposeUiTest {
+      // App B's pull is gated so it stays in-flight while we assert app A's graph is hidden.
+      val gateB = CompletableDeferred<Unit>()
+      val aSource =
+        StubNavigationDataSource(
+          Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList()))
+        )
+      val bSource =
+        object : NavigationDataSource {
+          override suspend fun getNavigationGraph(): Result<NavigationGraph> {
+            gateB.await()
+            return Result.Success(NavigationGraph(listOf(screen("Beta")), emptyList()))
+          }
+        }
+      val fake = FakeObservationStream()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { fake },
+              navigationDataSourceProvider = { appId ->
+                if (appId == "com.example.b") bSource else aSource
+              },
+            )
+          }
+        }
+      }
+      waitForIdle()
+
+      // Resolve app A; its graph renders.
+      fake.emitNavigation(navUpdate("com.example.a"))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Alpha").fetchSemanticsNodes().isNotEmpty()
+      }
+
+      // Foreground switches to app B (no disconnect). While B's pull is suspended the facet must
+      // hide A's graph and show Loading — not keep rendering stale A.
+      fake.emitNavigation(navUpdate("com.example.b"))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Resolving navigation graph", substring = true)
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
+      assertTrue(
+        "an in-place app switch must hide the previous app's graph",
+        onAllNodesWithText("Alpha").fetchSemanticsNodes().isEmpty(),
+      )
+
+      // Once B resolves it renders B.
+      gateB.complete(Unit)
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Beta").fetchSemanticsNodes().isNotEmpty()
+      }
+      onNodeWithText("Beta").assertExists()
+    }
+
+  @Test
+  fun `a same-app refresh keeps the current graph on screen while re-pulling`() = runComposeUiTest {
+    // The 2nd (same-app) pull is gated so we can observe the in-flight refresh window.
+    val gate = CompletableDeferred<Unit>()
+    val calls = AtomicInteger(0)
+    val refreshingSource =
+      object : NavigationDataSource {
+        override suspend fun getNavigationGraph(): Result<NavigationGraph> {
+          if (calls.incrementAndGet() >= 2) {
+            gate.await()
+            return Result.Success(
+              NavigationGraph(listOf(screen("Home"), screen("Details")), emptyList())
+            )
+          }
+          return Result.Success(NavigationGraph(listOf(screen("Home")), emptyList()))
+        }
+      }
+    val fake = FakeObservationStream()
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+        MaterialTheme {
+          NavigationFacet(
+            column = column(),
+            observationStreamFactory = { fake },
+            navigationDataSourceProvider = { refreshingSource },
+          )
+        }
+      }
+    }
+    waitForIdle()
+
+    fake.emitNavigation(navUpdate("com.example.app"))
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("Home").fetchSemanticsNodes().isNotEmpty()
+    }
+
+    // Same-app refresh: the 2nd pull is suspended on the gate. The existing graph must stay on
+    // screen (no Loading blank) — this is the round-6 behavior we must not regress.
+    fake.emitNavigation(navUpdate("com.example.app"))
+    waitUntil(timeoutMillis = 5_000) { calls.get() >= 2 }
+    onNodeWithText("Home").assertExists()
+    assertTrue(
+      "a same-app refresh must not blank the graph to Loading",
+      onAllNodesWithText("Resolving navigation graph", substring = true)
+        .fetchSemanticsNodes()
+        .isEmpty(),
+    )
+
+    gate.complete(Unit)
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("Details").fetchSemanticsNodes().isNotEmpty()
+    }
+  }
 
   @Test
   fun `shows the no-app guidance when a connected stream reports a null current app`() =

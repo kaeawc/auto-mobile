@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.video
 
 import java.io.File
 import java.security.MessageDigest
+import java.util.HexFormat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -49,11 +50,8 @@ class VideoSessionLeaseTest {
     )
 
   private fun expectedHash(token: String): String =
-    MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.US_ASCII)).joinToString(
-      ""
-    ) {
-      "%02x".format(it.toInt() and 0xFF)
-    }
+    HexFormat.of()
+      .formatHex(MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.US_ASCII)))
 
   @Test
   fun writesHeartbeatInDeviceElapsedRealtimeDomainAndRemovesLeaseOnStop() {

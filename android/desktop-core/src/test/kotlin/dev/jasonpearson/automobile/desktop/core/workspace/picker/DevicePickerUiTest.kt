@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -23,8 +24,11 @@ class DevicePickerUiTest {
       PickerDevice("i15", "iPhone 15", Platform.Ios, DeviceState.Shutdown, "17", "iOS 17", "arm64"),
     )
 
-  private fun content(selected: Set<String> = emptySet()) =
-    DevicePickerUiState.Content(devices, PickerFilters(), selected)
+  private fun content(
+    selected: Set<String> = emptySet(),
+    bootingIds: Set<String> = emptySet(),
+    bootErrors: Map<String, String> = emptyMap(),
+  ) = DevicePickerUiState.Content(devices, PickerFilters(), selected, bootingIds, bootErrors)
 
   @Test
   fun `renders rail options and device cards`() = runComposeUiTest {
@@ -33,7 +37,53 @@ class DevicePickerUiTest {
     onNodeWithContentDescription("Select filter Android").assertIsDisplayed()
     onNodeWithText("Pixel 8", substring = true).assertIsDisplayed()
     onNodeWithContentDescription("Select Pixel 8").assertIsDisplayed()
-    onNodeWithContentDescription("iPhone 15 (not booted)").assertIsDisplayed()
+    onNodeWithContentDescription("Boot iPhone 15").assertIsDisplayed()
+    onNodeWithText("Click to boot").assertIsDisplayed()
+  }
+
+  @Test
+  fun `clicking a shut-down card dispatches BootDevice`() = runComposeUiTest {
+    var action: DevicePickerAction? = null
+    setContent {
+      MaterialTheme { DevicePicker(content(), onAction = { action = it }, onClose = {}) }
+    }
+    onNodeWithContentDescription("Boot iPhone 15").performClick()
+    assertEquals(DevicePickerAction.BootDevice("i15"), action)
+  }
+
+  @Test
+  fun `a booting card shows Booting and is not re-triggerable`() = runComposeUiTest {
+    var action: DevicePickerAction? = null
+    setContent {
+      MaterialTheme {
+        DevicePicker(
+          content(bootingIds = setOf("i15")),
+          onAction = { action = it },
+          onClose = {},
+        )
+      }
+    }
+    onNodeWithText("Booting…").assertIsDisplayed()
+    onNodeWithContentDescription("Boot iPhone 15").assertDoesNotExist()
+    onNodeWithContentDescription("Booting iPhone 15").performClick()
+    assertNull(action) // a boot in flight is not clickable
+  }
+
+  @Test
+  fun `a failed card offers a retry that dispatches BootDevice`() = runComposeUiTest {
+    var action: DevicePickerAction? = null
+    setContent {
+      MaterialTheme {
+        DevicePicker(
+          content(bootErrors = mapOf("i15" to "boom")),
+          onAction = { action = it },
+          onClose = {},
+        )
+      }
+    }
+    onNodeWithText("Boot failed · Click to retry").assertIsDisplayed()
+    onNodeWithContentDescription("Retry boot iPhone 15").performClick()
+    assertEquals(DevicePickerAction.BootDevice("i15"), action)
   }
 
   @Test

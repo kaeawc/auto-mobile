@@ -29,6 +29,12 @@ sealed interface DevicePickerUiState {
     val devices: List<PickerDevice>,
     val filters: PickerFilters = PickerFilters(),
     val selectedIds: Set<String> = emptySet(),
+    /**
+     * Ids of devices whose boot is currently in flight (UI-only transient, not a [DeviceState]).
+     */
+    val bootingIds: Set<String> = emptySet(),
+    /** Per-device boot failure message; presence marks a card as retryable. */
+    val bootErrors: Map<String, String> = emptyMap(),
   ) : DevicePickerUiState
 
   data class Error(val message: String) : DevicePickerUiState
@@ -49,6 +55,9 @@ sealed interface DevicePickerAction {
 
   data class ToggleSelect(val deviceId: String) : DevicePickerAction
 
+  /** Boot a shut-down device (its card was clicked). Ignored for already-booted/booting devices. */
+  data class BootDevice(val deviceId: String) : DevicePickerAction
+
   data object ClearSelection : DevicePickerAction
 
   data object ObserveSelected : DevicePickerAction
@@ -68,6 +77,7 @@ sealed interface DevicePickerEffect {
  */
 class DevicePickerViewModel(
   private val resourceClient: McpResourceClient,
+  private val bootController: DeviceBootController,
   private val scope: CoroutineScope,
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
@@ -94,6 +104,7 @@ class DevicePickerViewModel(
       is DevicePickerAction.SetQuery -> updateFilters { it.copy(query = action.query) }
       is DevicePickerAction.ClearFilter -> clearFilter(action.dimension)
       is DevicePickerAction.ToggleSelect -> toggleSelect(action.deviceId)
+      is DevicePickerAction.BootDevice -> bootDevice(action.deviceId)
       is DevicePickerAction.ClearSelection -> updateContent { it.copy(selectedIds = emptySet()) }
       is DevicePickerAction.ObserveSelected -> observeSelected()
       is DevicePickerAction.Refresh -> load()
@@ -104,25 +115,87 @@ class DevicePickerViewModel(
     _state.value = DevicePickerUiState.Loading
     scope.launch {
       try {
-        // Resource reads hit the daemon (blocking) — keep them off the UI thread.
-        val devices =
-          withContext(ioDispatcher) {
-            val booted =
-              (resourceClient.readResource(BOOTED_URI) as? ResourceReadResult.Success)?.let {
-                DeviceResourceParser.parseBootedDevices(it.content)?.devices
-              } ?: emptyList()
-            val images =
-              (resourceClient.readResource(IMAGES_URI) as? ResourceReadResult.Success)?.let {
-                DeviceResourceParser.parseDeviceImages(it.content)?.images
-              } ?: emptyList()
-            buildPickerDevices(booted, images)
-          }
+        val devices = fetchDevices()
         LOG.info("Picker loaded ${devices.size} devices")
         _state.value = DevicePickerUiState.Content(devices)
       } catch (e: Exception) {
         LOG.warn("Failed to load picker devices: ${e.message}", e)
         _state.value = DevicePickerUiState.Error(e.message ?: "Failed to load devices")
       }
+    }
+  }
+
+  // Resource reads hit the daemon (blocking) — keep them off the UI thread.
+  private suspend fun fetchDevices(): List<PickerDevice> =
+    withContext(ioDispatcher) {
+      val booted =
+        (resourceClient.readResource(BOOTED_URI) as? ResourceReadResult.Success)?.let {
+          DeviceResourceParser.parseBootedDevices(it.content)?.devices
+        } ?: emptyList()
+      val images =
+        (resourceClient.readResource(IMAGES_URI) as? ResourceReadResult.Success)?.let {
+          DeviceResourceParser.parseDeviceImages(it.content)?.images
+        } ?: emptyList()
+      buildPickerDevices(booted, images)
+    }
+
+  private fun bootDevice(deviceId: String) {
+    val content = _state.value as? DevicePickerUiState.Content ?: return
+    if (deviceId in content.bootingIds) return // already booting — no double-boot
+    val device = content.devices.firstOrNull { it.id == deviceId } ?: return
+    if (device.state != DeviceState.Shutdown) return // only shut-down cards boot
+    updateContent {
+      it.copy(bootingIds = it.bootingIds + deviceId, bootErrors = it.bootErrors - deviceId)
+    }
+    scope.launch {
+      val result = bootController.boot(device)
+      if (result.isSuccess) {
+        reloadAfterBoot(device)
+      } else {
+        val message = result.exceptionOrNull()?.message ?: "Failed to boot ${device.name}"
+        updateContent {
+          it.copy(
+            bootingIds = it.bootingIds - deviceId,
+            bootErrors = it.bootErrors + (deviceId to message),
+          )
+        }
+      }
+    }
+  }
+
+  /**
+   * Reload after a boot succeeded and auto-select the now-booted device so Observe is usable. A
+   * booted device is re-keyed by the daemon (its id becomes a runtime serial), so it is matched
+   * back by name, not by the shut-down id.
+   */
+  private suspend fun reloadAfterBoot(bootedDevice: PickerDevice) {
+    val devices =
+      try {
+        fetchDevices()
+      } catch (e: Exception) {
+        LOG.warn("Reload after boot failed for ${bootedDevice.name}: ${e.message}", e)
+        updateContent {
+          it.copy(
+            bootingIds = it.bootingIds - bootedDevice.id,
+            bootErrors =
+              it.bootErrors + (bootedDevice.id to (e.message ?: "Reload after boot failed")),
+          )
+        }
+        return
+      }
+    val nowBooted = devices.firstOrNull {
+      it.name == bootedDevice.name && it.state == DeviceState.Booted
+    }
+    updateContent { content ->
+      content.copy(
+        devices = devices,
+        bootingIds = prunedBootingIds(content.bootingIds - bootedDevice.id, devices),
+        selectedIds =
+          if (nowBooted != null) content.selectedIds + nowBooted.id else content.selectedIds,
+        bootErrors =
+          if (nowBooted != null) content.bootErrors - bootedDevice.id
+          else content.bootErrors + (bootedDevice.id to "Boot did not complete"),
+      )
     }
   }
 
@@ -171,3 +244,9 @@ class DevicePickerViewModel(
 }
 
 private fun <T> Set<T>.toggle(value: T): Set<T> = if (value in this) this - value else this + value
+
+/** Drop any in-flight boot ids that a reload now reports as booted. */
+private fun prunedBootingIds(bootingIds: Set<String>, devices: List<PickerDevice>): Set<String> {
+  val bootedIds = devices.filter { it.state == DeviceState.Booted }.map { it.id }.toSet()
+  return bootingIds - bootedIds
+}

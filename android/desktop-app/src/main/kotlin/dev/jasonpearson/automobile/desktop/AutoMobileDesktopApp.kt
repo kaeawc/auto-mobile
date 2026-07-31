@@ -41,6 +41,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAction
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootController
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -111,8 +112,11 @@ fun AutoMobileDesktopApp(
   val workspaceState by workspaceViewModel.state.collectAsState()
 
   val resourceClient = remember(graph) { DaemonMcpResourceClient(graph.autoMobileClient) }
+  val bootController = remember(graph) { RealDeviceBootController(graph.autoMobileClient) }
   val pickerViewModel =
-    remember(scope, resourceClient) { DevicePickerViewModel(resourceClient, scope) }
+    remember(scope, resourceClient, bootController) {
+      DevicePickerViewModel(resourceClient, bootController, scope)
+    }
   val pickerState by pickerViewModel.state.collectAsState()
   var pickerOpen by remember { mutableStateOf(false) }
   var paletteOpen by remember { mutableStateOf(false) }

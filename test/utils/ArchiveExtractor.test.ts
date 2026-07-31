@@ -106,13 +106,17 @@ describe("DefaultArchiveExtractor", () => {
     executor.filesToWrite = ["libwebp-1.6.0/bin/cwebp"];
     const extractor = new DefaultArchiveExtractor(executor);
 
-    await extractor.extractTarGz({ archivePath: "/tmp/a b/archive.tar.gz", destinationDir });
+    // The extractor resolves the archive path; assert against the resolved form so
+    // the expectation holds on Windows (where a POSIX-style path gains a drive).
+    const archivePath = "/tmp/a b/archive.tar.gz";
+    const resolvedArchivePath = path.resolve(archivePath);
+    await extractor.extractTarGz({ archivePath, destinationDir });
 
     // Listing precedes extraction, both argv-first (no shell string).
     expect(executor.calls[0].file).toBe("tar");
-    expect(executor.calls[0].args).toEqual(["-tzf", "/tmp/a b/archive.tar.gz"]);
+    expect(executor.calls[0].args).toEqual(["-tzf", resolvedArchivePath]);
     expect(executor.calls[1].args[0]).toBe("-xzf");
-    expect(executor.calls[1].args[1]).toBe("/tmp/a b/archive.tar.gz");
+    expect(executor.calls[1].args[1]).toBe(resolvedArchivePath);
     expect(executor.calls[1].args[2]).toBe("-C");
     // Extraction targets a fresh staging dir inside the destination, not the destination itself.
     const stagingDir = executor.calls[1].args[3];

@@ -817,6 +817,40 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
 
+    test("keeps criteria auto-start available after a process exit when recovery is disabled", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      try {
+        const images: DeviceInfo[] = [
+          { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+        ];
+        const manager = new FakeDeviceManagerWithStartedProcess(images);
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          manager,
+          new DefaultRetryExecutor(fakeTimer)
+        );
+
+        await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
+        manager.bootedDevices = [];
+        manager.childProcess.emit("exit", 1, null);
+        await new Promise(resolve => setImmediate(resolve));
+
+        await expect(devicePool.assignMultipleDevices(["session-2"], 1000, "android"))
+          .resolves.toEqual(new Map([["session-2", "emulator-5554"]]));
+        expect(manager.startedDevices).toHaveLength(2);
+      } finally {
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
     test("reboots a disconnected pool-started Android emulator from its source AVD when enabled", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";

@@ -46,4 +46,21 @@ describe("BoundedAndroidDeviceReboot", () => {
     expect(attempts).toBe(2);
     expect(timer.getSleepHistory()).toEqual([1_000]);
   });
+
+  it("exhausts the target budget across successful crash-recovery cycles", async () => {
+    let attempts = 0;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const recovery = new BoundedAndroidDeviceReboot(timer, 2);
+    const reboot = async (): Promise<void> => {
+      attempts++;
+    };
+
+    await expect(recovery.run(target, reboot)).resolves.toBe(true);
+    await expect(recovery.run(target, reboot)).resolves.toBe(true);
+    await expect(recovery.run(target, reboot)).resolves.toBe(false);
+
+    expect(attempts).toBe(2);
+    expect(timer.getSleepHistory()).toEqual([1_000]);
+  });
 });

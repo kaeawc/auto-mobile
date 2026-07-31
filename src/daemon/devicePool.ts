@@ -979,20 +979,26 @@ export class DevicePool {
       device.sessionId = null;
     }
     device.status = "idle";
-    if (recoverAndroidEmulator) {
+    if (recoverAndroidEmulator && this.shouldRebootDisconnectedAndroidDevice(device)) {
       await this.removeDisconnectedDevice(device.id, false);
       return;
     }
     await this.removeDevice(device.id);
   }
 
+  private shouldRebootDisconnectedAndroidDevice(
+    device: PooledDevice
+  ): device is PooledDevice & { avdName: string } {
+    return (
+      isAndroidRebootOnDeathEnabled() &&
+      device.platform === "android" &&
+      typeof device.avdName === "string" &&
+      !this.rebootingAndroidAvdNames.has(device.avdName)
+    );
+  }
+
   private async rebootDisconnectedAndroidDevice(device: PooledDevice): Promise<boolean> {
-    if (
-      !isAndroidRebootOnDeathEnabled() ||
-      device.platform !== "android" ||
-      !device.avdName ||
-      this.rebootingAndroidAvdNames.has(device.avdName)
-    ) {
+    if (!this.shouldRebootDisconnectedAndroidDevice(device)) {
       return false;
     }
 

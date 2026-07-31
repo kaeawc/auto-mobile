@@ -13,6 +13,7 @@ export interface AndroidDeviceReboot {
  */
 export class BoundedAndroidDeviceReboot implements AndroidDeviceReboot {
   private readonly backoff = sequenceBackoff([1_000]);
+  private readonly attemptsByTarget: Map<string, number> = new Map();
 
   constructor(
     private readonly timer: Timer,
@@ -20,17 +21,32 @@ export class BoundedAndroidDeviceReboot implements AndroidDeviceReboot {
   ) {}
 
   async run(target: DeviceInfo, reboot: () => Promise<void>): Promise<boolean> {
-    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+    const targetKey = `${target.platform}:${target.name}`;
+    let attempts = this.attemptsByTarget.get(targetKey) ?? 0;
+    if (attempts >= this.maxAttempts) {
+      logger.warn(
+        `[Android reboot] Restart budget exhausted for ${target.name} (${attempts}/${this.maxAttempts})`
+      );
+      return false;
+    }
+
+    if (attempts > 0) {
+      await this.timer.sleep(this.backoff.delayForAttempt(attempts));
+    }
+
+    while (attempts < this.maxAttempts) {
+      attempts++;
+      this.attemptsByTarget.set(targetKey, attempts);
       try {
         await reboot();
         return true;
       } catch (error) {
         logger.warn(
-          `[Android reboot] Failed to restart ${target.name} (attempt ${attempt}/${this.maxAttempts}): ${error}`,
+          `[Android reboot] Failed to restart ${target.name} (attempt ${attempts}/${this.maxAttempts}): ${error}`,
           error
         );
-        if (attempt < this.maxAttempts) {
-          await this.timer.sleep(this.backoff.delayForAttempt(attempt));
+        if (attempts < this.maxAttempts) {
+          await this.timer.sleep(this.backoff.delayForAttempt(attempts));
         }
       }
     }

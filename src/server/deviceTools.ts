@@ -399,6 +399,9 @@ export function registerDeviceTools() {
 
       const deviceUtils = getDeviceToolsDependencies().deviceManagerFactory();
       perf.startOperation("killProcess");
+      if (args.device.platform === "android" && DaemonState.getInstance().isInitialized()) {
+        DaemonState.getInstance().getDevicePool().markIntentionalShutdown(args.device.deviceId);
+      }
       await deviceUtils.killDevice(args.device);
       perf.endOperation("killProcess");
 

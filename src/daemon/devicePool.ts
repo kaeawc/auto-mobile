@@ -123,6 +123,7 @@ export class DevicePool {
   private readonly androidDeviceReboot: AndroidDeviceReboot;
   private readonly rebootingAndroidAvdNames: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
+  private readonly intentionallyStoppedDeviceIds: Set<string> = new Set();
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
@@ -313,6 +314,9 @@ export class DevicePool {
     this.clearAutoStartSuppressionForBootedDevice(device);
     const existing = this.devices.get(device.deviceId);
     if (existing) {
+      if (sourceImage?.platform === "android") {
+        existing.avdName ??= sourceImage.name;
+      }
       // A successful (re)boot of an errored, idle device clears its failure state so
       // criteria autoboot can hand it out instead of failing with "no devices match".
       if (existing.status === "error" && !existing.sessionId) {
@@ -377,6 +381,10 @@ export class DevicePool {
 
   async removeDisconnectedDevice(deviceId: string, mayBeStaleSignal: boolean = true): Promise<void> {
     const device = this.devices.get(deviceId);
+    if (this.intentionallyStoppedDeviceIds.delete(deviceId)) {
+      await this.removeDevice(deviceId);
+      return;
+    }
     if (!device || device.sessionId) {
       await this.removeDevice(deviceId);
       return;
@@ -396,8 +404,13 @@ export class DevicePool {
       return false;
     }
     try {
-      const booted = await this.deviceManager.getBootedDevices("android");
-      if (!booted.some(candidate => candidate.deviceId === device.id)) {
+      resetAdbDeviceListCache();
+      const discovery = await this.deviceManager.getBootedDevicesDetailed("android");
+      if (!discovery.succeededPlatforms.has("android")) {
+        logger.warn(`[DevicePool] Retained ${device.id}: Android discovery failed during stale-disconnect check`);
+        return true;
+      }
+      if (!discovery.devices.some(candidate => candidate.deviceId === device.id)) {
         return false;
       }
       logger.info(
@@ -407,6 +420,19 @@ export class DevicePool {
     } catch (error) {
       logger.warn(`[DevicePool] Could not verify rebooted Android emulator ${device.id}: ${error}`, error);
       return false;
+    }
+  }
+
+  async isCurrentDisconnectedDevice(device: PooledDevice): Promise<boolean> {
+    if (this.devices.get(device.id) !== device || this.intentionallyStoppedDeviceIds.has(device.id)) {
+      return false;
+    }
+    return !await this.wasRebootedAndroidDeviceRediscovered(device);
+  }
+
+  markIntentionalShutdown(deviceId: string): void {
+    if (this.devices.has(deviceId)) {
+      this.intentionallyStoppedDeviceIds.add(deviceId);
     }
   }
 
@@ -454,7 +480,11 @@ export class DevicePool {
         }
       }
 
-      await this.removeDevice(device.id);
+      await this.evictMissingPooledDevice(
+        device,
+        "not present in refresh discovery",
+        true
+      );
       removedCount++;
     }
 
@@ -962,7 +992,7 @@ export class DevicePool {
       return true;
     }
 
-    await this.evictMissingPooledDevice(device, "not present in adb devices");
+    await this.evictMissingPooledDevice(device, "not present in adb devices", true);
     return false;
   }
 
@@ -978,7 +1008,13 @@ export class DevicePool {
         device.id,
         `device-disconnected:${device.id}`
       );
+      if (this.devices.get(device.id) !== device) {
+        return;
+      }
       device.sessionId = null;
+    }
+    if (this.devices.get(device.id) !== device) {
+      return;
     }
     device.status = "idle";
     if (recoverAndroidEmulator && this.shouldRebootDisconnectedAndroidDevice(device)) {
@@ -1006,6 +1042,7 @@ export class DevicePool {
 
     const avdName = device.avdName;
     this.rebootingAndroidAvdNames.add(avdName);
+    await this.stopTrackedEmulatorProcess(device.id);
     await this.removeDevice(device.id);
     try {
       const target: DeviceInfo = {
@@ -1030,6 +1067,25 @@ export class DevicePool {
     } finally {
       this.rebootingAndroidAvdNames.delete(avdName);
     }
+  }
+
+  private async stopTrackedEmulatorProcess(deviceId: string): Promise<void> {
+    const childProcess = this.startedDeviceProcesses.get(deviceId);
+    this.startedDeviceProcesses.delete(deviceId);
+    if (!childProcess || typeof childProcess.kill !== "function") {
+      return;
+    }
+
+    if (!("exitCode" in childProcess) || childProcess.exitCode !== null) {
+      childProcess.kill();
+      return;
+    }
+
+    const exited = new Promise<void>(resolve => {
+      childProcess.once("exit", () => resolve());
+    });
+    childProcess.kill();
+    await Promise.race([exited, this.timer.sleep(1_000)]);
   }
 
   private trackStartedDeviceProcess(device: BootedDevice, childProcess: ChildProcess | null | undefined): void {

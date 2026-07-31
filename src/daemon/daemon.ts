@@ -1183,6 +1183,7 @@ export class Daemon {
         }
 
         for (const [deviceId, recordingIds] of missingByDevice.entries()) {
+          const pooledDeviceAtDisconnect = this.devicePool.getDevice(deviceId);
           let deviceCleanupSucceeded = true;
 
           // Stop performance monitoring for this device
@@ -1217,6 +1218,16 @@ export class Daemon {
             } finally {
               this.stoppingRecordings.delete(recordingId);
             }
+          }
+
+          if (
+            pooledDeviceAtDisconnect &&
+            !await this.devicePool.isCurrentDisconnectedDevice(pooledDeviceAtDisconnect)
+          ) {
+            logger.info(
+              `[DisconnectMonitor] Skipping stale disconnect cleanup for recovered device ${deviceId}`
+            );
+            continue;
           }
 
           // Cancel active executions and release the session so the test fails

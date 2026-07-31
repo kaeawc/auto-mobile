@@ -228,6 +228,21 @@ describe("DevicePool", () => {
       expect(devicePool.getTotalDeviceCount()).toBe(1);
       expect(devicePool.getAvailableDeviceCount()).toBe(1);
     });
+
+    test("records the source AVD when a recovery boot races with pool refresh", async () => {
+      const ready = createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)");
+      const source: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        source: "local",
+      };
+      await devicePool.initializeWithDevices([ready]);
+
+      await devicePool.addDevice(ready, source);
+
+      expect(devicePool.getDevice("emulator-5554")?.avdName).toBe("Pixel 8");
+    });
   });
 
   describe("device-ready notifications", () => {
@@ -844,7 +859,9 @@ describe("DevicePool", () => {
 
     test("keeps criteria auto-start available after a process exit when recovery is disabled", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      const originalRebootOnDeathAlias = process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;
       delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      delete process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;
       try {
         const images: DeviceInfo[] = [
           { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
@@ -872,6 +889,11 @@ describe("DevicePool", () => {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
         } else {
           process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+        if (originalRebootOnDeathAlias === undefined) {
+          delete process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeathAlias;
         }
       }
     });
@@ -903,6 +925,39 @@ describe("DevicePool", () => {
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
         expect(devicePool.getDevice("Pixel 8")?.avdName).toBe("Pixel 8");
         expect(sessionManager.getSession("session-1")).toBeNull();
+      } finally {
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
+    test("does not recover an emulator intentionally shut down by the client", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      try {
+        const images: DeviceInfo[] = [
+          { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+        ];
+        const manager = new FakeDeviceManagerWithStartedProcess(images);
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          manager,
+          new DefaultRetryExecutor(fakeTimer)
+        );
+
+        await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
+        devicePool.markIntentionalShutdown("emulator-5554");
+        manager.childProcess.emit("exit", 0, null);
+        await new Promise(resolve => setImmediate(resolve));
+
+        expect(manager.startedDevices).toHaveLength(1);
+        expect(devicePool.getDevice("emulator-5554")).toBeNull();
       } finally {
         if (originalRebootOnDeath === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;

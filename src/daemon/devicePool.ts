@@ -1131,7 +1131,7 @@ export class DevicePool {
     childProcess.once("exit", handleExit);
     const exitCode = (childProcess as { exitCode?: number | null }).exitCode;
     const signalCode = (childProcess as { signalCode?: NodeJS.Signals | null }).signalCode;
-    if (exitCode !== undefined && (exitCode !== null || signalCode != null)) {
+    if (exitCode !== undefined && (exitCode !== null || signalCode !== null && signalCode !== undefined)) {
       handleExit(exitCode, signalCode ?? null);
     }
   }

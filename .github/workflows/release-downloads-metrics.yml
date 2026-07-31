@@ -1,0 +1,59 @@
+name: "Release Download Metrics"
+
+# Snapshot cumulative GitHub release-asset download counts + npm daily downloads
+# once a day and commit the dated snapshot to main. GitHub's API exposes only the
+# cumulative count per asset, so daily figures are only recoverable by diffing
+# consecutive daily snapshots (see docs/metrics/downloads.md). History before the
+# first run is unrecoverable — the first run seeds day-0.
+on:
+  workflow_dispatch:
+  schedule:
+    # 05:17 UTC daily — off-peak, and offset from other on-the-hour jobs so the
+    # runner pool isn't contended.
+    - cron: "17 5 * * *"
+
+# Only one snapshot job at a time; a second run would race the push to main.
+concurrency:
+  group: release-download-metrics
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    name: "Snapshot download counts"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          # Always operate on main, regardless of the ref a workflow_dispatch was
+          # triggered from — otherwise the privileged push below would publish the
+          # dispatch branch's commits to protected main.
+          ref: main
+          # Full history so the direct push to main isn't rejected as a shallow
+          # update, and the admin token so it bypasses the green-main ruleset.
+          fetch-depth: 0
+          token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.9
+
+      - name: "Collect and push download snapshot"
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # The collector runs INSIDE the script, after each hard-reset to
+          # origin/main, so the snapshot is always regenerated on fresh main and
+          # the push is conflict-free by construction (no rebase; issue #3590).
+          bash scripts/metrics/push-download-snapshot.sh

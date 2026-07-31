@@ -4,7 +4,7 @@ import {
   h264MacroblocksPerFrame,
   h264SpsLevelIdc,
   h264SpsProfileLevelId,
-  isCompatibleMainProfile
+  isCompatibleConstrainedBaselineProfile
 } from "../../../src/features/webrtc/h264Level";
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
@@ -74,31 +74,31 @@ describe("h264SpsProfileLevelId / h264SpsLevelIdc (property-based)", () => {
   });
 });
 
-describe("isCompatibleMainProfile (property-based)", () => {
-  test("accepts exactly the Main family (first byte 0x4d) parsed from an SPS", () => {
+describe("isCompatibleConstrainedBaselineProfile (property-based)", () => {
+  test("accepts exactly the Baseline family (first byte 0x42) parsed from an SPS", () => {
     fc.assert(
       fc.property(validSps, ({ nal, p }) => {
         const id = h264SpsProfileLevelId(nal)!;
-        return isCompatibleMainProfile(id) === (p === 0x4d);
+        return isCompatibleConstrainedBaselineProfile(id) === (p === 0x42);
       }),
       RUN_OPTIONS
     );
   });
 
-  test("accepts any 0x4d-prefixed profile-level-id, ignoring the profile-iop byte", () => {
+  test("accepts any 0x42-prefixed profile-level-id, including plain-Baseline (#reconnect-loop fix)", () => {
     const suffix = fc.string({ unit: fc.constantFrom("0", "2", "8", "a", "e", "f"), minLength: 4, maxLength: 4 });
     fc.assert(
-      fc.property(suffix, s => isCompatibleMainProfile(`4d${s}`)),
+      fc.property(suffix, s => isCompatibleConstrainedBaselineProfile(`42${s}`)),
       RUN_OPTIONS
     );
   });
 
-  test("rejects non-Main profiles (Baseline 0x42, High 0x64, and any non-0x4d first byte)", () => {
-    const nonMainByte = fc.integer({ min: 0, max: 255 }).filter(b => b !== 0x4d);
+  test("rejects non-Baseline profiles (Main 0x4d, High 0x64, and any non-0x42 first byte)", () => {
+    const nonBaselineByte = fc.integer({ min: 0, max: 255 }).filter(b => b !== 0x42);
     const suffix = fc.string({ unit: fc.constantFrom("0", "1", "e", "a", "f"), minLength: 4, maxLength: 4 });
     fc.assert(
-      fc.property(nonMainByte, suffix, (b, s) =>
-        isCompatibleMainProfile(`${b.toString(16).padStart(2, "0")}${s}`) === false
+      fc.property(nonBaselineByte, suffix, (b, s) =>
+        isCompatibleConstrainedBaselineProfile(`${b.toString(16).padStart(2, "0")}${s}`) === false
       ),
       RUN_OPTIONS
     );

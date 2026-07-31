@@ -122,6 +122,7 @@ export class DevicePool {
   private readonly onDeviceReady: DeviceReadyListener | undefined;
   private readonly androidDeviceReboot: AndroidDeviceReboot;
   private readonly rebootingAndroidAvdNames: Set<string> = new Set();
+  private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
@@ -366,6 +367,7 @@ export class DevicePool {
     this.devices.delete(deviceId);
     this.deviceSessionStarts.delete(deviceId);
     this.refreshMissingDeviceMisses.delete(deviceId);
+    this.startedDeviceProcesses.delete(deviceId);
     if (this.lastReleasedDeviceId === deviceId) {
       this.lastReleasedDeviceId = null;
     }
@@ -1038,7 +1040,11 @@ export class DevicePool {
       return;
     }
 
+    this.startedDeviceProcesses.set(device.deviceId, childProcess);
     childProcess.once("exit", (code, signal) => {
+      if (this.startedDeviceProcesses.get(device.deviceId) !== childProcess) {
+        return;
+      }
       void this.evictStartedDeviceAfterProcessExit(device.deviceId, code, signal).catch(error => {
         logger.warn(
           `[DevicePool] Failed to evict ${device.deviceId} after emulator process exit: ${error}`,

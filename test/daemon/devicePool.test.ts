@@ -122,6 +122,31 @@ describe("DevicePool", () => {
     }
   }
 
+  class FakeDeviceManagerWithDistinctStartedProcesses extends FakeDeviceManager {
+    readonly childProcesses: FakeChildProcess[] = [];
+
+    async startDevice(device: DeviceInfo, timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS): Promise<FakeChildProcess> {
+      await super.startDevice(device, timeoutMs);
+      this.bootedDevices = this.bootedDevices.map(booted => (
+        booted.deviceId === device.name
+          ? { ...booted, deviceId: "emulator-5554" }
+          : booted
+      ));
+      const childProcess = new FakeChildProcess();
+      this.childProcesses.push(childProcess);
+      return childProcess;
+    }
+
+    async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
+      return {
+        name: device.name,
+        platform: device.platform,
+        deviceId: "emulator-5554",
+        source: device.source,
+      };
+    }
+  }
+
   // Hands back a spawned handle from startDevice, then fails readiness — used to
   // assert the pool cancels a hung boot via handle.kill() (issue #3952). Reuses
   // FakeChildProcess, adding only a kill counter.
@@ -878,6 +903,43 @@ describe("DevicePool", () => {
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
         expect(devicePool.getDevice("Pixel 8")?.avdName).toBe("Pixel 8");
         expect(sessionManager.getSession("session-1")).toBeNull();
+      } finally {
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
+    test("ignores an old emulator process exit after same-serial recovery", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      try {
+        const images: DeviceInfo[] = [
+          { name: "Pixel 8", platform: "android", isRunning: false, deviceId: "emulator-5554", source: "local" },
+        ];
+        const manager = new FakeDeviceManagerWithDistinctStartedProcesses(images);
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          manager,
+          new DefaultRetryExecutor(fakeTimer)
+        );
+
+        await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
+        await devicePool.releaseDevice("emulator-5554");
+        manager.bootedDevices = [];
+        await devicePool.removeDisconnectedDevice("emulator-5554");
+        await devicePool.assignMultipleDevices(["session-2"], 1000, "android");
+
+        manager.childProcesses[0]!.emit("exit", 1, null);
+        await new Promise(resolve => setImmediate(resolve));
+
+        expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-2");
+        expect(sessionManager.getSession("session-2")).not.toBeNull();
       } finally {
         if (originalRebootOnDeath === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;

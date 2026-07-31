@@ -436,6 +436,10 @@ export class DevicePool {
     }
   }
 
+  clearIntentionalShutdown(deviceId: string): void {
+    this.intentionallyStoppedDeviceIds.delete(deviceId);
+  }
+
   private async removeDevicesMissingFrom(
     bootedDeviceIds: Set<string>,
     bootedPlatforms: Set<Platform>,

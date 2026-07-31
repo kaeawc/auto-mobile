@@ -399,10 +399,18 @@ export function registerDeviceTools() {
 
       const deviceUtils = getDeviceToolsDependencies().deviceManagerFactory();
       perf.startOperation("killProcess");
+      const devicePool = DaemonState.getInstance().isInitialized()
+        ? DaemonState.getInstance().getDevicePool()
+        : undefined;
       if (args.device.platform === "android" && DaemonState.getInstance().isInitialized()) {
-        DaemonState.getInstance().getDevicePool().markIntentionalShutdown(args.device.deviceId);
+        devicePool?.markIntentionalShutdown(args.device.deviceId);
       }
-      await deviceUtils.killDevice(args.device);
+      try {
+        await deviceUtils.killDevice(args.device);
+      } catch (error) {
+        devicePool?.clearIntentionalShutdown(args.device.deviceId);
+        throw error;
+      }
       perf.endOperation("killProcess");
 
       perf.startOperation("cleanup");

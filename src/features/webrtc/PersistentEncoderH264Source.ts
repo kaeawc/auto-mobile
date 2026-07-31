@@ -16,6 +16,11 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import {
+  VideoServerJarProvider,
+  type JarIntegrityProbe,
+  type VideoServerJarIntegrity,
+} from "./VideoServerJarProvider";
 import type { H264CaptureSource, H264CaptureSourceTelemetry } from "./H264CaptureSource";
 import {
   VIDEO_SERVER_CODEC_ID_H264,
@@ -275,6 +280,15 @@ export interface PersistentEncoderH264SourceOptions {
   fps?: number;
   /** Local path to the built `automobile-video.jar`. Required to run. */
   jarPath: string;
+  /**
+   * Source of the host-known expected sha256 + size of {@link jarPath} (issue
+   * #4733), used to skip a redundant push when the on-device copy already matches
+   * and to verify remote integrity before `app_process` launch. Injected for
+   * device-free tests; defaults to the shared {@link VideoServerJarProvider}
+   * singleton, which hashes the local jar with the same canonical calculator it
+   * verifies downloads with.
+   */
+  jarIntegrityProvider?: JarIntegrityProbe;
   adbFactory?: AdbClientFactory;
   connector?: SocketConnector;
   timer?: Timer;
@@ -374,6 +388,36 @@ function parseVideoForwardLine(line: string): { port: number; socketName: string
     return null;
   }
   return { port, socketName: destination.slice("localabstract:".length) };
+}
+
+/**
+ * Parse the on-device jar-integrity probe output (issue #4733): the combined
+ * stdout of `sha256sum <jar>` (a `<64-hex>  <path>` line) and `wc -c < <jar>` (a
+ * bare byte count). Order-independent. Returns `null` on any missing/garbled
+ * field — a partial or absent result (jar missing, `sha256sum`/`wc` unavailable)
+ * is treated by the caller as "push needed", never as a match.
+ */
+function parseRemoteJarIntegrity(output: string): VideoServerJarIntegrity | null {
+  let sha256: string | null = null;
+  let size: number | null = null;
+  for (const rawLine of output.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.length === 0) {
+      continue;
+    }
+    if (/^[0-9]+$/.test(line)) {
+      size = Number.parseInt(line, 10);
+      continue;
+    }
+    const shaMatch = /^([a-f0-9]{64})(?:\s|$)/.exec(line);
+    if (shaMatch) {
+      sha256 = shaMatch[1];
+    }
+  }
+  if (sha256 === null || size === null || !Number.isInteger(size) || size < 0) {
+    return null;
+  }
+  return { sha256, size };
 }
 
 function isSafeSessionToken(value: string): boolean {
@@ -510,6 +554,26 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private readonly activeVideoSessionRegistry: ActiveVideoSessionRegistry;
   private readonly maxServerRelaunchAttempts: number;
   private readonly serverRelaunchBackoff: BackoffPolicy;
+  /**
+   * Injected host-integrity source, or `undefined` to lazily default to the
+   * shared {@link VideoServerJarProvider} singleton. Resolved on first use rather
+   * than in the constructor so the `??` default does not count against the
+   * constructor's complexity ratchet.
+   */
+  private readonly jarIntegrityProvider: JarIntegrityProbe | undefined;
+
+  /**
+   * Host-known expected sha256 + size of the local jar (issue #4733), memoized
+   * across relaunches because the on-disk jar does not change during a source's
+   * lifetime.
+   */
+  private expectedJarIntegrity: VideoServerJarIntegrity | null = null;
+  /**
+   * True once the on-device jar has been confirmed byte-identical to the expected
+   * host copy for the current launch. Set when the pre-push probe matches (push
+   * skipped) so the pre-launch verify can reuse that result; reset per session.
+   */
+  private remoteJarVerified = false;
 
   private server: AdbProcess | null = null;
   private socket: StreamSocket | null = null;
@@ -562,6 +626,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       options.socketNameFactory ?? (() => makeOpaqueSocketName(defaultIdGenerator));
     this.activeVideoSessionRegistry =
       options.activeVideoSessionRegistry ?? defaultActiveVideoSessionRegistry;
+    this.jarIntegrityProvider = options.jarIntegrityProvider;
     const relaunchPolicy = PersistentEncoderH264Source.resolveRelaunchPolicy(options);
     this.maxServerRelaunchAttempts = relaunchPolicy.maxAttempts;
     this.serverRelaunchBackoff = relaunchPolicy.backoff;
@@ -736,17 +801,14 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     const session = this.createSession();
     this.session = session;
     this.deviceProcessId = null;
+    this.remoteJarVerified = false;
     // Claim this session's socket name BEFORE reconcile opens/owns any forward,
     // so a sibling session's concurrent orphan sweep can never mistake our
     // about-to-be-created forward for a stranded one. Cleared in teardown().
     this.activeVideoSessionRegistry.add(this.options.device.deviceId, session.socketName);
     await this.reconcileExpiredLeases(adb);
     if (!this.running) {return null;}
-    await this.withTimeout(
-      adb.executeCommand(`push "${this.options.jarPath}" ${VIDEO_SERVER_REMOTE_JAR_PATH}`),
-      this.commandTimeoutMs,
-      "adb push video-server jar"
-    );
+    await this.ensureRemoteJar(adb);
     if (!this.running) {return null;}
     const forward = await this.withTimeout(
       adb.executeCommand(`forward tcp:0 localabstract:${session.socketName}`),
@@ -767,9 +829,130 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     return port;
   }
 
+  /**
+   * Push the jar to `/data/local/tmp` only when the on-device copy does not
+   * already match the verified host bytes (issue #4733). The remote jar is
+   * sha256summed + sized through the ADB seam and compared against the host-known
+   * expected {@link VideoServerJarIntegrity}; a byte-identical remote copy skips
+   * the ~2.5 MB USB push (first-frame latency), otherwise the push runs. Any
+   * mismatch OR uncertainty (unreadable remote, missing `sha256sum`/`wc`, a probe
+   * timeout) pushes — correctness is never traded for the optimization. A skip is
+   * recorded in {@link remoteJarVerified} so the pre-launch verify can reuse it
+   * (the happy path hashes the remote once). Bounded by the launch-command
+   * timeout (issue #4741) like every other launch-path ADB call.
+   */
+  private async ensureRemoteJar(adb: ReturnType<AdbClientFactory["create"]>): Promise<void> {
+    const expected = await this.resolveExpectedJarIntegrity();
+    const remote = await this.statAndHashRemoteJar(adb);
+    if (remote !== null && remote.size === expected.size && remote.sha256 === expected.sha256) {
+      this.remoteJarVerified = true;
+      logger.info(
+        `[PersistentEncoderH264Source] on-device video-server jar already matches ` +
+        `(sha256=${expected.sha256}, size=${expected.size}); skipping push`
+      );
+      return;
+    }
+    if (remote !== null) {
+      logger.info(
+        `[PersistentEncoderH264Source] on-device video-server jar differs ` +
+        `(expected sha256=${expected.sha256} size=${expected.size}, ` +
+        `remote sha256=${remote.sha256} size=${remote.size}); pushing`
+      );
+    }
+    await this.withTimeout(
+      adb.executeCommand(`push "${this.options.jarPath}" ${VIDEO_SERVER_REMOTE_JAR_PATH}`),
+      this.commandTimeoutMs,
+      "adb push video-server jar"
+    );
+  }
+
+  /**
+   * Refuse to `app_process`-launch a jar whose on-device bytes DEFINITIVELY do
+   * not match the verified host copy (issue #4733) — a supply-chain / TOCTOU
+   * guard, since the jar runs in the screen/audio-capture context. Reuses the
+   * pre-push match when the push was skipped ({@link remoteJarVerified}); `adb
+   * forward` does not touch the jar, so that match still holds as the launch gate.
+   * Otherwise (a push just ran) it re-hashes the remote jar and throws an
+   * {@link ActionableError} on a definitive mismatch. An unreadable probe (device
+   * without `sha256sum`/`wc`, or a probe timeout) is not a mismatch: the push has
+   * already overwritten the remote with our trusted bytes, so — mirroring the
+   * handshake graceful-degrade — it logs and proceeds rather than regressing every
+   * such device to screenrecord.
+   */
+  private async verifyRemoteJarBeforeLaunch(adb: ReturnType<AdbClientFactory["create"]>): Promise<void> {
+    if (this.remoteJarVerified) {
+      return;
+    }
+    const expected = await this.resolveExpectedJarIntegrity();
+    const remote = await this.statAndHashRemoteJar(adb);
+    if (remote === null) {
+      logger.warn(
+        `[PersistentEncoderH264Source] could not hash the on-device jar at ${VIDEO_SERVER_REMOTE_JAR_PATH} ` +
+        "before launch; proceeding on the just-pushed trusted bytes (integrity verification degraded)"
+      );
+      return;
+    }
+    if (remote.size !== expected.size || remote.sha256 !== expected.sha256) {
+      throw new ActionableError(
+        `Refusing to launch video-server: the on-device jar at ${VIDEO_SERVER_REMOTE_JAR_PATH} failed ` +
+        `integrity verification (expected sha256=${expected.sha256} size=${expected.size}, got ` +
+        `sha256=${remote.sha256} size=${remote.size}). The bytes on the device do not match the ` +
+        "verified host copy; app_process will not be launched."
+      );
+    }
+    this.remoteJarVerified = true;
+  }
+
+  /**
+   * Host-known expected sha256 + size of the local jar, memoized (issue #4733).
+   * Delegates to the injected {@link JarIntegrityProbe}, which hashes the actual
+   * bytes at {@link PersistentEncoderH264SourceOptions.jarPath} with the canonical
+   * calculator — correct for cache, override, and local-build jars alike.
+   */
+  private async resolveExpectedJarIntegrity(): Promise<VideoServerJarIntegrity> {
+    if (this.expectedJarIntegrity === null) {
+      const provider = this.jarIntegrityProvider ?? VideoServerJarProvider.getInstance();
+      const integrity = await provider.computeLocalJarIntegrity(this.options.jarPath);
+      this.expectedJarIntegrity = { sha256: integrity.sha256.toLowerCase(), size: integrity.size };
+    }
+    return this.expectedJarIntegrity;
+  }
+
+  /**
+   * Read the on-device jar's sha256 + byte size through the ADB seam, or `null`
+   * when it cannot be determined (issue #4733). A single `sh -c` runs
+   * `sha256sum` + `wc -c` on the constant remote path (no interpolation), bounded
+   * by the launch-command timeout. A missing jar, absent tooling, or a timeout
+   * yields `null` — the callers treat that as "push"/"refuse", never as a match.
+   */
+  private async statAndHashRemoteJar(
+    adb: ReturnType<AdbClientFactory["create"]>
+  ): Promise<VideoServerJarIntegrity | null> {
+    const probe =
+      `sha256sum ${VIDEO_SERVER_REMOTE_JAR_PATH} 2>/dev/null; ` +
+      `wc -c < ${VIDEO_SERVER_REMOTE_JAR_PATH} 2>/dev/null`;
+    try {
+      const result = await this.withTimeout(
+        adb.executeCommand(`shell sh -c ${shellQuote(probe)}`),
+        this.commandTimeoutMs,
+        "adb hash video-server jar"
+      );
+      return parseRemoteJarIntegrity(result.stdout);
+    } catch (error) {
+      // Uncertainty is not fatal here: the caller pushes (or refuses to launch)
+      // on a null probe, so a wedged/absent probe never yields a false match.
+      logger.debug(`[PersistentEncoderH264Source] unable to hash on-device video-server jar: ${error}`);
+      return null;
+    }
+  }
+
   private async spawnAndWaitForServer(
     adb: ReturnType<AdbClientFactory["create"]>
   ): Promise<AdbProcess | null> {
+    await this.verifyRemoteJarBeforeLaunch(adb);
+    if (!this.running) {
+      return null;
+    }
     const server = await this.withTimeout(
       adb.spawn(this.buildServerArgs()),
       this.commandTimeoutMs,

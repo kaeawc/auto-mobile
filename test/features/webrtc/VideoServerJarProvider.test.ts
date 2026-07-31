@@ -86,6 +86,21 @@ describe("VideoServerJarProvider (#3831)", function() {
     expect(meta.size).toBe(stats.size);
   });
 
+  test("computeLocalJarIntegrity returns the lowercased sha256 and byte size of a local jar (#4733)", async function() {
+    // A real on-disk jar so the fs.stat size is genuine; the sha comes from the
+    // injected canonical calculator (here forced to a known value).
+    const localJar = path.join(cacheDir, "override-automobile-video.jar");
+    const bytes = validJarBuffer();
+    await fs.writeFile(localJar, bytes);
+    checksum.setFileChecksum(localJar, "A".repeat(64)); // upper-case in => lower-case out
+
+    const integrity = await makeProvider().computeLocalJarIntegrity(localJar);
+
+    expect(integrity.sha256).toBe("a".repeat(64));
+    expect(integrity.size).toBe(bytes.length);
+    expect(checksum.computedFiles).toContain(localJar);
+  });
+
   test("invalidates the cache and re-downloads when the on-disk jar size no longer matches the sidecar", async function() {
     const jarPath = (await makeProvider().ensure())!;
     expect(downloader.downloadedUrls).toHaveLength(1);

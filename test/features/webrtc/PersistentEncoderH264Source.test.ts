@@ -26,6 +26,13 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 const DEVICE: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "t" } as BootedDevice;
 const FORWARD_PORT = "45999";
+const REMOTE_JAR_PATH = "/data/local/tmp/automobile-video.jar";
+// Host-known expected integrity of the local jar the source would push (issue #4733).
+const EXPECTED_JAR_SHA256 = "a".repeat(64);
+const EXPECTED_JAR_SIZE = 2_500_000;
+// Combined `sha256sum` + `wc -c` probe stdout the on-device jar-hash helper parses.
+const remoteJarProbeOutput = (sha256: string, size: number): string =>
+  `${sha256}  ${REMOTE_JAR_PATH}\n${size}\n`;
 const SESSION_TOKEN = "session-0001";
 const SESSION_SOCKET = `${VIDEO_SERVER_SOCKET_PREFIX}_session0001`;
 const VIDEO_SERVER_MAIN_CLASS = "dev.jasonpearson.automobile.video.VideoServer";
@@ -164,6 +171,31 @@ function makeSource(overrides: Record<string, unknown> = {}) {
   const hangCommands = (overrides.hangCommands as string[] | undefined) ?? [];
   const neverResolves = <T>(): Promise<T> => new Promise<T>(() => {});
 
+  // Models the on-device jar (issue #4733): the remote copy matches the expected
+  // host bytes only after a push has landed, unless a test opts into a specific
+  // pre-push state (already-matching, always-mismatching, or a raw probe string).
+  let pushed = false;
+  const remoteJarProbeStdout = (): string => {
+    if (overrides.remoteJarProbe !== undefined) {
+      return overrides.remoteJarProbe as string;
+    }
+    if (overrides.remoteJarAlwaysMismatch === true) {
+      return remoteJarProbeOutput("b".repeat(64), 999);
+    }
+    if (overrides.remoteJarMatchesBeforePush === true) {
+      return remoteJarProbeOutput(EXPECTED_JAR_SHA256, EXPECTED_JAR_SIZE);
+    }
+    if (pushed) {
+      return remoteJarProbeOutput(EXPECTED_JAR_SHA256, EXPECTED_JAR_SIZE);
+    }
+    // A valid-but-different remote jar before the push (vs. an absent/unreadable
+    // one, the default empty probe) — both must push, but this exercises the
+    // "differs" branch specifically.
+    return overrides.remoteJarDiffersBeforePush === true
+      ? remoteJarProbeOutput("c".repeat(64), 42)
+      : "";
+  };
+
   const adbFactory: AdbClientFactory = {
     create() {
       return {
@@ -172,6 +204,13 @@ function makeSource(overrides: Record<string, unknown> = {}) {
           commands.push(command);
           if (hangCommands.some(sub => command.includes(sub))) {
             return neverResolves<{ stdout: string; stderr: string; exitCode: number }>();
+          }
+          if (command.startsWith("push")) {
+            pushed = true;
+            return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+          }
+          if (command.includes("sha256sum") && command.includes("automobile-video.jar")) {
+            return Promise.resolve({ stdout: remoteJarProbeStdout(), stderr: "", exitCode: 0 });
           }
           if (command.startsWith("forward tcp:0")) {
             forwardedSocket = command.split("localabstract:")[1] ?? null;
@@ -247,6 +286,15 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     onAudioData: chunk => audioChunks.push(chunk),
     onError: error => errors.push(error),
     jarPath: "/tmp/automobile-video.jar",
+    // Host-known expected jar integrity (issue #4733) via a fake so no real file
+    // is hashed; individual tests override for override/build-path coverage.
+    jarIntegrityProvider: {
+      computeLocalJarIntegrity: async () =>
+        (overrides.expectedJarIntegrity as { sha256: string; size: number } | undefined) ?? {
+          sha256: EXPECTED_JAR_SHA256,
+          size: EXPECTED_JAR_SIZE,
+        },
+    },
     adbFactory,
     connector,
     timer,
@@ -292,6 +340,97 @@ async function startReady(ctx: ReturnType<typeof makeSource>): Promise<void> {
     ctx.audioChunks.length = 0;
   }
 }
+
+describe("PersistentEncoderH264Source on-device jar integrity (issue #4733)", () => {
+  const pushCommands = (ctx: ReturnType<typeof makeSource>): string[] =>
+    ctx.commands.filter(c => c.startsWith("push") && c.includes(REMOTE_JAR_PATH));
+  const probeCommands = (ctx: ReturnType<typeof makeSource>): string[] =>
+    ctx.commands.filter(c => c.includes("sha256sum") && c.includes("automobile-video.jar"));
+
+  test("skips the push when the on-device jar already matches the expected bytes", async () => {
+    const ctx = makeSource({ remoteJarMatchesBeforePush: true });
+    await startReady(ctx);
+
+    // Byte-identical remote copy: no USB push, and the pre-push match doubles as
+    // the pre-launch integrity gate (a single probe on the happy path).
+    expect(pushCommands(ctx)).toHaveLength(0);
+    expect(probeCommands(ctx)).toHaveLength(1);
+    // Launch still proceeds.
+    expect(ctx.spawnArgs).toHaveLength(1);
+
+    await ctx.source.stop();
+  });
+
+  test("pushes when the on-device jar differs, then launches after re-verify", async () => {
+    // A valid-but-different remote jar pre-push; the fake device updates to the
+    // expected bytes once the push lands, so the pre-launch verify passes.
+    const ctx = makeSource({ remoteJarDiffersBeforePush: true });
+    await startReady(ctx);
+
+    expect(pushCommands(ctx)).toHaveLength(1);
+    // Two probes: the pre-push comparison and the post-push pre-launch verify.
+    expect(probeCommands(ctx)).toHaveLength(2);
+    expect(ctx.spawnArgs).toHaveLength(1);
+
+    await ctx.source.stop();
+  });
+
+  test("pushes when the remote jar cannot be hashed (uncertainty), never skips", async () => {
+    // Perma-empty probe => integrity unknown at both the pre-push comparison and
+    // the pre-launch verify. Uncertainty never skips the push; and because the
+    // push overwrote the remote with trusted bytes, the unverifiable pre-launch
+    // check degrades-and-proceeds (device may lack sha256sum/wc) rather than
+    // regressing to screenrecord.
+    const ctx = makeSource({ remoteJarProbe: "" });
+    await startReady(ctx);
+
+    expect(pushCommands(ctx).length).toBeGreaterThanOrEqual(1);
+    expect(ctx.spawnArgs).toHaveLength(1);
+
+    await ctx.source.stop();
+  });
+
+  test("does not skip the push when only the size matches but the hash differs", async () => {
+    // A same-size, different-bytes remote jar (a targeted swap) must still push.
+    const ctx = makeSource({
+      remoteJarProbe: remoteJarProbeOutput("d".repeat(64), EXPECTED_JAR_SIZE),
+    });
+    // The pre-push probe (wrong hash) forces a push; after the push the fake would
+    // keep returning the override, so this scenario also refuses at pre-launch —
+    // exactly the tamper guard. Assert the push happened.
+    let thrown: unknown;
+    try {
+      await ctx.source.start();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(pushCommands(ctx)).toHaveLength(1);
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("failed integrity verification");
+
+    await ctx.source.stop();
+  });
+
+  test("refuses to launch when the post-push on-device jar fails integrity verification", async () => {
+    // The remote jar never matches, even after the push: a tamper/TOCTOU signal.
+    const ctx = makeSource({ remoteJarAlwaysMismatch: true });
+    const errors: Error[] = [];
+
+    let thrown: unknown;
+    try {
+      await ctx.source.start();
+    } catch (error) {
+      thrown = error;
+    }
+    // start() tears down and rethrows so the factory can fall back to screenrecord.
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("failed integrity verification");
+    // app_process must NOT have been spawned.
+    expect(ctx.spawnArgs).toHaveLength(0);
+    expect(ctx.source.isRunning).toBe(false);
+    void errors;
+  });
+});
 
 describe("PersistentEncoderH264Source", () => {
   test("pushes the jar, launches the server with overrides, forwards, and forwards frames", async () => {

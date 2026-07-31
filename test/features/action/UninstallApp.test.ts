@@ -3,6 +3,7 @@ import { UninstallApp, DeviceAppUninstaller } from "../../../src/features/action
 import type { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 
 class FakeDeviceAppUninstaller implements DeviceAppUninstaller {
   public calls: Array<{ deviceUdid: string; bundleId: string; isSimulator?: boolean }> = [];
@@ -214,6 +215,21 @@ describe("UninstallApp (Android)", () => {
     expect(commands).not.toContain("shell pm uninstall --user 0 -k com.example.app");
   });
 
+  test("marks the Android installed-apps cache stale after a successful uninstall", async () => {
+    const repo = new FakeInstalledAppsRepository();
+    await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
+    fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
+      { stdout: "package:com.example.app\npackage:com.android.settings" },
+      { stdout: "package:com.android.settings" }
+    ]);
+
+    const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb), null, null, repo);
+
+    await uninstall.execute("com.example.app");
+
+    expect(await repo.getLatestVerification(androidDevice.deviceId)).toBe(0);
+  });
+
   test("emits pm uninstall -k when keepData is requested", async () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
@@ -235,16 +251,19 @@ describe("UninstallApp (Android)", () => {
   });
 
   test("returns not installed when package is missing", async () => {
+    const repo = new FakeInstalledAppsRepository();
+    await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
     setupNoApp(fakeAdb, 0);
 
-    const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
+    const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb), null, null, repo);
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(true);
     expect(result.wasInstalled).toBe(false);
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
+    expect(await repo.getLatestVerification(androidDevice.deviceId)).toBe(1_000);
   });
 
   test("detects work profile user", async () => {

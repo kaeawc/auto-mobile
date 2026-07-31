@@ -8,6 +8,7 @@ import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsLocator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import path from "path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -159,6 +160,34 @@ describe("InstallApp", () => {
     expect((installEntry.children as TimingEntry[]).length).toBeGreaterThan(0);
   });
 
+  test("marks the Android installed-apps cache stale after a successful install", async () => {
+    const apkPath = "/tmp/app-debug.apk";
+    const repo = new FakeInstalledAppsRepository();
+    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
+
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+    fakeHost.setCommandResponse("aapt2", createExecResult("package: name='com.example.app' versionCode='1'"));
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
+    fakeAdb.setCommandResponse("shell pm list packages --user 0 -f com.example.app", createExecResult("0"));
+    fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
+
+    const installApp = new InstallApp(
+      device,
+      fakeAdbFactory,
+      fakeHost,
+      fakeLocator,
+      () => createPerformanceTracker(true, fakeTimer),
+      null,
+      null,
+      undefined,
+      repo
+    );
+
+    await installApp.execute(apkPath);
+
+    expect(await repo.getLatestVerification(device.deviceId)).toBe(0);
+  });
+
   test("falls back to package diffing when aapt is unavailable", async () => {
     class SequencedFakeAdbExecutor extends FakeAdbExecutor {
       private listPackagesResponses: ExecResult[] = [];
@@ -219,6 +248,8 @@ describe("InstallApp", () => {
   test("returns a warning when aapt is unavailable and install fails", async () => {
     const apkPath = "/tmp/app-debug.apk";
     const perf = createPerformanceTracker(true, fakeTimer);
+    const repo = new FakeInstalledAppsRepository();
+    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
 
     fakeLocator.setTool(null);
 
@@ -227,13 +258,18 @@ describe("InstallApp", () => {
       fakeAdbFactory,
       fakeHost,
       fakeLocator,
-      () => perf
+      () => perf,
+      null,
+      null,
+      undefined,
+      repo
     );
 
     const result = await installApp.execute(apkPath);
 
     expect(result.success).toBe(false);
     expect(result.warning).toContain("aapt2");
+    expect(await repo.getLatestVerification(device.deviceId)).toBe(1_000);
   });
 
   test("installs iOS .app on simulator via simctl and detects new bundle id", async () => {

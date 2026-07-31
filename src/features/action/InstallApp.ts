@@ -15,6 +15,7 @@ import { logger } from "../../utils/logger";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -29,6 +30,7 @@ export class InstallApp {
   private device: BootedDevice;
   private deviceAppInstaller: DeviceAppInstaller;
   private plist: PlistReader;
+  private installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository();
 
   constructor(
     device: BootedDevice,
@@ -38,7 +40,8 @@ export class InstallApp {
     performanceTrackerFactory: () => PerformanceTracker = createGlobalPerformanceTracker,
     simctl: SimCtlClient | null = null,
     deviceAppInstaller: DeviceAppInstaller | null = null,
-    plist: PlistReader = new PlistClient()
+    plist: PlistReader = new PlistClient(),
+    installedAppsRepository?: InstalledAppsStore
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -48,6 +51,7 @@ export class InstallApp {
     this.simctl = simctl || new SimCtlClient(device);
     this.deviceAppInstaller = deviceAppInstaller || new DeviceAppManager();
     this.plist = plist;
+    this.setInstalledAppsRepository(installedAppsRepository);
   }
 
   private isSimulator(): boolean {
@@ -190,6 +194,8 @@ export class InstallApp {
       }
     }
 
+    await this.markInstalledAppsCacheStale(success);
+
     perf.end();
     const warning = warnings.length > 0 ? warnings.join(" ") : undefined;
     return {
@@ -202,6 +208,23 @@ export class InstallApp {
   }
 
   private static readonly ANDROID_DOWNGRADE_MARKER = "INSTALL_FAILED_VERSION_DOWNGRADE";
+
+  private setInstalledAppsRepository(installedAppsRepository?: InstalledAppsStore): void {
+    if (installedAppsRepository) {
+      this.installedAppsRepository = installedAppsRepository;
+    }
+  }
+
+  private async markInstalledAppsCacheStale(success: boolean): Promise<void> {
+    if (!success) {
+      return;
+    }
+    try {
+      await this.installedAppsRepository.markDeviceStale(this.device.deviceId);
+    } catch (error) {
+      logger.warn(`[InstallApp] Failed to invalidate installed apps cache: ${error}`);
+    }
+  }
 
   /**
    * Run an `adb install` command, capturing failures (whether reported as a

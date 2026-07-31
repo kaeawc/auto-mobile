@@ -10,6 +10,7 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
 
 export interface DeviceAppUninstaller {
   uninstallApp(deviceUdid: string, bundleId: string, isSimulator?: boolean): Promise<void>;
@@ -21,18 +22,21 @@ export class UninstallApp {
   private adb: AdbExecutor;
   private simctl: SimCtlClient;
   private deviceAppUninstaller: DeviceAppUninstaller;
+  private installedAppsRepository: InstalledAppsStore;
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     simctl: SimCtlClient | null = null,
-    deviceAppUninstaller: DeviceAppUninstaller | null = null
+    deviceAppUninstaller: DeviceAppUninstaller | null = null,
+    installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository()
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.simctl = simctl || new SimCtlClient(device);
     this.deviceAppUninstaller = deviceAppUninstaller || new DeviceAppManager();
+    this.installedAppsRepository = installedAppsRepository;
   }
 
   private isSimulator(): boolean {
@@ -190,6 +194,8 @@ export class UninstallApp {
         };
       }
 
+      await this.markInstalledAppsCacheStale();
+
       return {
         success: true,
         packageName,
@@ -216,5 +222,13 @@ export class UninstallApp {
       true
     );
     return result.stdout.split("\n").some(line => line.trim() === `package:${packageName}`);
+  }
+
+  private async markInstalledAppsCacheStale(): Promise<void> {
+    try {
+      await this.installedAppsRepository.markDeviceStale(this.device.deviceId);
+    } catch (error) {
+      logger.warn(`[UninstallApp] Failed to invalidate installed apps cache: ${error}`);
+    }
   }
 }

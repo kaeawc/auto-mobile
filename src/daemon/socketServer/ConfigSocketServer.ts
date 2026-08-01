@@ -1,6 +1,7 @@
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { RequestResponseSocketServer } from "./RequestResponseSocketServer";
 import { SocketRequest, SocketResponse } from "./SocketServerTypes";
+import type { StreamSocketAuthenticator } from "../streamSocketAuth";
 
 export type ConfigSocketMethod = "config/get" | "config/set";
 
@@ -11,6 +12,8 @@ export interface ConfigSocketRequest<
   id: string;
   type: TRequestType;
   method: ConfigSocketMethod;
+  /** Daemon session on whose behalf a mutating request is made (issue #4752). */
+  sessionUuid?: string;
   params?: {
     config?: TInput | null;
   };
@@ -54,6 +57,13 @@ interface ConfigSocketServerOptions<
   methodLabel: string;
   getConfig: () => Promise<TConfig>;
   updateConfig: (update: TInput | null) => Promise<ConfigSocketUpdateResult<TConfig>>;
+  /**
+   * Authorizes mutating (`config/set`) requests (issue #4752). When provided, an
+   * unauthenticated or cross-session request is rejected before the config
+   * change — which can trigger global archive eviction — is applied. Omitted by
+   * sockets that carry no session-scoped side effects.
+   */
+  authenticator?: StreamSocketAuthenticator;
 }
 
 /**
@@ -75,6 +85,7 @@ export class ConfigSocketServer<
   private readonly methodLabel: string;
   private readonly getConfig: () => Promise<TConfig>;
   private readonly updateConfig: (update: TInput | null) => Promise<ConfigSocketUpdateResult<TConfig>>;
+  private readonly authenticator?: StreamSocketAuthenticator;
 
   constructor(
     options: ConfigSocketServerOptions<TConfig, TInput, TResponseType, TEvictedKey>
@@ -85,6 +96,7 @@ export class ConfigSocketServer<
     this.methodLabel = options.methodLabel;
     this.getConfig = options.getConfig;
     this.updateConfig = options.updateConfig;
+    this.authenticator = options.authenticator;
   }
 
   protected async handleRequest(
@@ -101,6 +113,10 @@ export class ConfigSocketServer<
         };
       }
       case "config/set": {
+        // Authorize before the mutation: lowering maxArchiveSizeMb here triggers
+        // global archive eviction, so a cross-session request must be rejected
+        // first (issue #4752).
+        this.authenticator?.authorize({ sessionUuid: request.sessionUuid });
         if (!request.params || !("config" in request.params)) {
           throw new Error("config/set requires params.config");
         }

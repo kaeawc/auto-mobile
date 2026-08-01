@@ -1,8 +1,20 @@
 import type {
   VideoRecordingRepository,
+  VideoRecordingOwnerScope,
   VideoRecordingQuery,
   VideoRecordingRecord,
 } from "../../src/db/videoRecordingRepository";
+
+/**
+ * Mirror the repository's owner scoping (issue #4752): a scoped read sees rows it
+ * owns plus legacy NULL-owner rows; an unscoped read sees everything.
+ */
+function ownerVisible(record: VideoRecordingRecord, ownerSessionUuid?: string): boolean {
+  if (!ownerSessionUuid) {
+    return true;
+  }
+  return record.ownerSessionUuid === undefined || record.ownerSessionUuid === ownerSessionUuid;
+}
 
 type VideoRecordingRepositoryContract = Pick<
   VideoRecordingRepository,
@@ -44,8 +56,15 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
     this.records.set(recordingId, updated);
   }
 
-  async getRecording(recordingId: string): Promise<VideoRecordingRecord | null> {
-    return this.records.get(recordingId) ?? null;
+  async getRecording(
+    recordingId: string,
+    scope: VideoRecordingOwnerScope = {}
+  ): Promise<VideoRecordingRecord | null> {
+    const record = this.records.get(recordingId) ?? null;
+    if (record && !ownerVisible(record, scope.ownerSessionUuid)) {
+      return null;
+    }
+    return record;
   }
 
   async listRecordings(query: VideoRecordingQuery = {}): Promise<VideoRecordingRecord[]> {
@@ -55,6 +74,7 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
 
     let results = Array.from(this.records.values());
 
+    results = results.filter(record => ownerVisible(record, query.ownerSessionUuid));
     if (statuses) {
       results = results.filter(record => statuses.includes(record.status));
     }

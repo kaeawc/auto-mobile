@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import type { Kysely, SelectQueryBuilder } from "kysely";
 import { ensureMigrations, getDatabase } from "./database";
 import type {
   VideoFormat,
@@ -16,9 +16,26 @@ export interface VideoRecordingRecord extends VideoRecordingMetadata {
   deviceId: string;
   platform: "android" | "ios";
   status: VideoRecordingStatus;
+  /**
+   * Daemon session that started the recording (issue #4752). Absent for legacy
+   * rows written before owner-scoping, which stay readable by any session.
+   */
+  ownerSessionUuid?: string;
 }
 
-export interface VideoRecordingQuery {
+/**
+ * Owner scoping for a read (issue #4752). When `ownerSessionUuid` is set, the
+ * query is restricted to rows the caller may see: rows owned by that session,
+ * plus legacy rows with a NULL owner (which predate scoping and would otherwise
+ * become permanently unreadable). When absent, no owner filter is applied and
+ * callers see every row — reserved for internal/maintenance paths (eviction,
+ * restart interruption sweep) that operate on the whole archive.
+ */
+export interface VideoRecordingOwnerScope {
+  ownerSessionUuid?: string;
+}
+
+export interface VideoRecordingQuery extends VideoRecordingOwnerScope {
   status?: VideoRecordingStatus | VideoRecordingStatus[];
   deviceId?: string;
   platform?: "android" | "ios";
@@ -70,7 +87,29 @@ function toRecord(row: DbVideoRecording): VideoRecordingRecord {
     lastAccessedAt: row.last_accessed_at,
     config: parseConfig(row.config_json),
     highlights: parseHighlights(row.highlights_json ?? null),
+    ownerSessionUuid: row.owner_session_uuid ?? undefined,
   };
+}
+
+/**
+ * Restrict a `video_recordings` select to rows the given session may read
+ * (issue #4752): rows it owns, plus legacy NULL-owner rows that predate scoping.
+ * A no-op when `ownerSessionUuid` is undefined, preserving the unscoped
+ * whole-archive reads used by internal maintenance paths.
+ */
+function applyOwnerScope<O>(
+  builder: SelectQueryBuilder<Database, "video_recordings", O>,
+  ownerSessionUuid?: string
+): SelectQueryBuilder<Database, "video_recordings", O> {
+  if (!ownerSessionUuid) {
+    return builder;
+  }
+  return builder.where(eb =>
+    eb.or([
+      eb("owner_session_uuid", "is", null),
+      eb("owner_session_uuid", "=", ownerSessionUuid),
+    ])
+  );
 }
 
 function buildUpdatePayload(update: Partial<VideoRecordingRecord>): VideoRecordingUpdate {
@@ -124,6 +163,9 @@ function buildUpdatePayload(update: Partial<VideoRecordingRecord>): VideoRecordi
   if (update.highlights !== undefined) {
     payload.highlights_json = JSON.stringify(update.highlights ?? []);
   }
+  if (update.ownerSessionUuid !== undefined) {
+    payload.owner_session_uuid = update.ownerSessionUuid ?? null;
+  }
 
   return payload;
 }
@@ -163,6 +205,7 @@ export class VideoRecordingRepository {
       last_accessed_at: record.lastAccessedAt,
       config_json: JSON.stringify(record.config),
       highlights_json: record.highlights ? JSON.stringify(record.highlights) : null,
+      owner_session_uuid: record.ownerSessionUuid ?? null,
     };
 
     await db
@@ -189,6 +232,7 @@ export class VideoRecordingRepository {
           last_accessed_at: row.last_accessed_at,
           config_json: row.config_json,
           highlights_json: row.highlights_json,
+          owner_session_uuid: row.owner_session_uuid,
         })
       )
       .execute();
@@ -210,13 +254,17 @@ export class VideoRecordingRepository {
       .execute();
   }
 
-  async getRecording(recordingId: string): Promise<VideoRecordingRecord | null> {
+  async getRecording(
+    recordingId: string,
+    scope: VideoRecordingOwnerScope = {}
+  ): Promise<VideoRecordingRecord | null> {
     const db = await this.getDb();
-    const row = await db
+    let builder = db
       .selectFrom("video_recordings")
       .selectAll()
-      .where("recording_id", "=", recordingId)
-      .executeTakeFirst();
+      .where("recording_id", "=", recordingId);
+    builder = applyOwnerScope(builder, scope.ownerSessionUuid);
+    const row = await builder.executeTakeFirst();
 
     return row ? toRecord(row) : null;
   }
@@ -227,6 +275,7 @@ export class VideoRecordingRepository {
       .selectFrom("video_recordings")
       .selectAll();
 
+    builder = applyOwnerScope(builder, query.ownerSessionUuid);
     if (query.status !== undefined) {
       const statuses = Array.isArray(query.status) ? query.status : [query.status];
       builder = builder.where("status", "in", statuses);

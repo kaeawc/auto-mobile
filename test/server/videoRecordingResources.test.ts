@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import * as path from "node:path";
 import {
+  assertWithinArchiveRoot,
   buildVideoResourceContent,
   getLatestVideoRecording,
   getVideoArchiveItem,
@@ -12,11 +14,13 @@ import {
 } from "../../src/server/videoRecordingResourceUris";
 import type { VideoRecordingMetadata } from "../../src/models";
 
+const ARCHIVE_ROOT = "/tmp/video-archive";
+
 function metadata(overrides: Partial<VideoRecordingMetadata> = {}): VideoRecordingMetadata {
   return {
     recordingId: "rec-1",
     fileName: "rec-1.mp4",
-    filePath: "/tmp/rec-1.mp4",
+    filePath: `${ARCHIVE_ROOT}/rec-1/rec-1.mp4`,
     format: "mp4",
     sizeBytes: 1024,
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -33,6 +37,7 @@ function store(overrides: Partial<VideoRecordingResourceStore> = {}): VideoRecor
     getById: async () => null,
     list: async () => [],
     readFile: async () => Buffer.from("video-bytes"),
+    archiveRoot: ARCHIVE_ROOT,
     ...overrides,
   };
 }
@@ -101,6 +106,32 @@ describe("getVideoArchiveItem", () => {
   });
 });
 
+describe("assertWithinArchiveRoot", () => {
+  const root = "/home/user/.auto-mobile/video-archive";
+
+  test("returns the resolved path for a file inside the archive root", () => {
+    // Assert via node:path so the expectation matches on Windows (backslashes /
+    // drive letter) as well as POSIX — mirrors assertWithinArchiveRoot's own path.resolve.
+    const input = path.join(root, "rec-1", "rec-1.mp4");
+    expect(assertWithinArchiveRoot(input, root)).toBe(path.resolve(root, input));
+  });
+
+  test("resolves a relative path against the archive root", () => {
+    const input = path.join("rec-1", "rec-1.mp4");
+    expect(assertWithinArchiveRoot(input, root)).toBe(path.resolve(root, input));
+  });
+
+  test("throws for an absolute path outside the archive root", () => {
+    expect(() => assertWithinArchiveRoot("/etc/passwd", root)).toThrow(/outside the archive root/);
+  });
+
+  test("throws for a traversal escaping the archive root", () => {
+    expect(() => assertWithinArchiveRoot("../../etc/passwd", root)).toThrow(
+      /outside the archive root/
+    );
+  });
+});
+
 describe("buildVideoResourceContent", () => {
   test("reports a missing-file error when the metadata has no file path", async () => {
     const content = await buildVideoResourceContent(
@@ -110,6 +141,40 @@ describe("buildVideoResourceContent", () => {
     );
     expect(content.mimeType).toBe("application/json");
     expect(parse(content.text).error).toBe("Missing file path for recording no-file");
+    expect(content.blob).toBeUndefined();
+  });
+
+  test("refuses to read a poisoned file path outside the archive root, before touching disk", async () => {
+    let readCalled = false;
+    const content = await buildVideoResourceContent(
+      metadata({ filePath: "/etc/passwd", recordingId: "poisoned" }),
+      VIDEO_RESOURCE_URIS.LATEST,
+      store({
+        readFile: async () => {
+          readCalled = true;
+          return Buffer.from("secret");
+        },
+      })
+    );
+    expect(readCalled).toBe(false);
+    expect(content.blob).toBeUndefined();
+    expect(content.mimeType).toBe("application/json");
+    expect(parse(content.text).error).toContain("Failed to read video data");
+  });
+
+  test("refuses a relative traversal escaping the archive root", async () => {
+    let readCalled = false;
+    const content = await buildVideoResourceContent(
+      metadata({ filePath: "../../etc/passwd", recordingId: "traversal" }),
+      VIDEO_RESOURCE_URIS.LATEST,
+      store({
+        readFile: async () => {
+          readCalled = true;
+          return Buffer.from("secret");
+        },
+      })
+    );
+    expect(readCalled).toBe(false);
     expect(content.blob).toBeUndefined();
   });
 

@@ -2,6 +2,10 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { ConfigSocketServer, getSocketPath } from "./socketServer/index";
 import { getVideoRecordingConfig, updateVideoRecordingConfig } from "../server/videoRecordingManager";
 import { VIDEO_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
 import type { VideoRecordingConfig, VideoRecordingConfigInput } from "../models";
 
 interface VideoRecordingSocketServerDependencies {
@@ -31,7 +35,10 @@ export class VideoRecordingSocketServer extends ConfigSocketServer<
   constructor(
     socketPath: string = getSocketPath(VIDEO_RECORDING_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
-    dependencies: VideoRecordingSocketServerDependencies = defaultDependencies
+    dependencies: VideoRecordingSocketServerDependencies = defaultDependencies,
+    authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
+      "videoRecording config/set"
+    )
   ) {
     super({
       socketPath,
@@ -45,6 +52,7 @@ export class VideoRecordingSocketServer extends ConfigSocketServer<
         const { config, evictedRecordingIds } = await dependencies.updateConfig(update);
         return { config, evictedItems: evictedRecordingIds };
       },
+      authenticator,
     });
   }
 }

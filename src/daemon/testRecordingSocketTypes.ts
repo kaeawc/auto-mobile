@@ -7,6 +7,8 @@ export interface TestRecordingCommand {
   platform?: Platform;
   recordingId?: string;
   planName?: string;
+  /** Daemon session on whose behalf the command is made (issue #4752). */
+  sessionUuid?: string;
 }
 
 export interface TestRecordingResponse {

@@ -274,16 +274,23 @@ describe("config socket wrappers", () => {
     const socket = new FakeSocket();
     const config = { format: "mp4" } as VideoRecordingConfig;
     const updates: Array<VideoRecordingConfigInput | null> = [];
-    const server = new VideoRecordingSocketServer("/fake/path/video.sock", timer, {
-      getConfig: async () => config,
-      updateConfig: async update => {
-        updates.push(update);
-        return {
-          config,
-          evictedRecordingIds: ["recording-a"],
-        };
+    const server = new VideoRecordingSocketServer(
+      "/fake/path/video.sock",
+      timer,
+      {
+        getConfig: async () => config,
+        updateConfig: async update => {
+          updates.push(update);
+          return {
+            config,
+            evictedRecordingIds: ["recording-a"],
+          };
+        },
       },
-    });
+      // This suite exercises the config wrapper, not the auth gate (covered in
+      // videoRecordingSocketServerAuth.test.ts); inject a permissive authenticator.
+      { authorize: () => {} }
+    );
     const request: VideoRecordingSocketRequest = {
       id: "video-set",
       type: "video_recording_request",

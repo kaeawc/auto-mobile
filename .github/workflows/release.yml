@@ -481,7 +481,8 @@ jobs:
           # Releases requires a tag" on a non-tag ref, and this step runs after
           # npm/Homebrew/MCP/Maven/Docker have already published irreversibly.
           tag_name: ${{ needs.validate-release-tag.outputs.tag }}
-          name: AutoMobile v${{ steps.version.outputs.version }}
+          # Plain semver title (e.g. "0.0.47") to match every prior release.
+          name: ${{ steps.version.outputs.version }}
           body_path: release_notes.txt
           files: |
             /tmp/control-proxy-debug.apk

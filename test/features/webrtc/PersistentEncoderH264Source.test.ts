@@ -458,6 +458,25 @@ describe("PersistentEncoderH264Source", () => {
     await ctx.source.stop();
   });
 
+  test("surfaces the attested rotation from a config packet via onRotation (issue #4786)", async () => {
+    const rotations: number[] = [];
+    const ctx = makeSource({ onRotation: (rotation: number) => rotations.push(rotation) });
+    await startReady(ctx);
+
+    const FLAG_CONFIG = 1n << 63n;
+    const rotationBits = (rotation: number): bigint => (BigInt(rotation) & 0b11n) << 59n;
+    ctx.sockets[0].feed(streamHeader(480, 1040));
+    // Config packet attesting rotation 3, then a non-config frame that must NOT report rotation.
+    ctx.sockets[0].feed(framedPacket(Buffer.from([0, 0, 0, 1, 0x67]), FLAG_CONFIG | rotationBits(3)));
+    ctx.sockets[0].feed(framedPacket(Buffer.from([0, 0, 0, 1, 0x65])));
+
+    expect(rotations).toEqual([3]);
+    // The config payload still flows to onData unchanged.
+    expect(ctx.chunks[0]).toEqual(Buffer.from([0, 0, 0, 1, 0x67]));
+
+    await ctx.source.stop();
+  });
+
   test("omits --fps when no frame rate is requested, letting the preset default apply", async () => {
     const ctx = makeSource();
     await startReady(ctx);

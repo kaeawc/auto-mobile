@@ -10,7 +10,22 @@ private const val STREAM_HEADER_BYTES = 12
 private const val PACKET_HEADER_BYTES = 12
 private const val FLAG_CONFIG = 1L shl 63
 private const val FLAG_KEY_FRAME = 1L shl 62
-private const val PTS_MASK = (1L shl 62) - 1
+
+/**
+ * Bit 61: ROTATION_PRESENT (issue #4786). Set on a CONFIG packet whose bits 60-59 attest a display
+ * rotation (`0..3`). The daemon relay leaves it clear when its source cannot prove rotation
+ * (screenrecord/iOS), so an absent bit means "unknown" — distinct from the valid value 0. See
+ * `src/daemon/videoStreamFraming.ts` for the encoder.
+ */
+private const val FLAG_ROTATION_PRESENT = 1L shl 61
+private const val ROTATION_SHIFT = 59
+private const val ROTATION_MASK = 0b11L shl ROTATION_SHIFT
+
+/**
+ * Bits 0-58 carry the presentation timestamp. Narrowed from bits 0-61 for the rotation presence bit
+ * and field; backward compatible because a real microsecond PTS never reaches bit 59.
+ */
+private const val PTS_MASK = (1L shl ROTATION_SHIFT) - 1
 
 /** Dimensions advertised by the stream header. Both are zero unless the client sent a size hint. */
 data class VideoStreamHeader(val width: Int, val height: Int)
@@ -26,6 +41,12 @@ data class VideoPacket(
   val presentationTimeUs: Long,
   val isConfig: Boolean,
   val isKeyFrame: Boolean,
+  /**
+   * Attested display rotation (`0..3`) from a CONFIG packet, or null when unknown (issue #4786): a
+   * non-config packet, or a config packet from a relay whose source could not prove rotation. Null
+   * leaves the control gate to fail closed rather than trust an unattested orientation.
+   */
+  val rotation: Int? = null,
 ) {
   // Data classes compare arrays by identity, which would make equality useless in tests.
   override fun equals(other: Any?): Boolean =
@@ -33,7 +54,8 @@ data class VideoPacket(
       payload.contentEquals(other.payload) &&
       presentationTimeUs == other.presentationTimeUs &&
       isConfig == other.isConfig &&
-      isKeyFrame == other.isKeyFrame
+      isKeyFrame == other.isKeyFrame &&
+      rotation == other.rotation
 
   override fun hashCode(): Int =
     payload.contentHashCode() * 31 + presentationTimeUs.hashCode() * 31 + isConfig.hashCode()
@@ -97,13 +119,21 @@ class VideoStreamParser {
       }
 
       val start = offset + PACKET_HEADER_BYTES
+      val isConfig = (ptsAndFlags and FLAG_CONFIG) != 0L
       onPacket(
         VideoPacket(
           payload = buffer.copyOfRange(start, start + size),
           // Bit 63 makes the int64 negative, so mask before reading the timestamp.
           presentationTimeUs = ptsAndFlags and PTS_MASK,
-          isConfig = (ptsAndFlags and FLAG_CONFIG) != 0L,
+          isConfig = isConfig,
           isKeyFrame = (ptsAndFlags and FLAG_KEY_FRAME) != 0L,
+          // Rotation is attested only on a config packet carrying the presence bit (issue #4786).
+          rotation =
+            if (isConfig && (ptsAndFlags and FLAG_ROTATION_PRESENT) != 0L) {
+              ((ptsAndFlags and ROTATION_MASK) shr ROTATION_SHIFT).toInt()
+            } else {
+              null
+            },
         )
       )
       offset = start + size

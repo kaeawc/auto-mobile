@@ -237,6 +237,9 @@ internal fun rememberLiveVideoFrame(
               bitmap = decodedFrame,
               sequence = frameSequence.incrementAndGet(),
               receivedAtMs = nowMs(),
+              // The stream's config packets attest the display rotation; carrying it here lets
+              // DeviceControlSession re-prove orientation from the live frame alone (issue #4786).
+              rotation = frame.rotation,
             )
         }
       }

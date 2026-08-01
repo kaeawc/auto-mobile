@@ -162,6 +162,7 @@ nav:
             - 'Overview': design-docs/plat/android/index.md
             - 'Observe': design-docs/plat/android/observe.md
             - 'Screen Streaming': design-docs/plat/android/screen-streaming.md
+            - 'Video-Stream Rotation Attestation': design-docs/plat/android/video-stream-rotation-attestation.md
             - 'Emulator Startup': design-docs/plat/android/emulator-startup.md
             - 'CtrlProxy': design-docs/plat/android/control-proxy.md
             - 'AutoMobile SDK': design-docs/plat/android/auto-mobile-sdk.md

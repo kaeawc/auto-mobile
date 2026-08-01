@@ -46,6 +46,8 @@ interface Harness {
   sources: FakeCaptureSource[];
   captureOptions: Array<{ fps?: number }>;
   emit: (chunk: Buffer) => void;
+  /** Simulates the source attesting a display rotation (issue #4786). */
+  emitRotation: (rotation: number) => void;
   cleanup: () => Promise<void>;
 }
 
@@ -65,6 +67,7 @@ async function startHarness(
   const socketPath = path.join(dir, "video-stream.sock");
   const sources: FakeCaptureSource[] = [];
   let onData: ((chunk: Buffer) => void) | null = null;
+  let onRotation: ((rotation: number) => void) | null = null;
   const captureOptions: Array<{ fps?: number }> = [];
 
   const server = new VideoStreamSocketServer(
@@ -77,6 +80,7 @@ async function startHarness(
       },
       createCaptureSource: async opts => {
         onData = opts.onData;
+        onRotation = opts.onRotation ?? null;
         captureOptions.push(opts);
         const source = new FakeCaptureSource();
         source.startError = options.startError ?? null;
@@ -97,6 +101,7 @@ async function startHarness(
     sources,
     captureOptions,
     emit: chunk => onData?.(chunk),
+    emitRotation: rotation => onRotation?.(rotation),
     cleanup: async () => {
       await server.close();
       rmSync(dir, { recursive: true, force: true });
@@ -264,6 +269,7 @@ describe("VideoStreamSocketServer", () => {
           socketPath,
           sources: [source],
           emit: () => {},
+          emitRotation: () => {},
           cleanup: async () => {
             await server.close();
             rmSync(dir, { recursive: true, force: true });
@@ -315,6 +321,7 @@ describe("VideoStreamSocketServer", () => {
       socketPath,
       sources: [abandonedSource, replacementSource],
       emit: () => {},
+      emitRotation: () => {},
       cleanup: async () => {
         await server.close();
         rmSync(dir, { recursive: true, force: true });
@@ -400,6 +407,46 @@ describe("VideoStreamSocketServer", () => {
     expect(packet.readInt32BE(8)).toBe(sps.length);
     expect(packet.subarray(12, 12 + sps.length)).toEqual(sps);
     expect(packet.readBigInt64BE(0)).toBeLessThan(0n); // CONFIG flag is bit 63
+  });
+
+  test("attests the source's rotation on a config packet and its replay (issue #4786)", async () => {
+    const ROTATION_PRESENT = 1n << 61n;
+    const ROTATION_SHIFT = 59n;
+    const h = await startHarness();
+    const first = await subscribe(h.socketPath);
+    await waitFor(() => first.binary().length >= 12);
+
+    // The source attests rotation 3, then emits SPS: the config packet must carry it.
+    h.emitRotation(3);
+    const sps = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x07, 0x64, 0x00]);
+    h.emit(Buffer.concat([sps, Buffer.from([0x00, 0x00, 0x00, 0x01, 0x08])]));
+    await waitFor(() => first.binary().length > 12);
+
+    const flags = BigInt.asUintN(64, first.binary().subarray(12).readBigInt64BE(0));
+    expect(flags & ROTATION_PRESENT).toBe(ROTATION_PRESENT);
+    expect((flags >> ROTATION_SHIFT) & 0b11n).toBe(3n);
+
+    // A late joiner is replayed the parameter sets and must see the current rotation there too.
+    const late = await subscribe(h.socketPath);
+    await waitFor(() => late.binary().length > 12);
+    const replayFlags = BigInt.asUintN(64, late.binary().subarray(12).readBigInt64BE(0));
+    expect(replayFlags & ROTATION_PRESENT).toBe(ROTATION_PRESENT);
+    expect((replayFlags >> ROTATION_SHIFT) & 0b11n).toBe(3n);
+  });
+
+  test("leaves the rotation-present bit clear when the source never attests rotation", async () => {
+    const ROTATION_PRESENT = 1n << 61n;
+    const h = await startHarness();
+    const client = await subscribe(h.socketPath);
+    await waitFor(() => client.binary().length >= 12);
+
+    // No emitRotation call: a screenrecord/iOS source. The config packet must not claim a rotation.
+    // The trailing start code flushes the SPS NAL through the incremental Annex-B parser.
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x07, 0x64, 0x00, 0x00, 0x00, 0x00, 0x01, 0x08]));
+    await waitFor(() => client.binary().length > 12);
+
+    const flags = BigInt.asUintN(64, client.binary().subarray(12).readBigInt64BE(0));
+    expect(flags & ROTATION_PRESENT).toBe(0n);
   });
 
   test("forwards a PPS that arrives after a late viewer's replayed SPS", async () => {

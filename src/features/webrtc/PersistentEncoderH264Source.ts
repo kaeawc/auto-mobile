@@ -265,6 +265,12 @@ export interface PersistentEncoderH264SourceOptions {
   onData: (chunk: Buffer) => void;
   /** Called with each chunk of 8 kHz mono PCM16LE audio when enabled. */
   onAudioData?: (chunk: Buffer) => void;
+  /**
+   * Called with the attested display rotation (0..3) each time the device emits a CONFIG packet —
+   * at stream start and on every #4785 rotation-driven encoder swap (issue #4786). The live-mirror
+   * relay records this so it can re-attest rotation to desktop clients.
+   */
+  onRotation?: (rotation: number) => void;
   /** Called when the source fails fatally after a successful start. */
   onError?: (error: Error) => void;
   bitrateBps?: number;
@@ -1399,6 +1405,11 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         if (this.socket === socket) {
           if (packet.codecId === VIDEO_SERVER_CODEC_ID_H264) {
             this.observeVideoPacket(packet);
+            // A CONFIG packet attests the current display rotation (issue #4786). Surface it before
+            // the payload so the relay's rotation is current when the SPS/PPS reaches subscribers.
+            if (packet.config && packet.rotation !== undefined) {
+              this.options.onRotation?.(packet.rotation);
+            }
             this.options.onData(packet.data);
           } else if (packet.codecId === VIDEO_SERVER_CODEC_ID_PCM16) {
             this.options.onAudioData?.(packet.data);

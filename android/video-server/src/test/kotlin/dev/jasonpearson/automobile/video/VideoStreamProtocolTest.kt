@@ -53,10 +53,11 @@ class VideoStreamProtocolTest {
         0x6d,
         0x75,
         0x78,
+        // MUX_VERSION = 2 (issue #4786): config packets now attest rotation in bits 59-60.
         0x00,
         0x00,
         0x00,
-        0x01,
+        0x02,
         0x00,
         0x00,
         0x00,
@@ -234,6 +235,78 @@ class VideoStreamProtocolTest {
       replayed,
     )
     assertEquals(123, replayed and VideoStreamProtocol.PTS_MASK)
+  }
+
+  @Test
+  fun configPacketAttestsRotationForEveryValueWithoutCorruptingPtsOrFlags() {
+    for (rotation in 0..3) {
+      val ptsAndFlags =
+        VideoStreamProtocol.ptsAndFlags(
+          presentationTimeUs = 4242,
+          isConfig = true,
+          isKeyFrame = true,
+          rotation = rotation,
+        )
+
+      // Rotation round-trips out of bits 59-60.
+      assertEquals(rotation, VideoStreamProtocol.rotationOf(ptsAndFlags))
+      // PTS and the other flags are untouched.
+      assertEquals(4242, ptsAndFlags and VideoStreamProtocol.PTS_MASK)
+      assertEquals(
+        VideoStreamProtocol.PACKET_FLAG_CONFIG,
+        ptsAndFlags and VideoStreamProtocol.PACKET_FLAG_CONFIG,
+      )
+      assertEquals(
+        VideoStreamProtocol.PACKET_FLAG_KEY_FRAME,
+        ptsAndFlags and VideoStreamProtocol.PACKET_FLAG_KEY_FRAME,
+      )
+    }
+  }
+
+  @Test
+  fun rotationIsNotWrittenOnNonConfigPackets() {
+    // A non-config packet must never set the rotation bits, so a real PTS is never corrupted.
+    val ptsAndFlags =
+      VideoStreamProtocol.ptsAndFlags(
+        presentationTimeUs = 99,
+        isConfig = false,
+        isKeyFrame = true,
+        rotation = 3,
+      )
+
+    assertEquals(0L, ptsAndFlags and VideoStreamProtocol.ROTATION_MASK)
+    assertEquals(99, ptsAndFlags and VideoStreamProtocol.PTS_MASK)
+  }
+
+  @Test
+  fun defaultPtsAndFlagsOverloadWritesNoRotation() {
+    // The 3-arg overload (the pre-#4786 signature) must keep producing rotation-free flags.
+    val overload =
+      VideoStreamProtocol.ptsAndFlags(presentationTimeUs = 7, isConfig = true, isKeyFrame = false)
+    val explicitZero =
+      VideoStreamProtocol.ptsAndFlags(
+        presentationTimeUs = 7,
+        isConfig = true,
+        isKeyFrame = false,
+        rotation = 0,
+      )
+
+    assertEquals(explicitZero, overload)
+    assertEquals(0, VideoStreamProtocol.rotationOf(overload))
+  }
+
+  @Test
+  fun muxVersionIsTwo() {
+    assertEquals(2, VideoStreamProtocol.MUX_VERSION)
+  }
+
+  @Test
+  fun legacyHeaderStillDecodesUnchanged() {
+    // The 12-byte legacy (video-only) header is unaffected by the v2 bump and stays byte-identical.
+    assertArrayEquals(
+      byteArrayOf(0x68, 0x32, 0x36, 0x34, 0x00, 0x00, 0x01, 0xe0.toByte(), 0x00, 0x00, 0x04, 0x10),
+      VideoStreamProtocol.legacyHeader(width = 480, height = 1040),
+    )
   }
 
   @Test

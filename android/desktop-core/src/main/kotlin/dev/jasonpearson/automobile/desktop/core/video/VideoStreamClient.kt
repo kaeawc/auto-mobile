@@ -222,6 +222,11 @@ class VideoStreamClient(
   private fun pumpFrames(input: java.io.InputStream, decoder: H264Decoder) {
     val parser = VideoStreamParser()
     val buffer = ByteArray(64 * 1024)
+    // Latest attested rotation, updated by each config packet that carries it (issue #4786). A
+    // config packet precedes the IDR it configures, so a decoded frame is stamped with the rotation
+    // the current SPS/PPS attested. Stays null until the first attested config packet, so an
+    // unattested stream (screenrecord/iOS relay) leaves the control gate to fail closed.
+    var currentRotation: Int? = null
 
     while (true) {
       val read = input.read(buffer)
@@ -233,6 +238,9 @@ class VideoStreamClient(
           LOG.info("Live mirroring started (${header.width}x${header.height} advertised)")
         },
         onPacket = { packet ->
+          if (packet.isConfig && packet.rotation != null) {
+            currentRotation = packet.rotation
+          }
           decoder.decode(packet.payload) { frame ->
             val current = _state.value
             if (
@@ -245,7 +253,9 @@ class VideoStreamClient(
               _state.value = VideoStreamState.Streaming(frame.width, frame.height)
             }
             // The decoder reuses its buffer, so the frame must be copied before it leaves here.
-            _frames.tryEmit(DecodedFrame(frame.width, frame.height, frame.bgra.copyOf()))
+            _frames.tryEmit(
+              DecodedFrame(frame.width, frame.height, frame.bgra.copyOf(), currentRotation)
+            )
           }
         },
       )
@@ -331,7 +341,7 @@ class FakeVideoStreamSource(
   }
 
   /** Publishes a frame to collectors, as the real client would. */
-  fun emitFrame(width: Int = 1080, height: Int = 2400) {
-    _frames.tryEmit(DecodedFrame(width, height, ByteArray(width * height * 4)))
+  fun emitFrame(width: Int = 1080, height: Int = 2400, rotation: Int? = null) {
+    _frames.tryEmit(DecodedFrame(width, height, ByteArray(width * height * 4), rotation))
   }
 }

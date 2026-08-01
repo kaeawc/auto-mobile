@@ -282,6 +282,10 @@ object VideoServer {
         height,
         audioEnabled,
         expectedToken = session.token,
+        // Attest the live display rotation on every CONFIG packet (issue #4786). Read at
+        // config-packet-write time on the encode loop, so after the #4785 rotation swap the new
+        // encoder's SPS/PPS carries the new orientation.
+        rotationProvider = { DisplayControl.getDisplayInfo().rotation },
       )
     streamWriter!!.startCommandReader { command ->
       if (command == VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME) {

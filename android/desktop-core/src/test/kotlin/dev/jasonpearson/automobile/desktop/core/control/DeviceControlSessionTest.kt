@@ -1574,6 +1574,47 @@ class DeviceControlSessionTest {
     scope.cancel()
   }
 
+  @Test
+  fun `the live frame alone re-proves orientation after a rotation`() = runTest {
+    // Issue #4786: once the video stream attests rotation, a live frame carrying the new rotation
+    // re-proves orientation on its own — before the screenshot/hierarchy sources catch up — so
+    // control does not stay blocked waiting for an observation refresh.
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val session = session(scope, client)
+
+    // Proven rotation 0 from a coherent observation pair.
+    session.evaluate(paired(captureSequence = 8L, sourceSequence = 11L))
+    assertTrue(session.tap(testSnapshot().copy(rotation = 0), point))
+    advanceUntilIdle()
+
+    // The device rotates to 1; only the live frame attests it (the observation sources report no
+    // rotation yet).
+    val liveProvesRotation = paired(captureSequence = 9L, sourceSequence = 12L)
+    session.evaluate(
+      liveProvesRotation.copy(
+        screenshot = liveProvesRotation.screenshot?.copy(rotation = null),
+        hierarchy = liveProvesRotation.hierarchy?.copy(rotation = null),
+        liveFrame =
+          LiveFrameFacts(
+            deviceId = "emulator-5554",
+            sequence = 900_000L,
+            receivedAtMs = 1_000L,
+            width = 1080,
+            height = 2340,
+            rotation = 1,
+          ),
+      )
+    )
+
+    // Orientation is re-proven to 1 from the live frame alone: a rotation-1 tap dispatches,
+    assertTrue(session.tap(testSnapshot().copy(rotation = 1), point))
+    advanceUntilIdle()
+    // and the stale rotation-0 orientation is no longer dispatchable.
+    assertFalse(session.tap(testSnapshot().copy(rotation = 0), point))
+    scope.cancel()
+  }
+
   /** A coherent, freshly-received screenshot+hierarchy pair sharing one capture identity. */
   private fun paired(
     captureSequence: Long,

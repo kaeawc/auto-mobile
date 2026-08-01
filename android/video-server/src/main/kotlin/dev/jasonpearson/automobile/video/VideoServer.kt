@@ -37,6 +37,17 @@ object VideoServer {
   @Volatile private var audioCapture: AudioCapture? = null
   @Volatile private var streamWriter: VideoStreamWriter? = null
   @Volatile private var sessionLease: VideoSessionLease? = null
+  @Volatile private var rotationMonitor: RotationMonitor? = null
+
+  // The output dimensions the current encoder/capture were created at. The encode loop compares a
+  // freshly-recomputed pair against these to decide whether a rotation actually changed the output
+  // size (#4785); 0<->180 and 90<->270 rotations leave the size unchanged and need no swap.
+  @Volatile private var currentOutputWidth = 0
+  @Volatile private var currentOutputHeight = 0
+
+  // Set by the rotation monitor when the display rotates; consumed on the encode-loop thread, which
+  // owns the encoder/capture lifecycle, so the swap never races concurrent MediaCodec access.
+  @Volatile private var rotationPending = false
 
   @JvmStatic
   fun main(args: Array<String>) {
@@ -92,6 +103,8 @@ object VideoServer {
         fps,
         audioEnabled,
         session,
+        quality,
+        sizeOverride,
       )
     } catch (e: Exception) {
       System.err.println("Error: ${e.message}")
@@ -186,7 +199,26 @@ object VideoServer {
     )
   }
 
-  private fun calculateOutputDimensions(
+  /**
+   * Resolve the effective output dimensions for a display reading. An explicit `--size` override
+   * pins the exact WxH regardless of orientation (the least-surprising behavior for an explicit
+   * request: the operator asked for a specific frame size, so rotation must not silently swap it);
+   * with `--size` set, a rotation therefore never changes the resolved size and no encoder swap
+   * occurs — the mirror is letterboxed within the pinned surface. Otherwise the dimensions are
+   * derived from the current display size scaled by the preset, so re-reading [displayInfo] after a
+   * rotation yields the correctly-oriented output size (issue #4785).
+   */
+  internal fun resolveOutputDimensions(
+    displayInfo: DisplayControl.DisplayInfo,
+    quality: QualityPreset,
+    sizeOverride: Pair<Int, Int>?,
+  ): Pair<Int, Int> = sizeOverride ?: calculateOutputDimensions(displayInfo, quality)
+
+  /** True when a re-read produced a different output size, i.e. a swap is warranted (#4785). */
+  internal fun dimensionsChanged(current: Pair<Int, Int>, next: Pair<Int, Int>): Boolean =
+    current != next
+
+  internal fun calculateOutputDimensions(
     displayInfo: DisplayControl.DisplayInfo,
     quality: QualityPreset,
   ): Pair<Int, Int> {
@@ -227,20 +259,11 @@ object VideoServer {
     fps: Int,
     audioEnabled: Boolean,
     session: VideoSessionOptions,
+    quality: QualityPreset,
+    sizeOverride: Pair<Int, Int>?,
   ) {
-    // Create encoder
-    encoder =
-      VideoEncoder(
-        width = width,
-        height = height,
-        bitrate = bitrate,
-        fps = fps,
-      )
-    val surface = encoder!!.start()
-
-    // Create screen capture
-    capture = ScreenCapture(width, height, densityDpi)
-    capture!!.start(surface)
+    // Create the initial encoder + capture at the startup dimensions.
+    createEncoderAndCapture(width, height, densityDpi, bitrate, fps)
 
     // Backstop for idle-screen frame starvation (#4383): on a static screen the mirror
     // stops submitting buffers, so KEY_REPEAT_PREVIOUS_FRAME_AFTER alone does not reliably
@@ -296,6 +319,17 @@ object VideoServer {
       )
     }
 
+    // Detect rotation and recreate capture/encoder at the new orientation's dimensions (#4785).
+    // The monitor only flags the change; the swap runs on this encode-loop thread, which owns the
+    // encoder/capture lifecycle, so it never races concurrent MediaCodec access. FrameHeartbeat and
+    // VideoSessionLease are untouched by the swap and keep running across it.
+    rotationMonitor =
+      RotationMonitor(
+          reader = { DisplayControl.getDisplayInfo().rotation },
+          registrar = { onChanged -> DisplayControl.registerDisplayListener(onChanged) },
+        )
+        .also { it.start { rotationPending = true } }
+
     println("Streaming started")
 
     // Encoding loop
@@ -304,6 +338,10 @@ object VideoServer {
       // Snapshot the volatile streamWriter the shutdown hook nulls concurrently; a null
       // means teardown has begun, so exit the loop cleanly instead of throwing (#4748).
       val currentWriter = encodeLoopSnapshot(streamWriter) ?: break
+      if (rotationPending) {
+        rotationPending = false
+        swapCaptureForRotation(quality, sizeOverride, bitrate, fps, heartbeat)
+      }
       val index = encoder!!.dequeueOutputBuffer(bufferInfo, 100_000) // 100ms timeout
       if (index >= 0) {
         val buffer = encoder!!.getOutputBuffer(index)
@@ -340,6 +378,70 @@ object VideoServer {
   }
 
   /**
+   * Create the encoder and screen capture at [width]x[height] and record the pair as the current
+   * output dimensions. Shared by the initial startup path and the rotation swap so both build the
+   * capture stack identically.
+   */
+  private fun createEncoderAndCapture(
+    width: Int,
+    height: Int,
+    densityDpi: Int,
+    bitrate: Int,
+    fps: Int,
+  ) {
+    val newEncoder = VideoEncoder(width = width, height = height, bitrate = bitrate, fps = fps)
+    val surface = newEncoder.start()
+    val newCapture = ScreenCapture(width, height, densityDpi)
+    newCapture.start(surface)
+    encoder = newEncoder
+    capture = newCapture
+    currentOutputWidth = width
+    currentOutputHeight = height
+  }
+
+  /**
+   * Recreate the encoder and VirtualDisplay at the current display orientation's dimensions after a
+   * rotation (issue #4785). Runs on the encode-loop thread so it owns the encoder/capture lifecycle
+   * exclusively.
+   *
+   * Re-reads the display to get the post-rotation size, recomputes the output dimensions with the
+   * SAME preset scaling used at startup, and returns early when the size is unchanged (0<->180 and
+   * 90<->270 rotations, or an explicit `--size` that pins WxH) so no needless swap churns the
+   * stream. On a real size change it resets the writer's replay cache atomically BEFORE tearing
+   * down the old encoder, so a client attaching mid-swap can never replay the new SPS/PPS against
+   * the stale pre-rotation IDR; the new encoder's config+IDR then repopulate the cache and flow to
+   * any attached client live, and to a reconnecting client via replay. Rotating back recomputes the
+   * original dimensions and swaps again, so repeated rotations restore prior sizes.
+   */
+  private fun swapCaptureForRotation(
+    quality: QualityPreset,
+    sizeOverride: Pair<Int, Int>?,
+    bitrate: Int,
+    fps: Int,
+    heartbeat: FrameHeartbeat,
+  ) {
+    val displayInfo = DisplayControl.getDisplayInfo()
+    val next = resolveOutputDimensions(displayInfo, quality, sizeOverride)
+    val current = currentOutputWidth to currentOutputHeight
+    if (!dimensionsChanged(current, next)) {
+      return
+    }
+    val (newWidth, newHeight) = next
+    println(
+      "VIDEO_ROTATION_SWAP rotation=${displayInfo.rotation} " +
+        "from=${current.first}x${current.second} to=${newWidth}x$newHeight"
+    )
+    // Atomic w.r.t. the writer: clear the stale replay cache before the old encoder is gone so no
+    // reconnecting client can be replayed a new-SPS/old-IDR mismatch mid-swap.
+    streamWriter?.resetReplayCacheForResize()
+    capture?.stop()
+    encoder?.stop()
+    createEncoderAndCapture(newWidth, newHeight, displayInfo.densityDpi, bitrate, fps)
+    // Nudge a prompt fresh IDR so a static post-rotation screen does not starve viewers.
+    heartbeat.onKeyFrameRequested()
+  }
+
+  /**
    * Snapshot a volatile field the shutdown hook may null on another thread. The encode loop calls
    * this instead of a `!!` deref so a concurrent null observed mid-shutdown yields a clean stop
    * signal (null) rather than a [NullPointerException] (#4748). Kept as a seam so the loop's
@@ -349,11 +451,13 @@ object VideoServer {
 
   private fun shutdown() {
     running = false
+    rotationMonitor?.stop()
     audioCapture?.stop()
     streamWriter?.stop()
     capture?.stop()
     encoder?.stop()
 
+    rotationMonitor = null
     audioCapture = null
     streamWriter = null
     capture = null

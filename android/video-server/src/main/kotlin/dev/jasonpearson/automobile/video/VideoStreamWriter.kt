@@ -504,6 +504,22 @@ class VideoStreamWriter(
    */
   fun reconnectWindowExpired(): Boolean = reconnectWindow.isExpired()
 
+  /**
+   * Atomically clear the replay cache for a device-rotation encoder swap (issue #4785).
+   *
+   * Held under the same `lock` that guards client attach (`acceptClients` ->
+   * `replayCachedVideoLocked`), so the swap is atomic with respect to the writer: a client
+   * attaching mid-swap serializes either fully before this reset (replays the old encoder's
+   * coherent config+IDR) or fully after it (replays nothing yet, then requests a keyframe), and can
+   * never observe the new encoder's SPS/PPS paired with the stale pre-rotation IDR. The caller
+   * resets here after tearing down the old encoder and before starting the new one; the new
+   * encoder's config+IDR then repopulate the cache through the normal [writePacket] path, so a
+   * later reconnect replays the new coherent pair.
+   */
+  fun resetReplayCacheForResize() {
+    synchronized(lock) { packetCache.reset() }
+  }
+
   private fun writeStreamHeaderLocked() {
     val header =
       if (audioEnabled) {
@@ -631,6 +647,19 @@ internal class VideoPacketCache {
     if ((packet.ptsAndFlags and VideoStreamProtocol.PACKET_FLAG_KEY_FRAME) != 0L) {
       idr = packet.copyPacket()
     }
+  }
+
+  /**
+   * Drop the cached decoder state so the next [replay] starts empty. Used by the rotation-triggered
+   * encoder swap (#4785): the old encoder's SPS/PPS + IDR describe the pre-rotation dimensions, so
+   * they must not be replayed once a new encoder at the new dimensions is coming up. Clearing both
+   * halves together (never one) keeps every [replay] snapshot self-consistent — a reconnecting
+   * client can only ever see the old coherent pair, nothing, or the new coherent pair, never a new
+   * SPS paired with the old IDR.
+   */
+  fun reset() {
+    config = null
+    idr = null
   }
 
   fun replay(): List<CachedVideoPacket> {

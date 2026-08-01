@@ -23,6 +23,8 @@ import {
 } from "./IOSCtrlProxyBundleDownloader";
 import { hashAppBundle } from "./ios-cmdline-tools/AppBundleHasher";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
+import { getTempDir } from "./tempDir";
+import { ensureSecureDir } from "./filesystem/securePermissions";
 import {
   buildPlist,
   injectUITestEnvironment,
@@ -96,7 +98,16 @@ export class IOSCtrlProxyBuilder {
    */
   private static readonly RUNNER_XCTESTRUN_PREFIX = "automobile-runner-";
   private static readonly DEFAULT_PROJECT_ROOT = process.cwd();
-  private static readonly DEFAULT_DERIVED_DATA_PATH = "/tmp/automobile-ctrl-proxy";
+  /**
+   * Subdirectory under the uid-private auto-mobile base (`~/.auto-mobile`) where
+   * the runner bundle is extracted and later launched from. Replaces the former
+   * world-writable, predictable `/tmp/automobile-ctrl-proxy` default: on a shared
+   * host any other uid could pre-seed that path or swap the runner/xctest binary
+   * between the integrity check and launch (TOCTOU, issue #4759). Resolved lazily
+   * via {@link getTempDir} so an `AUTOMOBILE_DATA_DIR` override set after module
+   * load is honored.
+   */
+  private static readonly DEFAULT_DERIVED_DATA_SUBDIR = "derived-data";
   private static readonly DEFAULT_SCHEME = "CtrlProxyApp";
   private static readonly DEFAULT_DESTINATION = "generic/platform=iOS Simulator";
   private static readonly DEFAULT_BUNDLE_CACHE_DIR = path.join(os.homedir(), ".automobile", "ctrl-proxy-ios");
@@ -146,7 +157,7 @@ export class IOSCtrlProxyBuilder {
   ) {
     this.config = {
       projectRoot: config.projectRoot || process.env.AUTOMOBILE_PROJECT_ROOT || IOSCtrlProxyBuilder.DEFAULT_PROJECT_ROOT,
-      derivedDataPath: config.derivedDataPath || process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA || IOSCtrlProxyBuilder.DEFAULT_DERIVED_DATA_PATH,
+      derivedDataPath: config.derivedDataPath || process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA || getTempDir(IOSCtrlProxyBuilder.DEFAULT_DERIVED_DATA_SUBDIR),
       scheme: config.scheme || IOSCtrlProxyBuilder.DEFAULT_SCHEME,
       destination: config.destination || IOSCtrlProxyBuilder.DEFAULT_DESTINATION,
       bundleCacheDir: config.bundleCacheDir || process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR || IOSCtrlProxyBuilder.DEFAULT_BUNDLE_CACHE_DIR,
@@ -796,7 +807,7 @@ export class IOSCtrlProxyBuilder {
   }
 
   private async ensureBundleDownloaded(): Promise<{ bundlePath: string; usedCachedFallback: boolean }> {
-    await fs.mkdir(this.config.bundleCacheDir, { recursive: true });
+    await ensureSecureDir(this.config.bundleCacheDir);
     const bundlePath = this.getBundlePath();
 
     const overridePath = this.getBundlePathOverride();
@@ -915,7 +926,15 @@ export class IOSCtrlProxyBuilder {
   }
 
   private async extractBundle(bundlePath: string): Promise<void> {
+    // Fail closed before wiping/repopulating the tree if it is owned by another
+    // uid — extracting into a directory we do not own reopens the TOCTOU window
+    // this hardening closes (issue #4759).
+    await this.assertDerivedDataDirOwnedByCurrentUid();
     await this.downloader.extractBundle(bundlePath, this.config.derivedDataPath);
+    // Authoritatively restrict the extraction tree to owner-only (0o700),
+    // independent of the downloader implementation: the runner is launched from
+    // here, so other uids must not be able to read or swap its binaries (#4759).
+    await ensureSecureDir(this.config.derivedDataPath);
     await this.normalizeExtractedBundle();
     await this.verifyExtractedArtifacts();
 
@@ -964,7 +983,7 @@ export class IOSCtrlProxyBuilder {
     const targetBuildDir = path.join(this.config.derivedDataPath, "Build");
 
     await fs.rm(targetBuildDir, { recursive: true, force: true });
-    await fs.mkdir(this.config.derivedDataPath, { recursive: true });
+    await ensureSecureDir(this.config.derivedDataPath);
 
     try {
       await fs.rename(sourceBuildDir, targetBuildDir);
@@ -1027,21 +1046,92 @@ export class IOSCtrlProxyBuilder {
 
     // Verify the release-selected runner executable SHA256 for simulator.
     if (platform === "simulator") {
-      const expectedRunnerSha256 = this.getExpectedRunnerChecksum();
-      if (expectedRunnerSha256 && expectedRunnerSha256.length > 0) {
-        const runnerChecksumTarget = this.getExpectedRunnerChecksumTarget();
-        const runnerBinaryPath = await this.getRunnerBinaryPath(platform, runnerChecksumTarget);
-        if (!runnerBinaryPath) {
-          throw new Error(`CtrlProxy runner binary missing for ${platform}`);
-        }
-        const { checksum } = await this.downloader.computeFileSha256(runnerBinaryPath);
-        if (checksum.toLowerCase() !== expectedRunnerSha256.toLowerCase()) {
-          throw new Error(`CtrlProxy runner binary SHA256 mismatch for ${platform}. Expected: ${expectedRunnerSha256}, Got: ${checksum}`);
-        }
-        logger.info("[IOSCtrlProxyBuilder] Runner binary SHA256 verified", { platform, checksum });
-      } else {
-        logger.warn(`[IOSCtrlProxyBuilder] Runner binary SHA256 verification skipped for ${platform} (no hash provided)`);
-      }
+      await this.assertRunnerBinaryHash(platform, "post-extract");
+    }
+  }
+
+  /**
+   * Verify the runner executable's SHA256 against the release-selected expected
+   * hash. Shared by the post-extract check and the pre-launch re-verification
+   * (issue #4759). A no-op when no expected hash is configured (mirrors the prior
+   * skip-with-warning behavior); throws {@link ActionableError} on mismatch so the
+   * caller fails closed rather than launching a tampered binary.
+   *
+   * @param phase - which verification window this is, for log/error context.
+   */
+  private async assertRunnerBinaryHash(
+    platform: IOSCtrlProxyPlatform,
+    phase: "post-extract" | "pre-launch"
+  ): Promise<void> {
+    const expectedRunnerSha256 = this.getExpectedRunnerChecksum();
+    if (!expectedRunnerSha256 || expectedRunnerSha256.length === 0) {
+      logger.warn(`[IOSCtrlProxyBuilder] Runner binary SHA256 verification skipped for ${platform} (no hash provided)`);
+      return;
+    }
+    const runnerChecksumTarget = this.getExpectedRunnerChecksumTarget();
+    const runnerBinaryPath = await this.getRunnerBinaryPath(platform, runnerChecksumTarget);
+    if (!runnerBinaryPath) {
+      throw new ActionableError(`CtrlProxy runner binary missing for ${platform}`);
+    }
+    const { checksum } = await this.downloader.computeFileSha256(runnerBinaryPath);
+    if (checksum.toLowerCase() !== expectedRunnerSha256.toLowerCase()) {
+      throw new ActionableError(
+        `CtrlProxy runner binary SHA256 mismatch (${phase}) for ${platform}. ` +
+        `Expected: ${expectedRunnerSha256}, Got: ${checksum}. Refusing to launch a runner whose ` +
+        `binary changed since it was verified (possible TOCTOU tampering).`
+      );
+    }
+    logger.info(`[IOSCtrlProxyBuilder] Runner binary SHA256 verified (${phase})`, { platform, checksum });
+  }
+
+  /**
+   * Re-verify the runner binary hash and derived-data ownership IMMEDIATELY
+   * before launch (issue #4759). Post-extract verification alone leaves a
+   * verify→execute window in which a local attacker on a shared host can swap the
+   * runner/xctest binary before `xcodebuild test-without-building` runs it.
+   * {@link IOSCtrlProxyManager} calls this right before spawning the runner to
+   * close that window. Fails closed (throws {@link ActionableError}) on a foreign
+   * uid or a hash mismatch.
+   */
+  public async verifyRunnerBinaryBeforeLaunch(platform: IOSCtrlProxyPlatform): Promise<void> {
+    await this.assertDerivedDataDirOwnedByCurrentUid();
+    await this.assertRunnerBinaryHash(platform, "pre-launch");
+  }
+
+  /**
+   * Fail closed (issue #4759) when the derived-data directory already exists but
+   * is owned by a different uid. On a shared host another user could pre-seed the
+   * directory (the old `/tmp` default was world-writable and predictable) and swap
+   * the runner/xctest binaries out from under our integrity check. Reusing a
+   * directory we do not own reopens that TOCTOU window, so we refuse to extract
+   * into or launch from it.
+   *
+   * POSIX-only: Windows has no `st_uid`/`process.getuid`, so the check no-ops
+   * there — access control on Windows is via ACLs, outside the scope of these
+   * bits (matching {@link ensureSecureDir}'s cross-platform contract).
+   */
+  private async assertDerivedDataDirOwnedByCurrentUid(): Promise<void> {
+    const getuid = process.getuid?.bind(process);
+    if (process.platform === "win32" || !getuid) {
+      return;
+    }
+    let stats;
+    try {
+      stats = await fs.stat(this.config.derivedDataPath);
+    } catch (error) {
+      // Directory does not exist yet (first extraction) — nothing to refuse. Any
+      // other stat error is treated the same: the create step that follows will
+      // surface a real failure with a clearer message.
+      logger.debug(`[IOSCtrlProxyBuilder] derived-data stat failed (treated as absent): ${error}`, error);
+      return;
+    }
+    const currentUid = getuid();
+    if (stats.uid !== currentUid) {
+      throw new ActionableError(
+        `Refusing to reuse CtrlProxy derived-data directory ${this.config.derivedDataPath}: it is ` +
+        `owned by uid ${stats.uid}, not the current uid ${currentUid}. Another user may have pre-seeded ` +
+        `or tampered with it. Delete it, or set AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA to a directory you own.`
+      );
     }
   }
 

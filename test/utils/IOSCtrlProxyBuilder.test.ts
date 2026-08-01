@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
 import { FakeIOSCtrlProxyBundleDownloader } from "../fakes/FakeIOSCtrlProxyBundleDownloader";
+import { getTempDir } from "../../src/utils/tempDir";
 import * as fs from "fs/promises";
 import * as path from "path";
 import os from "os";
@@ -113,7 +114,11 @@ describe("IOSCtrlProxyBuilder", function() {
 
       expect(config.scheme).toBe("CtrlProxyApp");
       expect(config.destination).toBe("generic/platform=iOS Simulator");
-      expect(config.derivedDataPath).toBe("/tmp/automobile-ctrl-proxy");
+      // Off the world-writable /tmp default onto a uid-private ~/.auto-mobile
+      // subdir (issue #4759). Compare against getTempDir() so the assertion is
+      // path-separator agnostic and honors AUTOMOBILE_DATA_DIR on CI.
+      expect(config.derivedDataPath).toBe(getTempDir("derived-data"));
+      expect(config.derivedDataPath).not.toContain("/tmp/");
       expect(config.bundleCacheDir).toBe(path.join(os.homedir(), ".automobile", "ctrl-proxy-ios"));
     });
 
@@ -678,6 +683,102 @@ describe("IOSCtrlProxyBuilder", function() {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("runner binary SHA256 mismatch");
+    });
+
+    test("extracts the runner into a uid-private 0o700 directory, not /tmp (#4759)", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      const result = await builder.build("simulator");
+      expect(result.success).toBe(true);
+
+      // Windows has no POSIX mode bits (fs.chmod only toggles read-only), so the
+      // 0o700 assertion is POSIX-only.
+      if (process.platform !== "win32") {
+        const stats = await fs.stat(derivedDataPath);
+        expect(stats.mode & 0o777).toBe(0o700);
+      }
+    });
+
+    test("verifyRunnerBinaryBeforeLaunch re-verifies the hash and passes when unchanged (#4759)", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "xctest-checksum";
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      await builder.build("simulator");
+      const before = downloader.checksummedFilePaths.length;
+
+      // Must not throw, and must re-hash the runner binary (a second computeFileSha256).
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      expect(downloader.checksummedFilePaths.length).toBeGreaterThan(before);
+    });
+
+    test("verifyRunnerBinaryBeforeLaunch refuses launch when the runner binary changed after extraction (#4759)", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "xctest-checksum";
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      await builder.build("simulator");
+
+      // Simulate a TOCTOU swap: the on-disk runner binary now hashes differently
+      // than it did at extraction time.
+      downloader.runnerChecksum = "swapped-attacker-checksum";
+
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
+        .rejects.toThrow("runner binary SHA256 mismatch (pre-launch)");
+    });
+
+    test("refuses to reuse a derived-data directory owned by another uid (#4759)", async function() {
+      if (process.platform === "win32" || typeof process.getuid !== "function") {
+        // st_uid/getuid are POSIX-only; ownership refusal no-ops on win32.
+        return;
+      }
+
+      const derivedDataPath = path.join(tempDir, "ForeignDerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      await fs.mkdir(derivedDataPath, { recursive: true });
+
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader: new FakeIOSCtrlProxyBundleDownloader() }
+      );
+
+      const foreignUid = process.getuid()! + 1;
+      const statSpy = spyOn(fs, "stat").mockResolvedValue(
+        { uid: foreignUid } as Awaited<ReturnType<typeof fs.stat>>
+      );
+      try {
+        await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
+          .rejects.toThrow(`owned by uid ${foreignUid}`);
+      } finally {
+        statSpy.mockRestore();
+      }
     });
 
     test("fails closed when AUTOMOBILE_VERSION is pinned to an unknown version (#2746)", async function() {

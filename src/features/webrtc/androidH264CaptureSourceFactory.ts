@@ -120,6 +120,7 @@ export function createAndroidH264CaptureSource(
     device: options.device,
     onData: options.onData,
     onAudioData: options.onAudioData,
+    onRotation: options.onRotation,
     onError: options.onError,
     bitrateBps: options.bitrateBps,
     size: options.size,

@@ -12,8 +12,19 @@ import org.bytedeco.javacpp.BytePointer
 import org.bytedeco.javacpp.IntPointer
 import org.bytedeco.javacpp.PointerPointer
 
-/** One decoded frame as tightly packed BGRA, ready to hand to Skia. */
-class DecodedFrame(val width: Int, val height: Int, val bgra: ByteArray)
+/**
+ * One decoded frame as tightly packed BGRA, ready to hand to Skia.
+ *
+ * [rotation] is the display rotation (`0..3`) attested by the most recent CONFIG packet, or null
+ * when unknown (issue #4786). The decoder itself cannot know it — [VideoStreamClient] stamps it
+ * from the stream's config packets — so it defaults to null for frames the decoder constructs.
+ */
+class DecodedFrame(
+  val width: Int,
+  val height: Int,
+  val bgra: ByteArray,
+  val rotation: Int? = null,
+)
 
 /** Raised when the decoder cannot be created or a decode step fails unrecoverably. */
 class H264DecodeException(message: String, cause: Throwable? = null) : Exception(message, cause)

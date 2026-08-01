@@ -7,6 +7,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.toImageBitmap
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlinx.coroutines.CompletableDeferred
 
@@ -26,6 +27,23 @@ class LiveVideoStreamTest {
     waitUntil { source.connectedDeviceId == "emulator-5554" }
     runOnUiThread { showLiveLayout.value = false }
     waitUntil { source.connectedDeviceId == null }
+  }
+
+  @Test
+  fun `populates the live frame's rotation from the decoded stream`() = runComposeUiTest {
+    // Issue #4786: the rotation attested by the stream's config packets rides through to the
+    // LiveVideoFrame so DeviceControlSession can prove the live frame's orientation.
+    val source = FakeVideoStreamSource()
+    var observedRotation: Int? = null
+
+    setContent {
+      val liveFrame = rememberLiveVideoFrame(source, "emulator-5554")
+      SideEffect { liveFrame?.let { observedRotation = it.rotation } }
+    }
+
+    source.emitFrame(width = 1, height = 1, rotation = 3)
+    waitUntil { observedRotation == 3 }
+    assertEquals(3, observedRotation)
   }
 
   @Test

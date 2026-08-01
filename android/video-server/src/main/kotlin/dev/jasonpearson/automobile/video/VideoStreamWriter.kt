@@ -101,6 +101,11 @@ class VideoStreamWriter(
   private val expectedToken: String? = null,
   private val nowMs: () -> Long = { SystemClock.elapsedRealtime() },
   private val socketFactory: VideoServerSocketFactory = LocalServerSocketFactory,
+  // Supplies the CURRENT display rotation (0..3) attested on each CONFIG packet (issue #4786). Read
+  // on the encode-loop thread at config-packet time — including the #4785 rotation swap's new
+  // config packet — so the value matches the encoder that just emitted the SPS/PPS. Defaults to a
+  // constant 0 for token-less/legacy launches and unit tests that do not exercise rotation.
+  private val rotationProvider: () -> Int = { 0 },
 ) {
   private data class CachedPacket(
     val trackId: Int,
@@ -209,7 +214,7 @@ class VideoStreamWriter(
     /** Bit 62: key frame (I-frame) */
     const val PACKET_FLAG_KEY_FRAME = VideoStreamProtocol.PACKET_FLAG_KEY_FRAME
 
-    /** Mask for PTS (bits 0-61) */
+    /** Mask for PTS (bits 0-58); bits 59-60 carry the CONFIG-packet rotation (issue #4786). */
     const val PTS_MASK = VideoStreamProtocol.PTS_MASK
   }
 
@@ -481,11 +486,17 @@ class VideoStreamWriter(
     val data = ByteArray(bufferInfo.size)
     buffer.position(bufferInfo.offset)
     buffer.get(data, 0, bufferInfo.size)
+    val isConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+    // Attest the CURRENT rotation only on the CONFIG packet (SPS/PPS), which is re-emitted at
+    // stream
+    // start and on every #4785 rotation-driven encoder swap; the cache remembers it so a reconnect
+    // replays the current rotation for free (issue #4786).
     val ptsAndFlags =
       VideoStreamProtocol.ptsAndFlags(
         bufferInfo.presentationTimeUs,
-        (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0,
+        isConfig,
         (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0,
+        rotation = if (isConfig) rotationProvider() else 0,
       )
     synchronized(lock) { packetCache.remember(CachedVideoPacket(ptsAndFlags, data)) }
     return handoff.offer(EncodedVideoFrame(ptsAndFlags, data))

@@ -16,8 +16,25 @@ export const PACKET_FLAG_CONFIG = 1n << 63n;
 /** Bit 62 of `ptsAndFlags`: key frame. */
 export const PACKET_FLAG_KEY_FRAME = 1n << 62n;
 
-/** Bits 0-61 carry the presentation timestamp. */
-export const PTS_MASK = (1n << 62n) - 1n;
+/**
+ * Bit 61 of `ptsAndFlags`: ROTATION_PRESENT (issue #4786). Set on a CONFIG packet whose bits 60-59
+ * carry an attested display rotation. This layer has no REPLAYED flag, so bit 61 is free — it is a
+ * presence marker distinct from the device-side protocol's bit 61 (REPLAYED). A relay whose source
+ * cannot attest rotation (screenrecord, iOS) leaves this bit clear, and the desktop reads `null`
+ * (control fails closed).
+ */
+export const PACKET_FLAG_ROTATION_PRESENT = 1n << 61n;
+
+/** Attested display rotation (0..3) occupies bits 60-59 of a CONFIG packet (issue #4786). */
+export const ROTATION_SHIFT = 59n;
+export const ROTATION_MASK = 0b11n << ROTATION_SHIFT;
+
+/**
+ * Bits 0-58 carry the presentation timestamp. Narrowed from bits 0-61 to make room for the rotation
+ * presence bit and field; backward compatible because a real microsecond PTS never reaches bit 59
+ * (~18 000 years), so older streams wrote 0 there and older parsers read them as zero PTS.
+ */
+export const PTS_MASK = (1n << ROTATION_SHIFT) - 1n;
 
 /**
  * The 12-byte stream header: codec id, then width and height.
@@ -36,11 +53,21 @@ export function encodeStreamHeader(width: number = 0, height: number = 0): Buffe
 
 export function encodePtsAndFlags(
   presentationTimeUs: bigint,
-  { isConfig = false, isKeyFrame = false }: { isConfig?: boolean; isKeyFrame?: boolean } = {}
+  {
+    isConfig = false,
+    isKeyFrame = false,
+    rotation = null,
+  }: { isConfig?: boolean; isKeyFrame?: boolean; rotation?: number | null } = {}
 ): bigint {
   let ptsAndFlags = presentationTimeUs & PTS_MASK;
   if (isConfig) {
     ptsAndFlags |= PACKET_FLAG_CONFIG;
+    // Attest rotation ONLY on config packets, and only when the source proved it; a null rotation
+    // (screenrecord/iOS) leaves the presence bit clear so the desktop reads `null` (issue #4786).
+    if (rotation !== null) {
+      ptsAndFlags |= PACKET_FLAG_ROTATION_PRESENT;
+      ptsAndFlags |= (BigInt(rotation) & 0b11n) << ROTATION_SHIFT;
+    }
   }
   if (isKeyFrame) {
     ptsAndFlags |= PACKET_FLAG_KEY_FRAME;

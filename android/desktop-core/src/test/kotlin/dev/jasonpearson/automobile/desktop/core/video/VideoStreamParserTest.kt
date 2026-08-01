@@ -29,10 +29,16 @@ class VideoStreamParserTest {
     ptsUs: Long = 0,
     isConfig: Boolean = false,
     isKeyFrame: Boolean = false,
+    rotation: Int? = null,
   ): ByteArray {
-    var ptsAndFlags = ptsUs and ((1L shl 62) - 1)
+    var ptsAndFlags = ptsUs and ((1L shl 59) - 1)
     if (isConfig) ptsAndFlags = ptsAndFlags or (1L shl 63)
     if (isKeyFrame) ptsAndFlags = ptsAndFlags or (1L shl 62)
+    // Rotation rides bit 61 (ROTATION_PRESENT) + bits 59-60, matching videoStreamFraming.ts.
+    if (rotation != null) {
+      ptsAndFlags = ptsAndFlags or (1L shl 61)
+      ptsAndFlags = ptsAndFlags or ((rotation.toLong() and 0b11L) shl 59)
+    }
     return ByteBuffer.allocate(12 + payload.size)
       .order(ByteOrder.BIG_ENDIAN)
       .putLong(ptsAndFlags)
@@ -186,6 +192,48 @@ class VideoStreamParserTest {
 
     // 0x616d7578 is "amux", the daemon's audio-muxed variant, which this client does not decode.
     assertTrue(failure.message!!.contains("616d7578"), failure.message!!)
+  }
+
+  @Test
+  fun `decodes the attested rotation from a config packet for every value`() {
+    for (rotation in 0..3) {
+      val out =
+        feed(
+          VideoStreamParser(),
+          streamHeader() +
+            packet(byteArrayOf(0x67.toByte()), 4242, isConfig = true, rotation = rotation),
+        )
+
+      assertEquals(rotation, out.packets.single().rotation)
+      // The rotation bits must not leak into the timestamp.
+      assertEquals(4242L, out.packets.single().presentationTimeUs)
+    }
+  }
+
+  @Test
+  fun `rotation is null when the presence bit is absent`() {
+    // A config packet from a relay whose source could not attest rotation leaves rotation unknown.
+    val out =
+      feed(
+        VideoStreamParser(),
+        streamHeader() + packet(byteArrayOf(0x67.toByte()), 5, isConfig = true),
+      )
+
+    assertTrue(out.packets.single().isConfig)
+    assertEquals(null, out.packets.single().rotation)
+  }
+
+  @Test
+  fun `rotation is null on a non-config packet even when the presence bit is set`() {
+    // Only a config packet attests rotation; the parser must not read it off a key frame.
+    val out =
+      feed(
+        VideoStreamParser(),
+        streamHeader() + packet(byteArrayOf(0x65.toByte()), 9, isKeyFrame = true, rotation = 2),
+      )
+
+    assertTrue(out.packets.single().isKeyFrame)
+    assertEquals(null, out.packets.single().rotation)
   }
 
   @Test

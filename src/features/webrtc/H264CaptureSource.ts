@@ -22,6 +22,12 @@ export interface H264CaptureSourceOptions {
   onData: (chunk: Buffer) => void;
   /** Called with each chunk of 8 kHz mono PCM16LE audio when audio is enabled. */
   onAudioData?: (chunk: Buffer) => void;
+  /**
+   * Called with the attested display rotation (0..3) when the source can prove it (issue #4786).
+   * Only the Android persistent encoder attests today; screenrecord and iOS sources omit it, so a
+   * consumer that never receives a call leaves rotation unknown (control fails closed).
+   */
+  onRotation?: (rotation: number) => void;
   /** Called when the source fails fatally after it has started. */
   onError?: (error: Error) => void;
   bitrateBps?: number;

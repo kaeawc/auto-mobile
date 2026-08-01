@@ -11,7 +11,8 @@
  *   - bit 63 of `pts_and_flags`: CONFIG (codec config / SPS+PPS)
  *   - bit 62: KEY_FRAME (IDR)
  *   - bit 61: REPLAYED (cached packet for a replacement client)
- *   - bits 0-60: presentation timestamp (microseconds)
+ *   - bits 60-59: display ROTATION (0..3), attested on CONFIG packets only (issue #4786)
+ *   - bits 0-58: presentation timestamp (microseconds)
  *
  * Each packet payload is already Annex-B (MediaCodec AVC byte-buffer output), so
  * the concatenation of payloads is a valid Annex-B elementary stream — exactly
@@ -56,7 +57,16 @@ export const MAX_TRACK_COUNT = 16;
 const FLAG_CONFIG = 1n << 63n;
 const FLAG_KEY_FRAME = 1n << 62n;
 const FLAG_REPLAYED = 1n << 61n;
-const PTS_MASK = FLAG_REPLAYED - 1n;
+/**
+ * Display rotation (0..3) occupies bits 60-59 of `ptsAndFlags`, attested on CONFIG packets only
+ * (issue #4786). A real microsecond PTS never reaches bit 59 (~18 000 years), so narrowing the PTS
+ * mask to bits 0-58 is backward compatible: old streams wrote 0 there.
+ */
+const ROTATION_SHIFT = 59n;
+const ROTATION_MASK = 0b11n << ROTATION_SHIFT;
+const PTS_MASK = (1n << ROTATION_SHIFT) - 1n;
+/** Mux header wire version whose config packets attest rotation in bits 60-59 (issue #4786). */
+export const VIDEO_SERVER_MUX_VERSION = 2;
 
 export interface VideoServerStreamHeader {
   codecId: number;
@@ -64,6 +74,8 @@ export interface VideoServerStreamHeader {
   height: number;
   muxed?: boolean;
   audio?: boolean;
+  /** Mux wire version (issue #4786); present only for the muxed header, absent for legacy. */
+  muxVersion?: number;
 }
 
 export interface VideoServerPacket {
@@ -77,6 +89,12 @@ export interface VideoServerPacket {
   keyFrame: boolean;
   /** Cached packet replayed for a replacement LocalSocket client. */
   replayed: boolean;
+  /**
+   * Attested display rotation (0..3), present ONLY on CONFIG packets (issue #4786); `undefined` on
+   * non-config packets. A config packet always carries a valid rotation, so `undefined` here means
+   * "not a config packet", never "config packet without rotation".
+   */
+  rotation?: number;
   /** Presentation timestamp in microseconds. */
   ptsUs: number;
 }
@@ -99,6 +117,17 @@ export class VideoServerStreamParser {
   private muxTracks: Map<number, { codecId: number; param1: number; param2: number }> | null = null;
 
   constructor(private readonly callbacks: VideoServerStreamParserCallbacks) {}
+
+  /**
+   * Extract the attested rotation (0..3) from a packet's flags, but only for CONFIG packets — the
+   * rotation bits are undefined on any other packet (issue #4786).
+   */
+  private static rotationFromFlags(flags: bigint): number | undefined {
+    if ((flags & FLAG_CONFIG) === 0n) {
+      return undefined;
+    }
+    return Number((flags & ROTATION_MASK) >> ROTATION_SHIFT);
+  }
 
   /**
    * Guard a size/track-count read against its cap. A declared length over the
@@ -149,7 +178,12 @@ export class VideoServerStreamParser {
           }
         }
         if (videoHeader) {
-          this.header = { ...videoHeader, muxed: true, audio: hasPcmAudioTrack };
+          this.header = {
+            ...videoHeader,
+            muxed: true,
+            audio: hasPcmAudioTrack,
+            muxVersion: fullHeader.readUInt32BE(4),
+          };
           this.callbacks.onHeader?.(this.header);
         }
         this.buffered.discard(headerBytes);
@@ -186,6 +220,7 @@ export class VideoServerStreamParser {
         config: (flags & FLAG_CONFIG) !== 0n,
         keyFrame: (flags & FLAG_KEY_FRAME) !== 0n,
         replayed: (flags & FLAG_REPLAYED) !== 0n,
+        rotation: VideoServerStreamParser.rotationFromFlags(flags),
         ptsUs: Number(flags & PTS_MASK),
       });
     }
@@ -214,6 +249,7 @@ export class VideoServerStreamParser {
         config: (flags & FLAG_CONFIG) !== 0n,
         keyFrame: (flags & FLAG_KEY_FRAME) !== 0n,
         replayed: (flags & FLAG_REPLAYED) !== 0n,
+        rotation: VideoServerStreamParser.rotationFromFlags(flags),
         ptsUs: Number(flags & PTS_MASK),
       });
     }

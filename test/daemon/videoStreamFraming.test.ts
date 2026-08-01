@@ -9,6 +9,10 @@ import {
   isParameterSetChunk,
   PACKET_FLAG_CONFIG,
   PACKET_FLAG_KEY_FRAME,
+  PACKET_FLAG_ROTATION_PRESENT,
+  PTS_MASK,
+  ROTATION_MASK,
+  ROTATION_SHIFT,
 } from "../../src/daemon/videoStreamFraming";
 
 /** Annex-B chunk with a 4-byte start code and the given NAL type. */
@@ -59,6 +63,34 @@ describe("videoStreamFraming", () => {
 
       expect(ptsAndFlags & PACKET_FLAG_CONFIG).toBe(0n);
       expect(ptsAndFlags).toBe(7n);
+    });
+
+    // --- Rotation attestation (issue #4786), layer 2 ---
+
+    test("a config packet attests rotation with the presence bit and a 2-bit field", () => {
+      for (const rotation of [0, 1, 2, 3]) {
+        const ptsAndFlags = encodePtsAndFlags(1000n, { isConfig: true, rotation });
+
+        expect(ptsAndFlags & PACKET_FLAG_ROTATION_PRESENT).toBe(PACKET_FLAG_ROTATION_PRESENT);
+        expect((ptsAndFlags & ROTATION_MASK) >> ROTATION_SHIFT).toBe(BigInt(rotation));
+        // The rotation field must not leak into the timestamp.
+        expect(ptsAndFlags & PTS_MASK).toBe(1000n);
+      }
+    });
+
+    test("a null rotation leaves the presence bit clear so the desktop reads unknown", () => {
+      const ptsAndFlags = encodePtsAndFlags(1000n, { isConfig: true, rotation: null });
+
+      expect(ptsAndFlags & PACKET_FLAG_ROTATION_PRESENT).toBe(0n);
+      expect(ptsAndFlags & ROTATION_MASK).toBe(0n);
+    });
+
+    test("rotation is ignored on a non-config packet", () => {
+      const ptsAndFlags = encodePtsAndFlags(1000n, { isKeyFrame: true, rotation: 3 });
+
+      expect(ptsAndFlags & PACKET_FLAG_ROTATION_PRESENT).toBe(0n);
+      expect(ptsAndFlags & ROTATION_MASK).toBe(0n);
+      expect(ptsAndFlags & PTS_MASK).toBe(1000n);
     });
   });
 

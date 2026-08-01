@@ -48,7 +48,8 @@ class VideoStreamClientTest {
     error: String? = null,
     payload: ByteArray? = null,
     keepOpen: Boolean = false,
-  ): FakeRelay = FakeRelay(success, error, payload, keepOpen).also { servers.add(it) }
+    rotation: Int? = null,
+  ): FakeRelay = FakeRelay(success, error, payload, keepOpen, rotation).also { servers.add(it) }
 
   @Test
   fun `subscribes with the device id and decodes frames`() = runBlocking {
@@ -82,6 +83,35 @@ class VideoStreamClientTest {
     assertTrue(state is VideoStreamState.Streaming, "expected Streaming, was $state")
     assertEquals(320, (state as VideoStreamState.Streaming).width)
     assertEquals(240, state.height)
+
+    client.dispose()
+  }
+
+  @Test
+  fun `stamps decoded frames with the rotation attested by a config packet`() = runBlocking {
+    // Issue #4786: the config packet attests rotation 3, so the decoded frame carries it
+    // end-to-end.
+    val server = relay(payload = sampleH264(), rotation = 3)
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+
+    client.connect("emulator-5554")
+
+    val frame = server.awaitFirstFrameFrom(client)
+    assertEquals(3, frame.rotation)
+
+    client.dispose()
+  }
+
+  @Test
+  fun `leaves rotation null when the stream does not attest it`() = runBlocking {
+    // An unattested stream (screenrecord/iOS relay) leaves rotation unknown so control fails
+    // closed.
+    val server = relay(payload = sampleH264())
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+
+    client.connect("emulator-5554")
+
+    assertEquals(null, server.awaitFirstFrameFrom(client).rotation)
 
     client.dispose()
   }
@@ -224,6 +254,9 @@ class VideoStreamClientTest {
     private val error: String?,
     private val payload: ByteArray?,
     private val keepOpen: Boolean,
+    // When set, the framed packet is flagged CONFIG and attests this rotation (issue #4786), as the
+    // daemon relay does on a parameter-set packet.
+    private val rotation: Int? = null,
   ) : AutoCloseable {
     private val tempDir: Path = Files.createTempDirectory(Path.of("/tmp"), "amvsc-")
     val socketPath: Path = tempDir.resolve("video-stream.sock")
@@ -279,8 +312,18 @@ class VideoStreamClientTest {
           .putInt(0)
           .array()
       )
+      var flags = 0L
+      rotation?.let {
+        // CONFIG (bit 63) + ROTATION_PRESENT (bit 61) + rotation (bits 59-60), matching
+        // videoStreamFraming.ts so the client stamps decoded frames with the attested rotation.
+        flags = flags or (1L shl 63) or (1L shl 61) or ((it.toLong() and 0b11L) shl 59)
+      }
       out.write(
-        ByteBuffer.allocate(12).order(ByteOrder.BIG_ENDIAN).putLong(0L).putInt(annexB.size).array()
+        ByteBuffer.allocate(12)
+          .order(ByteOrder.BIG_ENDIAN)
+          .putLong(flags)
+          .putInt(annexB.size)
+          .array()
       )
       out.write(annexB)
       out.flush()

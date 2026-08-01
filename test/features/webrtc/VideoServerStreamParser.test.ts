@@ -16,7 +16,13 @@ import {
 const FLAG_CONFIG = 1n << 63n;
 const FLAG_KEY_FRAME = 1n << 62n;
 const FLAG_REPLAYED = 1n << 61n;
-const PTS_MASK = FLAG_REPLAYED - 1n;
+const ROTATION_SHIFT = 59n;
+const PTS_MASK = (1n << ROTATION_SHIFT) - 1n;
+
+/** Rotation bits (0..3) as the on-device encoder writes them into a CONFIG packet's flags. */
+function rotationBits(rotation: number): bigint {
+  return (BigInt(rotation) & 0b11n) << ROTATION_SHIFT;
+}
 
 function streamHeader(width: number, height: number): Buffer {
   const buf = Buffer.alloc(12);
@@ -87,6 +93,8 @@ describe("VideoServerStreamParser", () => {
       config: true,
       keyFrame: false,
       replayed: false,
+      // A config packet always attests rotation; 0 here (no rotation bits set) is a valid value.
+      rotation: 0,
       ptsUs: 0,
     });
     expect(packets[1]).toEqual({
@@ -164,6 +172,7 @@ describe("VideoServerStreamParser", () => {
         height: 1280,
         muxed: true,
         audio: true,
+        muxVersion: 1,
       },
     ]);
     expect(packets.map(packet => [packet.trackId, packet.codecId, packet.ptsUs])).toEqual([
@@ -288,5 +297,64 @@ describe("VideoServerStreamParser", () => {
 
     expect(headers).toEqual([]);
     expect(packets).toEqual([]);
+  });
+
+  // --- Rotation attestation (issue #4786) ---
+
+  test("decodes the attested rotation from a config packet for every value 0..3", () => {
+    for (const rotation of [0, 1, 2, 3]) {
+      const { parser, packets } = collect();
+      parser.push(streamHeader(1080, 2400));
+      parser.push(
+        packet(Buffer.from([0, 0, 0, 1, 0x67]), FLAG_CONFIG | rotationBits(rotation), 4242)
+      );
+
+      expect(packets).toHaveLength(1);
+      expect(packets[0].config).toBe(true);
+      expect(packets[0].rotation).toBe(rotation);
+      // The rotation bits must not leak into the presentation timestamp.
+      expect(packets[0].ptsUs).toBe(4242);
+    }
+  });
+
+  test("leaves rotation undefined on a non-config packet even if the pts is large", () => {
+    const { parser, packets } = collect();
+    parser.push(streamHeader(1080, 2400));
+    // A key frame is not a config packet: rotation is meaningless and must be undefined.
+    parser.push(packet(Buffer.from([0, 0, 0, 1, 0x65]), FLAG_KEY_FRAME, 123456));
+
+    expect(packets[0].config).toBe(false);
+    expect(packets[0].rotation).toBeUndefined();
+    expect(packets[0].ptsUs).toBe(123456);
+  });
+
+  test("a replayed config packet still surfaces the current rotation", () => {
+    // The device replays cached SPS/PPS to a reconnecting client; rotation rides that same config
+    // packet, so a reattaching client reads the current orientation without a fresh keyframe.
+    const { parser, packets } = collect();
+    parser.push(streamHeader(1080, 2400));
+    parser.push(
+      packet(Buffer.from([0, 0, 0, 1, 0x67]), FLAG_CONFIG | FLAG_REPLAYED | rotationBits(3), 10)
+    );
+
+    expect(packets[0]).toMatchObject({ config: true, replayed: true, rotation: 3, ptsUs: 10 });
+  });
+
+  test("a v1-shaped config packet (no rotation bits) decodes to rotation 0, not a corrupt pts", () => {
+    // Backward compatibility: an old stream wrote 0 into bits 59-60, so the narrowed PTS mask must
+    // still read the timestamp cleanly and report rotation 0.
+    const { parser, packets } = collect();
+    parser.push(streamHeader(1080, 2400));
+    parser.push(packet(Buffer.from([0, 0, 0, 1, 0x67]), FLAG_CONFIG, 987654));
+
+    expect(packets[0].rotation).toBe(0);
+    expect(packets[0].ptsUs).toBe(987654);
+  });
+
+  test("reports the mux wire version from the muxed header", () => {
+    const { parser, headers } = collect();
+    parser.push(muxHeader());
+
+    expect(headers[0].muxVersion).toBe(1);
   });
 });

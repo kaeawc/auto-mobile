@@ -46,6 +46,85 @@ export const IOS_MAX_DURATION_SECONDS = 3600;
 const ANDROID_HIGHLIGHT_ANIMATION_DURATION_MS = 6000;
 const IOS_HIGHLIGHT_ANIMATION_DURATION_MS = 3000;
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+// Retention defaults (issue #4762). The archive was previously size-only: a
+// long-idle daemon never pruned, and a single uncapped in-progress capture could
+// fill the disk. These add a time-based TTL sweep and a live in-progress size cap.
+// All three are overridable via env so operators can tune retention without a
+// rebuild (documented in docs/design-docs/mcp/observe/video-recording.md).
+const DEFAULT_RETENTION_DAYS = 7;
+const DEFAULT_RETENTION_SWEEP_INTERVAL_MINUTES = 60;
+const DEFAULT_IN_PROGRESS_SIZE_CHECK_SECONDS = 15;
+
+/**
+ * Time-based retention + in-progress size-cap policy for the video archive
+ * (issue #4762). Injected via the manager dependencies so tests drive the TTL
+ * sweep and size monitor deterministically with FakeTimer; defaults resolve from
+ * the environment (see {@link resolveVideoRetentionPolicy}).
+ */
+export interface VideoRetentionPolicy {
+  /**
+   * Delete completed/interrupted recordings whose age (relative to `createdAt`)
+   * exceeds this. `0` disables the time-based sweep entirely.
+   */
+  ttlMs: number;
+  /** How often the TTL sweep timer fires. */
+  sweepIntervalMs: number;
+  /** How often an in-progress recording's on-disk size is checked against the cap. */
+  inProgressCheckIntervalMs: number;
+}
+
+function parseEnvNumber(
+  raw: string | undefined,
+  fallback: number,
+  allowZero: boolean
+): number {
+  if (raw === undefined || raw.trim() === "") {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0 || (!allowZero && parsed === 0)) {
+    logger.warn(
+      `[VideoRecording] Ignoring invalid retention env value "${raw}"; using ${fallback}`
+    );
+    return fallback;
+  }
+  return parsed;
+}
+
+/**
+ * Resolve the retention policy from the environment, falling back to the
+ * documented defaults. Exported for tests; the manager calls it when no explicit
+ * policy is injected.
+ */
+export function resolveVideoRetentionPolicy(
+  env: NodeJS.ProcessEnv = process.env
+): VideoRetentionPolicy {
+  const days = parseEnvNumber(
+    env.AUTOMOBILE_VIDEO_RETENTION_DAYS ?? env.AUTO_MOBILE_VIDEO_RETENTION_DAYS,
+    DEFAULT_RETENTION_DAYS,
+    true
+  );
+  const sweepMinutes = parseEnvNumber(
+    env.AUTOMOBILE_VIDEO_RETENTION_SWEEP_MINUTES ??
+      env.AUTO_MOBILE_VIDEO_RETENTION_SWEEP_MINUTES,
+    DEFAULT_RETENTION_SWEEP_INTERVAL_MINUTES,
+    false
+  );
+  const checkSeconds = parseEnvNumber(
+    env.AUTOMOBILE_VIDEO_INPROGRESS_CHECK_SECONDS ??
+      env.AUTO_MOBILE_VIDEO_INPROGRESS_CHECK_SECONDS,
+    DEFAULT_IN_PROGRESS_SIZE_CHECK_SECONDS,
+    false
+  );
+  return {
+    ttlMs: Math.max(0, Math.floor(days * MS_PER_DAY)),
+    sweepIntervalMs: Math.max(1000, Math.floor(sweepMinutes * 60_000)),
+    inProgressCheckIntervalMs: Math.max(1000, Math.floor(checkSeconds * 1000)),
+  };
+}
+
 interface StartVideoRecordingRequest {
   device: BootedDevice;
   configOverrides?: VideoRecordingConfigInput;
@@ -83,6 +162,18 @@ interface VideoRecordingManagerDependencies {
   highlightClient: VisualHighlightClient;
   timer: Timer;
   now: () => Date;
+  /**
+   * Time-based retention + in-progress size-cap policy (issue #4762). Injected so
+   * tests can drive the sweep/monitor with FakeTimer; defaults come from
+   * {@link resolveVideoRetentionPolicy}.
+   */
+  retentionPolicy: VideoRetentionPolicy;
+  /**
+   * On-disk size of a recording file, in bytes. Seam over `fs.stat` so the
+   * in-progress size cap is testable without real capture I/O. Returns 0 for a
+   * missing file.
+   */
+  statFileSize: (filePath: string) => Promise<number>;
 }
 
 interface RecordedHighlightEntry {
@@ -108,6 +199,13 @@ let managerInitialized = false;
 const autoStopTimers = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
 const highlightSessions = new Map<string, VideoRecordingHighlightSession>();
 const highlightSessionsByDeviceId = new Map<string, string>();
+// In-progress size-cap monitors, keyed by recordingId (issue #4762). Each is a
+// periodic timer that stops a live capture once it reaches its cap so one long
+// recording cannot fill the disk.
+const inProgressSizeMonitors = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
+// The single periodic TTL sweep timer (issue #4762). Armed lazily on first init,
+// cleared on manager reset.
+let retentionSweepTimer: { timer: Timer; handle: NodeJS.Timeout } | null = null;
 
 async function selectBackend(): Promise<VideoCaptureBackend> {
   logger.debug("[VideoRecording] Using HybridVideoCaptureBackend (iOS FFmpeg, Android platform)");
@@ -126,6 +224,8 @@ async function initializeVideoRecordingState(
     return;
   }
   managerInitialized = true;
+
+  ensureRetentionSweep(deps);
 
   const active = await deps.recordingRepository.listRecordings({ status: "recording" });
   if (active.length === 0) {
@@ -160,6 +260,8 @@ async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDep
       highlightClient: new VisualHighlightClient(),
       timer: defaultTimer,
       now: () => new Date(),
+      retentionPolicy: resolveVideoRetentionPolicy(),
+      statFileSize: getFileSize,
     };
   }
 
@@ -177,6 +279,8 @@ export async function setVideoRecordingManagerDependencies(
     highlightClient: deps.highlightClient ?? new VisualHighlightClient(),
     timer: deps.timer ?? defaultTimer,
     now: deps.now ?? (() => new Date()),
+    retentionPolicy: deps.retentionPolicy ?? resolveVideoRetentionPolicy(),
+    statFileSize: deps.statFileSize ?? getFileSize,
   };
   moduleDependencies = {
     videoRecorderService: deps.videoRecorderService ?? current.videoRecorderService,
@@ -185,6 +289,8 @@ export async function setVideoRecordingManagerDependencies(
     highlightClient: deps.highlightClient ?? current.highlightClient,
     timer: deps.timer ?? current.timer,
     now: deps.now ?? current.now,
+    retentionPolicy: deps.retentionPolicy ?? current.retentionPolicy,
+    statFileSize: deps.statFileSize ?? current.statFileSize,
   };
   resetVideoRecordingManagerState();
 }
@@ -194,6 +300,14 @@ function resetVideoRecordingManagerState(): void {
     timer.clearTimeout(handle);
   }
   autoStopTimers.clear();
+  for (const { timer, handle } of inProgressSizeMonitors.values()) {
+    timer.clearInterval(handle);
+  }
+  inProgressSizeMonitors.clear();
+  if (retentionSweepTimer) {
+    retentionSweepTimer.timer.clearInterval(retentionSweepTimer.handle);
+    retentionSweepTimer = null;
+  }
   for (const session of highlightSessions.values()) {
     for (const handle of session.timers) {
       session.timer.clearTimeout(handle);
@@ -296,6 +410,130 @@ function clearAutoStop(recordingId: string): void {
     entry.timer.clearTimeout(entry.handle);
     autoStopTimers.delete(recordingId);
   }
+}
+
+/**
+ * Arm the single periodic TTL sweep (issue #4762). Runs on a timer — not only on
+ * stop/config-change — so a long-idle daemon still prunes recordings older than
+ * the retention TTL. A `ttlMs` of 0 disables the sweep.
+ */
+function ensureRetentionSweep(deps: VideoRecordingManagerDependencies): void {
+  if (retentionSweepTimer) {
+    return;
+  }
+  const { retentionPolicy, timer } = deps;
+  if (retentionPolicy.ttlMs <= 0) {
+    return;
+  }
+  const handle = timer.setInterval(() => {
+    void runRetentionSweep().catch(error => {
+      logger.warn(`[VideoRecording] TTL retention sweep failed: ${error}`);
+    });
+  }, retentionPolicy.sweepIntervalMs);
+  retentionSweepTimer = { timer, handle };
+}
+
+/**
+ * Delete completed/interrupted recordings whose age (relative to `createdAt`)
+ * exceeds the retention TTL (issue #4762). Exported so tests can trigger a sweep
+ * directly and the daemon can force one on demand. Returns the pruned ids.
+ */
+export async function runRetentionSweep(): Promise<string[]> {
+  const deps = await getVideoRecordingDependencies();
+  const { recordingRepository, retentionPolicy, now } = deps;
+  if (retentionPolicy.ttlMs <= 0) {
+    return [];
+  }
+
+  const cutoffMs = now().getTime() - retentionPolicy.ttlMs;
+  const recordings = await recordingRepository.listRecordings({
+    status: ["completed", "interrupted"],
+  });
+
+  const prunedRecordingIds: string[] = [];
+  for (const recording of recordings) {
+    const createdMs = Date.parse(recording.createdAt);
+    if (Number.isNaN(createdMs) || createdMs > cutoffMs) {
+      continue;
+    }
+    try {
+      const deleted = await deleteVideoRecording(recording.recordingId);
+      if (deleted) {
+        prunedRecordingIds.push(recording.recordingId);
+      }
+    } catch (error) {
+      logger.warn(
+        `[VideoRecording] Failed to prune expired recording ${recording.recordingId}: ${error}`
+      );
+    }
+  }
+
+  if (prunedRecordingIds.length > 0) {
+    logger.info(
+      `[VideoRecording] TTL sweep pruned ${prunedRecordingIds.length} recording(s) older than ` +
+        `${retentionPolicy.ttlMs} ms`
+    );
+  }
+
+  return prunedRecordingIds;
+}
+
+/**
+ * Arm a periodic monitor that stops a live capture once its on-disk file reaches
+ * the archive cap (issue #4762). Without this, an uncapped in-progress recording
+ * (iOS `simctl recordVideo` runs up to an hour) could fill the disk before any
+ * eviction — which only ever considers *other completed* recordings — could run.
+ * `capBytes <= 0` disables the monitor for that recording.
+ */
+function scheduleInProgressSizeCap(
+  recordingId: string,
+  filePath: string,
+  capBytes: number,
+  deps: VideoRecordingManagerDependencies
+): void {
+  if (!Number.isFinite(capBytes) || capBytes <= 0) {
+    return;
+  }
+  const { timer, retentionPolicy } = deps;
+  const handle = timer.setInterval(() => {
+    void enforceInProgressSizeCap(recordingId, filePath, capBytes).catch(error => {
+      logger.warn(
+        `[VideoRecording] In-progress size check failed for ${recordingId}: ${error}`
+      );
+    });
+  }, retentionPolicy.inProgressCheckIntervalMs);
+  inProgressSizeMonitors.set(recordingId, { timer, handle });
+}
+
+function clearInProgressSizeCap(recordingId: string): void {
+  const entry = inProgressSizeMonitors.get(recordingId);
+  if (entry) {
+    entry.timer.clearInterval(entry.handle);
+    inProgressSizeMonitors.delete(recordingId);
+  }
+}
+
+async function enforceInProgressSizeCap(
+  recordingId: string,
+  filePath: string,
+  capBytes: number
+): Promise<void> {
+  // A tick may fire after the recording already stopped (cleared monitor); skip.
+  if (!inProgressSizeMonitors.has(recordingId)) {
+    return;
+  }
+  const { statFileSize } = await getVideoRecordingDependencies();
+  const sizeBytes = await statFileSize(filePath);
+  if (sizeBytes < capBytes) {
+    return;
+  }
+
+  logger.warn(
+    `[VideoRecording] In-progress recording ${recordingId} reached size cap ` +
+      `(${sizeBytes} >= ${capBytes} bytes); stopping to protect disk.`
+  );
+  clearInProgressSizeCap(recordingId);
+  await stopVideoRecording(recordingId);
 }
 
 function getHighlightSessionByDevice(deviceId: string): VideoRecordingHighlightSession | null {
@@ -621,6 +859,9 @@ export async function startVideoRecording(
 
   await scheduleAutoStop(active.recordingId, maxDurationSeconds);
 
+  const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
+  scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
+
   return active;
 }
 
@@ -632,6 +873,7 @@ export async function stopVideoRecording(
   const resolvedId = await resolveActiveRecordingId(recordingId);
 
   clearAutoStop(resolvedId);
+  clearInProgressSizeCap(resolvedId);
 
   const metadata = await videoRecorderService.stopRecording(resolvedId);
   const highlightSession = disposeHighlightSession(resolvedId);
@@ -669,6 +911,7 @@ export async function stopVideoRecording(
 export async function interruptVideoRecording(recordingId: string): Promise<void> {
   const { recordingRepository, now } = await getVideoRecordingDependencies();
   clearAutoStop(recordingId);
+  clearInProgressSizeCap(recordingId);
 
   const record = await recordingRepository.getRecording(recordingId);
   if (!record || record.status !== "recording") {
@@ -779,6 +1022,13 @@ async function deleteVideoRecording(recordingId: string): Promise<boolean> {
 
   const recordingDir = path.dirname(record.filePath);
   if (await pathExists(recordingDir)) {
+    // NOTE (issue #4762): `rm` unlinks the directory entry but does NOT overwrite
+    // the underlying blocks, so screen-capture bytes (which may contain OTPs,
+    // credentials, or PII) can remain recoverable from the raw device until the
+    // filesystem reuses them. This is documented as a known limitation in
+    // docs/design-docs/mcp/observe/video-recording.md. A future opt-in
+    // "sensitive mode" would overwrite-before-unlink here; it is deliberately a
+    // follow-up (see the doc) rather than an unconditional cost on every delete.
     await fsPromises.rm(recordingDir, { recursive: true, force: true });
   }
 

@@ -34,6 +34,47 @@ Returns the current navigation graph showing:
 
 See [Navigation Graph](nav/index.md) for details.
 
+### Navigation Apps
+
+**URI**: `automobile:navigation/apps`
+
+Lists the apps that have a **persisted** navigation graph, so an agent (or the
+desktop's offline app picker) can choose an app to browse. This resource is
+**device-independent** — it reads persisted data only and requires no connected
+device. An app appears only when it has at least one recorded screen; an empty
+database returns an empty list rather than an error.
+
+Each entry provides:
+
+- `appId` — the application package id (e.g. `com.example.app`)
+- `displayName` — human-readable name when known; currently always `null`
+  because the persisted schema has no display-name column
+- `lastUpdated` — ISO-8601 timestamp of the app record's `updated_at`
+
+Entries are ordered newest-first by the app record's `updated_at`.
+
+**Response shape**:
+
+```json
+{
+  "apps": [
+    {
+      "appId": "com.example.app",
+      "displayName": null,
+      "lastUpdated": "2026-01-02T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+> **`lastUpdated` caveat**: this field reflects the app record's
+> `navigation_apps.updated_at`, which is bumped on the main navigation-recording
+> paths but not by every graph mutation (e.g. `promoteSuggestion`,
+> `updateNodeScreenshot`, `recordBackStack`). It can therefore lag those changes,
+> and the `updated_at` ordering can too — do not treat it as the exact time of
+> the most recent graph mutation. Tracked by
+> [#4931](https://github.com/kaeawc/auto-mobile/issues/4931).
+
 ### Booted Devices
 
 **URI**: `automobile:devices/booted`

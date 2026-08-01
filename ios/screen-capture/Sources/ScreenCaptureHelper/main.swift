@@ -178,15 +178,24 @@ case .captureSimulator(let windowID, let fps, let audio):
     logError(CaptureStartupMarker.line(.resolvingWindow(windowID: windowID)))
     let window: SCWindow
     switch runBlocking({ try await SimulatorWindowDiscovery.find(windowID: windowID) }) {
-    case .success(.some(let resolved)):
+    case .success(.resolved(let resolved)):
         window = resolved
         logError(CaptureStartupMarker.line(.resolvedWindow(
             windowID: windowID,
             width: Int(resolved.frame.width),
             height: Int(resolved.frame.height)
         )))
-    case .success(.none):
+    case .success(.notFound):
         logError("error: no window with CGWindowID \(windowID)")
+        exit(1)
+    case .success(.notSimulatorWindow(let bundleIdentifier)):
+        // Fail closed: the window id resolves to a live window that is not owned
+        // by the iOS Simulator (a recycled/stale window id). Capturing it would
+        // silently leak an unrelated window's contents (#4763).
+        logError(
+            "error: window with CGWindowID \(windowID) is not an iOS Simulator window"
+            + " (owning bundle: \(bundleIdentifier ?? "unknown")); refusing to capture"
+        )
         exit(1)
     case .failure(let error):
         logError("error: failed to query simulator windows: \(error)")

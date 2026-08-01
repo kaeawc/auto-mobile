@@ -89,6 +89,33 @@ class RealNavigationDataSource(
     }
   }
 
+  override suspend fun listApps(): Result<List<NavigationAppSummary>> {
+    val provider = clientProvider ?: return Result.Success(emptyList())
+
+    return try {
+      val client = provider()
+      // Device-optional resource: the daemon returns every app with a persisted graph,
+      // newest-first.
+      val contents = client.readResource("automobile:navigation/apps")
+      val text = contents.firstOrNull()?.text ?: return Result.Success(emptyList())
+
+      val response = json.decodeFromString(serializer<McpNavigationAppsResponse>(), text)
+      val apps =
+        response.apps.map { app ->
+          NavigationAppSummary(
+            appId = app.appId,
+            displayName = app.displayName,
+            lastUpdated = app.lastUpdated,
+          )
+        }
+      Result.Success(apps)
+    } catch (e: McpConnectionException) {
+      Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (e: Exception) {
+      Result.Error(e, "Failed to load saved navigation apps: ${e.message}")
+    }
+  }
+
   /** Infer screen type from screen name patterns. */
   private fun inferScreenType(screenName: String): String {
     val lowerName = screenName.lowercase()
@@ -142,4 +169,18 @@ private data class McpNavigationEdge(
   val to: String,
   val toolName: String?,
   val traversalCount: Int = 1,
+)
+
+// Matches the device-optional `automobile:navigation/apps` resource (issue #4910 contract):
+// { "apps": [ { "appId": "...", "displayName": null, "lastUpdated": "<ISO-8601>" } ] }
+// newest-first.
+
+@Serializable
+private data class McpNavigationAppsResponse(val apps: List<McpNavigationAppSummary> = emptyList())
+
+@Serializable
+private data class McpNavigationAppSummary(
+  val appId: String,
+  val displayName: String? = null,
+  val lastUpdated: String,
 )

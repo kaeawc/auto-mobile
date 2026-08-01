@@ -1,14 +1,24 @@
 package dev.jasonpearson.automobile.desktop.core.navigation
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
@@ -60,6 +70,16 @@ fun NavigationDashboard(
   // current screen here or the canvas's Fog toggle + auto-focus (both gated on a non-null current
   // screen) stay dead. Only consulted when [providedGraph] is non-null.
   providedCurrentScreen: String? = null,
+  // Read-only (offline) browse: when true the graph is inspectable — browsing, panning, zooming,
+  // and
+  // drilling into screen/transition detail all work — but device-side navigate actions (which need
+  // a
+  // live device) are unavailable and a "Navigate actions disabled (offline)" badge is shown. Used
+  // by
+  // the offline-browse surface (Phase C of #4837), which renders a persisted graph via
+  // [providedGraph] with no observed device. Any future live "navigate device to this screen"
+  // affordance must gate on this flag.
+  readOnly: Boolean = false,
 ) {
   val graph = LocalAutoMobileGraph.current
   var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
@@ -213,63 +233,97 @@ fun NavigationDashboard(
     }
   }
 
-  when (currentSection) {
-    NavigationSection.FlowMap ->
-      Box(modifier = Modifier.fillMaxSize()) {
-        NavigationCanvasView(
-          screens = screens,
-          transitions = transitions,
-          onScreenSelected = { screenId ->
-            selectedScreenId = screenId
-            currentSection = NavigationSection.ScreenDetail
-            onHighlightCleared()
-          },
-          externalHighlightedScreens = highlightedScreens,
-          currentReplayScreen = currentStepScreen,
-          screenshotLoader = screenshotLoader,
-          fogModeEnabled = fogModeEnabled,
-          currentObservedScreen = currentObservedScreen,
-          onFogModeToggled = { enabled ->
-            fogModeEnabled = enabled
-            settingsProvider.fogModeEnabled = enabled
-          },
-          fitToViewTrigger = fitToViewTrigger,
-        )
+  // Wrap the section content so the read-only (offline) badge can overlay every section: navigate
+  // actions are unavailable in the whole dashboard offline, not just the flow map.
+  Box(modifier = Modifier.fillMaxSize()) {
+    when (currentSection) {
+      NavigationSection.FlowMap ->
+        Box(modifier = Modifier.fillMaxSize()) {
+          NavigationCanvasView(
+            screens = screens,
+            transitions = transitions,
+            onScreenSelected = { screenId ->
+              selectedScreenId = screenId
+              currentSection = NavigationSection.ScreenDetail
+              onHighlightCleared()
+            },
+            externalHighlightedScreens = highlightedScreens,
+            currentReplayScreen = currentStepScreen,
+            screenshotLoader = screenshotLoader,
+            fogModeEnabled = fogModeEnabled,
+            currentObservedScreen = currentObservedScreen,
+            onFogModeToggled = { enabled ->
+              fogModeEnabled = enabled
+              settingsProvider.fogModeEnabled = enabled
+            },
+            fitToViewTrigger = fitToViewTrigger,
+          )
+        }
+
+      NavigationSection.ScreenDetail -> {
+        val screen =
+          screens.find { it.id == selectedScreenId }
+            ?: screens.find { it.name == selectedScreenId }
+            ?: screens.firstOrNull()
+
+        if (screen != null) {
+          ScreenDetailView(
+            screen = screen,
+            transitions = transitions,
+            onBack = { currentSection = NavigationSection.FlowMap },
+            onScreenSelected = navigateToScreen,
+            screenshotLoader = screenshotLoader,
+          )
+        } else {
+          currentSection = NavigationSection.FlowMap
+        }
       }
 
-    NavigationSection.ScreenDetail -> {
-      val screen =
-        screens.find { it.id == selectedScreenId }
-          ?: screens.find { it.name == selectedScreenId }
-          ?: screens.firstOrNull()
+      NavigationSection.TransitionDetail -> {
+        val transition =
+          transitions.find { it.id == selectedTransitionId } ?: transitions.firstOrNull()
 
-      if (screen != null) {
-        ScreenDetailView(
-          screen = screen,
-          transitions = transitions,
-          onBack = { currentSection = NavigationSection.FlowMap },
-          onScreenSelected = navigateToScreen,
-          screenshotLoader = screenshotLoader,
-        )
-      } else {
-        currentSection = NavigationSection.FlowMap
+        if (transition != null) {
+          TransitionDetailView(
+            transition = transition,
+            onBack = { currentSection = NavigationSection.FlowMap },
+            onScreenSelected = navigateToScreen,
+          )
+        } else {
+          currentSection = NavigationSection.FlowMap
+        }
       }
     }
 
-    NavigationSection.TransitionDetail -> {
-      val transition =
-        transitions.find { it.id == selectedTransitionId } ?: transitions.firstOrNull()
-
-      if (transition != null) {
-        TransitionDetailView(
-          transition = transition,
-          onBack = { currentSection = NavigationSection.FlowMap },
-          onScreenSelected = navigateToScreen,
-        )
-      } else {
-        currentSection = NavigationSection.FlowMap
-      }
+    if (readOnly) {
+      ReadOnlyOfflineBadge(Modifier.align(Alignment.TopEnd).padding(12.dp))
     }
+  }
+}
+
+/**
+ * Corner badge shown while browsing a persisted graph with no live device. Communicates that
+ * navigate actions (which need a device) are unavailable; browsing/panning still work. Its stable
+ * content description is the offline read-only signal the UI tests assert on.
+ */
+@Composable
+private fun ReadOnlyOfflineBadge(modifier: Modifier = Modifier) {
+  Box(
+    modifier =
+      modifier
+        .background(
+          MaterialTheme.colorScheme.surfaceVariant,
+          RoundedCornerShape(6.dp),
+        )
+        .padding(horizontal = 8.dp, vertical = 4.dp)
+        .semantics { contentDescription = "Navigate actions disabled (offline)" }
+  ) {
+    Text(
+      "Read-only · offline",
+      style = MaterialTheme.typography.labelSmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      fontSize = 11.sp,
+    )
   }
 }
 

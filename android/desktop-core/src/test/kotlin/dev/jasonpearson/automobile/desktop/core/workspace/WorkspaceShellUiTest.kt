@@ -438,4 +438,31 @@ class WorkspaceShellUiTest {
     onNodeWithContentDescription("Status detail: Daemon reconnecting").performClick()
     onNodeWithText("fake-health-body").assertIsDisplayed()
   }
+
+  @Test
+  fun `empty state offers a Browse navigation history affordance`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(state = WorkspaceUiState.Empty, onAction = {}, onOpenPicker = {})
+      }
+    }
+    onNodeWithContentDescription("Browse navigation history").assertIsDisplayed()
+  }
+
+  @Test
+  fun `Browse navigation history opens the offline browse overlay`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          offlineBrowseContent = { Text("offline-browse-body") },
+        )
+      }
+    }
+    // Overlay body is not present until the affordance is clicked.
+    onNodeWithContentDescription("Browse navigation history").performClick()
+    onNodeWithText("offline-browse-body").assertIsDisplayed()
+  }
 }

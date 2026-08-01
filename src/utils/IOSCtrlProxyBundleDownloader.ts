@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import AdmZip from "adm-zip";
 import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
 import { type ChecksumCalculator, type Sha256Source, DefaultChecksumCalculator } from "./ChecksumCalculator";
+import { ensureSecureDir } from "./filesystem/securePermissions";
 
 export type { Sha256Source };
 
@@ -33,7 +34,10 @@ export class DefaultIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDo
 
   public async extractBundle(bundlePath: string, destination: string): Promise<void> {
     await fs.rm(destination, { recursive: true, force: true });
-    await fs.mkdir(destination, { recursive: true });
+    // Owner-only (0o700) instead of the umask default: the extracted runner is
+    // launched from here, so other uids must not be able to swap its binaries
+    // between verification and launch (TOCTOU, issue #4759).
+    await ensureSecureDir(destination);
 
     const zip = new AdmZip(bundlePath);
     zip.extractAllTo(destination, true);

@@ -162,6 +162,8 @@ function createFakeBuilder(xctestrunPath = "/tmp/CtrlProxy.xctestrun") {
   return {
     getXctestrunPath: async () => xctestrunPath,
     getRunnerBinaryPath: async () => null,
+    // Pre-launch TOCTOU re-verify seam (#4759); a no-op in the default fake.
+    verifyRunnerBinaryBeforeLaunch: async () => {},
     writeRunnerEnvironment: fakeWriteRunnerEnvironment,
     needsRebuild: async () => false,
     build: async () => ({ success: true, message: "built" }),
@@ -1282,6 +1284,7 @@ describe("IOSCtrlProxyManager", function() {
       const fakeBuilder = {
         getXctestrunPath: async () => null,
         getRunnerBinaryPath: async () => null,
+        verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
 
@@ -1305,6 +1308,7 @@ describe("IOSCtrlProxyManager", function() {
       const fakeBuilder = {
         getXctestrunPath: async () => "/tmp/test.xctestrun",
         getRunnerBinaryPath: async () => null,
+        verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
 
@@ -1335,6 +1339,7 @@ describe("IOSCtrlProxyManager", function() {
             throw new Error("should not build when an external CtrlProxy process is reused");
           },
           getRunnerBinaryPath: async () => null,
+          verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -1371,6 +1376,7 @@ describe("IOSCtrlProxyManager", function() {
         const fakeBuilder = {
           getXctestrunPath: async () => "/tmp/test.xctestrun",
           getRunnerBinaryPath: async () => null,
+          verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -1407,6 +1413,7 @@ describe("IOSCtrlProxyManager", function() {
         const fakeBuilder = {
           getXctestrunPath: async () => "/tmp/test.xctestrun",
           getRunnerBinaryPath: async () => null,
+          verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -1436,6 +1443,7 @@ describe("IOSCtrlProxyManager", function() {
           throw new Error("should not build when an external CtrlProxy process is reused");
         },
         getRunnerBinaryPath: async () => null,
+        verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -1476,6 +1484,7 @@ describe("IOSCtrlProxyManager", function() {
           throw new Error("should not build when an external CtrlProxy process is reused");
         },
         getRunnerBinaryPath: async () => null,
+        verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -1516,6 +1525,7 @@ describe("IOSCtrlProxyManager", function() {
           throw new Error("should not build when an external CtrlProxy process is reused");
         },
         getRunnerBinaryPath: async () => null,
+        verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -1558,6 +1568,7 @@ describe("IOSCtrlProxyManager", function() {
           throw new Error("should not build when an external CtrlProxy process is reused");
         },
         getRunnerBinaryPath: async () => null,
+        verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -1590,6 +1601,7 @@ describe("IOSCtrlProxyManager", function() {
       const fakeBuilder = {
         getXctestrunPath: async () => "/tmp/test.xctestrun",
         getRunnerBinaryPath: async () => null,
+        verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -1622,6 +1634,7 @@ describe("IOSCtrlProxyManager", function() {
         const fakeBuilder = {
           getXctestrunPath: async () => "/tmp/test.xctestrun",
           getRunnerBinaryPath: async () => null,
+          verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: async (xctestrunPath: string, env: Record<string, string>, deviceId: string) => {
             writeCalls.push({ xctestrunPath, env, deviceId });
             return "/tmp/automobile-runner-SIM.xctestrun";
@@ -1677,6 +1690,7 @@ describe("IOSCtrlProxyManager", function() {
         const fakeBuilder = {
           getXctestrunPath: async () => "/tmp/test.xctestrun",
           getRunnerBinaryPath: async () => null,
+          verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -1724,6 +1738,7 @@ describe("IOSCtrlProxyManager", function() {
         const fakeBuilder = {
           getXctestrunPath: async () => sourceXctestrun,
           getRunnerBinaryPath: async () => null,
+          verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: (p: string, env: Record<string, string>, id: string) =>
             realBuilder.writeRunnerEnvironment(p, env, id),
         } as unknown as IOSCtrlProxyBuilder;
@@ -1768,6 +1783,7 @@ describe("IOSCtrlProxyManager", function() {
         const fakeBuilder = {
           getXctestrunPath: async () => "/tmp/device.xctestrun",
           getRunnerBinaryPath: async () => null,
+          verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: async (_p: string, env: Record<string, string>, deviceId: string) => {
             writeCalls.push({ env, deviceId });
             return "/tmp/automobile-runner-DEV.xctestrun";
@@ -1882,6 +1898,7 @@ describe("IOSCtrlProxyManager", function() {
             throw new Error("should not build when an external direct runner is reused");
           },
           getRunnerBinaryPath: async () => null,
+          verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(

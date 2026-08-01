@@ -99,8 +99,47 @@ Platform-specific capture sources:
 
 - Archive directory: `~/.auto-mobile/video-archive`.
 - Store recording metadata in SQLite (`~/.auto-mobile/auto-mobile.db`).
-- Enforce `maxArchiveSizeMb` with LRU eviction (oldest first).
+- Enforce `maxArchiveSizeMb` with LRU eviction (oldest first). Eviction only
+  removes *other completed* recordings and only fires on stop or config change.
 - Provide stable filenames (`recordingId` + timestamp).
+
+### Time-based retention (TTL)
+
+Size-based eviction alone lets sensitive recordings persist indefinitely while
+the archive stays under `maxArchiveSizeMb`, and it never runs on a long-idle
+daemon (it only fires on stop/config-change). A periodic **TTL sweep** (issue
+[#4762](https://github.com/kaeawc/auto-mobile/issues/4762)) runs on an injected
+timer and deletes completed/interrupted recordings whose age (relative to
+`createdAt`) exceeds the retention window.
+
+| Setting | Env var (either prefix) | Default |
+| --- | --- | --- |
+| Retention window | `AUTOMOBILE_VIDEO_RETENTION_DAYS` / `AUTO_MOBILE_VIDEO_RETENTION_DAYS` | `7` days (`0` disables the sweep) |
+| Sweep interval | `AUTOMOBILE_VIDEO_RETENTION_SWEEP_MINUTES` / `AUTO_MOBILE_VIDEO_RETENTION_SWEEP_MINUTES` | `60` minutes |
+| In-progress size-check interval | `AUTOMOBILE_VIDEO_INPROGRESS_CHECK_SECONDS` / `AUTO_MOBILE_VIDEO_INPROGRESS_CHECK_SECONDS` | `15` seconds |
+
+Invalid or negative values fall back to the defaults (a warning is logged).
+
+### In-progress size cap
+
+A single long capture (iOS `simctl recordVideo` runs up to
+`IOS_MAX_DURATION_SECONDS = 3600`) is not covered by archive eviction, which only
+considers *other completed* recordings — so one uncapped recording can fill the
+disk (a local DoS). Each live recording is monitored against the archive cap
+(`maxArchiveSizeMb`); when its on-disk file reaches the cap the recording is
+stopped (and finalized) rather than allowed to grow unbounded.
+
+### Secure delete (known limitation)
+
+Deletion (`deleteVideoRecording`, eviction, and the TTL sweep) uses
+`fs.rm(recordingDir, { recursive: true, force: true })`. **This is not a secure
+delete:** it unlinks the directory entry but does not overwrite the underlying
+blocks, so screen-capture bytes — which may contain OTPs, credentials, or PII —
+can remain recoverable from the raw storage device until the filesystem reuses
+those blocks. An opt-in **"sensitive mode"** that overwrites recording bytes
+before unlinking is intentionally left as a follow-up (see the flagged hook in
+`deleteVideoRecording`) rather than paid as an unconditional cost on every
+delete.
 
 ## Video recording configuration socket
 
@@ -117,3 +156,9 @@ Platform-specific capture sources:
 
 - Recording is opt-in only (explicit tool call or CLI flag).
 - Sensitive metadata must be scrubbed from filenames.
+- Recordings are stored owner-only (per-recording dir `0o700`, finalized file
+  `0o600`; issue [#4750](https://github.com/kaeawc/auto-mobile/issues/4750)).
+- Recordings are pruned on a time-based TTL (default 7 days) so sensitive content
+  does not persist indefinitely; see [Time-based retention (TTL)](#time-based-retention-ttl).
+- Deletion is a plain unlink, **not** a secure/overwrite delete; see
+  [Secure delete (known limitation)](#secure-delete-known-limitation).

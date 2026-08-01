@@ -135,6 +135,47 @@ object DisplayControl {
   }
 
   /**
+   * Register a framework callback that fires when the default display changes (issue #4785),
+   * primarily to observe rotation. Returns a stop-lambda that unregisters the listener, or null
+   * when registration is unavailable so the caller falls back to polling [getDisplayInfo].
+   *
+   * Under `app_process`/shell uid a real [android.hardware.display.DisplayManager] and a main
+   * `Looper` may or may not be reachable; registration is best-effort and any failure degrades
+   * cleanly to the poll fallback rather than aborting capture.
+   *
+   * @param onDisplayChanged invoked (on the framework Handler thread) whenever display 0 changes.
+   * @return an unregister lambda on success, or null if no listener could be registered.
+   */
+  fun registerDisplayListener(onDisplayChanged: () -> Unit): (() -> Unit)? {
+    return try {
+      val displayManager =
+        systemContext.getSystemService(android.hardware.display.DisplayManager::class.java)
+          ?: return null
+      val looper = android.os.Looper.getMainLooper() ?: return null
+      val handler = android.os.Handler(looper)
+      val listener =
+        object : android.hardware.display.DisplayManager.DisplayListener {
+          override fun onDisplayAdded(displayId: Int) = Unit
+
+          override fun onDisplayRemoved(displayId: Int) = Unit
+
+          override fun onDisplayChanged(displayId: Int) {
+            if (displayId == DEFAULT_DISPLAY_ID) onDisplayChanged()
+          }
+        }
+      displayManager.registerDisplayListener(listener, handler)
+      return { displayManager.unregisterDisplayListener(listener) }
+    } catch (error: Exception) {
+      // Best-effort capability probe: under shell uid the DisplayManager or a usable Looper may be
+      // unavailable. Swallow and return null so the poll fallback covers rotation detection.
+      System.err.println("registerDisplayListener unavailable: ${error.message}")
+      null
+    }
+  }
+
+  private const val DEFAULT_DISPLAY_ID = 0
+
+  /**
    * Create a VirtualDisplay that mirrors the specified display.
    *
    * @param name The name of the virtual display

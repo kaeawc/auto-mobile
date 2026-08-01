@@ -1,0 +1,31 @@
+{
+  "$comment": [
+    "Advisory usage budget for the Maven Central publication (issue #4853).",
+    "Consumed by scripts/release/maven-publication-manifest.sh --budget. A breach",
+    "prints a BUDGET WARN and, by default, still exits 0: the preflight reports,",
+    "it never blocks a release, so an urgent security fix always ships. Only",
+    "--strict turns a breach into a non-zero exit.",
+    "",
+    "centralOrgLimits records the real Maven Central Usage Center ceilings, which",
+    "are MONTHLY and aggregate across every namespace in the org (not per release).",
+    "Observed 2026-07: 15.43 MB of 80 MB, 320 of 1000 files, 4 of 7 releases.",
+    "",
+    "perRelease is what this preflight actually checks -- one tagged release's",
+    "footprint as staged locally. Note the preflight over-counts vs Central: the",
+    "local file repo also writes maven-metadata and every Gradle checksum, so a",
+    "release Central tallies at ~80 files shows here as ~200 signed. These",
+    "thresholds are therefore relative guardrails on the local manifest with",
+    "headroom, sized so a normal release cadence stays well inside the monthly",
+    "ceilings. Tighten maxBytes after #4851 (signature checksums) and #4852 (Dokka",
+    "javadoc) land, and raise a ceiling deliberately when a new coordinate is added."
+  ],
+  "centralOrgLimits": {
+    "monthlyReleaseSizeBytes": 83886080,
+    "monthlyFileCount": 1000,
+    "monthlyReleaseCount": 7
+  },
+  "perRelease": {
+    "maxFiles": 260,
+    "maxBytes": 6291456
+  }
+}

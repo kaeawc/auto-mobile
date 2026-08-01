@@ -337,6 +337,51 @@
   [ -z "$output" ]
 }
 
+@test "release.yml runs the Maven publication manifest preflight before publishing (#4853)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/release.yml"
+  # Both steps live in the release job, and the preflight must precede the
+  # publish so the manifest reflects what is about to be uploaded.
+  local names preflight publish
+  names="$(yq -r '.jobs."verify-and-release".steps[].name' "$workflow")"
+  preflight="$(printf '%s\n' "$names" \
+    | grep -nxF 'Maven Central publication manifest preflight' | cut -d: -f1)"
+  publish="$(printf '%s\n' "$names" \
+    | grep -nxF 'Publish Android Libraries to Maven Central' | cut -d: -f1)"
+  [ -n "$preflight" ]
+  [ -n "$publish" ]
+  [ "$preflight" -lt "$publish" ]
+}
+
+@test "release.yml preflight step calls the extracted preflight script (#4853)" {
+  wiring_requires_yq
+  local script
+  script="$(yq -r '.jobs."verify-and-release".steps[]
+    | select(.name == "Maven Central publication manifest preflight") | .run' \
+    ".github/workflows/release.yml")"
+  [[ "$script" == *"scripts/release/maven-publication-manifest-preflight.sh"* ]]
+}
+
+@test "the preflight script wires staging, the generator, the budget, and the summary (#4853)" {
+  # The bash lives in a script (not inline YAML) so it can be linted and tested;
+  # assert the script itself carries the wiring the release depends on.
+  local s="scripts/release/maven-publication-manifest-preflight.sh"
+  [ -x "$s" ]
+  grep -q "publishAllPublicationsToCentralManifestRepository" "$s"
+  grep -q "maven-publication-manifest.sh" "$s"
+  grep -q "maven-usage-budget.json" "$s"
+  grep -q "GITHUB_STEP_SUMMARY" "$s"
+}
+
+@test "release.yml uploads the publication manifest artifact (#4853)" {
+  wiring_requires_yq
+  local uses
+  uses="$(yq -r '.jobs."verify-and-release".steps[]
+    | select(.name == "Upload Maven publication manifest") | .uses' \
+    ".github/workflows/release.yml")"
+  [[ "$uses" == actions/upload-artifact@* ]]
+}
+
 # The assertions below parse the workflow as YAML rather than grepping its text.
 # A raw grep is satisfied by any comment or unrelated step containing the string,
 # so it would keep passing while the step it claims to pin was deleted -- and a

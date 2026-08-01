@@ -52,6 +52,7 @@ add_check "app-bundle-metadata-boundary" "bun \"$PROJECT_ROOT/scripts/check-app-
 add_check "git-metadata-boundary" "bash \"$PROJECT_ROOT/scripts/check-no-new-direct-git-metadata.sh\"" "lint,conventions" "Require Git metadata probes to use GitMetadataClient"
 add_check "ffmpeg-execution-boundary" "bun \"$PROJECT_ROOT/scripts/check-ffmpeg-execution-boundary.ts\"" "lint,conventions" "Require FFmpeg execution through FfmpegClient"
 add_check "sdkmanager-execution-boundary" "bun \"$PROJECT_ROOT/scripts/check-sdkmanager-execution-boundary.ts\"" "lint,conventions" "Require sdkmanager execution through SdkManagerClient"
+add_check "archive-extraction-boundary" "bun \"$PROJECT_ROOT/scripts/check-archive-extraction-boundary.ts\"" "lint,conventions" "Require tar extraction through ArchiveExtractor"
 add_check "xcodebuild-boundary" "\"$PROJECT_ROOT/scripts/check-no-new-direct-xcodebuild.sh\"" "lint,ios" "Keep xcodebuild execution behind XcodebuildClient"
 add_check "daemon-launcher-boundary" "bash \"$PROJECT_ROOT/scripts/check-daemon-launcher-boundary.sh\"" "lint,conventions" "Require DaemonLauncher ownership for daemon process execution"
 add_check "ios-ctrl-proxy-process-boundary" "bun \"$PROJECT_ROOT/scripts/check-ios-ctrl-proxy-process-boundary.ts\"" "lint,conventions" "Keep CtrlProxy PID tooling behind its lifecycle client"

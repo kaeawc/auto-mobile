@@ -243,10 +243,10 @@ describe("DefaultArchiveExtractor", () => {
     expect(await fs.readdir(destinationDir)).toEqual([]);
   });
 
-  test("rejects a staged symlink member whose target escapes the destination", async () => {
+  test("rejects a top-level symlink member outright", async () => {
     const destinationDir = await makeTempDir();
     const executor = new RecordingExecutor();
-    // `tar -tzf` reports only the benign member name; the symlink type/target is hidden.
+    // `tar -tzf` reports only the benign member name; the symlink type is hidden.
     executor.listing = "pkg/\npkg/tool";
     executor.symlinksToWrite = [{ path: "pkg/tool", target: "../../../outside/payload" }];
     const extractor = new DefaultArchiveExtractor(executor);
@@ -256,26 +256,50 @@ describe("DefaultArchiveExtractor", () => {
       .catch(error => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
-    expect((thrown as ActionableError).message).toContain("escapes the destination");
-    // Nothing escaped: the staging tree was cleaned up, destination left empty.
+    expect((thrown as ActionableError).message).toContain("symlinks are not permitted");
+    // Nothing landed: the staging tree was cleaned up, destination left empty.
     expect(await fs.readdir(destinationDir)).toEqual([]);
   });
 
-  test("allows a self-contained symlink whose target stays inside the destination", async () => {
+  test("rejects a nested symlink member", async () => {
     const destinationDir = await makeTempDir();
     const executor = new RecordingExecutor();
-    executor.listing = "lib/\nlib/libwebp.7.dylib\nlib/libwebp.dylib";
-    executor.filesToWrite = ["lib/libwebp.7.dylib"];
-    // Versioned dylib link, same directory — a normal shape for a lib archive.
-    executor.symlinksToWrite = [{ path: "lib/libwebp.dylib", target: "libwebp.7.dylib" }];
+    executor.listing = "pkg/\npkg/lib/\npkg/lib/tool";
+    executor.symlinksToWrite = [{ path: "pkg/lib/tool", target: "../shared/file" }];
     const extractor = new DefaultArchiveExtractor(executor);
 
-    await extractor.extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir });
+    const thrown = await extractor
+      .extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir })
+      .catch(error => error);
 
-    // The link landed in place and still resolves inside the destination.
-    const linkPath = path.join(destinationDir, "lib", "libwebp.dylib");
-    expect((await fs.lstat(linkPath)).isSymbolicLink()).toBe(true);
-    expect(await fs.readlink(linkPath)).toBe("libwebp.7.dylib");
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect((thrown as ActionableError).message).toContain("symlinks are not permitted");
+    expect(await fs.readdir(destinationDir)).toEqual([]);
+  });
+
+  test("rejects a symlink member even when its lexical target looks in-bounds", async () => {
+    // The dangerous escapes (a `..` collapsing across a symlink, a dangling
+    // destination symlink) all disguise the target as internal. Rejecting every
+    // link member removes the need to prove any single target stays contained.
+    const base = await makeTempDir();
+    const destinationDir = path.join(base, "dest");
+    await fs.mkdir(destinationDir, { recursive: true });
+    // A pre-existing destination symlink an in-bounds-looking target could ride.
+    await fs.symlink("../outside", path.join(destinationDir, "trusted"));
+
+    const executor = new RecordingExecutor();
+    executor.listing = "tool";
+    executor.symlinksToWrite = [{ path: "tool", target: "trusted/payload" }];
+    const extractor = new DefaultArchiveExtractor(executor);
+
+    const thrown = await extractor
+      .extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir })
+      .catch(error => error);
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect((thrown as ActionableError).message).toContain("symlinks are not permitted");
+    // The link never landed; only the pre-existing `trusted` remains.
+    expect(await fs.readdir(destinationDir)).toEqual(["trusted"]);
   });
 
   test("recovers when a malicious `./` member leaves the staging dir unwritable", async () => {

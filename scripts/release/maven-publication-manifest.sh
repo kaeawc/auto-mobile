@@ -259,6 +259,23 @@ if [ -n "$budget_file" ]; then
     [ -n "$reasons" ] && reasons="$reasons; "
     reasons="${reasons}bytes $total_bytes > $max_bytes"
   fi
+  # Advisory per-javadoc-jar guard (#4852): the largest javadoc jar must stay
+  # small so the empty jar cannot silently regress back to the full Dokka HTML
+  # site. Validated the same way (absent or a non-negative integer).
+  max_javadoc="$(jq -r -s '(.[0].perRelease.maxJavadocJarBytes) as $v
+    | if $v == null then "" elif ($v | type == "number" and . >= 0 and (floor == .)) then ($v | tostring) else "INVALID" end' "$budget_file")"
+  if [ "$max_javadoc" = "INVALID" ]; then
+    echo "error: budget maxJavadocJarBytes must be a non-negative integer" >&2
+    exit 2
+  fi
+  if [ -n "$max_javadoc" ]; then
+    largest_javadoc="$(awk -F'\t' '$2 == "javadoc-jar" && $NF + 0 > m { m = $NF + 0 } END { print m + 0 }' "$records")"
+    if [ "$largest_javadoc" -gt "$max_javadoc" ]; then
+      breached=1
+      [ -n "$reasons" ] && reasons="$reasons; "
+      reasons="${reasons}javadoc-jar $largest_javadoc > $max_javadoc"
+    fi
+  fi
   echo
   if [ "$breached" -eq 1 ]; then
     echo "BUDGET WARN: $reasons (advisory -- does not block the release)"

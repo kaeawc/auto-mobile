@@ -1,3 +1,5 @@
+import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
+import com.vanniktech.maven.publish.JavadocJar
 import java.util.concurrent.TimeUnit
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
@@ -180,6 +182,13 @@ tasks.register("apiCheck") {
 }
 
 mavenPublishing {
+  // Publish an empty (Central-compliant) Javadoc jar instead of the ~1.78 MB
+  // Dokka HTML site (#4852). Maven Central requires a -javadoc.jar to exist, but
+  // we do not ship HTML API docs. The single-arg form keeps vanniktech's defaults
+  // for everything else -- the release aar and the real sources jar are unchanged
+  // -- and Dokka stays applied for local/hosted doc generation.
+  configure(AndroidSingleVariantLibrary(javadocJar = JavadocJar.Empty()))
+
   // Coordinates: group and version from root, artifact from local gradle.properties
   coordinates(
     property("GROUP").toString(),

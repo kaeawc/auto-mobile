@@ -58,11 +58,25 @@ under `--strict` any unexpected file fails the run.
 
 ## Regression oracle for artifact reduction
 
-The manifest is the before/after oracle for the artifact-reduction work:
+The manifest was the before/after oracle for the artifact-reduction work:
 
-- **#4851** (eliminate signature checksums) shrinks the `signature-checksum`
-  count to zero.
-- **#4852** (reduce the Dokka Javadoc payload) shrinks the `javadoc-jar` bytes.
+- **#4851** (eliminate signature checksums) needed **no change**. The manifest
+  measures the local Gradle staging repo, which does write `.asc.md5`/`.asc.sha1`
+  sidecars — but vanniktech's Central Portal upload *bundle*
+  (`android/build/publish/*.zip`) already omits them (it ships only `.md5`+`.sha1`
+  for primaries, no signature checksums, no `sha256`/`sha512`, no metadata). So
+  the checksums-of-signatures are never uploaded; the issue was closed as
+  already-resolved.
+- **#4852** (reduce the Dokka Javadoc payload) shipped an **empty Javadoc jar**.
+  `auto-mobile-sdk` published the full Dokka HTML site — 1,779,714 bytes, ~38% of
+  the staged release, of which ~1.2 MB was client-side search/navigation
+  JavaScript, a search index, and web fonts. Maven Central requires a
+  `-javadoc.jar` to exist but not to contain HTML, so `auto-mobile-sdk`'s
+  `mavenPublishing` now uses `JavadocJar.Empty()`: the jar drops to **261 bytes**
+  (an empty `META-INF/MANIFEST.MF`), matching the other three modules. The release
+  aar and the real sources jar are unchanged, and Dokka stays applied for local or
+  hosted doc generation. The `maxJavadocJarBytes` guard in
+  `maven-usage-budget.json` (advisory) keeps it from regressing to the HTML site.
 
 Capture the manifest, make the change, re-capture, and diff.
 
@@ -78,10 +92,11 @@ Measured from a local staging of all four coordinates at version `0.0.47`
 | `auto-mobile-junit-runner` | 30 | ~0.47 MB |
 | `auto-mobile-test-plan-validation` | 30 | ~0.19 MB |
 
-`auto-mobile-sdk`'s Javadoc jar alone is ~1.78 MB; the other three carry no
-public API docs (~261 bytes each). Signing (enabled in release CI) adds a `.asc`
-plus its four checksums for each signed primary, which is what brings a real
-release to roughly 200 files.
+Signing (enabled in release CI) adds a `.asc` plus its four checksums for each
+signed primary in the local staging, which is what brings the local count to
+roughly 200 files — though the actual Central upload bundle is far smaller (see
+the #4851 note above). After #4852, every module's Javadoc jar is an empty ~261
+bytes.
 
 ## Budget
 
@@ -105,5 +120,6 @@ per-release guardrails:
   final Central state (the Usage Center showed ~80 files/release against ~200 here
   signed). This is intentional: the manifest reflects what Gradle produces, and
   the relative before/after signal — the point of the oracle — is unaffected.
-- The budget is advisory. Tighten `perRelease.maxBytes` after #4851 and #4852
-  land, and raise a ceiling deliberately whenever a new coordinate is added.
+- The budget is advisory. Raise a ceiling deliberately whenever a new coordinate
+  is added, and keep `maxJavadocJarBytes` small so the empty Javadoc jar cannot
+  regress to the Dokka HTML site.

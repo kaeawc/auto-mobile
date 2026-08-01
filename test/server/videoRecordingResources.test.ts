@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import * as path from "node:path";
 import {
   assertWithinArchiveRoot,
   buildVideoResourceContent,
@@ -109,13 +110,15 @@ describe("assertWithinArchiveRoot", () => {
   const root = "/home/user/.auto-mobile/video-archive";
 
   test("returns the resolved path for a file inside the archive root", () => {
-    expect(assertWithinArchiveRoot(`${root}/rec-1/rec-1.mp4`, root)).toBe(
-      `${root}/rec-1/rec-1.mp4`
-    );
+    // Assert via node:path so the expectation matches on Windows (backslashes /
+    // drive letter) as well as POSIX — mirrors assertWithinArchiveRoot's own path.resolve.
+    const input = path.join(root, "rec-1", "rec-1.mp4");
+    expect(assertWithinArchiveRoot(input, root)).toBe(path.resolve(root, input));
   });
 
   test("resolves a relative path against the archive root", () => {
-    expect(assertWithinArchiveRoot("rec-1/rec-1.mp4", root)).toBe(`${root}/rec-1/rec-1.mp4`);
+    const input = path.join("rec-1", "rec-1.mp4");
+    expect(assertWithinArchiveRoot(input, root)).toBe(path.resolve(root, input));
   });
 
   test("throws for an absolute path outside the archive root", () => {

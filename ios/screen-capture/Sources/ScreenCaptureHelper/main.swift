@@ -97,6 +97,16 @@ func writeJSON<T: Encodable>(_ value: T) {
     }
 }
 
+// MARK: - Capability handshake
+
+// Advertise the helper's wire capabilities on stderr at startup so the TS
+// supervisor can detect a version skew before choosing an output path (issue
+// #4787). Absence of these lines identifies an outdated helper. This is a
+// diagnostic stderr line only; the stdout frame pipeline is unchanged.
+for line in CaptureCapabilityMarker.allLines() {
+    logError(line)
+}
+
 // MARK: - Argument parsing
 
 let options: CommandLineOptions

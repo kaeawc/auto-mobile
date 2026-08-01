@@ -6,7 +6,9 @@
  *
  * Followed by `height * bytesPerRow` bytes of BGRA pixel data. Audio records
  * reserve width=0: height=8000, bytesPerRow=1, timestampMs=payload length,
- * followed by 8 kHz mono PCM16LE bytes.
+ * followed by 8 kHz mono PCM16LE bytes. Encoded-video records (issue #4787) also
+ * reserve width=0, with a distinct `height` sentinel — see
+ * `ENCODED_VIDEO_HEIGHT_BASE` below.
  *
  * `magic` is a fixed sync marker ("AMF1" on the wire) and `headerChecksum` is a
  * CRC-32 (IEEE) over the 16 field bytes that follow it. Together they make frame
@@ -54,6 +56,37 @@ const MAX_ROW_PADDING_BYTES = 4096;
 export const MAX_RAW_FRAME_BYTES = 32 * 1024 * 1024;
 /** Largest plausible audio record (16 MiB ≈ 17 minutes of 8 kHz PCM16LE). */
 const MAX_AUDIO_PAYLOAD_BYTES = 16 * 1024 * 1024;
+/**
+ * Largest plausible encoded-video record. A single H.264 access unit (even a
+ * high-resolution keyframe) is far smaller than a raw BGRA frame; 16 MiB is
+ * generous headroom while keeping one buffered record bounded.
+ */
+const MAX_ENCODED_VIDEO_PAYLOAD_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Encoded-video discriminator (issue #4787). The header carries no type field;
+ * raw frames and audio are told apart by reserved sentinels in the geometry
+ * fields (audio = `width=0, height=8000, bytesPerRow=1`). An encoded-video record
+ * reuses `width=0` (a real raw frame always has `width>=1`, so the raw decoder
+ * already rejects `width=0`) and puts a reserved constant in `height` whose top
+ * 31 bits are fixed and whose low bit carries the keyframe flag:
+ *
+ *     width       = 0                                  (never a raw frame)
+ *     height      = ENCODED_VIDEO_HEIGHT_BASE | keyframeBit
+ *     bytesPerRow = encoded H.264 payload length in bytes
+ *     timestampMs = presentation timestamp (ms) from the CMSampleBuffer PTS
+ *
+ * `ENCODED_VIDEO_HEIGHT_BASE` (0xE2640000, mnemonic "E2 64" ≈ encoded H.264) can
+ * never equal the audio sentinel's `height` of 8000, so an encoded record is
+ * unambiguous against both raw frames (width!=0) and audio (height!=8000). The
+ * CRC-32 header checksum still covers all 16 field bytes, so a corrupt encoded
+ * header fails validation and drives resync exactly like a raw or audio header.
+ */
+export const ENCODED_VIDEO_HEIGHT_BASE = 0xe264_0000;
+/** All bits of `height` except the low keyframe-flag bit. */
+export const ENCODED_VIDEO_HEIGHT_MASK = 0xffff_fffe;
+/** Low bit of the encoded-video `height` sentinel: set on keyframes. */
+const ENCODED_VIDEO_KEYFRAME_BIT = 0x0000_0001;
 
 export interface FrameHeader {
   width: number;
@@ -71,6 +104,17 @@ export interface DecodedAudio {
   pcm16le: Buffer;
 }
 
+/**
+ * An in-helper-encoded H.264 access unit (issue #4787). Surfaced distinctly from
+ * raw BGRA frames and audio. `presentationTimestampMs` is the CMSampleBuffer PTS
+ * (not helper wall-clock) so downstream RTP timing is driven by capture time.
+ */
+export interface DecodedEncodedVideo {
+  keyframe: boolean;
+  presentationTimestampMs: number;
+  payload: Buffer;
+}
+
 type MalformedFrameReason =
   | "header_magic_mismatch"
   | "header_checksum_mismatch"
@@ -80,7 +124,8 @@ type MalformedFrameReason =
   | "header_bytes_per_row_too_large"
   | "header_dimensions_out_of_range"
   | "header_payload_too_large"
-  | "audio_payload_too_large";
+  | "audio_payload_too_large"
+  | "encoded_video_payload_too_large";
 
 export interface MalformedFrameError {
   reason: MalformedFrameReason;
@@ -108,7 +153,8 @@ export class FrameDecoder {
     chunk: Buffer,
     onMalformed?: (error: MalformedFrameError) => void,
     onAudio?: (audio: DecodedAudio) => void,
-    onFrame?: (frame: DecodedFrame) => void
+    onFrame?: (frame: DecodedFrame) => void,
+    onEncodedVideo?: (video: DecodedEncodedVideo) => void
   ): DecodedFrame[] {
     const frames: DecodedFrame[] = [];
     let offset = 0;
@@ -122,7 +168,7 @@ export class FrameDecoder {
         // MAX_RAW_FRAME_BYTES, and `resynchronize` compacts garbage that carries
         // no validating marker — so every full-buffer state drains, leaving this
         // throw an infinite-loop guard rather than a real teardown path (#4772).
-        if (!this.decodeAvailable(frames, onMalformed, onAudio, onFrame)) {
+        if (!this.decodeAvailable(frames, onMalformed, onAudio, onFrame, onEncodedVideo)) {
           throw new Error("FrameDecoder reached its raw-frame buffer limit without a complete frame");
         }
         continue;
@@ -131,7 +177,7 @@ export class FrameDecoder {
       this.buffer.append(chunk.subarray(offset, end));
       this.highWaterMarkBytes = Math.max(this.highWaterMarkBytes, this.buffer.length);
       offset = end;
-      this.decodeAvailable(frames, onMalformed, onAudio, onFrame);
+      this.decodeAvailable(frames, onMalformed, onAudio, onFrame, onEncodedVideo);
     }
     return frames;
   }
@@ -148,7 +194,8 @@ export class FrameDecoder {
     frames: DecodedFrame[],
     onMalformed?: (error: MalformedFrameError) => void,
     onAudio?: (audio: DecodedAudio) => void,
-    onFrame?: (frame: DecodedFrame) => void
+    onFrame?: (frame: DecodedFrame) => void,
+    onEncodedVideo?: (video: DecodedEncodedVideo) => void
   ): boolean {
     let madeProgress = false;
     while (true) {
@@ -173,18 +220,38 @@ export class FrameDecoder {
       // avoids the former concatenate-on-every-chunk behavior while retaining
       // no more than this one completed payload.
       const payload = this.buffer.takeDetached(expected);
-      if (isAudioHeader(pending)) {
-        onAudio?.({ pcm16le: payload });
-      } else {
-        const frame = { header: pending, pixels: payload };
-        if (onFrame) {
-          onFrame(frame);
-        } else {
-          frames.push(frame);
-        }
-      }
+      this.emitRecord(pending, payload, frames, onAudio, onFrame, onEncodedVideo);
       this.pendingHeader = null;
       madeProgress = true;
+    }
+  }
+
+  /** Route a completed payload to the callback for its record kind. */
+  private emitRecord(
+    header: FrameHeader,
+    payload: Buffer,
+    frames: DecodedFrame[],
+    onAudio?: (audio: DecodedAudio) => void,
+    onFrame?: (frame: DecodedFrame) => void,
+    onEncodedVideo?: (video: DecodedEncodedVideo) => void
+  ): void {
+    if (isAudioHeader(header)) {
+      onAudio?.({ pcm16le: payload });
+      return;
+    }
+    if (isEncodedVideoHeader(header)) {
+      onEncodedVideo?.({
+        keyframe: (header.height & ENCODED_VIDEO_KEYFRAME_BIT) !== 0,
+        presentationTimestampMs: header.timestampMs,
+        payload,
+      });
+      return;
+    }
+    const frame = { header, pixels: payload };
+    if (onFrame) {
+      onFrame(frame);
+    } else {
+      frames.push(frame);
     }
   }
 
@@ -264,10 +331,22 @@ function isAudioHeader(header: FrameHeader): boolean {
   return header.width === 0 && header.height === 8_000 && header.bytesPerRow === 1;
 }
 
+/**
+ * True when the header is an encoded-video record (issue #4787): `width=0` (never
+ * a raw frame) and `height` masked to its reserved sentinel base. Cannot collide
+ * with the audio sentinel because `ENCODED_VIDEO_HEIGHT_BASE` (0xE2640000) is not
+ * 8000, so audio and encoded records are mutually exclusive.
+ */
+function isEncodedVideoHeader(header: FrameHeader): boolean {
+  // `& ` yields a signed int32 in JS; `>>> 0` coerces back to the unsigned value
+  // so the high-bit sentinel base (0xE2640000) compares equal.
+  return header.width === 0 && ((header.height & ENCODED_VIDEO_HEIGHT_MASK) >>> 0) === ENCODED_VIDEO_HEIGHT_BASE;
+}
+
 function payloadSize(header: FrameHeader): number {
-  return isAudioHeader(header)
-    ? header.timestampMs
-    : header.height * header.bytesPerRow;
+  if (isAudioHeader(header)) {return header.timestampMs;}
+  if (isEncodedVideoHeader(header)) {return header.bytesPerRow;}
+  return header.height * header.bytesPerRow;
 }
 
 function parseFields(buffer: Buffer, offset: number): FrameHeader {
@@ -298,6 +377,11 @@ function headerErrorAt(buffer: Buffer, offset: number): MalformedFrameReason | n
 function fieldBoundsError(header: FrameHeader): MalformedFrameReason | null {
   if (isAudioHeader(header)) {
     return header.timestampMs > MAX_AUDIO_PAYLOAD_BYTES ? "audio_payload_too_large" : null;
+  }
+  // Encoded video is checked before the `width===0` raw rejection: it too
+  // reserves `width===0`, so it must be classified before that guard fires.
+  if (isEncodedVideoHeader(header)) {
+    return header.bytesPerRow > MAX_ENCODED_VIDEO_PAYLOAD_BYTES ? "encoded_video_payload_too_large" : null;
   }
   if (header.width === 0) {return "header_width_zero";}
   if (header.height === 0) {return "header_height_zero";}
@@ -330,6 +414,27 @@ export function encodeFrameHeader(header: FrameHeader): Buffer {
   buffer.writeUInt32LE(header.timestampMs >>> 0, 20);
   buffer.writeUInt32LE(crc32(buffer.subarray(HEADER_FIELDS_OFFSET, FRAME_HEADER_SIZE)), 4);
   return buffer;
+}
+
+export interface EncodedVideoHeaderFields {
+  payloadLength: number;
+  keyframe: boolean;
+  presentationTimestampMs: number;
+}
+
+/**
+ * Encode an encoded-video record header (issue #4787). Mirrors
+ * `FrameProtocol.encodeEncodedVideoHeader` in the Swift helper; the shared golden
+ * vectors pin the two byte for byte. See `ENCODED_VIDEO_HEIGHT_BASE` for the
+ * discriminator rationale.
+ */
+export function encodeEncodedVideoHeader(fields: EncodedVideoHeaderFields): Buffer {
+  return encodeFrameHeader({
+    width: 0,
+    height: (ENCODED_VIDEO_HEIGHT_BASE | (fields.keyframe ? ENCODED_VIDEO_KEYFRAME_BIT : 0)) >>> 0,
+    bytesPerRow: fields.payloadLength,
+    timestampMs: fields.presentationTimestampMs,
+  });
 }
 
 const CRC32_TABLE = buildCrc32Table();

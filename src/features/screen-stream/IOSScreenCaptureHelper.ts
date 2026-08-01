@@ -4,11 +4,13 @@ import {
   type SpawnOptions,
 } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   type DecodedFrame,
   type DecodedAudio,
+  type DecodedEncodedVideo,
   FrameDecoder,
   type MalformedFrameError,
 } from "./frameProtocol";
@@ -23,6 +25,15 @@ export { type FrameQueueMetrics } from "./LatestFrameQueue";
 export const IOS_SCREEN_CAPTURE_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 /** Prefix used by the helper to send JSON queue snapshots over stderr. */
 export const NATIVE_FRAME_METRICS_PREFIX = "automobile-frame-metrics:";
+/**
+ * Prefix of the startup capability handshake line the helper writes to stderr
+ * (issue #4787). One token per line: `capture-capability: <token>`. A helper that
+ * predates the handshake emits no such line, so its absence is how a version
+ * skew is detected — see {@link IOSScreenCaptureHelper.assertSupportsEncodedVideo}.
+ */
+export const CAPTURE_CAPABILITY_PREFIX = "capture-capability:";
+/** Capability token advertising in-helper H.264 encoded output (issue #4787). */
+export const ENCODED_VIDEO_CAPABILITY = "encoded-video-h264";
 
 export type HelperSpawner = (
   command: string,
@@ -82,6 +93,8 @@ export interface IosScreenCaptureHelperEvents {
   frameMetrics: (metrics: FrameQueueMetrics) => void;
   captureMetrics: (metrics: NativeFrameMetrics) => void;
   audio: (audio: DecodedAudio) => void;
+  encodedVideo: (video: DecodedEncodedVideo) => void;
+  capability: (token: string) => void;
   malformed: (error: MalformedFrameError) => void;
   stderr: (line: string) => void;
   readiness: (status: IosScreenCaptureReadiness) => void;
@@ -128,6 +141,7 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   private readonly frameQueue: LatestFrameQueue;
   private readonly frameDeliveryScheduler: FrameDeliveryScheduler;
   private process: ChildProcessWithoutNullStreams | null = null;
+  private readonly helperCapabilities = new Set<string>();
   private stderrBuffer = "";
   private exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | null = null;
   private frameDeliveryScheduled = false;
@@ -191,7 +205,8 @@ export class IOSScreenCaptureHelper extends EventEmitter {
         buf,
         err => this.emit("malformed", err),
         audio => this.emit("audio", audio),
-        frame => this.enqueueFrame(frame)
+        frame => this.enqueueFrame(frame),
+        video => this.emit("encodedVideo", video)
       );
       // `onFrame` keeps the decoder from allocating an array for a coalesced
       // stdout chunk. Preserve the fallback return path for direct decoder use.
@@ -314,8 +329,45 @@ export class IOSScreenCaptureHelper extends EventEmitter {
       this.emit("captureMetrics", metrics);
       return;
     }
+    const capability = parseCapabilityMarker(line);
+    if (capability !== null) {
+      this.helperCapabilities.add(capability);
+      this.emit("capability", capability);
+      return;
+    }
     this.emit("stderr", line);
     this.emitReadinessFromMarker(line);
+  }
+
+  /**
+   * Capability tokens the helper advertised via its startup handshake. Empty when
+   * the helper predates the handshake (issue #4787).
+   */
+  get capabilities(): ReadonlySet<string> {
+    return this.helperCapabilities;
+  }
+
+  /** True once the helper has advertised in-helper H.264 encoded output. */
+  supportsEncodedVideo(): boolean {
+    return this.helperCapabilities.has(ENCODED_VIDEO_CAPABILITY);
+  }
+
+  /**
+   * Fail fast on a version-skewed pairing: a helper that never advertised the
+   * encoded-video capability (an old binary pinned via
+   * `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER`) cannot produce encoded output, so
+   * requesting it must surface an actionable error rather than degrade into a
+   * resync storm (issue #4787).
+   */
+  assertSupportsEncodedVideo(): void {
+    if (this.supportsEncodedVideo()) {return;}
+    throw new ActionableError(
+      "The screen-capture-helper did not advertise the '" + ENCODED_VIDEO_CAPABILITY +
+      "' capability at startup, so it cannot emit encoded H.264 video. This is an " +
+      "outdated helper. Unset AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER to use the " +
+      "checksum-pinned release helper, or point it at a build that advertises " +
+      "'" + ENCODED_VIDEO_CAPABILITY + "'."
+    );
   }
 
   private async waitForExitWithinGrace(): Promise<{
@@ -365,6 +417,19 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   }
 
   private static readonly STDERR_BUFFER_MAX = 64 * 1024;
+}
+
+/**
+ * Parse a `capture-capability: <token>` handshake line, returning the token or
+ * null when the line is not a capability marker (issue #4787).
+ */
+function parseCapabilityMarker(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith(CAPTURE_CAPABILITY_PREFIX)) {
+    return null;
+  }
+  const token = trimmed.slice(CAPTURE_CAPABILITY_PREFIX.length).trim();
+  return token.length > 0 ? token : null;
 }
 
 function parseNativeFrameMetrics(line: string): NativeFrameMetrics | null {

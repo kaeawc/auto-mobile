@@ -184,7 +184,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
 
     const sizeBytes = await getFileSize(handle.outputPath);
-    logger.info(`[VideoCapture] Final file size: ${sizeBytes} bytes at ${handle.outputPath}`);
+    logger.info(`[VideoCapture] Final file size: ${sizeBytes} bytes`);
+    // Absolute host path leaks the local username; keep it diagnostic-only.
+    logger.debug(`[VideoCapture] Output file at ${handle.outputPath}`);
 
     const codec = "h264";
 
@@ -242,9 +244,12 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
     args.push(deviceTempPath);
 
-    logger.info(`[VideoCapture] Starting Android recording: ${args.join(" ")}`);
-    logger.info(`[VideoCapture] Device temp path: ${deviceTempPath}`);
-    logger.info(`[VideoCapture] Output path: ${config.outputPath}`);
+    logger.info(`[VideoCapture] Starting Android recording`);
+    // The argv, device temp path and host output path embed the recording id
+    // and local username; keep them diagnostic-only.
+    logger.debug(`[VideoCapture] Screenrecord argv: ${args.join(" ")}`);
+    logger.debug(`[VideoCapture] Device temp path: ${deviceTempPath}`);
+    logger.debug(`[VideoCapture] Output path: ${config.outputPath}`);
     logger.info(`[VideoCapture] Bitrate: ${bitrateKbps}kbps (${bitrateBps}bps), Time limit: ${timeLimitSeconds}s`);
 
     const process = await adb.spawn(args);

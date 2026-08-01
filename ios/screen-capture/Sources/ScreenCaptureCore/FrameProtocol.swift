@@ -23,6 +23,42 @@ public enum FrameProtocol {
     public static let audioSampleRate: UInt32 = 8_000
     public static let audioChannelCount: UInt32 = 1
 
+    /// Encoded-video discriminator (issue #4787). The header carries no type
+    /// field; raw frames and audio are told apart by reserved sentinels in the
+    /// geometry fields (audio = width=0, height=8000, bytesPerRow=1). An
+    /// encoded-video record reuses width=0 (a raw frame always has width>=1) and
+    /// puts this reserved constant in `height`, whose top 31 bits are fixed and
+    /// whose low bit carries the keyframe flag:
+    ///
+    ///     width       = 0                                  (never a raw frame)
+    ///     height      = encodedVideoHeightBase | keyframeBit
+    ///     bytesPerRow = encoded H.264 payload length in bytes
+    ///     timestampMs = presentation timestamp (ms) from the CMSampleBuffer PTS
+    ///
+    /// `encodedVideoHeightBase` (0xE264_0000) can never equal the audio
+    /// sentinel's height of 8000, so an encoded record is unambiguous against
+    /// both raw frames (width != 0) and audio (height != 8000). The CRC-32 header
+    /// checksum still covers all 16 field bytes, so a corrupt encoded header
+    /// fails validation and drives resync exactly like a raw or audio header.
+    public static let encodedVideoHeightBase: UInt32 = 0xE264_0000
+    /// All bits of `height` except the low keyframe-flag bit.
+    public static let encodedVideoHeightMask: UInt32 = 0xFFFF_FFFE
+    static let encodedVideoKeyframeBit: UInt32 = 0x0000_0001
+
+    /// A decoded in-helper-encoded H.264 access-unit record (issue #4787),
+    /// surfaced distinctly from raw frames and audio.
+    public struct EncodedVideoRecord: Equatable {
+        public let payloadLength: Int
+        public let isKeyframe: Bool
+        public let presentationTimestampMs: UInt32
+
+        public init(payloadLength: Int, isKeyframe: Bool, presentationTimestampMs: UInt32) {
+            self.payloadLength = payloadLength
+            self.isKeyframe = isKeyframe
+            self.presentationTimestampMs = presentationTimestampMs
+        }
+    }
+
     public struct Header: Equatable {
         public let width: UInt32
         public let height: UInt32
@@ -65,6 +101,42 @@ public enum FrameProtocol {
             bytesPerRow: audioChannelCount,
             timestampMs: UInt32(payloadLength)
         ))
+    }
+
+    /// Encode an encoded-video record header (issue #4787). Mirrors
+    /// `encodeEncodedVideoHeader` in the TypeScript decoder; the shared golden
+    /// vectors pin the two byte for byte. See `encodedVideoHeightBase`.
+    public static func encodeEncodedVideoHeader(
+        payloadLength: Int,
+        isKeyframe: Bool,
+        presentationTimestampMs: UInt32
+    ) -> Data {
+        let keyframeBit = isKeyframe ? encodedVideoKeyframeBit : 0
+        return encodeHeader(Header(
+            width: 0,
+            height: encodedVideoHeightBase | keyframeBit,
+            bytesPerRow: UInt32(payloadLength),
+            timestampMs: presentationTimestampMs
+        ))
+    }
+
+    /// True when a decoded header is an encoded-video record: width=0 (never a
+    /// raw frame) and `height` masked to the reserved sentinel base. Cannot
+    /// collide with the audio sentinel because the base (0xE264_0000) is not 8000.
+    public static func isEncodedVideoHeader(_ header: Header) -> Bool {
+        header.width == 0 && (header.height & encodedVideoHeightMask) == encodedVideoHeightBase
+    }
+
+    /// Decode + validate a header and, when it is an encoded-video record, map it
+    /// to an `EncodedVideoRecord`. Returns nil for a corrupt header (marker or
+    /// checksum mismatch) or a header that is not an encoded-video record.
+    public static func decodeEncodedVideoHeader(_ data: Data) -> EncodedVideoRecord? {
+        guard let header = decodeHeader(data), isEncodedVideoHeader(header) else { return nil }
+        return EncodedVideoRecord(
+            payloadLength: Int(header.bytesPerRow),
+            isKeyframe: (header.height & encodedVideoKeyframeBit) != 0,
+            presentationTimestampMs: header.timestampMs
+        )
     }
 
     /// Decode + validate a header. Returns nil when the marker or checksum does

@@ -1,0 +1,28 @@
+{
+  "description": "Golden vectors for the encoded-H.264 record kind (issue #4787), shared byte-for-byte by the Swift ScreenCaptureCoreTests and the TypeScript frameProtocol tests. Each record is header(24) + payload; recordHex is the exact wire bytes. Discriminator: width=0, height = encodedVideoHeightBase(0xE2640000) | keyframeBit, bytesPerRow = payload length, timestampMs = presentation timestamp (ms) from the CMSampleBuffer PTS. Regenerate with scratch/genGolden.ts if the format changes; both suites must stay in lockstep.",
+  "headerSize": 24,
+  "encodedVideoHeightBase": "0xE2640000",
+  "encodedVideoHeightMask": "0xFFFFFFFE",
+  "records": [
+    {
+      "name": "keyframe",
+      "keyframe": true,
+      "presentationTimestampMs": 1000,
+      "payloadHex": "000000016742001fabcdef0102030405",
+      "recordHex": "414d4631f8ece4d600000000010064e210000000e8030000000000016742001fabcdef0102030405"
+    },
+    {
+      "name": "delta",
+      "keyframe": false,
+      "presentationTimestampMs": 1033,
+      "payloadHex": "00000001419a001122334455",
+      "recordHex": "414d46312bb4d90d00000000000064e20c0000000904000000000001419a001122334455"
+    }
+  ],
+  "resync": {
+    "description": "A corrupted keyframe record (field byte at offset 8 flipped, so the CRC-32 no longer validates) followed by a valid delta record. A decoder must report exactly one checksum mismatch, then recover and decode the delta record.",
+    "corruptedRecordHex": "414d4631f8ece4d6ff000000010064e210000000e8030000000000016742001fabcdef0102030405",
+    "streamHex": "414d4631f8ece4d6ff000000010064e210000000e8030000000000016742001fabcdef0102030405414d46312bb4d90d00000000000064e20c0000000904000000000001419a001122334455",
+    "recoveredRecordName": "delta"
+  }
+}

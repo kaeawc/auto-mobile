@@ -41,10 +41,11 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     /// Force-keyframe latch shared with the STDIN control channel; consumed by
     /// the encoder on the next frame. Present even in raw mode (harmless there).
     let forceKeyFrameLatch = ForceKeyFrameLatch()
-    /// Active encoder in `--encode h264` mode; recreated on a capture-size
-    /// change (seamless reconfig: the new session's first frame is a fresh
-    /// SPS/PPS + IDR).
-    private var encoder: H264VideoEncoder?
+    /// Shared in-helper encode wiring in `--encode h264` mode (issues #4788 /
+    /// #4790). `nil` in the raw-BGRA path. The same `EncodePipeline` type backs the
+    /// physical-device capture session, so the VideoToolbox glue lives in exactly
+    /// one place.
+    private var pipeline: EncodePipeline?
     /// Pixel format requested from ScreenCaptureKit — 32BGRA for the raw path,
     /// 420v (NV12) for the lowest-CPU encode path.
     var configuredPixelFormat: OSType = kCVPixelFormatType_32BGRA
@@ -101,8 +102,17 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         // 420v (NV12) is the lowest-CPU encode input: the delivered
         // IOSurface-backed CVPixelBuffer feeds VTCompressionSession directly with
         // no color conversion. The raw path keeps 32BGRA untouched.
-        if isEncoding {
+        if let encodeSettings = encodeSettings {
             configuredPixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            pipeline = EncodePipeline(
+                writer: writer,
+                fps: fps,
+                source: .simulator,
+                bitrate: encodeSettings.bitrate,
+                forceKeyFrameLatch: forceKeyFrameLatch,
+                diagnosticSink: diagnosticSink,
+                onFatalError: onFatalError
+            )
         }
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let config = SimulatorCaptureSession.makeConfiguration(
@@ -160,8 +170,8 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     }
 
     func stop() async {
-        encoder?.stop()
-        encoder = nil
+        pipeline?.stop()
+        pipeline = nil
         guard let stream = stream else { return }
         // removeStreamOutput breaks the SCStream → self retain cycle so the
         // session is collectable even before SCStream itself goes away.
@@ -226,12 +236,16 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         width: Int,
         height: Int
     ) {
+        guard let pipeline = pipeline else { return }
         let target = H264EncodeMath.resolveEncoderScale(
             H264EncodeMath.EncoderSize(width: width, height: height)
         ) ?? H264EncodeMath.EncoderSize(width: width, height: height)
 
         // Ask SCK to deliver the encode resolution. Until it does, skip encoding
-        // rather than feed VideoToolbox a mismatched buffer size.
+        // rather than feed VideoToolbox a mismatched buffer size. (The device path
+        // cannot reshape its delivery size, so it instead sizes the encoder to the
+        // target and lets VideoToolbox scale the native buffer — the divergence the
+        // shared pipeline is designed around.)
         if width != target.width || height != target.height {
             reconfigure(width: target.width, height: target.height)
             return
@@ -239,58 +253,11 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
 
         // Delivered size now equals the encode target. (Re)create the encoder if
         // absent or sized for a previous resolution.
-        if encoder == nil || encoder?.width != target.width || encoder?.height != target.height {
-            guard startEncoder(width: target.width, height: target.height) else { return }
-        }
+        guard pipeline.ensureEncoder(width: target.width, height: target.height) else { return }
 
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        if encoder?.encode(pixelBuffer: pixelBuffer, presentationTime: pts) == true {
+        if pipeline.encode(pixelBuffer: pixelBuffer, presentationTime: pts) {
             noteFrameWritten(width: target.width, height: target.height)
-        }
-    }
-
-    /// Build and start a VideoToolbox encoder at `width`x`height`, resolving the
-    /// `AverageBitRate` from the delivered dimensions per the operator's bitrate
-    /// choice. Returns `false` (and surfaces a fatal error) when the session
-    /// cannot be created.
-    private func startEncoder(width: Int, height: Int) -> Bool {
-        encoder?.stop()
-        let bitrate = resolvedBitrateBps(width: width, height: height)
-        let newEncoder = H264VideoEncoder(
-            width: width,
-            height: height,
-            fps: fps,
-            averageBitRateBps: bitrate,
-            writer: writer,
-            forceKeyFrameLatch: forceKeyFrameLatch,
-            diagnosticSink: diagnosticSink,
-            onFatalError: { [weak self] message in
-                self?.onFatalError(EncoderOutputOverflowError(message: message))
-            }
-        )
-        do {
-            try newEncoder.start()
-        } catch {
-            onFatalError(error)
-            return false
-        }
-        encoder = newEncoder
-        return true
-    }
-
-    /// Resolve `AverageBitRate` (bps) from the delivered pixel dimensions and the
-    /// operator's bitrate choice. `nil` leaves the VideoToolbox default. The
-    /// policy (which choice) is set by the TS supervisor via CLI flags; only the
-    /// pixel-dimension arithmetic — which the helper alone knows pre-encode —
-    /// happens here, via the pure `H264EncodeMath`.
-    private func resolvedBitrateBps(width: Int, height: Int) -> Int? {
-        switch encodeSettings?.bitrate {
-        case .explicitBps(let bps):
-            return bps
-        case .bitsPerPixel(let bpp):
-            return H264EncodeMath.bitrateBps(width: width, height: height, fps: fps, bitsPerPixel: bpp)
-        case .videoToolboxDefault, .none:
-            return nil
         }
     }
 

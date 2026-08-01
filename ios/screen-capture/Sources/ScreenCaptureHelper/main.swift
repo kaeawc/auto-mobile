@@ -288,7 +288,7 @@ case .captureSimulator(let windowID, let fps, let audio, let encode):
     }
     RunLoop.main.run()
 
-case .capture(let deviceID):
+case .capture(let deviceID, let encode):
     CMIOSystem.enableScreenCaptureDevices()
     // Poll briefly for the requested device to register instead of an
     // unconditional 0.5s sleep; return as soon as it enumerates (issue #4737).
@@ -319,13 +319,28 @@ case .capture(let deviceID):
     let writer = FrameWriter(sink: sink)
     let metricsReporter = FrameMetricsReporter(writer: writer, output: logError)
     metricsReporter.start()
-    let captureSession = DeviceCaptureSession(writer: writer) { error in
+    let captureSession = DeviceCaptureSession(writer: writer, encode: encode) { error in
         // A mid-stream AVCaptureSession fatal error (runtime error / interruption
-        // once running): exit deterministically so the supervisor's bounded
-        // reconnect re-establishes capture instead of leaving a dead session
-        // spinning RunLoop.main (issue #4768).
+        // once running) or a fatal encoded-output overflow: exit deterministically
+        // so the supervisor's bounded reconnect re-establishes capture instead of
+        // leaving a dead session spinning RunLoop.main (issues #4768 / #4790).
         logError("error: iOS device capture failed: \(error)")
         exit(midStreamFatalExitCode)
+    }
+
+    // In encode mode, read newline-delimited JSON control commands from STDIN
+    // (today only `{"cmd":"forceKeyFrame"}`). The raw path never touches STDIN, so
+    // its stdout is byte-for-byte unchanged (issues #4788 / #4790).
+    var deviceControlChannel: ControlChannel?
+    if encode != nil {
+        let channel = ControlChannel { command in
+            switch command {
+            case .forceKeyFrame:
+                captureSession.forceKeyFrameLatch.request()
+            }
+        }
+        channel.start()
+        deviceControlChannel = channel
     }
 
     do {
@@ -337,6 +352,7 @@ case .capture(let deviceID):
 
     installShutdownHandlers {
         metricsReporter.stop()
+        deviceControlChannel?.stop()
         captureSession.stop()
         exit(0)
     }

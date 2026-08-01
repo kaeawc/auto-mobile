@@ -30,6 +30,13 @@ export const NAVIGATION_RESOURCE_URIS = {
 
 export type NavigationGraphResourceContent = NavigationGraphSummary;
 export type NavigationNodeResourceContent = NavigationGraphNodeResource;
+/**
+ * Payload of the `automobile:navigation/apps` resource: apps that have a
+ * persisted navigation graph. Each entry's `lastUpdated` reflects the app
+ * record's `navigation_apps.updated_at`, which can lag graph mutations that do
+ * not touch the parent timestamp (issue #4931); it is not the exact time of the
+ * most recent graph change.
+ */
 export interface NavigationAppsResourceContent {
   apps: NavigationAppSummary[];
 }

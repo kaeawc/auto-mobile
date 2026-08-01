@@ -1307,10 +1307,13 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
-   * List every app that has a persisted navigation graph, newest-updated first.
-   * Device-independent (reads persisted rows only) so the desktop can populate an
-   * offline app picker. displayName is null: the persisted schema has no
-   * display-name column (see NavigationAppSummary).
+   * List every app that has a persisted navigation graph, ordered by the app
+   * record's `navigation_apps.updated_at` (newest first). Device-independent
+   * (reads persisted rows only) so the desktop can populate an offline app
+   * picker. displayName is null: the persisted schema has no display-name column
+   * (see NavigationAppSummary). Note that `updated_at` is not bumped by every
+   * graph mutation, so both `lastUpdated` and this ordering can lag some changes
+   * (issue #4931).
    */
   public async listAppsWithGraph(): Promise<NavigationAppSummary[]> {
     const apps = await this.repository.listApps();

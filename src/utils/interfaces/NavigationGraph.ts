@@ -257,7 +257,13 @@ export interface NavigationAppSummary {
    * a name source can be wired without a breaking response-shape change.
    */
   displayName: string | null;
-  /** ISO-8601 timestamp of the app's most recent navigation-graph update. */
+  /**
+   * ISO-8601 timestamp of the app record's `navigation_apps.updated_at`. This is
+   * bumped on the main navigation-recording paths but NOT by every graph mutation
+   * (e.g. promoteSuggestion / updateNodeScreenshot / recordBackStack do not touch
+   * it), so it can lag those changes. Do not treat it as the exact time of the
+   * most recent graph mutation. Tracked by issue #4931.
+   */
   lastUpdated: string;
 }
 

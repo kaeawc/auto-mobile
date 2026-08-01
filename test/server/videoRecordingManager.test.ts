@@ -447,7 +447,17 @@ describe("videoRecordingManager", () => {
       expect(fakeTimer.getPendingIntervalCount()).toBe(1);
 
       fakeTimer.advanceTime(1000);
-      await drainAsyncUntil(async () => fakeBackend.stopCalls.length === 1);
+      // The interval fires enforceInProgressSizeCap → stopVideoRecording, which
+      // stops the backend, THEN persists status "completed", THEN enforces the
+      // archive limit — a chain that settles across several microtasks. Drain
+      // until the capture is fully finalized (visible in the completed listing),
+      // not merely until backend.stop() was called: `stopCalls` is bumped inside
+      // stopRecording and races ahead of the "completed" status write, so a
+      // stopCalls-only predicate reads the recording mid-stop (still "recording",
+      // filtered out of the listing) under CI event-loop pressure (#4762 macOS flake).
+      await drainAsyncUntil(async () =>
+        (await listVideoRecordings()).some(record => record.recordingId === active.recordingId)
+      );
 
       expect(fakeBackend.stopCalls.length).toBe(1);
       const recordings = await listVideoRecordings();

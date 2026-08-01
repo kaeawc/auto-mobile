@@ -14,6 +14,7 @@ import {
 class FakeSimulatorHelper extends EventEmitter {
   starts = 0;
   stops = 0;
+  keyFrameRequests = 0;
   isRunning = false;
   stopError: Error | null = null;
 
@@ -31,6 +32,11 @@ class FakeSimulatorHelper extends EventEmitter {
     return null;
   }
 
+  requestKeyFrame(): boolean {
+    this.keyFrameRequests++;
+    return true;
+  }
+
   override on<E extends keyof IosScreenCaptureHelperEvents>(
     event: E,
     listener: IosScreenCaptureHelperEvents[E]
@@ -43,6 +49,18 @@ function simulatorOptions(windowID = 42): IosScreenCaptureHelperOptions {
   return {
     binaryPath: "/fake/screen-capture-helper",
     target: { kind: "simulator", windowID, fps: 15 },
+  };
+}
+
+function encodedOptions(windowID = 42): IosScreenCaptureHelperOptions {
+  return {
+    binaryPath: "/fake/screen-capture-helper",
+    target: {
+      kind: "simulator",
+      windowID,
+      fps: 15,
+      encode: { codec: "h264", bitrate: { kind: "bitsPerPixel", bpp: 0.1 } },
+    },
   };
 }
 
@@ -344,5 +362,84 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     await second.start();
     await pool.shutdown();
     expect(helpers[1].stops).toBe(1);
+  });
+
+  test("forces an IDR on every encoded lease attach and never replays a raw frame", async () => {
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+
+    const first = pool.acquire(encodedOptions());
+    await first.start();
+    // The first attach forces an IDR so a fresh stream starts on a keyframe.
+    expect(helpers[0].keyFrameRequests).toBe(1);
+
+    // A late lease adopting the warm encoded helper must also force an IDR — it
+    // would otherwise begin mid-GOP on undecodable P-frames. The raw warm-start
+    // frame replay is disabled on the encoded path.
+    const replayed: number[] = [];
+    const second = pool.acquire(encodedOptions());
+    second.on("frame", frame => replayed.push(frame.header.width));
+    helpers[0].emit("encodedVideo", { keyframe: false, presentationTimestampMs: 1, payload: Buffer.from([0, 0, 0, 1, 0x41]) });
+    await second.start();
+
+    expect(helpers).toHaveLength(1);
+    expect(helpers[0].keyFrameRequests).toBe(2);
+    expect(replayed).toEqual([]);
+  });
+
+  test("forwards encoded records and the capability handshake to every lease", async () => {
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const lease = pool.acquire(encodedOptions());
+    const records: boolean[] = [];
+    const capabilities: string[] = [];
+    lease.on("encodedVideo", video => records.push(video.keyframe));
+    lease.on("capability", token => capabilities.push(token));
+    await lease.start();
+
+    helpers[0].emit("capability", "encoded-video-h264");
+    helpers[0].emit("encodedVideo", { keyframe: true, presentationTimestampMs: 1, payload: Buffer.from([0x65]) });
+
+    expect(capabilities).toEqual(["encoded-video-h264"]);
+    expect(records).toEqual([true]);
+    await pool.shutdown();
+  });
+
+  test("gives a mismatched encoder config an independent helper entry", async () => {
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      createHelper: () => {
+        const helper = new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+
+    // Raw and encoded leases on the same window get separate entries: encoder
+    // config is part of the pool key, and there is no live reconfiguration.
+    const raw = pool.acquire(simulatorOptions());
+    await raw.start();
+    const encoded = pool.acquire(encodedOptions());
+    await encoded.start();
+
+    expect(helpers).toHaveLength(2);
+    expect(helpers[0].starts).toBe(1);
+    expect(helpers[1].starts).toBe(1);
+    // The raw entry never had an IDR forced; only the encoded one did.
+    expect(helpers[0].keyFrameRequests).toBe(0);
+    expect(helpers[1].keyFrameRequests).toBe(1);
+    await pool.shutdown();
   });
 });

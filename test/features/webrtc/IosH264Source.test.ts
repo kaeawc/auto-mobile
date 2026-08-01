@@ -10,8 +10,10 @@ import {
   IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS,
   IOS_WEBRTC_FFMPEG_ENV,
   IOS_WEBRTC_FFMPEG_ENV_ALIAS,
+  IOS_WEBRTC_FORCE_RAW_ENV,
   IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL,
   IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS,
+  IOS_ENCODED_FORCED_KEYFRAME_MIN_INTERVAL_MS,
   IOS_ENCODER_RESTART_GRACE_MS,
   IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS,
   IosH264Source,
@@ -26,7 +28,8 @@ import {
 } from "../../../src/features/webrtc/h264Level";
 import { IOSSimulatorCaptureHelperPool } from "../../../src/features/screen-stream/IOSSimulatorCaptureHelperPool";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../../src/features/webrtc/webrtcStreamingConfig";
-import type { CaptureTarget, DecodedFrame } from "../../../src/features/screen-stream";
+import { ENCODED_VIDEO_CAPABILITY } from "../../../src/features/screen-stream";
+import type { CaptureTarget, DecodedEncodedVideo, DecodedFrame } from "../../../src/features/screen-stream";
 
 const IOS_DEVICE: BootedDevice = {
   deviceId: "00008140-001A2B3C0AE2401E",
@@ -48,6 +51,8 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
   stopped = false;
   isRunning = false;
   stopError: Error | null = null;
+  keyFrameRequests = 0;
+  keyFrameRequestResult = true;
 
   start(): void {
     this.started = true;
@@ -63,8 +68,29 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
     return null;
   }
 
+  requestKeyFrame(): boolean {
+    this.keyFrameRequests++;
+    return this.keyFrameRequestResult;
+  }
+
   emitFrame(frame: DecodedFrame): void {
     this.emit("frame", frame);
+  }
+
+  emitEncodedVideo(video: DecodedEncodedVideo): void {
+    this.emit("encodedVideo", video);
+  }
+
+  emitCapability(token: string): void {
+    this.emit("capability", token);
+  }
+
+  emitMalformed(reason: string): void {
+    this.emit("malformed", { reason, header: { width: 0, height: 0, bytesPerRow: 0, timestampMs: 0 } });
+  }
+
+  emitExit(code: number | null, signal: NodeJS.Signals | null = null): void {
+    this.emit("exit", { code, signal });
   }
 
   emitStderr(line: string): void {
@@ -74,6 +100,14 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
   emitReadiness(phase: string, atMs = 0, detail?: string): void {
     this.emit("readiness", { phase, atMs, detail });
   }
+}
+
+function encodedRecord(
+  payload: number[],
+  keyframe = true,
+  presentationTimestampMs = 1
+): DecodedEncodedVideo {
+  return { keyframe, presentationTimestampMs, payload: Buffer.from(payload) };
 }
 
 class DelayedStopFrameCaptureHelper extends FakeFrameCaptureHelper {
@@ -180,6 +214,10 @@ function createHarness(
     },
     simulatorWindowResolver: async () => 42,
     commandRunner: successfulCommandRunner,
+    // These shared harnesses exercise the raw-BGRA + ffmpeg pipeline. A simulator
+    // target now defaults to the encoded path, so force raw to keep them pinned to
+    // the fallback pipeline they assert; encoded tests override this to false.
+    forceRawPipeline: true,
     ...overrides,
   });
 
@@ -202,6 +240,7 @@ function createHarnessWithOverrides(options: Partial<ConstructorParameters<typeo
     },
     simulatorWindowResolver: async () => 42,
     commandRunner: successfulCommandRunner,
+    forceRawPipeline: true,
     ...options,
   });
   return { source, helper, encoderSpawns };
@@ -235,6 +274,7 @@ function createRestartHarness(
     },
     simulatorWindowResolver: async () => 42,
     commandRunner: successfulCommandRunner,
+    forceRawPipeline: true,
     ...overrides,
   });
   return { source, helper, encoders, encoderSpawns, chunks, errors };
@@ -271,6 +311,7 @@ function createReconnectHarness(
     },
     simulatorWindowResolver: async () => 42,
     commandRunner: successfulCommandRunner,
+    forceRawPipeline: true,
     ...overrides,
   });
   return { source, helpers, encoders, encoderSpawns, chunks, errors };
@@ -296,6 +337,7 @@ function createResolverHarness(
       return helper;
     },
     spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+    forceRawPipeline: true,
     commandRunner: async (command, args) => {
       if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
         return {
@@ -444,6 +486,7 @@ describe("IosH264Source", () => {
       helperPathExists: fakeHelperPathExists,
       onData: () => {},
       simulatorHelperPool: pool,
+      forceRawPipeline: true,
       spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
@@ -478,6 +521,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
+      forceRawPipeline: true,
       spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
@@ -523,6 +567,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
+      forceRawPipeline: true,
       spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
       simulatorWindowResolver: async () => resolvedWindowIds[resolveCalls++] ?? 99,
       commandRunner: successfulCommandRunner,
@@ -574,6 +619,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
+      forceRawPipeline: true,
       spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
       simulatorWindowResolver: async () => {
         resolveCalls++;
@@ -622,6 +668,7 @@ describe("IosH264Source", () => {
       helperPathExists: fakeHelperPathExists,
       onData: () => {},
       simulatorHelperPool: pool,
+      forceRawPipeline: true,
       spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
@@ -665,6 +712,7 @@ describe("IosH264Source", () => {
       helperPathExists: fakeHelperPathExists,
       onData: () => {},
       simulatorHelperPool: pool,
+      forceRawPipeline: true,
       spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
@@ -712,6 +760,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
+      forceRawPipeline: true,
       spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
@@ -762,6 +811,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
+      forceRawPipeline: true,
       spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
@@ -796,6 +846,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
+      forceRawPipeline: true,
       spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
@@ -829,6 +880,7 @@ describe("IosH264Source", () => {
       helperPathExists: fakeHelperPathExists,
       onData: () => {},
       simulatorHelperPool: pool,
+      forceRawPipeline: true,
       spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
@@ -1038,6 +1090,7 @@ describe("IosH264Source", () => {
       helperPathExists: fakeHelperPathExists,
       fps: 15,
       onData: () => {},
+      forceRawPipeline: true,
       createHelper: options => {
         helperTargets.push(options.target);
         return helper;
@@ -2091,6 +2144,205 @@ describe("IosH264Source", () => {
         delete process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS];
       } else {
         process.env[IOS_WEBRTC_FFMPEG_ENV_ALIAS] = originalLegacy;
+      }
+    }
+  });
+});
+
+// Encoded in-helper H.264 path (issue #4789): the helper advertises the encode
+// capability and emits Annex-B records, so the source becomes a record reader with
+// no ffmpeg subprocess.
+function createEncodedHarness(
+  overrides: Partial<ConstructorParameters<typeof IosH264Source>[0]> = {}
+) {
+  const helpers: FakeFrameCaptureHelper[] = [];
+  const helperTargets: CaptureTarget[] = [];
+  const encoderSpawns: Array<{ command: string; args: string[] }> = [];
+  const commandRunnerCalls: string[][] = [];
+  const chunks: Buffer[] = [];
+  const errors: Error[] = [];
+  const source = new IosH264Source({
+    device: IOS_SIMULATOR,
+    helperPath: FAKE_HELPER_PATH,
+    helperPathExists: fakeHelperPathExists,
+    onData: chunk => chunks.push(chunk),
+    onError: error => errors.push(error),
+    forceRawPipeline: false,
+    createHelper: options => {
+      helperTargets.push(options.target);
+      const helper = new FakeFrameCaptureHelper();
+      helpers.push(helper);
+      return helper;
+    },
+    spawner: (command, args) => {
+      encoderSpawns.push({ command, args });
+      return new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams;
+    },
+    simulatorWindowResolver: async () => 42,
+    commandRunner: async (command, args) => {
+      commandRunnerCalls.push(args);
+      return successfulCommandRunner(command, args);
+    },
+    ...overrides,
+  });
+  return { source, helpers, helperTargets, encoderSpawns, commandRunnerCalls, chunks, errors };
+}
+
+// The helper is built lazily inside `start()`, so drive startup through the
+// harness `helpers` array and act on helpers[0] once it has been created.
+async function startEncoded(
+  source: IosH264Source,
+  helpers: FakeFrameCaptureHelper[],
+  firstRecord: DecodedEncodedVideo = encodedRecord([0, 0, 0, 1, 0x65, 0x88])
+): Promise<void> {
+  const started = source.start();
+  await flush();
+  helpers[0].emitCapability(ENCODED_VIDEO_CAPABILITY);
+  helpers[0].emitEncodedVideo(firstRecord);
+  await started;
+}
+
+function probedEncoders(calls: string[][]): boolean {
+  return calls.some(args => args.includes("-encoders"));
+}
+
+describe("IosH264Source encoded path (#4789)", () => {
+  test("reads encoded records and forwards Annex-B without an ffmpeg subprocess", async () => {
+    const { source, helpers, encoderSpawns, commandRunnerCalls, chunks } = createEncodedHarness();
+
+    await startEncoded(source, helpers);
+    helpers[0].emitEncodedVideo(encodedRecord([0, 0, 0, 1, 0x41, 0x9a], false, 2));
+
+    expect(encoderSpawns).toHaveLength(0);
+    expect(probedEncoders(commandRunnerCalls)).toBe(false);
+    expect(chunks.map(chunk => [...chunk])).toEqual([
+      [0, 0, 0, 1, 0x65, 0x88],
+      [0, 0, 0, 1, 0x41, 0x9a],
+    ]);
+  });
+
+  test("spawns the helper with the bits-per-pixel default encode settings", async () => {
+    const { source, helpers, helperTargets } = createEncodedHarness();
+
+    await startEncoded(source, helpers);
+
+    expect(helperTargets).toEqual([
+      {
+        kind: "simulator",
+        windowID: 42,
+        fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT,
+        encode: {
+          codec: "h264",
+          bitrate: { kind: "bitsPerPixel", bpp: IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL },
+        },
+      },
+    ]);
+  });
+
+  test("passes an operator bitrate override down as explicit encode bps", async () => {
+    const { source, helpers, helperTargets } = createEncodedHarness({ bitrateBps: 1_234_000 });
+
+    await startEncoded(source, helpers);
+
+    const target = helperTargets[0];
+    expect(target.kind === "simulator" ? target.encode : undefined).toEqual({
+      codec: "h264",
+      bitrate: { kind: "explicitBps", bps: 1_234_000 },
+    });
+  });
+
+  test("requestKeyFrame sends the forceKeyFrame control command, throttled by the shorter interval", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers } = createEncodedHarness({ timer });
+
+    await startEncoded(source, helpers);
+
+    expect(source.requestKeyFrame()).toBe(true);
+    expect(helpers[0].keyFrameRequests).toBe(1);
+    // A burst is collapsed inside the throttle window.
+    expect(source.requestKeyFrame()).toBe(false);
+    expect(helpers[0].keyFrameRequests).toBe(1);
+
+    timer.advanceTime(IOS_ENCODED_FORCED_KEYFRAME_MIN_INTERVAL_MS);
+    expect(source.requestKeyFrame()).toBe(true);
+    expect(helpers[0].keyFrameRequests).toBe(2);
+
+    await source.stop();
+  });
+
+  test("requests a keyframe after a decoder resync so recovery starts on an IDR", async () => {
+    const { source, helpers } = createEncodedHarness();
+
+    await startEncoded(source, helpers);
+    helpers[0].emitMalformed("header_checksum_mismatch");
+
+    expect(helpers[0].keyFrameRequests).toBe(1);
+
+    await source.stop();
+  });
+
+  test("falls back to the raw ffmpeg pipeline when the helper predates the encode handshake", async () => {
+    const { source, helpers, helperTargets, encoderSpawns, commandRunnerCalls } =
+      createEncodedHarness();
+
+    const started = source.start();
+    await flush();
+    // An outdated helper advertises no capability and rejects --encode, exiting.
+    helpers[0].emitStderr("error: unknown argument --encode");
+    await flush();
+
+    // The fallback builds a fresh raw helper; a raw frame completes raw startup.
+    expect(helpers).toHaveLength(2);
+    helpers[1].emitFrame(frame(4, 4, 0x11));
+    await started;
+
+    expect(helperTargets[0].kind === "simulator" ? helperTargets[0].encode : undefined).toBeDefined();
+    expect(helperTargets[1].kind === "simulator" ? helperTargets[1].encode : undefined).toBeUndefined();
+    // ffmpeg is spawned and probed only on the raw fallback.
+    expect(encoderSpawns).toHaveLength(1);
+    expect(probedEncoders(commandRunnerCalls)).toBe(true);
+
+    await source.stop();
+  });
+
+  test("uses the raw pipeline directly under the force-raw escape hatch, never attempting encode", async () => {
+    const { source, helpers, helperTargets, encoderSpawns, commandRunnerCalls } =
+      createEncodedHarness({ forceRawPipeline: true });
+
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(4, 4, 0x11));
+    await started;
+
+    // Exactly one helper, built directly for the raw path with no encode settings.
+    expect(helpers).toHaveLength(1);
+    expect(helperTargets[0].kind === "simulator" ? helperTargets[0].encode : undefined).toBeUndefined();
+    expect(encoderSpawns).toHaveLength(1);
+    expect(probedEncoders(commandRunnerCalls)).toBe(true);
+
+    await source.stop();
+  });
+
+  test("honors the AUTOMOBILE_IOS_WEBRTC_FORCE_RAW escape-hatch env var", async () => {
+    const original = process.env[IOS_WEBRTC_FORCE_RAW_ENV];
+    process.env[IOS_WEBRTC_FORCE_RAW_ENV] = "1";
+    try {
+      const { source, helpers, helperTargets, encoderSpawns } = createEncodedHarness({
+        forceRawPipeline: undefined,
+      });
+      const started = source.start();
+      await flush();
+      helpers[0].emitFrame(frame(4, 4, 0x11));
+      await started;
+
+      expect(helperTargets[0].kind === "simulator" ? helperTargets[0].encode : undefined).toBeUndefined();
+      expect(encoderSpawns).toHaveLength(1);
+      await source.stop();
+    } finally {
+      if (original === undefined) {
+        delete process.env[IOS_WEBRTC_FORCE_RAW_ENV];
+      } else {
+        process.env[IOS_WEBRTC_FORCE_RAW_ENV] = original;
       }
     }
   });

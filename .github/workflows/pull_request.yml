@@ -792,7 +792,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,xml,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
+            --only yaml,xml,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,sharp-matrix,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
             --max-parallel 4
 
       - name: "Run BATS Tests (Ubuntu)"

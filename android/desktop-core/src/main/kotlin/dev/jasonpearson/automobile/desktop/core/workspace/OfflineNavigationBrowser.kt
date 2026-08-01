@@ -82,8 +82,7 @@ private sealed interface AppGraphState {
  */
 @Composable
 fun OfflineNavigationBrowser(
-  navigationDataSourceProvider: ((String?) -> NavigationDataSource)? = null,
-  reloadTrigger: Int = 0,
+  navigationDataSourceProvider: ((String?) -> NavigationDataSource)? = null
 ) {
   val graph = LocalAutoMobileGraph.current
   val provider: (String?) -> NavigationDataSource =
@@ -96,11 +95,7 @@ fun OfflineNavigationBrowser(
   var selectedApp by remember { mutableStateOf<NavigationAppSummary?>(null) }
 
   if (selectedApp == null) {
-    AppListStep(
-      provider = provider,
-      reloadTrigger = reloadTrigger,
-      onSelect = { selectedApp = it },
-    )
+    AppListStep(provider = provider, onSelect = { selectedApp = it })
   } else {
     val app = selectedApp
     if (app != null) {
@@ -112,13 +107,12 @@ fun OfflineNavigationBrowser(
 @Composable
 private fun AppListStep(
   provider: (String?) -> NavigationDataSource,
-  reloadTrigger: Int,
   onSelect: (NavigationAppSummary) -> Unit,
 ) {
   var attempt by remember { mutableStateOf(0) }
   var state by remember { mutableStateOf<AppListState>(AppListState.Loading) }
 
-  LaunchedEffect(reloadTrigger, attempt) {
+  LaunchedEffect(attempt) {
     state = AppListState.Loading
     // Read off the UI thread: the resource read hits the daemon. Injected fakes run inline
     // (deterministic). A throw becomes a retryable Error rather than crashing the Recomposer.

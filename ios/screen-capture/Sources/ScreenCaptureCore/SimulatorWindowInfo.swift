@@ -41,6 +41,15 @@ public struct SimulatorWindowListResponse: Codable, Equatable {
 /// Bundle identifier of the iOS Simulator host application on macOS.
 public let simulatorBundleIdentifier = "com.apple.iphonesimulator"
 
+/// Returns true when a window's owning-application bundle identifier belongs to
+/// the iOS Simulator host. Used to re-verify a resolved `CGWindowID` at capture
+/// time: macOS recycles window IDs, so a stale `--simulator-window <id>` can
+/// resolve to an unrelated application's window. Re-checking here lets the
+/// caller fail closed instead of silently capturing the wrong window (#4763).
+public func isSimulatorWindow(bundleIdentifier: String?) -> Bool {
+    bundleIdentifier == simulatorBundleIdentifier
+}
+
 /// ScreenCaptureKit cannot isolate a single Simulator window's audio from the
 /// Simulator host application, so audio capture is safe only with one window.
 public enum SimulatorAudioCaptureAvailability {

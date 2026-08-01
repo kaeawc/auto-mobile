@@ -359,15 +359,6 @@ export class DevicePool {
     this.notifyDeviceReady(device.deviceId);
   }
 
-  async registerStartedDevice(
-    device: BootedDevice,
-    sourceImage: DeviceInfo | undefined,
-    childProcess: ChildProcess | null | undefined
-  ): Promise<void> {
-    await this.addDevice(device, sourceImage);
-    await this.trackStartedDeviceProcess(device, childProcess);
-  }
-
   private recordSourceAndroidAvd(deviceId: string, sourceImage?: DeviceInfo): void {
     const device = this.devices.get(deviceId);
     if (device?.platform === "android" && sourceImage?.platform === "android") {
@@ -1794,7 +1785,8 @@ export class DevicePool {
     sessionId: string,
     deviceId: string,
     platform: Platform,
-    sourceImage?: DeviceInfo
+    sourceImage?: DeviceInfo,
+    childProcess?: ChildProcess | null
   ): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
       const alreadyPooled = this.devices.has(deviceId);
@@ -1814,6 +1806,14 @@ export class DevicePool {
       if (!device) {
         throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
       }
+      await this.trackStartedDeviceProcess({
+        deviceId: device.id,
+        name: device.name,
+        platform: device.platform,
+      }, childProcess);
+      if (this.devices.get(deviceId) !== device) {
+        throw new ActionableError(`Device '${deviceId}' exited before it could be assigned.`);
+      }
       await this.assertIdleDeviceAssignable(device, `Device '${deviceId}' is not available in the device pool.`);
 
       if (!await this.ensurePooledDevicePresentForUse(device)) {
@@ -1830,9 +1830,11 @@ export class DevicePool {
           existingSession.assignedDevice === deviceId &&
           existingSession.platform === device.platform
         ) {
-          const refreshedSession = await this.sessionManager.getOrCreateSession(existingSession.sessionId);
-          logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
-          return refreshedSession.sessionId;
+          return this.reuseExistingDeviceSession(
+            deviceId,
+            existingSession.sessionId,
+            sourceImage
+          );
         }
 
         if (existingSession) {
@@ -1857,6 +1859,22 @@ export class DevicePool {
     });
   }
 
+  private async reuseExistingDeviceSession(
+    deviceId: string,
+    existingSessionId: string,
+    sourceImage?: DeviceInfo
+  ): Promise<string> {
+    if (sourceImage) {
+      throw new ActionableError(
+        `Freshly started device '${deviceId}' was assigned to session ` +
+        `${existingSessionId} before its owning session could reserve it.`
+      );
+    }
+    const refreshedSession = await this.sessionManager.getOrCreateSession(existingSessionId);
+    logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
+    return refreshedSession.sessionId;
+  }
+
   /**
    * Lock a device with an autolock session ID.
    *
@@ -1873,12 +1891,30 @@ export class DevicePool {
     deviceId: string,
     platform: Platform,
     mcpSessionId?: string,
-    sourceImage?: DeviceInfo
+    sourceImage?: DeviceInfo,
+    childProcess?: ChildProcess | null
   ): Promise<string | undefined> {
     if (!isDevicePoolAutolockEnabled()) {
       return undefined;
     }
+    return this.assignmentMutex.runExclusive(() =>
+      this.autolockDeviceExclusive(
+        deviceId,
+        platform,
+        mcpSessionId,
+        sourceImage,
+        childProcess
+      )
+    );
+  }
 
+  private async autolockDeviceExclusive(
+    deviceId: string,
+    platform: Platform,
+    mcpSessionId?: string,
+    sourceImage?: DeviceInfo,
+    childProcess?: ChildProcess | null
+  ): Promise<string> {
     const sessionId = randomUUID();
 
     // Ensure device is in the pool (it may have been freshly booted)
@@ -1906,6 +1942,14 @@ export class DevicePool {
         `  - Use 'startDevice' with deviceId to restart this specific device\n` +
         `  - Use 'listDevices' to see currently available devices`
       );
+    }
+    await this.trackStartedDeviceProcess({
+      deviceId: device.id,
+      name: device.name,
+      platform: device.platform,
+    }, childProcess);
+    if (this.devices.get(deviceId) !== device) {
+      throw new ActionableError(`Device '${deviceId}' exited before it could be autolocked.`);
     }
     await this.assertIdleDeviceAssignable(
       device,

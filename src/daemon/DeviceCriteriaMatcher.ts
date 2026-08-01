@@ -147,14 +147,18 @@ export class DeviceCriteriaMatcher {
   }
 
   /**
-   * Whether Android rediscovery found the same AVD on the same transport.
+   * Whether Android rediscovery found the same AVD, or could not resolve its
+   * name, on the same transport.
    */
   androidRediscoveryMatches(
     candidate: BootedDevice,
     expectedDeviceId: string,
     expectedAvdName: string
   ): boolean {
-    return candidate.deviceId === expectedDeviceId && candidate.name === expectedAvdName;
+    return candidate.deviceId === expectedDeviceId && (
+      candidate.name === expectedAvdName ||
+      candidate.name === `Unknown (${expectedDeviceId})`
+    );
   }
 
   /**

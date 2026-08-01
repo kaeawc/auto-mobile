@@ -1,3 +1,4 @@
+import type { ChildProcess } from "child_process";
 import { z } from "zod";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
@@ -265,15 +266,19 @@ export function registerDeviceTools() {
         const pool = DaemonState.getInstance().getDevicePool();
         if (boot.source === "cold-boot") {
           pool.clearIntentionalShutdown(boot.device.deviceId);
-          await pool.registerStartedDevice(
-            boot.device,
-            boot.sourceImage,
-            boot.processHandle
-          );
         } else {
           pool.notifyDeviceReady(boot.device.deviceId);
         }
       }
+
+      const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
+      await ctrlProxySetup(boot.device, perf);
+      const sessionId = await bindBootedDeviceSession(
+        boot.device,
+        args,
+        boot.sourceImage,
+        boot.processHandle
+      );
 
       if (boot.source === "cold-boot" || boot.provisioned) {
         perf.startOperation("notifyResources");
@@ -284,9 +289,8 @@ export function registerDeviceTools() {
         boot.device,
         boot.source,
         perf,
-        args,
+        sessionId,
         boot.processId,
-        boot.sourceImage
       );
     } catch (error) {
       perf.end();
@@ -354,41 +358,48 @@ export function registerDeviceTools() {
     perf.endOperation("ensureCtrlProxy");
   }
 
+  async function bindBootedDeviceSession(
+    device: BootedDevice,
+    args: StartDeviceArgs,
+    sourceImage?: DeviceInfo,
+    childProcess?: ChildProcess | null
+  ): Promise<string> {
+    // Reserve the exact ready device before resource notifications publish it
+    // to concurrent allocators.
+    const daemonState = DaemonState.getInstance();
+    if (isDevicePoolAutolockEnabled() && daemonState.isInitialized()) {
+      const autolockSessionId = await daemonState.getDevicePool().autolockDevice(
+        device.deviceId,
+        device.platform,
+        args.__mcpSessionId,
+        sourceImage,
+        childProcess
+      );
+      if (autolockSessionId) {
+        return autolockSessionId;
+      }
+    }
+
+    const sessionId = getDeviceToolsDependencies().idGenerator.next();
+    if (!daemonState.isInitialized()) {
+      return sessionId;
+    }
+    return daemonState.getDevicePool().bindOrReuseDeviceSession(
+      sessionId,
+      device.deviceId,
+      device.platform,
+      sourceImage,
+      childProcess
+    );
+  }
+
   async function buildBootedResponse(
     device: BootedDevice,
     source: "booted" | "cold-boot",
     perf: ReturnType<typeof createPerformanceTracker>,
-    args: StartDeviceArgs,
+    sessionId: string,
     processId?: number,
-    sourceImage?: DeviceInfo,
   ) {
-    // Ensure iOS automation proxy is installed and running before returning.
-    // This avoids the first observe/tap call paying the full setup cost.
-    const deps = getDeviceToolsDependencies();
-    const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
-    await ctrlProxySetup(device, perf);
-
-    // Always generate a session ID for consistent device interactions.
-    // When autolock is enabled, lock the device to a pool-issued session UUID that
-    // is enforced for all subsequent tool calls and auto-released after an idle timeout.
-    // When disabled, still bind the returned session to this exact device so callers
-    // can mix startDevice -> setActiveDevice -> session-targeted tools without the
-    // session path assigning a different simulator/device on first use.
-    let sessionId: string | undefined;
-    if (isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
-      sessionId = await DaemonState.getInstance()
-        .getDevicePool()
-        .autolockDevice(device.deviceId, device.platform, args.__mcpSessionId, sourceImage);
-    }
-    if (!sessionId) {
-      sessionId = deps.idGenerator.next();
-      if (DaemonState.getInstance().isInitialized()) {
-        sessionId = await DaemonState.getInstance()
-          .getDevicePool()
-          .bindOrReuseDeviceSession(sessionId, device.deviceId, device.platform, sourceImage);
-      }
-    }
-
     perf.end();
     const timing = perf.getTimings();
 

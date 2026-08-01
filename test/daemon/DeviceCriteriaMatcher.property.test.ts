@@ -16,7 +16,7 @@ const normalize = (value: string): string | undefined => {
 };
 
 describe("DeviceCriteriaMatcher recovery policy (property-based)", () => {
-  test("Android rediscovery matches exactly when both transport and AVD identity match", () => {
+  test("Android rediscovery requires the transport and accepts only matching or unresolved AVD names", () => {
     fc.assert(
       fc.property(shortString, shortString, shortString, shortString, (
         expectedDeviceId,
@@ -35,7 +35,10 @@ describe("DeviceCriteriaMatcher recovery policy (property-based)", () => {
           expectedAvdName
         ) === (
           candidateDeviceId === expectedDeviceId &&
-          candidateAvdName === expectedAvdName
+          (
+            candidateAvdName === expectedAvdName ||
+            candidateAvdName === `Unknown (${expectedDeviceId})`
+          )
         );
       }),
       RUN_OPTIONS

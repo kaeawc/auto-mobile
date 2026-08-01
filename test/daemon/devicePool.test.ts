@@ -498,6 +498,39 @@ describe("DevicePool", () => {
       }
     });
 
+    test("retains a same-serial Android emulator when its AVD name is unresolved", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      try {
+        await devicePool.addDevice(ready, {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          source: "local",
+        });
+        const disconnected = devicePool.getDevice(ready.deviceId);
+        if (!disconnected) {
+          throw new Error("expected disconnected pooled device");
+        }
+        fakeDeviceManager.bootedDevices = [
+          createBootedDevice(
+            "emulator-5554",
+            "android",
+            "Unknown (emulator-5554)"
+          ),
+        ];
+
+        expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe(false);
+      } finally {
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
     test("stale disconnect validation rejects a same-serial replacement added during discovery", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";

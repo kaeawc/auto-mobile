@@ -240,7 +240,7 @@ describe("startDevice handler", () => {
     }
   });
 
-  it("evicts the pooled device cache before cold-boot resource notifications", async () => {
+  it("reserves a public cold boot before resource notifications", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer);
     const readyDeviceIds: string[] = [];
@@ -272,6 +272,7 @@ describe("startDevice handler", () => {
       signalResourcesStarted = resolve;
     });
     setDeviceToolsDependencies({
+      idGenerator: new CountingIdGenerator("session"),
       notifyResourcesChanged: async () => {
         signalResourcesStarted();
         await resourcesStarted;
@@ -282,9 +283,13 @@ describe("startDevice handler", () => {
     await waitForResources;
     try {
       expect(readyDeviceIds).toEqual(["emulator-5554"]);
+      expect(pool.getDevice("emulator-5554")?.status).toBe("busy");
+      expect(pool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
+      expect(daemonSessionManager.getSession("session-1")).not.toBeNull();
     } finally {
       releaseResources();
-      await start;
+      const result = await start;
+      expect(result.sessionId).toBe("session-1");
     }
   });
 

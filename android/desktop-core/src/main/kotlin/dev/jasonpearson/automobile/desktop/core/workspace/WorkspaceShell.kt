@@ -85,13 +85,23 @@ fun WorkspaceShell(
   compareContent: @Composable (DeviceColumn, DeviceColumn) -> Unit = { a, b ->
     TwoDeviceCompareView(columnA = a, columnB = b)
   },
+  // Body of the offline-browse overlay opened from the empty state's "Browse navigation history"
+  // affordance. Lets the user inspect a persisted navigation graph with no device observed (Phase C
+  // of #4837). Hoisted like the other bodies so a test can drive it with a fake data source;
+  // defaults to the real [OfflineNavigationBrowser].
+  offlineBrowseContent: @Composable () -> Unit = { OfflineNavigationBrowser() },
 ) {
   var showHealthSheet by remember { mutableStateOf(false) }
   var showCompare by remember { mutableStateOf(false) }
+  var showOfflineBrowse by remember { mutableStateOf(false) }
   val comparePair = (state as? WorkspaceUiState.Content)?.let(::compareColumns)
   // A pane closing can drop the observed count below two; retire any open compare so it can't
   // linger with a stale pair.
   if (comparePair == null && showCompare) showCompare = false
+  // Offline browse is only meaningful with no device observed; if one is observed mid-browse
+  // (Empty -> Content) retire the overlay so it can't linger (with its offline badge) over a live
+  // workspace.
+  if (state !is WorkspaceUiState.Empty && showOfflineBrowse) showOfflineBrowse = false
   Box(modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
       TopBar(
@@ -104,7 +114,12 @@ fun WorkspaceShell(
         onCompare = { showCompare = true },
       )
       when (state) {
-        is WorkspaceUiState.Empty -> EmptyState(onOpenPicker, Modifier.weight(1f).fillMaxWidth())
+        is WorkspaceUiState.Empty ->
+          EmptyState(
+            onOpenPicker = onOpenPicker,
+            onBrowseHistory = { showOfflineBrowse = true },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+          )
         is WorkspaceUiState.Content ->
           Row(Modifier.weight(1f).fillMaxWidth()) {
             val canDiff = state.columns.size > 1
@@ -139,6 +154,12 @@ fun WorkspaceShell(
         columnB = comparePair.second,
         onDismiss = { showCompare = false },
         content = compareContent,
+      )
+    }
+    if (showOfflineBrowse) {
+      OfflineBrowseOverlay(
+        onDismiss = { showOfflineBrowse = false },
+        content = offlineBrowseContent,
       )
     }
   }
@@ -397,7 +418,7 @@ private fun DefaultHealthSheetBody() {
 }
 
 @Composable
-private fun EmptyState(onOpenPicker: () -> Unit, modifier: Modifier) {
+private fun EmptyState(onOpenPicker: () -> Unit, onBrowseHistory: () -> Unit, modifier: Modifier) {
   Column(
     modifier = modifier,
     verticalArrangement = Arrangement.Center,
@@ -417,6 +438,66 @@ private fun EmptyState(onOpenPicker: () -> Unit, modifier: Modifier) {
           .padding(horizontal = 20.dp, vertical = 10.dp)
     ) {
       Text("Open Devices", color = Color.White)
+    }
+    Spacer(Modifier.height(12.dp))
+    // Offline path (Phase C of #4837): inspect a persisted navigation graph with no device
+    // observed.
+    Text(
+      "Browse navigation history",
+      style = MaterialTheme.typography.labelLarge,
+      color = Accent,
+      modifier =
+        Modifier.clickable { onBrowseHistory() }
+          .semantics { contentDescription = "Browse navigation history" }
+          .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
+  }
+}
+
+/**
+ * Full-window overlay hosting the offline navigation browser: a dimmed scrim (click-away to
+ * dismiss) with a centered panel that renders [content]. Mirrors [HealthSheetOverlay].
+ */
+@Composable
+private fun OfflineBrowseOverlay(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+  Box(
+    modifier =
+      Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+      ) {
+        onDismiss()
+      },
+    contentAlignment = Alignment.Center,
+  ) {
+    Column(
+      modifier =
+        Modifier.fillMaxWidth(0.7f)
+          .fillMaxHeight(0.85f)
+          .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
+          // Swallow clicks on the panel so they don't dismiss via the scrim.
+          .clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+          ) {}
+          .padding(16.dp)
+          .semantics { contentDescription = "Offline navigation browser" }
+    ) {
+      Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Navigation history", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.weight(1f))
+        Text(
+          "✕",
+          style = MaterialTheme.typography.titleMedium,
+          color = MaterialTheme.colorScheme.onSurface,
+          modifier =
+            Modifier.clickable { onDismiss() }
+              .semantics { contentDescription = "Close navigation history" }
+              .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+      }
+      Spacer(Modifier.height(8.dp))
+      Box(Modifier.weight(1f).fillMaxWidth()) { content() }
     }
   }
 }

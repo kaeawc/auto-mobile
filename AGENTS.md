@@ -124,6 +124,32 @@ The `systemTray` tool handles this automatically. See
 `com.android.systemui` nodes. Collapsed groups mark child text as
 not visible even though they are present in the shade.
 
+# Version Control: jj colocated checkouts
+
+If a `.jj/` directory exists at the repo root, this checkout is managed by
+jj (Jujutsu), colocated with git. Use jj for all history-mutating VCS work;
+plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
+
+- Do NOT run mutating git commands (`git commit`, `git rebase`, `git stash`,
+  `git checkout <branch>`) — they fight jj's working-copy snapshotting.
+- Command mapping: status `jj st` · diff `jj diff` · commit `jj commit -m`
+  (or `jj describe -m` + `jj new`) · amend `jj squash` · rebase
+  `jj rebase -d main` · undo anything `jj undo`.
+- PR flow: `jj bookmark create work/<name> -r @-`, then
+  `jj git push --allow-new --bookmark work/<name>`, then `gh pr create`
+  as usual. Update a PR by editing the change and `jj git push`.
+- Git hooks do not run under jj. Always run the relevant validation
+  commands (`turbo run lint build test`, `scripts/all_fast_validate_checks.sh`)
+  before pushing — nothing else will.
+- **Never add or modify binary assets** (images, video, fonts, archives —
+  anything `.gitattributes` routes through LFS) in a jj checkout: jj bypasses
+  git's LFS filters and would commit the full blob. `snapshot.auto-track`
+  leaves such files untracked on purpose; do not `jj file track` them. Do
+  asset work from a plain-git LFS-enabled clone. CI (`lfs-pointers` in Fast
+  Validation) rejects violations.
+- Do not create `git worktree`s of a jj checkout. For parallel work use
+  `jj workspace add ../<name>` instead.
+
 # Codex specific
 
 - GitHub interactions use the GitHub CLI (`gh`).

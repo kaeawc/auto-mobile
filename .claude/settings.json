@@ -6,6 +6,12 @@
       "Bash(bun run test)",
       "Bash(bun run test -- --grep:*)",
       "Bash(bun install)",
+      "Bash(jj st)",
+      "Bash(jj status)",
+      "Bash(jj diff:*)",
+      "Bash(jj log:*)",
+      "Bash(jj show:*)",
+      "Bash(jj op log:*)",
       "mcp__auto-mobile__*"
     ]
   },

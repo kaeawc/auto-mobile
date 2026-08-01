@@ -48,6 +48,8 @@ docs/contributing.md
 /.cache
 .mcp.json
 .mcp.local.json
+.claude/settings.local.json
+CLAUDE.local.md
 *.pid
 *.pem
 # IntelliJ Platform Gradle plugin artifacts

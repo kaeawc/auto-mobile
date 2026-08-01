@@ -200,6 +200,18 @@ JSON
   [[ "$output" != *"BUDGET OK"* ]]
 }
 
+@test "a budget threshold too large for bash fails closed (jq scientific notation)" {
+  # jq accepts 1e100 as an integer-valued number but emits "1E+100", which bash
+  # cannot compare -- must fail closed, not silently report BUDGET OK.
+  local budget="$STAGE/huge-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": { "maxFiles": 1e100 } }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"BUDGET OK"* ]]
+}
+
 @test "the committed budget policy exists and is valid JSON" {
   [ -f "$BUDGET_FILE" ]
   run jq empty "$BUDGET_FILE"

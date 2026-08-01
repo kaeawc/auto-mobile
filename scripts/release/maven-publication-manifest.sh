@@ -250,6 +250,15 @@ if [ -n "$budget_file" ]; then
   max_files="$(printf '%s' "$limits" | cut -f1)"
   max_bytes="$(printf '%s' "$limits" | cut -f2)"
   breached=0
+  # jq validates a non-negative integer but emits scientific notation for values
+  # too large for bash (e.g. 1e100 -> "1E+100"), which bash's -gt cannot compare.
+  # Require plain digits so an out-of-range threshold fails closed, not silently.
+  for _v in "$max_files" "$max_bytes"; do
+    if [ -n "$_v" ] && ! printf '%s' "$_v" | grep -qE '^[0-9]+$'; then
+      echo "error: budget threshold out of range for comparison (got '$_v')" >&2
+      exit 2
+    fi
+  done
   reasons=""
   if [ -n "$max_files" ] && [ "$total_files" -gt "$max_files" ]; then
     breached=1; reasons="files $total_files > $max_files"
@@ -266,6 +275,10 @@ if [ -n "$budget_file" ]; then
     | if $v == null then "" elif ($v | type == "number" and . >= 0 and (floor == .)) then ($v | tostring) else "INVALID" end' "$budget_file")"
   if [ "$max_javadoc" = "INVALID" ]; then
     echo "error: budget maxJavadocJarBytes must be a non-negative integer" >&2
+    exit 2
+  fi
+  if [ -n "$max_javadoc" ] && ! printf '%s' "$max_javadoc" | grep -qE '^[0-9]+$'; then
+    echo "error: budget maxJavadocJarBytes out of range for comparison (got '$max_javadoc')" >&2
     exit 2
   fi
   if [ -n "$max_javadoc" ]; then

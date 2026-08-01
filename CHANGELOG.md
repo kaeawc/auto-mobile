@@ -1,5 +1,44 @@
 # Changelog
 
+## [v0.0.48] - 2026-08-01
+### Added
+- Chart daily release download counts (GitHub assets + npm) on a docs dashboard ([#4890](https://github.com/kaeawc/auto-mobile/issues/4890)) (devxp)
+- chore(release): add a Maven Central publication manifest and usage budget preflight ([#4853](https://github.com/kaeawc/auto-mobile/issues/4853)) (release engineering)
+- chore(ios): screen-capture streaming hardening follow-ups ([#4772](https://github.com/kaeawc/auto-mobile/issues/4772)) (ios, webrtc)
+- Recover from on-device encoder crashes: bounded server relaunch + mid-stream screenrecord fallback ([#4742](https://github.com/kaeawc/auto-mobile/issues/4742)) (android, webrtc)
+- perf(android-video): use VBR instead of CBR for bursty screen content ([#4740](https://github.com/kaeawc/auto-mobile/issues/4740)) (android, performance, video)
+- perf(android-video): frame rate is preset-locked to 60fps and not plumbed end-to-end ([#4739](https://github.com/kaeawc/auto-mobile/issues/4739)) (android, performance, video, webrtc)
+- iOS capture: replace fixed 500ms Thread.sleep in helper device startup with bounded polling ([#4737](https://github.com/kaeawc/auto-mobile/issues/4737)) (ios, performance)
+- iOS WebRTC: stop copying a full frame per frame for lastHelperFrame (quick win) ([#4735](https://github.com/kaeawc/auto-mobile/issues/4735)) (ios, performance, webrtc)
+### Changed
+- Centralize tar extraction behind a safe archive-extraction boundary ([#4065](https://github.com/kaeawc/auto-mobile/issues/4065)) (devxp, testing)
+### Fixed
+- Enforce video-server reconnect-window expiry independently of the encode loop (blocked-write starvation) ([#4784](https://github.com/kaeawc/auto-mobile/issues/4784)) (android, webrtc)
+- Reconcile hygiene for video-server leases: wall-clock fallback, unparseable/.tmp sweep, serial-vs-reboot ordering ([#4783](https://github.com/kaeawc/auto-mobile/issues/4783)) (android, webrtc)
+- fix(ios): deterministic teardown and bounded recovery on mid-stream capture failure ([#4768](https://github.com/kaeawc/auto-mobile/issues/4768)) (ios, webrtc)
+- Sweep orphaned adb forward entries left behind by video-server self-expiry ([#4753](https://github.com/kaeawc/auto-mobile/issues/4753)) (android, webrtc)
+### Security
+- [security] Session-scope the recording archive and recording/test-recording sockets ([#4752](https://github.com/kaeawc/auto-mobile/issues/4752)) (bug, video)
+- [security] Authenticate and session-scope the video-stream and WebRTC-stream sockets ([#4751](https://github.com/kaeawc/auto-mobile/issues/4751)) (bug, ios, webrtc)
+- [security] Harden filesystem permissions on ~/.auto-mobile, sockets, and video recordings (0o700/0o600) ([#4750](https://github.com/kaeawc/auto-mobile/issues/4750)) (bug, ios, video)
+- Add on-device JAR hash: verify integrity before app_process launch + skip redundant push ([#4733](https://github.com/kaeawc/auto-mobile/issues/4733)) (enhancement, android, performance, video, webrtc)
+- [security] Whitelist video-server command-channel bytes ([#4732](https://github.com/kaeawc/auto-mobile/issues/4732)) (enhancement, android, video)
+- [security] Harden video-session lease file: restrictive perms + no cleartext token at rest ([#4731](https://github.com/kaeawc/auto-mobile/issues/4731)) (enhancement, android, video)
+- [security] Authenticate video-server client before evicting the current one (pre-auth hijack/DoS) ([#4730](https://github.com/kaeawc/auto-mobile/issues/4730)) (bug, android, video)
+- [security] Decouple session token from socket name and require a token handshake ([#4729](https://github.com/kaeawc/auto-mobile/issues/4729)) (enhancement, android, video)
+- [security] Video-server LocalSocket is unauthenticated — any local app can read the screen stream ([#4728](https://github.com/kaeawc/auto-mobile/issues/4728)) (bug, android, video)
+### Other
+- desktop: wire branded app icon into installers + Dock/notifications ([#4920](https://github.com/kaeawc/auto-mobile/issues/4920))
+- Automatic recovery when a booted Android emulator dies mid-session ([#4914](https://github.com/kaeawc/auto-mobile/issues/4914))
+- Daemon: list apps that have a persisted navigation graph ([#4910](https://github.com/kaeawc/auto-mobile/issues/4910))
+- Desktop Navigation (Phase C): wire as an app-sourced per-pane facet ([#4909](https://github.com/kaeawc/auto-mobile/issues/4909))
+- Android: installApp / uninstallApp invalidate only resource cache, so listApps can return stale packages ([#4897](https://github.com/kaeawc/auto-mobile/issues/4897))
+- Run the WebRTC MediaMTX publisher integration on WebRTC-touching PRs (not merge-only) ([#4884](https://github.com/kaeawc/auto-mobile/issues/4884)) (ci, testing, webrtc)
+- Desktop picker: boot a shut-down device on click (remove the 'Boot to observe (soon)' dead-end) ([#4879](https://github.com/kaeawc/auto-mobile/issues/4879))
+- research(release): eliminate unnecessary Maven Central signature checksum artifacts ([#4851](https://github.com/kaeawc/auto-mobile/issues/4851)) (release engineering, research)
+- perf(android-video): relax the 2s GOP and rely on on-demand IDR ([#4757](https://github.com/kaeawc/auto-mobile/issues/4757)) (android, performance, video, webrtc)
+- ci: lint bash embedded in .claude/commands and skills markdown ([#4118](https://github.com/kaeawc/auto-mobile/issues/4118)) (ci, devxp, testing)
+
 ## [v0.0.47] - 2026-07-29
 ### Fixed
 - release: screen-capture-helper asset name/format 404s for the client ([#4688](https://github.com/kaeawc/auto-mobile/issues/4688)) (release engineering)

@@ -44,12 +44,38 @@ export type HelperSpawner = (
 export type HelperProcessGroupKiller = (pid: number, signal: NodeJS.Signals) => void;
 
 /**
+ * In-helper H.264 encode settings (issue #4789). Present on a simulator target
+ * requests the helper's `--encode h264` mode (420v capture + VTCompressionSession
+ * Annex-B output) instead of streaming raw BGRA. The bitrate *policy* stays here
+ * in the supervisor — the helper only carries the chosen flag and does the
+ * pre-encode pixel arithmetic (scale + bitrate) it alone knows. Mirrors the Swift
+ * `CommandLineOptions.EncodeSettings` (issue #4788).
+ */
+export interface EncodeSettings {
+  /** Only H.264 exists today; the field pins the vocabulary for future codecs. */
+  codec: "h264";
+  bitrate: EncodeBitratePolicy;
+}
+
+/**
+ * How the helper should choose the encoder's average bitrate. `explicitBps` is an
+ * operator override (`--bitrate-bps`), `bitsPerPixel` derives it from the
+ * delivered pixels x fps (`--bits-per-pixel`, the Simulator default), and
+ * `videoToolboxDefault` passes neither flag (VideoToolbox picks — the
+ * physical-device path, #4375).
+ */
+export type EncodeBitratePolicy =
+  | { kind: "explicitBps"; bps: number }
+  | { kind: "bitsPerPixel"; bpp: number }
+  | { kind: "videoToolboxDefault" };
+
+/**
  * What the helper should capture. Either a USB-connected iOS device (via
  * AVFoundation) or a macOS iOS Simulator window (via ScreenCaptureKit).
  */
 export type CaptureTarget =
   | { kind: "device"; deviceId?: string }
-  | { kind: "simulator"; windowID: number; fps?: number; audio?: boolean };
+  | { kind: "simulator"; windowID: number; fps?: number; audio?: boolean; encode?: EncodeSettings };
 
 /** Valid range for the simulator capture frame rate, mirrors the Swift CLI. */
 export const SIMULATOR_FPS_MIN = 5;
@@ -353,6 +379,34 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   }
 
   /**
+   * Ask the in-helper encoder to emit a fresh IDR on its next frame by writing
+   * `{"cmd":"forceKeyFrame"}` on the newline-delimited STDIN control channel the
+   * helper opens in `--encode h264` mode (issue #4789 / the channel added by
+   * #4788). Unlike the raw ffmpeg path — which could only get an IDR by restarting
+   * the encoder — this is a cheap in-process signal, so the caller may throttle
+   * it far more loosely. Returns false (a logged no-op) when the helper is not
+   * running or the write fails; a not-yet-started or raw-mode helper has no
+   * control channel to signal. The write is a tiny control line, so backpressure
+   * is not tracked.
+   */
+  requestKeyFrame(): boolean {
+    const proc = this.process;
+    if (proc === null || !this.isRunning) {
+      return false;
+    }
+    try {
+      proc.stdin.write(`${JSON.stringify({ cmd: "forceKeyFrame" })}\n`);
+      return true;
+    } catch (error) {
+      // The encoder restarts on the next capture frame's periodic GOP even if
+      // this control write is lost, so a failed signal is a best-effort miss,
+      // not a stream failure.
+      logger.debug(`[IOSScreenCaptureHelper] forceKeyFrame control write failed: ${error}`);
+      return false;
+    }
+  }
+
+  /**
    * Fail fast on a version-skewed pairing: a helper that never advertised the
    * encoded-video capability (an old binary pinned via
    * `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER`) cannot produce encoded output, so
@@ -510,7 +564,32 @@ function buildArgs(target: CaptureTarget): string[] {
       if (target.audio === true) {
         args.push("--audio");
       }
+      appendEncodeArgs(args, target.encode);
       return args;
     }
+  }
+}
+
+/**
+ * Append the `--encode h264` mode flags (issue #4789). The bitrate policy is
+ * passed DOWN as helper flags so the helper does the pre-encode pixel arithmetic
+ * rather than the supervisor computing an ffmpeg `-b:v`. `videoToolboxDefault`
+ * passes neither flag (the helper lets VideoToolbox choose). Mirrors the Swift
+ * `--bitrate-bps`/`--bits-per-pixel` parsing (issue #4788).
+ */
+function appendEncodeArgs(args: string[], encode: EncodeSettings | undefined): void {
+  if (encode === undefined) {
+    return;
+  }
+  args.push("--encode", encode.codec);
+  switch (encode.bitrate.kind) {
+    case "explicitBps":
+      args.push("--bitrate-bps", String(Math.round(encode.bitrate.bps)));
+      break;
+    case "bitsPerPixel":
+      args.push("--bits-per-pixel", String(encode.bitrate.bpp));
+      break;
+    case "videoToolboxDefault":
+      break;
   }
 }

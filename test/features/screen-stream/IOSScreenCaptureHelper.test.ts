@@ -195,6 +195,71 @@ describe("IOSScreenCaptureHelper", () => {
     expect(spawnArgs.args).toEqual(["--simulator-window", "1", "--audio"]);
   });
 
+  test("passes --encode h264 with the bits-per-pixel bitrate flag (#4789)", () => {
+    const { spawnArgs, helper } = withFakeSpawner({
+      kind: "simulator",
+      windowID: 1,
+      encode: { codec: "h264", bitrate: { kind: "bitsPerPixel", bpp: 0.1 } },
+    });
+    helper.start();
+
+    expect(spawnArgs.args).toEqual([
+      "--simulator-window",
+      "1",
+      "--encode",
+      "h264",
+      "--bits-per-pixel",
+      "0.1",
+    ]);
+  });
+
+  test("passes an explicit --bitrate-bps override for encoded capture (#4789)", () => {
+    const { spawnArgs, helper } = withFakeSpawner({
+      kind: "simulator",
+      windowID: 1,
+      encode: { codec: "h264", bitrate: { kind: "explicitBps", bps: 2_500_000 } },
+    });
+    helper.start();
+
+    expect(spawnArgs.args).toEqual([
+      "--simulator-window",
+      "1",
+      "--encode",
+      "h264",
+      "--bitrate-bps",
+      "2500000",
+    ]);
+  });
+
+  test("passes --encode with no bitrate flag under the VideoToolbox default (#4789)", () => {
+    const { spawnArgs, helper } = withFakeSpawner({
+      kind: "simulator",
+      windowID: 1,
+      encode: { codec: "h264", bitrate: { kind: "videoToolboxDefault" } },
+    });
+    helper.start();
+
+    expect(spawnArgs.args).toEqual(["--simulator-window", "1", "--encode", "h264"]);
+  });
+
+  test("requestKeyFrame writes the forceKeyFrame control command to stdin (#4789)", () => {
+    const { fake, helper } = withFakeSpawner({
+      kind: "simulator",
+      windowID: 1,
+      encode: { codec: "h264", bitrate: { kind: "bitsPerPixel", bpp: 0.1 } },
+    });
+    helper.start();
+
+    expect(helper.requestKeyFrame()).toBe(true);
+    expect(fake.getStdinData().toString("utf8")).toBe('{"cmd":"forceKeyFrame"}\n');
+  });
+
+  test("requestKeyFrame is a no-op before the helper has started (#4789)", () => {
+    const { helper } = withFakeSpawner({ kind: "simulator", windowID: 1 });
+
+    expect(helper.requestKeyFrame()).toBe(false);
+  });
+
   test("emits multiplexed PCM16LE audio without treating it as a malformed frame", async () => {
     const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 1, audio: true });
     const audio: Buffer[] = [];

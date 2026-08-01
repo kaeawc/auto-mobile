@@ -12,6 +12,7 @@ import {
 } from "./IOSScreenCaptureHelper";
 import type {
   DecodedAudio,
+  DecodedEncodedVideo,
   DecodedFrame,
   MalformedFrameError,
 } from "./frameProtocol";
@@ -22,7 +23,14 @@ export interface IosSimulatorCaptureHelperLease {
   start(): void | Promise<void>;
   stop(): Promise<unknown>;
   invalidate(): Promise<void>;
+  /**
+   * Ask the in-helper encoder to emit a fresh IDR (encoded leases only). No-op on
+   * a raw-BGRA helper, which has no STDIN control channel. See issue #4789.
+   */
+  requestKeyFrame(): boolean;
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
+  on(event: "encodedVideo", listener: (video: DecodedEncodedVideo) => void): this;
+  on(event: "capability", listener: (token: string) => void): this;
   on(event: "frameMetrics", listener: (metrics: FrameQueueMetrics) => void): this;
   on(event: "captureMetrics", listener: (metrics: NativeFrameMetrics) => void): this;
   on(event: "audio", listener: (audio: DecodedAudio) => void): this;
@@ -33,7 +41,7 @@ export interface IosSimulatorCaptureHelperLease {
   on(event: "error", listener: (error: Error) => void): this;
 }
 
-type SimulatorHelper = Pick<IOSScreenCaptureHelper, "start" | "stop" | "isRunning"> & {
+type SimulatorHelper = Pick<IOSScreenCaptureHelper, "start" | "stop" | "isRunning" | "requestKeyFrame"> & {
   on<E extends keyof IosScreenCaptureHelperEvents>(
     event: E,
     listener: IosScreenCaptureHelperEvents[E]
@@ -52,7 +60,15 @@ interface HelperEntry {
   key: string;
   helper: SimulatorHelper;
   leases: Set<PooledSimulatorCaptureHelperLease>;
+  /**
+   * Raw-frame warm-start cache (raw leases only). A late lease is primed by
+   * replaying this last BGRA frame. Meaningless in encoded mode — a single cached
+   * H.264 access unit is a P-frame the new lease cannot decode — so encoded
+   * entries leave it null and force a fresh IDR on attach instead (issue #4789).
+   */
   latestFrame: DecodedFrame | null;
+  /** True when this entry's helper runs the in-helper H.264 encode path (#4789). */
+  encoded: boolean;
   idleTimer: NodeJS.Timeout | null;
   failed: boolean;
   failedStopFailed: boolean;
@@ -64,6 +80,13 @@ interface HelperEntry {
  * source gets a lease, so its ffmpeg encoder and callbacks stay stream-scoped
  * while capture survives short reconnect gaps. A new window identity never
  * retargets an active helper; it gets an independent, TTL-bounded entry.
+ *
+ * In-helper encoding (issue #4789) collapses the raw path's "capture is
+ * host-scoped, encoding is stream-scoped" separation, so on the encoded path the
+ * encoder config (mode + bitrate) becomes part of the target key — a mismatched
+ * acquire gets a new entry, never a live reconfigure — the raw-frame warm-start
+ * cache is disabled, and every lease attach forces a fresh IDR so a late lease
+ * never starts on undecodable P-frames. Raw-lease behavior is unchanged.
  */
 export class IOSSimulatorCaptureHelperPool {
   private readonly idleTtlMs: number;
@@ -104,62 +127,112 @@ export class IOSSimulatorCaptureHelperPool {
         return;
       }
       const targetKey = helperTargetKey(lease.options.target, lease.options.binaryPath);
-      let entry = this.entries.get(targetKey);
-      if (entry?.failedStopFailed) {
-        // A previous helper.stop() threw and left this entry poisoned. The
-        // failure was already surfaced once (to the awaiting invalidate/best-
-        // effort cleanup). Drop the entry now so this attach can build a fresh
-        // helper instead of re-throwing the same error forever — bounded retry,
-        // not permanent poison of the window target.
-        this.clearEntryIdleTimer(entry);
-        this.entries.delete(targetKey);
-        entry = undefined;
-      }
-      if (!entry) {
-        // A new CGWindowID proves a reboot/window recreation. Evict any idle
-        // session now rather than letting it occupy ScreenCaptureKit resources
-        // through its TTL, but never disrupt a different active simulator stream.
-        for (const candidate of this.entries.values()) {
-          if (candidate.key !== targetKey && candidate.leases.size === 0) {
-            await this.stopEntry(candidate);
-          }
-        }
-
-        if (!lease.isStarted) {
-          return;
-        }
-        const helper = this.createHelper(lease.options);
-        entry = {
-          key: targetKey,
-          helper,
-          leases: new Set(),
-          latestFrame: null,
-          idleTimer: null,
-          failed: false,
-          failedStopFailed: false,
-          failedStopError: undefined,
-        };
-        this.entries.set(targetKey, entry);
-        this.wireHelper(entry);
-      }
-
-      this.clearEntryIdleTimer(entry);
-      entry.leases.add(lease);
-      lease.entryKey = targetKey;
-      if (entry.latestFrame) {
-        lease.forward("frame", entry.latestFrame);
-      }
-      if (!entry.helper.isRunning) {
-        try {
-          entry.helper.start();
-        } catch (error) {
-          entry.leases.delete(lease);
-          lease.entryKey = null;
-          this.entries.delete(targetKey);
-          throw error;
-        }
+      const entry = await this.resolveOrCreateEntry(targetKey, lease);
+      if (entry !== null) {
+        this.finalizeAttach(entry, lease, targetKey);
       }
     });
+  }
+
+  /**
+   * Return the live entry for `targetKey`, creating (and wiring) a fresh helper
+   * when none is usable. Returns null when the lease was stopped mid-eviction.
+   */
+  private async resolveOrCreateEntry(
+    targetKey: string,
+    lease: PooledSimulatorCaptureHelperLease
+  ): Promise<HelperEntry | null> {
+    let entry = this.entries.get(targetKey);
+    if (entry?.failedStopFailed) {
+      // A previous helper.stop() threw and left this entry poisoned. The failure
+      // was already surfaced once (to the awaiting invalidate/best-effort
+      // cleanup). Drop the entry now so this attach can build a fresh helper
+      // instead of re-throwing the same error forever — bounded retry, not
+      // permanent poison of the window target.
+      this.clearEntryIdleTimer(entry);
+      this.entries.delete(targetKey);
+      entry = undefined;
+    }
+    if (entry) {
+      return entry;
+    }
+    // A new CGWindowID proves a reboot/window recreation. Evict any idle session
+    // now rather than letting it occupy ScreenCaptureKit resources through its
+    // TTL, but never disrupt a different active simulator stream.
+    for (const candidate of this.entries.values()) {
+      if (candidate.key !== targetKey && candidate.leases.size === 0) {
+        await this.stopEntry(candidate);
+      }
+    }
+    if (!lease.isStarted) {
+      return null;
+    }
+    const created: HelperEntry = {
+      key: targetKey,
+      helper: this.createHelper(lease.options),
+      leases: new Set(),
+      latestFrame: null,
+      encoded: isEncodedTarget(lease.options.target),
+      idleTimer: null,
+      failed: false,
+      failedStopFailed: false,
+      failedStopError: undefined,
+    };
+    this.entries.set(targetKey, created);
+    this.wireHelper(created);
+    return created;
+  }
+
+  /** Register the lease on the entry, start the helper if idle, and warm-start it. */
+  private finalizeAttach(
+    entry: HelperEntry,
+    lease: PooledSimulatorCaptureHelperLease,
+    targetKey: string
+  ): void {
+    this.clearEntryIdleTimer(entry);
+    entry.leases.add(lease);
+    lease.entryKey = targetKey;
+    if (!entry.encoded && entry.latestFrame) {
+      lease.forward("frame", entry.latestFrame);
+    }
+    if (!entry.helper.isRunning) {
+      try {
+        entry.helper.start();
+      } catch (error) {
+        entry.leases.delete(lease);
+        lease.entryKey = null;
+        this.entries.delete(targetKey);
+        throw error;
+      }
+    }
+    if (entry.encoded) {
+      // In-helper encoding collapses the raw path's capture-host / encoder-stream
+      // separation: a late lease attaching to a warm encoded helper would start
+      // mid-GOP on P-frames it cannot decode. Force an IDR so every attach — the
+      // first and every subsequent lease — begins on a self-decodable keyframe
+      // (issue #4789). Safe before the helper's first frame: the encoder honors
+      // the pending force on its first encoded frame.
+      entry.helper.requestKeyFrame();
+    }
+  }
+
+  /**
+   * Relay a lease's keyframe request to its warm helper's STDIN control channel
+   * (issue #4789). Synchronous best-effort: it reads the current entry directly
+   * rather than serializing through the transition chain, because a PLI-driven IDR
+   * must not queue behind a slow helper stop on an unrelated target. Returns false
+   * when the lease is detached or its helper is raw / not running.
+   */
+  requestKeyFrame(lease: PooledSimulatorCaptureHelperLease): boolean {
+    const entryKey = lease.entryKey;
+    if (!entryKey) {
+      return false;
+    }
+    const entry = this.entries.get(entryKey);
+    if (!entry || !entry.leases.has(lease)) {
+      return false;
+    }
+    return entry.helper.requestKeyFrame();
   }
 
   async detach(lease: PooledSimulatorCaptureHelperLease): Promise<void> {
@@ -207,6 +280,8 @@ export class IOSSimulatorCaptureHelperPool {
       entry.latestFrame = frame;
       this.broadcast(entry, "frame", frame);
     });
+    entry.helper.on("encodedVideo", video => this.broadcast(entry, "encodedVideo", video));
+    entry.helper.on("capability", token => this.broadcast(entry, "capability", token));
     entry.helper.on("frameMetrics", metrics => this.broadcast(entry, "frameMetrics", metrics));
     entry.helper.on("captureMetrics", metrics => this.broadcast(entry, "captureMetrics", metrics));
     entry.helper.on("audio", audio => this.broadcast(entry, "audio", audio));
@@ -371,6 +446,10 @@ class PooledSimulatorCaptureHelperLease extends EventEmitter implements IosSimul
     await this.pool.invalidate(this);
   }
 
+  requestKeyFrame(): boolean {
+    return this.started && this.pool.requestKeyFrame(this);
+  }
+
   get isStarted(): boolean {
     return this.started;
   }
@@ -389,12 +468,20 @@ function helperTargetKey(target: CaptureTarget, binaryPath: string): string {
   if (target.kind !== "simulator") {
     throw new Error("Simulator helper pool received a non-simulator target.");
   }
+  // Encoder config (mode + bitrate) is part of the identity: a lease whose encode
+  // settings differ from a warm helper's cannot adopt it (no live reconfiguration
+  // in v1), so a mismatched acquire gets an independent entry (issue #4789).
   return JSON.stringify({
     binaryPath,
     windowID: target.windowID,
     fps: target.fps,
     audio: target.audio === true,
+    encode: target.encode ?? null,
   });
+}
+
+function isEncodedTarget(target: CaptureTarget): boolean {
+  return target.kind === "simulator" && target.encode !== undefined;
 }
 
 function isFatalHelperStderr(line: string): boolean {

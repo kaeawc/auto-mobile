@@ -31,6 +31,8 @@ export {
   SIMULATOR_FPS_MAX,
   SIMULATOR_FPS_MIN,
   type CaptureTarget,
+  type EncodeSettings,
+  type EncodeBitratePolicy,
   type HelperSpawner,
   type HelperProcessGroupKiller,
   type IosScreenCaptureHelperOptions,

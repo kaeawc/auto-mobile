@@ -19,6 +19,7 @@ import {
 } from "../features/video";
 import { serverConfig } from "../utils/ServerConfig";
 import { logger } from "../utils/logger";
+import { redactHomeDir } from "../utils/redactPath";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { createTimestampedId } from "../utils/IdGenerator";
 import { ResourceRegistry } from "./resourceRegistry";
@@ -715,7 +716,7 @@ async function getFileSize(filePath: string): Promise<number> {
     const stats = await fsPromises.stat(filePath);
     return stats.size;
   } catch {
-    logger.warn(`[VideoRecording] Missing recording file at ${filePath}`);
+    logger.warn(`[VideoRecording] Missing recording file at ${redactHomeDir(filePath)}`);
     return 0;
   }
 }

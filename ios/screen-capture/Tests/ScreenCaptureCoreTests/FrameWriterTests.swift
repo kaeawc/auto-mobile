@@ -168,6 +168,50 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(writer.metrics().bytesQueued, 0)
     }
 
+    func testDropsFrameWhenPayloadLengthOverflows() {
+        let sink = BufferSink()
+        let writer = FrameWriter(sink: sink, startTime: Date(timeIntervalSince1970: 0))
+        let scratch: [UInt8] = [0]
+
+        let accepted = scratch.withUnsafeBufferPointer { ptr in
+            // bytesPerRow * height overflows Int; the frame must drop, not trap.
+            writer.write(
+                width: 1,
+                height: 2,
+                bytesPerRow: Int.max,
+                baseAddress: UnsafeRawPointer(ptr.baseAddress!),
+                timestamp: Date(timeIntervalSince1970: 0.1)
+            )
+        }
+        writer.flush()
+
+        XCTAssertFalse(accepted)
+        XCTAssertEqual(sink.data.count, 0)
+        XCTAssertEqual(writer.metrics().droppedFrames, 1)
+    }
+
+    func testDropsFrameWhenDimensionExceedsUInt32() {
+        let sink = BufferSink()
+        let writer = FrameWriter(sink: sink, startTime: Date(timeIntervalSince1970: 0))
+        let scratch: [UInt8] = [0, 0, 0, 0]
+
+        let accepted = scratch.withUnsafeBufferPointer { ptr in
+            // Small payload passes the cap, but width does not fit UInt32.
+            writer.write(
+                width: Int(UInt32.max) + 1,
+                height: 1,
+                bytesPerRow: 4,
+                baseAddress: UnsafeRawPointer(ptr.baseAddress!),
+                timestamp: Date(timeIntervalSince1970: 0.1)
+            )
+        }
+        writer.flush()
+
+        XCTAssertFalse(accepted)
+        XCTAssertEqual(sink.data.count, 0)
+        XCTAssertEqual(writer.metrics().droppedFrames, 1)
+    }
+
     func testSlowSinkDiscardsEmptyAudioRecords() {
         let sink = BlockingPayloadSink()
         let writer = FrameWriter(

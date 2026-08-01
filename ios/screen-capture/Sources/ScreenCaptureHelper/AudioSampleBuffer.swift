@@ -28,13 +28,24 @@ func pcm16leAudio(sampleBuffer: CMSampleBuffer) -> Data? {
     guard result == noErr, let input = audioBufferList.mBuffers.mData else { return nil }
 
     let sampleCount = CMSampleBufferGetNumSamples(sampleBuffer)
+    let availableBytes = Int(audioBufferList.mBuffers.mDataByteSize)
     if asbd.mBitsPerChannel == 16 {
-        return Data(bytes: input, count: sampleCount * MemoryLayout<Int16>.size)
+        guard let count = AudioPcm16Encoder.safeCopyByteCount(
+            sampleCount: sampleCount,
+            bytesPerSample: MemoryLayout<Int16>.size,
+            availableBytes: availableBytes
+        ) else { return nil }
+        return Data(bytes: input, count: count)
     }
     if asbd.mBitsPerChannel == 32,
        (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0 {
+        guard let count = AudioPcm16Encoder.safeCopyByteCount(
+            sampleCount: sampleCount,
+            bytesPerSample: MemoryLayout<Float>.size,
+            availableBytes: availableBytes
+        ) else { return nil }
         return AudioPcm16Encoder.encodeFloat32LE(
-            Data(bytes: input, count: sampleCount * MemoryLayout<Float>.size)
+            Data(bytes: input, count: count)
         )
     }
     return nil

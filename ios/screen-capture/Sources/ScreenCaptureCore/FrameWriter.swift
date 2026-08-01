@@ -107,21 +107,31 @@ public final class FrameWriter {
         baseAddress: UnsafeRawPointer,
         timestamp: Date = Date()
     ) -> Bool {
-        let payloadLength = bytesPerRow * height
         let elapsedMs = max(0, timestamp.timeIntervalSince(startTime) * 1000)
         let captureTimestampMs = UInt32(truncatingIfNeeded: UInt64(elapsedMs))
-        guard payloadLength <= configuration.maximumPendingFrameBytes else {
-            stateLock.lock()
-            latestCaptureTimestampMs = captureTimestampMs
-            droppedFrames += 1
-            stateLock.unlock()
+
+        // `bytesPerRow * height` can overflow Int for pathological geometry;
+        // compute it defensively and drop the frame instead of trapping, before
+        // the memory-budget cap so the cap never sees a wrapped value.
+        let (payloadLength, overflow) = bytesPerRow.multipliedReportingOverflow(by: height)
+        guard !overflow, payloadLength <= configuration.maximumPendingFrameBytes else {
+            recordDroppedFrame(captureTimestampMs: captureTimestampMs)
+            return false
+        }
+
+        // The header fields are UInt32; a value that doesn't fit would trap on
+        // conversion, so drop the frame instead.
+        guard let headerWidth = UInt32(exactly: width),
+              let headerHeight = UInt32(exactly: height),
+              let headerBytesPerRow = UInt32(exactly: bytesPerRow) else {
+            recordDroppedFrame(captureTimestampMs: captureTimestampMs)
             return false
         }
 
         let header = FrameProtocol.encodeHeader(FrameProtocol.Header(
-            width: UInt32(width),
-            height: UInt32(height),
-            bytesPerRow: UInt32(bytesPerRow),
+            width: headerWidth,
+            height: headerHeight,
+            bytesPerRow: headerBytesPerRow,
             timestampMs: captureTimestampMs
         ))
         // The capture callback owns the pixel-buffer lock. This one copy lets it
@@ -188,6 +198,13 @@ public final class FrameWriter {
     /// orderly shutdown; production capture never blocks its callback on this.
     public func flush() {
         outputQueue.sync {}
+    }
+
+    private func recordDroppedFrame(captureTimestampMs: UInt32) {
+        stateLock.lock()
+        latestCaptureTimestampMs = captureTimestampMs
+        droppedFrames += 1
+        stateLock.unlock()
     }
 
     private func enqueueFrame(_ record: PendingRecord) {

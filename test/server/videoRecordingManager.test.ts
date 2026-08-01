@@ -353,13 +353,18 @@ describe("videoRecordingManager", () => {
 
     const drainAsyncUntil = async (
       predicate: () => Promise<boolean>,
-      attempts = 40
+      attempts = 100
     ): Promise<void> => {
       for (let attempt = 0; attempt < attempts; attempt++) {
         if (await predicate()) {
           return;
         }
-        await new Promise(resolve => setImmediate(resolve));
+        // Real 1ms sleep, not setImmediate: the size-cap stop chain is fire-and-
+        // forget async, and setImmediate can be starved under macOS CI I/O load,
+        // intermittently timing out this drain (#4762). Mirrors the proven
+        // waitForRecordingCount approach above. On success the loop returns early,
+        // so the 1ms cost is only paid while genuinely waiting.
+        await defaultTimer.sleep(1);
       }
       throw new Error("drainAsyncUntil timed out");
     };

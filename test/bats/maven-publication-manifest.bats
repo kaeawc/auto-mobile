@@ -165,6 +165,77 @@ JSON
   [[ "$output" == *"BUDGET OK"* ]]
 }
 
+@test "an oversized javadoc jar trips the javadoc guard (#4852)" {
+  local dir="$STAGE/$GROUP_PATH/auto-mobile-sdk/0.0.47"
+  mkdir -p "$dir"
+  head -c 100000 /dev/zero >"$dir/auto-mobile-sdk-0.0.47-javadoc.jar" # 100 KB > 51200
+  local budget="$STAGE/jvd-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": { "maxJavadocJarBytes": 51200 } }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -eq 0 ] # advisory
+  [[ "$output" == *"BUDGET WARN"* ]]
+  [[ "$output" == *"javadoc-jar"* ]]
+}
+
+@test "empty javadoc jars stay within the javadoc guard (#4852)" {
+  # build_release stages javadoc jars at 100 bytes, well under the guard.
+  local budget="$STAGE/jvd-ok-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": { "maxJavadocJarBytes": 51200 } }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BUDGET OK"* ]]
+}
+
+@test "a non-integer maxJavadocJarBytes fails closed (#4852)" {
+  local budget="$STAGE/jvd-bad-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": { "maxJavadocJarBytes": 0.5 } }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"BUDGET OK"* ]]
+}
+
+@test "a budget threshold too large for bash fails closed (scientific notation)" {
+  # jq accepts 1e100 as an integer-valued number but emits "1E+100", which bash
+  # cannot compare -- must fail closed, not silently report BUDGET OK.
+  local budget="$STAGE/huge-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": { "maxFiles": 1e100 } }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"BUDGET OK"* ]]
+}
+
+@test "an in-range exponent-form threshold is accepted and applied (1e6)" {
+  # jq 1.7+ serializes 1e6 as "1E+6"; floor normalization keeps it usable.
+  local budget="$STAGE/exp-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": { "maxFiles": 1e6 } }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BUDGET OK"* ]]
+  [[ "$output" == *"/1000000"* ]]
+}
+
+@test "a plain-decimal threshold above the exact-integer cap fails closed" {
+  # 2^63 is all digits (passes a ^[0-9]+$ regex) but overflows bash's signed
+  # 64-bit arithmetic; the jq cap at 2^53 rejects it.
+  local budget="$STAGE/overflow-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": { "maxJavadocJarBytes": 9223372036854775808 } }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"BUDGET OK"* ]]
+}
+
 @test "the committed budget policy exists and is valid JSON" {
   [ -f "$BUDGET_FILE" ]
   run jq empty "$BUDGET_FILE"

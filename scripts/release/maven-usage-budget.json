@@ -16,8 +16,11 @@
     "release Central tallies at ~80 files shows here as ~200 signed. These",
     "thresholds are therefore relative guardrails on the local manifest with",
     "headroom, sized so a normal release cadence stays well inside the monthly",
-    "ceilings. Tighten maxBytes after #4851 (signature checksums) and #4852 (Dokka",
-    "javadoc) land, and raise a ceiling deliberately when a new coordinate is added."
+    "ceilings. #4851 (signature checksums) needed no change -- vanniktech's upload",
+    "bundle already excludes them. #4852 shipped an empty javadoc jar, guarded by",
+    "maxJavadocJarBytes below (the largest javadoc jar must stay tiny, so it cannot",
+    "regress to the ~1.78 MB Dokka HTML site). Raise a ceiling deliberately when a",
+    "new coordinate is added."
   ],
   "centralOrgLimits": {
     "monthlyReleaseSizeBytes": 83886080,
@@ -26,6 +29,7 @@
   },
   "perRelease": {
     "maxFiles": 260,
-    "maxBytes": 6291456
+    "maxBytes": 6291456,
+    "maxJavadocJarBytes": 51200
   }
 }

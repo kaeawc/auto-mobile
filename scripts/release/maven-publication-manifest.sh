@@ -234,8 +234,14 @@ if [ -n "$budget_file" ]; then
   # integer. Output is "maxFiles<TAB>maxBytes" (empty field = no limit), or the
   # sentinel INVALID.
   limits="$(jq -r -s '
-    def okint: type == "number" and . >= 0 and (floor == .);
-    def field($v): if $v == null then "" elif ($v | okint) then ($v | tostring) else "INVALID" end;
+    # Cap at 2^53, the largest EXACT integer for jq numbers (IEEE-754 doubles) and
+    # safely inside a signed 64-bit range, so the emitted value is always plain
+    # digits bash can compare. Realistic budgets are millions at most.
+    def okint: type == "number" and . >= 0 and (floor == .) and . <= 9007199254740992;
+    # floor normalizes to canonical decimal: jq 1.7+ preserves a literal like 1e6
+    # and tostring would emit "1E+6", which the bash digit check would reject even
+    # though it is a valid in-range integer. floor forces plain digits.
+    def field($v): if $v == null then "" elif ($v | okint) then ($v | floor | tostring) else "INVALID" end;
     .[0].perRelease as $r
     | if $r == null then "\t"
       elif ($r | type) != "object" then "INVALID"
@@ -250,6 +256,15 @@ if [ -n "$budget_file" ]; then
   max_files="$(printf '%s' "$limits" | cut -f1)"
   max_bytes="$(printf '%s' "$limits" | cut -f2)"
   breached=0
+  # jq validates a non-negative integer but emits scientific notation for values
+  # too large for bash (e.g. 1e100 -> "1E+100"), which bash's -gt cannot compare.
+  # Require plain digits so an out-of-range threshold fails closed, not silently.
+  for _v in "$max_files" "$max_bytes"; do
+    if [ -n "$_v" ] && ! printf '%s' "$_v" | grep -qE '^[0-9]+$'; then
+      echo "error: budget threshold out of range for comparison (got '$_v')" >&2
+      exit 2
+    fi
+  done
   reasons=""
   if [ -n "$max_files" ] && [ "$total_files" -gt "$max_files" ]; then
     breached=1; reasons="files $total_files > $max_files"
@@ -258,6 +273,27 @@ if [ -n "$budget_file" ]; then
     breached=1
     [ -n "$reasons" ] && reasons="$reasons; "
     reasons="${reasons}bytes $total_bytes > $max_bytes"
+  fi
+  # Advisory per-javadoc-jar guard (#4852): the largest javadoc jar must stay
+  # small so the empty jar cannot silently regress back to the full Dokka HTML
+  # site. Validated the same way (absent or a non-negative integer).
+  max_javadoc="$(jq -r -s '(.[0].perRelease.maxJavadocJarBytes) as $v
+    | if $v == null then "" elif ($v | type == "number" and . >= 0 and (floor == .) and . <= 9007199254740992) then ($v | floor | tostring) else "INVALID" end' "$budget_file")"
+  if [ "$max_javadoc" = "INVALID" ]; then
+    echo "error: budget maxJavadocJarBytes must be a non-negative integer" >&2
+    exit 2
+  fi
+  if [ -n "$max_javadoc" ] && ! printf '%s' "$max_javadoc" | grep -qE '^[0-9]+$'; then
+    echo "error: budget maxJavadocJarBytes out of range for comparison (got '$max_javadoc')" >&2
+    exit 2
+  fi
+  if [ -n "$max_javadoc" ]; then
+    largest_javadoc="$(awk -F'\t' '$2 == "javadoc-jar" && $NF + 0 > m { m = $NF + 0 } END { print m + 0 }' "$records")"
+    if [ "$largest_javadoc" -gt "$max_javadoc" ]; then
+      breached=1
+      [ -n "$reasons" ] && reasons="$reasons; "
+      reasons="${reasons}javadoc-jar $largest_javadoc > $max_javadoc"
+    fi
   fi
   echo
   if [ "$breached" -eq 1 ]; then

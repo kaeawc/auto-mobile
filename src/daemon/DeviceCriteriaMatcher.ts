@@ -132,6 +132,51 @@ export class DeviceCriteriaMatcher {
   }
 
   /**
+   * Whether any image in a collection satisfies the allocation criteria.
+   */
+  someDeviceImageMatchesCriteria(
+    images: Iterable<DeviceInfo>,
+    criteria?: DeviceAllocationCriteria
+  ): boolean {
+    for (const image of images) {
+      if (this.deviceImageMatchesCriteria(image, criteria)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Whether Android rediscovery found the same AVD, or could not resolve its
+   * name, on the same transport.
+   */
+  androidRediscoveryMatches(
+    candidate: BootedDevice,
+    expectedDeviceId: string,
+    expectedAvdName: string
+  ): boolean {
+    return candidate.deviceId === expectedDeviceId && (
+      candidate.name === expectedAvdName ||
+      candidate.name === `Unknown (${expectedDeviceId})`
+    );
+  }
+
+  /**
+   * Whether pooled devices plus eligible Android recoveries can satisfy a request.
+   */
+  hasSufficientCapacityIncludingAndroidRecovery(
+    pooledDeviceCount: number,
+    requiredCount: number,
+    pendingAndroidRecoveryCount: number,
+    platform?: Platform
+  ): boolean {
+    const eligibleRecoveryCount = platform === undefined || platform === "android"
+      ? pendingAndroidRecoveryCount
+      : 0;
+    return pooledDeviceCount + eligibleRecoveryCount >= requiredCount;
+  }
+
+  /**
    * Whether a device image can be booted right now.
    */
   isStartableDeviceImage(image: DeviceInfo): boolean {

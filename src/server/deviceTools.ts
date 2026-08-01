@@ -1,9 +1,10 @@
+import type { ChildProcess } from "child_process";
 import { z } from "zod";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { ActionableError, BootedDevice, SomePlatform } from "../models";
+import { ActionableError, BootedDevice, DeviceInfo, SomePlatform } from "../models";
 import type { FormFactor, StartDeviceResult } from "../models/DeviceMatchCriteria";
 import { BOOTED_DEVICE_RESOURCE_URIS, notifyBootedDeviceResourcesUpdated } from "./bootedDeviceResources";
 import { DEVICE_IMAGE_RESOURCE_URIS, notifyDeviceImageResourcesUpdated } from "./deviceImageResources";
@@ -113,6 +114,7 @@ export interface DeviceToolsDependencies {
   ensureCtrlProxyReady?: (device: BootedDevice, perf: ReturnType<typeof createPerformanceTracker>) => Promise<void>;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
+  clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
   idGenerator: IdGenerator;
 }
 
@@ -120,6 +122,38 @@ async function defaultNotifyResourcesChanged(): Promise<void> {
   await notifyBootedDeviceResourcesUpdated();
   await notifyDeviceImageResourcesUpdated();
   await syncInstalledAppResources();
+}
+
+async function defaultClearInstalledAppsForDevice(deviceId: string): Promise<void> {
+  const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
+  const repo = new InstalledAppsRepository();
+  await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
+    getDbWriteBarrier().track(() => repo.clearDeviceSession(deviceId)).then(() => undefined)
+  );
+}
+
+async function clearInstalledAppsAfterShutdown(
+  dependencies: DeviceToolsDependencies,
+  deviceId: string
+): Promise<void> {
+  try {
+    await dependencies.clearInstalledAppsForDevice(deviceId);
+  } catch (error) {
+    // The device is already stopped; the next app verification refreshes stale cache rows.
+    logger.warn(
+      `[DeviceTools] Failed to clear installed apps for ${deviceId} after shutdown: ${error}`,
+      error
+    );
+  }
+}
+
+async function notifyResourcesAfterShutdown(dependencies: DeviceToolsDependencies): Promise<void> {
+  try {
+    await dependencies.notifyResourcesChanged();
+  } catch (error) {
+    // The device is already stopped; resource subscriptions refresh on their next update.
+    logger.warn(`[DeviceTools] Failed to notify resource changes after shutdown: ${error}`, error);
+  }
 }
 
 let moduleDependencies: DeviceToolsDependencies | null = null;
@@ -132,6 +166,7 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       notifyResourcesChanged: defaultNotifyResourcesChanged,
       deviceCreationGateFactory: () => getDeviceCreationGate(),
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
+      clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       idGenerator: defaultIdGenerator,
     };
   }
@@ -147,6 +182,8 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
     deviceCreationGateFactory: deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
+    clearInstalledAppsForDevice:
+      deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
   };
 }
@@ -160,7 +197,8 @@ export function registerDeviceTools() {
   const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
     try {
 
-      const deviceUtils = getDeviceToolsDependencies().deviceManagerFactory();
+      const deps = getDeviceToolsDependencies();
+      const deviceUtils = deps.deviceManagerFactory();
       const imageList = await deviceUtils.listDeviceImages(args.platform);
 
       return createJSONToolResponse({
@@ -225,15 +263,35 @@ export function registerDeviceTools() {
       // A ready device may reuse an existing serial. Invalidate daemon-side
       // per-device state before any later await lets socket traffic reach it.
       if (DaemonState.getInstance().isInitialized()) {
-        DaemonState.getInstance().getDevicePool().notifyDeviceReady(boot.device.deviceId);
+        const pool = DaemonState.getInstance().getDevicePool();
+        if (boot.source === "cold-boot") {
+          pool.clearIntentionalShutdown(boot.device.deviceId);
+        } else {
+          pool.notifyDeviceReady(boot.device.deviceId);
+        }
       }
+
+      const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
+      await ctrlProxySetup(boot.device, perf);
+      const sessionId = await bindBootedDeviceSession(
+        boot.device,
+        args,
+        boot.sourceImage,
+        boot.processHandle
+      );
 
       if (boot.source === "cold-boot" || boot.provisioned) {
         perf.startOperation("notifyResources");
         await deps.notifyResourcesChanged();
         perf.endOperation("notifyResources");
       }
-      return await buildBootedResponse(boot.device, boot.source, perf, args, boot.processId);
+      return await buildBootedResponse(
+        boot.device,
+        boot.source,
+        perf,
+        sessionId,
+        boot.processId,
+      );
     } catch (error) {
       perf.end();
       if (error instanceof ActionableError) {
@@ -300,40 +358,48 @@ export function registerDeviceTools() {
     perf.endOperation("ensureCtrlProxy");
   }
 
+  async function bindBootedDeviceSession(
+    device: BootedDevice,
+    args: StartDeviceArgs,
+    sourceImage?: DeviceInfo,
+    childProcess?: ChildProcess | null
+  ): Promise<string> {
+    // Reserve the exact ready device before resource notifications publish it
+    // to concurrent allocators.
+    const daemonState = DaemonState.getInstance();
+    if (isDevicePoolAutolockEnabled() && daemonState.isInitialized()) {
+      const autolockSessionId = await daemonState.getDevicePool().autolockDevice(
+        device.deviceId,
+        device.platform,
+        args.__mcpSessionId,
+        sourceImage,
+        childProcess
+      );
+      if (autolockSessionId) {
+        return autolockSessionId;
+      }
+    }
+
+    const sessionId = getDeviceToolsDependencies().idGenerator.next();
+    if (!daemonState.isInitialized()) {
+      return sessionId;
+    }
+    return daemonState.getDevicePool().bindOrReuseDeviceSession(
+      sessionId,
+      device.deviceId,
+      device.platform,
+      sourceImage,
+      childProcess
+    );
+  }
+
   async function buildBootedResponse(
     device: BootedDevice,
     source: "booted" | "cold-boot",
     perf: ReturnType<typeof createPerformanceTracker>,
-    args: StartDeviceArgs,
+    sessionId: string,
     processId?: number,
   ) {
-    // Ensure iOS automation proxy is installed and running before returning.
-    // This avoids the first observe/tap call paying the full setup cost.
-    const deps = getDeviceToolsDependencies();
-    const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
-    await ctrlProxySetup(device, perf);
-
-    // Always generate a session ID for consistent device interactions.
-    // When autolock is enabled, lock the device to a pool-issued session UUID that
-    // is enforced for all subsequent tool calls and auto-released after an idle timeout.
-    // When disabled, still bind the returned session to this exact device so callers
-    // can mix startDevice -> setActiveDevice -> session-targeted tools without the
-    // session path assigning a different simulator/device on first use.
-    let sessionId: string | undefined;
-    if (isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
-      sessionId = await DaemonState.getInstance()
-        .getDevicePool()
-        .autolockDevice(device.deviceId, device.platform, args.__mcpSessionId);
-    }
-    if (!sessionId) {
-      sessionId = deps.idGenerator.next();
-      if (DaemonState.getInstance().isInitialized()) {
-        sessionId = await DaemonState.getInstance()
-          .getDevicePool()
-          .bindOrReuseDeviceSession(sessionId, device.deviceId, device.platform);
-      }
-    }
-
     perf.end();
     const timing = perf.getTimings();
 
@@ -397,23 +463,29 @@ export function registerDeviceTools() {
         perf.endOperation("stopCtrlProxy");
       }
 
-      const deviceUtils = getDeviceToolsDependencies().deviceManagerFactory();
+      const deps = getDeviceToolsDependencies();
+      const deviceUtils = deps.deviceManagerFactory();
       perf.startOperation("killProcess");
-      await deviceUtils.killDevice(args.device);
+      const devicePool = DaemonState.getInstance().isInitialized()
+        ? DaemonState.getInstance().getDevicePool()
+        : undefined;
+      if (args.device.platform === "android") {
+        devicePool?.markIntentionalShutdown(args.device.deviceId);
+      }
+      try {
+        await deviceUtils.killDevice(args.device);
+      } catch (error) {
+        devicePool?.clearIntentionalShutdown(args.device.deviceId);
+        throw error;
+      }
       perf.endOperation("killProcess");
 
       perf.startOperation("cleanup");
-      const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
-      const repo = new InstalledAppsRepository();
-      await getInstalledAppsCacheWriteCoordinator().invalidate(args.device.deviceId, () =>
-        getDbWriteBarrier().track(() => repo.clearDeviceSession(args.device.deviceId)).then(() => undefined)
-      );
+      await clearInstalledAppsAfterShutdown(deps, args.device.deviceId);
       perf.endOperation("cleanup");
 
       perf.startOperation("notifyResources");
-      await notifyBootedDeviceResourcesUpdated();
-      await notifyDeviceImageResourcesUpdated();
-      await syncInstalledAppResources();
+      await notifyResourcesAfterShutdown(deps);
       perf.endOperation("notifyResources");
 
       perf.end();

@@ -31,6 +31,18 @@ export function isDevicePoolAutolockEnabled(): boolean {
 }
 
 /**
+ * Restart a pool-owned Android emulator after its process exits or its serial
+ * is confirmed missing. Read at call time to support daemon configuration
+ * changes without a restart.
+ */
+export function isAndroidRebootOnDeathEnabled(): boolean {
+  const override =
+    process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH ??
+    process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;
+  return override === "1";
+}
+
+/**
  * Device pool idle timeout in milliseconds.
  * When autolock is enabled, a device is freed if no interaction
  * occurs within this duration. Default: 60 seconds.

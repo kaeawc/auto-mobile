@@ -1,3 +1,4 @@
+import type { ChildProcess } from "child_process";
 import type { BootedDevice, DeviceInfo } from "../models";
 import { ActionableError } from "../models";
 import type { DeviceMatchCriteria, FormFactor, MatchingStrategy } from "../models/DeviceMatchCriteria";
@@ -30,6 +31,8 @@ export interface DeviceBootProgress {
 export interface DeviceBootResult {
   device: BootedDevice;
   source: "booted" | "cold-boot";
+  sourceImage?: DeviceInfo;
+  processHandle?: ChildProcess | null;
   processId?: number;
   provisioned: boolean;
 }
@@ -175,6 +178,8 @@ export class DeviceBootService {
     return {
       device: enrichBootedDevice(ready, image),
       source: "cold-boot",
+      sourceImage: image,
+      processHandle: handle,
       processId: handle?.pid,
       provisioned,
     };

@@ -1,12 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { isDevicePoolAutolockEnabled, getDevicePoolTimeoutMs } from "../../src/daemon/poolConfig";
+import {
+  getDevicePoolTimeoutMs,
+  isAndroidRebootOnDeathEnabled,
+  isDevicePoolAutolockEnabled,
+} from "../../src/daemon/poolConfig";
 
 const ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTOMOBILE_DEVICE_POOL_TIMEOUT",
   "AUTO_MOBILE_DEVICE_POOL_TIMEOUT",
+  "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",
+  "AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH",
 ] as const;
+const ORIGINAL_ENV = new Map<(typeof ENV_KEYS)[number], string | undefined>(
+  ENV_KEYS.map(key => [key, process.env[key]])
+);
 
 function clearEnv(): void {
   for (const key of ENV_KEYS) {
@@ -14,9 +23,20 @@ function clearEnv(): void {
   }
 }
 
+function restoreEnv(): void {
+  for (const key of ENV_KEYS) {
+    const original = ORIGINAL_ENV.get(key);
+    if (original === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = original;
+    }
+  }
+}
+
 describe("poolConfig autolock", () => {
   beforeEach(clearEnv);
-  afterEach(clearEnv);
+  afterEach(restoreEnv);
 
   it("isDevicePoolAutolockEnabled defaults to false", () => {
     expect(isDevicePoolAutolockEnabled()).toBe(false);
@@ -75,6 +95,24 @@ describe("poolConfig autolock", () => {
       expect(getDevicePoolTimeoutMs()).toBe(row.expected);
     });
   }
+});
+
+describe("Android reboot-on-death configuration", () => {
+  beforeEach(clearEnv);
+  afterEach(restoreEnv);
+
+  it("defaults to disabled and accepts only '1'", () => {
+    expect(isAndroidRebootOnDeathEnabled()).toBe(false);
+    process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "true";
+    expect(isAndroidRebootOnDeathEnabled()).toBe(false);
+    process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+    expect(isAndroidRebootOnDeathEnabled()).toBe(true);
+  });
+
+  it("honors the AUTO_MOBILE_ alias", () => {
+    process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+    expect(isAndroidRebootOnDeathEnabled()).toBe(true);
+  });
 });
 
 /**

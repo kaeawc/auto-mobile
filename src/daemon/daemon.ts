@@ -6,7 +6,7 @@ import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager } from "./sessionManager";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
-import { DevicePool } from "./devicePool";
+import { DevicePool, type PooledDevice } from "./devicePool";
 import { DaemonState } from "./daemonState";
 import {
   DEFAULT_DAEMON_PORT,
@@ -1183,6 +1183,10 @@ export class Daemon {
         }
 
         for (const [deviceId, recordingIds] of missingByDevice.entries()) {
+          const pooledDeviceAtDisconnect = this.devicePool.getDevice(deviceId);
+          if (await this.shouldSkipStaleDisconnectCleanup(pooledDeviceAtDisconnect, deviceId)) {
+            continue;
+          }
           let deviceCleanupSucceeded = true;
 
           // Stop performance monitoring for this device
@@ -1219,6 +1223,10 @@ export class Daemon {
             }
           }
 
+          if (await this.shouldSkipStaleDisconnectCleanup(pooledDeviceAtDisconnect, deviceId)) {
+            continue;
+          }
+
           // Cancel active executions and release the session so the test fails
           // fast instead of waiting for the full MCP request timeout.
           const sessionId = this.sessionManager.getSessionForDevice(deviceId);
@@ -1252,6 +1260,22 @@ export class Daemon {
     }, DEVICE_DISCONNECT_POLL_INTERVAL_MS);
 
     this.deviceDisconnectTimer.unref();
+  }
+
+  private async shouldSkipStaleDisconnectCleanup(
+    pooledDeviceAtDisconnect: PooledDevice | null,
+    deviceId: string
+  ): Promise<boolean> {
+    if (
+      !pooledDeviceAtDisconnect ||
+      await this.devicePool.isCurrentDisconnectedDevice(pooledDeviceAtDisconnect)
+    ) {
+      return false;
+    }
+    logger.info(
+      `[DisconnectMonitor] Skipping stale disconnect cleanup for recovered device ${deviceId}`
+    );
+    return true;
   }
 
   private startAdbMissingDeviceListener(): void {

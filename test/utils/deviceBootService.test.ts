@@ -34,6 +34,8 @@ describe("DeviceBootService", () => {
     const result = await service(devices, matcher).boot({ platform: "android", timeoutMs: 12_345 });
 
     expect(result.source).toBe("cold-boot");
+    expect(result.sourceImage).toBe(image);
+    expect(result.processHandle).toBe(devices.getWaitForDeviceReadyChildProcess());
     expect(result.processId).toBe(12345);
     expect(devices.getExecutedOperations()).toEqual([
       "listDeviceImages:android",
@@ -54,6 +56,8 @@ describe("DeviceBootService", () => {
     const result = await service(devices, matcher).boot({ platform: "android" });
 
     expect(result.source).toBe("booted");
+    expect(result.sourceImage).toBeUndefined();
+    expect(result.processHandle).toBeUndefined();
     expect(result.processId).toBeUndefined();
     expect(devices.getExecutedOperations()).toContain("waitForDeviceReady:Pixel_9_API_35:120000");
   });

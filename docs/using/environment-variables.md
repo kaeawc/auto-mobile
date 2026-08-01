@@ -117,6 +117,15 @@ Created devices are named `AutoMobile-<model>-<id>` so they are easy to find and
 clean up (`xcrun simctl delete <udid>` / `avdmanager delete avd -n <name>`), and
 the resolved device type and runtime are logged at creation time.
 
+## Device-pool Android recovery
+
+| Variable | Legacy alias | Purpose | Default |
+|----------|--------------|---------|---------|
+| `AUTOMOBILE_ANDROID_REBOOT_ON_DEATH` | `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH` | When exactly `1`, restarts a pool-owned Android emulator after its process exits or ADB confirms it disappeared. The same AVD receives at most two recovery launches per daemon lifetime; exhaustion falls back to device removal and start suppression. | unset (off) |
+
+Set this on the process that starts the AutoMobile daemon. It does not apply to
+externally started emulators or iOS simulators.
+
 ## WebRTC screen streaming (`AUTOMOBILE_WEBRTC_*`)
 
 Defaults for pushing a device's screen to a WHIP ingest server (the supported

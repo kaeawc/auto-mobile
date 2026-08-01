@@ -32,6 +32,8 @@ export type CaptureSourceFactory = (options: {
   onRotation?: (rotation: number) => void;
   bitrateBps?: number;
   size?: { width: number; height: number };
+  /** Aspect-preserving resolution/bitrate preset; see `VideoStreamSocketRequest.quality`. */
+  quality?: "low" | "medium" | "high";
   /** Capture rate for iOS Simulator sources; see the call site for why it is pinned. */
   fps?: number;
 }) => Promise<H264CaptureSource>;
@@ -239,11 +241,13 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         },
         bitrateBps: request.bitrateKbps ? request.bitrateKbps * 1000 : undefined,
         size: request.size,
-        // Pin the observation rate explicitly. This relay borrows the WebRTC
-        // capture sources, so without this it would silently inherit whatever
-        // the *WebRTC* iOS Simulator default happens to be — a knob that is
-        // tuned for an interactive WHEP feed and is not configurable here.
-        fps: SIMULATOR_FPS_DEFAULT,
+        quality: request.quality,
+        // Pin the observation rate explicitly when the client sent no hint. This
+        // relay borrows the WebRTC capture sources, so without this it would
+        // silently inherit whatever the *WebRTC* iOS Simulator default happens
+        // to be — a knob that is tuned for an interactive WHEP feed. A client
+        // hint wins so farm viewers can lower the rate across many streams.
+        fps: request.fps ?? SIMULATOR_FPS_DEFAULT,
       });
       // The final subscriber may disconnect while source construction is in
       // flight. Do not attach an unreachable capture process to a removed entry.
@@ -453,6 +457,7 @@ function defaultDependencies(): VideoStreamSocketServerDependencies {
           onRotation: options.onRotation,
           bitrateBps: options.bitrateBps,
           size: options.size,
+          quality: options.quality,
           fps: options.fps,
         },
         jarPath

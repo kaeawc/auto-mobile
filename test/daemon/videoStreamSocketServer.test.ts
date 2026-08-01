@@ -44,7 +44,7 @@ interface Harness {
   server: VideoStreamSocketServer;
   socketPath: string;
   sources: FakeCaptureSource[];
-  captureOptions: Array<{ fps?: number }>;
+  captureOptions: Array<{ fps?: number; quality?: string }>;
   emit: (chunk: Buffer) => void;
   /** Simulates the source attesting a display rotation (issue #4786). */
   emitRotation: (rotation: number) => void;
@@ -68,7 +68,7 @@ async function startHarness(
   const sources: FakeCaptureSource[] = [];
   let onData: ((chunk: Buffer) => void) | null = null;
   let onRotation: ((rotation: number) => void) | null = null;
-  const captureOptions: Array<{ fps?: number }> = [];
+  const captureOptions: Array<{ fps?: number; quality?: string }> = [];
 
   const server = new VideoStreamSocketServer(
     {
@@ -190,6 +190,22 @@ describe("VideoStreamSocketServer", () => {
     // silently adopt whatever the interactive WHEP default happens to be.
     expect(h.captureOptions[0].fps).toBe(SIMULATOR_FPS_DEFAULT);
     expect(SIMULATOR_FPS_DEFAULT).not.toBe(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT);
+  });
+
+  test("forwards client quality and fps hints to the capture source", async () => {
+    const h = await startHarness();
+
+    // A farm viewer lowers per-stream decode cost by requesting a preset and
+    // rate; the client hint must win over the pinned observation default.
+    await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      quality: "low",
+      fps: 15,
+    });
+
+    expect(h.captureOptions[0].quality).toBe("low");
+    expect(h.captureOptions[0].fps).toBe(15);
   });
 
   test("sends the stream header immediately after the ack", async () => {

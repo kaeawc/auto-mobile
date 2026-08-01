@@ -59,13 +59,52 @@ class VideoStreamClientTest {
     client.connect("emulator-5554")
 
     val frame = server.awaitFirstFrameFrom(client)
-    assertEquals(320, frame.width)
-    assertEquals(240, frame.height)
-    assertEquals(320 * 240 * 4, frame.bgra.size)
+    assertEquals(320, frame.bitmap.width)
+    assertEquals(240, frame.bitmap.height)
+    // The replay cache holds the NEWEST frame; the sample stream decodes several.
+    assertTrue(frame.sequence >= 1L, "expected a stamped sequence, was ${frame.sequence}")
 
     val request = server.awaitRequest()
     assertEquals("subscribe", request["action"]?.jsonPrimitive?.content)
     assertEquals("emulator-5554", request["deviceId"]?.jsonPrimitive?.content)
+
+    client.dispose()
+  }
+
+  @Test
+  fun `subscribes with quality, fps and bitrate hints when configured`() = runBlocking {
+    val server = relay(payload = sampleH264())
+    val client =
+      VideoStreamClient(
+        socketPathValue = server.socketPath.toString(),
+        quality = VideoStreamQuality.Low,
+        fps = 15,
+        bitrateKbps = 1_500,
+      )
+
+    client.connect("emulator-5554")
+    server.awaitFirstFrameFrom(client)
+
+    val request = server.awaitRequest()
+    assertEquals("low", request["quality"]?.jsonPrimitive?.content)
+    assertEquals("15", request["fps"]?.jsonPrimitive?.content)
+    assertEquals("1500", request["bitrateKbps"]?.jsonPrimitive?.content)
+
+    client.dispose()
+  }
+
+  @Test
+  fun `omits the quality hints by default`() = runBlocking {
+    val server = relay(payload = sampleH264())
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+
+    client.connect("emulator-5554")
+    server.awaitFirstFrameFrom(client)
+
+    val request = server.awaitRequest()
+    assertTrue(!request.containsKey("quality"))
+    assertTrue(!request.containsKey("fps"))
+    assertTrue(!request.containsKey("bitrateKbps"))
 
     client.dispose()
   }
@@ -238,8 +277,8 @@ class VideoStreamClientTest {
     throw AssertionError("Timed out waiting for condition")
   }
 
-  private suspend fun FakeRelay.awaitFirstFrameFrom(client: VideoStreamClient): DecodedFrame {
-    var frame: DecodedFrame? = null
+  private suspend fun FakeRelay.awaitFirstFrameFrom(client: VideoStreamClient): LiveVideoFrame {
+    var frame: LiveVideoFrame? = null
     val deadline = System.currentTimeMillis() + 10_000
     while (System.currentTimeMillis() < deadline && frame == null) {
       frame = client.frames.replayCache.firstOrNull()

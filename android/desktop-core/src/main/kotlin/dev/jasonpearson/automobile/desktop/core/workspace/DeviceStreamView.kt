@@ -17,6 +17,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.rememberLiveVideoFrame
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 
@@ -39,7 +40,13 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 @Composable
 fun DeviceStreamView(
   column: DeviceColumn,
-  sourceFactory: (deviceId: String) -> VideoStreamSource = { VideoStreamClient() },
+  // Workspace panes default to the `low` preset (long side capped at 540, ~2 Mbps): pane real
+  // estate can't show more pixels than that anyway, and decode cost scales with pixel count, which
+  // is what makes dozens of concurrent farm panes affordable. Hoisted so a host that wants a
+  // full-resolution mirror can pass VideoStreamQuality.High or a different source entirely.
+  sourceFactory: (deviceId: String) -> VideoStreamSource = {
+    VideoStreamClient(quality = VideoStreamQuality.Low)
+  },
 ) {
   val source = remember(column.deviceId) { sourceFactory(column.deviceId) }
   val liveFrame = rememberLiveVideoFrame(source, column.deviceId)

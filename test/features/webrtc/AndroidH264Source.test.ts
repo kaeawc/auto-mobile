@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import {
   ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS,
   AndroidH264Source,
+  capToQualityPreset,
   type SpawnedProcess,
 } from "../../../src/features/webrtc/AndroidH264Source";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -97,6 +98,26 @@ describe("AndroidH264Source", () => {
     const size = spawnArgs[0][spawnArgs[0].indexOf("--size") + 1];
     const [width, height] = size.split("x").map(Number);
     expect(Math.ceil(width / 16) * Math.ceil(height / 16)).toBeLessThanOrEqual(8192);
+    await source.stop();
+  });
+
+  test("caps the resolved display size to the quality preset's long side", async () => {
+    // Mirrors the on-device VideoServer.calculateOutputDimensions semantics:
+    // low caps the LONGER dimension at 540, scaling the other to even pixels.
+    const { source, spawnArgs } = makeSource({ quality: "low" }, "Physical size: 1080x2400\n");
+    await source.start();
+    const args = spawnArgs[0].join(" ");
+    expect(args).toContain("--size 242x540");
+    await source.stop();
+  });
+
+  test("an explicit size wins over the quality preset", async () => {
+    const { source, spawnArgs } = makeSource({
+      quality: "low",
+      size: { width: 720, height: 1280 },
+    });
+    await source.start();
+    expect(spawnArgs[0].join(" ")).toContain("--size 720x1280");
     await source.stop();
   });
 
@@ -254,5 +275,35 @@ describe("AndroidH264Source", () => {
     expect(captured).not.toBeNull();
     expect((captured as unknown as Error).message).toBe("adb not found");
     expect(source.isRunning).toBe(false);
+  });
+});
+
+describe("capToQualityPreset", () => {
+  test("caps a portrait display by height, matching the on-device scaler", () => {
+    expect(capToQualityPreset({ width: 1080, height: 2400 }, "low")).toEqual({
+      width: 242,
+      height: 540,
+    });
+  });
+
+  test("caps a landscape display by width", () => {
+    expect(capToQualityPreset({ width: 2400, height: 1080 }, "low")).toEqual({
+      width: 540,
+      height: 242,
+    });
+  });
+
+  test("never upscales a display already within the preset", () => {
+    expect(capToQualityPreset({ width: 320, height: 480 }, "low")).toEqual({
+      width: 320,
+      height: 480,
+    });
+  });
+
+  test("passes the size through unchanged without a preset", () => {
+    expect(capToQualityPreset({ width: 1440, height: 3200 }, undefined)).toEqual({
+      width: 1440,
+      height: 3200,
+    });
   });
 });

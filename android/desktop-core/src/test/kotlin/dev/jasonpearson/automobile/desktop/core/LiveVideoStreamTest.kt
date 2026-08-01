@@ -5,11 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
-import dev.jasonpearson.automobile.desktop.core.video.toImageBitmap
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import kotlinx.coroutines.CompletableDeferred
 
 @OptIn(ExperimentalTestApi::class)
 class LiveVideoStreamTest {
@@ -68,28 +66,19 @@ class LiveVideoStreamTest {
   }
 
   @Test
-  fun `does not restore a frame decoded after the relay becomes unavailable`() = runComposeUiTest {
+  fun `does not adopt a frame emitted after the relay becomes unavailable`() = runComposeUiTest {
+    // A frame can race the relay's death (it was decoded just before, delivered just after). The
+    // collector gates on the CURRENT stream state, so the dead mirror stays cleared.
     val source = FakeVideoStreamSource()
-    val decodingStarted = CompletableDeferred<Unit>()
-    val allowDecodingToFinish = CompletableDeferred<Unit>()
     var observedFrame: androidx.compose.ui.graphics.ImageBitmap? = null
 
     setContent {
-      val liveFrame =
-        rememberLiveVideoFrame(source, "emulator-5554") { frame ->
-          decodingStarted.complete(Unit)
-          allowDecodingToFinish.await()
-          frame.toImageBitmap()
-        }
+      val liveFrame = rememberLiveVideoFrame(source, "emulator-5554")
       SideEffect { observedFrame = liveFrame?.bitmap }
     }
 
-    source.emitFrame(width = 1, height = 1)
-    decodingStarted.await()
     source.becomeUnavailable()
-    waitUntil { observedFrame == null }
-
-    allowDecodingToFinish.complete(Unit)
+    source.emitFrame(width = 1, height = 1)
     waitForIdle()
     assertNull(observedFrame)
   }

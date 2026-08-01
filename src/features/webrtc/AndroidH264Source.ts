@@ -269,7 +269,9 @@ export class AndroidH264Source implements H264CaptureSource {
       const { stdout } = await adb.executeCommand("shell wm size");
       const match = /Physical size:\s*(\d+)x(\d+)/.exec(stdout);
       if (match) {
-        this.resolvedSize = capToLevel42({ width: Number(match[1]), height: Number(match[2]) });
+        this.resolvedSize = capToLevel42(
+          capToQualityPreset({ width: Number(match[1]), height: Number(match[2]) }, this.options.quality)
+        );
         return this.resolvedSize;
       }
     } catch (error) {
@@ -278,9 +280,47 @@ export class AndroidH264Source implements H264CaptureSource {
     // `wm size` is unavailable on a few older/restricted devices. Keep that
     // fallback within the Level 4.2 SDP capability instead of emitting native
     // display resolution with an unbounded SPS level.
-    this.resolvedSize = DEFAULT_SCREENRECORD_SIZE;
+    this.resolvedSize = capToQualityPreset(DEFAULT_SCREENRECORD_SIZE, this.options.quality);
     return this.resolvedSize;
   }
+}
+
+/**
+ * Aspect-preserving resolution caps mirroring the on-device video-server
+ * presets (`android/video-server/.../QualityPreset.kt`). The persistent encoder
+ * applies its preset on-device (`VideoServer.calculateOutputDimensions` caps
+ * the LONGER dimension and scales the other proportionally); this applies the
+ * same bound to the `screenrecord` fallback so a farm viewer that asked for
+ * `low` does not silently pay full-resolution decode when the persistent
+ * encoder is absent.
+ */
+const QUALITY_PRESET_MAX_LONG_SIDE: Record<"low" | "medium" | "high", number> = {
+  low: 540,
+  medium: 720,
+  high: 1080,
+};
+
+/**
+ * Scale [size] down (never up) so its longer side fits the [quality] preset,
+ * truncating to even pixels exactly as the on-device scaler does.
+ */
+export function capToQualityPreset(
+  size: { width: number; height: number },
+  quality: "low" | "medium" | "high" | undefined
+): { width: number; height: number } {
+  if (!quality) {
+    return size;
+  }
+  const maxLongSide = QUALITY_PRESET_MAX_LONG_SIDE[quality];
+  const longSide = Math.max(size.width, size.height);
+  if (longSide <= maxLongSide) {
+    return { width: size.width & ~1, height: size.height & ~1 };
+  }
+  const scale = maxLongSide / longSide;
+  if (size.height >= size.width) {
+    return { width: Math.trunc(size.width * scale) & ~1, height: maxLongSide };
+  }
+  return { width: maxLongSide, height: Math.trunc(size.height * scale) & ~1 };
 }
 
 function capToLevel42(size: { width: number; height: number }): { width: number; height: number } {

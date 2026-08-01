@@ -157,7 +157,6 @@ import dev.jasonpearson.automobile.desktop.core.video.LiveVideoFrame
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
-import dev.jasonpearson.automobile.desktop.core.video.toImageBitmap
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
@@ -203,30 +202,19 @@ internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String
  */
 
 /**
- * Connects a live-mirroring source for this composition and exposes only its newest decoded frame.
+ * Connects a live-mirroring source for this composition and exposes only its newest frame.
  *
- * The source already drops old decoded frames; conflation here also prevents Compose conversion
- * from accumulating work when the relay runs faster than the UI can draw. A refused or unavailable
+ * Frames arrive ready to draw — the client converts, sequences, and timestamps them on its reader
+ * thread (issues #3348/#4786) — so this only conflates to the newest and gates on the stream state:
+ * a frame that raced the relay's death must not restore a dead mirror. A refused or unavailable
  * relay clears the frame, allowing [DeviceScreenView] to continue rendering screenshot updates.
  */
 @Composable
 internal fun rememberLiveVideoFrame(
   source: VideoStreamSource?,
   deviceId: String?,
-  nowMs: () -> Long = MONOTONIC_NOW_MS,
-  frameConverter:
-    suspend (
-      dev.jasonpearson.automobile.desktop.core.video.DecodedFrame
-    ) -> androidx.compose.ui.graphics.ImageBitmap =
-    { frame ->
-      withContext(Dispatchers.Default) { frame.toImageBitmap() }
-    },
 ): LiveVideoFrame? {
   var liveFrame by remember(source, deviceId) { mutableStateOf<LiveVideoFrame?>(null) }
-  // Monotonic per (source, deviceId): identifies which decoded frame is on screen so a stalled
-  // relay — which keeps its socket, its Streaming state and its last bitmap — is distinguishable
-  // from a live one (issue #3348).
-  val frameSequence = remember(source, deviceId) { java.util.concurrent.atomic.AtomicLong(0L) }
 
   DisposableEffect(source, deviceId) {
     if (source != null && deviceId != null) source.connect(deviceId)
@@ -239,18 +227,7 @@ internal fun rememberLiveVideoFrame(
   LaunchedEffect(source) {
     source?.frames?.conflate()?.collect { frame ->
       if (source.state.value is VideoStreamState.Streaming) {
-        val decodedFrame = frameConverter(frame)
-        if (source.state.value is VideoStreamState.Streaming) {
-          liveFrame =
-            LiveVideoFrame(
-              bitmap = decodedFrame,
-              sequence = frameSequence.incrementAndGet(),
-              receivedAtMs = nowMs(),
-              // The stream's config packets attest the display rotation; carrying it here lets
-              // DeviceControlSession re-prove orientation from the live frame alone (issue #4786).
-              rotation = frame.rotation,
-            )
-        }
+        liveFrame = frame
       }
     }
   }
@@ -810,7 +787,7 @@ fun AutoMobileContent(
         null
       }
     }
-  val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId, MONOTONIC_NOW_MS)
+  val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId)
   // Forces the control-availability decision to be re-evaluated on a timer, not only when an
   // observation source produces an update (issue #3348). A stalled observation stream produces
   // nothing at all — its staleness is visible only as time passing — so without this a frozen

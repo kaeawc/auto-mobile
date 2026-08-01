@@ -57,6 +57,7 @@ add_check "archive-extraction-boundary" "bun \"$PROJECT_ROOT/scripts/check-archi
 add_check "xcodebuild-boundary" "\"$PROJECT_ROOT/scripts/check-no-new-direct-xcodebuild.sh\"" "lint,ios" "Keep xcodebuild execution behind XcodebuildClient"
 add_check "daemon-launcher-boundary" "bash \"$PROJECT_ROOT/scripts/check-daemon-launcher-boundary.sh\"" "lint,conventions" "Require DaemonLauncher ownership for daemon process execution"
 add_check "ios-ctrl-proxy-process-boundary" "bun \"$PROJECT_ROOT/scripts/check-ios-ctrl-proxy-process-boundary.ts\"" "lint,conventions" "Keep CtrlProxy PID tooling behind its lifecycle client"
+add_check "lfs-pointers" "\"$PROJECT_ROOT/scripts/check-lfs-pointers.sh\"" "lint,conventions" "Reject full blobs committed where .gitattributes requires LFS pointers"
 add_check "datetime-now-literal" "\"$PROJECT_ROOT/scripts/validate-no-datetime-now-literal.sh\"" "lint" "Reject string-literal SQL time-expression defaults in migrations"
 add_check "desktop-core-unified" "\"$PROJECT_ROOT/scripts/android/validate-no-desktop-core-unified.sh\"" "lint,android" "Reject abandoned desktop-core unified socket-client package"
 add_check "workflow-assertion-triggers" "\"$PROJECT_ROOT/scripts/ci/validate_workflow_assertion_triggers.sh\"" "config,ci" "Ensure workflow-YAML assertion tests are triggered by the paths they assert"

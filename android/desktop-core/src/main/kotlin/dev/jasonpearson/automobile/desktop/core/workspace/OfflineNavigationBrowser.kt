@@ -84,6 +84,14 @@ fun OfflineNavigationBrowser(
   navigationDataSourceProvider: ((String?) -> NavigationDataSource)? = null
 ) {
   val graph = LocalAutoMobileGraph.current
+  // Construct RealNavigationDataSource directly rather than routing through
+  // DefaultDataSourceFactory.createNavigationDataSource (which wraps it in
+  // CachedNavigationDataSource) — intentionally bypassing the cache. Two reasons: (1) each fetch
+  // runs once per (appId, attempt) inside a LaunchedEffect, not per recomposition, so there is no
+  // recomposition-driven refetch storm for a cache to absorb; and (2) CachedNavigationDataSource
+  // caches Result.Error alongside success, so a retry (attempt++) would replay the STALE cached
+  // error instead of re-fetching, defeating the error -> retry -> success flow. Caching here would
+  // buy nothing and would need invalidation-on-retry to stay correct.
   val provider: (String?) -> NavigationDataSource =
     navigationDataSourceProvider
       ?: { appId ->

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
 import { FakeIOSCtrlProxyBundleDownloader } from "../fakes/FakeIOSCtrlProxyBundleDownloader";
+import { FakeCtrlProxyCodesignVerifier } from "../fakes/FakeCtrlProxyCodesignVerifier";
 import { getTempDir } from "../../src/utils/tempDir";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -34,6 +35,11 @@ describe("IOSCtrlProxyBuilder", function() {
     // Reset singleton instances
     IOSCtrlProxyBuilder.resetInstances();
     IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("");
+    // Default to a passing, in-process codesign verifier so pre-launch tests
+    // never spawn a real `codesign`/`spctl` (issue #4760).
+    IOSCtrlProxyBuilder.setCodesignVerifierForTesting(new FakeCtrlProxyCodesignVerifier());
+    delete process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN;
+    delete process.env.AUTOMOBILE_IOS_HELPER_TEAM_ID;
   });
 
   afterEach(async function() {
@@ -79,6 +85,9 @@ describe("IOSCtrlProxyBuilder", function() {
     } else {
       process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwd;
     }
+
+    delete process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN;
+    delete process.env.AUTOMOBILE_IOS_HELPER_TEAM_ID;
 
     // Reset singleton instances
     IOSCtrlProxyBuilder.resetInstances();
@@ -779,6 +788,123 @@ describe("IOSCtrlProxyBuilder", function() {
       } finally {
         statSpy.mockRestore();
       }
+    });
+
+    async function buildForCodesign(): Promise<{
+      builder: IOSCtrlProxyBuilder;
+      verifier: FakeCtrlProxyCodesignVerifier;
+    }> {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = "xctest-checksum";
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      const verifier = new FakeCtrlProxyCodesignVerifier();
+      IOSCtrlProxyBuilder.setCodesignVerifierForTesting(verifier);
+
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+      await builder.build("simulator");
+      return { builder, verifier };
+    }
+
+    test("verifyRunnerBinaryBeforeLaunch runs codesign against the runner app before launch (#4760)", async function() {
+      if (process.platform !== "darwin") {
+        // codesign/spctl are macOS-only; the check no-ops off darwin.
+        return;
+      }
+      const { builder, verifier } = await buildForCodesign();
+
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+
+      expect(verifier.verifiedPaths).toHaveLength(1);
+      expect(verifier.verifiedPaths[0].endsWith(path.join("CtrlProxyUITests-Runner.app"))).toBe(true);
+    });
+
+    test("codesign verification is skipped (exec seam never invoked) on non-darwin (#4760)", async function() {
+      if (process.platform === "darwin") {
+        return;
+      }
+      const { builder, verifier } = await buildForCodesign();
+
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+
+      expect(verifier.verifiedPaths).toHaveLength(0);
+    });
+
+    test("codesign --verify failure warns and proceeds by default (#4760)", async function() {
+      if (process.platform !== "darwin") {
+        return;
+      }
+      const { builder, verifier } = await buildForCodesign();
+      verifier.outcome = { verified: false, notarized: true, teamId: "ABCDE12345", detail: "bad seal" };
+
+      // DEFAULT = warn-and-proceed: no throw.
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      expect(verifier.verifiedPaths).toHaveLength(1);
+    });
+
+    test("codesign --verify failure refuses launch when require flag is set (#4760)", async function() {
+      if (process.platform !== "darwin") {
+        return;
+      }
+      const { builder, verifier } = await buildForCodesign();
+      verifier.outcome = { verified: false, notarized: true, teamId: "ABCDE12345", detail: "bad seal" };
+      process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
+        .rejects.toThrow("Refusing to launch");
+    });
+
+    test("Team-ID mismatch warns by default and refuses under the require flag (#4760)", async function() {
+      if (process.platform !== "darwin") {
+        return;
+      }
+      const { builder, verifier } = await buildForCodesign();
+      verifier.outcome = { verified: true, notarized: true, teamId: "REALTEAMID", detail: "" };
+      process.env.AUTOMOBILE_IOS_HELPER_TEAM_ID = "PINNEDTEAMID";
+
+      // Mismatch alone warns and proceeds.
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+
+      // With the require flag it becomes a refusal.
+      process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
+        .rejects.toThrow("Team ID mismatch");
+    });
+
+    test("matching pinned Team ID passes without warning (#4760)", async function() {
+      if (process.platform !== "darwin") {
+        return;
+      }
+      const { builder, verifier } = await buildForCodesign();
+      verifier.outcome = { verified: true, notarized: true, teamId: "PINNEDTEAMID", detail: "" };
+      process.env.AUTOMOBILE_IOS_HELPER_TEAM_ID = "PINNEDTEAMID";
+      process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+
+      // Fail-closed mode, but a matching Team ID and verified signature pass.
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      expect(verifier.verifiedPaths).toHaveLength(1);
+    });
+
+    test("a broken codesign toolchain warns by default and refuses under the require flag (#4760)", async function() {
+      if (process.platform !== "darwin") {
+        return;
+      }
+      const { builder, verifier } = await buildForCodesign();
+      verifier.throwError = new Error("codesign: command not found");
+
+      // Tool error warns and proceeds by default.
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+
+      process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
+        .rejects.toThrow("Refusing to launch");
     });
 
     test("fails closed when AUTOMOBILE_VERSION is pinned to an unknown version (#2746)", async function() {

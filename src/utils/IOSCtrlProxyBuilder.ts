@@ -40,6 +40,53 @@ import {
   type IosPrerequisiteDetector,
   DefaultIosPrerequisiteDetector
 } from "./ios-cmdline-tools/IosPrerequisiteDetector";
+import {
+  type CodesignVerificationOutcome,
+  type CtrlProxyCodesignVerifier,
+  DefaultCtrlProxyCodesignVerifier
+} from "./ios-cmdline-tools/CtrlProxyCodesignVerifier";
+
+/**
+ * When truthy (`1`/`true`), a failed `codesign --verify`, a failed
+ * `spctl --assess`, or a Team-ID mismatch turns the default WARNING into a hard
+ * refusal to launch the downloaded iOS helper (issue #4760). Off by default so
+ * dev / self-built / unsigned local helpers still run — code signing is not
+ * OS-enforced on the simulator anyway, so the value here is defense-in-depth on
+ * physical devices alongside the #4759 hash re-verification.
+ */
+export const IOS_HELPER_REQUIRE_CODESIGN_ENV = "AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN";
+/**
+ * Optional pinned Apple Team ID. When set, the runner bundle's
+ * `TeamIdentifier` must match; a mismatch warns (or refuses, under
+ * {@link IOS_HELPER_REQUIRE_CODESIGN_ENV}). Unset by default because we ship no
+ * canonical Team ID (issue #4760).
+ */
+export const IOS_HELPER_TEAM_ID_ENV = "AUTOMOBILE_IOS_HELPER_TEAM_ID";
+
+/**
+ * Turn a codesign inspection outcome into a list of human-readable problems,
+ * honoring an optional pinned Team ID (issue #4760). An empty list means the
+ * runner passed every applicable check.
+ */
+function collectCodesignProblems(
+  outcome: CodesignVerificationOutcome,
+  pinnedTeamId: string | null
+): string[] {
+  const problems: string[] = [];
+  if (!outcome.verified) {
+    problems.push("codesign --verify --deep --strict failed");
+  }
+  if (outcome.notarized === false) {
+    problems.push("spctl --assess (notarization/Gatekeeper) failed");
+  }
+  if (pinnedTeamId && outcome.teamId && outcome.teamId !== pinnedTeamId) {
+    problems.push(`Team ID mismatch (pinned ${pinnedTeamId}, bundle ${outcome.teamId})`);
+  }
+  if (pinnedTeamId && !outcome.teamId) {
+    problems.push(`Team ID pin ${pinnedTeamId} set but the bundle is unsigned / has no Team ID`);
+  }
+  return problems;
+}
 
 /**
  * Result of CtrlProxy download/install
@@ -130,6 +177,10 @@ export class IOSCtrlProxyBuilder {
   // Test seam for the builder the static prefetch drives; null uses getInstance().
   private static prefetchBuilderOverride: PrefetchBuilder | null = null;
 
+  // Pre-launch codesign/notarization gate (issue #4760). Static seam mirrors
+  // `timer` so tests inject a fake and never spawn a real `codesign`/`spctl`.
+  private static codesignVerifier: CtrlProxyCodesignVerifier = new DefaultCtrlProxyCodesignVerifier();
+
   // Singleton instances per configuration
   private static instances: Map<string, IOSCtrlProxyBuilder> = new Map();
 
@@ -196,6 +247,15 @@ export class IOSCtrlProxyBuilder {
     IOSCtrlProxyBuilder.timer = defaultTimer;
     IOSCtrlProxyBuilder.iosPrerequisiteDetector = new DefaultIosPrerequisiteDetector();
     IOSCtrlProxyBuilder.prefetchBuilderOverride = null;
+    IOSCtrlProxyBuilder.codesignVerifier = new DefaultCtrlProxyCodesignVerifier();
+  }
+
+  /**
+   * Override the codesign/notarization verifier for testing (issue #4760). Null
+   * restores the default `codesign`/`spctl`-backed verifier.
+   */
+  public static setCodesignVerifierForTesting(verifier: CtrlProxyCodesignVerifier | null): void {
+    IOSCtrlProxyBuilder.codesignVerifier = verifier ?? new DefaultCtrlProxyCodesignVerifier();
   }
 
   /**
@@ -1096,6 +1156,104 @@ export class IOSCtrlProxyBuilder {
   public async verifyRunnerBinaryBeforeLaunch(platform: IOSCtrlProxyPlatform): Promise<void> {
     await this.assertDerivedDataDirOwnedByCurrentUid();
     await this.assertRunnerBinaryHash(platform, "pre-launch");
+    await this.verifyRunnerCodesign(platform);
+  }
+
+  /**
+   * Second integrity control before launching the downloaded helper (issue
+   * #4760): run `codesign --verify --deep --strict` (and `spctl --assess` for
+   * notarization) against the extracted runner app, composing with — not
+   * replacing — the #4759 SHA-256 re-verification above.
+   *
+   * DEFAULT = WARN: a verify failure, a failed notarization assess, or a
+   * Team-ID mismatch is logged at WARN and launch proceeds. Hard-refusing by
+   * default would break dev / self-built / unsigned local helpers and requires a
+   * pinned Apple Team ID we do not ship. Flip to fail-closed with
+   * {@link IOS_HELPER_REQUIRE_CODESIGN_ENV}=1; pin a Team ID with
+   * {@link IOS_HELPER_TEAM_ID_ENV}.
+   *
+   * macOS-only: `codesign`/`spctl` do not exist on other platforms and the
+   * simulator does not OS-enforce signing, so this no-ops off darwin (the exec
+   * seam is never invoked) — mirroring {@link assertDerivedDataDirOwnedByCurrentUid}.
+   */
+  private async verifyRunnerCodesign(platform: IOSCtrlProxyPlatform): Promise<void> {
+    if (process.platform !== "darwin") {
+      logger.debug(`[IOSCtrlProxyBuilder] codesign verification skipped on ${process.platform} (macOS-only)`);
+      return;
+    }
+
+    const appPath = await this.getRunnerAppPath(platform);
+    if (!appPath) {
+      logger.warn(`[IOSCtrlProxyBuilder] Runner app bundle missing for ${platform}; skipping codesign verification`);
+      return;
+    }
+
+    const requireCodesign = isTruthyEnvValue(process.env[IOS_HELPER_REQUIRE_CODESIGN_ENV]);
+    const pinnedTeamId = process.env[IOS_HELPER_TEAM_ID_ENV]?.trim() || null;
+
+    let outcome: CodesignVerificationOutcome;
+    try {
+      outcome = await IOSCtrlProxyBuilder.codesignVerifier.verifyAppBundle(appPath);
+    } catch (error) {
+      // The codesign/spctl tools themselves errored (e.g. not installed). Treat
+      // as a non-fatal warning by default so a broken toolchain does not block
+      // launch; fail closed only when the operator opted in.
+      const message = `Code-signing verification could not run for the ${platform} runner: ` +
+        `${error instanceof Error ? error.message : String(error)}`;
+      this.applyCodesignPolicy(message, requireCodesign, error);
+      return;
+    }
+
+    const problems = collectCodesignProblems(outcome, pinnedTeamId);
+    if (problems.length === 0) {
+      logger.info("[IOSCtrlProxyBuilder] Runner codesign verified", {
+        platform,
+        teamId: outcome.teamId,
+        notarized: outcome.notarized,
+      });
+      return;
+    }
+
+    const summary = `Code-signing verification issues for the ${platform} runner: ${problems.join("; ")}.` +
+      (outcome.detail ? ` (${outcome.detail})` : "");
+    this.applyCodesignPolicy(summary, requireCodesign);
+  }
+
+  /**
+   * Apply the warn-vs-refuse policy for a code-signing problem (issue #4760).
+   * DEFAULT = warn-and-proceed; refuse (throw {@link ActionableError}) only when
+   * {@link IOS_HELPER_REQUIRE_CODESIGN_ENV} opts into fail-closed.
+   */
+  private applyCodesignPolicy(summary: string, requireCodesign: boolean, cause?: unknown): void {
+    if (requireCodesign) {
+      throw new ActionableError(
+        `${summary} Refusing to launch because ${IOS_HELPER_REQUIRE_CODESIGN_ENV} is set.`
+      );
+    }
+    logger.warn(
+      `[IOSCtrlProxyBuilder] ${summary} Proceeding anyway — code signing is not OS-enforced on the ` +
+      `simulator, and the #4759 SHA-256 check already covers integrity. Set ` +
+      `${IOS_HELPER_REQUIRE_CODESIGN_ENV}=1 to refuse launch, and ${IOS_HELPER_TEAM_ID_ENV} to pin a Team ID.`,
+      cause
+    );
+  }
+
+  /** Path to the extracted runner `.app` bundle codesign verifies (issue #4760). */
+  public async getRunnerAppPath(platform: IOSCtrlProxyPlatform = "simulator"): Promise<string | null> {
+    const buildPath = await this.getBuildProductsPath(platform);
+    if (!buildPath) {
+      return null;
+    }
+    const runnerAppPath = path.join(buildPath, "CtrlProxyUITests-Runner.app");
+    try {
+      await fs.access(runnerAppPath);
+      return runnerAppPath;
+    } catch (error) {
+      // Runner app not present yet (not built/extracted); null lets the caller
+      // skip codesign rather than treating a missing bundle as a hard failure.
+      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      return null;
+    }
   }
 
   /**

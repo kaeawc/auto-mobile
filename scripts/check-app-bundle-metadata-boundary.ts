@@ -81,7 +81,18 @@ const directlyExecutesCodesign = (file: string): Array<{ line: number; column: n
 
 // Production diagnostics must use AppBundleMetadataClient as well. Tests are not
 // scanned, and any future source exception needs a documented entry here.
-const exceptions = new Map<string, string>([]);
+const exceptions = new Map<string, string>([
+  [
+    "src/utils/ios-cmdline-tools/CtrlProxyCodesignVerifier.ts",
+    // Pre-launch integrity gate for the DOWNLOADED iOS helper (issue #4760): an
+    // argv-only `codesign --verify --deep --strict` / `codesign -dvv` plus
+    // `spctl --assess`. This is a launch-time signature/notarization control,
+    // not entitlement-metadata inspection, and it also owns `spctl` (which
+    // AppBundleMetadataClient has no business executing). Injection-safe: the
+    // bundle path is passed as a single literal argv element, never a shell string.
+    "CtrlProxy launch-gate signature/notarization verification (#4760).",
+  ],
+]);
 const violations = sourceFiles(SOURCE_ROOT)
   .map(file => ({ file, path: repoPath(file) }))
   .filter(({ path }) => path !== OWNER && !exceptions.has(path))

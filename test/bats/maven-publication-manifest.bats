@@ -200,12 +200,24 @@ JSON
   [[ "$output" != *"BUDGET OK"* ]]
 }
 
-@test "a budget threshold too large for bash fails closed (jq scientific notation)" {
+@test "a budget threshold too large for bash fails closed (scientific notation)" {
   # jq accepts 1e100 as an integer-valued number but emits "1E+100", which bash
   # cannot compare -- must fail closed, not silently report BUDGET OK.
   local budget="$STAGE/huge-budget.json"
   cat >"$budget" <<'JSON'
 { "perRelease": { "maxFiles": 1e100 } }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"BUDGET OK"* ]]
+}
+
+@test "a plain-decimal threshold above the exact-integer cap fails closed" {
+  # 2^63 is all digits (passes a ^[0-9]+$ regex) but overflows bash's signed
+  # 64-bit arithmetic; the jq cap at 2^53 rejects it.
+  local budget="$STAGE/overflow-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": { "maxJavadocJarBytes": 9223372036854775808 } }
 JSON
   run bash "$SCRIPT" "$STAGE" --budget "$budget"
   [ "$status" -ne 0 ]

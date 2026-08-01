@@ -7,6 +7,7 @@ import { NoOpPerformanceTracker, type PerformanceTracker } from "./PerformanceTr
 import {
   IOS_CTRL_PROXY_APP_HASH,
   LATEST_RELEASE_VERSION,
+  assertHttpsAssetUrl,
   isExplicitPin,
   isPinnedVersionKnown,
   resolveAssetVersion,
@@ -807,6 +808,9 @@ export class IOSCtrlProxyBuilder {
   private getBundleUrl(): string {
     const override = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL?.trim();
     if (override) {
+      // Reject a plaintext http:// bundle override unless the opt-out is set
+      // (issue #4761); resolveIpaUrl already enforces https on the mirror knob.
+      assertHttpsAssetUrl(override, "AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL");
       return override;
     }
     return resolveIpaUrl();
@@ -898,6 +902,12 @@ export class IOSCtrlProxyBuilder {
         } catch (error) {
           if (isLatest && cachedBundleExists) {
             logger.warn(`[IOSCtrlProxyBuilder] Download failed, using cached bundle: ${error instanceof Error ? error.message : String(error)}`);
+            // `cachedBundleExists` only proves the cached IPA is size-valid — NOT
+            // that its checksum matches. build() skips extractBundle+verifyBundle
+            // for the fallback path, so checksum-verify here before reuse instead
+            // of trusting a size-valid-but-unverified cached IPA (issue #4761).
+            // A mismatch throws and fails closed rather than reusing it silently.
+            await this.verifyBundle(bundlePath);
             return { bundlePath, usedCachedFallback: true };
           }
           throw error;
@@ -1104,10 +1114,13 @@ export class IOSCtrlProxyBuilder {
       logger.warn(`[IOSCtrlProxyBuilder] App bundle hash verification skipped for ${platform} (no hash provided)`);
     }
 
-    // Verify the release-selected runner executable SHA256 for simulator.
-    if (platform === "simulator") {
-      await this.assertRunnerBinaryHash(platform, "post-extract");
-    }
+    // Verify the release-selected runner executable SHA256 for BOTH simulator
+    // and device (issue #4761). On device the app-bundle hash check above is
+    // skipped because IOS_CTRL_PROXY_APP_HASH ships empty, so re-hashing the
+    // runner executable is the only independent post-extract integrity signal
+    // there — previously it ran for simulator only. `assertRunnerBinaryHash`
+    // still no-ops with a warning when no runner checksum is configured.
+    await this.assertRunnerBinaryHash(platform, "post-extract");
   }
 
   /**

@@ -376,10 +376,57 @@ export const AUTOMOBILE_VERSION_ENV = "AUTOMOBILE_VERSION";
 /** Environment variable that mirrors the APK/IPA download host for offline CI. */
 export const AUTOMOBILE_ASSET_BASE_URL_ENV = "AUTOMOBILE_ASSET_BASE_URL";
 
+/**
+ * Opt-out that permits a plaintext `http://` asset base/bundle URL (issue #4761).
+ * DEFAULT = require `https:`; asset downloads over cleartext are a
+ * confidentiality/downgrade risk (a network attacker can observe the fetch and,
+ * combined with a redirect, weaken the delivery path even though the pinned
+ * checksum still blocks substitution). Set to `1`/`true` ONLY for a trusted
+ * loopback/dev mirror (e.g. `http://127.0.0.1:8080` or `http://localhost`).
+ */
+export const AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV = "AUTOMOBILE_ALLOW_INSECURE_ASSET_URL";
+
 /** Default GitHub Releases base for versioned asset downloads. */
 export const DEFAULT_ASSET_BASE_URL = "https://github.com/kaeawc/auto-mobile/releases/download";
 
 type EnvLike = Record<string, string | undefined>;
+
+/** True when the plaintext-http opt-out ({@link AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV}) is set. */
+function isInsecureAssetUrlAllowed(env: EnvLike): boolean {
+  const value = env[AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV];
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
+/**
+ * Enforce `https:` on an asset download URL (issue #4761). Rejects `http://` and
+ * any other non-TLS scheme unless {@link AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV}
+ * opts into plaintext for a trusted loopback/dev mirror. Throws
+ * {@link ActionableError} — used both for the `AUTOMOBILE_ASSET_BASE_URL` mirror
+ * and the iOS bundle-URL override.
+ *
+ * @param label the env var / knob name to name in the error message.
+ */
+export function assertHttpsAssetUrl(url: string, label: string, env: EnvLike = process.env): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new ActionableError(
+      `${label} must be an absolute URL, for example https://mirror.example/auto-mobile.`
+    );
+  }
+  if (parsed.protocol === "https:") {
+    return;
+  }
+  if (isInsecureAssetUrlAllowed(env)) {
+    return;
+  }
+  throw new ActionableError(
+    `${label} must use https:// (got ${parsed.protocol}//). Plaintext/non-TLS asset downloads are a ` +
+    `confidentiality and downgrade risk. Set ${AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV}=1 to opt out ` +
+    `for a trusted loopback/dev mirror.`
+  );
+}
 
 /**
  * Resolve the pinned version from `AUTOMOBILE_VERSION`. Returns the trimmed value
@@ -445,6 +492,8 @@ export function resolveAssetBaseUrl(env: EnvLike = process.env): string {
         `use a path-only base URL such as ${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}.`
       );
     }
+    // Require https:// unless the plaintext opt-out is set (issue #4761).
+    assertHttpsAssetUrl(`${parsed.origin}${parsed.pathname}`, AUTOMOBILE_ASSET_BASE_URL_ENV, env);
     return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "");
   }
   return DEFAULT_ASSET_BASE_URL;

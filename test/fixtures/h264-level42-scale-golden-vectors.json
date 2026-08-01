@@ -1,0 +1,28 @@
+{
+  "description": "Golden vectors pinning the H.264 Level 4.2 macroblock budget and the resolution/bitrate arithmetic across the TypeScript sender (src/features/webrtc/IosH264Source.ts + h264Level.ts) and the in-helper Swift encoder (ios/screen-capture ScreenCaptureCore H264EncodeMath). Both suites assert their own constant equals maxMacroblocksPerFrame and reproduce every scale/bitrate case, so the cross-language Level 4.2 capability advertised in the WHIP SDP cannot drift from what the helper actually encodes. Regenerate with scratch/gen.ts (imports the real TS functions).",
+  "maxMacroblocksPerFrame": 8192,
+  "macroblockSize": 16,
+  "minEncoderDimension": 2,
+  "defaultBitsPerPixel": 0.1,
+  "scaleCases": [
+    { "width": 1170, "height": 2532, "scaled": { "width": 974, "height": 2112 }, "macroblocks": 11766 },
+    { "width": 886, "height": 1920, "scaled": null, "macroblocks": 6720 },
+    { "width": 750, "height": 1334, "scaled": null, "macroblocks": 3948 },
+    { "width": 286, "height": 658, "scaled": null, "macroblocks": 756 },
+    { "width": 1284, "height": 2778, "scaled": { "width": 976, "height": 2110 }, "macroblocks": 14094 },
+    { "width": 3840, "height": 2160, "scaled": { "width": 1904, "height": 1072 }, "macroblocks": 32400 },
+    { "width": 1920, "height": 1080, "scaled": null, "macroblocks": 8160 },
+    { "width": 1, "height": 1, "scaled": { "width": 2, "height": 2 }, "macroblocks": 1 },
+    { "width": 3, "height": 5, "scaled": { "width": 2, "height": 4 }, "macroblocks": 1 },
+    { "width": 8192, "height": 8192, "scaled": { "width": 1440, "height": 1440 }, "macroblocks": 262144 },
+    { "width": 640, "height": 480, "scaled": null, "macroblocks": 1200 },
+    { "width": 911, "height": 1940, "scaled": { "width": 910, "height": 1940 }, "macroblocks": 6954 }
+  ],
+  "bitrateCases": [
+    { "width": 286, "height": 658, "fps": 15, "bitrateBps": 282282 },
+    { "width": 911, "height": 1940, "fps": 15, "bitrateBps": 2651010 },
+    { "width": 1170, "height": 2532, "fps": 10, "bitrateBps": 2962440 },
+    { "width": 640, "height": 480, "fps": 30, "bitrateBps": 921600 },
+    { "width": 100, "height": 100, "fps": 5, "bitrateBps": 5000 }
+  ]
+}

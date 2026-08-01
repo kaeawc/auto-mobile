@@ -35,6 +35,19 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     private let writer: FrameWriter
     private let onFatalError: (Error) -> Void
     private let makeStream: StreamFactory
+    /// In-helper H.264 encode settings (issue #4788). `nil` keeps the default
+    /// raw-BGRA path byte-for-byte unchanged.
+    private let encodeSettings: CommandLineOptions.EncodeSettings?
+    /// Force-keyframe latch shared with the STDIN control channel; consumed by
+    /// the encoder on the next frame. Present even in raw mode (harmless there).
+    let forceKeyFrameLatch = ForceKeyFrameLatch()
+    /// Active encoder in `--encode h264` mode; recreated on a capture-size
+    /// change (seamless reconfig: the new session's first frame is a fresh
+    /// SPS/PPS + IDR).
+    private var encoder: H264VideoEncoder?
+    /// Pixel format requested from ScreenCaptureKit — 32BGRA for the raw path,
+    /// 420v (NV12) for the lowest-CPU encode path.
+    var configuredPixelFormat: OSType = kCVPixelFormatType_32BGRA
     /// Diagnostic lines (first-frame marker, reconfigure warnings) go here so
     /// tests can observe them; the default preserves the stderr behavior.
     private let diagnosticSink: (String) -> Void
@@ -67,20 +80,34 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         diagnosticSink: @escaping (String) -> Void = { line in
             FileHandle.standardError.write(Data(line.utf8))
         },
+        encode: CommandLineOptions.EncodeSettings? = nil,
         onFatalError: @escaping (Error) -> Void
     ) {
         self.writer = writer
         self.makeStream = makeStream
         self.diagnosticSink = diagnosticSink
+        self.encodeSettings = encode
         self.onFatalError = onFatalError
     }
+
+    /// Whether this session encodes H.264 in-process instead of streaming raw
+    /// BGRA.
+    var isEncoding: Bool { encodeSettings != nil }
 
     func start(window: SCWindow, fps: Int, audio: Bool) async throws {
         self.fps = fps
         audioEnabled = audio
         windowID = window.windowID
+        // 420v (NV12) is the lowest-CPU encode input: the delivered
+        // IOSurface-backed CVPixelBuffer feeds VTCompressionSession directly with
+        // no color conversion. The raw path keeps 32BGRA untouched.
+        if isEncoding {
+            configuredPixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        }
         let filter = SCContentFilter(desktopIndependentWindow: window)
-        let config = SimulatorCaptureSession.makeConfiguration(window: window, fps: fps, audio: audio)
+        let config = SimulatorCaptureSession.makeConfiguration(
+            window: window, fps: fps, audio: audio, pixelFormat: configuredPixelFormat
+        )
         configuredPixelWidth = config.width
         configuredPixelHeight = config.height
 
@@ -133,6 +160,8 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     }
 
     func stop() async {
+        encoder?.stop()
+        encoder = nil
         guard let stream = stream else { return }
         // removeStreamOutput breaks the SCStream → self retain cycle so the
         // session is collectable even before SCStream itself goes away.
@@ -167,12 +196,101 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let actualWidth = CVPixelBufferGetWidth(pixelBuffer)
         let actualHeight = CVPixelBufferGetHeight(pixelBuffer)
+
+        if isEncoding {
+            encodeScreenFrame(
+                pixelBuffer: pixelBuffer, sampleBuffer: sampleBuffer,
+                width: actualWidth, height: actualHeight
+            )
+            return
+        }
+
         if actualWidth != configuredPixelWidth || actualHeight != configuredPixelHeight {
             reconfigure(width: actualWidth, height: actualHeight)
         }
 
         if writer.write(sampleBuffer: sampleBuffer) {
             noteFrameWritten(width: actualWidth, height: actualHeight)
+        }
+    }
+
+    /// Encode-mode screen path (issue #4788). Converges the ScreenCaptureKit
+    /// output size to the Level 4.2 macroblock-budgeted encode resolution — so
+    /// SCK does the downscale, not a separate stage — then feeds the delivered
+    /// 420v buffer straight to VideoToolbox. On a size change the encoder is torn
+    /// down and recreated (seamless reconfig); the new session's first frame is a
+    /// fresh SPS/PPS + IDR.
+    private func encodeScreenFrame(
+        pixelBuffer: CVPixelBuffer,
+        sampleBuffer: CMSampleBuffer,
+        width: Int,
+        height: Int
+    ) {
+        let target = H264EncodeMath.resolveEncoderScale(
+            H264EncodeMath.EncoderSize(width: width, height: height)
+        ) ?? H264EncodeMath.EncoderSize(width: width, height: height)
+
+        // Ask SCK to deliver the encode resolution. Until it does, skip encoding
+        // rather than feed VideoToolbox a mismatched buffer size.
+        if width != target.width || height != target.height {
+            reconfigure(width: target.width, height: target.height)
+            return
+        }
+
+        // Delivered size now equals the encode target. (Re)create the encoder if
+        // absent or sized for a previous resolution.
+        if encoder == nil || encoder?.width != target.width || encoder?.height != target.height {
+            guard startEncoder(width: target.width, height: target.height) else { return }
+        }
+
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        if encoder?.encode(pixelBuffer: pixelBuffer, presentationTime: pts) == true {
+            noteFrameWritten(width: target.width, height: target.height)
+        }
+    }
+
+    /// Build and start a VideoToolbox encoder at `width`x`height`, resolving the
+    /// `AverageBitRate` from the delivered dimensions per the operator's bitrate
+    /// choice. Returns `false` (and surfaces a fatal error) when the session
+    /// cannot be created.
+    private func startEncoder(width: Int, height: Int) -> Bool {
+        encoder?.stop()
+        let bitrate = resolvedBitrateBps(width: width, height: height)
+        let newEncoder = H264VideoEncoder(
+            width: width,
+            height: height,
+            fps: fps,
+            averageBitRateBps: bitrate,
+            writer: writer,
+            forceKeyFrameLatch: forceKeyFrameLatch,
+            diagnosticSink: diagnosticSink,
+            onFatalError: { [weak self] message in
+                self?.onFatalError(EncoderOutputOverflowError(message: message))
+            }
+        )
+        do {
+            try newEncoder.start()
+        } catch {
+            onFatalError(error)
+            return false
+        }
+        encoder = newEncoder
+        return true
+    }
+
+    /// Resolve `AverageBitRate` (bps) from the delivered pixel dimensions and the
+    /// operator's bitrate choice. `nil` leaves the VideoToolbox default. The
+    /// policy (which choice) is set by the TS supervisor via CLI flags; only the
+    /// pixel-dimension arithmetic — which the helper alone knows pre-encode —
+    /// happens here, via the pure `H264EncodeMath`.
+    private func resolvedBitrateBps(width: Int, height: Int) -> Int? {
+        switch encodeSettings?.bitrate {
+        case .explicitBps(let bps):
+            return bps
+        case .bitsPerPixel(let bpp):
+            return H264EncodeMath.bitrateBps(width: width, height: height, fps: fps, bitsPerPixel: bpp)
+        case .videoToolboxDefault, .none:
+            return nil
         }
     }
 
@@ -226,7 +344,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         let updated = SCStreamConfiguration()
         updated.width = width
         updated.height = height
-        updated.pixelFormat = kCVPixelFormatType_32BGRA
+        updated.pixelFormat = configuredPixelFormat
         updated.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         updated.showsCursor = false
         updated.scalesToFit = false
@@ -254,14 +372,19 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         }
     }
 
-    private static func makeConfiguration(window: SCWindow, fps: Int, audio: Bool) -> SCStreamConfiguration {
+    private static func makeConfiguration(
+        window: SCWindow,
+        fps: Int,
+        audio: Bool,
+        pixelFormat: OSType = kCVPixelFormatType_32BGRA
+    ) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
         // Logical (points) size; the delivered CVPixelBuffer is in native
         // pixels (2x/3x for Retina), and downstream consumers must use
         // CVPixelBufferGetWidth/Height — not these values — to allocate sinks.
         config.width = Int(window.frame.width)
         config.height = Int(window.frame.height)
-        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.pixelFormat = pixelFormat
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.showsCursor = false
         config.scalesToFit = false
@@ -291,6 +414,14 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
 /// the stalled startup stage (`starting-capture` seen, `capture-started`
 /// absent), letting the parent supervisor fail fast with a specific cause
 /// instead of frame starvation. See issues #4350 / #4764.
+/// Raised when the encoder's bounded output queue overflows (issue #4788). The
+/// encoded path never drops an emitted record, so overflow is fatal: `main.swift`
+/// exits and the supervisor relaunches the helper with a fresh IDR.
+struct EncoderOutputOverflowError: Error, CustomStringConvertible {
+    let message: String
+    var description: String { message }
+}
+
 struct StartCaptureTimeoutError: Error, CustomStringConvertible {
     let deadlineSeconds: TimeInterval
 

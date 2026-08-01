@@ -2,11 +2,32 @@ import Foundation
 
 /// Parsed CLI arguments for the screen-capture helper.
 public struct CommandLineOptions: Equatable {
+    /// In-helper H.264 encode settings (issue #4788). Absent means the default
+    /// raw-BGRA path with zero behavior change. The bitrate *policy* stays in the
+    /// TypeScript supervisor (which flag it passes); the helper only carries the
+    /// choice and does the pixel-dimension arithmetic it alone knows pre-encode.
+    public struct EncodeSettings: Equatable {
+        public enum Bitrate: Equatable {
+            /// `--bitrate-bps <n>`: operator override, used verbatim.
+            case explicitBps(Int)
+            /// `--bits-per-pixel <x>`: bitrate computed from delivered pixels x fps.
+            case bitsPerPixel(Double)
+            /// Neither flag: let VideoToolbox pick (physical-device path, #4375).
+            case videoToolboxDefault
+        }
+
+        public let bitrate: Bitrate
+
+        public init(bitrate: Bitrate) {
+            self.bitrate = bitrate
+        }
+    }
+
     public enum Mode: Equatable {
         case listDevices
         case capture(deviceID: String?)
         case listSimulators
-        case captureSimulator(windowID: UInt32, fps: Int, audio: Bool)
+        case captureSimulator(windowID: UInt32, fps: Int, audio: Bool, encode: EncodeSettings?)
         case help
     }
 
@@ -38,6 +59,9 @@ public struct CommandLineOptions: Equatable {
         var simulatorFPS: Int?
         var audio = false
         var help = false
+        var encodeRequested = false
+        var bitrateBps: Int?
+        var bitsPerPixel: Double?
 
         while let arg = iterator.next() {
             switch arg {
@@ -72,6 +96,32 @@ public struct CommandLineOptions: Equatable {
                 simulatorFPS = parsed
             case "--audio":
                 audio = true
+            case "--encode":
+                guard let value = iterator.next() else {
+                    throw ParseError.missingValue(flag: arg)
+                }
+                // Only H.264 exists today; reject anything else so a typo fails
+                // loudly instead of silently taking the raw path.
+                guard value == "h264" else {
+                    throw ParseError.invalidValue(flag: arg, value: value)
+                }
+                encodeRequested = true
+            case "--bitrate-bps":
+                guard let value = iterator.next() else {
+                    throw ParseError.missingValue(flag: arg)
+                }
+                guard let parsed = Int(value), parsed > 0 else {
+                    throw ParseError.invalidValue(flag: arg, value: value)
+                }
+                bitrateBps = parsed
+            case "--bits-per-pixel":
+                guard let value = iterator.next() else {
+                    throw ParseError.missingValue(flag: arg)
+                }
+                guard let parsed = Double(value), parsed > 0, parsed.isFinite else {
+                    throw ParseError.invalidValue(flag: arg, value: value)
+                }
+                bitsPerPixel = parsed
             case "-h", "--help":
                 help = true
             default:
@@ -104,6 +154,31 @@ public struct CommandLineOptions: Equatable {
             throw ParseError.conflictingFlags("--audio requires --simulator-window")
         }
 
+        if bitrateBps != nil && bitsPerPixel != nil {
+            throw ParseError.conflictingFlags("--bitrate-bps and --bits-per-pixel are mutually exclusive")
+        }
+        if (bitrateBps != nil || bitsPerPixel != nil) && !encodeRequested {
+            throw ParseError.conflictingFlags("--bitrate-bps/--bits-per-pixel require --encode h264")
+        }
+        // v1 scope: in-helper encoding is wired for the Simulator (ScreenCaptureKit)
+        // path only; the device path keeps VideoToolbox out of the helper.
+        if encodeRequested && simulatorWindowID == nil {
+            throw ParseError.conflictingFlags("--encode requires --simulator-window")
+        }
+
+        var encodeSettings: EncodeSettings?
+        if encodeRequested {
+            let bitrate: EncodeSettings.Bitrate
+            if let bps = bitrateBps {
+                bitrate = .explicitBps(bps)
+            } else if let bpp = bitsPerPixel {
+                bitrate = .bitsPerPixel(bpp)
+            } else {
+                bitrate = .videoToolboxDefault
+            }
+            encodeSettings = EncodeSettings(bitrate: bitrate)
+        }
+
         if listDevices {
             return CommandLineOptions(mode: .listDevices)
         }
@@ -115,7 +190,8 @@ public struct CommandLineOptions: Equatable {
                 mode: .captureSimulator(
                     windowID: windowID,
                     fps: simulatorFPS ?? defaultSimulatorFPS,
-                    audio: audio
+                    audio: audio,
+                    encode: encodeSettings
                 )
             )
         }
@@ -142,6 +218,16 @@ public struct CommandLineOptions: Equatable {
         --simulator-fps <n>     Target frame rate (5-60, default 5). Higher
                                 values waste CPU for typical MCP workloads.
         --audio                 Capture Simulator window audio as 8 kHz mono PCM16LE.
+
+    ENCODE OPTIONS (in-helper H.264, requires --simulator-window):
+        --encode h264           Encode H.264 (Baseline 4.2) in-process instead of
+                                streaming raw BGRA. Captures 420v (NV12) and emits
+                                Annex-B encoded-video records. Default: raw BGRA.
+        --bitrate-bps <n>       Operator override for the average bitrate (bps).
+        --bits-per-pixel <x>    Compute the bitrate from the delivered pixel
+                                dimensions x fps x <x> (Simulator default 0.1).
+                                Mutually exclusive with --bitrate-bps; omit both
+                                to let VideoToolbox choose (physical-device path).
 
         -h, --help              Show this help.
 

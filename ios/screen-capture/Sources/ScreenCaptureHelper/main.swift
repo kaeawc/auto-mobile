@@ -160,7 +160,7 @@ case .listSimulators:
         exit(1)
     }
 
-case .captureSimulator(let windowID, let fps, let audio):
+case .captureSimulator(let windowID, let fps, let audio, let encode):
     guard CGPreflightScreenCaptureAccess() else {
         logError(
             "error: Screen Recording permission is required. Grant Screen Recording to your terminal/IDE in System Settings > Privacy & Security > Screen Recording."
@@ -216,14 +216,30 @@ case .captureSimulator(let windowID, let fps, let audio):
     let writer = FrameWriter(sink: sink)
     let metricsReporter = FrameMetricsReporter(writer: writer, output: logError)
     metricsReporter.start()
-    let simSession = SimulatorCaptureSession(writer: writer) { error in
-        // A mid-stream ScreenCaptureKit fatal error: exit deterministically so
-        // the supervisor's bounded reconnect re-establishes capture, rather than
-        // leaving RunLoop.main spinning on a dead stream (issue #4768).
+    let simSession = SimulatorCaptureSession(writer: writer, encode: encode) { error in
+        // A mid-stream ScreenCaptureKit fatal error (or a fatal encoded-output
+        // overflow): exit deterministically so the supervisor's bounded reconnect
+        // re-establishes capture, rather than leaving RunLoop.main spinning on a
+        // dead stream (issues #4768 / #4788).
         logError("error: ScreenCaptureKit stream stopped: \(error)")
         exit(midStreamFatalExitCode)
     }
     let firstFrameSignal = simSession.firstFrameSignal
+
+    // In encode mode, read newline-delimited JSON control commands from STDIN
+    // (today only `{"cmd":"forceKeyFrame"}`). The raw path never touches STDIN,
+    // so its output is byte-for-byte unchanged (issue #4788).
+    var controlChannel: ControlChannel?
+    if encode != nil {
+        let channel = ControlChannel { command in
+            switch command {
+            case .forceKeyFrame:
+                simSession.forceKeyFrameLatch.request()
+            }
+        }
+        channel.start()
+        controlChannel = channel
+    }
 
     // ScreenCaptureKit silently emits no frames when the host process lacks
     // Screen Recording permission — there's no error to surface. Emit a hint on
@@ -250,6 +266,7 @@ case .captureSimulator(let windowID, let fps, let audio):
     installShutdownHandlers {
         metricsReporter.stop()
         permissionHintTimer.cancel()
+        controlChannel?.stop()
         Task { @MainActor in
             await simSession.stop()
             exit(0)

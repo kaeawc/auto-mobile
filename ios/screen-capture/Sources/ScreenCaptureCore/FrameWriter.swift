@@ -45,18 +45,27 @@ public final class FrameWriter {
         /// buffering to one frame when stdout's consumer is slow.
         public static let defaultMaximumPendingFrameBytes = 32 * 1024 * 1024
         public static let defaultMaximumPendingAudioBytes = 64 * 1024
+        /// Bound on the ordered encoded-H.264 output queue (issue #4788). Unlike
+        /// raw frames, encoded records are never dropped — overflow is fatal — so
+        /// this ceiling is a hard backstop against unbounded growth when stdout's
+        /// consumer stalls, sized for several seconds of Baseline output.
+        public static let defaultMaximumPendingEncodedBytes = 64 * 1024 * 1024
 
         public let maximumPendingFrameBytes: Int
         public let maximumPendingAudioBytes: Int
+        public let maximumPendingEncodedBytes: Int
 
         public init(
             maximumPendingFrameBytes: Int = defaultMaximumPendingFrameBytes,
-            maximumPendingAudioBytes: Int = defaultMaximumPendingAudioBytes
+            maximumPendingAudioBytes: Int = defaultMaximumPendingAudioBytes,
+            maximumPendingEncodedBytes: Int = defaultMaximumPendingEncodedBytes
         ) {
             precondition(maximumPendingFrameBytes > 0)
             precondition(maximumPendingAudioBytes > 0)
+            precondition(maximumPendingEncodedBytes > 0)
             self.maximumPendingFrameBytes = maximumPendingFrameBytes
             self.maximumPendingAudioBytes = maximumPendingAudioBytes
+            self.maximumPendingEncodedBytes = maximumPendingEncodedBytes
         }
     }
 
@@ -70,6 +79,7 @@ public final class FrameWriter {
     private enum RecordKind {
         case frame
         case audio
+        case encoded
     }
 
     private let sink: FrameSink
@@ -80,6 +90,8 @@ public final class FrameWriter {
     private var pendingFrame: PendingRecord?
     private var pendingAudio: [PendingRecord] = []
     private var pendingAudioBytes = 0
+    private var pendingEncoded: [PendingRecord] = []
+    private var pendingEncodedBytes = 0
     private var lastWrittenRecordKind: RecordKind?
     private var outputWorkerScheduled = false
     private var droppedFrames: UInt64 = 0
@@ -179,6 +191,41 @@ public final class FrameWriter {
         }
     }
 
+    /// Queues an ordered encoded-H.264 record (header + Annex-B payload) on the
+    /// same serial writer (issue #4788). Encoded records are NEVER dropped: a
+    /// broken reference chain is worse than a stall, so overflow returns `false`
+    /// and the caller exits (the supervisor relaunches with a fresh IDR) instead
+    /// of discarding an emitted record. `header` is a `FrameProtocol`
+    /// encoded-video header; `payload` is the Annex-B access unit.
+    @discardableResult
+    public func writeEncoded(header: Data, payload: Data) -> Bool {
+        let record = PendingRecord(
+            header: header,
+            payload: payload,
+            captureTimestampMs: nil,
+            enqueuedAt: Date()
+        )
+        stateLock.lock()
+        if EncoderDropPolicy.wouldOverflowOutputQueue(
+            queuedBytes: pendingEncodedBytes,
+            recordBytes: record.payload.count,
+            maxQueuedBytes: configuration.maximumPendingEncodedBytes
+        ) {
+            stateLock.unlock()
+            return false
+        }
+        pendingEncoded.append(record)
+        pendingEncodedBytes += record.payload.count
+        highWaterMarkBytes = max(highWaterMarkBytes, queuedBytesLocked())
+        let shouldSchedule = !outputWorkerScheduled
+        outputWorkerScheduled = true
+        stateLock.unlock()
+        if shouldSchedule {
+            outputQueue.async { self.drain() }
+        }
+        return true
+    }
+
     public func metrics(now: Date = Date()) -> FrameWriterMetrics {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -239,20 +286,35 @@ public final class FrameWriter {
         stateLock.lock()
         defer { stateLock.unlock() }
 
-        if pendingFrame != nil, !pendingAudio.isEmpty {
-            if lastWrittenRecordKind == .frame {
-                return takeAudioLocked()
-            }
-            return takeFrameLocked()
+        // "Media" is a raw frame or an encoded record; only one of the two ever
+        // flows in a given run (raw path vs `--encode h264`). Alternate media
+        // with audio so neither starves — preserving the raw path's exact
+        // frame/audio ordering when no encoded records are present.
+        let mediaPending = pendingFrame != nil || !pendingEncoded.isEmpty
+        if mediaPending, !pendingAudio.isEmpty {
+            let lastWasMedia = lastWrittenRecordKind == .frame || lastWrittenRecordKind == .encoded
+            return lastWasMedia ? takeAudioLocked() : takeMediaLocked()
         }
-        if pendingFrame != nil {
-            return takeFrameLocked()
+        if mediaPending {
+            return takeMediaLocked()
         }
         if !pendingAudio.isEmpty {
             return takeAudioLocked()
         }
         outputWorkerScheduled = false
         return nil
+    }
+
+    /// Encoded records take priority over a raw frame (they never coexist), and
+    /// are emitted strictly FIFO — they must not be reordered or dropped.
+    private func takeMediaLocked() -> PendingRecord? {
+        if !pendingEncoded.isEmpty {
+            let encoded = pendingEncoded.removeFirst()
+            pendingEncodedBytes -= encoded.payload.count
+            lastWrittenRecordKind = .encoded
+            return encoded
+        }
+        return takeFrameLocked()
     }
 
     private func takeFrameLocked() -> PendingRecord? {
@@ -270,7 +332,7 @@ public final class FrameWriter {
     }
 
     private func queuedBytesLocked() -> Int {
-        (pendingFrame?.payload.count ?? 0) + pendingAudioBytes
+        (pendingFrame?.payload.count ?? 0) + pendingAudioBytes + pendingEncodedBytes
     }
 }
 

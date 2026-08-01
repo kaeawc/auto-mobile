@@ -77,6 +77,10 @@ fun WorkspaceShell(
   // hierarchy + device mirror) replaces the stream. Hoisted like [facetContent] so a test can drive
   // it with a fake; the default is the real [LayoutFacet], so the host needs no extra wiring.
   inspectContent: @Composable (DeviceColumn) -> Unit = { LayoutFacet(it) },
+  // Body of the pane's stream area while a column is in Input mode. Hoisted like [facetContent] —
+  // and defaulting to the inert placeholder for the same reason — so composing the shell in a unit
+  // test or preview never opens a relay socket. The host passes the real [DeviceStreamView].
+  streamContent: @Composable (DeviceColumn) -> Unit = { WorkspaceStreamPlaceholder() },
   // Body of the health sheet opened by clicking the status dot. Hoisted like [facetContent] so the
   // host (or a test) can substitute content; defaults to the live [DiagnosticsDashboard].
   healthSheetContent: @Composable () -> Unit = { DefaultHealthSheetBody() },
@@ -134,6 +138,7 @@ fun WorkspaceShell(
                   onAction = onAction,
                   facetContent = facetContent,
                   inspectContent = inspectContent,
+                  streamContent = streamContent,
                   canDiff = canDiff,
                   modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
@@ -517,6 +522,7 @@ private fun DeviceColumnView(
   onAction: (WorkspaceAction) -> Unit,
   facetContent: @Composable (DeviceColumn, Tool) -> Unit,
   inspectContent: @Composable (DeviceColumn) -> Unit,
+  streamContent: @Composable (DeviceColumn) -> Unit,
   canDiff: Boolean,
   modifier: Modifier,
 ) {
@@ -530,12 +536,18 @@ private fun DeviceColumnView(
     DeviceColumnHeader(column, onAction)
     val tool = column.activeTool
     if (tool == null) {
-      PaneMainContent(column, onAction, inspectContent, Modifier.weight(1f))
+      PaneMainContent(column, onAction, inspectContent, streamContent, Modifier.weight(1f))
     } else {
       // With a tool active the pane splits main content + docked facet; ⤡ shrink flips the split so
       // the main content collapses to grow the facet.
       val facetFraction = facetHeightFraction(column.shrunk)
-      PaneMainContent(column, onAction, inspectContent, Modifier.weight(1f - facetFraction))
+      PaneMainContent(
+        column,
+        onAction,
+        inspectContent,
+        streamContent,
+        Modifier.weight(1f - facetFraction),
+      )
       DockedFacet(column, tool, onAction, facetContent, canDiff, Modifier.weight(facetFraction))
     }
   }
@@ -551,30 +563,32 @@ private fun PaneMainContent(
   column: DeviceColumn,
   onAction: (WorkspaceAction) -> Unit,
   inspectContent: @Composable (DeviceColumn) -> Unit,
+  streamContent: @Composable (DeviceColumn) -> Unit,
   modifier: Modifier,
 ) {
   if (column.mode == InteractionMode.Inspect) {
     Box(modifier.fillMaxWidth()) { inspectContent(column) }
   } else {
-    StreamArea(column, onAction, modifier)
+    StreamArea(column, onAction, streamContent, modifier)
   }
 }
 
 /**
- * Placeholder device stream with the emulator controls floating on it. The real WebRTC stream lands
- * in a later PR.
+ * The pane's device stream area: the hoisted [streamContent] body (the host's [DeviceStreamView],
+ * or the placeholder default) with the emulator controls floating on it.
  */
 @Composable
 private fun StreamArea(
   column: DeviceColumn,
   onAction: (WorkspaceAction) -> Unit,
+  streamContent: @Composable (DeviceColumn) -> Unit,
   modifier: Modifier,
 ) {
   Box(
     modifier = modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant),
     contentAlignment = Alignment.Center,
   ) {
-    Text("stream", color = MaterialTheme.colorScheme.outline)
+    streamContent(column)
     EmulatorControls(
       column = column,
       onAction = onAction,
@@ -646,6 +660,16 @@ fun WorkspaceFacetPlaceholder(tool: Tool) {
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
     Text("${tool.label} — coming soon", color = MaterialTheme.colorScheme.outline)
   }
+}
+
+/**
+ * Default stream-area body: the inert pre-live placeholder. Hosts swap in [DeviceStreamView] via
+ * [WorkspaceShell]'s `streamContent` slot; tests and previews keep this so composing the shell
+ * never opens a relay socket.
+ */
+@Composable
+fun WorkspaceStreamPlaceholder() {
+  Text("stream", color = MaterialTheme.colorScheme.outline)
 }
 
 /**

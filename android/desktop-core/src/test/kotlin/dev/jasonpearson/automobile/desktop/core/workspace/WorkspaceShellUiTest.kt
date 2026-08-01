@@ -307,6 +307,51 @@ class WorkspaceShellUiTest {
     }
 
   @Test
+  fun `Input mode renders the injected stream content per pane device`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel 8"), col("b", "Pixel 9")),
+        focusedDeviceId = "a",
+      )
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          onOpenPicker = {},
+          streamContent = { column -> Text("stream-slot:${column.deviceId}") },
+        )
+      }
+    }
+    onNodeWithText("stream-slot:a").assertIsDisplayed()
+    onNodeWithText("stream-slot:b").assertIsDisplayed()
+    // The injected body replaces the default placeholder.
+    onNodeWithText("stream").assertDoesNotExist()
+  }
+
+  @Test
+  fun `Inspect mode does not render the injected stream content`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel 8").copy(mode = InteractionMode.Inspect)),
+        focusedDeviceId = "a",
+      )
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          onOpenPicker = {},
+          inspectContent = { Text("inspect-slot") },
+          streamContent = { Text("stream-slot") },
+        )
+      }
+    }
+    onNodeWithText("inspect-slot").assertIsDisplayed()
+    onNodeWithText("stream-slot").assertDoesNotExist()
+  }
+
+  @Test
   fun `Input mode renders the stream and not the inspect content`() = runComposeUiTest {
     val state =
       WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")

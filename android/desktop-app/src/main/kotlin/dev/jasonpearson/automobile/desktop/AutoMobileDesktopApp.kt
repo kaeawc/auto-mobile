@@ -22,6 +22,7 @@ import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
+import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
 import dev.jasonpearson.automobile.desktop.core.workspace.FailuresFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
@@ -201,6 +202,11 @@ fun AutoMobileDesktopApp(
               status = workspaceStatus.status,
               statusDetail = workspaceStatus.detail,
               facetContent = { column, tool -> WorkspaceFacet(column, tool) },
+              // Live device mirror in each pane's stream area, fed by the daemon's video-stream
+              // relay. Until the desktop can supply a daemon sessionUuid (#4924), a daemon with
+              // stream-socket auth at its default (on, #4751) refuses the subscribe and the pane
+              // shows the reason; AUTOMOBILE_DAEMON_STREAM_AUTH=0 is the interim escape hatch.
+              streamContent = { column -> DeviceStreamView(column) },
             )
             if (paletteOpen) {
               CommandPalette(

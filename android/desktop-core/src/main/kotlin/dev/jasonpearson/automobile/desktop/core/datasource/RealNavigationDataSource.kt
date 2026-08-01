@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponent
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenTransition
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
@@ -49,6 +50,14 @@ class RealNavigationDataSource(
       // Parse the MCP navigation graph response
       val response = json.decodeFromString(serializer<McpNavigationGraphResponse>(), graphText)
 
+      // The daemon signals failure with an `{ "error": ... }` envelope (not a throw). Because
+      // decoding uses ignoreUnknownKeys, that envelope would otherwise parse into an all-defaults
+      // response and masquerade as a genuinely-empty graph. A present error field means failure; a
+      // real empty graph ({ "nodes": [], "edges": [] }) has a null error and stays Success.
+      response.error?.let {
+        return Result.Error(RuntimeException(it), it)
+      }
+
       // Count outgoing edges per screen for transitionCount
       val outgoingEdgeCounts = response.edges.groupBy { it.from }.mapValues { it.value.size }
 
@@ -84,6 +93,9 @@ class RealNavigationDataSource(
       Result.Success(NavigationGraph(screens = screens, transitions = transitions))
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (c: CancellationException) {
+      // Let coroutine cancellation propagate so this suspend call stays cancellable.
+      throw c
     } catch (e: Exception) {
       Result.Error(e, "Failed to load navigation graph: ${e.message}")
     }
@@ -100,6 +112,12 @@ class RealNavigationDataSource(
       val text = contents.firstOrNull()?.text ?: return Result.Success(emptyList())
 
       val response = json.decodeFromString(serializer<McpNavigationAppsResponse>(), text)
+      // A present `error` field is the daemon's failure envelope; a genuinely-empty result
+      // ({ "apps": [] }) has a null error and stays Success. See getNavigationGraph for why the
+      // envelope must be detected explicitly under ignoreUnknownKeys.
+      response.error?.let {
+        return Result.Error(RuntimeException(it), it)
+      }
       val apps =
         response.apps.map { app ->
           NavigationAppSummary(
@@ -111,6 +129,8 @@ class RealNavigationDataSource(
       Result.Success(apps)
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (c: CancellationException) {
+      throw c
     } catch (e: Exception) {
       Result.Error(e, "Failed to load saved navigation apps: ${e.message}")
     }
@@ -152,6 +172,8 @@ private data class McpNavigationGraphResponse(
   val nodes: List<McpNavigationNode> = emptyList(),
   val edges: List<McpNavigationEdge> = emptyList(),
   val currentScreen: String? = null,
+  // Present only on the daemon's `{ "error": ... }` failure envelope; null on a real graph.
+  val error: String? = null,
 )
 
 @Serializable
@@ -176,7 +198,11 @@ private data class McpNavigationEdge(
 // newest-first.
 
 @Serializable
-private data class McpNavigationAppsResponse(val apps: List<McpNavigationAppSummary> = emptyList())
+private data class McpNavigationAppsResponse(
+  val apps: List<McpNavigationAppSummary> = emptyList(),
+  // Present only on the daemon's `{ "error": ... }` failure envelope; null on a real list.
+  val error: String? = null,
+)
 
 @Serializable
 private data class McpNavigationAppSummary(

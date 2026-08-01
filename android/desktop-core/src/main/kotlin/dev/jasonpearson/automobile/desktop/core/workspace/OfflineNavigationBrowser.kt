@@ -35,7 +35,6 @@ import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
-import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -114,8 +113,9 @@ private fun AppListStep(
 
   LaunchedEffect(attempt) {
     state = AppListState.Loading
-    // Read off the UI thread: the resource read hits the daemon. Injected fakes run inline
-    // (deterministic). A throw becomes a retryable Error rather than crashing the Recomposer.
+    // Read off the UI thread: the resource read hits the daemon, so it runs on Dispatchers.IO
+    // (injected fakes hop the same dispatcher; tests stay deterministic via their waitUntil
+    // polling). A throw becomes a retryable Error rather than crashing the Recomposer.
     state =
       try {
         when (val result = withContext(Dispatchers.IO) { provider(null).listApps() }) {
@@ -123,7 +123,8 @@ private fun AppListStep(
             if (result.data.isEmpty()) AppListState.Empty else AppListState.Loaded(result.data)
           is Result.Error ->
             AppListState.Error(result.message ?: "Failed to load saved navigation graphs")
-          Result.Loading -> AppListState.Error("Saved navigation graphs are still loading")
+          // A one-shot read resolves to Success/Error; a stray Loading just keeps the spinner.
+          Result.Loading -> AppListState.Loading
         }
       } catch (c: CancellationException) {
         throw c
@@ -219,7 +220,8 @@ private fun AppGraphStep(
             else AppGraphState.Resolved(result.data)
           is Result.Error ->
             AppGraphState.Error(result.message ?: "Failed to load navigation graph")
-          Result.Loading -> AppGraphState.Error("Navigation graph is still loading")
+          // A one-shot read resolves to Success/Error; a stray Loading just keeps the spinner.
+          Result.Loading -> AppGraphState.Loading
         }
       } catch (c: CancellationException) {
         throw c
@@ -228,12 +230,6 @@ private fun AppGraphStep(
         AppGraphState.Error(e.message ?: "Failed to load navigation graph")
       }
   }
-
-  // Remembered per app so its LRU screenshot cache survives recomposition.
-  val screenshotLoader =
-    remember(app.appId) {
-      NavigationScreenshotLoader(clientProvider = { graph.autoMobileClient })
-    }
 
   Column(Modifier.fillMaxSize()) {
     Row(
@@ -271,7 +267,14 @@ private fun AppGraphStep(
         is AppGraphState.Resolved ->
           NavigationDashboard(
             providedGraph = current.graph,
-            screenshotLoader = screenshotLoader,
+            // No screenshot loader offline (screenshotLoader defaults to null → placeholder). The
+            // daemon's automobile:navigation/nodes/{id}/screenshot resource resolves the image via
+            // NavigationGraphManager.getCurrentAppId() + screenName, not the browsed app, so a
+            // node whose screen name collides with the daemon's current app (Home, MainActivity, …)
+            // would render the WRONG app's thumbnail — and not-found otherwise. Node ids are
+            // globally unique so the graph structure is correct; only per-node screenshots are
+            // mis-scoped. App-scoped offline screenshots are the follow-up #4933 (add ?appId= to
+            // the daemon resource); until then browse without thumbnails.
             settingsProvider = graph.settingsProvider,
             selectedAppId = app.appId,
             // Offline: device-side navigate actions are unavailable; browsing/panning still work.

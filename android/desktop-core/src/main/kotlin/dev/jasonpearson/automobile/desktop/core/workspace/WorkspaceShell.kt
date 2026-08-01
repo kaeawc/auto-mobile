@@ -98,6 +98,10 @@ fun WorkspaceShell(
   // A pane closing can drop the observed count below two; retire any open compare so it can't
   // linger with a stale pair.
   if (comparePair == null && showCompare) showCompare = false
+  // Offline browse is only meaningful with no device observed; if one is observed mid-browse
+  // (Empty -> Content) retire the overlay so it can't linger (with its offline badge) over a live
+  // workspace.
+  if (state !is WorkspaceUiState.Empty && showOfflineBrowse) showOfflineBrowse = false
   Box(modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
       TopBar(

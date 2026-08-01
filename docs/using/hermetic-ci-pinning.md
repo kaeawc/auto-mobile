@@ -67,6 +67,13 @@ registry-known version. For a version **not** in the registry there is nothing t
 against, so the download fails closed (see the `AUTOMOBILE_VERSION` notes above) — a
 mirror can only serve unverified assets if you deliberately opt out of verification.
 
+`AUTOMOBILE_ASSET_BASE_URL` (and the iOS-only `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL`
+bundle override) **must use `https://`** (issue [#4761](https://github.com/kaeawc/auto-mobile/issues/4761)).
+A plaintext `http://` base is rejected because asset fetches over cleartext are a
+confidentiality/downgrade risk even though the pinned checksum still blocks
+substitution. For a trusted loopback/dev mirror (e.g. `http://127.0.0.1:8080`),
+set `AUTOMOBILE_ALLOW_INSECURE_ASSET_URL=1` to opt back into `http://`.
+
 ## Android hermetic recipe
 
 1. **Pin the runner + daemon:**

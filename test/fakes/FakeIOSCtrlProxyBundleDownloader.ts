@@ -12,6 +12,8 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
   public checksummedFilePaths: string[] = [];
   public checksumSource: Sha256Source = "node";
   public extractedSubdir: string = "";
+  /** When true, also emit Debug-iphoneos products + a device xctestrun (issue #4761 AC3). */
+  public includeDeviceProducts: boolean = false;
 
   public async download(url: string, destination: string): Promise<void> {
     this.downloadedUrls.push(url);
@@ -48,5 +50,20 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
     await fs.mkdir(path.dirname(xctestBinary), { recursive: true });
     await fs.writeFile(xctestBinary, "fake CtrlProxy code");
     await fs.mkdir(path.join(productsDir, "CtrlProxyTests.xctest"), { recursive: true });
+
+    if (this.includeDeviceProducts) {
+      const deviceDir = path.join(extractionRoot, "Build", "Products", "Debug-iphoneos");
+      await fs.mkdir(deviceDir, { recursive: true });
+      const deviceXctestrun = path.join(extractionRoot, "Build", "Products", "CtrlProxyApp_iphoneos.xctestrun");
+      await fs.writeFile(deviceXctestrun, "fake device xctestrun");
+      await fs.mkdir(path.join(deviceDir, "CtrlProxyApp.app"), { recursive: true });
+      const deviceRunnerDir = path.join(deviceDir, "CtrlProxyUITests-Runner.app");
+      await fs.mkdir(deviceRunnerDir, { recursive: true });
+      await fs.writeFile(path.join(deviceRunnerDir, "CtrlProxyUITests-Runner"), "fake device runner");
+      const deviceXctestBinary = path.join(deviceRunnerDir, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests");
+      await fs.mkdir(path.dirname(deviceXctestBinary), { recursive: true });
+      await fs.writeFile(deviceXctestBinary, "fake device CtrlProxy code");
+      await fs.mkdir(path.join(deviceDir, "CtrlProxyTests.xctest"), { recursive: true });
+    }
   }
 }

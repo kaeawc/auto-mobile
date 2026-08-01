@@ -1026,5 +1026,157 @@ describe("IOSCtrlProxyBuilder", function() {
         size: 12000,
       });
     });
+
+    test("refuses a checksum-mismatched cached bundle on the download-failed fallback (#4761)", async function() {
+      // A size-valid but checksum-mismatched cached IPA already exists. Previously,
+      // when the latest-mode download failed, build() reused it WITHOUT any checksum
+      // check (usedCachedFallback skips extract+verify). Now verifyBundle runs on the
+      // fallback bundle before reuse, so the stale/tampered cache is rejected.
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      await fs.mkdir(cacheDir, { recursive: true });
+      await fs.writeFile(path.join(cacheDir, "control-proxy.ipa"), "a".repeat(12000));
+
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "cached-different-checksum";
+      downloader.download = async () => {
+        throw new Error("network unreachable");
+      };
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      const result = await builder.build("simulator");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("checksum verification failed");
+    });
+
+    test("verifies then reuses a checksum-valid cached bundle on the download-failed fallback (#4761)", async function() {
+      // Pre-existing extracted artifacts + a cached IPA. The latest-mode download
+      // fails; the cached IPA is checksum-verified and only then reused (extraction
+      // is skipped for the fallback path, so the downloader never re-extracts).
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const productsDir = path.join(derivedDataPath, "Build", "Products");
+      await fs.mkdir(path.join(productsDir, "Debug-iphonesimulator"), { recursive: true });
+      await fs.writeFile(path.join(productsDir, "CtrlProxyApp_iphonesimulator.xctestrun"), "mock");
+
+      const cacheDir = path.join(tempDir, "cache");
+      await fs.mkdir(cacheDir, { recursive: true });
+      await fs.writeFile(path.join(cacheDir, "control-proxy.ipa"), "a".repeat(12000));
+
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.download = async () => {
+        throw new Error("network unreachable");
+      };
+      // First hash (pre-download validity probe) mismatches to force the download
+      // attempt; the verifyBundle re-hash on the fallback path matches and passes.
+      let shaCalls = 0;
+      downloader.computeFileSha256 = async () => {
+        shaCalls++;
+        return { checksum: shaCalls === 1 ? "stale-checksum" : "expected-checksum", source: "node" as const };
+      };
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      const result = await builder.build("simulator");
+
+      expect(result.success).toBe(true);
+      // verifyBundle re-hashed the cached bundle (a second computeFileSha256 call).
+      expect(shaCalls).toBeGreaterThanOrEqual(2);
+      // Fallback path skips extraction entirely.
+      expect(downloader.extractedPaths).toHaveLength(0);
+    });
+
+    test("rejects a plaintext http:// bundle URL override by default (#4761)", async function() {
+      const prevUrl = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL;
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL = "http://mirror.test/control-proxy.ipa";
+      try {
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const cacheDir = path.join(tempDir, "cache");
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        downloader.checksum = "expected-checksum";
+        IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+        const builder = IOSCtrlProxyBuilder.getInstance(
+          { derivedDataPath, bundleCacheDir: cacheDir },
+          { downloader }
+        );
+
+        const result = await builder.build("simulator");
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("must use https://");
+      } finally {
+        if (prevUrl === undefined) {
+          delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL;
+        } else {
+          process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL = prevUrl;
+        }
+      }
+    });
+
+    test("re-hashes the device runner executable post-extract, not just simulator (#4761)", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.includeDeviceProducts = true;
+      downloader.runnerChecksum = "xctest-checksum";
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      const result = await builder.build("device");
+
+      expect(result.success).toBe(true);
+      // The device runner executable under Debug-iphoneos was independently hashed.
+      expect(downloader.checksummedFilePaths).toContain(
+        path.join(
+          derivedDataPath, "Build", "Products", "Debug-iphoneos",
+          "CtrlProxyUITests-Runner.app", "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests"
+        )
+      );
+    });
+
+    test("fails closed when the device runner executable hash differs (#4761)", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.includeDeviceProducts = true;
+      // Only the device runner executable is tampered; the simulator one matches.
+      downloader.computeFileSha256 = async (filePath: string) => {
+        if (path.basename(filePath) === "CtrlProxyUITests") {
+          return {
+            checksum: filePath.includes("Debug-iphoneos") ? "tampered-device-checksum" : "xctest-checksum",
+            source: "node" as const,
+          };
+        }
+        return { checksum: "expected-checksum", source: "node" as const };
+      };
+
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      const result = await builder.build("device");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("runner binary SHA256 mismatch");
+    });
   });
 });

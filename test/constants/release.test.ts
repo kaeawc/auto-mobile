@@ -4,8 +4,10 @@ import { join } from "path";
 import {
   APK_SHA256_CHECKSUM,
   APK_URL,
+  AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV,
   DAEMON_PACKAGE_NAME,
   DEFAULT_ASSET_BASE_URL,
+  assertHttpsAssetUrl,
   IOS_CTRL_PROXY_IPA_URL,
   IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM,
   IOS_CTRL_PROXY_SHA256_CHECKSUM,
@@ -204,6 +206,48 @@ describe("resolveAssetBaseUrl (AUTOMOBILE_ASSET_BASE_URL mirror knob)", function
   test("rejects non-absolute mirror bases", function() {
     expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "/mirror/am" }))
       .toThrow("AUTOMOBILE_ASSET_BASE_URL must be an absolute URL");
+  });
+
+  test("rejects a plaintext http:// mirror base by default (#4761)", function() {
+    expect(() => resolveAssetBaseUrl({ AUTOMOBILE_ASSET_BASE_URL: "http://mirror.test/am" }))
+      .toThrow("AUTOMOBILE_ASSET_BASE_URL must use https://");
+  });
+
+  test("allows a plaintext http:// mirror base when the opt-out is set (#4761)", function() {
+    expect(resolveAssetBaseUrl({
+      AUTOMOBILE_ASSET_BASE_URL: "http://127.0.0.1:8080/am/",
+      [AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV]: "1",
+    })).toBe("http://127.0.0.1:8080/am");
+  });
+});
+
+describe("assertHttpsAssetUrl (#4761 https enforcement)", function() {
+  test("accepts an https:// URL", function() {
+    expect(() => assertHttpsAssetUrl("https://mirror.test/am/control-proxy.ipa", "LABEL", {}))
+      .not.toThrow();
+  });
+
+  test("rejects an http:// URL by default", function() {
+    expect(() => assertHttpsAssetUrl("http://mirror.test/am/control-proxy.ipa", "LABEL", {}))
+      .toThrow("LABEL must use https://");
+  });
+
+  test("rejects a non-http(s) scheme by default", function() {
+    expect(() => assertHttpsAssetUrl("ftp://mirror.test/am/control-proxy.ipa", "LABEL", {}))
+      .toThrow("LABEL must use https://");
+  });
+
+  test("permits http:// under the AUTOMOBILE_ALLOW_INSECURE_ASSET_URL opt-out", function() {
+    expect(() => assertHttpsAssetUrl(
+      "http://localhost:8080/control-proxy.ipa",
+      "LABEL",
+      { [AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV]: "true" }
+    )).not.toThrow();
+  });
+
+  test("rejects a non-absolute URL", function() {
+    expect(() => assertHttpsAssetUrl("/relative/path", "LABEL", {}))
+      .toThrow("LABEL must be an absolute URL");
   });
 });
 

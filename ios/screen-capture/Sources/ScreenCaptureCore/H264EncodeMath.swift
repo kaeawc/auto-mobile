@@ -101,6 +101,56 @@ public enum H264EncodeMath {
         return max(1, Int(rounded))
     }
 
+    // MARK: - Source-aware bitrate resolution (issue #4790)
+
+    /// Which capture source drives the encode. The only behavior this forks is the
+    /// bits-per-pixel budget: the `defaultBitsPerPixel` (0.1) figure was measured
+    /// entirely from Simulator screen content (issue #4349) and does not describe a
+    /// physical device, so a device NEVER applies it (issue #4375).
+    public enum CaptureSource: Equatable {
+        case simulator
+        case device
+    }
+
+    /// Resolve the `AverageBitRate` (bps) VideoToolbox should target — or `nil` to
+    /// leave VideoToolbox's own default — from the operator's bitrate choice, the
+    /// capture source, and the delivered pixel dimensions. Pure so the
+    /// Simulator-only bits-per-pixel gating and the physical-device fallback are
+    /// unit-tested without a live `VTCompressionSession`:
+    ///
+    ///   - `.explicitBps`: honored verbatim for BOTH sources (operator override).
+    ///   - `.bitsPerPixel`: Simulator-only. On a device it is skipped and the
+    ///     result falls back to the VideoToolbox default (`nil`), because the
+    ///     bits-per-pixel budget was justified from Simulator measurements alone.
+    ///   - `.videoToolboxDefault`: VideoToolbox default (`nil`) for both.
+    ///
+    /// Unlike the arithmetic above, this is NOT part of the cross-language golden
+    /// vectors — it encodes a Swift-side policy the TypeScript sender applies by
+    /// choosing which flags to pass per source.
+    public static func resolveAverageBitRateBps(
+        source: CaptureSource,
+        bitrate: CommandLineOptions.EncodeSettings.Bitrate,
+        width: Int,
+        height: Int,
+        fps: Int
+    ) -> Int? {
+        switch bitrate {
+        case .explicitBps(let bps):
+            return bps
+        case .bitsPerPixel(let bpp):
+            switch source {
+            case .simulator:
+                return bitrateBps(width: width, height: height, fps: fps, bitsPerPixel: bpp)
+            case .device:
+                // Skip the Simulator-derived bpp budget on a device; VideoToolbox
+                // picks its own default instead (issues #4349 / #4375).
+                return nil
+            }
+        case .videoToolboxDefault:
+            return nil
+        }
+    }
+
     // MARK: - Private helpers
 
     private static func divCeil(_ numerator: Int, _ denominator: Int) -> Int {

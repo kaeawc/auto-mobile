@@ -127,4 +127,59 @@ final class H264EncodeMathTests: XCTestCase {
             1
         )
     }
+
+    // MARK: - Source-aware bitrate resolution (issue #4790)
+
+    /// An explicit operator override is honored verbatim on BOTH sources — the
+    /// #4375 decision to always respect `--bitrate-bps`.
+    func testResolveExplicitBpsHonoredForBothSources() {
+        for source in [H264EncodeMath.CaptureSource.simulator, .device] {
+            XCTAssertEqual(
+                H264EncodeMath.resolveAverageBitRateBps(
+                    source: source, bitrate: .explicitBps(2_500_000),
+                    width: 800, height: 600, fps: 30
+                ),
+                2_500_000,
+                "explicit bps must be honored for \(source)"
+            )
+        }
+    }
+
+    /// On the Simulator the bits-per-pixel budget is applied — same arithmetic as
+    /// the pure `bitrateBps`.
+    func testResolveBitsPerPixelAppliedForSimulator() {
+        let resolved = H264EncodeMath.resolveAverageBitRateBps(
+            source: .simulator, bitrate: .bitsPerPixel(0.1),
+            width: 800, height: 600, fps: 30
+        )
+        XCTAssertEqual(
+            resolved,
+            H264EncodeMath.bitrateBps(width: 800, height: 600, fps: 30, bitsPerPixel: 0.1)
+        )
+    }
+
+    /// The key #4790 branch: on a physical device the bits-per-pixel budget is
+    /// SKIPPED (it was measured from Simulator screen content, #4349), so the
+    /// resolver returns `nil` and VideoToolbox picks its own default.
+    func testResolveBitsPerPixelSkippedForDevice() {
+        XCTAssertNil(
+            H264EncodeMath.resolveAverageBitRateBps(
+                source: .device, bitrate: .bitsPerPixel(0.1),
+                width: 800, height: 600, fps: 30
+            )
+        )
+    }
+
+    /// Neither flag leaves the VideoToolbox default (`nil`) on both sources.
+    func testResolveVideoToolboxDefaultIsNilForBothSources() {
+        for source in [H264EncodeMath.CaptureSource.simulator, .device] {
+            XCTAssertNil(
+                H264EncodeMath.resolveAverageBitRateBps(
+                    source: source, bitrate: .videoToolboxDefault,
+                    width: 800, height: 600, fps: 30
+                ),
+                "videoToolboxDefault must resolve to nil for \(source)"
+            )
+        }
+    }
 }

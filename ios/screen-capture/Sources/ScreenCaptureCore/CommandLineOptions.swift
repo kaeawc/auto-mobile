@@ -25,7 +25,9 @@ public struct CommandLineOptions: Equatable {
 
     public enum Mode: Equatable {
         case listDevices
-        case capture(deviceID: String?)
+        /// Physical USB-connected iOS device capture (AVFoundation). `encode` is
+        /// absent on the raw-BGRA path and present under `--encode h264` (#4790).
+        case capture(deviceID: String?, encode: EncodeSettings?)
         case listSimulators
         case captureSimulator(windowID: UInt32, fps: Int, audio: Bool, encode: EncodeSettings?)
         case help
@@ -160,10 +162,12 @@ public struct CommandLineOptions: Equatable {
         if (bitrateBps != nil || bitsPerPixel != nil) && !encodeRequested {
             throw ParseError.conflictingFlags("--bitrate-bps/--bits-per-pixel require --encode h264")
         }
-        // v1 scope: in-helper encoding is wired for the Simulator (ScreenCaptureKit)
-        // path only; the device path keeps VideoToolbox out of the helper.
-        if encodeRequested && simulatorWindowID == nil {
-            throw ParseError.conflictingFlags("--encode requires --simulator-window")
+        // In-helper encoding is wired for both the Simulator (ScreenCaptureKit) and
+        // the physical-device (AVFoundation) capture paths (issues #4788 / #4790).
+        // It is only meaningful for a capture mode, so reject it on the discovery
+        // (`--list-*`) modes.
+        if encodeRequested && (listDevices || listSimulators) {
+            throw ParseError.conflictingFlags("--encode requires a capture mode, not --list-devices/--list-simulators")
         }
 
         var encodeSettings: EncodeSettings?
@@ -195,7 +199,7 @@ public struct CommandLineOptions: Equatable {
                 )
             )
         }
-        return CommandLineOptions(mode: .capture(deviceID: deviceID))
+        return CommandLineOptions(mode: .capture(deviceID: deviceID, encode: encodeSettings))
     }
 
     public static let helpText = """
@@ -219,15 +223,19 @@ public struct CommandLineOptions: Equatable {
                                 values waste CPU for typical MCP workloads.
         --audio                 Capture Simulator window audio as 8 kHz mono PCM16LE.
 
-    ENCODE OPTIONS (in-helper H.264, requires --simulator-window):
+    ENCODE OPTIONS (in-helper H.264; works with --simulator-window or a device):
         --encode h264           Encode H.264 (Baseline 4.2) in-process instead of
                                 streaming raw BGRA. Captures 420v (NV12) and emits
                                 Annex-B encoded-video records. Default: raw BGRA.
         --bitrate-bps <n>       Operator override for the average bitrate (bps).
+                                Honored for both the Simulator and device paths.
         --bits-per-pixel <x>    Compute the bitrate from the delivered pixel
                                 dimensions x fps x <x> (Simulator default 0.1).
-                                Mutually exclusive with --bitrate-bps; omit both
-                                to let VideoToolbox choose (physical-device path).
+                                Simulator-only: on a physical device this budget is
+                                skipped and VideoToolbox picks its own default,
+                                because the 0.1 figure was measured from Simulator
+                                screen content. Mutually exclusive with
+                                --bitrate-bps; omit both to let VideoToolbox choose.
 
         -h, --help              Show this help.
 

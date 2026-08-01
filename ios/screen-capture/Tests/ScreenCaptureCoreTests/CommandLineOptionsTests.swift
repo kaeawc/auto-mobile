@@ -12,14 +12,14 @@ final class CommandLineOptionsTests: XCTestCase {
 
     func testDefaultsToCaptureWithoutDeviceID() throws {
         let opts = try CommandLineOptions.parse(["screen-capture-helper"])
-        XCTAssertEqual(opts.mode, .capture(deviceID: nil))
+        XCTAssertEqual(opts.mode, .capture(deviceID: nil, encode: nil))
     }
 
     func testParsesDeviceID() throws {
         let opts = try CommandLineOptions.parse([
             "screen-capture-helper", "--device-id", "ABC123"
         ])
-        XCTAssertEqual(opts.mode, .capture(deviceID: "ABC123"))
+        XCTAssertEqual(opts.mode, .capture(deviceID: "ABC123", encode: nil))
     }
 
     func testParsesListDevices() throws {

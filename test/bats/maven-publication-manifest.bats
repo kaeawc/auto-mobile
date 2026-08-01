@@ -212,6 +212,18 @@ JSON
   [[ "$output" != *"BUDGET OK"* ]]
 }
 
+@test "an in-range exponent-form threshold is accepted and applied (1e6)" {
+  # jq 1.7+ serializes 1e6 as "1E+6"; floor normalization keeps it usable.
+  local budget="$STAGE/exp-budget.json"
+  cat >"$budget" <<'JSON'
+{ "perRelease": { "maxFiles": 1e6 } }
+JSON
+  run bash "$SCRIPT" "$STAGE" --budget "$budget"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BUDGET OK"* ]]
+  [[ "$output" == *"/1000000"* ]]
+}
+
 @test "a plain-decimal threshold above the exact-integer cap fails closed" {
   # 2^63 is all digits (passes a ^[0-9]+$ regex) but overflows bash's signed
   # 64-bit arithmetic; the jq cap at 2^53 rejects it.

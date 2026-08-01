@@ -238,7 +238,10 @@ if [ -n "$budget_file" ]; then
     # safely inside a signed 64-bit range, so the emitted value is always plain
     # digits bash can compare. Realistic budgets are millions at most.
     def okint: type == "number" and . >= 0 and (floor == .) and . <= 9007199254740992;
-    def field($v): if $v == null then "" elif ($v | okint) then ($v | tostring) else "INVALID" end;
+    # floor normalizes to canonical decimal: jq 1.7+ preserves a literal like 1e6
+    # and tostring would emit "1E+6", which the bash digit check would reject even
+    # though it is a valid in-range integer. floor forces plain digits.
+    def field($v): if $v == null then "" elif ($v | okint) then ($v | floor | tostring) else "INVALID" end;
     .[0].perRelease as $r
     | if $r == null then "\t"
       elif ($r | type) != "object" then "INVALID"
@@ -275,7 +278,7 @@ if [ -n "$budget_file" ]; then
   # small so the empty jar cannot silently regress back to the full Dokka HTML
   # site. Validated the same way (absent or a non-negative integer).
   max_javadoc="$(jq -r -s '(.[0].perRelease.maxJavadocJarBytes) as $v
-    | if $v == null then "" elif ($v | type == "number" and . >= 0 and (floor == .) and . <= 9007199254740992) then ($v | tostring) else "INVALID" end' "$budget_file")"
+    | if $v == null then "" elif ($v | type == "number" and . >= 0 and (floor == .) and . <= 9007199254740992) then ($v | floor | tostring) else "INVALID" end' "$budget_file")"
   if [ "$max_javadoc" = "INVALID" ]; then
     echo "error: budget maxJavadocJarBytes must be a non-negative integer" >&2
     exit 2

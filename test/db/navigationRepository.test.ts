@@ -543,4 +543,51 @@ describe("NavigationRepository", () => {
       expect(new Set(seenIds).size).toBe(4);
     });
   });
+
+  describe("listApps", () => {
+    test("returns an empty list when no apps exist", async () => {
+      const apps = await repo.listApps();
+      expect(apps).toEqual([]);
+    });
+
+    test("returns distinct apps that have persisted nodes, newest-updated first", async () => {
+      await repo.getOrCreateApp("com.example.a");
+      await repo.getOrCreateNode("com.example.a", "HomeA", 1000);
+      await repo.getOrCreateApp("com.example.b");
+      await repo.getOrCreateNode("com.example.b", "HomeB", 1000);
+      // Revisiting a screen must not duplicate the app row.
+      await repo.getOrCreateNode("com.example.b", "HomeB", 2000);
+
+      // Pin distinct updated_at values so ordering is deterministic.
+      await db
+        .updateTable("navigation_apps")
+        .set({ updated_at: "2026-01-01T00:00:00.000Z" })
+        .where("app_id", "=", "com.example.a")
+        .execute();
+      await db
+        .updateTable("navigation_apps")
+        .set({ updated_at: "2026-01-02T00:00:00.000Z" })
+        .where("app_id", "=", "com.example.b")
+        .execute();
+
+      const apps = await repo.listApps();
+
+      expect(apps).toEqual([
+        { app_id: "com.example.b", updated_at: "2026-01-02T00:00:00.000Z" },
+        { app_id: "com.example.a", updated_at: "2026-01-01T00:00:00.000Z" },
+      ]);
+    });
+
+    test("excludes apps that have no persisted nodes", async () => {
+      // Bare app row with no recorded screens (e.g. setCurrentApp only).
+      await repo.getOrCreateApp("com.example.empty");
+      await repo.getOrCreateApp("com.example.withnodes");
+      await repo.getOrCreateNode("com.example.withnodes", "Home", 1000);
+
+      const apps = await repo.listApps();
+
+      expect(apps).toHaveLength(1);
+      expect(apps[0]?.app_id).toBe("com.example.withnodes");
+    });
+  });
 });

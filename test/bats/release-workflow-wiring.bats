@@ -187,25 +187,24 @@
   [ "$output" = "90" ]
 }
 
-@test "prepare-release validates the finalized tree before tagging and can rerun provenance upload (#4686)" {
+@test "prepare-release verifies the prepared artifacts on the finalized tree before tagging and can rerun provenance upload (#4686)" {
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"
 
-  run yq -r '.jobs."validate-finalized-release".needs' "$workflow"
+  # verify-prepared-release gates tagging on the finalized release tree. Generic
+  # CI (test/lint/build/smoke) is intentionally NOT re-run in this pipeline: it
+  # already gates every PR and merge into main before a release is cut, so the
+  # release pipeline runs only release-specific verification (see #4935).
+  run yq -r '.jobs."verify-prepared-release".needs' "$workflow"
   [ "$status" -eq 0 ]
   [[ "$output" == *"finalize-release"* ]]
 
-  run yq -r '.jobs."verify-prepared-release".needs' "$workflow"
+  # The release-specific gate: prepared-artifact checksums and release integrity
+  # are verified against the actual built artifacts before the tag is promoted.
+  run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Verify prepared release artifacts") | .run' "$workflow"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"validate-finalized-release"* ]]
-
-  local step_names
-  step_names="$(yq -r '.jobs."validate-finalized-release".steps[].name' "$workflow")"
-  [[ "$step_names" == *"Run tests"* ]]
-  [[ "$step_names" == *"Run lint"* ]]
-  [[ "$step_names" == *"Build TypeScript"* ]]
-  [[ "$step_names" == *"Run Bun MCP startup smoke"* ]]
-  [[ "$step_names" == *"Run Bun image runtime smoke"* ]]
+  [[ "$output" == *"verify-artifact-sha256.sh"* ]]
+  [[ "$output" == *"verify-release-integrity.sh"* ]]
 
   run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Upload release artifact provenance") | .with.overwrite' "$workflow"
   [ "$status" -eq 0 ]

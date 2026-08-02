@@ -41,6 +41,9 @@ describe("archive extraction boundary (issue #4065)", () => {
     expect(directlyExtractsTar(
       'runExecSeam(cb, opts, { command: "tar", args: ["-xzf", archive] });'
     )).toBe(true);
+    expect(directlyExtractsTar(
+      'const seam = runExecSeam; seam(cb, opts, { command: "tar", args: ["-xzf", archive] });'
+    )).toBe(true);
   });
 
   test("detects array-first tar extraction (Bun.spawn's single-array signature)", () => {
@@ -55,6 +58,8 @@ describe("archive extraction boundary (issue #4065)", () => {
     expect(directlyExtractsTar('const argv = ["tar", "-xzf", archive]; Bun.spawn(argv);')).toBe(true);
     expect(directlyExtractsTar('const args = ["-xzf", archive]; spawn("tar", [...args]);')).toBe(true);
     expect(directlyExtractsTar('const rest = ["-xzf", a]; Bun.spawn(["tar", ...rest]);')).toBe(true);
+    expect(directlyExtractsTar('const run = exec; run("tar", ["-xzf", archive], { cwd: dir });')).toBe(true);
+    expect(directlyExtractsTar('const prefix = dynamic; Bun.spawn([...prefix, "tar", "-xzf", archive]);')).toBe(false);
     expect(directlyExtractsTar('const args = ["-czf", archive]; spawn("tar", args);')).toBe(false);
     expect(directlyExtractsTar(
       'const command = "tar"; const args = ["-xzf", archive]; const run = executeCommand; run(command, args);'

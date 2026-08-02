@@ -6,7 +6,7 @@ import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = "src/utils/image/webp/WebpBinaryResolver.ts";
 const BINARY = "(?:cwebp|dwebp|webpmux)";
-const BINARY_COMMAND = new RegExp(`(?:^|[/\\\\\\s])${BINARY}(?:\\.exe)?(?:\\s|$)`, "i");
+const BINARY_COMMAND = new RegExp(`(?:^|[/\\\\\\s])${BINARY}(?:\\.exe)?(?:\\s|$|[;&|])`, "i");
 
 /**
  * A production file "directly executes" a libwebp tool when it launches the
@@ -92,6 +92,8 @@ describe("webp codec execution boundary (issue #4064)", () => {
     expect(directlyExecutesWebp('execSync("cwebp -o - -");')).toBe(true);
     expect(directlyExecutesWebp('spawn("/bin/sh", ["-c", "cwebp -o -"]);')).toBe(true);
     expect(directlyExecutesWebp('Bun.spawn(["bash", "-c", "dwebp -o - --"]);')).toBe(true);
+    expect(directlyExecutesWebp('exec("cwebp&&echo done");')).toBe(true);
+    expect(directlyExecutesWebp('exec("dwebp; echo done");')).toBe(true);
     expect(directlyExecutesWebp('spawnSync("webpmux", ["-info", file]);')).toBe(true);
   });
 

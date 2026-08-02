@@ -13,6 +13,7 @@ export interface ExecutionBoundaryAst {
   calleeName(call: ts.CallExpression): string | undefined;
   isLauncher(call: ts.CallExpression): boolean;
   isExecutionSeam(call: ts.CallExpression): boolean;
+  isRunExecSeam(call: ts.CallExpression): boolean;
   strings(node: ts.Expression | undefined): string[];
   arrayElements(node: ts.Expression | undefined): ts.Expression[] | undefined;
   containsCallNamed(node: ts.Expression | undefined, names: ReadonlySet<string>): boolean;
@@ -36,6 +37,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const calls: ts.CallExpression[] = [];
   const launcherAliases = new Set(PROCESS_LAUNCHERS);
   const executionSeamAliases = new Set(["executeCommand", "runExecSeam", "execute"]);
+  const runExecSeamAliases = new Set(["runExecSeam"]);
   const childProcessNamespaces = new Set<string>();
   const bind = (name: string, value: ts.Expression): void => initializers.set(name, [...(initializers.get(name) ?? []), value]);
   const collect = (node: ts.Node): void => {
@@ -90,6 +92,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       (node.name.text === "execute" && (node.expression.kind === ts.SyntaxKind.ThisKeyword ||
         /(?:executor|host|process)/i.test(node.expression.getText(sourceFile))))
     ));
+  const isRunExecSeamReference = (node: ts.Expression): boolean =>
+    (ts.isIdentifier(node) && runExecSeamAliases.has(node.text)) ||
+    (ts.isPropertyAccessExpression(node) && node.name.text === "runExecSeam");
   let changed = true;
   while (changed) {
     changed = false;
@@ -99,6 +104,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       }
       if (!executionSeamAliases.has(name) && values.some(isExecutionSeamReference)) {
         executionSeamAliases.add(name); changed = true;
+      }
+      if (!runExecSeamAliases.has(name) && values.some(isRunExecSeamReference)) {
+        runExecSeamAliases.add(name); changed = true;
       }
     }
   }
@@ -132,8 +140,19 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const arrayElements = (node: ts.Expression | undefined, seen = new Set<string>()): ts.Expression[] | undefined => {
     if (!node) {return undefined;}
     if (ts.isArrayLiteralExpression(node)) {
-      return node.elements.flatMap(element =>
-        ts.isSpreadElement(element) ? arrayElements(element.expression, seen) ?? [] : ts.isExpression(element) ? [element] : []);
+      const elements: ts.Expression[] = [];
+      for (const element of node.elements) {
+        if (ts.isSpreadElement(element)) {
+          const spread = arrayElements(element.expression, seen);
+          // An unresolved spread can occupy the command position. Do not silently discard it and
+          // shift later elements into that position.
+          if (!spread) {return undefined;}
+          elements.push(...spread);
+        } else if (ts.isExpression(element)) {
+          elements.push(element);
+        }
+      }
+      return elements;
     }
     if (ts.isIdentifier(node) && !seen.has(node.text)) {
       const next = new Set([...seen, node.text]);
@@ -161,11 +180,14 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     isLauncher: call => (ts.isIdentifier(call.expression) && launcherAliases.has(call.expression.text)) ||
       (ts.isPropertyAccessExpression(call.expression) &&
         ((ts.isIdentifier(call.expression.expression) && childProcessNamespaces.has(call.expression.expression.text) && PROCESS_LAUNCHERS.has(call.expression.name.text)) ||
+          (PROCESS_LAUNCHERS.has(call.expression.name.text) &&
+            /(?:executor|host|process)/i.test(call.expression.expression.getText(sourceFile))) ||
           ["execFile", "execFileSync", "execFileAsync"].includes(call.expression.name.text) ||
           INJECTED_LAUNCHERS.has(call.expression.name.text) ||
           (ts.isIdentifier(call.expression.expression) && call.expression.expression.text === "Bun" &&
             ["spawn", "spawnSync"].includes(call.expression.name.text)))),
     isExecutionSeam: call => isExecutionSeamReference(call.expression),
+    isRunExecSeam: call => isRunExecSeamReference(call.expression),
     strings,
     arrayElements,
     containsCallNamed,

@@ -59,7 +59,7 @@ describe("devicectl execution boundary (issue #4053)", () => {
       // Diagnostic-only references are allowed only with a concrete reason here.
     ]);
     const offenders = sourceFiles(join(ROOT, "src")).flatMap(file => {
-      const repoPath = relative(ROOT, file);
+      const repoPath = relative(ROOT, file).replace(/\\/g, "/");
       if (repoPath === OWNER || exceptions.has(repoPath)) {return [];}
       const source = readFileSync(file, "utf8");
       return directlyExecutesDevicectl(source)

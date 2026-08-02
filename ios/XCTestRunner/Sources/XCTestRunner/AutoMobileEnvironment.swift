@@ -698,7 +698,8 @@ public enum DaemonManager {
     )
         -> DaemonStartupResult
     {
-        let expectedClientVersion = clientVersion ?? resolveDaemonClientVersion(repoRoot: repoRoot)
+        let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot)
+        let expectedClientVersion = clientVersion ?? resolveDaemonClientVersion(repoRoot: effectiveRepoRoot)
         PerfTimer.log("ensureDaemonRunning: checking isDaemonRunning")
         if runtime.isDaemonRunning() {
             // A stale different-build daemon on the shared socket would reject this runner's
@@ -712,7 +713,7 @@ public enum DaemonManager {
             let buildSkew = requiresRepoRootBuildSkew(
                 daemonBuildId: runtime.readDaemonBuildId(),
                 daemonEntryScript: runtime.readDaemonEntryScript(),
-                repoRoot: repoRoot
+                repoRoot: effectiveRepoRoot
             )
             let assetVersionSkew = requiresAssetVersionPinFailure(
                 daemonAssetVersion: runtime.readDaemonAssetVersion(),
@@ -730,14 +731,14 @@ public enum DaemonManager {
                 PerfTimer.log("ensureDaemonRunning: daemon version/build skew, restarting")
                 if let failure = startupFailure(for: runtime.runDaemonSubcommand(
                     "restart",
-                    repoRoot: repoRoot,
+                    repoRoot: effectiveRepoRoot,
                     timeoutSeconds: timeoutSeconds
                 )) {
                     PerfTimer.log("ensureDaemonRunning: restartDaemon failed - \(failure)")
                     return failure
                 }
                 return waitForVersionMatchedDaemon(
-                    repoRoot: repoRoot,
+                    repoRoot: effectiveRepoRoot,
                     timeoutSeconds: timeoutSeconds,
                     runtime: runtime,
                     callerAssetVersion: callerAssetVersion,
@@ -751,7 +752,7 @@ public enum DaemonManager {
         PerfTimer.log("ensureDaemonRunning: starting daemon")
         if let failure = startupFailure(for: runtime.runDaemonSubcommand(
             "start",
-            repoRoot: repoRoot,
+            repoRoot: effectiveRepoRoot,
             timeoutSeconds: timeoutSeconds
         )) {
             PerfTimer.log("ensureDaemonRunning: startDaemon failed - \(failure)")
@@ -759,7 +760,7 @@ public enum DaemonManager {
         }
 
         return waitForVersionMatchedDaemon(
-            repoRoot: repoRoot,
+            repoRoot: effectiveRepoRoot,
             timeoutSeconds: timeoutSeconds,
             runtime: runtime,
             callerAssetVersion: callerAssetVersion,

@@ -405,6 +405,28 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertEqual(runtime.subcommands, [.init(name: "restart", repoRoot: repoRoot.path)])
     }
 
+    func testEnsureDaemonRunningUsesInferredRootForBuildSkew() throws {
+        let repoRoot = try XCTUnwrap(DaemonManager.resolveDaemonRepoRoot(nil))
+        let entry = try XCTUnwrap(DaemonManager.resolveRepoRootDaemonEntryScript(repoRoot))
+        let currentBuildId = try XCTUnwrap(DaemonManager.computeBuildId(entry))
+        let runtime = FakeDaemonRuntime(
+            daemonVersion: AutoMobileVersion.current,
+            daemonBuildId: "different-checkout",
+            daemonEntryScript: "/other-checkout/dist/src/index.js",
+            buildIdAfterRestart: currentBuildId
+        )
+
+        let result = DaemonManager.ensureDaemonRunningResult(
+            repoRoot: nil,
+            timeoutSeconds: 0,
+            runtime: runtime,
+            callerAssetVersion: nil
+        )
+
+        XCTAssertEqual(result, .ready)
+        XCTAssertEqual(runtime.subcommands, [.init(name: "restart", repoRoot: repoRoot)])
+    }
+
     func testEnsureDaemonRunningAcceptsDaemonMatchingPinnedClientVersion() {
         let runtime = FakeDaemonRuntime(
             daemonVersion: "0.0.40",

@@ -1442,6 +1442,60 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
+    test("clears resolved build contexts on connection close so the next event re-resolves (#4984)", async function() {
+      // While the WS has no client, a package_event has zero listeners, so an app can be
+      // replaced unobserved. onConnectionClosed must invalidate cached contexts so the
+      // next event after reconnect re-resolves the hash instead of using the stale build.
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      const DIGEST = "a".repeat(64);
+      fakeAdb.setCommandResponse("pm path", { stdout: "package:/a/base.apk", stderr: "" });
+      fakeAdb.setCommandResponse("sha256sum", { stdout: `${DIGEST}  /a/base.apk`, stderr: "" });
+      const pkgSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: true, versionCode: 5 } as never);
+      const settle = async (): Promise<void> => {
+        for (let i = 0; i < 10; i++) { await new Promise<void>(r => setImmediate(r)); await testTimer.advanceTimersByTimeAsync(1); }
+      };
+      const navEvent = (dest: string): void => socket!.simulateMessage(JSON.stringify({
+        type: "navigation_event",
+        event: { destination: dest, source: "s", arguments: {}, metadata: {}, timestamp: testTimer.now(), sequenceNumber: 1, applicationId: "com.example.app" }
+      }));
+      let socket: Awaited<ReturnType<typeof waitForSocket>>;
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        navEvent("Home");
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update", timestamp: testTimer.now(),
+          data: { updatedAt: testTimer.now(), packageName: "com.example.app", hierarchy: { "text": "Home" } }
+        }));
+        await resultPromise;
+        await settle();
+        expect(pkgSpy).toHaveBeenCalledTimes(1); // resolved once
+
+        navEvent("Details");
+        await settle();
+        expect(pkgSpy).toHaveBeenCalledTimes(1); // cached — no re-resolution
+
+        // Connection drops (app may be replaced unobserved), then a later event arrives.
+        (testClient as unknown as { onConnectionClosed: () => void }).onConnectionClosed();
+
+        navEvent("Home2");
+        await settle();
+        expect(pkgSpy).toHaveBeenCalledTimes(2); // re-resolved after close
+      } finally {
+        pkgSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
     test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#2885)", async function() {
       resetDbWriteBarrier();
       // The Android handler resolves getDbWriteBarrier() per write (#2912), so a

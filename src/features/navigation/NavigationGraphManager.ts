@@ -763,15 +763,19 @@ export class NavigationGraphManager implements NavigationGraphService {
     const fingerprintData = event.fingerprintData || JSON.stringify({ hash: fingerprintHash });
     const timestamp = event.timestamp;
 
-    // Capture the app ONCE before the awaited fingerprint lookup: if an app switch
-    // lands during the await, the matched node belongs to THIS app, so its provenance
-    // must resolve for this app too — not whatever currentAppId became (#4984).
+    // Snapshot the FULL provenance (app + device + build key) ONCE before the first
+    // await: reading only appId early but re-reading the mutable build/device context
+    // after the fingerprint lookup would let a concurrent event (a second unbound
+    // device routing through the global manager) swap the context mid-lookup, stamping
+    // this reach with another device's identity/hash. Capturing everything up front and
+    // threading the immutable snapshot means no code path re-reads mutable state after
+    // any await (#4984).
     const appId = this.currentAppId;
+    const provenance = this.resolveProvenance(appId);
 
     // Case 1: Check if fingerprint is already correlated to a named node (scoped to this app)
     const existingNode = await this.repository.getNodeByFingerprint(appId, fingerprintHash);
     if (existingNode) {
-      const provenance = this.resolveProvenance(appId);
 
       // Persist the counter writes atomically across BOTH repos via the shared helper,
       // which owns the assertSharedConnection() precondition and the bind-both-repos
@@ -1730,7 +1734,19 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     const appId = this.currentAppId;
     const timestamp = this.timer.now();
-    const provenance = this.resolveProvenance(appId);
+    // Record the promoted node under the DEFAULT/unknown build key, NOT the current
+    // (promotion-time) build/device (#4984). The suggestion's original reaches were
+    // captured under whatever build saw them, but `navigation_suggestions` stores no
+    // provenance, so stamping promotion-time identity would falsely claim the promoting
+    // build/device did the historical reach. Recording under the default key makes the
+    // promoted node visible without a false claim; transferring real suggestion
+    // provenance is a follow-up (needs a suggestions-schema change).
+    const provenance: ResolvedProvenance = {
+      versionCode: 0,
+      contentHash: "",
+      deviceId: LEGACY_PROVENANCE_SENTINEL,
+      sessionUuid: this.sessionUuid ?? LEGACY_PROVENANCE_SENTINEL,
+    };
 
     // Persist the node creation + suggestion promotion atomically. repository.promoteSuggestion
     // does getOrCreateFingerprint + an UPDATE to link the suggestion; without a transaction a
@@ -1750,9 +1766,9 @@ export class NavigationGraphManager implements NavigationGraphService {
       // Promote the suggestion (creates fingerprint and links suggestion)
       await repository.promoteSuggestion(suggestionId, node.id, timestamp);
 
-      // Record provenance for the promoted node (#4984): promotion is a reach the
-      // suggestion captured, so the node must appear in build/device-scoped analysis
-      // rather than having a visit count but no observation until reached again.
+      // Record an observation for the promoted node under the default/unknown key
+      // (see the provenance snapshot above), so it is visible in analysis rather than
+      // having a visit count but no observation, without a false build/device claim.
       await this.recordNodeProvenance(repository, appId, node.id, timestamp, provenance);
 
       // #4931: touch navigation_apps.updated_at atomically with the promotion.

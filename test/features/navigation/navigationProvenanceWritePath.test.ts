@@ -193,6 +193,45 @@ describe("NavigationGraphManager provenance write path", () => {
     expect(bk.version_code).toBe(7);
   });
 
+  test("fingerprint path: a build-context swap during the lookup does not change the recorded build/device", async () => {
+    // A second unbound device routing through the same manager swaps app P's context
+    // mid-lookup; the reach must keep the device+hash captured BEFORE the await.
+    class SwitchingRepo extends NavigationRepository {
+      public onLookup: (() => void) | undefined;
+      async getNodeByFingerprint(appId: string, hash: string) {
+        if (this.onLookup) { this.onLookup(); }
+        return super.getNodeByFingerprint(appId, hash);
+      }
+    }
+    const switchingRepo = new SwitchingRepo(db);
+    const coverageRepo = new TestCoverageRepository(undefined, db);
+    const m = NavigationGraphManager.createForTesting(switchingRepo, coverageRepo, undefined, SESSION);
+
+    await m.setCurrentApp(APP);
+    m.setBuildContext({ appId: APP, deviceId: "device-A", versionCode: 7, contentHash: "hashA" });
+    const node = await switchingRepo.getOrCreateNode(APP, "Home", 100);
+    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", "{}", 100);
+
+    // Device B swaps APP's context in the manager during the awaited lookup.
+    switchingRepo.onLookup = () => {
+      m.setBuildContext({ appId: APP, deviceId: "device-B", versionCode: 99, contentHash: "hashB" });
+    };
+
+    await m.recordHierarchyNavigation({
+      fromFingerprint: null, toFingerprint: "fp-1", packageName: APP, timestamp: 200,
+    } as never);
+
+    const obs = await db
+      .selectFrom("navigation_node_observations")
+      .selectAll()
+      .where("node_id", "=", node.id)
+      .executeTakeFirstOrThrow();
+    expect(obs.device_id).toBe("device-A"); // snapshot before await, not B
+    const bk = await db.selectFrom("navigation_build_keys").selectAll().where("id", "=", obs.build_key_id).executeTakeFirstOrThrow();
+    expect(bk.version_code).toBe(7);
+    expect(bk.content_hash).toBe("hashA");
+  });
+
   test("falls back to the default build key when no build context is set", async () => {
     await manager.setCurrentApp(APP);
     await manager.recordNavigationEvent(navEvent("Home", 100));
@@ -228,8 +267,10 @@ describe("NavigationGraphManager provenance write path", () => {
     expect(after).toHaveLength(before.length);
   });
 
-  test("#4931: promoteSuggestion touches updated_at and records a node observation", async () => {
+  test("#4931: promoteSuggestion touches updated_at and records the node under the DEFAULT key", async () => {
     await manager.setCurrentApp(APP);
+    // Even with a current (promotion-time) build context, the promoted observation must
+    // NOT claim that build — the suggestion stores no provenance (#4984).
     manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
     const repo = new NavigationRepository(db);
     const suggestion = await repo.addOrUpdateSuggestion(APP, "fp-hash", "{}", 100);
@@ -238,8 +279,7 @@ describe("NavigationGraphManager provenance write path", () => {
     await manager.promoteSuggestion(suggestion.id, "Home");
 
     expect(await updatedAt()).not.toBe(old);
-    // The promoted node is visible in build/device-scoped analysis (#4984), not just
-    // a bare visit count.
+    // The promoted node is visible, but under the default/unknown key — not v7.
     const node = await repo.getNode(APP, "Home");
     const obs = await db
       .selectFrom("navigation_node_observations")
@@ -247,7 +287,9 @@ describe("NavigationGraphManager provenance write path", () => {
       .where("node_id", "=", node!.id)
       .execute();
     expect(obs).toHaveLength(1);
+    expect(obs[0].device_id).toBe("legacy");
     const bk = await db.selectFrom("navigation_build_keys").selectAll().where("id", "=", obs[0].build_key_id).executeTakeFirstOrThrow();
-    expect(bk.version_code).toBe(7);
+    expect(bk.version_code).toBe(0);
+    expect(bk.content_hash).toBe("");
   });
 });

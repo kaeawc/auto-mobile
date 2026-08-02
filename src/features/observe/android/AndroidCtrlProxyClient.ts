@@ -1130,6 +1130,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.getNavigationGraphManager().setBuildContext(resolved);
       return;
     }
+    // No resolved context on THIS client for the app: clear it from the currently
+    // selected manager so a context left by a previous binding/selection (e.g. set on
+    // the global manager while unbound, then not cleared when a later package_event
+    // invalidated only the bound manager) is never served as stale (#4984). Falls to
+    // the default/unattributed key until (re)resolution lands. Synchronous, so it
+    // takes effect before this event's write reads provenance.
+    this.getNavigationGraphManager().clearBuildContext(appId);
     if (this.buildContextInFlight.has(appId)) {
       return;
     }
@@ -1500,8 +1507,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.hierarchyNavigationDetector = null;
     }
 
+    // Revalidate build/device provenance across a disconnect (#4984): while the WS has
+    // no client, a package_event has zero listeners, so an app could be replaced
+    // unobserved. Invalidate every known app's cached context — clearing the resolved
+    // context, the provider's hash cache, and bumping the generation so any in-flight
+    // resolution is discarded — so the next nav event after reconnect re-resolves the
+    // hash instead of attributing to the pre-update build indefinitely.
+    for (const appId of this.knownBuildContextApps()) {
+      this.invalidateBuildContext(appId);
+    }
+
     // Stop work profile monitor when connection closes
     this.stopWorkProfileMonitor();
+  }
+
+  /** Every app id with cached or in-flight build-context state (#4984). */
+  private knownBuildContextApps(): string[] {
+    return Array.from(new Set([
+      ...this.resolvedBuildContexts.keys(),
+      ...this.buildContextInFlight,
+    ]));
   }
 
   protected async setupBeforeConnect(perf: PerformanceTracker): Promise<void> {

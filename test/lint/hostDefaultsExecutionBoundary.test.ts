@@ -76,11 +76,21 @@ describe("host defaults execution boundary (issue #4062)", () => {
     expect(directlyExecutesHostDefaults(
       'const command = "defaults"; const run = promisify(execFile); run(command, ["read", "-g", key]);'
     )).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'import { execFile as run } from "node:child_process"; run("defaults", ["read"]);'
+    )).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'const { execFile: run } = childProcess; run("defaults", ["read"]);'
+    )).toBe(true);
   });
 
   test("does not flag simulator defaults routed through a simctl argv", () => {
     expect(directlyExecutesHostDefaults('simctl.executeCommandArgs(["spawn", udid, "defaults", "read", domain, key]);')).toBe(false);
     expect(directlyExecutesHostDefaults('spawn("xcrun", ["simctl", "spawn", udid, "defaults", "read"]);')).toBe(false);
+  });
+
+  test("does not mistake unrelated methods named exec for process launchers", () => {
+    expect(directlyExecutesHostDefaults('const matcher = /defaults/; matcher.exec("defaults");')).toBe(false);
   });
 
   test("every documented exception still exists", () => {

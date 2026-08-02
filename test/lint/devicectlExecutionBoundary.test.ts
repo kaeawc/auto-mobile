@@ -28,7 +28,8 @@ function directlyExecutesDevicectl(source: string): boolean {
   const ast = executionBoundaryAst(source);
   return ast.calls.some(call => {
     if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
-    if (ast.calleeName(call) === "runExecSeam") {
+    if (ast.calleeName(call) === "runExecSeam" ||
+      call.arguments.length >= 3 && ast.strings(call.arguments[2]).includes("xcrun")) {
       const values = call.arguments.flatMap(argument => ast.strings(argument));
       return values.includes("xcrun") && values.includes("devicectl");
     }
@@ -93,6 +94,9 @@ describe("devicectl execution boundary (issue #4053)", () => {
     )).toBe(true);
     expect(directlyExecutesDevicectl(
       'runExecSeam(cb, opts, { command: "xcrun", args: ["devicectl", "--version"] });'
+    )).toBe(true);
+    expect(directlyExecutesDevicectl(
+      'const run = runExecSeam; run(cb, opts, { command: "xcrun", args: ["devicectl", "--version"] });'
     )).toBe(true);
   });
 

@@ -37,6 +37,7 @@ describe("archive extraction boundary (issue #4065)", () => {
     expect(directlyExtractsTar('exec("tar -C dest --extract -f archive.tar.gz");')).toBe(true);
     // Command assembled with a binary + expression; the static prefix still reads as tar extract.
     expect(directlyExtractsTar('executor.exec("tar -xzf " + archive);')).toBe(true);
+    expect(directlyExtractsTar('const run = exec; run("tar -xzf archive.tar.gz -C dest");')).toBe(true);
   });
 
   test("detects array-first tar extraction (Bun.spawn's single-array signature)", () => {

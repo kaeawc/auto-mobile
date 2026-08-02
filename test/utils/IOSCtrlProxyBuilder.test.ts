@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
+import {
+  IOS_CTRL_PROXY_RUNNER_SHA256_ENV,
+  IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV,
+  IOSCtrlProxyBuilder
+} from "../../src/utils/IOSCtrlProxyBuilder";
 import { FakeIOSCtrlProxyBundleDownloader } from "../fakes/FakeIOSCtrlProxyBundleDownloader";
 import { FakeCtrlProxyCodesignVerifier } from "../fakes/FakeCtrlProxyCodesignVerifier";
 import { getTempDir } from "../../src/utils/tempDir";
@@ -18,6 +22,8 @@ describe("IOSCtrlProxyBuilder", function() {
   let originalIpaPath: string | undefined;
   let originalBundlePath: string | undefined;
   let originalLaunchCwd: string | undefined;
+  let originalRunnerSha256: string | undefined;
+  let originalRunnerSha256Target: string | undefined;
   let tempDir: string;
 
   beforeEach(async function() {
@@ -29,6 +35,8 @@ describe("IOSCtrlProxyBuilder", function() {
     originalIpaPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH;
     originalBundlePath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
     originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+    originalRunnerSha256 = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV];
+    originalRunnerSha256Target = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV];
 
     // Create temp directory for tests
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ctrl-proxy-ios-builder-test-"));
@@ -85,6 +93,18 @@ describe("IOSCtrlProxyBuilder", function() {
       delete process.env[DAEMON_LAUNCH_CWD_ENV];
     } else {
       process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwd;
+    }
+
+    if (originalRunnerSha256 === undefined) {
+      delete process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV];
+    } else {
+      process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV] = originalRunnerSha256;
+    }
+
+    if (originalRunnerSha256Target === undefined) {
+      delete process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV];
+    } else {
+      process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV] = originalRunnerSha256Target;
     }
 
     delete process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN;
@@ -738,6 +758,66 @@ describe("IOSCtrlProxyBuilder", function() {
       // Must not throw, and must re-hash the runner binary (a second computeFileSha256).
       await builder.verifyRunnerBinaryBeforeLaunch("simulator");
       expect(downloader.checksummedFilePaths.length).toBeGreaterThan(before);
+    });
+
+    test("source-built runner checksum override remains enforced before launch (#4966)", async function() {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const sourceBuiltChecksum = "a".repeat(64);
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+      downloader.runnerChecksum = sourceBuiltChecksum;
+
+      process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV] = sourceBuiltChecksum;
+      process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV] = "xctest";
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir: cacheDir },
+        { downloader }
+      );
+
+      expect((await builder.build("simulator")).success).toBe(true);
+
+      downloader.runnerChecksum = "b".repeat(64);
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator"))
+        .rejects.toThrow("runner binary SHA256 mismatch (pre-launch)");
+    });
+
+    test("rejects a malformed source-built runner checksum override (#4966)", async function() {
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+
+      process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV] = "not-a-sha256";
+      process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV] = "xctest";
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath: path.join(tempDir, "DerivedData"), bundleCacheDir: path.join(tempDir, "cache") },
+        { downloader }
+      );
+
+      const result = await builder.build("simulator");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(`${IOS_CTRL_PROXY_RUNNER_SHA256_ENV} must be a 64-character`);
+    });
+
+    test("rejects an invalid source-built runner checksum target (#4966)", async function() {
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "expected-checksum";
+
+      process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV] = "a".repeat(64);
+      process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV] = "app";
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath: path.join(tempDir, "DerivedData"), bundleCacheDir: path.join(tempDir, "cache") },
+        { downloader }
+      );
+
+      const result = await builder.build("simulator");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(`${IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV} must be either`);
     });
 
     test("verifyRunnerBinaryBeforeLaunch refuses launch when the runner binary changed after extraction (#4759)", async function() {

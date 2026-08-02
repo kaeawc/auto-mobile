@@ -1669,8 +1669,10 @@ jobs:
       AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"
       AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "60000"
       # This job builds CtrlProxy into /tmp/automobile-ctrl-proxy before daemon
-      # startup. Make that local build authoritative so PR runs do not depend on
+      # startup. Pin both the build script and every restarted daemon to that
+      # path, and make the local build authoritative so PR runs do not depend on
       # a published release IPA existing for package.json's current version.
+      AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA: "/tmp/automobile-ctrl-proxy"
       AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD: "true"
     steps:
       - name: "Git Checkout"
@@ -1758,6 +1760,28 @@ jobs:
           ls -la /tmp/automobile-ctrl-proxy/Build/Products/Debug-iphonesimulator/ || true
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
           echo "xctestrun file: ${XCTESTRUN}"
+
+      # The source build intentionally differs from the published release whose
+      # checksum is compiled into the daemon. Publish this job's exact xctest
+      # executable hash so the pre-launch TOCTOU check remains enabled and every
+      # restarted daemon verifies the artifact it is actually about to execute.
+      - name: "Pin Source-Built CtrlProxy Runner Integrity"
+        shell: bash
+        run: |
+          runner_binary="/tmp/automobile-ctrl-proxy/Build/Products/Debug-iphonesimulator/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests"
+          if [[ ! -f "${runner_binary}" ]]; then
+            echo "::error::Source-built CtrlProxy xctest executable not found: ${runner_binary}" >&2
+            exit 1
+          fi
+          runner_sha256="$(shasum -a 256 "${runner_binary}" | awk '{print $1}')"
+          if [[ ! "${runner_sha256}" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "::error::Unable to compute a valid CtrlProxy xctest SHA256" >&2
+            exit 1
+          fi
+          {
+            echo "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=${runner_sha256}"
+            echo "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest"
+          } >> "${GITHUB_ENV}"
 
       # Re-sync before the test, which needs both the build artifacts and the
       # booted sim's UDID.

@@ -18,6 +18,10 @@ import type {
   NewNavigationNodeFingerprint,
   NavigationSuggestion,
   NewNavigationSuggestion,
+  NavigationBuildKey,
+  NewNavigationBuildKey,
+  NewNavigationNodeObservation,
+  NewNavigationEdgeObservation,
 } from "./types";
 import { logger } from "../utils/logger";
 
@@ -1078,6 +1082,108 @@ export class NavigationRepository {
       .where("app_id", "=", appId)
       .where("promoted_to_fingerprint_id", "is", null)
       .orderBy("occurrence_count", "desc")
+      .execute();
+  }
+
+  // ==========================================
+  // Build-key + provenance observation methods (#4984)
+  // ==========================================
+
+  /**
+   * Get or create the build-key row for (app_id, version_code, content_hash).
+   *
+   * Atomic upsert on UNIQUE(app_id, version_code, content_hash)
+   * (idx_navigation_build_keys_unique) so a concurrent first-create doesn't throw
+   * a UNIQUE collision. The conflict path is a no-op touch (app_id set to its own
+   * value) so RETURNING still yields the existing row without mutating it.
+   */
+  async getOrCreateBuildKey(
+    appId: string,
+    versionCode: number,
+    contentHash: string
+  ): Promise<NavigationBuildKey> {
+    const db = this.getDb();
+    const newBuildKey: NewNavigationBuildKey = {
+      app_id: appId,
+      version_code: versionCode,
+      content_hash: contentHash,
+    };
+
+    return db
+      .insertInto("navigation_build_keys")
+      .values(newBuildKey)
+      .onConflict(oc =>
+        oc.columns(["app_id", "version_code", "content_hash"]).doUpdateSet(eb => ({
+          app_id: eb.ref("navigation_build_keys.app_id"),
+        }))
+      )
+      .returningAll()
+      .executeTakeFirstOrThrow();
+  }
+
+  /**
+   * Record a per-node provenance observation.
+   *
+   * Atomic upsert on UNIQUE(node_id, build_key_id, device_id, session_uuid): a
+   * revisit within the same (build, device, session) bumps last_seen_at in SQL;
+   * a new tuple inserts a new row. first_seen_at is left untouched on conflict.
+   */
+  async recordNodeObservation(
+    nodeId: number,
+    buildKeyId: number,
+    deviceId: string,
+    sessionUuid: string,
+    seenAt: number
+  ): Promise<void> {
+    const db = this.getDb();
+    const observation: NewNavigationNodeObservation = {
+      node_id: nodeId,
+      build_key_id: buildKeyId,
+      device_id: deviceId,
+      session_uuid: sessionUuid,
+      first_seen_at: seenAt,
+      last_seen_at: seenAt,
+    };
+
+    await db
+      .insertInto("navigation_node_observations")
+      .values(observation)
+      .onConflict(oc =>
+        oc
+          .columns(["node_id", "build_key_id", "device_id", "session_uuid"])
+          .doUpdateSet({ last_seen_at: seenAt })
+      )
+      .execute();
+  }
+
+  /**
+   * Record a per-edge provenance observation (symmetric to recordNodeObservation).
+   */
+  async recordEdgeObservation(
+    edgeId: number,
+    buildKeyId: number,
+    deviceId: string,
+    sessionUuid: string,
+    seenAt: number
+  ): Promise<void> {
+    const db = this.getDb();
+    const observation: NewNavigationEdgeObservation = {
+      edge_id: edgeId,
+      build_key_id: buildKeyId,
+      device_id: deviceId,
+      session_uuid: sessionUuid,
+      first_seen_at: seenAt,
+      last_seen_at: seenAt,
+    };
+
+    await db
+      .insertInto("navigation_edge_observations")
+      .values(observation)
+      .onConflict(oc =>
+        oc
+          .columns(["edge_id", "build_key_id", "device_id", "session_uuid"])
+          .doUpdateSet({ last_seen_at: seenAt })
+      )
       .execute();
   }
 

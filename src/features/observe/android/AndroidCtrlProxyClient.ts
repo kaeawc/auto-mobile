@@ -37,6 +37,7 @@ import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { NavigationGraphManager, NavigationEvent } from "../../navigation/NavigationGraphManager";
+import { createContentHashProvider, type ContentHashProvider } from "../../../utils/ContentHashProvider";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
@@ -905,6 +906,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Session binding for multi-agent isolation
   private boundSessionId: string | null = null;
 
+  // Build/device provenance (#4984): lazily-built content-hash provider (cached by
+  // (deviceId, packageId, versionCode)) and the set of app ids whose build context
+  // resolution has already been kicked off, so we resolve once per install.
+  private contentHashProvider: ContentHashProvider | null = null;
+  private buildContextResolvedApps: Set<string> = new Set();
+
   // Hierarchy caching (accessed by delegates via context)
   private cachedHierarchy: CachedHierarchy | null = null;
 
@@ -1081,6 +1088,51 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.boundSessionId
       ? NavigationGraphManager.getInstanceForSession(this.boundSessionId)
       : NavigationGraphManager.getInstance();
+  }
+
+  /**
+   * Eagerly resolve the build/device provenance context for an app and set it on
+   * the session's navigation manager (#4984). Non-blocking and idempotent: the
+   * content hash resolves once per install (cached), so a nav event that arrives
+   * before it lands records under the default build key. Only sets a full build
+   * context once a real content hash is available.
+   */
+  private ensureBuildContext(appId: string): void {
+    if (this.buildContextResolvedApps.has(appId)) {
+      return;
+    }
+    this.buildContextResolvedApps.add(appId);
+
+    const resolve = async (): Promise<void> => {
+      try {
+        const info = await this.requestPackageInfo(appId, { includePermissions: false }, 4000);
+        const versionCode = info.success && typeof info.versionCode === "number" ? info.versionCode : 0;
+        if (!this.contentHashProvider) {
+          this.contentHashProvider = createContentHashProvider(this.device);
+        }
+        const contentHash = await this.contentHashProvider.resolveContentHash(this.device, appId, versionCode);
+        if (contentHash === null) {
+          // Unresolved hash: leave the default build key in effect and retry on a
+          // later event (drop the memo so ensureBuildContext runs again).
+          this.buildContextResolvedApps.delete(appId);
+          return;
+        }
+        this.getNavigationGraphManager().setBuildContext({
+          deviceId: this.device.deviceId,
+          versionCode,
+          contentHash,
+        });
+      } catch (error) {
+        // Best-effort provenance: log and let mutations fall back to the default key.
+        this.buildContextResolvedApps.delete(appId);
+        logger.debug(`[CTRL_PROXY] Build-context resolution failed for ${appId}: ${error}`);
+      }
+    };
+
+    // Fire-and-forget: resolution only sets in-memory build context (no DB write),
+    // so it is NOT enlisted in the DB-write shutdown barrier. Errors are handled
+    // inside resolve().
+    void resolve();
   }
 
   /**
@@ -2772,6 +2824,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           }
           if (event.applicationId) {
             this.sdkNavigationAppIds.add(event.applicationId);
+            // Eagerly resolve build/device provenance for this app (#4984).
+            // Non-blocking: later events pick up the resolved build key; this
+            // event may still record under the default key.
+            this.ensureBuildContext(event.applicationId);
           }
           // Attach last interaction for telemetry correlation
           if (this.lastInteraction) {

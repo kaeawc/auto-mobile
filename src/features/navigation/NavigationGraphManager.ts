@@ -52,6 +52,9 @@ export interface NavigationGraphService extends NavigationGraph, NavigationGraph
   setCurrentApp(appId: string): Promise<void>;
   getCurrentAppId(): string | null;
 
+  // Build/device provenance (#4984)
+  setBuildContext(context: NavigationBuildContext | null): void;
+
   // Screen tracking
   getCurrentScreen(): string | null;
   recordBackStack(backStack: BackStackInfo): Promise<void>;
@@ -106,6 +109,20 @@ type HistoryCursor = {
 };
 
 /**
+ * Build/device provenance context for a graph mutation (#4984). The build key is
+ * (packageId=current app, versionCode, contentHash); deviceId names the device
+ * the mutation was observed on.
+ */
+export interface NavigationBuildContext {
+  deviceId: string;
+  versionCode: number;
+  contentHash: string;
+}
+
+/** Non-null legacy sentinel used when a provenance dimension is unknown (#4984). */
+const LEGACY_PROVENANCE_SENTINEL = "legacy";
+
+/**
  * Manages the navigation graph with SQLite persistence.
  * Tracks screen visits and correlates navigation events with tool calls.
  */
@@ -120,6 +137,15 @@ export class NavigationGraphManager implements NavigationGraphService {
   private currentAppId: string | null = null;
   private currentScreen: string | null = null;
   private graphUpdateListeners: Array<() => void | Promise<void>> = [];
+
+  // Session + build/device provenance (#4984). sessionUuid identifies the owning
+  // agent session; the build context (deviceId, versionCode, contentHash) is set
+  // by the CtrlProxy client that binds a device. When the build context is unset
+  // (no device bound yet, or an unresolved content hash), mutations record under
+  // the default build key so a write never blocks on — or fails because of —
+  // provenance resolution.
+  private sessionUuid: string | null;
+  private currentBuildContext: NavigationBuildContext | null = null;
 
   // Tool call history kept in memory for correlation (transient data)
   private toolCallHistory: ToolCallInteraction[] = [];
@@ -148,11 +174,23 @@ export class NavigationGraphManager implements NavigationGraphService {
   constructor(
     repository?: NavigationRepository,
     testCoverageRepository?: TestCoverageRepository,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    sessionUuid: string | null = null
   ) {
     this.repository = repository ?? new NavigationRepository();
     this.testCoverageRepository = testCoverageRepository ?? new TestCoverageRepository();
     this.timer = timer;
+    this.sessionUuid = sessionUuid;
+  }
+
+  /**
+   * Set the build/device provenance context for subsequent graph mutations
+   * (#4984). Called by the CtrlProxy client that owns the device; the content hash
+   * is resolved eagerly (and cached) at bind time so nav events that arrive later
+   * record under the real build key. Pass `null` to clear.
+   */
+  public setBuildContext(context: NavigationBuildContext | null): void {
+    this.currentBuildContext = context;
   }
 
   /**
@@ -174,7 +212,7 @@ export class NavigationGraphManager implements NavigationGraphService {
   public static getInstanceForSession(sessionId: string): NavigationGraphManager {
     let instance = NavigationGraphManager.sessionInstances.get(sessionId);
     if (!instance) {
-      instance = new NavigationGraphManager();
+      instance = new NavigationGraphManager(undefined, undefined, undefined, sessionId);
       NavigationGraphManager.sessionInstances.set(sessionId, instance);
     }
     return instance;
@@ -249,9 +287,10 @@ export class NavigationGraphManager implements NavigationGraphService {
   public static createForTesting(
     repository?: NavigationRepository,
     testCoverageRepository?: TestCoverageRepository,
-    timer?: Timer
+    timer?: Timer,
+    sessionUuid?: string
   ): NavigationGraphManager {
-    return new NavigationGraphManager(repository, testCoverageRepository, timer);
+    return new NavigationGraphManager(repository, testCoverageRepository, timer, sessionUuid ?? null);
   }
 
   /**
@@ -318,6 +357,65 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
+   * Resolve the provenance dimensions for a mutation (#4984): the build key
+   * (versionCode + contentHash), the deviceId, and the sessionUuid. When no build
+   * context is set the mutation records under the default build key with non-null
+   * legacy sentinels — today's single-build behavior as the degenerate default.
+   */
+  private resolveProvenance(): {
+    versionCode: number;
+    contentHash: string;
+    deviceId: string;
+    sessionUuid: string;
+    } {
+    const ctx = this.currentBuildContext;
+    const sessionUuid = this.sessionUuid ?? LEGACY_PROVENANCE_SENTINEL;
+    if (ctx) {
+      return {
+        versionCode: ctx.versionCode,
+        contentHash: ctx.contentHash,
+        deviceId: ctx.deviceId,
+        sessionUuid,
+      };
+    }
+    logger.debug(
+      `[NAVIGATION_GRAPH] No build context set for ${this.currentAppId ?? "?"}; ` +
+      `recording provenance under the default build key`
+    );
+    return { versionCode: 0, contentHash: "", deviceId: LEGACY_PROVENANCE_SENTINEL, sessionUuid };
+  }
+
+  /**
+   * Record a per-node provenance observation inside the caller's transaction
+   * (#4984). Must run on the transaction-bound repository so it commits atomically
+   * with the node mutation.
+   */
+  private async recordNodeProvenance(
+    repository: NavigationRepository,
+    appId: string,
+    nodeId: number,
+    timestamp: number
+  ): Promise<void> {
+    const p = this.resolveProvenance();
+    const buildKey = await repository.getOrCreateBuildKey(appId, p.versionCode, p.contentHash);
+    await repository.recordNodeObservation(nodeId, buildKey.id, p.deviceId, p.sessionUuid, timestamp);
+  }
+
+  /**
+   * Record a per-edge provenance observation inside the caller's transaction (#4984).
+   */
+  private async recordEdgeProvenance(
+    repository: NavigationRepository,
+    appId: string,
+    edgeId: number,
+    timestamp: number
+  ): Promise<void> {
+    const p = this.resolveProvenance();
+    const buildKey = await repository.getOrCreateBuildKey(appId, p.versionCode, p.contentHash);
+    await repository.recordEdgeObservation(edgeId, buildKey.id, p.deviceId, p.sessionUuid, timestamp);
+  }
+
+  /**
    * Record back stack information for the current screen.
    * Updates the current node with back stack depth and task ID.
    */
@@ -327,15 +425,25 @@ export class NavigationGraphManager implements NavigationGraphService {
       return;
     }
 
-    await this.repository.updateNodeBackStack(
-      this.currentAppId,
-      this.currentScreen,
-      backStack.depth,
-      backStack.currentTaskId
-    );
+    const appId = this.currentAppId;
+    const screenName = this.currentScreen;
+
+    // Persist the back-stack update + app touch atomically (#4931): both run on the
+    // transaction-bound repository so a throw rolls back together and the exclusive
+    // connection is never held across non-DB work.
+    await this.repository.runInTransaction(async trx => {
+      const repository = this.repository.withExecutor(trx);
+      await repository.updateNodeBackStack(
+        appId,
+        screenName,
+        backStack.depth,
+        backStack.currentTaskId
+      );
+      await repository.touchApp(appId);
+    });
 
     logger.debug(
-      `[NAVIGATION_GRAPH] Updated back stack for ${this.currentScreen}: ` +
+      `[NAVIGATION_GRAPH] Updated back stack for ${screenName}: ` +
       `depth=${backStack.depth}, taskId=${backStack.currentTaskId}`
     );
   }
@@ -382,6 +490,10 @@ export class NavigationGraphManager implements NavigationGraphService {
       // Get or create node and update visit count
       const n = await repository.getOrCreateNode(appId, screenName, timestamp);
 
+      // Record per-node provenance for the current build/device/session (#4984),
+      // in the same transaction as the node mutation.
+      await this.recordNodeProvenance(repository, appId, n.id, timestamp);
+
       // Record node visit for test coverage if session is active
       if (this.activeTestSession) {
         await testCoverageRepository.recordNodeVisit(
@@ -416,6 +528,9 @@ export class NavigationGraphManager implements NavigationGraphService {
           toolArgs,
           timestamp
         );
+
+        // Record per-edge provenance for the current build/device/session (#4984).
+        await this.recordEdgeProvenance(repository, appId, edge.id, timestamp);
 
         // Record edge traversal for test coverage if session is active
         if (this.activeTestSession) {
@@ -596,6 +711,9 @@ export class NavigationGraphManager implements NavigationGraphService {
       await this.runBothReposInTransaction(async (repository, testCoverageRepository) => {
         // Update the existing node's visit count and last_seen_at
         await repository.updateNodeVisit(existingNode.id, timestamp);
+
+        // Record per-node provenance for this reach (#4984), same transaction.
+        await this.recordNodeProvenance(repository, appId, existingNode.id, timestamp);
 
         // Record node visit for test coverage if session is active
         if (this.activeTestSession) {
@@ -1496,7 +1614,14 @@ export class NavigationGraphManager implements NavigationGraphService {
     screenName: string,
     screenshotPath: string | null
   ): Promise<void> {
-    await this.repository.updateNodeScreenshot(appId, screenName, screenshotPath);
+    // #4931: touch navigation_apps.updated_at atomically with the screenshot write.
+    // This is enrichment, not a device reach, so it records NO provenance observation
+    // (observations are reach events; see #4984 decision).
+    await this.repository.runInTransaction(async trx => {
+      const repository = this.repository.withExecutor(trx);
+      await repository.updateNodeScreenshot(appId, screenName, screenshotPath);
+      await repository.touchApp(appId);
+    });
     logger.debug(`[NAVIGATION_GRAPH] Updated screenshot for ${screenName}: ${screenshotPath}`);
     this.notifyGraphUpdated();
   }
@@ -1550,6 +1675,9 @@ export class NavigationGraphManager implements NavigationGraphService {
 
       // Promote the suggestion (creates fingerprint and links suggestion)
       await repository.promoteSuggestion(suggestionId, node.id, timestamp);
+
+      // #4931: touch navigation_apps.updated_at atomically with the promotion.
+      await repository.touchApp(appId);
     });
 
     logger.info(

@@ -28,7 +28,7 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
   const calls: string[] = [];
   const timer = new FakeTimer();
   let states = ["Shutdown"];
-  let bootStatusFailure: string | null = null;
+  let bootStatusFailures: Array<string | null> = [];
   const nextState = (): string => (states.length > 1 ? states.shift()! : states[0]);
 
   const execAsync = async (file: string, args: string[]) => {
@@ -39,6 +39,7 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
       return createExecResult("simctl version 1.0.0", "");
     }
     if (command === `xcrun simctl bootstatus ${UDID} -b`) {
+      const bootStatusFailure = bootStatusFailures.shift() ?? null;
       if (bootStatusFailure !== null) {
         throw new Error(bootStatusFailure);
       }
@@ -79,7 +80,7 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
     timer,
     calls,
     setStates: next => { states = [...next]; },
-    failBootStatusWith: message => { bootStatusFailure = message; }
+    failBootStatusWith: message => { bootStatusFailures = [message]; }
   };
 }
 
@@ -88,6 +89,12 @@ const bootstatusCalls = (calls: string[]): string[] =>
 
 const shutdownCalls = (calls: string[]): string[] =>
   calls.filter(call => call === `xcrun simctl shutdown ${UDID}`);
+
+const ALREADY_BOOTED_405 =
+  "Device boot failed\n" +
+  "An error was encountered processing the command " +
+  "(domain=com.apple.CoreSimulator.SimError, code=405): " +
+  "Unable to boot device in current state: Booted";
 
 describe("SimCtlClient boot self-verification", () => {
   test("a wedged boot (bootstatus exit 0, device Shutdown) fails with an actionable error", async () => {
@@ -116,6 +123,32 @@ describe("SimCtlClient boot self-verification", () => {
     expect(bootstatusCalls(harness.calls).length).toBe(1);
     expect(shutdownCalls(harness.calls).length).toBe(0);
     expect(harness.timer.getSleepCallCount()).toBe(0);
+  });
+
+  test("accepts a CoreSimulator 405 already-Booted response after verifying the requested simulator", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    harness.setStates(["Booted"]);
+    harness.failBootStatusWith(ALREADY_BOOTED_405);
+
+    const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+
+    expect(handle).toBeDefined();
+    expect(bootstatusCalls(harness.calls).length).toBe(1);
+    expect(shutdownCalls(harness.calls).length).toBe(0);
+    expect(harness.timer.getSleepCallCount()).toBe(0);
+  });
+
+  test("retries a contradictory CoreSimulator 405 response when the simulator is not Booted", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    harness.setStates(["Shutdown", "Booted"]);
+    harness.failBootStatusWith(ALREADY_BOOTED_405);
+
+    const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+
+    expect(handle).toBeDefined();
+    expect(bootstatusCalls(harness.calls).length).toBe(2);
+    expect(shutdownCalls(harness.calls).length).toBe(1);
+    expect(harness.timer.getSleepHistory()).toEqual([10]);
   });
 
   test("retries a wedged boot after a shutdown and a backoff, then succeeds", async () => {

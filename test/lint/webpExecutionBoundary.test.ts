@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = "src/utils/image/webp/WebpBinaryResolver.ts";
 const BINARY = "(?:cwebp|dwebp|webpmux)";
+const BINARY_COMMAND = new RegExp(`(?:^|[/\\\\\\s;&|])${BINARY}(?:\\.exe)?(?:\\s|$|[;&|])`, "i");
 
 /**
  * A production file "directly executes" a libwebp tool when it launches the
@@ -14,29 +16,26 @@ const BINARY = "(?:cwebp|dwebp|webpmux)";
  * path is `WebpBinaryProvider.runCwebp` / `runDwebp` on the owner, which this
  * heuristic deliberately does not flag.
  *
- * Residual limit (bounded to concrete evasions): the binary name must appear as
- * a literal inside a single string token. A name assembled from a variable or
- * string concatenation, or one hidden past same-quote nesting inside a shell
- * string, is not detected — those are out of scope for this guard.
+ * The shared AST analyzer follows ordinary aliases, static variables, and the
+ * resolver return path rather than matching raw source text.
  */
 function directlyExecutesWebp(source: string): boolean {
-  const launchApis = "(?:spawn|spawnSync|exec|execSync|execFile|execFileSync)";
-  // A launcher whose first string argument itself contains the binary, e.g.
-  // spawn("cwebp", ...) or execSync("cwebp -o - -").
-  const directLiteral = new RegExp(`\\b${launchApis}\\s*\\(\\s*["'\`][^"'\`]*${BINARY}`, "i");
-  const bunSpawnLiteral = new RegExp(`Bun\\.spawn(?:Sync)?\\s*\\(\\s*\\[\\s*["'\`][^"'\`]*${BINARY}`, "i");
-  // A shell launcher that smuggles the binary through a `-c` command string,
-  // e.g. spawn("/bin/sh", ["-c", "cwebp -o -"]) or Bun.spawn(["bash", "-c", "dwebp ..."]).
-  const shellCommandString = new RegExp(`["'\`]-c["'\`]\\s*,\\s*["'\`][^"'\`]*${BINARY}`, "i");
-
-  const resolverVarNames = [
-    ...source.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?[^;]*\.(?:resolveCwebp|resolveDwebp)\s*\([^;]*;/g)
-  ].map(match => match[1]);
-  const resolverVarLaunch = resolverVarNames.some(name =>
-    new RegExp(`\\b${launchApis}\\s*\\(\\s*${name}\\b|Bun\\.spawn(?:Sync)?\\s*\\(\\s*\\[\\s*${name}\\b|\\.spawn\\s*\\(\\s*${name}\\b`).test(source)
-  );
-
-  return directLiteral.test(source) || bunSpawnLiteral.test(source) || shellCommandString.test(source) || resolverVarLaunch;
+  if (!/(?:cwebp|dwebp|webpmux)/i.test(source) || !/(?:spawn|exec|execute|Bun)/i.test(source)) {return false;}
+  const ast = executionBoundaryAst(source);
+  return ast.calls.some(call => {
+    if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
+    const alternatives = ast.arrayAlternatives(call.arguments[0]) ?? [[call.arguments[0]]];
+    return alternatives.some(([command, ...arrayArgs]) => {
+      const commandValues = ast.strings(command);
+      const argvAlternatives = arrayArgs.length > 0 ? [arrayArgs] : ast.arrayAlternatives(call.arguments[1]) ?? [];
+      const shellCommand = argvAlternatives.flatMap(argv => {
+        const shellIndex = argv.findIndex(argument => ast.strings(argument).includes("-c"));
+        return shellIndex >= 0 ? ast.strings(argv[shellIndex + 1]) : [];
+      });
+      return commandValues.some(value => BINARY_COMMAND.test(value)) || shellCommand.some(value => BINARY_COMMAND.test(value)) ||
+        ast.containsCallNamed(command, new Set(["resolveCwebp", "resolveDwebp"]));
+    });
+  });
 }
 
 function sourceFiles(directory: string): string[] {
@@ -86,12 +85,21 @@ describe("webp codec execution boundary (issue #4064)", () => {
     expect(directlyExecutesWebp(
       "const bin = await resolver.resolveDwebp(); execFile(bin, args);"
     )).toBe(true);
+    expect(directlyExecutesWebp(
+      'const binary = "cwebp"; const launch = spawn; launch(binary, ["-o", "-"]);'
+    )).toBe(true);
+    expect(directlyExecutesWebp('spawn("C:\\\\tools\\\\cwebp.exe", args);')).toBe(true);
+    expect(directlyExecutesWebp('const binary = "cwebp" as const; spawn(binary, args);')).toBe(true);
   });
 
   test("flags shell-string and *Sync launcher evasions", () => {
     expect(directlyExecutesWebp('execSync("cwebp -o - -");')).toBe(true);
+    expect(directlyExecutesWebp('const tool = "cwebp"; exec(`${tool} -o - -`);')).toBe(true);
     expect(directlyExecutesWebp('spawn("/bin/sh", ["-c", "cwebp -o -"]);')).toBe(true);
     expect(directlyExecutesWebp('Bun.spawn(["bash", "-c", "dwebp -o - --"]);')).toBe(true);
+    expect(directlyExecutesWebp('exec("cwebp&&echo done");')).toBe(true);
+    expect(directlyExecutesWebp('exec("dwebp; echo done");')).toBe(true);
+    expect(directlyExecutesWebp('exec("echo ok;cwebp -o - -");')).toBe(true);
     expect(directlyExecutesWebp('spawnSync("webpmux", ["-info", file]);')).toBe(true);
   });
 
@@ -99,6 +107,17 @@ describe("webp codec execution boundary (issue #4064)", () => {
     expect(directlyExecutesWebp("const output = await this.binaryResolver.runCwebp(args, pngBuffer);")).toBe(false);
     expect(directlyExecutesWebp('return this.binaryResolver.runDwebp(["-o", "-", "--", "-"], webpBuffer);')).toBe(false);
     expect(directlyExecutesWebp("const binaries = await new WebpBinaryResolver().resolve();")).toBe(false);
+  });
+
+  test("does not mistake codec words in data arguments for execution", () => {
+    expect(directlyExecutesWebp('spawn("echo", ["cwebp"]);')).toBe(false);
+    expect(directlyExecutesWebp('spawn("echo", ["/tmp/cwebp-result.txt"]);')).toBe(false);
+    expect(directlyExecutesWebp('spawn("bash", ["-c", script], { env: { TOOL: "cwebp" } });')).toBe(false);
+  });
+
+  test("detects a static shell prefix without joining across dynamic values", () => {
+    expect(directlyExecutesWebp('exec("cwebp -o - " + input);')).toBe(true);
+    expect(directlyExecutesWebp('exec("cwe" + suffix + "bp -o -");')).toBe(false);
   });
 
   test("every documented exception still exists", () => {

@@ -37,6 +37,27 @@ describe("archive extraction boundary (issue #4065)", () => {
     expect(directlyExtractsTar('exec("tar -C dest --extract -f archive.tar.gz");')).toBe(true);
     // Command assembled with a binary + expression; the static prefix still reads as tar extract.
     expect(directlyExtractsTar('executor.exec("tar -xzf " + archive);')).toBe(true);
+    expect(directlyExtractsTar('const run = exec; run("tar -xzf archive.tar.gz -C dest");')).toBe(true);
+    expect(directlyExtractsTar(
+      'runExecSeam(cb, opts, { command: "tar", args: ["-xzf", archive] });'
+    )).toBe(true);
+    expect(directlyExtractsTar(
+      'const seam = runExecSeam; seam(cb, opts, { command: "tar", args: ["-xzf", archive] });'
+    )).toBe(true);
+    expect(directlyExtractsTar(
+      'const command = "tar"; const args = ["-xzf", archive]; runExecSeam(cb, opts, { command, args });'
+    )).toBe(true);
+    expect(directlyExtractsTar(
+      'const command = "tar"; const args = ["-xzf", archive]; const context = { command, args }; runExecSeam(cb, opts, { ...context });'
+    )).toBe(true);
+    expect(directlyExtractsTar('runExecSeam(cb, opts, { command: "echo", args: ["tar", "-x"] });')).toBe(false);
+    expect(directlyExtractsTar('exec(useTar ? "tar -xzf archive.tar.gz" : "unzip archive.zip");')).toBe(true);
+    expect(directlyExtractsTar('exec(process.env.ARCHIVE_CMD ?? "tar -xzf archive.tar.gz");')).toBe(true);
+    expect(directlyExtractsTar('import cp = require("node:child_process"); cp.exec("tar -xzf archive.tar.gz");')).toBe(true);
+    expect(directlyExtractsTar("exec(String.raw`tar -xzf archive.tar.gz`);")).toBe(true);
+    expect(directlyExtractsTar(
+      'runExecSeam(cb, opts, enabled ? { command: "tar", args: ["-xzf", archive] } : { command: "echo", args: [] });'
+    )).toBe(true);
   });
 
   test("detects array-first tar extraction (Bun.spawn's single-array signature)", () => {
@@ -51,7 +72,12 @@ describe("archive extraction boundary (issue #4065)", () => {
     expect(directlyExtractsTar('const argv = ["tar", "-xzf", archive]; Bun.spawn(argv);')).toBe(true);
     expect(directlyExtractsTar('const args = ["-xzf", archive]; spawn("tar", [...args]);')).toBe(true);
     expect(directlyExtractsTar('const rest = ["-xzf", a]; Bun.spawn(["tar", ...rest]);')).toBe(true);
+    expect(directlyExtractsTar('const run = exec; run("tar", ["-xzf", archive], { cwd: dir });')).toBe(true);
+    expect(directlyExtractsTar('const prefix = dynamic; Bun.spawn([...prefix, "tar", "-xzf", archive]);')).toBe(false);
     expect(directlyExtractsTar('const args = ["-czf", archive]; spawn("tar", args);')).toBe(false);
+    expect(directlyExtractsTar(
+      'const command = "tar"; const args = ["-xzf", archive]; const run = executeCommand; run(command, args);'
+    )).toBe(true);
   });
 
   test("over-detects a shadowed argv name (loud false CI failure beats a silent miss)", () => {
@@ -71,6 +97,7 @@ describe("archive extraction boundary (issue #4065)", () => {
 
   test("does not flag tar creation, listing, or non-extract options", () => {
     expect(directlyExtractsTar('executeCommand("tar", ["-czf", archivePath, dir]);')).toBe(false);
+    expect(directlyExtractsTar('spawn("tar", ["-czf", archive], { env: { MODE: "-x" } });')).toBe(false);
     expect(directlyExtractsTar('executeCommand("tar", ["-tzf", archivePath]);')).toBe(false);
     // `-C` change-dir on its own is not extraction.
     expect(directlyExtractsTar('executeCommand("tar", ["-C", dir]);')).toBe(false);

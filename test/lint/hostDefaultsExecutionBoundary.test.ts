@@ -1,39 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = "src/utils/HostDefaultsClient.ts";
-
-// child_process launch primitives, plus the executor-seam method the repo uses
-// (`HostCommandExecutor.executeCommand`). Callers that promisify or otherwise
-// alias one of these are recovered separately via `wrapperNames`.
-const LAUNCHER_NAMES = "spawn|spawnSync|spawnCommand|exec|execSync|execFile|execFileSync|executeCommand";
-// Opening string-literal quote: single, double, or backtick.
-const QUOTE = "[\"'`]";
-
-/**
- * Names bound to a promisified/aliased `child_process` launcher, e.g.
- * `const execFileAsync = promisify(execFile);` or `const run = execFile;`. Such
- * a name invoked with a leading `"defaults"` literal is the same violation as a
- * direct launcher call — the guard must recognize the launch semantically, not
- * only the literal `execFile("defaults"` spelling.
- *
- * Bounded by design: this covers the concrete promisify/alias evasions the repo
- * actually uses (see `src/utils/hostAppearance.ts`, `HostCommandExecutor.ts`).
- * A launcher smuggled through a data structure, a computed member, or a
- * cross-module indirection is out of scope for this regex detector; a new
- * production `defaults` path in those exotic forms would need a manual review
- * catch, and this comment marks the deliberate limit.
- */
-function wrapperNames(source: string): string[] {
-  // const <name> = promisify(execFile) | util.promisify(exec) | execFile;
-  const pattern = new RegExp(
-    String.raw`\b(?:const|let|var)\s+(\w+)\s*=\s*(?:(?:\w+\.)?promisify\s*\(\s*(?:${LAUNCHER_NAMES})\s*\)|(?:${LAUNCHER_NAMES}))\s*;`,
-    "g"
-  );
-  return [...source.matchAll(pattern)].map(match => match[1]);
-}
+const DEFAULTS_COMMAND = /(?:^|[;&|])\s*(?:[^\s;&|]*[/\\])?defaults(?:\s|$)/;
 
 /**
  * Detects direct production execution of the host `defaults` binary (issue
@@ -43,21 +15,18 @@ function wrapperNames(source: string): string[] {
  * argument leaves those SimCtlClient paths untouched.
  */
 export function directlyExecutesHostDefaults(source: string): boolean {
-  // execFile("defaults", ...) / spawn("defaults", ...) / executeCommand("defaults", ...)
-  const literalFirstArg = new RegExp(String.raw`\b(?:${LAUNCHER_NAMES})\s*\(\s*${QUOTE}defaults${QUOTE}`);
-  // exec("defaults read -g ...") — shell string whose command word is `defaults`.
-  const shellString = new RegExp(String.raw`\b(?:exec|execSync)\s*\(\s*${QUOTE}defaults\s`);
-  // Bun.spawn(["defaults", ...]) — argv array whose first element is the binary.
-  const bunSpawn = new RegExp(String.raw`\bBun\.spawn\s*\(\s*\[\s*${QUOTE}defaults${QUOTE}`);
-  if (literalFirstArg.test(source) || shellString.test(source) || bunSpawn.test(source)) {
-    return true;
-  }
-
-  // A promisified/aliased launcher invoked as `<name>("defaults", ...)`, where
-  // `<name>` is a launcher captured by `wrapperNames` (e.g. `execFileAsync`).
-  return wrapperNames(source).some(name =>
-    new RegExp(String.raw`\b${name}\s*\(\s*${QUOTE}defaults[\s${QUOTE.slice(1, -1)}]`).test(source)
-  );
+  if (!source.includes("defaults") || !/(?:spawn|exec|execute|Bun)/i.test(source)) {return false;}
+  const ast = executionBoundaryAst(source);
+  return ast.calls.some(call => {
+    if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
+    if (ast.isRunExecSeam(call)) {
+      return ast.objectPropertyValues(call.arguments[2], "command")
+        .some(value => ast.strings(value).some(text => DEFAULTS_COMMAND.test(text)));
+    }
+    const first = call.arguments[0];
+    const alternatives = ast.arrayAlternatives(first) ?? [[first]];
+    return alternatives.some(([command]) => ast.strings(command).some(value => DEFAULTS_COMMAND.test(value)));
+  });
 }
 
 function sourceFiles(directory: string): string[] {
@@ -94,7 +63,22 @@ describe("host defaults execution boundary (issue #4062)", () => {
     expect(directlyExecutesHostDefaults('spawn("defaults", ["read", "-g", "AppleInterfaceStyle"]);')).toBe(true);
     expect(directlyExecutesHostDefaults('await executor.executeCommand("defaults", ["read", "-g", key]);')).toBe(true);
     expect(directlyExecutesHostDefaults('exec("defaults read -g AppleInterfaceStyle");')).toBe(true);
+    expect(directlyExecutesHostDefaults('exec("echo /tmp/defaults read");')).toBe(false);
+    expect(directlyExecutesHostDefaults('exec("defaults\\tread -g AppleInterfaceStyle");')).toBe(true);
+    expect(directlyExecutesHostDefaults('spawn("/usr/bin/defaults", ["read", "-g", key]);')).toBe(true);
     expect(directlyExecutesHostDefaults('Bun.spawn(["defaults", "read", "-g", key]);')).toBe(true);
+    expect(directlyExecutesHostDefaults('spawn("defaults" as const, ["read", "-g", key]);')).toBe(true);
+    expect(directlyExecutesHostDefaults('Bun.spawn(["defaults", "read"] as const);')).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'runExecSeam(cb, opts, { command: "defaults", args: ["read", "-g", key] });'
+    )).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'runExecSeam(cb, opts, enabled ? { command: "defaults", args: ["read"] } : { command: "echo", args: [] });'
+    )).toBe(true);
+    expect(directlyExecutesHostDefaults('const tool = "defaults"; exec(`${tool} read -g key`);')).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'function safe(){ const argv = ["echo"]; Bun.spawn(argv); } function bad(){ const argv = ["defaults", "read"]; Bun.spawn(argv); }'
+    )).toBe(true);
   });
 
   test("flags a promisified or aliased launcher invoked with defaults", () => {
@@ -108,11 +92,39 @@ describe("host defaults execution boundary (issue #4062)", () => {
     expect(directlyExecutesHostDefaults(
       'const launch = execFile; launch("defaults", ["read", "-g", key]);'
     )).toBe(true);
+    // The command may be assembled through ordinary constants before the alias call.
+    expect(directlyExecutesHostDefaults(
+      'const command = "defaults"; const run = promisify(execFile); run(command, ["read", "-g", key]);'
+    )).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'import { execFile as run } from "node:child_process"; run("defaults", ["read"]);'
+    )).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'const cp = require("node:child_process"); const { execFile: run } = cp; run("defaults", ["read"]);'
+    )).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'const { execFile: run } = fakeApi; run("defaults", ["read"]);'
+    )).toBe(false);
+    expect(directlyExecutesHostDefaults(
+      'let run; run = execFile; run("defaults", ["read"]);'
+    )).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'const cp = require("node:child_process"); cp.execFile("defaults", ["read"]);'
+    )).toBe(true);
   });
 
   test("does not flag simulator defaults routed through a simctl argv", () => {
     expect(directlyExecutesHostDefaults('simctl.executeCommandArgs(["spawn", udid, "defaults", "read", domain, key]);')).toBe(false);
     expect(directlyExecutesHostDefaults('spawn("xcrun", ["simctl", "spawn", udid, "defaults", "read"]);')).toBe(false);
+  });
+
+  test("does not mistake unrelated methods named exec for process launchers", () => {
+    expect(directlyExecutesHostDefaults('const matcher = /defaults/; matcher.exec("defaults");')).toBe(false);
+  });
+
+  test("detects a static shell prefix without joining across dynamic values", () => {
+    expect(directlyExecutesHostDefaults('exec("defaults read -g " + key);')).toBe(true);
+    expect(directlyExecutesHostDefaults('exec("defau" + key + "lts read");')).toBe(false);
   });
 
   test("every documented exception still exists", () => {

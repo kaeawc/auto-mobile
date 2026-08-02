@@ -44,15 +44,18 @@ export function directlyExtractsTar(source: string): boolean {
   return sharedAst.calls.some(call => {
     if (!sharedAst.isLauncher(call) && !sharedAst.isExecutionSeam(call)) {return false;}
     if (sharedAst.isRunExecSeam(call)) {
-      const values = sharedAst.strings(call.arguments[2]);
-      return values.includes("tar") && values.some(value => EXTRACT_FLAG.test(value));
+      const command = sharedAst.objectPropertyValues(call.arguments[2], "command");
+      const args = sharedAst.objectPropertyValues(call.arguments[2], "args");
+      return command.some(value => sharedAst.strings(value).includes("tar")) &&
+        args.some(value => sharedAst.strings(value).some(flag => EXTRACT_FLAG.test(flag)));
     }
-    const array = sharedAst.arrayElements(call.arguments[0]);
-    const command = array?.[0] ?? call.arguments[0];
-    const args = array ? array.slice(1) : call.arguments.slice(1);
-    if (sharedAst.strings(command).some(value => SHELL_TAR_EXTRACT.test(value))) {return true;}
-    return sharedAst.strings(command).includes("tar") && args.some(argument =>
-      sharedAst.strings(argument).some(value => EXTRACT_FLAG.test(value)));
+    const alternatives = sharedAst.arrayAlternatives(call.arguments[0]) ?? [[call.arguments[0]]];
+    return alternatives.some(([command, ...args]) => {
+      if (sharedAst.strings(command).some(value => SHELL_TAR_EXTRACT.test(value))) {return true;}
+      const argv = args.length > 0 ? args : call.arguments.slice(1);
+      return sharedAst.strings(command).includes("tar") && argv.some(argument =>
+        sharedAst.strings(argument).some(value => EXTRACT_FLAG.test(value)));
+    });
   });
 }
 

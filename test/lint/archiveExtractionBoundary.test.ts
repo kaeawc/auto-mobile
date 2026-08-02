@@ -44,6 +44,13 @@ describe("archive extraction boundary (issue #4065)", () => {
     expect(directlyExtractsTar(
       'const seam = runExecSeam; seam(cb, opts, { command: "tar", args: ["-xzf", archive] });'
     )).toBe(true);
+    expect(directlyExtractsTar(
+      'const command = "tar"; const args = ["-xzf", archive]; runExecSeam(cb, opts, { command, args });'
+    )).toBe(true);
+    expect(directlyExtractsTar(
+      'const command = "tar"; const args = ["-xzf", archive]; const context = { command, args }; runExecSeam(cb, opts, { ...context });'
+    )).toBe(true);
+    expect(directlyExtractsTar('runExecSeam(cb, opts, { command: "echo", args: ["tar", "-x"] });')).toBe(false);
     expect(directlyExtractsTar('exec(useTar ? "tar -xzf archive.tar.gz" : "unzip archive.zip");')).toBe(true);
   });
 

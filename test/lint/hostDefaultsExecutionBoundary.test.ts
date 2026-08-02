@@ -20,9 +20,8 @@ export function directlyExecutesHostDefaults(source: string): boolean {
   return ast.calls.some(call => {
     if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
     const first = call.arguments[0];
-    const array = ast.arrayElements(first);
-    const command = array?.[0] ?? first;
-    return ast.strings(command).some(value => DEFAULTS_COMMAND.test(value));
+    const alternatives = ast.arrayAlternatives(first) ?? [[first]];
+    return alternatives.some(([command]) => ast.strings(command).some(value => DEFAULTS_COMMAND.test(value)));
   });
 }
 
@@ -65,6 +64,10 @@ describe("host defaults execution boundary (issue #4062)", () => {
     expect(directlyExecutesHostDefaults('Bun.spawn(["defaults", "read", "-g", key]);')).toBe(true);
     expect(directlyExecutesHostDefaults('spawn("defaults" as const, ["read", "-g", key]);')).toBe(true);
     expect(directlyExecutesHostDefaults('Bun.spawn(["defaults", "read"] as const);')).toBe(true);
+    expect(directlyExecutesHostDefaults('const tool = "defaults"; exec(`${tool} read -g key`);')).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'function safe(){ const argv = ["echo"]; Bun.spawn(argv); } function bad(){ const argv = ["defaults", "read"]; Bun.spawn(argv); }'
+    )).toBe(true);
   });
 
   test("flags a promisified or aliased launcher invoked with defaults", () => {

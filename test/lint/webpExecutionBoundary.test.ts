@@ -6,7 +6,7 @@ import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = "src/utils/image/webp/WebpBinaryResolver.ts";
 const BINARY = "(?:cwebp|dwebp|webpmux)";
-const BINARY_COMMAND = new RegExp(`(?:^|[/\\\\\\s])${BINARY}(?:\\.exe)?(?:\\s|$|[;&|])`, "i");
+const BINARY_COMMAND = new RegExp(`(?:^|[/\\\\\\s;&|])${BINARY}(?:\\.exe)?(?:\\s|$|[;&|])`, "i");
 
 /**
  * A production file "directly executes" a libwebp tool when it launches the
@@ -24,14 +24,17 @@ function directlyExecutesWebp(source: string): boolean {
   const ast = executionBoundaryAst(source);
   return ast.calls.some(call => {
     if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
-    const array = ast.arrayElements(call.arguments[0]);
-    const command = array?.[0] ?? call.arguments[0];
-    const commandValues = ast.strings(command);
-    const argv = array ? array.slice(1) : ast.arrayElements(call.arguments[1]) ?? [];
-    const shellIndex = argv.findIndex(argument => ast.strings(argument).includes("-c"));
-    const shellCommand = shellIndex >= 0 ? ast.strings(argv[shellIndex + 1]) : [];
-    return commandValues.some(value => BINARY_COMMAND.test(value)) || shellCommand.some(value => BINARY_COMMAND.test(value)) ||
-      ast.containsCallNamed(command, new Set(["resolveCwebp", "resolveDwebp"]));
+    const alternatives = ast.arrayAlternatives(call.arguments[0]) ?? [[call.arguments[0]]];
+    return alternatives.some(([command, ...arrayArgs]) => {
+      const commandValues = ast.strings(command);
+      const argvAlternatives = arrayArgs.length > 0 ? [arrayArgs] : ast.arrayAlternatives(call.arguments[1]) ?? [];
+      const shellCommand = argvAlternatives.flatMap(argv => {
+        const shellIndex = argv.findIndex(argument => ast.strings(argument).includes("-c"));
+        return shellIndex >= 0 ? ast.strings(argv[shellIndex + 1]) : [];
+      });
+      return commandValues.some(value => BINARY_COMMAND.test(value)) || shellCommand.some(value => BINARY_COMMAND.test(value)) ||
+        ast.containsCallNamed(command, new Set(["resolveCwebp", "resolveDwebp"]));
+    });
   });
 }
 
@@ -91,10 +94,12 @@ describe("webp codec execution boundary (issue #4064)", () => {
 
   test("flags shell-string and *Sync launcher evasions", () => {
     expect(directlyExecutesWebp('execSync("cwebp -o - -");')).toBe(true);
+    expect(directlyExecutesWebp('const tool = "cwebp"; exec(`${tool} -o - -`);')).toBe(true);
     expect(directlyExecutesWebp('spawn("/bin/sh", ["-c", "cwebp -o -"]);')).toBe(true);
     expect(directlyExecutesWebp('Bun.spawn(["bash", "-c", "dwebp -o - --"]);')).toBe(true);
     expect(directlyExecutesWebp('exec("cwebp&&echo done");')).toBe(true);
     expect(directlyExecutesWebp('exec("dwebp; echo done");')).toBe(true);
+    expect(directlyExecutesWebp('exec("echo ok;cwebp -o - -");')).toBe(true);
     expect(directlyExecutesWebp('spawnSync("webpmux", ["-info", file]);')).toBe(true);
   });
 

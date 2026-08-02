@@ -29,24 +29,27 @@ function directlyExecutesDevicectl(source: string): boolean {
   const ast = executionBoundaryAst(source);
   return ast.calls.some(call => {
     if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
-    if (ast.calleeName(call) === "runExecSeam" ||
-      call.arguments.length >= 3 && ast.strings(call.arguments[2]).includes("xcrun")) {
-      const values = call.arguments.flatMap(argument => ast.strings(argument));
-      return values.includes("xcrun") && values.includes("devicectl");
+    if (ast.isRunExecSeam(call)) {
+      const command = ast.objectPropertyValues(call.arguments[2], "command");
+      const args = ast.objectPropertyValues(call.arguments[2], "args");
+      return command.some(value => ast.strings(value).some(commandValue => /(?:^|[/\\])xcrun$/.test(commandValue))) &&
+        args.some(value => ast.strings(value).includes("devicectl"));
     }
-    const array = ast.arrayElements(call.arguments[0]);
-    const command = array?.[0] ?? call.arguments[0];
-    const args = array ? array.slice(1) : call.arguments.slice(1);
-    const commandValues = ast.strings(command);
-    const xcrun = commandValues.some(value => /(?:^|[/\\])xcrun$/.test(value));
-    const directDevicectl = commandValues.some(value => /(?:^|[/\\])devicectl$/.test(value));
-    const shellDevicectl = commandValues.some(value => /(?:^|\s)xcrun\s+devicectl(?:\s|$)/.test(value));
-    const argv = array ? array.slice(1) : ast.arrayElements(call.arguments[1]) ?? [];
-    const shellIndex = argv.findIndex(argument => ast.strings(argument).includes("-c"));
-    const shellPayload = shellIndex >= 0 ? ast.strings(argv[shellIndex + 1]) : [];
-    const shellWrappedDevicectl = shellPayload.some(value => /(?:^|\s)xcrun\s+devicectl(?:\s|$)/.test(value));
-    return shellDevicectl || shellWrappedDevicectl || directDevicectl ||
-      xcrun && args.some(argument => ast.strings(argument).includes("devicectl"));
+    const alternatives = ast.arrayAlternatives(call.arguments[0]) ?? [[call.arguments[0]]];
+    return alternatives.some(([command, ...arrayArgs]) => {
+      const args = arrayArgs.length > 0 ? arrayArgs : call.arguments.slice(1);
+      const commandValues = ast.strings(command);
+      const xcrun = commandValues.some(value => /(?:^|[/\\])xcrun$/.test(value));
+      const directDevicectl = commandValues.some(value => /(?:^|[/\\])devicectl$/.test(value));
+      const shellDevicectl = commandValues.some(value => /(?:^|\s)xcrun\s+devicectl(?:\s|$)/.test(value));
+      const argvAlternatives = arrayArgs.length > 0 ? [arrayArgs] : ast.arrayAlternatives(call.arguments[1]) ?? [];
+      const shellWrappedDevicectl = argvAlternatives.some(argv => {
+        const shellIndex = argv.findIndex(argument => ast.strings(argument).includes("-c"));
+        return shellIndex >= 0 && ast.strings(argv[shellIndex + 1]).some(value => /(?:^|\s)xcrun\s+devicectl(?:\s|$)/.test(value));
+      });
+      return shellDevicectl || shellWrappedDevicectl || directDevicectl ||
+        xcrun && args.some(argument => ast.strings(argument).includes("devicectl"));
+    });
   });
 }
 
@@ -99,6 +102,7 @@ describe("devicectl execution boundary (issue #4053)", () => {
 
   test("detects shell, direct-binary, and absolute xcrun devicectl forms", () => {
     expect(directlyExecutesDevicectl('exec("xcrun devicectl device list");')).toBe(true);
+    expect(directlyExecutesDevicectl('const tool = "xcrun"; exec(`${tool} devicectl device list`);')).toBe(true);
     expect(directlyExecutesDevicectl('execFile("devicectl", ["--version"]);')).toBe(true);
     expect(directlyExecutesDevicectl('spawn("/usr/bin/xcrun", ["devicectl", "device", "list"]);')).toBe(true);
     expect(directlyExecutesDevicectl('spawn("/bin/sh", ["-c", "xcrun devicectl device list"]);')).toBe(true);
@@ -116,6 +120,9 @@ describe("devicectl execution boundary (issue #4053)", () => {
     )).toBe(true);
     expect(directlyExecutesDevicectl(
       'runExecSeam(cb, opts, { command: "xcrun", args: ["devicectl", "--version"] });'
+    )).toBe(true);
+    expect(directlyExecutesDevicectl(
+      'const command = "xcrun"; const args = ["devicectl", "--version"]; runExecSeam(cb, opts, { command, args });'
     )).toBe(true);
     expect(directlyExecutesDevicectl(
       'const run = runExecSeam; run(cb, opts, { command: "xcrun", args: ["devicectl", "--version"] });'

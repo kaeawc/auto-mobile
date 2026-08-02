@@ -15,7 +15,9 @@ export interface ExecutionBoundaryAst {
   isExecutionSeam(call: ts.CallExpression): boolean;
   isRunExecSeam(call: ts.CallExpression): boolean;
   strings(node: ts.Expression | undefined): string[];
+  arrayAlternatives(node: ts.Expression | undefined): ts.Expression[][] | undefined;
   arrayElements(node: ts.Expression | undefined): ts.Expression[] | undefined;
+  objectPropertyValues(node: ts.Expression | undefined, propertyName: string): ts.Expression[];
   containsCallNamed(node: ts.Expression | undefined, names: ReadonlySet<string>): boolean;
 }
 
@@ -23,6 +25,10 @@ function propertyName(expression: ts.Expression): string | undefined {
   if (ts.isIdentifier(expression)) {return expression.text;}
   if (ts.isPropertyAccessExpression(expression)) {return expression.name.text;}
   return undefined;
+}
+
+function propertyNameOf(name: ts.PropertyName): string | undefined {
+  return ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name) ? name.text : undefined;
 }
 
 function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {
@@ -126,7 +132,18 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (ts.isStringLiteralLike(node)) {return [node.text];}
     if (ts.isParenthesizedExpression(node)) {return strings(node.expression, seen);}
     if (ts.isNoSubstitutionTemplateLiteral(node)) {return [node.text];}
-    if (ts.isTemplateExpression(node)) {return [node.head.text, ...node.templateSpans.map(span => span.literal.text)];}
+    if (ts.isTemplateExpression(node)) {
+      let values = [node.head.text];
+      for (const span of node.templateSpans) {
+        const interpolation = strings(span.expression, seen);
+        if (interpolation.length > 0 && interpolation.every(value => !value.includes(DYNAMIC_BOUNDARY))) {
+          values = values.flatMap(prefix => interpolation.map(value => prefix + value + span.literal.text));
+        } else {
+          values = [...values, DYNAMIC_BOUNDARY, span.literal.text];
+        }
+      }
+      return values;
+    }
     if (ts.isConditionalExpression(node)) {
       return [...strings(node.whenTrue, seen), ...strings(node.whenFalse, seen)];
     }
@@ -150,31 +167,51 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     return [];
   };
 
-  const arrayElements = (node: ts.Expression | undefined, seen = new Set<string>()): ts.Expression[] | undefined => {
+  const arrayAlternatives = (node: ts.Expression | undefined, seen = new Set<string>()): ts.Expression[][] | undefined => {
     if (!node) {return undefined;}
     node = unwrapTransparentExpression(node);
     if (ts.isArrayLiteralExpression(node)) {
-      const elements: ts.Expression[] = [];
+      let alternatives: ts.Expression[][] = [[]];
       for (const element of node.elements) {
         if (ts.isSpreadElement(element)) {
-          const spread = arrayElements(element.expression, seen);
+          const spread = arrayAlternatives(element.expression, seen);
           // An unresolved spread can occupy the command position. Do not silently discard it and
           // shift later elements into that position.
           if (!spread) {return undefined;}
-          elements.push(...spread);
+          alternatives = alternatives.flatMap(prefix => spread.map(value => [...prefix, ...value]));
         } else if (ts.isExpression(element)) {
-          elements.push(element);
+          alternatives = alternatives.map(prefix => [...prefix, element]);
         }
       }
-      return elements;
+      return alternatives;
     }
     if (ts.isIdentifier(node) && !seen.has(node.text)) {
       const next = new Set([...seen, node.text]);
       const values = initializers.get(node.text) ?? [];
-      const arrays = values.map(value => arrayElements(value, next)).filter((value): value is ts.Expression[] => value !== undefined);
+      const arrays = values.map(value => arrayAlternatives(value, next)).filter((value): value is ts.Expression[][] => value !== undefined);
       return arrays.length > 0 ? arrays.flat() : undefined;
     }
     return undefined;
+  };
+  const arrayElements = (node: ts.Expression | undefined): ts.Expression[] | undefined => {
+    const alternatives = arrayAlternatives(node);
+    return alternatives?.length === 1 ? alternatives[0] : undefined;
+  };
+  const objectPropertyValues = (node: ts.Expression | undefined, propertyName: string, seen = new Set<string>()): ts.Expression[] => {
+    if (!node) {return [];}
+    node = unwrapTransparentExpression(node);
+    if (ts.isObjectLiteralExpression(node)) {
+      return node.properties.flatMap(property => {
+        if (ts.isPropertyAssignment(property) && propertyNameOf(property.name) === propertyName) {return [property.initializer];}
+        if (ts.isShorthandPropertyAssignment(property) && property.name.text === propertyName) {return [property.name];}
+        return ts.isSpreadAssignment(property) ? objectPropertyValues(property.expression, propertyName, seen) : [];
+      });
+    }
+    if (ts.isIdentifier(node) && !seen.has(node.text)) {
+      return (initializers.get(node.text) ?? []).flatMap(value =>
+        objectPropertyValues(value, propertyName, new Set([...seen, node.text])));
+    }
+    return [];
   };
   const containsCallNamed = (node: ts.Expression | undefined, names: ReadonlySet<string>, seen = new Set<string>()): boolean => {
     if (!node) {return false;}
@@ -203,7 +240,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     isExecutionSeam: call => isExecutionSeamReference(call.expression),
     isRunExecSeam: call => isRunExecSeamReference(call.expression),
     strings,
+    arrayAlternatives,
     arrayElements,
+    objectPropertyValues,
     containsCallNamed,
   };
 }

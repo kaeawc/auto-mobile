@@ -220,14 +220,20 @@ public protocol AutoMobileMCPClient {
 public final class AutoMobileDaemonClient: AutoMobileMCPClient {
     private let socketPath: String
     private let logger: AutoMobileLogger
+    private let clientVersion: String
     private let queue = DispatchQueue(label: "AutoMobileDaemonClient")
     private var connection: NWConnection?
     private var buffer = Data()
     private var requestId: Int64 = 0
 
-    public init(socketPath: String, logger: AutoMobileLogger = StdoutLogger()) {
+    public init(
+        socketPath: String,
+        logger: AutoMobileLogger = StdoutLogger(),
+        clientVersion: String? = nil
+    ) {
         self.socketPath = socketPath
         self.logger = logger
+        self.clientVersion = clientVersion ?? DaemonManager.resolveDaemonClientVersion()
     }
 
     public func initialize(timeout: TimeInterval) throws {
@@ -327,7 +333,7 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient {
             "params": params,
             "timeoutMs": Int(timeout * 1000),
             // Declared for the daemon's server-side version handshake gate (#2744).
-            "clientVersion": AutoMobileVersion.current,
+            "clientVersion": clientVersion,
         ]
 
         let data = try JSONSerialization.data(withJSONObject: request, options: [])
@@ -840,7 +846,11 @@ public final class AutoMobilePlanExecutor {
         } else {
             switch configuration.transport {
             case let .daemonUnixSocket(path):
-                self.mcpClient = AutoMobileDaemonClient(socketPath: path, logger: logger)
+                self.mcpClient = AutoMobileDaemonClient(
+                    socketPath: path,
+                    logger: logger,
+                    clientVersion: DaemonManager.resolveDaemonClientVersion(repoRoot: configuration.daemonRepoRoot)
+                )
             case let .streamableHttp(url):
                 do {
                     self.mcpClient = try StreamableHTTPMCPClient(endpoint: url, logger: logger)

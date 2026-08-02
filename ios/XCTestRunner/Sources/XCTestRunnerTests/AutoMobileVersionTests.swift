@@ -125,6 +125,109 @@ final class AutoMobileVersionTests: XCTestCase {
         ))
     }
 
+    func testPinnedDaemonPackageCommandUsesBunxAndAutomobileVersion() throws {
+        let command = try XCTUnwrap(DaemonManager.buildPackageDaemonCommand(
+            packageRunner: "/opt/homebrew/bin/bunx",
+            subcommand: "start",
+            packageVersion: "0.0.40"
+        ))
+
+        XCTAssertEqual(command, [
+            "@kaeawc/auto-mobile@0.0.40",
+            "--daemon",
+            "start",
+        ])
+    }
+
+    func testPinnedDaemonPackageCommandUsesNpxNonInteractiveFlag() throws {
+        let command = try XCTUnwrap(DaemonManager.buildPackageDaemonCommand(
+            packageRunner: "/usr/local/bin/npx",
+            subcommand: "restart",
+            packageVersion: "0.0.40"
+        ))
+
+        XCTAssertEqual(command, [
+            "-y",
+            "@kaeawc/auto-mobile@0.0.40",
+            "--daemon",
+            "restart",
+        ])
+    }
+
+    func testResolveDaemonPackageVersionPrefersExplicitPinThenAutomobileVersion() {
+        XCTAssertEqual(DaemonManager.resolveDaemonPackageVersion(environment: [
+            "AUTOMOBILE_DAEMON_PACKAGE_VERSION": " 0.0.41 ",
+            "AUTOMOBILE_VERSION": "0.0.40",
+        ]), "0.0.41")
+        XCTAssertEqual(DaemonManager.resolveDaemonPackageVersion(environment: [
+            "AUTOMOBILE_VERSION": " 0.0.40 ",
+        ]), "0.0.40")
+        XCTAssertNil(DaemonManager.resolveDaemonPackageVersion(environment: [:]))
+    }
+
+    func testPinnedDaemonPackageCommandRejectsFloatingOrUnknownPins() {
+        XCTAssertNil(DaemonManager.buildPackageDaemonCommand(
+            packageRunner: "/opt/homebrew/bin/bunx",
+            subcommand: "start",
+            packageVersion: "latest"
+        ))
+        XCTAssertNil(DaemonManager.buildPackageDaemonCommand(
+            packageRunner: "/opt/homebrew/bin/bunx",
+            subcommand: "start",
+            packageVersion: "unknown"
+        ))
+    }
+
+    func testDaemonLaunchSelectsPinnedPackageInsteadOfPathExecutable() {
+        XCTAssertEqual(DaemonManager.selectDaemonLaunch(
+            subcommand: "start",
+            localEntry: nil,
+            runtime: nil,
+            packageRunner: "/opt/homebrew/bin/bunx",
+            autoMobilePath: "/usr/local/bin/auto-mobile",
+            packageVersion: "0.0.40"
+        ), .process(
+            executable: "/opt/homebrew/bin/bunx",
+            arguments: ["@kaeawc/auto-mobile@0.0.40", "--daemon", "start"]
+        ))
+    }
+
+    func testDaemonLaunchRejectsPinnedStartWithoutPackageRunner() {
+        XCTAssertEqual(DaemonManager.selectDaemonLaunch(
+            subcommand: "start",
+            localEntry: nil,
+            runtime: nil,
+            packageRunner: nil,
+            autoMobilePath: "/usr/local/bin/auto-mobile",
+            packageVersion: "0.0.40"
+        ), .executableNotFound)
+    }
+
+    func testDaemonLaunchPreservesBuiltCheckoutPrecedenceOverPin() {
+        XCTAssertEqual(DaemonManager.selectDaemonLaunch(
+            subcommand: "restart",
+            localEntry: "/repo/dist/src/index.js",
+            runtime: "/opt/homebrew/bin/bun",
+            packageRunner: "/opt/homebrew/bin/bunx",
+            autoMobilePath: "/usr/local/bin/auto-mobile",
+            packageVersion: "0.0.40"
+        ), .process(
+            executable: "/opt/homebrew/bin/bun",
+            arguments: ["/repo/dist/src/index.js", "--daemon", "restart"]
+        ))
+    }
+
+    func testResolveDaemonClientVersionUsesPinWithoutBuiltCheckout() {
+        XCTAssertEqual(DaemonManager.resolveDaemonClientVersion(
+            repoRootHasBuiltEntry: false,
+            environment: ["AUTOMOBILE_VERSION": "0.0.40"]
+        ), "0.0.40")
+        XCTAssertEqual(DaemonManager.resolveDaemonClientVersion(
+            repoRootHasBuiltEntry: true,
+            environment: ["AUTOMOBILE_VERSION": "0.0.40"]
+        ), AutoMobileVersion.current)
+    }
+
     func testResolveRepoRootDaemonEntryScript() throws {
         XCTAssertNil(DaemonManager.resolveRepoRootDaemonEntryScript(nil))
         XCTAssertNil(DaemonManager.resolveRepoRootDaemonEntryScript(""))
@@ -253,6 +356,26 @@ final class AutoMobileVersionTests: XCTestCase {
 
         XCTAssertEqual(result, .ready)
         XCTAssertEqual(runtime.subcommands, [.init(name: "restart", repoRoot: repoRoot.path)])
+    }
+
+    func testEnsureDaemonRunningAcceptsDaemonMatchingPinnedClientVersion() {
+        let runtime = FakeDaemonRuntime(
+            daemonVersion: "0.0.40",
+            daemonBuildId: nil,
+            daemonEntryScript: nil,
+            buildIdAfterRestart: ""
+        )
+
+        let result = DaemonManager.ensureDaemonRunningResult(
+            repoRoot: nil,
+            timeoutSeconds: 0,
+            runtime: runtime,
+            callerAssetVersion: nil,
+            clientVersion: "0.0.40"
+        )
+
+        XCTAssertEqual(result, .ready)
+        XCTAssertTrue(runtime.subcommands.isEmpty)
     }
 }
 

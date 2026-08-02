@@ -345,7 +345,10 @@ open class AutoMobileTestCase: XCTestCase {
             }
             return try StreamableHTTPMCPClient(endpoint: endpointURL)
         }
-        return AutoMobileDaemonClient(socketPath: daemonSocketPath)
+        return AutoMobileDaemonClient(
+            socketPath: daemonSocketPath,
+            clientVersion: DaemonManager.resolveDaemonClientVersion(repoRoot: daemonRepoRoot)
+        )
     }
 
     private func isDaemonSocketTransport() -> Bool {

@@ -1243,12 +1243,14 @@ export class IOSCtrlProxyBuilder {
         `${summary} Refusing to launch because ${IOS_HELPER_REQUIRE_CODESIGN_ENV} is set.`
       );
     }
-    logger.warn(
-      `[IOSCtrlProxyBuilder] ${summary} Proceeding anyway — code signing is not OS-enforced on the ` +
+    const message = `[IOSCtrlProxyBuilder] ${summary} Proceeding anyway — code signing is not OS-enforced on the ` +
       `simulator, and the #4759 SHA-256 check already covers integrity. Set ` +
-      `${IOS_HELPER_REQUIRE_CODESIGN_ENV}=1 to refuse launch, and ${IOS_HELPER_TEAM_ID_ENV} to pin a Team ID.`,
-      cause
-    );
+      `${IOS_HELPER_REQUIRE_CODESIGN_ENV}=1 to refuse launch, and ${IOS_HELPER_TEAM_ID_ENV} to pin a Team ID.`;
+    if (cause === undefined) {
+      logger.warn(message);
+      return;
+    }
+    logger.warn(message, cause);
   }
 
   /** Path to the extracted runner `.app` bundle codesign verifies (issue #4760). */

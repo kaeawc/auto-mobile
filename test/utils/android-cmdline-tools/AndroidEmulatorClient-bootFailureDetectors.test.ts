@@ -56,11 +56,22 @@ describe("Android emulator boot failure diagnostics", () => {
     expect(error.message).toContain("2048 MB");
   });
 
-  test("reports a target that remains offline instead of waiting for the generic timeout", async () => {
+  test("keeps a transient offline target within the readiness deadline", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setDeviceStates([{ deviceId: "emulator-5554", state: "offline" }]);
+    adb.getDeviceStates = async () => {
+      if (timer.now() < 16_000) {
+        return [{ deviceId: "emulator-5554", state: "offline" }];
+      }
+
+      adb.setDevices([{ name: "Pixel_9_Pro", platform: "android", deviceId: "emulator-5554" }]);
+      adb.setCommandResponse("get-state", result("device"));
+      adb.setCommandResponse("shell pm list packages", result("package:com.example\n"));
+      adb.setCommandResponse("shell getprop sys.boot_completed", result("1"));
+      adb.setCommandResponse("shell getprop init.svc.bootanim", result("stopped"));
+      return [{ deviceId: "emulator-5554", state: "device" }];
+    };
     const client = new AndroidEmulatorClient(
       async () => result(),
       null,
@@ -71,9 +82,8 @@ describe("Android emulator boot failure diagnostics", () => {
     process.env.EMULATOR_POLLING_INTERVAL_MS = "500";
 
     try {
-      const error = await expectRejection(client.waitForEmulatorReady("Pixel_9_Pro", 20_000, null, "emulator-5554"));
-      expect(error.message).toContain("offline");
-      expect(error.message).toContain("15 seconds");
+      const booted = await client.waitForEmulatorReady("Pixel_9_Pro", 20_000, null, "emulator-5554");
+      expect(booted.deviceId).toBe("emulator-5554");
     } finally {
       if (previousPollingInterval === undefined) {
         delete process.env.EMULATOR_POLLING_INTERVAL_MS;
@@ -110,7 +120,6 @@ describe("Android emulator boot failure diagnostics", () => {
     const client = new AndroidEmulatorClient(async () => result(), null, timer, { create: () => adb } as AdbClientFactory);
     const detectOfflineFailure = (client as unknown as {
       detectOfflineFailure: (
-        avdName: string,
         deviceId: string | undefined,
         tracker: { deviceId: string | null; since: number | null },
       ) => Promise<Error | null>;
@@ -118,13 +127,14 @@ describe("Android emulator boot failure diagnostics", () => {
     const tracker = { deviceId: null as string | null, since: null as number | null };
 
     adb.setDeviceStates([{ deviceId: "emulator-5554", state: "offline" }]);
-    await detectOfflineFailure("Pixel_9_Pro", "emulator-5554", tracker);
+    await detectOfflineFailure("emulator-5554", tracker);
     timer.advanceTime(15_000);
-    const offlineFailure = await detectOfflineFailure("Pixel_9_Pro", "emulator-5554", tracker);
-    expect(offlineFailure?.message).toContain("offline");
+    const offlineFailure = await detectOfflineFailure("emulator-5554", tracker);
+    expect(offlineFailure).toBeNull();
+    expect(tracker.since).toBe(0);
 
     adb.setDeviceStates([{ deviceId: "emulator-5554", state: "device" }]);
-    const recoveredFailure = await detectOfflineFailure("Pixel_9_Pro", "emulator-5554", tracker);
+    const recoveredFailure = await detectOfflineFailure("emulator-5554", tracker);
     expect(recoveredFailure).toBeNull();
     expect(tracker.since).toBeNull();
   });

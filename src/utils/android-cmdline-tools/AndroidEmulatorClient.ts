@@ -16,7 +16,6 @@ import type { FormFactor } from "../../models/DeviceMatchCriteria";
 import type { AdbDeviceState } from "./interfaces/AdbExecutor";
 
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
-const OFFLINE_DEVICE_THRESHOLD_MS = 15_000;
 
 /**
  * Interface for Android Emulator (AVD) management
@@ -591,7 +590,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   private async detectOfflineFailure(
-    avdName: string,
     deviceId: string | undefined,
     tracker: { deviceId: string | null; since: number | null },
     timeoutMs?: number,
@@ -618,11 +616,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       tracker.deviceId = targetState.deviceId;
       tracker.since = this.timer.now();
     }
-    if (tracker.since !== null && this.timer.now() - tracker.since >= OFFLINE_DEVICE_THRESHOLD_MS) {
-      return new ActionableError(
-        `Emulator '${avdName}' (${targetState.deviceId}) has remained offline for ${OFFLINE_DEVICE_THRESHOLD_MS / 1000} seconds. Restart it outside the restrictive sandbox and verify that adb can reach the emulator.`
-      );
-    }
+    // An offline ADB state is transient during normal emulator startup. Keep
+    // tracking it for diagnostics, but wait for the caller's readiness deadline
+    // unless the emulator process provides definitive failure evidence.
     return null;
   }
 
@@ -1385,21 +1381,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private readinessTimeoutError(
     avdName: string,
     timeoutMs: number,
-    offlineFailure: ActionableError | null,
     processExitError: ActionableError | null,
   ): ActionableError {
     return processExitError
-      ?? offlineFailure
       ?? new ActionableError(`Emulator '${avdName}' failed to become ready within ${timeoutMs}ms`);
-  }
-
-  private shouldStopReadinessPolling(
-    pollingActive: boolean,
-    elapsedMs: number,
-    timeoutMs: number,
-    offlineFailure: ActionableError | null,
-  ): boolean {
-    return !pollingActive || elapsedMs >= timeoutMs || offlineFailure !== null;
   }
 
   private unknownEmulatorName(deviceId: string): string {
@@ -1527,7 +1512,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     // Start background polling immediately with configurable intervals
     let pollingActive = true;
     let foundDeviceId: string | null = null;
-    let offlineFailure: ActionableError | null = null;
     const offlineTracker = { deviceId: null as string | null, since: null as number | null };
 
     perf.startOperation("devicePolling");
@@ -1545,8 +1529,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             pollingActive = false;
             break;
           }
-          offlineFailure = await this.detectOfflineFailure(avdName, correlatedTargetDeviceId, offlineTracker, remainingTimeoutMs);
-          if (this.shouldStopReadinessPolling(pollingActive, this.timer.now() - startTime, timeoutMs, offlineFailure)) {
+          await this.detectOfflineFailure(correlatedTargetDeviceId, offlineTracker, remainingTimeoutMs);
+          if (!pollingActive || this.timer.now() - startTime >= timeoutMs) {
             break;
           }
 
@@ -1659,7 +1643,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     // Main timeout loop
     while (this.timer.now() - startTime < timeoutMs) {
-      const readinessFailure = processExitError ?? offlineFailure;
+      const readinessFailure = processExitError;
       if (readinessFailure) {
         pollingActive = false;
         await pollingPromise;
@@ -1696,7 +1680,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return bootedDevice;
     }
 
-    throw this.readinessTimeoutError(avdName, timeoutMs, offlineFailure, processExitError);
+    throw this.readinessTimeoutError(avdName, timeoutMs, processExitError);
   }
 
   /**

@@ -426,7 +426,7 @@ wiring_requires_yq() {
 
   run yq -r '.jobs."verify-and-release".if' "$workflow"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"github.event_name == 'workflow_dispatch'"* ]]
+  [ "$output" = "github.event_name == 'workflow_dispatch' && needs.validate-release-tag.outputs.is_release_tag == 'true'" ]
 }
 
 @test "prepare-release dispatches release.yml on the tag with its run ID (#4686)" {

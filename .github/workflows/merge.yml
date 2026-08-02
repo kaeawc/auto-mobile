@@ -1142,9 +1142,9 @@ jobs:
       MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD || vars.MAVEN_PASSWORD }}
       ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_USERNAME || vars.MAVEN_USERNAME }}
       ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_PASSWORD || vars.MAVEN_PASSWORD }}
-      SIGNING_IN_MEMORY_KEY: ${{ secrets.SIGNING_IN_MEMORY_KEY || vars.SIGNING_IN_MEMORY_KEY }}
-      SIGNING_IN_MEMORY_KEY_PASSWORD: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD || vars.SIGNING_IN_MEMORY_KEY_PASSWORD }}
-      SIGNING_IN_MEMORY_KEY_ID: ${{ secrets.SIGNING_IN_MEMORY_KEY_ID || vars.SIGNING_IN_MEMORY_KEY_ID }}
+      SIGNING_IN_MEMORY_KEY: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEY || vars.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEY }}
+      SIGNING_IN_MEMORY_KEY_PASSWORD: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYPASSWORD || vars.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYPASSWORD }}
+      SIGNING_IN_MEMORY_KEY_ID: ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYID || vars.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYID }}
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1178,7 +1178,15 @@ jobs:
         shell: bash
         run: |
           if [ -n "$SIGNING_IN_MEMORY_KEY" ]; then
-            echo "ORG_GRADLE_PROJECT_signingInMemoryKey=$SIGNING_IN_MEMORY_KEY" >> "$GITHUB_ENV"
+            # The ASCII-armored key is multi-line, so it must use the heredoc
+            # form of the GITHUB_ENV file. A single-line NAME=value would emit
+            # stray armor/body lines that the runner rejects as a malformed env
+            # file, aborting the job before it can publish.
+            {
+              echo "ORG_GRADLE_PROJECT_signingInMemoryKey<<__AUTOMOBILE_SIGNING_KEY_EOF__"
+              echo "$SIGNING_IN_MEMORY_KEY"
+              echo "__AUTOMOBILE_SIGNING_KEY_EOF__"
+            } >> "$GITHUB_ENV"
           fi
           if [ -n "$SIGNING_IN_MEMORY_KEY_PASSWORD" ]; then
             echo "ORG_GRADLE_PROJECT_signingInMemoryKeyPassword=$SIGNING_IN_MEMORY_KEY_PASSWORD" >> "$GITHUB_ENV"

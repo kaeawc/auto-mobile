@@ -285,6 +285,22 @@ final class AutoMobileVersionTests: XCTestCase {
         ), AutoMobileVersion.current)
     }
 
+    func testResolveDaemonClientVersionHonorsConfiguredRepoRoot() throws {
+        let repoRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("automobile-configured-root-\(UUID().uuidString)")
+        let entry = repoRoot.appendingPathComponent("dist/src/index.js")
+        try FileManager.default.createDirectory(at: entry.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "// fixture entry".write(to: entry, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        XCTAssertEqual(DaemonManager.resolveDaemonClientVersion(
+            environment: [
+                "AUTOMOBILE_REPO_ROOT": repoRoot.path,
+                "AUTOMOBILE_DAEMON_PACKAGE_VERSION": "0.0.40",
+            ]
+        ), AutoMobileVersion.current)
+    }
+
     func testResolveDaemonRepoRootPrefersTheProvidedCheckout() {
         XCTAssertEqual(
             DaemonManager.resolveDaemonRepoRoot("/repo"),
@@ -464,22 +480,22 @@ final class AutoMobileVersionTests: XCTestCase {
             subcommand: "restart",
             readinessTimeoutSeconds: 15,
             environment: [:]
-        ), 26)
+        ), 36)
         XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
             subcommand: "restart",
             readinessTimeoutSeconds: 15,
             environment: ["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS": "30000"]
-        ), 66)
+        ), 96)
         XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
             subcommand: "start",
             readinessTimeoutSeconds: 15,
             environment: ["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS": "30000"]
-        ), 60)
+        ), 90)
         XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
             subcommand: "start",
             readinessTimeoutSeconds: 15,
             environment: [:]
-        ), 20)
+        ), 30)
     }
 
     func testEnsureDaemonRunningAcceptsDaemonMatchingPinnedClientVersion() {

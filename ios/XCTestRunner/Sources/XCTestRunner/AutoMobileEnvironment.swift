@@ -487,9 +487,9 @@ public enum DaemonManager {
         let startupSeconds = configuredStartupMilliseconds > 0
             ? TimeInterval(configuredStartupMilliseconds) / 1000
             : 10
-        // DaemonManager can wait once for an existing lock holder and once for the lock winner's
-        // startup/retry, each with the configured startup budget.
-        let startupLifecycleSeconds = 2 * startupSeconds
+        // DaemonManager can wait for a lock holder, then make two startup attempts while
+        // recovering an incomplete package extraction, each with the configured startup budget.
+        let startupLifecycleSeconds = 3 * startupSeconds
         guard subcommand == "restart" else {
             return max(readinessTimeoutSeconds, startupLifecycleSeconds)
         }
@@ -603,7 +603,7 @@ public enum DaemonManager {
         repoRoot: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> String {
-        let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot)
+        let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot, environment: environment)
         return resolveDaemonClientVersion(
             repoRootHasBuiltEntry: resolveRepoRootDaemonEntryScript(effectiveRepoRoot) != nil,
             environment: environment
@@ -612,8 +612,15 @@ public enum DaemonManager {
 
     /// The checkout used for both daemon launch and the matching client handshake. A caller may
     /// supply a root explicitly; otherwise XCTestRunner's own source checkout is used when built.
-    static func resolveDaemonRepoRoot(_ repoRoot: String?, inferredRepoRoot: String? = nil) -> String? {
-        repoRoot ?? inferredRepoRoot ?? findRepoRoot(startingAt: #filePath)
+    static func resolveDaemonRepoRoot(
+        _ repoRoot: String?,
+        inferredRepoRoot: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        repoRoot
+            ?? inferredRepoRoot
+            ?? AutoMobileEnvironment(values: environment).firstNonEmpty(["AUTOMOBILE_REPO_ROOT"])
+            ?? findRepoRoot(startingAt: #filePath)
     }
 
     static func resolveDaemonClientVersion(

@@ -197,9 +197,10 @@ describe("FileAvdConfigReader", () => {
     process.env.ANDROID_USER_HOME = "/user-home";
     const path = require("path");
     const paths: string[] = [];
+    const expectedConfigPath = path.join("/user-home", "avd", "Play.avd", "config.ini");
     const reader = new FileAvdConfigReader(
       async path => { paths.push(path); return "image.sysdir.1=system-images/android-34/google_apis_playstore/arm64-v8a/"; },
-      path => path.endsWith("Play.avd/config.ini"),
+      path => path === expectedConfigPath,
     );
 
     const config = await reader.readConfig("Play");
@@ -210,18 +211,19 @@ describe("FileAvdConfigReader", () => {
 
   it("resolves an absolute custom path from the AVD registry", async () => {
     const path = require("path");
-    const registryPath = path.join("/fake/avd", "Custom.ini");
-    const configPath = path.join("/custom/avds", "Custom.avd", "config.ini");
+    const avdHome = path.resolve("fake", "avd");
+    const registryPath = path.join(avdHome, "Custom.ini");
+    const configPath = path.join(path.resolve("custom", "avds"), "Custom.avd", "config.ini");
     const readPaths: string[] = [];
     const reader = new FileAvdConfigReader(
       async filePath => {
         readPaths.push(filePath);
-        if (filePath === registryPath) {return "path=/custom/avds/Custom.avd\n";}
+        if (filePath === registryPath) {return `path=${path.dirname(configPath)}\n`;}
         if (filePath === configPath) {return "hw.ramSize=4096\nimage.sysdir.1=system-images/android-34/google_apis/arm64-v8a/";}
         throw new Error(`Unexpected path: ${filePath}`);
       },
       filePath => filePath === registryPath || filePath === configPath,
-      "/fake/avd",
+      avdHome,
     );
 
     const config = await reader.readConfig("Custom");
@@ -232,20 +234,22 @@ describe("FileAvdConfigReader", () => {
 
   it("prefers a valid registry target over a stale conventional config", async () => {
     const path = require("path");
-    const registryPath = path.join("/fake/avd", "Custom.ini");
-    const conventionalConfigPath = path.join("/fake/avd", "Custom.avd", "config.ini");
-    const relocatedConfigPath = path.join("/custom/avds", "Custom.avd", "config.ini");
+    const avdHome = path.resolve("fake", "avd");
+    const relocatedAvdHome = path.resolve("custom", "avds");
+    const registryPath = path.join(avdHome, "Custom.ini");
+    const conventionalConfigPath = path.join(avdHome, "Custom.avd", "config.ini");
+    const relocatedConfigPath = path.join(relocatedAvdHome, "Custom.avd", "config.ini");
     const readPaths: string[] = [];
     const reader = new FileAvdConfigReader(
       async filePath => {
         readPaths.push(filePath);
-        if (filePath === registryPath) {return "path=/custom/avds/Custom.avd\n";}
+        if (filePath === registryPath) {return `path=${relocatedAvdHome}/Custom.avd\n`;}
         if (filePath === relocatedConfigPath) {return "hw.ramSize=4096\n";}
         if (filePath === conventionalConfigPath) {return "hw.ramSize=1024\n";}
         throw new Error(`Unexpected path: ${filePath}`);
       },
       filePath => filePath === registryPath || filePath === conventionalConfigPath || filePath === relocatedConfigPath,
-      "/fake/avd",
+      avdHome,
     );
 
     const config = await reader.readConfig("Custom");
@@ -256,8 +260,9 @@ describe("FileAvdConfigReader", () => {
 
   it("resolves a safe relative path.rel from the Android user-home parent", async () => {
     const path = require("path");
-    const registryPath = path.join("/fake/.android/avd", "Custom.ini");
-    const configPath = path.join("/fake/.android/custom-avds", "Custom.avd", "config.ini");
+    const avdHome = path.resolve("fake", ".android", "avd");
+    const configPath = path.join(path.dirname(avdHome), "custom-avds", "Custom.avd", "config.ini");
+    const registryPath = path.join(avdHome, "Custom.ini");
     const readPaths: string[] = [];
     const reader = new FileAvdConfigReader(
       async filePath => {
@@ -267,7 +272,7 @@ describe("FileAvdConfigReader", () => {
         throw new Error(`Unexpected path: ${filePath}`);
       },
       filePath => filePath === registryPath || filePath === configPath,
-      "/fake/.android/avd",
+      avdHome,
     );
 
     const config = await reader.readConfig("Custom");
@@ -278,11 +283,13 @@ describe("FileAvdConfigReader", () => {
 
   it("resolves path.rel from config home when ANDROID_AVD_HOME is overridden", async () => {
     const path = require("path");
-    process.env.ANDROID_AVD_HOME = "/fake/avd-data";
-    process.env.ANDROID_USER_HOME = "/fake/.android";
-    process.env.ANDROID_EMULATOR_HOME = "/fake/.android";
-    const registryPath = path.join("/fake/avd-data", "Custom.ini");
-    const configPath = path.join("/fake/.android/avd", "Custom.avd", "config.ini");
+    const avdHome = path.resolve("fake", "avd-data");
+    const configHome = path.resolve("fake", ".android");
+    process.env.ANDROID_AVD_HOME = avdHome;
+    process.env.ANDROID_USER_HOME = configHome;
+    process.env.ANDROID_EMULATOR_HOME = configHome;
+    const registryPath = path.join(avdHome, "Custom.ini");
+    const configPath = path.join(configHome, "avd", "Custom.avd", "config.ini");
     const readPaths: string[] = [];
     const reader = new FileAvdConfigReader(
       async filePath => {
@@ -302,7 +309,8 @@ describe("FileAvdConfigReader", () => {
 
   it("rejects a relative registry path that escapes the Android user-home parent", async () => {
     const path = require("path");
-    const registryPath = path.join("/fake/.android/avd", "Custom.ini");
+    const avdHome = path.resolve("fake", ".android", "avd");
+    const registryPath = path.join(avdHome, "Custom.ini");
     const probedPaths: string[] = [];
     const reader = new FileAvdConfigReader(
       async filePath => {
@@ -310,7 +318,7 @@ describe("FileAvdConfigReader", () => {
         return "path.rel=../../outside/Custom.avd\n";
       },
       filePath => filePath === registryPath,
-      "/fake/.android/avd",
+      avdHome,
     );
 
     const config = await reader.readConfig("Custom");

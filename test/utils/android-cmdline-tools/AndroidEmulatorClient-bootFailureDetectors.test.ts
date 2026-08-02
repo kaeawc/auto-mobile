@@ -58,14 +58,16 @@ describe("Android emulator boot failure diagnostics", () => {
 
   test("applies the RAM floor when the AVD config comes from an absolute registry path", async () => {
     const path = require("path");
-    const registryPath = path.join("/fake/avd", "Pixel_9_Pro.ini");
-    const configPath = path.join("/custom/avds", "Pixel_9_Pro.avd", "config.ini");
+    const avdHome = path.resolve("fake", "avd");
+    const relocatedAvdHome = path.resolve("custom", "avds");
+    const registryPath = path.join(avdHome, "Pixel_9_Pro.ini");
+    const configPath = path.join(relocatedAvdHome, "Pixel_9_Pro.avd", "config.ini");
     const reader = new FileAvdConfigReader(
       async filePath => filePath === registryPath
-        ? "path=/custom/avds/Pixel_9_Pro.avd\n"
+        ? `path=${path.join(relocatedAvdHome, "Pixel_9_Pro.avd")}\n`
         : "hw.ramSize=1024\nimage.sysdir.1=system-images/android-36/google_apis_playstore/arm64-v8a/\ntag.id=google_apis_playstore\n",
       filePath => filePath === registryPath || filePath === configPath,
-      "/fake/avd",
+      avdHome,
     );
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

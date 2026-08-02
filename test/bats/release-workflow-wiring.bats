@@ -408,6 +408,27 @@ wiring_requires_yq() {
   [ "$output" = "true" ]
 }
 
+@test "release.yml queues a validation run for hand-pushed tags without publishing (#4697)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/release.yml"
+
+  run yq -r '.on.push.tags[]' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "*" ]
+
+  run yq -r '.concurrency.group' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'release-${{ inputs.tag || github.ref_name }}' ]
+
+  run yq -r '.jobs."validate-release-tag".steps[] | select(.id == "validate") | .env.TAG' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ inputs.tag || github.ref_name }}' ]
+
+  run yq -r '.jobs."verify-and-release".if' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "github.event_name == 'workflow_dispatch' && needs.validate-release-tag.outputs.is_release_tag == 'true'" ]
+}
+
 @test "prepare-release dispatches release.yml on the tag with its run ID (#4686)" {
   wiring_requires_yq
   # Pull the one step's run script out of the parsed YAML, so comments elsewhere

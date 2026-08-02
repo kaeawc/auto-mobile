@@ -44,7 +44,7 @@ import { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } from 
 import { startAppearanceSocketServer, stopAppearanceSocketServer } from "./appearanceSocketServer";
 import { startPerformanceStreamSocketServer, stopPerformanceStreamSocketServer } from "./performanceStreamSocketServer";
 import { startPerformancePushSocketServer, stopPerformancePushSocketServer } from "./performancePushSocketServer";
-import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer, getDeviceDataStreamServer, type NavigationGraphStreamData } from "./deviceDataStreamSocketServer";
+import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer, getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import { startFailuresStreamSocketServer, stopFailuresStreamSocketServer } from "./failuresStreamSocketServer";
 import { startFailuresPushSocketServer, stopFailuresPushSocketServer } from "./failuresPushSocketServer";
 import { startTelemetryPushSocketServer, stopTelemetryPushSocketServer } from "./telemetryPushSocketServer";
@@ -59,6 +59,10 @@ import {
   type ObservationStreamIosClient,
 } from "./observationInitialFrame";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import {
+  convertSummaryToStreamData,
+  createNavigationGraphRequestHandler,
+} from "./navigationGraphRequestHandler";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
@@ -1001,18 +1005,11 @@ export class Daemon {
       }
     });
 
-    // Wire up on-demand navigation graph requests from IDE plugins
-    server.setOnNavigationGraphRequested(async (appId?: string | null) => {
-      try {
-        const summary = appId
-          ? await navGraphManager.exportGraphSummaryForApp(appId)
-          : await navGraphManager.exportGraphSummary();
-        return convertSummaryToStreamData(summary);
-      } catch (error) {
-        logger.warn(`[Daemon] Failed to export navigation graph on request: ${error}`);
-        return null;
-      }
-    });
+    // Wire up on-demand navigation graph requests from IDE plugins. A failed export must NOT be
+    // swallowed to null (issue #4918): the handler rethrows so the stream server's existing error
+    // path surfaces a typed `error` frame, letting a stream-driven client distinguish "export
+    // failed" from "no app / empty graph".
+    server.setOnNavigationGraphRequested(createNavigationGraphRequestHandler(navGraphManager));
 
     logger.info("[Daemon] Navigation graph stream listener configured");
   }
@@ -1653,34 +1650,6 @@ export class Daemon {
   getDevicePool(): DevicePool {
     return this.devicePool;
   }
-}
-
-/**
- * Convert a NavigationGraphManager summary to the stream data format.
- */
-function convertSummaryToStreamData(summary: {
-  appId: string | null;
-  nodes: Array<{ id: number; screenName: string; visitCount: number; screenshotPath?: string | null }>;
-  edges: Array<{ id: number; from: string; to: string; toolName: string | null; traversalCount: number }>;
-  currentScreen: string | null;
-}): NavigationGraphStreamData {
-  return {
-    appId: summary.appId,
-    nodes: summary.nodes.map(node => ({
-      id: node.id,
-      screenName: node.screenName,
-      visitCount: node.visitCount,
-      screenshotPath: node.screenshotPath,
-    })),
-    edges: summary.edges.map(edge => ({
-      id: edge.id,
-      from: edge.from,
-      to: edge.to,
-      toolName: edge.toolName,
-      traversalCount: edge.traversalCount,
-    })),
-    currentScreen: summary.currentScreen,
-  };
 }
 
 /**

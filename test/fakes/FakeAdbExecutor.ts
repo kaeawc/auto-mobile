@@ -285,7 +285,7 @@ export class FakeAdbExecutor implements AdbExecutor {
     return this.devices;
   }
 
-  async getDeviceStates(): Promise<AdbDeviceState[]> {
+  async getDeviceStates(_options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<AdbDeviceState[]> {
     return this.deviceStates;
   }
 

@@ -86,6 +86,7 @@ describe("Android doctor command line tools check", () => {
     expect(result.status).toBe("warn");
     expect(result.message).toContain("outdated");
     expect(result.message).toContain("8.0");
+    expect(result.value).toBe(location.path);
   });
 
   test("passes when cmdline-tools meets the supported SDK XML version", async () => {
@@ -103,6 +104,7 @@ describe("Android doctor command line tools check", () => {
 
     expect(result.status).toBe("pass");
     expect(result.message).toContain("13.0");
+    expect(result.value).toBe(location.path);
   });
 });
 
@@ -472,12 +474,23 @@ describe("checkConnectedDevices", () => {
   test("warns when an AVD has too little configured RAM", async () => {
     const result = await checkAvdMemory({
       listAvds: async () => [{ name: "Tiny" }],
-      readAvdConfig: { readConfig: async () => ({ ramSizeMb: 1024 }) },
+      readAvdConfig: { readConfig: async () => ({ apiLevel: 36, tag: "google_apis_playstore", ramSizeMb: 1024 }) },
     });
 
     expect(result.status).toBe("warn");
     expect(result.message).toContain("Tiny");
     expect(result.message).toContain("2048 MB");
+  });
+
+  test("does not warn for low-memory non-Play or legacy AVDs", async () => {
+    const result = await checkAvdMemory({
+      listAvds: async () => [{ name: "Legacy" }, { name: "Wear" }],
+      readAvdConfig: { readConfig: async name => name === "Legacy"
+        ? { apiLevel: 28, tag: "google_apis", ramSizeMb: 1024 }
+        : { apiLevel: 35, tag: "android-wear", ramSizeMb: 1024 } },
+    });
+
+    expect(result.status).toBe("pass");
   });
 
   test("warns when no AVD config can be read", async () => {

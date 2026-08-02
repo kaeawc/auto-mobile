@@ -115,6 +115,27 @@ describe("SdkManagerClient", () => {
     await expect(readSdkManagerVersion({ getVersion: async () => ({ stdout: "", stderr: "Requires Java 17", exitCode: 1, outputTruncated: false }) })).resolves.toBeNull();
   });
 
+  test("parses the standalone sdkmanager version after warning output", async () => {
+    await expect(readSdkManagerVersion({ getVersion: async () => ({
+      stdout: "Warning: SDK XML version 3 is too old.\n13.0\n",
+      stderr: "",
+      exitCode: 0,
+      outputTruncated: false,
+    }) })).resolves.toBe("13.0");
+  });
+
+  test("passes the selected tools location to the version probe", async () => {
+    const location = { path: "/selected/cmdline-tools/latest", source: "manual" as const, available_tools: ["sdkmanager"] };
+    let receivedLocation: unknown;
+    await expect(readSdkManagerVersion({
+      getVersion: async options => {
+        receivedLocation = options?.location;
+        return { stdout: "13.0\n", stderr: "", exitCode: 0, outputTruncated: false };
+      },
+    }, location)).resolves.toBe("13.0");
+    expect(receivedLocation).toEqual(location);
+  });
+
   test("does not truncate the sdkmanager catalogue by default", async () => {
     const { client, child } = createClient();
     const output = "available package\n".repeat(2_000);

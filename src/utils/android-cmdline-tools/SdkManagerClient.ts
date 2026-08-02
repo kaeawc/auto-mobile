@@ -28,6 +28,8 @@ export interface SdkManagerExecutionOptions {
   timeoutMs?: number;
   terminationGraceMs?: number;
   maxOutputChars?: number;
+  /** Use a previously selected command-line-tools installation. */
+  location?: AndroidToolsLocation;
 }
 
 export interface SdkManagerCommandResult {
@@ -127,13 +129,16 @@ export class SdkManagerClient {
     options: SdkManagerExecutionOptions,
     allowBootstrapRoot = false,
   ): Promise<SdkManagerCommandResult> {
-    const { path, env } = await this.resolve(allowBootstrapRoot);
+    const { path, env } = await this.resolve(allowBootstrapRoot, options.location);
     return this.execute(path, args, { ...defaultsForCommand, env }, options);
   }
 
-  private async resolve(allowBootstrapRoot = false): Promise<{ path: string; env: NodeJS.ProcessEnv }> {
-    const locations = await this.dependencies.detectAndroidCommandLineTools();
-    const location = this.dependencies.getBestAndroidToolsLocation(locations);
+  private async resolve(
+    allowBootstrapRoot = false,
+    selectedLocation?: AndroidToolsLocation,
+  ): Promise<{ path: string; env: NodeJS.ProcessEnv }> {
+    const locations = selectedLocation ? [selectedLocation] : await this.dependencies.detectAndroidCommandLineTools();
+    const location = selectedLocation ?? this.dependencies.getBestAndroidToolsLocation(locations);
     if (!location) {
       throw new Error("Android command line tools not found. Tool installation functionality has been removed. Please install Android SDK Command-line Tools and set ANDROID_HOME or ANDROID_SDK_ROOT to the SDK root.");
     }
@@ -278,8 +283,14 @@ export class SdkManagerClient {
 /** Read and normalize the installed sdkmanager version for diagnostics. */
 export async function readSdkManagerVersion(
   client: Pick<SdkManagerClient, "getVersion"> = new SdkManagerClient(),
+  location?: AndroidToolsLocation,
 ): Promise<string | null> {
-  const result = await client.getVersion();
+  const result = await client.getVersion(location ? { location } : {});
   if (result.exitCode !== 0) {return null;}
-  return result.stdout.match(/\b(\d+(?:\.\d+){0,2})\b/)?.[1] ?? null;
+  let version: string | null = null;
+  for (const line of `${result.stdout}\n${result.stderr}`.split("\n")) {
+    const match = line.trim().match(/^(\d+(?:\.\d+){0,2})$/);
+    if (match) {version = match[1];}
+  }
+  return version;
 }

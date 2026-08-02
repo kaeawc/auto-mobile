@@ -97,7 +97,7 @@ export interface AdbExecutor {
   getBootedAndroidDevices(options?: { bypassCache?: boolean }): Promise<BootedDevice[]>;
 
   /** Return raw ADB device states, including `offline` and `unauthorized` rows. */
-  getDeviceStates?(): Promise<AdbDeviceState[]>;
+  getDeviceStates?(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<AdbDeviceState[]>;
 
   /**
    * Check if the device screen is currently on

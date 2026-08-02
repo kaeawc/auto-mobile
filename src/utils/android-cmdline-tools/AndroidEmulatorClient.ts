@@ -557,7 +557,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     suggestion?: string;
   } {
     const mprotectFailure = /qemu_mprotect__osdep:\s*mprotect failed:\s*permission denied/i.test(output);
-    const hvfFailure = /hvf is not enabled on this aarch64 host/i.test(output);
+    const hvfFailure = /hvf is not enabled on this aarch64 host|HVF error:\s*HV_(?:UNSUPPORTED|ERROR)|failed to initialize HVF:\s*Invalid argument/i.test(output);
     if (!mprotectFailure && !hvfFailure) {
       return { isSandboxError: false };
     }
@@ -594,10 +594,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     avdName: string,
     deviceId: string | undefined,
     tracker: { deviceId: string | null; since: number | null },
+    timeoutMs?: number,
   ): Promise<ActionableError | null> {
     let states: AdbDeviceState[];
     try {
-      states = await this.adbFactory.create(null).getDeviceStates?.() ?? [];
+      states = await this.adbFactory.create(null).getDeviceStates?.({ timeoutMs }) ?? [];
     } catch (error) {
       logger.debug(`Offline-state probe unavailable during emulator readiness: ${error instanceof Error ? error.message : String(error)}`);
       tracker.deviceId = null;
@@ -1532,7 +1533,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           logger.debug(`Background polling iteration - checking for emulator '${avdName}'...`);
 
           const correlatedTargetDeviceId = targetDeviceId ?? this.getLaunchTargetDeviceId(childProcess);
-          offlineFailure = await this.detectOfflineFailure(avdName, correlatedTargetDeviceId, offlineTracker);
+          const remainingTimeoutMs = timeoutMs - (this.timer.now() - startTime);
+          if (remainingTimeoutMs <= 0) {
+            pollingActive = false;
+            break;
+          }
+          offlineFailure = await this.detectOfflineFailure(avdName, correlatedTargetDeviceId, offlineTracker, remainingTimeoutMs);
+          if (!pollingActive || this.timer.now() - startTime >= timeoutMs) {
+            break;
+          }
 
           // For local emulators, check for running devices
           logger.debug(`Checking for running local emulators...`);

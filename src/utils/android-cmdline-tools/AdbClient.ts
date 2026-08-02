@@ -1000,7 +1000,7 @@ export class AdbClient implements AdbExecutor {
    * getBootedAndroidDevices(). Readiness diagnostics use this to distinguish a
    * device that is absent from one that is present but stuck offline.
    */
-  async getDeviceStates(): Promise<AdbDeviceState[]> {
+  async getDeviceStates(options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<AdbDeviceState[]> {
     if (this.shouldSkipMissingAdbProbe()) {
       return [];
     }
@@ -1009,9 +1009,10 @@ export class AdbClient implements AdbExecutor {
     try {
       result = await this.executeCommand(
         "devices -l",
-        AdbClient.DEVICE_LIST_TIMEOUT_MS,
+        options.timeoutMs ?? AdbClient.DEVICE_LIST_TIMEOUT_MS,
         undefined,
-        true
+        true,
+        options.signal,
       );
     } catch (error) {
       if (this.isMissingExecutableError(error)) {

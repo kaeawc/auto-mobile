@@ -29,6 +29,9 @@ describe("Android emulator boot failure diagnostics", () => {
 
     expect(client.detectSandboxMprotect("qemu_mprotect__osdep: mprotect failed: Permission denied").isSandboxError).toBe(true);
     expect(client.detectSandboxMprotect("hvf is not enabled on this aarch64 host").isSandboxError).toBe(true);
+    expect(client.detectSandboxMprotect("HVF error: HV_UNSUPPORTED").isSandboxError).toBe(true);
+    expect(client.detectSandboxMprotect("HVF error: HV_ERROR").isSandboxError).toBe(true);
+    expect(client.detectSandboxMprotect("failed to initialize HVF: Invalid argument").isSandboxError).toBe(true);
     expect(client.detectSandboxMprotect("Detected GPU type: host").isSandboxError).toBe(false);
   });
 
@@ -64,6 +67,7 @@ describe("Android emulator boot failure diagnostics", () => {
       timer,
       { create: () => adb } as AdbClientFactory,
     );
+    const previousPollingInterval = process.env.EMULATOR_POLLING_INTERVAL_MS;
     process.env.EMULATOR_POLLING_INTERVAL_MS = "500";
 
     try {
@@ -71,7 +75,11 @@ describe("Android emulator boot failure diagnostics", () => {
       expect(error.message).toContain("offline");
       expect(error.message).toContain("15 seconds");
     } finally {
-      delete process.env.EMULATOR_POLLING_INTERVAL_MS;
+      if (previousPollingInterval === undefined) {
+        delete process.env.EMULATOR_POLLING_INTERVAL_MS;
+      } else {
+        process.env.EMULATOR_POLLING_INTERVAL_MS = previousPollingInterval;
+      }
     }
   });
 
@@ -119,6 +127,21 @@ describe("Android emulator boot failure diagnostics", () => {
     const recoveredFailure = await detectOfflineFailure("Pixel_9_Pro", "emulator-5554", tracker);
     expect(recoveredFailure).toBeNull();
     expect(tracker.since).toBeNull();
+  });
+
+  test("bounds the auxiliary state probe by the readiness deadline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const observedTimeouts: Array<number | undefined> = [];
+    adb.getDeviceStates = async options => {
+      observedTimeouts.push(options?.timeoutMs);
+      return [];
+    };
+    const client = new AndroidEmulatorClient(async () => result(), null, timer, { create: () => adb } as AdbClientFactory);
+
+    await expectRejection(client.waitForEmulatorReady("Pixel_9_Pro", 100, null, "emulator-5554"));
+    expect(observedTimeouts[0]).toBe(100);
   });
 
 });

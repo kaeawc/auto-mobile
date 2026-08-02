@@ -22,12 +22,11 @@ import type { AndroidToolsLocation } from "../../utils/android-cmdline-tools/det
 import { FileAvdConfigReader, MIN_AVD_RAM_MB, type AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import type { AdbDeviceState } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 
-const MIN_CMDLINE_TOOLS_VERSION = [9, 0, 0] as const;
+const MIN_CMDLINE_TOOLS_VERSION = [9, 0] as const;
 type CmdlineToolsVersionReader = (location: AndroidToolsLocation) => Promise<string | null>;
 
 const readCmdlineToolsVersion: CmdlineToolsVersionReader = async location => {
-  void location;
-  return readSdkManagerVersion();
+  return readSdkManagerVersion(undefined, location);
 };
 
 async function checkCmdlineToolsVersion(
@@ -42,6 +41,7 @@ async function checkCmdlineToolsVersion(
         status: "warn",
         message: "Could not determine cmdline-tools version.",
         recommendation: "Install a current Android SDK Command-line Tools package that supports SDK XML v4.",
+        value: location.path,
       };
     }
     const parts = version.split(".").map(part => Number.parseInt(part, 10) || 0);
@@ -53,14 +53,14 @@ async function checkCmdlineToolsVersion(
         status: "warn",
         message: `Android cmdline-tools version ${version} is outdated for current SDK XML/device catalogs.`,
         recommendation: "Upgrade to Android SDK Command-line Tools 9.0 or newer.",
-        value: version,
+        value: location.path,
       };
     }
     return {
       name: "Android Command Line Tools",
       status: "pass",
       message: `Android command line tools detected (version ${version}).`,
-      value: version,
+      value: location.path,
     };
   } catch (error) {
     logger.warn(`Failed to determine cmdline-tools version: ${error instanceof Error ? error.message : String(error)}`);
@@ -69,6 +69,7 @@ async function checkCmdlineToolsVersion(
       status: "warn",
       message: `Could not determine cmdline-tools version: ${error instanceof Error ? error.message : String(error)}`,
       recommendation: "Install a current Android SDK Command-line Tools package that supports SDK XML v4.",
+      value: location.path,
     };
   }
 }
@@ -369,15 +370,18 @@ export async function checkAvdMemory(
   }
 
   try {
+    const readAvdConfig = dependencies.readAvdConfig;
     const avds = await dependencies.listAvds();
     const unverifiableConfigs: string[] = [];
     const lowMemory = (await Promise.all(avds.map(async avd => {
-      const config = await dependencies.readAvdConfig!.readConfig(avd.name);
+      const config = await readAvdConfig.readConfig(avd.name);
       if (config?.ramSizeMb === undefined) {
         unverifiableConfigs.push(avd.name);
         return null;
       }
-      return config?.ramSizeMb !== undefined && config.ramSizeMb < MIN_AVD_RAM_MB
+      const isModernPlayImage = config.tag?.toLowerCase().includes("play")
+        && (config.apiLevel ?? 0) >= 30;
+      return isModernPlayImage && config.ramSizeMb < MIN_AVD_RAM_MB
         ? `${avd.name} (${config.ramSizeMb} MB)`
         : null;
     }))).filter((name): name is string => name !== null);

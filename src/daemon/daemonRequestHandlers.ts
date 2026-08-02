@@ -11,6 +11,7 @@ export interface DaemonStateAccess {
   isInitialized(): boolean;
   getSessionManager(): {
     getSession(sessionId: string): Session | null;
+    recordHeartbeat?(sessionId: string): void;
     getSessionForDevice?(deviceId: string): string | null;
     getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;
     releaseSession(sessionId: string): Promise<string | null>;
@@ -70,6 +71,24 @@ export async function handleDaemonRequest(
   }
 
   switch (request.method) {
+    case "daemon/heartbeat": {
+      const sessionId = (request.params as { sessionId?: string } | undefined)?.sessionId;
+      if (!sessionId) {
+        return {
+          success: false,
+          error: "sessionId parameter required",
+        };
+      }
+      const manager = state.getSessionManager();
+      if (!manager.getSession(sessionId)) {
+        return {
+          success: false,
+          error: `Session not found: ${sessionId}`,
+        };
+      }
+      manager.recordHeartbeat?.(sessionId);
+      return { success: true, result: { sessionId } };
+    }
     case "daemon/refreshDevices": {
       const pool = state.getDevicePool();
       const addedCount = await pool.refreshDevices();

@@ -138,6 +138,31 @@ describe("handleDaemonRequest", () => {
     });
   });
 
+  test("records a heartbeat for an active session", async () => {
+    const devicePool = new FakeDevicePool({
+      total: 1,
+      idle: 0,
+      assigned: 1,
+      error: 0,
+    });
+    const state = new FakeDaemonState(sessionManager, devicePool);
+    const sessionId = "heartbeat-session";
+    const session = await sessionManager.createSession(sessionId, "emulator-5554", "android");
+    const initialHeartbeat = session.lastHeartbeat;
+    fakeTimer.advanceTime(1_000);
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/heartbeat", { sessionId }),
+      state
+    );
+
+    expect(response).toEqual({
+      success: true,
+      result: { sessionId },
+    });
+    expect(sessionManager.getSession(sessionId)?.lastHeartbeat).toBeGreaterThan(initialHeartbeat);
+  });
+
   test("returns error when sessionId is missing", async () => {
     const devicePool = new FakeDevicePool({
       total: 0,

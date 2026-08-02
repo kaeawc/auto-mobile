@@ -13,6 +13,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -70,6 +71,82 @@ class McpDaemonClientInputTest {
         assertEquals(
           "profile-a",
           arguments?.get("__autoMobileCapabilityProfileUuid")?.jsonPrimitive?.content,
+        )
+      }
+  }
+
+  @Test
+  fun `desktop session uuid is injected into tool calls without overriding explicit routing`() {
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(resultJson = "{}"),
+            SocketResponse(resultJson = "{}"),
+            SocketResponse(resultJson = "{}"),
+          )
+      )
+      .use { server ->
+        val client =
+          McpDaemonClient(
+            socketPathValue = server.socketPath.toString(),
+            sessionUuid = "desktop-session",
+          )
+
+        client.callTool("observe", JsonObject(emptyMap()))
+        client.callTool(
+          "observe",
+          JsonObject(mapOf("sessionUuid" to JsonPrimitive("explicit-session"))),
+        )
+        client.callTool("setToolCapability", JsonObject(emptyMap()))
+
+        val requests = server.awaitRequests()
+        assertEquals(
+          "desktop-session",
+          requests[0].params["arguments"]?.jsonObject?.get("sessionUuid")?.jsonPrimitive?.content,
+        )
+        assertEquals(
+          "explicit-session",
+          requests[1].params["arguments"]?.jsonObject?.get("sessionUuid")?.jsonPrimitive?.content,
+        )
+        assertFalse(
+          "sessionUuid" in (requests[2].params["arguments"]?.jsonObject ?: JsonObject(emptyMap()))
+        )
+      }
+  }
+
+  @Test
+  fun `desktop daemon session exposes one identity and releases it only once`() {
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(resultJson = "{\"heartbeat\":true}"),
+            SocketResponse(resultJson = "{\"released\":true}"),
+          )
+      )
+      .use { server ->
+        val session =
+          DesktopDaemonSession(
+            McpDaemonClient(
+              socketPathValue = server.socketPath.toString(),
+              sessionUuid = "desktop-session",
+            )
+          )
+
+        assertEquals("desktop-session", session.sessionUuid)
+        assertEquals("desktop-session", session.sessionUuidProvider())
+        session.heartbeat()
+        session.release()
+        assertNull(session.sessionUuidProvider())
+        session.release()
+
+        val requests = server.awaitRequests()
+        assertEquals(
+          listOf("daemon/heartbeat", "daemon/releaseSession"),
+          requests.map { it.method },
+        )
+        assertEquals(
+          "desktop-session",
+          requests[1].params["sessionId"]?.jsonPrimitive?.content,
         )
       }
   }

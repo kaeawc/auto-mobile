@@ -100,7 +100,8 @@ class VideoStreamClient(
    * stream-socket session guard (issue #4751). Resolved at connect time so a session established
    * after construction is still used. Null (the default) omits the `sessionUuid` field via
    * [explicitNulls] = false, so the daemon rejects the subscribe unless it was started with
-   * `AUTOMOBILE_DAEMON_STREAM_AUTH=0`. The desktop cannot yet populate it -- see issue #4924.
+   * `AUTOMOBILE_DAEMON_STREAM_AUTH=0`. The desktop host supplies a provider from
+   * `DesktopDaemonSession` for Unix-daemon connections.
    */
   private val sessionUuidProvider: () -> String? = { null },
 ) : VideoStreamSource {

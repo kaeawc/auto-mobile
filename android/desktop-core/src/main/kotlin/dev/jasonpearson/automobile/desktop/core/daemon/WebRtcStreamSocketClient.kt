@@ -101,8 +101,8 @@ interface WebRtcStreamClient {
  * request so a session established after this client is constructed is still picked up. When it
  * returns null the `sessionUuid` field is omitted from the wire request (`DaemonJson` drops nulls);
  * the daemon then rejects the request unless it was started with `AUTOMOBILE_DAEMON_STREAM_AUTH=0`.
- * The default provider returns null because the desktop does not yet hold a daemon session identity
- * to send -- see [WebRtcStreamSocketRequest.sessionUuid] and issue #4924.
+ * The default provider returns null for callers that do not own a session-bound desktop app run;
+ * the desktop host supplies a provider from `DesktopDaemonSession` for Unix-daemon connections.
  */
 class WebRtcStreamSocketClient(
   private val socketPathValue: String = AutoMobileSocketPaths.socketPath(WEBRTC_STREAM_SOCKET_FILE),

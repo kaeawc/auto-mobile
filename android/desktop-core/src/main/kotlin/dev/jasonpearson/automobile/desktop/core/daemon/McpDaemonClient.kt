@@ -45,6 +45,7 @@ class McpDaemonClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
   private val json: Json = DaemonJson,
   private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
+  val sessionUuid: String? = null,
 ) : AutoMobileClient {
   private var daemonLifecycle: DaemonLifecycleEnsurer? =
     if (socketPathValue == DaemonSocketPaths.socketPath()) DesktopDaemonLifecycle() else null
@@ -505,12 +506,23 @@ class McpDaemonClient(
   }
 
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
-    val profileUuid = capabilityProfileUuid
-    val routedArguments =
-      if (name == SET_TOOL_CAPABILITY_TOOL_NAME || profileUuid == null) arguments
-      else
+    val sessionArguments =
+      if (
+        sessionUuid != null && name != SET_TOOL_CAPABILITY_TOOL_NAME && "sessionUuid" !in arguments
+      ) {
         buildJsonObject {
           arguments.forEach { (key, value) -> put(key, value) }
+          put("sessionUuid", JsonPrimitive(sessionUuid))
+        }
+      } else {
+        arguments
+      }
+    val profileUuid = capabilityProfileUuid
+    val routedArguments =
+      if (name == SET_TOOL_CAPABILITY_TOOL_NAME || profileUuid == null) sessionArguments
+      else
+        buildJsonObject {
+          sessionArguments.forEach { (key, value) -> put(key, value) }
           put(DAEMON_CAPABILITY_PROFILE_PARAM, JsonPrimitive(profileUuid))
         }
     val response =
@@ -523,6 +535,28 @@ class McpDaemonClient(
       )
     ensureSuccess(response)
     return response.result ?: JsonObject(emptyMap())
+  }
+
+  /** Releases this client's daemon session, if it owns one. */
+  internal fun releaseSession() {
+    val sessionId = sessionUuid ?: return
+    val response =
+      sendRequest(
+        "daemon/releaseSession",
+        buildJsonObject { put("sessionId", JsonPrimitive(sessionId)) },
+      )
+    ensureSuccess(response)
+  }
+
+  /** Refreshes the heartbeat for this client's daemon session, if it owns one. */
+  internal fun heartbeatSession() {
+    val sessionId = sessionUuid ?: return
+    val response =
+      sendRequest(
+        "daemon/heartbeat",
+        buildJsonObject { put("sessionId", JsonPrimitive(sessionId)) },
+      )
+    ensureSuccess(response)
   }
 
   override fun enableToolCapability(capability: String) {

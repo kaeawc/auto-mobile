@@ -542,6 +542,31 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertEqual(result, .ready)
         XCTAssertTrue(runtime.subcommands.isEmpty)
     }
+
+    func testEnsureDaemonRunningFailsClosedForInvalidPinsBeforeDaemonReuse() {
+        for (environment, expectedVersion) in [
+            (["AUTOMOBILE_DAEMON_PACKAGE_VERSION": "next"], "next"),
+            (["AUTOMOBILE_VERSION": "^0.0.40"], "^0.0.40"),
+        ] {
+            let runtime = FakeDaemonRuntime(
+                daemonVersion: AutoMobileVersion.current,
+                daemonBuildId: nil,
+                daemonEntryScript: nil,
+                buildIdAfterRestart: ""
+            )
+
+            let result = DaemonManager.ensureDaemonRunningResult(
+                repoRoot: "",
+                timeoutSeconds: 0,
+                runtime: runtime,
+                callerAssetVersion: nil,
+                environment: environment
+            )
+
+            XCTAssertEqual(result, .invalidPackageVersion(expectedVersion))
+            XCTAssertTrue(runtime.subcommands.isEmpty)
+        }
+    }
 }
 
 private final class FakeDaemonSubcommandLauncher: DaemonManager.DaemonSubcommandLauncher {

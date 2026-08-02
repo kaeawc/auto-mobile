@@ -842,6 +842,15 @@ public enum DaemonManager {
         -> DaemonStartupResult
     {
         let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot, inferredRepoRoot: inferredRepoRoot)
+        let hasLocalBuild = resolveRepoRootDaemonEntryScript(effectiveRepoRoot) != nil
+        if !hasLocalBuild,
+           case let .invalid(version) = daemonPackageVersionResolution(
+               resolveDaemonPackageVersion(environment: environment)
+           )
+        {
+            PerfTimer.log("ensureDaemonRunning: invalid pinned daemon package version: \(version)")
+            return .invalidPackageVersion(version)
+        }
         let launcherTimeoutSeconds = daemonLauncherTimeoutSeconds(
             subcommand: "restart",
             readinessTimeoutSeconds: timeoutSeconds,

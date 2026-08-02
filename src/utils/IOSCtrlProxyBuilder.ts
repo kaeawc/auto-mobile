@@ -63,6 +63,15 @@ export const IOS_HELPER_REQUIRE_CODESIGN_ENV = "AUTOMOBILE_IOS_HELPER_REQUIRE_CO
  * canonical Team ID (issue #4760).
  */
 export const IOS_HELPER_TEAM_ID_ENV = "AUTOMOBILE_IOS_HELPER_TEAM_ID";
+/**
+ * Expected SHA256 for an explicitly supplied or source-built runner. This keeps
+ * the pre-launch integrity gate active when the local runner intentionally does
+ * not match the published release artifact selected by package.json.
+ */
+export const IOS_CTRL_PROXY_RUNNER_SHA256_ENV = "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256";
+/** Executable represented by {@link IOS_CTRL_PROXY_RUNNER_SHA256_ENV}. */
+export const IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV =
+  "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET";
 
 /**
  * Turn a codesign inspection outcome into a list of human-readable problems,
@@ -837,6 +846,15 @@ export class IOSCtrlProxyBuilder {
     if (override !== null) {
       return override;
     }
+    const environmentOverride = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV]?.trim();
+    if (environmentOverride) {
+      if (!/^[a-f0-9]{64}$/i.test(environmentOverride)) {
+        throw new ActionableError(
+          `${IOS_CTRL_PROXY_RUNNER_SHA256_ENV} must be a 64-character hexadecimal SHA256 checksum`
+        );
+      }
+      return environmentOverride.toLowerCase();
+    }
     return resolveRunnerChecksum();
   }
 
@@ -844,6 +862,15 @@ export class IOSCtrlProxyBuilder {
     const override = IOSCtrlProxyBuilder.expectedRunnerChecksumTargetOverride;
     if (override !== null) {
       return override;
+    }
+    const environmentOverride = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV]?.trim();
+    if (environmentOverride === "runner" || environmentOverride === "xctest") {
+      return environmentOverride;
+    }
+    if (environmentOverride) {
+      throw new ActionableError(
+        `${IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV} must be either "runner" or "xctest"`
+      );
     }
     return resolveRunnerChecksumTarget();
   }

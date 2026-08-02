@@ -86,6 +86,7 @@ describe("webp codec execution boundary (issue #4064)", () => {
       'const binary = "cwebp"; const launch = spawn; launch(binary, ["-o", "-"]);'
     )).toBe(true);
     expect(directlyExecutesWebp('spawn("C:\\\\tools\\\\cwebp.exe", args);')).toBe(true);
+    expect(directlyExecutesWebp('const binary = "cwebp" as const; spawn(binary, args);')).toBe(true);
   });
 
   test("flags shell-string and *Sync launcher evasions", () => {

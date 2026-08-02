@@ -63,6 +63,8 @@ describe("host defaults execution boundary (issue #4062)", () => {
     expect(directlyExecutesHostDefaults('exec("defaults\\tread -g AppleInterfaceStyle");')).toBe(true);
     expect(directlyExecutesHostDefaults('spawn("/usr/bin/defaults", ["read", "-g", key]);')).toBe(true);
     expect(directlyExecutesHostDefaults('Bun.spawn(["defaults", "read", "-g", key]);')).toBe(true);
+    expect(directlyExecutesHostDefaults('spawn("defaults" as const, ["read", "-g", key]);')).toBe(true);
+    expect(directlyExecutesHostDefaults('Bun.spawn(["defaults", "read"] as const);')).toBe(true);
   });
 
   test("flags a promisified or aliased launcher invoked with defaults", () => {

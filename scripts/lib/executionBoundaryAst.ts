@@ -25,6 +25,15 @@ function propertyName(expression: ts.Expression): string | undefined {
   return undefined;
 }
 
+function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {
+  let current = expression;
+  while (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+}
+
 /**
  * Parses one TypeScript source file and provides conservative, scope-insensitive value flow for
  * execution-boundary guards. A value bound anywhere to a bare name is considered at every use:
@@ -113,6 +122,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
 
   const strings = (node: ts.Expression | undefined, seen = new Set<string>()): string[] => {
     if (!node) {return [];}
+    node = unwrapTransparentExpression(node);
     if (ts.isStringLiteralLike(node)) {return [node.text];}
     if (ts.isParenthesizedExpression(node)) {return strings(node.expression, seen);}
     if (ts.isNoSubstitutionTemplateLiteral(node)) {return [node.text];}
@@ -139,6 +149,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
 
   const arrayElements = (node: ts.Expression | undefined, seen = new Set<string>()): ts.Expression[] | undefined => {
     if (!node) {return undefined;}
+    node = unwrapTransparentExpression(node);
     if (ts.isArrayLiteralExpression(node)) {
       const elements: ts.Expression[] = [];
       for (const element of node.elements) {

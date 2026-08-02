@@ -52,6 +52,9 @@ describe("archive extraction boundary (issue #4065)", () => {
     expect(directlyExtractsTar('const args = ["-xzf", archive]; spawn("tar", [...args]);')).toBe(true);
     expect(directlyExtractsTar('const rest = ["-xzf", a]; Bun.spawn(["tar", ...rest]);')).toBe(true);
     expect(directlyExtractsTar('const args = ["-czf", archive]; spawn("tar", args);')).toBe(false);
+    expect(directlyExtractsTar(
+      'const command = "tar"; const args = ["-xzf", archive]; const run = executeCommand; run(command, args);'
+    )).toBe(true);
   });
 
   test("over-detects a shadowed argv name (loud false CI failure beats a silent miss)", () => {

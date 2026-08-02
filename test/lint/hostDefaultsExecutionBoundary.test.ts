@@ -1,39 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = "src/utils/HostDefaultsClient.ts";
-
-// child_process launch primitives, plus the executor-seam method the repo uses
-// (`HostCommandExecutor.executeCommand`). Callers that promisify or otherwise
-// alias one of these are recovered separately via `wrapperNames`.
-const LAUNCHER_NAMES = "spawn|spawnSync|spawnCommand|exec|execSync|execFile|execFileSync|executeCommand";
-// Opening string-literal quote: single, double, or backtick.
-const QUOTE = "[\"'`]";
-
-/**
- * Names bound to a promisified/aliased `child_process` launcher, e.g.
- * `const execFileAsync = promisify(execFile);` or `const run = execFile;`. Such
- * a name invoked with a leading `"defaults"` literal is the same violation as a
- * direct launcher call — the guard must recognize the launch semantically, not
- * only the literal `execFile("defaults"` spelling.
- *
- * Bounded by design: this covers the concrete promisify/alias evasions the repo
- * actually uses (see `src/utils/hostAppearance.ts`, `HostCommandExecutor.ts`).
- * A launcher smuggled through a data structure, a computed member, or a
- * cross-module indirection is out of scope for this regex detector; a new
- * production `defaults` path in those exotic forms would need a manual review
- * catch, and this comment marks the deliberate limit.
- */
-function wrapperNames(source: string): string[] {
-  // const <name> = promisify(execFile) | util.promisify(exec) | execFile;
-  const pattern = new RegExp(
-    String.raw`\b(?:const|let|var)\s+(\w+)\s*=\s*(?:(?:\w+\.)?promisify\s*\(\s*(?:${LAUNCHER_NAMES})\s*\)|(?:${LAUNCHER_NAMES}))\s*;`,
-    "g"
-  );
-  return [...source.matchAll(pattern)].map(match => match[1]);
-}
 
 /**
  * Detects direct production execution of the host `defaults` binary (issue
@@ -43,21 +14,14 @@ function wrapperNames(source: string): string[] {
  * argument leaves those SimCtlClient paths untouched.
  */
 export function directlyExecutesHostDefaults(source: string): boolean {
-  // execFile("defaults", ...) / spawn("defaults", ...) / executeCommand("defaults", ...)
-  const literalFirstArg = new RegExp(String.raw`\b(?:${LAUNCHER_NAMES})\s*\(\s*${QUOTE}defaults${QUOTE}`);
-  // exec("defaults read -g ...") — shell string whose command word is `defaults`.
-  const shellString = new RegExp(String.raw`\b(?:exec|execSync)\s*\(\s*${QUOTE}defaults\s`);
-  // Bun.spawn(["defaults", ...]) — argv array whose first element is the binary.
-  const bunSpawn = new RegExp(String.raw`\bBun\.spawn\s*\(\s*\[\s*${QUOTE}defaults${QUOTE}`);
-  if (literalFirstArg.test(source) || shellString.test(source) || bunSpawn.test(source)) {
-    return true;
-  }
-
-  // A promisified/aliased launcher invoked as `<name>("defaults", ...)`, where
-  // `<name>` is a launcher captured by `wrapperNames` (e.g. `execFileAsync`).
-  return wrapperNames(source).some(name =>
-    new RegExp(String.raw`\b${name}\s*\(\s*${QUOTE}defaults[\s${QUOTE.slice(1, -1)}]`).test(source)
-  );
+  const ast = executionBoundaryAst(source);
+  return ast.calls.some(call => {
+    if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
+    const first = call.arguments[0];
+    const array = ast.arrayElements(first);
+    const command = array?.[0] ?? first;
+    return ast.strings(command).some(value => value === "defaults" || value.startsWith("defaults "));
+  });
 }
 
 function sourceFiles(directory: string): string[] {
@@ -107,6 +71,10 @@ describe("host defaults execution boundary (issue #4062)", () => {
     )).toBe(true);
     expect(directlyExecutesHostDefaults(
       'const launch = execFile; launch("defaults", ["read", "-g", key]);'
+    )).toBe(true);
+    // The command may be assembled through ordinary constants before the alias call.
+    expect(directlyExecutesHostDefaults(
+      'const command = "defaults"; const run = promisify(execFile); run(command, ["read", "-g", key]);'
     )).toBe(true);
   });
 

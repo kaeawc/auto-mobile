@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = "src/utils/ios-cmdline-tools/DeviceAppManager.ts";
@@ -19,26 +20,23 @@ const OWNER = "src/utils/ios-cmdline-tools/DeviceAppManager.ts";
  *    Requiring the `xcrun` literal keeps benign `executeCommand("adb", ...)` /
  *    `executeCommand("xcrun", ["simctl", ...])` calls off the offender list.
  *
- * DeviceAppManager itself never trips this: it routes every invocation through
- * its injected `execute` seam with the `file`/`args` VARIABLES (no `xcrun` /
- * `devicectl` literal at the call site), and it is the exempt {@link OWNER}.
- *
- * Residual limit: the seam regex scans across a single statement (no `;`), so it
- * would miss a `devicectl` literal hidden behind a block-bodied
- * `runExecSeam(() => { ...; })` callback. That indirection does not exist in the
- * repo (the only seam is `executeCommand`, whose argv is a flat literal array),
- * and any such rewrite would still surface through the launcher-primitive branch.
+ * DeviceAppManager itself is excluded as the owner. Elsewhere, an injected
+ * `execute(file, args)` seam is treated as a launch boundary too, so a refactor
+ * cannot hide a literal xcrun/devicectl call behind that indirection.
  */
 function directlyExecutesDevicectl(source: string): boolean {
-  const launcherWithDevicectl =
-    /\b(?:exec|execSync|execFile|execFileSync|execFileAsync|spawn|spawnSync|spawnCommand)\s*\([^;]*?["'`][^"'`]*\bdevicectl\b/;
-  const bunSpawnWithDevicectl =
-    /Bun\.spawn\s*\(\s*\[[^\]]*?["'`][^"'`]*\bdevicectl\b/;
-  const seamXcrunDevicectl =
-    /\b(?:executeCommand|runExecSeam)\s*\([^;]*?["'`]xcrun["'`][^;]*?\bdevicectl\b/;
-  return launcherWithDevicectl.test(source)
-    || bunSpawnWithDevicectl.test(source)
-    || seamXcrunDevicectl.test(source);
+  const ast = executionBoundaryAst(source);
+  return ast.calls.some(call => {
+    if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
+    if (ast.calleeName(call) === "runExecSeam") {
+      const values = call.arguments.flatMap(argument => ast.strings(argument));
+      return values.includes("xcrun") && values.includes("devicectl");
+    }
+    const array = ast.arrayElements(call.arguments[0]);
+    const command = array?.[0] ?? call.arguments[0];
+    const args = array ? array.slice(1) : call.arguments.slice(1);
+    return ast.strings(command).includes("xcrun") && args.some(argument => ast.strings(argument).includes("devicectl"));
+  });
 }
 
 function sourceFiles(directory: string): string[] {
@@ -98,11 +96,14 @@ describe("devicectl execution boundary (issue #4053)", () => {
     )).toBe(true);
   });
 
-  test("does not flag the injected execute seam, sibling tools, or comments", () => {
-    // DeviceAppManager's injected `execute(file, args)` dep is not a launcher.
+  test("detects injected execute seams while ignoring sibling tools and comments", () => {
+    // An injected execute(file, args) seam outside the owner can bypass the boundary.
     expect(directlyExecutesDevicectl(
       'await this.execute("xcrun", ["devicectl", "device", "uninstall", "app"]);'
-    )).toBe(false);
+    )).toBe(true);
+    expect(directlyExecutesDevicectl(
+      'const file = "xcrun"; const args = ["devicectl", "device", "uninstall", "app"]; await execute(file, args);'
+    )).toBe(true);
     // The owner's default dep routes VARIABLES through the seam — no literals.
     expect(directlyExecutesDevicectl(
       "return new DefaultHostCommandExecutor().executeCommand(file, args);"

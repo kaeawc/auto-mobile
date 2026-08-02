@@ -1178,7 +1178,15 @@ jobs:
         shell: bash
         run: |
           if [ -n "$SIGNING_IN_MEMORY_KEY" ]; then
-            echo "ORG_GRADLE_PROJECT_signingInMemoryKey=$SIGNING_IN_MEMORY_KEY" >> "$GITHUB_ENV"
+            # The ASCII-armored key is multi-line, so it must use the heredoc
+            # form of the GITHUB_ENV file. A single-line NAME=value would emit
+            # stray armor/body lines that the runner rejects as a malformed env
+            # file, aborting the job before it can publish.
+            {
+              echo "ORG_GRADLE_PROJECT_signingInMemoryKey<<__AUTOMOBILE_SIGNING_KEY_EOF__"
+              echo "$SIGNING_IN_MEMORY_KEY"
+              echo "__AUTOMOBILE_SIGNING_KEY_EOF__"
+            } >> "$GITHUB_ENV"
           fi
           if [ -n "$SIGNING_IN_MEMORY_KEY_PASSWORD" ]; then
             echo "ORG_GRADLE_PROJECT_signingInMemoryKeyPassword=$SIGNING_IN_MEMORY_KEY_PASSWORD" >> "$GITHUB_ENV"

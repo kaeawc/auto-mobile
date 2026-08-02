@@ -13,6 +13,7 @@ import {
   type AdbExecuteOptions,
   type AdbProcess,
   type AdbSpawnOptions,
+  type DeviceTimestampResult,
 } from "./interfaces/AdbExecutor";
 import { getAbortSignal } from "../AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
@@ -549,12 +550,23 @@ export class AdbClient implements AdbExecutor {
    * Falls back to host time if the device timestamp cannot be retrieved.
    */
   async getDeviceTimestampMs(): Promise<number> {
+    const result = await this.getDeviceTimestampMsWithSource();
+    return result.timestampMs;
+  }
+
+  /**
+   * Get device time in milliseconds since epoch and identify its clock source.
+   * Falls back to host time if the device timestamp cannot be retrieved.
+   */
+  async getDeviceTimestampMsWithSource(): Promise<DeviceTimestampResult> {
     try {
       const result = await this.executeCommand("shell date +%s%3N");
       const trimmed = result.stdout.trim();
-      const parsed = parseInt(trimmed, 10);
-      if (!Number.isNaN(parsed) && parsed > 0) {
-        return parsed;
+      if (/^\d+$/.test(trimmed)) {
+        const parsed = Number(trimmed);
+        if (Number.isSafeInteger(parsed) && parsed > 0) {
+          return { timestampMs: parsed, source: "device-ms" };
+        }
       }
     } catch (error) {
       logger.debug(`[ADB] Failed to read device time with ms precision: ${error}`);
@@ -563,16 +575,19 @@ export class AdbClient implements AdbExecutor {
     try {
       const result = await this.executeCommand("shell date +%s");
       const trimmed = result.stdout.trim();
-      const parsed = parseInt(trimmed, 10);
-      if (!Number.isNaN(parsed) && parsed > 0) {
-        return parsed * 1000;
+      if (/^\d+$/.test(trimmed)) {
+        const parsed = Number(trimmed);
+        const timestampMs = parsed * 1000;
+        if (Number.isSafeInteger(parsed) && parsed > 0 && Number.isSafeInteger(timestampMs)) {
+          return { timestampMs, source: "device-seconds" };
+        }
       }
     } catch (error) {
       logger.debug(`[ADB] Failed to read device time in seconds: ${error}`);
     }
 
     logger.debug("[ADB] Falling back to host time for device timestamp");
-    return this.timer.now();
+    return { timestampMs: this.timer.now(), source: "host" };
   }
 
   /**

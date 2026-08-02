@@ -29,6 +29,8 @@ import { Keyboard } from "./Keyboard";
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "eventOnly" | "append";
 
+const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
+
 export type AppendKeyEventValidator = (timeoutMs?: number) => Promise<{ success: boolean; error?: string }>;
 
 interface KeyboardCloser {
@@ -665,10 +667,19 @@ export class InputText extends BaseVisualChange {
     // clock (`this.timer.now()`) lets a device clock running ahead of the host
     // accept an older cached focused hierarchy as fresh, defeating the freshness
     // guarantee (issue #4617). Derive the fallback from the device clock via
-    // `getDeviceTimestampMs`, the same source the rest of the freshness logic uses.
-    const minTimestamp = typeof viewHierarchy.updatedAt === "number"
-      ? viewHierarchy.updatedAt + 1
-      : await this.adb.getDeviceTimestampMs();
+    // `getDeviceTimestampMsWithSource`, and reject degraded host-clock results.
+    let minTimestamp: number;
+    if (typeof viewHierarchy.updatedAt === "number") {
+      minTimestamp = viewHierarchy.updatedAt + 1;
+    } else {
+      const timestampResult = await this.adb.getDeviceTimestampMsWithSource();
+      if (timestampResult.source === "host") {
+        return undefined;
+      }
+      minTimestamp = timestampResult.source === "device-seconds"
+        ? timestampResult.timestampMs + DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS
+        : timestampResult.timestampMs;
+    }
     const refreshedObserveResult = await this.observeScreen.execute({
       skipWaitForFresh: false,
       minTimestamp

@@ -37,7 +37,7 @@ function ok(stdout = ""): ExecResult {
   };
 }
 
-describe("AdbClient ADB-path discovery deadline", () => {
+describe.serial("AdbClient ADB-path discovery deadline", () => {
   beforeEach(() => {
     resetAdbClientCaches();
     clearDetectionCache();

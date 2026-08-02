@@ -48,7 +48,10 @@ export class AdbCommandTimeoutError extends Error {
 // Module-level cache configuration and instances
 const moduleTimer: Timer = defaultTimer;
 let deviceListCache: TTLCache<string, BootedDevice[]> | null = null;
-let adbPathCache: TTLCache<string, string> | null = null;
+// Keep production clients sharing the resolved path while isolating injected
+// execution seams. A module-wide path cache keyed only by "adbPath" lets one
+// test/client reuse another client's incomplete or synthetic discovery result.
+let adbPathCaches = new WeakMap<ExecFileAsync, TTLCache<string, string>>();
 
 const DEVICE_LIST_CACHE_TTL_MS = 5000; // 5 seconds
 const ADB_PATH_CACHE_TTL_MS = 60000; // 1 minute - ADB path rarely changes
@@ -60,16 +63,18 @@ function getDeviceListCache(): TTLCache<string, BootedDevice[]> {
   return deviceListCache;
 }
 
-function getAdbPathCache(): TTLCache<string, string> {
-  if (!adbPathCache) {
-    adbPathCache = new TTLCache(moduleTimer, { ttlMs: ADB_PATH_CACHE_TTL_MS });
+function getAdbPathCache(execAsync: ExecFileAsync): TTLCache<string, string> {
+  let cache = adbPathCaches.get(execAsync);
+  if (!cache) {
+    cache = new TTLCache(moduleTimer, { ttlMs: ADB_PATH_CACHE_TTL_MS });
+    adbPathCaches.set(execAsync, cache);
   }
-  return adbPathCache;
+  return cache;
 }
 
 export function resetAdbClientCaches(): void {
   deviceListCache = null;
-  adbPathCache = null;
+  adbPathCaches = new WeakMap();
 }
 
 export function resetAdbDeviceListCache(): void {
@@ -395,7 +400,7 @@ export class AdbClient implements AdbExecutor {
     }
 
     // Check cache first - TTLCache handles expiration automatically
-    const cache = getAdbPathCache();
+    const cache = getAdbPathCache(this.execAsync);
     const cachedPath = cache.get("adbPath");
     if (cachedPath) {
       this.adbPath = cachedPath;

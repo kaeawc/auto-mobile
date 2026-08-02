@@ -85,15 +85,15 @@ export class FileAvdConfigReader implements AvdConfigReader {
 
   async readConfig(avdName: string): Promise<AvdConfig | null> {
     const path = require("path");
-    let configPath = path.join(this.avdHome, `${avdName}.avd`, "config.ini");
+    const conventionalConfigPath = path.join(this.avdHome, `${avdName}.avd`, "config.ini");
+    let configPath = conventionalConfigPath;
 
-    if (!this.existsFn(configPath)) {
-      const resolvedConfigPath = await this.resolveRegistryConfigPath(avdName);
-      if (!resolvedConfigPath) {
-        logger.debug(`AVD config.ini not found: ${configPath}`);
-        return null;
-      }
+    const resolvedConfigPath = await this.resolveRegistryConfigPath(avdName);
+    if (resolvedConfigPath) {
       configPath = resolvedConfigPath;
+    } else if (!this.existsFn(configPath)) {
+      logger.debug(`AVD config.ini not found: ${configPath}`);
+      return null;
     }
 
     try {

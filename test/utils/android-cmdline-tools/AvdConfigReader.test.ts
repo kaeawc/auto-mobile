@@ -199,7 +199,7 @@ describe("FileAvdConfigReader", () => {
     const paths: string[] = [];
     const reader = new FileAvdConfigReader(
       async path => { paths.push(path); return "image.sysdir.1=system-images/android-34/google_apis_playstore/arm64-v8a/"; },
-      path => { paths.push(path); return true; },
+      path => path.endsWith("Play.avd/config.ini"),
     );
 
     const config = await reader.readConfig("Play");
@@ -228,6 +228,30 @@ describe("FileAvdConfigReader", () => {
 
     expect(config?.ramSizeMb).toBe(4096);
     expect(readPaths).toEqual([registryPath, configPath]);
+  });
+
+  it("prefers a valid registry target over a stale conventional config", async () => {
+    const path = require("path");
+    const registryPath = path.join("/fake/avd", "Custom.ini");
+    const conventionalConfigPath = path.join("/fake/avd", "Custom.avd", "config.ini");
+    const relocatedConfigPath = path.join("/custom/avds", "Custom.avd", "config.ini");
+    const readPaths: string[] = [];
+    const reader = new FileAvdConfigReader(
+      async filePath => {
+        readPaths.push(filePath);
+        if (filePath === registryPath) {return "path=/custom/avds/Custom.avd\n";}
+        if (filePath === relocatedConfigPath) {return "hw.ramSize=4096\n";}
+        if (filePath === conventionalConfigPath) {return "hw.ramSize=1024\n";}
+        throw new Error(`Unexpected path: ${filePath}`);
+      },
+      filePath => filePath === registryPath || filePath === conventionalConfigPath || filePath === relocatedConfigPath,
+      "/fake/avd",
+    );
+
+    const config = await reader.readConfig("Custom");
+
+    expect(config?.ramSizeMb).toBe(4096);
+    expect(readPaths).toEqual([registryPath, relocatedConfigPath]);
   });
 
   it("resolves a safe relative path.rel from the Android user-home parent", async () => {

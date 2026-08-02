@@ -392,9 +392,9 @@ export class NavigationGraphManager implements NavigationGraphService {
    * setBuildContext mid-transaction, and resolving separately per observation would
    * split a single transition across two build keys.
    */
-  private resolveProvenance(): ResolvedProvenance {
+  private resolveProvenance(appId: string | null): ResolvedProvenance {
     const sessionUuid = this.sessionUuid ?? LEGACY_PROVENANCE_SENTINEL;
-    const ctx = this.currentAppId ? this.buildContexts.get(this.currentAppId) : undefined;
+    const ctx = appId ? this.buildContexts.get(appId) : undefined;
     if (ctx) {
       return {
         versionCode: ctx.versionCode,
@@ -404,7 +404,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       };
     }
     logger.debug(
-      `[NAVIGATION_GRAPH] No matching build context for ${this.currentAppId ?? "?"}; ` +
+      `[NAVIGATION_GRAPH] No matching build context for ${appId ?? "?"}; ` +
       `recording provenance under the default build key`
     );
     return { versionCode: 0, contentHash: "", deviceId: LEGACY_PROVENANCE_SENTINEL, sessionUuid };
@@ -506,7 +506,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     // Snapshot provenance ONCE for this transition so the node and edge observations
     // share one build key even if a fire-and-forget hash lands mid-transaction (#4984).
-    const provenance = this.resolveProvenance();
+    const provenance = this.resolveProvenance(appId);
 
     // Persist the whole graph write atomically across BOTH repos via the shared helper,
     // which owns the assertSharedConnection() precondition and the bind-both-repos
@@ -725,11 +725,15 @@ export class NavigationGraphManager implements NavigationGraphService {
     const fingerprintData = event.fingerprintData || JSON.stringify({ hash: fingerprintHash });
     const timestamp = event.timestamp;
 
+    // Capture the app ONCE before the awaited fingerprint lookup: if an app switch
+    // lands during the await, the matched node belongs to THIS app, so its provenance
+    // must resolve for this app too — not whatever currentAppId became (#4984).
+    const appId = this.currentAppId;
+
     // Case 1: Check if fingerprint is already correlated to a named node (scoped to this app)
-    const existingNode = await this.repository.getNodeByFingerprint(this.currentAppId, fingerprintHash);
+    const existingNode = await this.repository.getNodeByFingerprint(appId, fingerprintHash);
     if (existingNode) {
-      const appId = this.currentAppId;
-      const provenance = this.resolveProvenance();
+      const provenance = this.resolveProvenance(appId);
 
       // Persist the counter writes atomically across BOTH repos via the shared helper,
       // which owns the assertSharedConnection() precondition and the bind-both-repos

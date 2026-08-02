@@ -99,23 +99,32 @@ export class CachingContentHashProvider implements ContentHashProvider {
 const SHA256_HEX = /^[0-9a-f]{64}$/i;
 
 /**
- * Combine per-APK SHA-256 digests (from `sha256sum` output: `<hex>  <path>` per
- * line) into a single content hash. Sorted so split-APK ordering does not affect
- * the result, and derived from digests only (no filesystem timestamps/metadata).
- *
- * Only lines whose first token is a valid 64-char hex SHA-256 are used; other
- * lines (e.g. a legacy `adb shell` merging `sha256sum: not found` into stdout) are
- * ignored. Returns `""` when no valid digest is present, so the caller can fall
- * back to the pull path instead of caching a meaningless hash.
+ * Extract the valid 64-char hex SHA-256 digests from `sha256sum` output
+ * (`<hex>  <path>` per line), sorted. Lines whose first token is not a valid hex
+ * digest — e.g. a legacy `adb shell` merging `sha256sum: not found` into stdout, or
+ * a per-file error for an unreadable split — are dropped, so the caller can compare
+ * the count against the expected number of APKs.
  */
-export function combineApkDigests(sha256sumStdout: string): string {
-  const digests = sha256sumStdout
+export function extractApkDigests(sha256sumStdout: string): string[] {
+  return sha256sumStdout
     .split("\n")
     .map(line => line.trim())
     .filter(line => line.length > 0)
     .map(line => line.split(/\s+/)[0])
     .filter((digest): digest is string => Boolean(digest) && SHA256_HEX.test(digest))
     .sort();
+}
+
+/**
+ * Combine per-APK SHA-256 digests into a single content hash. Sorted so split-APK
+ * ordering does not affect the result, and derived from digests only (no filesystem
+ * timestamps/metadata). Returns `""` when no valid digest is present.
+ */
+export function combineApkDigests(sha256sumStdout: string): string {
+  return hashDigestList(extractApkDigests(sha256sumStdout));
+}
+
+function hashDigestList(digests: string[]): string {
   if (digests.length === 0) {
     return "";
   }
@@ -161,23 +170,28 @@ export class AndroidApkContentHasher implements AppContentHasher {
       );
     }
 
-    // On-device digest of every APK. Guard both the throw case (modern adb
-    // propagates a non-zero exit when sha256sum is absent) and the empty/garbage
-    // -stdout case, so the pull fallback is reachable and a "sha256sum: not found"
-    // line (a legacy adb can merge stderr into stdout) is never hashed as a digest.
-    let combined = "";
+    // On-device digest of every APK. Require exactly ONE valid digest per APK path:
+    // the `;`-joined commands let one split fail (unreadable / sha256sum absent) while
+    // another still prints a valid digest, and accepting that partial hash would
+    // conflate builds differing only in the failing split. A count mismatch (also the
+    // throw case — modern adb propagates a non-zero exit — and the "sha256sum: not
+    // found" merged-stderr case) falls back to the pull path.
+    let digests: string[] = [];
     try {
       const script = apkPaths.map(p => `sha256sum "${p}"`).join("; ");
       const onDevice = await this.adb.executeCommand(`shell sh -c '${script}'`);
-      combined = combineApkDigests(onDevice.stdout ?? "");
+      digests = extractApkDigests(onDevice.stdout ?? "");
     } catch (error) {
       logger.debug(`[ContentHash] on-device sha256sum failed for ${packageId}: ${error}`);
     }
-    if (combined) {
-      return combined;
+    if (digests.length === apkPaths.length) {
+      return combineApkDigests(digests.join("\n"));
     }
 
-    logger.warn(`[ContentHash] on-device sha256sum unavailable for ${packageId}; using adb pull (slow path)`);
+    logger.warn(
+      `[ContentHash] on-device sha256sum incomplete for ${packageId} ` +
+      `(${digests.length}/${apkPaths.length} APKs); using adb pull (slow path)`
+    );
     return this.computeViaPull(apkPaths, packageId);
   }
 

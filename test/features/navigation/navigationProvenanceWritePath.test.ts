@@ -147,6 +147,52 @@ describe("NavigationGraphManager provenance write path", () => {
     expect(aKey.content_hash).toBe("hashA");
   });
 
+  test("fingerprint path: an app switch during the lookup does not cross-link A's node to B's build key", async () => {
+    // Repo whose getNodeByFingerprint switches the current app mid-await, simulating
+    // an app switch landing during the awaited fingerprint lookup.
+    class SwitchingRepo extends NavigationRepository {
+      public onLookup: (() => Promise<void>) | undefined;
+      async getNodeByFingerprint(appId: string, hash: string) {
+        if (this.onLookup) { await this.onLookup(); }
+        return super.getNodeByFingerprint(appId, hash);
+      }
+    }
+    const switchingRepo = new SwitchingRepo(db);
+    const coverageRepo = new TestCoverageRepository(undefined, db);
+    const m = NavigationGraphManager.createForTesting(switchingRepo, coverageRepo, undefined, SESSION);
+
+    await m.setCurrentApp(APP);
+    m.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
+    m.setBuildContext({ appId: "com.other.app", deviceId: "emu-1", versionCode: 99, contentHash: "hashB" });
+
+    // Seed a named node + correlated fingerprint for APP.
+    const node = await switchingRepo.getOrCreateNode(APP, "Home", 100);
+    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", "{}", 100);
+
+    switchingRepo.onLookup = async () => { await m.setCurrentApp("com.other.app"); };
+
+    await m.recordHierarchyNavigation({
+      fromFingerprint: null,
+      toFingerprint: "fp-1",
+      packageName: APP,
+      timestamp: 200,
+    } as never);
+
+    const obs = await db
+      .selectFrom("navigation_node_observations")
+      .selectAll()
+      .where("node_id", "=", node.id)
+      .executeTakeFirstOrThrow();
+    const bk = await db
+      .selectFrom("navigation_build_keys")
+      .selectAll()
+      .where("id", "=", obs.build_key_id)
+      .executeTakeFirstOrThrow();
+    // A's node is recorded under A's build key (v7), not B's (v99).
+    expect(bk.app_id).toBe(APP);
+    expect(bk.version_code).toBe(7);
+  });
+
   test("falls back to the default build key when no build context is set", async () => {
     await manager.setCurrentApp(APP);
     await manager.recordNavigationEvent(navEvent("Home", 100));

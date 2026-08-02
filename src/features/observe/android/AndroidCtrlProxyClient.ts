@@ -1119,7 +1119,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const resolve = async (): Promise<void> => {
       try {
         const info = await this.requestPackageInfo(appId, { includePermissions: false }, 4000);
-        const versionCode = info.success && typeof info.versionCode === "number" ? info.versionCode : 0;
+        // A transient package-info failure (timeout / success:false) must NOT be
+        // cached as version 0 — that would attribute the whole install to a bogus
+        // version until a package event. Defer; a later event retries.
+        if (!info.success || typeof info.versionCode !== "number") {
+          logger.debug(`[CTRL_PROXY] Package info unavailable for ${appId}; deferring build-context resolution`);
+          return;
+        }
+        const versionCode = info.versionCode;
         if (!this.contentHashProvider) {
           this.contentHashProvider = createContentHashProvider(this.device);
         }
@@ -3073,6 +3080,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     } else if (!this.shouldUseHierarchyNavigation(data.packageName)) {
       logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${data.packageName}`);
     } else {
+      // Resolve build/device provenance for hierarchy-driven reaches too (#4984):
+      // non-SDK apps never emit navigation_event, so this is the only path that gives
+      // them a real build key instead of the default/legacy one.
+      if (data.packageName) {
+        this.ensureBuildContext(data.packageName);
+      }
       this.getHierarchyNavigationDetector().onHierarchyUpdate(data);
     }
   }

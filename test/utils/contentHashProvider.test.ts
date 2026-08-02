@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { ChecksumCalculator } from "../../src/utils/ChecksumCalculator";
 import {
   AndroidApkContentHasher,
   CachingContentHashProvider,
@@ -210,5 +211,33 @@ describe("AndroidApkContentHasher (pm path resolution)", () => {
     const adb = fakeAdb(() => ok("Unable to find package\n"));
     const hasher = new AndroidApkContentHasher(adb);
     await expect(hasher.computeHash(fakeDevice("emu-1"), "com.missing.app", 0)).rejects.toThrow();
+  });
+
+  test("falls back to pull when the on-device digest count is incomplete (one split failed)", async () => {
+    // 2 APKs but on-device sha256sum yields only 1 valid digest (the split errored):
+    // accepting that partial would conflate builds differing only in the failing split.
+    let pullChecksums = 0;
+    const checksum: ChecksumCalculator = {
+      async computeFileSha256() {
+        pullChecksums += 1;
+        return { checksum: pullChecksums === 1 ? DIGEST_B : DIGEST_Z, source: "node" as const };
+      },
+    };
+    const adb = fakeAdb(command => {
+      if (command.includes("pm path")) {
+        return ok("package:/a/base.apk\npackage:/a/split.apk\n");
+      }
+      if (command.includes("sha256sum")) {
+        return ok(`${DIGEST_A}  /a/base.apk\nsha256sum: /a/split.apk: No such file or directory\n`);
+      }
+      return ok(""); // pull
+    });
+    const hasher = new AndroidApkContentHasher(adb, checksum);
+    const hash = await hasher.computeHash(fakeDevice("emu-1"), "com.example.app", 0);
+
+    // Fell back to pull (hashed both APKs), NOT the partial single on-device digest.
+    expect(pullChecksums).toBe(2);
+    expect(hash).toBe(combineApkDigests(`${DIGEST_B}  /a/base.apk\n${DIGEST_Z}  /a/split.apk`));
+    expect(hash).not.toBe(combineApkDigests(`${DIGEST_A}  /a/base.apk`));
   });
 });

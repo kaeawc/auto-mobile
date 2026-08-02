@@ -1269,6 +1269,95 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
+    test("resolves build/device provenance on the hierarchy path for a non-SDK app (#4984)", async function() {
+      // Apps without the AutoMobile SDK never emit navigation_event, so the hierarchy
+      // path must kick off build-context resolution — otherwise every reach records
+      // under the default/legacy build. Asserting requestPackageInfo is consulted
+      // proves ensureBuildContext ran on this path.
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: true, versionCode: 42 } as never);
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: testTimer.now(),
+            packageName: "com.example.nosdk",
+            hierarchy: { "text": "Home", "resource-id": "com.example.nosdk:id/home" },
+          }
+        }));
+
+        await resultPromise;
+        for (let i = 0; i < 10; i++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+          await testTimer.advanceTimersByTimeAsync(1);
+        }
+
+        expect(pkgInfoSpy).toHaveBeenCalled();
+        expect(pkgInfoSpy.mock.calls[0][0]).toBe("com.example.nosdk");
+      } finally {
+        pkgInfoSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
+    test("does not apply a build context built from a failed package-info result (#4984)", async function() {
+      // A transient package-info failure must NOT be persisted as version 0 — defer
+      // instead, so a later event retries. setBuildContext must not be called.
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+      const setCtxSpy = spyOn(navHarness.manager, "setBuildContext");
+
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: false } as never);
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: testTimer.now(),
+            packageName: "com.example.nosdk",
+            hierarchy: { "text": "Home", "resource-id": "com.example.nosdk:id/home" },
+          }
+        }));
+
+        await resultPromise;
+        for (let i = 0; i < 10; i++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+          await testTimer.advanceTimersByTimeAsync(1);
+        }
+
+        expect(pkgInfoSpy).toHaveBeenCalled();
+        // Failed metadata → deferred → no (bogus version-0) context applied.
+        expect(setCtxSpy).not.toHaveBeenCalled();
+      } finally {
+        pkgInfoSpy.mockRestore();
+        setCtxSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
     test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#2885)", async function() {
       resetDbWriteBarrier();
       // The Android handler resolves getDbWriteBarrier() per write (#2912), so a

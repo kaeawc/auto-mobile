@@ -157,13 +157,7 @@ function registryConfigCandidates(props: Map<string, string>, configHome: string
   if (relativePath && !path.isAbsolute(relativePath)) {
     const relativeBase = path.resolve(configHome);
     const resolvedDirectory = path.resolve(relativeBase, relativePath);
-    const relativeToBase = path.relative(relativeBase, resolvedDirectory);
-    const escapesBase = relativeToBase === ".."
-      || relativeToBase.startsWith(`..${path.sep}`)
-      || path.isAbsolute(relativeToBase);
-    if (!escapesBase) {
-      candidates.push(path.join(resolvedDirectory, "config.ini"));
-    }
+    candidates.push(path.join(resolvedDirectory, "config.ini"));
   }
   return candidates;
 }

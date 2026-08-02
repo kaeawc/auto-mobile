@@ -494,6 +494,16 @@ describe("checkConnectedDevices", () => {
     expect(result.message).toBe("All applicable modern Play-image AVDs meet the 2048 MB memory minimum.");
   });
 
+  test("does not warn when a non-applicable AVD omits RAM", async () => {
+    const result = await checkAvdMemory({
+      listAvds: async () => [{ name: "Legacy" }],
+      readAvdConfig: { readConfig: async () => ({ apiLevel: 28, tag: "google_apis" }) },
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("applicable modern Play-image");
+  });
+
   test("warns when no AVD config can be read", async () => {
     const result = await checkAvdMemory({
       listAvds: async () => [{ name: "Missing" }],

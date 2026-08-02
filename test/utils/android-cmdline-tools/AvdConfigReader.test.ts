@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { afterEach, describe, it, expect } from "bun:test";
 import { parseAvdConfig, apiLevelToVersion, FileAvdConfigReader } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
 describe("parseAvdConfig", () => {
@@ -144,6 +144,14 @@ describe("apiLevelToVersion", () => {
 });
 
 describe("FileAvdConfigReader", () => {
+  const previousAndroidAvdHome = process.env.ANDROID_AVD_HOME;
+  const previousAndroidUserHome = process.env.ANDROID_USER_HOME;
+
+  afterEach(() => {
+    if (previousAndroidAvdHome === undefined) {delete process.env.ANDROID_AVD_HOME;} else {process.env.ANDROID_AVD_HOME = previousAndroidAvdHome;}
+    if (previousAndroidUserHome === undefined) {delete process.env.ANDROID_USER_HOME;} else {process.env.ANDROID_USER_HOME = previousAndroidUserHome;}
+  });
+
   it("reads config from correct path", async () => {
     const matchesConfigPath = (p: string) => p.includes("TestAvd.avd") && p.endsWith("config.ini");
     const readFileFn = async (path: string, _encoding: string) => {
@@ -180,5 +188,20 @@ describe("FileAvdConfigReader", () => {
     const config = await reader.readConfig("Broken");
 
     expect(config).toBeNull();
+  });
+
+  it("uses ANDROID_USER_HOME/avd when ANDROID_AVD_HOME is unset", async () => {
+    delete process.env.ANDROID_AVD_HOME;
+    process.env.ANDROID_USER_HOME = "/user-home";
+    const paths: string[] = [];
+    const reader = new FileAvdConfigReader(
+      async path => { paths.push(path); return "image.sysdir.1=system-images/android-34/google_apis_playstore/arm64-v8a/"; },
+      path => { paths.push(path); return true; },
+    );
+
+    const config = await reader.readConfig("Play");
+
+    expect(config?.apiLevel).toBe(34);
+    expect(paths[0]).toBe("/user-home/avd/Play.avd/config.ini");
   });
 });

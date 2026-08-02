@@ -375,12 +375,19 @@ export async function checkAvdMemory(
     const unverifiableConfigs: string[] = [];
     const lowMemory = (await Promise.all(avds.map(async avd => {
       const config = await readAvdConfig.readConfig(avd.name);
-      if (config?.ramSizeMb === undefined) {
+      if (!config) {
         unverifiableConfigs.push(avd.name);
         return null;
       }
       const isModernPlayImage = config.tag?.toLowerCase().includes("play")
         && (config.apiLevel ?? 0) >= 30;
+      if (!isModernPlayImage) {
+        return null;
+      }
+      if (config.ramSizeMb === undefined) {
+        unverifiableConfigs.push(avd.name);
+        return null;
+      }
       return isModernPlayImage && config.ramSizeMb < MIN_AVD_RAM_MB
         ? `${avd.name} (${config.ramSizeMb} MB)`
         : null;

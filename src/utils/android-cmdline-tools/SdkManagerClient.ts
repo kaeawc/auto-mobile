@@ -286,7 +286,10 @@ export async function readSdkManagerVersion(
   location?: AndroidToolsLocation,
 ): Promise<string | null> {
   const result = await client.getVersion(location ? { location } : {});
-  if (result.exitCode !== 0) {return null;}
+  if (result.exitCode !== 0) {
+    logger.debug(`sdkmanager --version failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
+    return null;
+  }
   let version: string | null = null;
   for (const line of `${result.stdout}\n${result.stderr}`.split("\n")) {
     const match = line.trim().match(/^(\d+(?:\.\d+){0,2})$/);

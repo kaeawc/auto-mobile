@@ -600,6 +600,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     try {
       states = await this.adbFactory.create(null).getDeviceStates?.({ timeoutMs }) ?? [];
     } catch (error) {
+      // Auxiliary diagnostic probe; a failure here must not block readiness polling.
       logger.debug(`Offline-state probe unavailable during emulator readiness: ${error instanceof Error ? error.message : String(error)}`);
       tracker.deviceId = null;
       tracker.since = null;
@@ -1392,6 +1393,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       ?? new ActionableError(`Emulator '${avdName}' failed to become ready within ${timeoutMs}ms`);
   }
 
+  private shouldStopReadinessPolling(
+    pollingActive: boolean,
+    elapsedMs: number,
+    timeoutMs: number,
+    offlineFailure: ActionableError | null,
+  ): boolean {
+    return !pollingActive || elapsedMs >= timeoutMs || offlineFailure !== null;
+  }
+
   private unknownEmulatorName(deviceId: string): string {
     return `Unknown (${deviceId})`;
   }
@@ -1461,7 +1471,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     logger.info(`Waiting for emulator '${avdName}' to be ready... (polling interval: ${pollingIntervalMs}ms)`);
 
     // Monitor child process for early exit if provided
-    let processExited = false;
     let processExitError: ActionableError | null = null;
     if (childProcess && childProcess.pid) {
       const processOutput: string[] = [];
@@ -1480,7 +1489,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         // A null code means the process was killed by signal (e.g. SIGABRT from a
         // failed Qt xcb plugin on a headless host) — treat that as a failure too.
         if (code !== 0) {
-          processExited = true;
           const combinedOutput = processOutput.join("");
 
           // Check for known error patterns
@@ -1527,7 +1535,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       while (pollingActive && !foundDeviceId) {
         try {
           this.recordLaunchError(childProcess, error => {
-            processExited = true;
             processExitError = error;
           });
           logger.debug(`Background polling iteration - checking for emulator '${avdName}'...`);
@@ -1539,7 +1546,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             break;
           }
           offlineFailure = await this.detectOfflineFailure(avdName, correlatedTargetDeviceId, offlineTracker, remainingTimeoutMs);
-          if (!pollingActive || this.timer.now() - startTime >= timeoutMs) {
+          if (this.shouldStopReadinessPolling(pollingActive, this.timer.now() - startTime, timeoutMs, offlineFailure)) {
             break;
           }
 
@@ -1652,12 +1659,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     // Main timeout loop
     while (this.timer.now() - startTime < timeoutMs) {
-      // Check if emulator process crashed during readiness wait
-      if (processExited && processExitError) {
+      const readinessFailure = processExitError ?? offlineFailure;
+      if (readinessFailure) {
         pollingActive = false;
         await pollingPromise;
         perf.endOperation("devicePolling");
-        throw processExitError;
+        throw readinessFailure;
       }
 
       if (foundDeviceId) {

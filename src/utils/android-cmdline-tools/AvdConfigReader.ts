@@ -71,7 +71,11 @@ export class FileAvdConfigReader implements AvdConfigReader {
     this.existsFn = existsFn ?? ((p: string) => fs.existsSync(p));
 
     const homeDir = process.env.HOME || process.env.USERPROFILE;
-    this.avdHome = avdHome ?? process.env.ANDROID_AVD_HOME ?? (homeDir ? path.join(homeDir, ".android", "avd") : "");
+    const androidUserHome = process.env.ANDROID_USER_HOME;
+    this.avdHome = avdHome
+      ?? process.env.ANDROID_AVD_HOME
+      ?? (androidUserHome ? path.join(androidUserHome, "avd") : undefined)
+      ?? (homeDir ? path.join(homeDir, ".android", "avd") : "");
   }
 
   async readConfig(avdName: string): Promise<AvdConfig | null> {

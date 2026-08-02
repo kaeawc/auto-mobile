@@ -1390,6 +1390,58 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
+    test("build-context resolution is deferred out-of-band, not run inline with the message handler (#2885/#4984)", async function() {
+      // Regression guard for the macOS/Windows-CI-only #2885 failure: ensureBuildContext
+      // must NOT call requestPackageInfo (a WS send + RequestManager timeout timer)
+      // synchronously inside the WS message handler, or it reorders the barrier-tracked
+      // nav write vs the socket-close cache invalidation on differently-scheduled runners.
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: false } as never);
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "navigation_event",
+          event: {
+            destination: "Home", source: "Start", arguments: {}, metadata: {},
+            timestamp: testTimer.now(), sequenceNumber: 1, applicationId: "com.example.app",
+          }
+        }));
+
+        // Drain MICROTASKS only (never setImmediate): the deferred resolution is
+        // dispatched on a macrotask, so if it ran inline requestPackageInfo would
+        // already have fired here. It must not have.
+        for (let i = 0; i < 5; i++) { await Promise.resolve(); }
+        expect(pkgInfoSpy).not.toHaveBeenCalled();
+
+        // Let getLatestHierarchy resolve, then allow macrotasks: the deferred
+        // resolution now runs and consults requestPackageInfo out-of-band.
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: { updatedAt: testTimer.now(), packageName: "com.example.app", hierarchy: { "text": "Home" } }
+        }));
+        await resultPromise;
+        for (let i = 0; i < 10; i++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+          await testTimer.advanceTimersByTimeAsync(1);
+        }
+        expect(pkgInfoSpy).toHaveBeenCalled();
+      } finally {
+        pkgInfoSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
     test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#2885)", async function() {
       resetDbWriteBarrier();
       // The Android handler resolves getDbWriteBarrier() per write (#2912), so a

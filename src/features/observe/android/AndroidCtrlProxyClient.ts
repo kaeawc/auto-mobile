@@ -1175,10 +1175,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
     };
 
+    // Defer the resolution to a macrotask so NO work runs inline with the current
+    // WebSocket message handler (#4984/#2885). resolve() would otherwise call
+    // requestPackageInfo synchronously — a WS send plus a RequestManager timeout
+    // timer — which reorders the barrier-tracked navigation-graph write and the
+    // socket-close cache invalidation on differently-scheduled runners (macOS/Windows
+    // CI). Scheduling on the injected timer keeps the event handler's barrier
+    // registration synchronous and first, with the hash resolving out-of-band.
     // Fire-and-forget: resolution only sets in-memory build context (no DB write),
-    // so it is NOT enlisted in the DB-write shutdown barrier. Errors are handled
-    // inside resolve().
-    void resolve();
+    // so it is NOT enlisted in the DB-write shutdown barrier.
+    this.timer.setTimeout(() => { void resolve(); }, 0);
   }
 
   /**

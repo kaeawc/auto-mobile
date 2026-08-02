@@ -108,6 +108,14 @@ export class CtrlProxyPackages {
         };
       }
 
+      // Check the socket is OPEN BEFORE registering, so an already-closed socket
+      // never leaves a registered request orphaned (a later cancelAll would reject
+      // an un-awaited promise as an unhandled rejection).
+      const ws = this.context.getWebSocket();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not connected");
+      }
+
       const requestId = `package_info_${this.context.timer.now()}_${generateSecureId()}`;
       const resultPromise = this.context.requestManager.register<A11yPackageInfoResult>(
         requestId,
@@ -124,19 +132,26 @@ export class CtrlProxyPackages {
         })
       );
 
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
+      try {
+        ws.send(
+          serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestPackageInfo({
+              requestId,
+              packageName,
+              includePermissions: options.includePermissions ?? true,
+            })
+          )
+        );
+      } catch (sendError) {
+        // Settle the just-registered request rather than orphaning it, so the
+        // always-awaited resultPromise below returns the failure instead of a later
+        // cancelAll surfacing an unhandled rejection.
+        this.context.requestManager.resolveError(
+          requestId,
+          `${sendError}`,
+          this.context.timer.now() - startTime
+        );
       }
-      ws.send(
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestPackageInfo({
-            requestId,
-            packageName,
-            includePermissions: options.includePermissions ?? true,
-          })
-        )
-      );
 
       return await resultPromise;
     } catch (error) {

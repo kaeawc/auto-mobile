@@ -404,11 +404,11 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           MANIFEST_OUT: ${{ runner.temp }}/maven-publication-manifest.txt
           ORG_GRADLE_PROJECT_signingInMemoryKey:
-            ${{ secrets.SIGNING_IN_MEMORY_KEY }}
+            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword:
-            ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYPASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyId:
-            ${{ secrets.SIGNING_IN_MEMORY_KEY_ID }}
+            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYID }}
         run: scripts/release/maven-publication-manifest-preflight.sh
 
       - name: Upload Maven publication manifest
@@ -428,11 +428,11 @@ jobs:
           ORG_GRADLE_PROJECT_mavenCentralPassword:
             ${{ secrets.MAVEN_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey:
-            ${{ secrets.SIGNING_IN_MEMORY_KEY }}
+            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword:
-            ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYPASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyId:
-            ${{ secrets.SIGNING_IN_MEMORY_KEY_ID }}
+            ${{ secrets.ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYID }}
           RELEASE_KEYSTORE_PATH: keystore/release.keystore
           RELEASE_KEYSTORE_PASSWORD:
             ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}

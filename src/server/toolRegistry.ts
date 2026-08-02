@@ -820,7 +820,10 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         const session = releaseSessionUuid ? sessionManager.getSession(releaseSessionUuid) : null;
         if (session) {
           const deviceId = session.assignedDevice;
-          sessionManager.releaseSession(session.sessionId);
+          // Await the release so its onSessionRelease callbacks (CtrlProxy binding +
+          // detector cleanup) complete — and any rejection is caught by this try —
+          // before the device is freed (#4984).
+          await sessionManager.releaseSession(session.sessionId);
           await devicePool.releaseDevice(deviceId);
           NavigationGraphManager.releaseSession(releaseSessionUuid);
           // CtrlProxy client binding + detector cleanup for the released session is

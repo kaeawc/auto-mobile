@@ -169,7 +169,11 @@ fun AutoMobileDesktopApp(
   // Register + bind the session to the FOCUSED device. Stream auth then admits every pane: the
   // focused device is owned by this session, and each other observed device is unowned (its
   // subscribe passes the auth's unowned-device branch). Binding is idempotent and re-runs when the
-  // focus changes; a bind failure only means that pane shows the refusal reason.
+  // focus changes; a bind failure only means that pane shows the refusal reason. `boundDeviceId`
+  // tracks whether the session is actually registered with the daemon yet — the daemon creates a
+  // session lazily on the first tool call that carries its UUID (here, setActiveDevice), so a
+  // heartbeat before that would be rejected as "Session not found".
+  var boundDeviceId by remember(desktopDaemonSession) { mutableStateOf<String?>(null) }
   val focusedColumn =
     (workspaceState as? WorkspaceUiState.Content)?.let { content ->
       content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
@@ -179,14 +183,18 @@ fun AutoMobileDesktopApp(
     val column = focusedColumn ?: return@LaunchedEffect
     val platform = if (column.platform == Platform.Ios) "ios" else "android"
     runCatching {
-        withContext(Dispatchers.IO) { session.client.setActiveDevice(column.deviceId, platform) }
-      }
+      withContext(Dispatchers.IO) { session.client.setActiveDevice(column.deviceId, platform) }
+    }
+      .onSuccess { boundDeviceId = column.deviceId }
       .onFailure { LOG.warn("Failed to bind desktop session to ${column.deviceId}: ${it.message}") }
   }
 
-  // Keep the session alive against the daemon's idle watchdog while the workspace is open.
-  LaunchedEffect(desktopDaemonSession) {
+  // Keep the session alive against the daemon's idle watchdog — but only once it is registered
+  // (bound), otherwise every heartbeat is a "Session not found" against a session the daemon has
+  // not created yet.
+  LaunchedEffect(desktopDaemonSession, boundDeviceId) {
     val session = desktopDaemonSession ?: return@LaunchedEffect
+    if (boundDeviceId == null) return@LaunchedEffect
     while (isActive) {
       delay(DESKTOP_SESSION_HEARTBEAT_MS)
       runCatching { withContext(Dispatchers.IO) { session.heartbeat() } }

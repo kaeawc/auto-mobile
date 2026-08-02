@@ -10,6 +10,7 @@ import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
 import { PlistClient, type PlistReader } from "./PlistClient";
+import { isIosSimulatorUdid } from "./iosDeviceType";
 
 export interface AppleDevice {
   udid: string;
@@ -399,10 +400,20 @@ function inferIosFormFactor(deviceTypeId: string | undefined): "phone" | "tablet
   return undefined;
 }
 
-function isAlreadyBootedCoreSimulator405(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("domain=com.apple.CoreSimulator.SimError, code=405") &&
-    message.includes("Unable to boot device in current state: Booted");
+function isAlreadyBootedCoreSimulator405(error: unknown, udid: string): boolean {
+  if (!isIosSimulatorUdid(udid) || !(error instanceof Error)) {
+    return false;
+  }
+
+  const execError = error as NodeJS.ErrnoException & { stderr?: unknown };
+  const stderr = typeof execError.stderr === "string"
+    ? execError.stderr
+    : Buffer.isBuffer(execError.stderr) ? execError.stderr.toString() : "";
+
+  return typeof execError.code === "number" &&
+    execError.code !== 0 &&
+    stderr.includes("domain=com.apple.CoreSimulator.SimError, code=405") &&
+    stderr.includes("Unable to boot device in current state: Booted");
 }
 
 /**
@@ -638,10 +649,10 @@ export class SimCtlClient implements SimCtl {
    * Get the list of all simulators and devices
    * @returns Promise with simulator list data
    */
-  private async listSimulators(): Promise<SimulatorList> {
+  private async listSimulators(timeoutMs?: number): Promise<SimulatorList> {
     const perf = createGlobalPerformanceTracker();
     perf.startOperation("simctlListDevices");
-    const result = await this.executeCommandArgs(["list", "devices", "--json"]);
+    const result = await this.executeCommandArgs(["list", "devices", "--json"], timeoutMs);
     perf.endOperation("simctlListDevices");
 
     try {
@@ -779,7 +790,10 @@ export class SimCtlClient implements SimCtl {
    * On a failed verification the device is shut down, a bounded backoff is
    * awaited through the injected {@link Timer}, and the boot is retried.
    */
-  private async bootAndVerify(udid: string, timeoutMs?: number): Promise<void> {
+  private async bootAndVerify(
+    udid: string,
+    timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS
+  ): Promise<void> {
     const { maxAttempts, retryBackoffMs } = this.bootOptions;
     let lastFailure = "";
 
@@ -791,14 +805,14 @@ export class SimCtlClient implements SimCtl {
         // CoreSimulator can transiently reject bootstatus with error 405 while
         // reporting the requested simulator is already Booted. Verify its state
         // before deciding whether the command failure is actionable.
-        if (!isAlreadyBootedCoreSimulator405(error)) {
+        if (!isAlreadyBootedCoreSimulator405(error, udid)) {
           throw error;
         }
         logger.debug(`[iOS] bootstatus returned expected CoreSimulator error 405 for ${udid}; verifying simulator state: ${error}`);
         bootstatusReportedAlreadyBooted = true;
       }
 
-      const state = await this.readSimulatorState(udid);
+      const state = await this.readSimulatorState(udid, timeoutMs);
       if (state === "Booted") {
         return;
       }
@@ -812,7 +826,7 @@ export class SimCtlClient implements SimCtl {
         // Best-effort: shutting down an already-shutdown device errors, and that
         // is fine — the next attempt re-boots from whatever state it is in.
         try {
-          await this.executeCommandArgs(["shutdown", udid]);
+          await this.executeCommandArgs(["shutdown", udid], timeoutMs);
         } catch (error) {
           logger.debug(`[iOS] shutdown before boot retry failed for ${udid}: ${error}`);
         }
@@ -906,9 +920,9 @@ export class SimCtlClient implements SimCtl {
    * @returns the state string (e.g. "Booted", "Shutdown"), or undefined when
    *          the device is absent or discovery failed.
    */
-  private async readSimulatorState(udid: string): Promise<string | undefined> {
+  private async readSimulatorState(udid: string, timeoutMs: number): Promise<string | undefined> {
     try {
-      const simulatorList = await this.listSimulators();
+      const simulatorList = await this.listSimulators(timeoutMs);
       for (const runtimeDevices of Object.values(simulatorList.devices)) {
         const match = runtimeDevices.find(device => device.udid === udid);
         if (match) {
@@ -1096,7 +1110,7 @@ export class SimCtlClient implements SimCtl {
     // boot to finish, then slept a fixed 1s and asked whether the device had
     // shown up in the booted list -- neither a wait nor a proof of readiness.
     perf.startOperation("simctlBoot");
-    await this.bootAndVerify(udid);
+    await this.bootAndVerify(udid, DEFAULT_DEVICE_READY_TIMEOUT_MS);
     perf.endOperation("simctlBoot");
 
     perf.startOperation("bootRegistration");

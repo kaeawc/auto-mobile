@@ -10,13 +10,14 @@ interface Harness {
   simctl: SimCtlClient;
   timer: FakeTimer;
   calls: string[];
+  commandTimeouts: Map<string, boolean[]>;
   /**
    * States reported by successive `simctl list devices --json` calls. The last
    * entry sticks once the sequence is exhausted.
    */
   setStates(states: string[]): void;
   /** Make the next `bootstatus` invocation reject. */
-  failBootStatusWith(message: string | null): void;
+  failBootStatusWith(error: Error | null): void;
 }
 
 /**
@@ -26,14 +27,18 @@ interface Harness {
  */
 function createHarness(bootOptions: SimCtlBootOptions): Harness {
   const calls: string[] = [];
+  const commandTimeouts = new Map<string, boolean[]>();
   const timer = new FakeTimer();
   let states = ["Shutdown"];
-  let bootStatusFailures: Array<string | null> = [];
+  let bootStatusFailures: Array<Error | null> = [];
   const nextState = (): string => (states.length > 1 ? states.shift()! : states[0]);
 
-  const execAsync = async (file: string, args: string[]) => {
+  const execAsync = async (file: string, args: string[], _maxBuffer?: number, signal?: AbortSignal) => {
     const command = `${file} ${args.join(" ")}`;
     calls.push(command);
+    const timeoutUsage = commandTimeouts.get(command) ?? [];
+    timeoutUsage.push(signal !== undefined);
+    commandTimeouts.set(command, timeoutUsage);
 
     if (command === "xcrun simctl --version") {
       return createExecResult("simctl version 1.0.0", "");
@@ -41,7 +46,7 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
     if (command === `xcrun simctl bootstatus ${UDID} -b`) {
       const bootStatusFailure = bootStatusFailures.shift() ?? null;
       if (bootStatusFailure !== null) {
-        throw new Error(bootStatusFailure);
+        throw bootStatusFailure;
       }
       // Healthy boots on macOS 26 / Xcode 26 also print this line (#4092), so it
       // must never be treated as a wedge sentinel.
@@ -79,8 +84,9 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
     simctl,
     timer,
     calls,
+    commandTimeouts,
     setStates: next => { states = [...next]; },
-    failBootStatusWith: message => { bootStatusFailures = [message]; }
+    failBootStatusWith: error => { bootStatusFailures = [error]; }
   };
 }
 
@@ -95,6 +101,16 @@ const ALREADY_BOOTED_405 =
   "An error was encountered processing the command " +
   "(domain=com.apple.CoreSimulator.SimError, code=405): " +
   "Unable to boot device in current state: Booted";
+
+function coreSimulator405Error(stderr: string = ALREADY_BOOTED_405): Error {
+  return Object.assign(new Error("simctl bootstatus exited unsuccessfully"), {
+    code: 1,
+    stderr,
+  });
+}
+
+const commandTimeouts = (harness: Harness, command: string): boolean[] =>
+  harness.commandTimeouts.get(command) ?? [];
 
 describe("SimCtlClient boot self-verification", () => {
   test("a wedged boot (bootstatus exit 0, device Shutdown) fails with an actionable error", async () => {
@@ -128,7 +144,7 @@ describe("SimCtlClient boot self-verification", () => {
   test("accepts a CoreSimulator 405 already-Booted response after verifying the requested simulator", async () => {
     const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
     harness.setStates(["Booted"]);
-    harness.failBootStatusWith(ALREADY_BOOTED_405);
+    harness.failBootStatusWith(coreSimulator405Error());
 
     const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
 
@@ -141,7 +157,7 @@ describe("SimCtlClient boot self-verification", () => {
   test("retries a contradictory CoreSimulator 405 response when the simulator is not Booted", async () => {
     const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
     harness.setStates(["Shutdown", "Booted"]);
-    harness.failBootStatusWith(ALREADY_BOOTED_405);
+    harness.failBootStatusWith(coreSimulator405Error());
 
     const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
 
@@ -149,6 +165,38 @@ describe("SimCtlClient boot self-verification", () => {
     expect(bootstatusCalls(harness.calls).length).toBe(2);
     expect(shutdownCalls(harness.calls).length).toBe(1);
     expect(harness.timer.getSleepHistory()).toEqual([10]);
+  });
+
+  test("does not recover from a textual 405 in an unstructured error message", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    const error = new Error(ALREADY_BOOTED_405);
+    harness.failBootStatusWith(error);
+
+    await expect(harness.simctl.startSimulator(UDID, 5000)).rejects.toBe(error);
+    expect(harness.calls).not.toContain("xcrun simctl list devices --json");
+  });
+
+  test("does not recover when a crafted non-simulator UDID appears in the error message", async () => {
+    const craftedUdid = `not-a-simulator\n${ALREADY_BOOTED_405}`;
+    const calls: string[] = [];
+    const error = Object.assign(new Error(`xcrun simctl bootstatus ${craftedUdid} -b failed`), {
+      code: 1,
+      stderr: "unrelated failure",
+    });
+    const simctl = new SimCtlClient(null, async (file, args) => {
+      const command = `${file} ${args.join(" ")}`;
+      calls.push(command);
+      if (command === "xcrun simctl --version") {
+        return createExecResult("simctl version 1.0.0", "");
+      }
+      if (args[1] === "bootstatus") {
+        throw error;
+      }
+      return createExecResult("", "");
+    }, new FakeTimer(), "darwin", undefined, undefined, { maxAttempts: 2, retryBackoffMs: 10 });
+
+    await expect(simctl.startSimulator(craftedUdid, 5000)).rejects.toBe(error);
+    expect(calls).not.toContain("xcrun simctl list devices --json");
   });
 
   test("retries a wedged boot after a shutdown and a backoff, then succeeds", async () => {
@@ -163,6 +211,17 @@ describe("SimCtlClient boot self-verification", () => {
     expect(bootstatusCalls(harness.calls).length).toBe(2);
     expect(shutdownCalls(harness.calls).length).toBe(1);
     expect(harness.timer.getSleepHistory()).toEqual([2000]);
+  });
+
+  test("time-bounds verification state reads and retry shutdown", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    harness.setStates(["Shutdown", "Booted"]);
+
+    await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+
+    expect(commandTimeouts(harness, `xcrun simctl bootstatus ${UDID} -b`)).toEqual([true, true]);
+    expect(commandTimeouts(harness, "xcrun simctl list devices --json")).toEqual([true, true]);
+    expect(commandTimeouts(harness, `xcrun simctl shutdown ${UDID}`)).toEqual([true]);
   });
 
   test("stops after the bounded attempt count and reports the observed state", async () => {
@@ -183,7 +242,7 @@ describe("SimCtlClient boot self-verification", () => {
 
   test("a bootstatus failure propagates immediately without burning a retry", async () => {
     const harness = createHarness({ maxAttempts: 3, retryBackoffMs: 10 });
-    harness.failBootStatusWith("Invalid device: nope");
+    harness.failBootStatusWith(new Error("Invalid device: nope"));
 
     const error = await harness.timer.resolvePromise(
       harness.simctl.startSimulator(UDID, 5000).then(
@@ -223,6 +282,8 @@ describe("SimCtlClient boot self-verification", () => {
     expect(device.deviceId).toBe(UDID);
     expect(bootstatusCalls(harness.calls).length).toBe(2);
     expect(shutdownCalls(harness.calls).length).toBe(1);
+    expect(commandTimeouts(harness, `xcrun simctl bootstatus ${UDID} -b`).slice(0, 2)).toEqual([true, true]);
+    expect(commandTimeouts(harness, "xcrun simctl list devices --json").slice(0, 2)).toEqual([true, true]);
   });
 
   test("waitForSimulatorReady rejects a wedged boot instead of returning a device", async () => {

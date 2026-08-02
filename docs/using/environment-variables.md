@@ -119,14 +119,23 @@ Created devices are named `AutoMobile-<model>-<id>` so they are easy to find and
 clean up (`xcrun simctl delete <udid>` / `avdmanager delete avd -n <name>`), and
 the resolved device type and runtime are logged at creation time.
 
-## Device-pool Android recovery
+## Managed-device recovery
 
 | Variable | Legacy alias | Purpose | Default |
 |----------|--------------|---------|---------|
-| `AUTOMOBILE_ANDROID_REBOOT_ON_DEATH` | `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH` | When exactly `1`, restarts a pool-owned Android emulator after its process exits or ADB confirms it disappeared. The same AVD receives at most two recovery launches per daemon lifetime; exhaustion falls back to device removal and start suppression. | unset (off) |
+| `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS` | `AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS` | Enables managed-device recovery after confirmed loss. Only exact `1` enables it; exact `0` disables it. Invalid values warn and disable recovery. | `0` |
+| `AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` | `AUTO_MOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` | Canonical positive decimal attempt budget per stable AutoMobile-owned device identity. Values are bounded to `1` through `10`; invalid values warn and use the default. | `2` |
 
-Set this on the process that starts the AutoMobile daemon. It does not apply to
-externally started emulators or iOS simulators.
+These settings are read once when the daemon starts, logged with their effective
+values, and reported by device-pool status. Existing
+`AUTOMOBILE_ANDROID_REBOOT_ON_DEATH` / `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH`
+remain migration fallbacks for the enablement setting.
+
+Only AutoMobile-owned virtual devices are eligible. Android restarts its owned
+AVD today; externally started emulators, physical devices, and iOS simulators
+are never restarted. A confirmed device loss cancels and releases the active
+session and returns the machine-readable `device_lost` tool outcome rather than
+continuing the in-flight operation.
 
 ## WebRTC screen streaming (`AUTOMOBILE_WEBRTC_*`)
 

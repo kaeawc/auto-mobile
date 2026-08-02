@@ -5,7 +5,11 @@ import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { DaemonState } from "../daemon/daemonState";
 import type { Session } from "../daemon/sessionManager";
-import type { DevicePool } from "../daemon/devicePool";
+import type {
+  DevicePool,
+  DeviceRecoveryEligibility,
+  DeviceRecoveryPolicy,
+} from "../daemon/devicePool";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
@@ -49,6 +53,7 @@ interface BootedDeviceInfo {
   status: "booted";
   poolStatus?: PoolDeviceStatus;
   assignedSession?: string;
+  recoveryEligibility?: DeviceRecoveryEligibility;
   session?: DeviceSessionInfo;
   serviceStatus?: DeviceServiceStatus;
 }
@@ -73,6 +78,7 @@ interface PoolStatusSummary {
   assigned: number;
   error: number;
   total: number;
+  recoveryPolicy: DeviceRecoveryPolicy;
 }
 
 interface DeviceSessionInfo {
@@ -88,6 +94,7 @@ interface DeviceSessionInfo {
 interface PoolDeviceInfo {
   poolStatus: PoolDeviceStatus;
   assignedSession?: string;
+  recoveryEligibility: DeviceRecoveryEligibility;
 }
 
 /**
@@ -129,7 +136,8 @@ function toBootedDeviceInfo(
     ...info,
     ...(poolInfo ? {
       poolStatus: poolInfo.poolStatus,
-      ...(poolInfo.assignedSession ? { assignedSession: poolInfo.assignedSession } : {})
+      ...(poolInfo.assignedSession ? { assignedSession: poolInfo.assignedSession } : {}),
+      recoveryEligibility: poolInfo.recoveryEligibility,
     } : {}),
     ...(sessionInfo ? { session: sessionInfo } : {})
   };
@@ -159,7 +167,8 @@ function getPoolDeviceInfo(devicePool: DevicePool | null, deviceId: string): Poo
 
   return {
     poolStatus,
-    assignedSession: pooledDevice.sessionId || undefined
+    assignedSession: pooledDevice.sessionId || undefined,
+    recoveryEligibility: devicePool.getRecoveryEligibility(deviceId),
   };
 }
 
@@ -203,7 +212,8 @@ function summarizePoolStatus(
     idle,
     assigned,
     error,
-    total: idle + assigned + error
+    total: idle + assigned + error,
+    recoveryPolicy: devicePool.getRecoveryPolicy(),
   };
 }
 
@@ -270,7 +280,8 @@ async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<Boot
         idle: 0,
         assigned: 0,
         error: 0,
-        total: 0
+        total: 0,
+        recoveryPolicy: devicePool.getRecoveryPolicy(),
       };
     } catch (error) {
       logger.warn(`[BootedDeviceResources] Failed to read device pool status: ${error}`);

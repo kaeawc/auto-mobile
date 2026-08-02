@@ -22,6 +22,7 @@ import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
+import { isDeviceLostError } from "../../server/deviceLossOutcome";
 import {
   summarizeObserveResultForFailure,
   trimObservationForStepCapture,
@@ -500,6 +501,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
         details,
       };
     } catch (error) {
+      if (isDeviceLostError(error)) {
+        throw error;
+      }
       const errorMessage = `${error}`;
       if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
         this.logger.warn(`${context.logPrefix} optional step ${step.tool} threw; returning skipped status`, error);
@@ -714,6 +718,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
       };
 
     } catch (error) {
+      if (isDeviceLostError(error)) {
+        throw error;
+      }
       logger.error(`Plan execution failed: ${error}`);
 
       debugSteps.push({
@@ -849,6 +856,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
         return result;
       } catch (error) {
+        if (isDeviceLostError(error)) {
+          throw error;
+        }
         const errorMessage = error instanceof Error ? error.message : String(error);
         logger.error(`[PARALLEL_EXEC][${device}] Unexpected error: ${errorMessage}`);
 
@@ -1050,6 +1060,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
         skippedSteps,
       };
     } catch (error) {
+      if (isDeviceLostError(error)) {
+        throw error;
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(`[PARALLEL_EXEC][${device}] Track execution error: ${errorMessage}`);
 

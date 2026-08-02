@@ -25,6 +25,7 @@ import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { ProgressCallback } from "./toolRegistry";
 import type { Plan } from "../models/Plan";
+import { isDeviceLostError } from "./deviceLossOutcome";
 
 /**
  * Test metadata captured per-execution for the test-execution timing repository.
@@ -113,6 +114,12 @@ const getDeviceType = (device: BootedDevice): "emulator" | "simulator" | "device
 };
 
 const sharedTestExecutionRepository = new TestExecutionRepository();
+
+const rethrowDeviceLoss = (error: unknown): void => {
+  if (isDeviceLostError(error)) {
+    throw error;
+  }
+};
 
 /**
  * Converts debug step traces from PlanExecutor into the row shape expected by
@@ -242,8 +249,9 @@ export class PlanExecutionOrchestrator {
   }
 
   /**
-   * Run all phases, always returning a structured ExecutePlanResult.
-   * Never throws — failures are converted into `success: false` responses.
+   * Run all phases, returning a structured ExecutePlanResult for ordinary plan
+   * failures. Device-loss cancellation is rethrown for the MCP boundary to
+   * report as an infrastructure outcome.
    */
   async execute(): Promise<ExecutePlanResult> {
     const startTime = this.timer.now();
@@ -317,6 +325,7 @@ export class PlanExecutionOrchestrator {
       this.perfLog(`Returning from executePlanTool (deviceId=${this.device.deviceId})`);
       return response;
     } catch (error) {
+      rethrowDeviceLoss(error);
       logger.error(`[PERF] Failed to execute plan: ${error}`);
 
       await this.recordExecution("failed", startTime, {

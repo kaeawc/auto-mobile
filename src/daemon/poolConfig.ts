@@ -1,5 +1,87 @@
 import type { MatchingStrategy } from "../models/DeviceMatchCriteria";
 
+export const DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS = 2;
+export const MAX_DEVICE_RECOVERY_ATTEMPTS = 10;
+
+export interface DeviceRecoveryPolicy {
+  onLoss: boolean;
+  maxAttempts: number;
+}
+
+export interface DeviceRecoveryPolicyParseResult {
+  policy: DeviceRecoveryPolicy;
+  warnings: string[];
+}
+
+type Environment = Record<string, string | undefined>;
+
+function firstDefined(env: Environment, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    if (env[key] !== undefined) {
+      return env[key];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Resolves recovery once when the daemon starts. The legacy Android setting is
+ * retained as a migration fallback, but new clients must use the platform-neutral
+ * recovery variables.
+ */
+export function parseDeviceRecoveryPolicy(env: Environment): DeviceRecoveryPolicyParseResult {
+  const warnings: string[] = [];
+  const onLossValue = firstDefined(env, [
+    "AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS",
+    "AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS",
+    "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",
+    "AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH",
+  ]);
+  let onLoss = false;
+  if (onLossValue !== undefined) {
+    if (onLossValue === "1") {
+      onLoss = true;
+    } else if (onLossValue !== "0") {
+      warnings.push(
+        `Invalid AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS value ${JSON.stringify(onLossValue)}; using 0.`
+      );
+    }
+  }
+
+  const maxAttemptsValue = firstDefined(env, [
+    "AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS",
+    "AUTO_MOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS",
+  ]);
+  let maxAttempts = DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS;
+  if (maxAttemptsValue !== undefined) {
+    if (/^[1-9]\d*$/.test(maxAttemptsValue)) {
+      const parsed = Number(maxAttemptsValue);
+      if (parsed <= MAX_DEVICE_RECOVERY_ATTEMPTS) {
+        maxAttempts = parsed;
+      } else {
+        warnings.push(
+          `Invalid AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS value ${JSON.stringify(maxAttemptsValue)}; ` +
+          `using ${DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS}.`
+        );
+      }
+    } else {
+      warnings.push(
+        `Invalid AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS value ${JSON.stringify(maxAttemptsValue)}; ` +
+        `using ${DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS}.`
+      );
+    }
+  }
+
+  return {
+    policy: { onLoss, maxAttempts },
+    warnings,
+  };
+}
+
+export function getDeviceRecoveryPolicy(): DeviceRecoveryPolicy {
+  return parseDeviceRecoveryPolicy(process.env).policy;
+}
+
 /**
  * Device pool matching strategy.
  * Controls how a device is selected when multiple candidates match.

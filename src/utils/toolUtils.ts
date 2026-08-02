@@ -3,6 +3,7 @@
  */
 import { OPERATION_CANCELLED_MESSAGE } from "./constants";
 import { serverConfig } from "./ServerConfig";
+import { deviceLostErrorFromAbortSignal } from "../server/deviceLossOutcome";
 
 const stripAccessibilityExtras = (key: string, value: unknown): unknown => {
   if (key === "extras") {
@@ -211,6 +212,10 @@ export const getStructuredField = <TPayload, K extends keyof TPayload & string>(
 
 export const throwIfAborted = (signal?: AbortSignal): void => {
   if (signal?.aborted) {
+    const deviceLoss = deviceLostErrorFromAbortSignal(signal);
+    if (deviceLoss) {
+      throw deviceLoss;
+    }
     throw new Error(OPERATION_CANCELLED_MESSAGE);
   }
 };

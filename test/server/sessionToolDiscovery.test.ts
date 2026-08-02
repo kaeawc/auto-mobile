@@ -46,8 +46,12 @@ describe("session-scoped tool discovery", () => {
     expect(binding.effectiveSessionUuid("recreated-transport")).toBe("device-session-a");
     expect(binding.bind("recreated-transport", "device-session-a")).toBe(true);
     expect(binding.bind("recreated-transport", "device-session-a")).toBe(false);
-    expect(binding.bind("recreated-transport", "device-session-b")).toBe(true);
-    expect(binding.effectiveSessionUuid("recreated-transport")).toBe("device-session-b");
+    expect(binding.bind("recreated-transport", "device-session-b")).toBe(false);
+    expect(() => binding.effectiveSessionUuid(
+      "recreated-transport",
+      { sessionUuid: "device-session-b" },
+    )).toThrow("MCP connection is bound");
+    expect(binding.effectiveSessionUuid("recreated-transport")).toBe("device-session-a");
   });
 
   test.each(["", "   "])("uses the bound session when an explicit session UUID is %p", sessionUuid => {

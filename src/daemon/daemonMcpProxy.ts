@@ -1,7 +1,16 @@
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike, type DaemonClientFactory } from "./client";
 import { DaemonManager, type DaemonManagerLike } from "./manager";
 import { logger } from "../utils/logger";
-import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS, DAEMON_BOUND_SESSION_REPLAY_TTL_MS, DAEMON_CAPABILITY_PROFILE_PARAM } from "./constants";
+import {
+  SOCKET_PATH,
+  DAEMON_STARTUP_TIMEOUT_MS,
+  CONNECTION_TIMEOUT_MS,
+  DAEMON_VERSION,
+  DAEMON_VERSION_RESTART_COOLDOWN_MS,
+  DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
+  DAEMON_CAPABILITY_PROFILE_PARAM,
+  DAEMON_BOUND_SESSION_PARAM,
+} from "./constants";
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
@@ -176,6 +185,8 @@ export interface DaemonMcpProxyConfig {
   buildIdentity?: BuildIdentity;
   /** This client's version for the daemon version gate (defaults to DAEMON_VERSION; injectable for testing) */
   clientVersion?: string;
+  /** Existing device-pool session bound before the first discovery request. */
+  initialSessionUuid?: string;
 }
 
 /**
@@ -349,6 +360,9 @@ export class DaemonMcpProxy {
   // refreshing it, the remembered UUID is treated as retired so a sessionless
   // call is not rewritten to a released session (issue #4610).
   private boundSessionUuidAt: number | undefined;
+  // Startup bindings remain authoritative until the daemon signals release.
+  // Replay expiration only protects bindings inferred from ordinary calls.
+  private initialSessionBindingConfigured = false;
   // A connection-level capability profile is not a daemon device session. It
   // survives executePlan's device-session release and is forwarded through the
   // socket only when no explicit/remembered routing session is in use.
@@ -399,6 +413,11 @@ export class DaemonMcpProxy {
       this.config.connectionTimeoutMs
     ));
     this.timer = config.timer ?? defaultTimer;
+    if (typeof config.initialSessionUuid === "string" && config.initialSessionUuid.trim().length > 0) {
+      this.boundSessionUuid = config.initialSessionUuid.trim();
+      this.boundSessionUuidAt = this.timer.now();
+      this.initialSessionBindingConfigured = true;
+    }
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
     this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
     this.clientAssetVersion = isExplicitPin()
@@ -853,7 +872,19 @@ export class DaemonMcpProxy {
       );
       await this.resetConnection();
       await this.ensureConnected();
-      return await operation();
+      try {
+        return await operation();
+      } catch (retryError) {
+        // A configured binding normally survives beyond the replay TTL, because
+        // only an actual daemon release may retire it. If the release push was
+        // missed, two authoritative "Session not found" responses prove the
+        // configured session is gone, so unblock an explicit replacement.
+        if (this.initialSessionBindingConfigured && this.isDaemonSessionNotFoundError(retryError)) {
+          this.discoveryEpoch += 1;
+          this.clearBoundSessionUuid();
+        }
+        throw retryError;
+      }
     }
   }
 
@@ -862,12 +893,16 @@ export class DaemonMcpProxy {
       return true;
     }
 
-    const message = error instanceof Error ? error.message : String(error);
     // "Unknown tool" means the frontend advertised a tool the daemon rejects —
     // typically a wrong-build daemon serving this frontend. Reconnecting drops the
     // stale tool cache and re-runs the build-identity handshake (which restarts the
     // daemon to the correct build on skew), so retry once before giving up.
-    return message.includes("Session not found") || this.isUnknownToolError(error);
+    return this.isDaemonSessionNotFoundError(error) || this.isUnknownToolError(error);
+  }
+
+  private isDaemonSessionNotFoundError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("Session not found");
   }
 
   private isUnknownToolError(error: unknown): boolean {
@@ -997,16 +1032,26 @@ export class DaemonMcpProxy {
     if (this.isBoundSessionReplayExpired()) {
       this.clearBoundSessionUuid();
     }
-    // Only a caller-provided NON-EMPTY STRING sessionUuid counts as an explicit
-    // session selection that bypasses the retained binding. A blank/null/number/
-    // object sessionUuid is not explicit, so the bound UUID is still injected.
-    if (
-      !this.boundSessionUuid ||
-      (typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0)
-    ) {
+    const explicitSessionUuid = typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0
+      ? args.sessionUuid
+      : undefined;
+    if (!this.boundSessionUuid || explicitSessionUuid === this.boundSessionUuid) {
       return args;
     }
-    return { ...args, sessionUuid: this.boundSessionUuid };
+    if (explicitSessionUuid && this.initialSessionBindingConfigured) {
+      throw new Error(
+        `MCP connection is bound to device session ${this.boundSessionUuid}; ` +
+        `cannot route this call to ${explicitSessionUuid} until the binding is released.`
+      );
+    }
+    if (explicitSessionUuid) {
+      return args;
+    }
+    return {
+      ...args,
+      sessionUuid: this.boundSessionUuid,
+      [DAEMON_BOUND_SESSION_PARAM]: this.boundSessionUuid,
+    };
   }
 
   private withCapabilityProfile(args: Record<string, unknown>): Record<string, unknown> {
@@ -1036,7 +1081,11 @@ export class DaemonMcpProxy {
   }
 
   private isBoundSessionReplayExpired(): boolean {
-    if (this.boundSessionUuid === undefined || this.boundSessionUuidAt === undefined) {
+    if (
+      this.initialSessionBindingConfigured ||
+      this.boundSessionUuid === undefined ||
+      this.boundSessionUuidAt === undefined
+    ) {
       return false;
     }
     return this.timer.now() - this.boundSessionUuidAt >= DAEMON_BOUND_SESSION_REPLAY_TTL_MS;
@@ -1045,6 +1094,7 @@ export class DaemonMcpProxy {
   private clearBoundSessionUuid(): void {
     this.boundSessionUuid = undefined;
     this.boundSessionUuidAt = undefined;
+    this.initialSessionBindingConfigured = false;
   }
 
   // Record that the daemon released a specific session UUID, advancing the global
@@ -1213,7 +1263,9 @@ export class DaemonMcpProxy {
    * Read a resource from the daemon
    */
   async readResource(uri: string): Promise<any> {
-    return await this.withRecoverableReconnect(() => this.client!.readResource(uri));
+    return await this.withRecoverableReconnect(() =>
+      this.client!.readResource(uri, this.withBoundSessionUuid({}))
+    );
   }
 
   /**

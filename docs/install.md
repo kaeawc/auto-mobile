@@ -26,21 +26,22 @@ Verify the install:
 auto-mobile --cli help
 ```
 
-## Android emulator crash recovery
+## Managed-device crash recovery
 
-To let a pool-started Android emulator recover from a mid-session process exit
-or confirmed ADB disconnect, set this environment variable on the process that
-starts the AutoMobile daemon:
+To let AutoMobile recover an owned virtual device after a mid-session process
+exit or confirmed disconnect, set this on the process that starts the daemon:
 
 ``` bash
-AUTOMOBILE_ANDROID_REBOOT_ON_DEATH=1 auto-mobile --daemon restart
+AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=1 \
+AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS=2 \
+auto-mobile --daemon restart
 ```
 
-`AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH=1` is supported as a compatibility alias.
-Only the exact value `1` enables recovery. AutoMobile retries the same AVD at
-most twice per daemon lifetime, with backoff; after that budget is exhausted it
-removes and suppresses the device as it normally would. This does not recover
-externally started emulators or iOS simulators.
+Only exact `1` enables recovery. The attempt budget is a strict integer from
+`1` to `10` and defaults to two. The legacy
+`AUTOMOBILE_ANDROID_REBOOT_ON_DEATH=1` setting remains a compatibility fallback.
+AutoMobile recovers only virtual devices it started itself; physical devices and
+externally managed devices are never restarted.
 
 ## Uninstalling
 

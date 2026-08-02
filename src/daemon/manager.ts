@@ -1378,21 +1378,33 @@ export async function runDaemonCommand(
       }
 
       case "available-devices": {
-        const formatPoolStats = (stats?: { idle: number; assigned: number; error: number; total: number }) => (
-          JSON.stringify({
-            availableDevices: stats?.idle ?? 0,
-            totalDevices: stats?.total ?? 0,
-            assignedDevices: stats?.assigned ?? 0,
-            errorDevices: stats?.error ?? 0,
-          })
-        );
+        const formatPoolStats = (
+          stats?: { idle: number; assigned: number; error: number; total: number },
+          recoveryPolicy?: { onLoss: boolean; maxAttempts: number },
+          devices?: Array<{ deviceId: string; platform: string; recoveryEligibility?: unknown }>,
+        ) => JSON.stringify({
+          availableDevices: stats?.idle ?? 0,
+          totalDevices: stats?.total ?? 0,
+          assignedDevices: stats?.assigned ?? 0,
+          errorDevices: stats?.error ?? 0,
+          ...(recoveryPolicy ? { recoveryPolicy } : {}),
+          ...(devices ? { devices } : {}),
+        });
 
         // Check if running in daemon process
         const daemonState = manager.getDaemonState();
         if (daemonState.isInitialized()) {
           // Running inside daemon process
           const pool = daemonState.getDevicePool();
-          console.log(formatPoolStats(pool.getStats()));
+          console.log(formatPoolStats(
+            pool.getStats(),
+            pool.getRecoveryPolicy(),
+            pool.getAllDevices().map(device => ({
+              deviceId: device.id,
+              platform: device.platform,
+              recoveryEligibility: pool.getRecoveryEligibility(device.id),
+            })),
+          ));
         } else {
           // Running from CLI - query daemon via socket
           const client = manager.createClient();
@@ -1404,7 +1416,19 @@ export async function runDaemonCommand(
               console.log(formatPoolStats());
             } else {
               const data = JSON.parse(content);
-              console.log(formatPoolStats(data?.poolStatus));
+              console.log(formatPoolStats(
+                data?.poolStatus,
+                data?.poolStatus?.recoveryPolicy,
+                data?.devices?.map((device: {
+                  deviceId: string;
+                  platform: string;
+                  recoveryEligibility?: unknown;
+                }) => ({
+                  deviceId: device.deviceId,
+                  platform: device.platform,
+                  recoveryEligibility: device.recoveryEligibility,
+                })),
+              ));
             }
             await client.close();
           } catch (error) {

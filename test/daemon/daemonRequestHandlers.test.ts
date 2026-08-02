@@ -6,12 +6,15 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "../../src/daemon/devicePool";
 
 class FakeDevicePool {
   stats: DevicePoolStats;
   refreshedCount = 0;
   releasedDevices: string[] = [];
   addedDevices: number;
+  recoveryPolicy: DeviceRecoveryPolicy = { onLoss: false, maxAttempts: 2 };
+  devices: PooledDevice[] = [];
 
   constructor(stats: DevicePoolStats, addedDevices: number = 0) {
     this.stats = stats;
@@ -29,6 +32,18 @@ class FakeDevicePool {
 
   async releaseDevice(deviceId: string): Promise<void> {
     this.releasedDevices.push(deviceId);
+  }
+
+  getRecoveryPolicy(): DeviceRecoveryPolicy {
+    return this.recoveryPolicy;
+  }
+
+  getAllDevices(): PooledDevice[] {
+    return this.devices;
+  }
+
+  getRecoveryEligibility(_deviceId: string): DeviceRecoveryEligibility {
+    return { eligible: false, reason: "disabled" };
   }
 }
 
@@ -260,6 +275,8 @@ describe("handleDaemonRequest", () => {
       assignedDevices: 1,
       errorDevices: 0,
       stats: devicePool.stats,
+      recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+      devices: [],
     });
   });
 });

@@ -25,6 +25,7 @@ import {
   DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_CAPABILITY_PROFILE_HEADER,
   DAEMON_CAPABILITY_PROFILE_PARAM,
+  DAEMON_BOUND_SESSION_PARAM,
   DAEMON_VERSION,
 } from "./constants";
 import {
@@ -777,7 +778,7 @@ export class UnixSocketServer {
       // the proxy-side reconnect seeding (issue #4610).
       const listSessionUuid = this.getSessionUuid(request.params);
       const capabilityProfileUuid = this.getCapabilityProfileUuid(request.params);
-      if (listSessionUuid) {
+      if (listSessionUuid && !this.isReleasedBoundSession(request.params)) {
         return this.sessionScopedForwardRoute(socketSessionId, listSessionUuid, undefined, capabilityProfileUuid);
       }
       if (capabilityProfileUuid) {
@@ -791,8 +792,7 @@ export class UnixSocketServer {
     }
 
     if (request.method === "resources/read") {
-      const uri = request.params?.uri;
-      return this.sharedMcpForwardRoute(typeof uri === "string" ? `resource:${uri}` : "resource:unknown");
+      return this.getResourceReadForwardRoute(request, socketSessionId);
     }
 
     return this.sharedMcpForwardRoute(`method:${request.method}`);
@@ -820,12 +820,24 @@ export class UnixSocketServer {
     return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
   }
 
+  private getResourceReadForwardRoute(
+    request: DaemonRequest,
+    socketSessionId: string,
+  ): McpForwardRoute {
+    const sessionUuid = this.getSessionUuid(request.params);
+    if (sessionUuid && !this.isReleasedBoundSession(request.params)) {
+      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined);
+    }
+    const uri = request.params?.uri;
+    return this.sharedMcpForwardRoute(typeof uri === "string" ? `resource:${uri}` : "resource:unknown");
+  }
+
   private getToolsCallForwardRoute(args: unknown, socketSessionId: string): McpForwardRoute {
     const scopedKey = this.getRequestArgumentScopeKey(args);
     const boundRoute = this.getBoundMcpClientRoute(socketSessionId);
     const sessionUuid = this.getSessionUuid(args);
     const capabilityProfileUuid = this.getCapabilityProfileUuid(args) ?? boundRoute?.capabilityProfileUuid;
-    if (sessionUuid) {
+    if (sessionUuid && !this.isReleasedBoundSession(args)) {
       return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, scopedKey, capabilityProfileUuid);
     }
     if (capabilityProfileUuid) {
@@ -915,9 +927,31 @@ export class UnixSocketServer {
       this.recordGeneratedCapabilityProfile(request, response, socketSessionId, route);
       return;
     }
+    this.recordSessionBoundMcpClientKey(
+      socketSessionId,
+      route,
+      sessionUuid,
+      sessionWasActiveBeforeForward,
+      request.params?.name,
+      request.params?.arguments,
+    );
+  }
+
+  private recordSessionBoundMcpClientKey(
+    socketSessionId: string,
+    route: McpForwardRoute,
+    sessionUuid: string,
+    sessionWasActiveBeforeForward: boolean,
+    toolName: unknown,
+    args: unknown,
+  ): void {
+    if (this.isReleasedBoundSession(args)) {
+      this.clearBoundMcpClientKey(socketSessionId);
+      return;
+    }
     const sessionIsActiveAfterForward = this.hasActiveDaemonSession(sessionUuid);
     if (
-      (sessionWasActiveBeforeForward || request.params?.name === "executePlan")
+      (sessionWasActiveBeforeForward || toolName === "executePlan")
       && !sessionIsActiveAfterForward
     ) {
       this.clearBoundMcpClientKey(socketSessionId);
@@ -1042,6 +1076,19 @@ export class UnixSocketServer {
     }
     const sessionUuid = (args as Record<string, unknown>).sessionUuid;
     return isNonBlankSessionUuid(sessionUuid) ? sessionUuid : undefined;
+  }
+
+  private isReleasedBoundSession(args: unknown): boolean {
+    if (!args || typeof args !== "object" || Array.isArray(args) || !this.daemonState.isInitialized()) {
+      return false;
+    }
+    const record = args as Record<string, unknown>;
+    const sessionUuid = this.getSessionUuid(record);
+    return (
+      sessionUuid !== undefined &&
+      record[DAEMON_BOUND_SESSION_PARAM] === sessionUuid &&
+      !this.hasActiveDaemonSession(sessionUuid)
+    );
   }
 
   private getRequestArgumentScopeKey(args: unknown): string | undefined {
@@ -2362,6 +2409,15 @@ export class UnixSocketServer {
 
     const forwardedArgs = { ...args } as Record<string, unknown>;
     delete forwardedArgs[DAEMON_CAPABILITY_PROFILE_PARAM];
+    const boundSessionUuid = this.getSessionUuid(forwardedArgs);
+    const usesBoundSession = forwardedArgs[DAEMON_BOUND_SESSION_PARAM] === boundSessionUuid;
+    delete forwardedArgs[DAEMON_BOUND_SESSION_PARAM];
+    // Connection-bound sessions are carried by the loopback transport header.
+    // Never let a stale injected UUID reach ToolExecutionContext, whose legacy
+    // explicit-session contract would otherwise create a replacement session.
+    if (usesBoundSession) {
+      delete forwardedArgs.sessionUuid;
+    }
     return {
       ...forwardedArgs,
       __mcpSessionId: socketSessionId,

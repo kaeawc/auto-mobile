@@ -142,6 +142,12 @@ export const DAEMON_CAPABILITY_PROFILE_HEADER = "x-auto-mobile-capability-profil
 export const DAEMON_CAPABILITY_PROFILE_PARAM = "__autoMobileCapabilityProfileUuid";
 
 /**
+ * Socket RPC field identifying a session UUID injected from a connection-bound
+ * route rather than explicitly selected by the caller.
+ */
+export const DAEMON_BOUND_SESSION_PARAM = "__autoMobileBoundSessionUuid";
+
+/**
  * How long the proxy will keep replaying a remembered session binding on
  * sessionless calls before treating it as retired (issue #4610). It mirrors the
  * daemon's session idle timeout (`SessionManager.SESSION_TIMEOUT_MS`, 30 min):

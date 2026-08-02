@@ -12,6 +12,7 @@ import { runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
+import { deviceLostErrorFromAbortSignal, deviceLossOutcomeFromError } from "./deviceLossOutcome";
 
 // Import the tool registry
 import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
@@ -478,7 +479,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       throw new ActionableError(`Invalid parameters for tool ${name}: ${formatToolParamError(name, error)}`);
     }
 
-    const execution = executionTracker.startExecution(name, sessionId, providedSessionUuid ?? routingSessionUuid);
+    const executionSessionUuid = derivedLabelSessionUuid ?? providedSessionUuid ?? routingSessionUuid;
+    const execution = executionTracker.startExecution(name, sessionId, executionSessionUuid);
     const handlerParams = implicitAutolockMcpSessionId && parsedParams && typeof parsedParams === "object"
       ? { ...parsedParams, [INTERNAL_MCP_SESSION_PARAM]: implicitAutolockMcpSessionId }
       : parsedParams;
@@ -543,6 +545,19 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         logger.debug("[MCP] Omitted structuredContent", { tool: name, reason: omissionReason });
       }
       return stripToolResultStructuredContent(result, omissionReason);
+    } catch (error) {
+      const deviceLoss = deviceLossOutcomeFromError(error, executionSessionUuid)
+        ?? deviceLossOutcomeFromError(
+          deviceLostErrorFromAbortSignal(execution.abortController.signal),
+          executionSessionUuid,
+        );
+      if (deviceLoss) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(deviceLoss) }],
+          isError: true,
+        };
+      }
+      throw error;
     } finally {
       executionTracker.endExecution(execution.id);
     }

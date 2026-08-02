@@ -11,7 +11,8 @@ import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { RetryExecutor, defaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import {
-  isAndroidRebootOnDeathEnabled,
+  getDeviceRecoveryPolicy,
+  type DeviceRecoveryPolicy,
   isDevicePoolAutolockEnabled,
   getDevicePoolTimeoutMs,
 } from "./poolConfig";
@@ -31,6 +32,7 @@ import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheW
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
+export type { DeviceRecoveryPolicy } from "./poolConfig";
 
 /**
  * Error class for device pool operations with retryability flag.
@@ -49,6 +51,15 @@ export class DevicePoolError extends Error {
  * Pooled Device Status
  */
 export type DeviceStatus = "idle" | "busy" | "error";
+export type DeviceRecoveryIneligibilityReason =
+  | "disabled"
+  | "not-automobile-owned"
+  | "unsupported-platform"
+  | "not-in-pool";
+
+export type DeviceRecoveryEligibility =
+  | { eligible: true; action: "restart" }
+  | { eligible: false; reason: DeviceRecoveryIneligibilityReason };
 
 /**
  * Pooled Device
@@ -124,6 +135,7 @@ export class DevicePool {
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
   private readonly androidDeviceReboot: AndroidDeviceReboot;
+  private readonly recoveryPolicy: DeviceRecoveryPolicy;
   private readonly recoveringAndroidImages: Map<string, DeviceInfo> = new Map();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
@@ -148,7 +160,8 @@ export class DevicePool {
     criteriaMatcher: DeviceCriteriaMatcher = new DeviceCriteriaMatcher(),
     releaseSessionForDisconnectedDevice?: DeviceDisconnectSessionReleaser,
     onDeviceReady?: DeviceReadyListener,
-    androidDeviceReboot?: AndroidDeviceReboot
+    androidDeviceReboot?: AndroidDeviceReboot,
+    recoveryPolicy?: DeviceRecoveryPolicy,
   ) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
@@ -159,7 +172,13 @@ export class DevicePool {
     this.deviceSessionRepository = deviceSessionRepository;
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
-    this.androidDeviceReboot = androidDeviceReboot ?? new BoundedAndroidDeviceReboot(timer);
+    // Resolve recovery policy once so retries and status agree even if the
+    // process environment changes after construction.
+    this.recoveryPolicy = { ...(recoveryPolicy ?? getDeviceRecoveryPolicy()) };
+    this.androidDeviceReboot = androidDeviceReboot ?? new BoundedAndroidDeviceReboot(
+      timer,
+      this.recoveryPolicy.maxAttempts,
+    );
     this.releaseSessionForDisconnectedDevice = releaseSessionForDisconnectedDevice ?? (async (
       sessionId,
       _deviceId,
@@ -418,7 +437,7 @@ export class DevicePool {
   }
 
   private async wasRebootedAndroidDeviceRediscovered(device: PooledDevice): Promise<boolean> {
-    if (!isAndroidRebootOnDeathEnabled() || device.platform !== "android" || !device.avdName) {
+    if (!this.getRecoveryPolicy().onLoss || !this.isAutoMobileOwnedAndroidVirtualDevice(device)) {
       return false;
     }
     const avdName = device.avdName;
@@ -1102,9 +1121,8 @@ export class DevicePool {
     device: PooledDevice
   ): device is PooledDevice & { avdName: string } {
     return (
-      isAndroidRebootOnDeathEnabled() &&
-      device.platform === "android" &&
-      typeof device.avdName === "string" &&
+      this.getRecoveryPolicy().onLoss &&
+      this.isAutoMobileOwnedAndroidVirtualDevice(device) &&
       !this.recoveringAndroidImages.has(device.avdName)
     );
   }
@@ -2188,6 +2206,39 @@ export class DevicePool {
    */
   getAllDevices(): PooledDevice[] {
     return Array.from(this.devices.values());
+  }
+
+  /** Effective daemon-startup policy, copied so callers cannot mutate pool state. */
+  getRecoveryPolicy(): DeviceRecoveryPolicy {
+    return { ...this.recoveryPolicy };
+  }
+
+  getRecoveryEligibility(deviceId: string): DeviceRecoveryEligibility {
+    const device = this.devices.get(deviceId);
+    if (!device) {
+      return { eligible: false, reason: "not-in-pool" };
+    }
+    if (!this.getRecoveryPolicy().onLoss) {
+      return { eligible: false, reason: "disabled" };
+    }
+    if (device.platform !== "android") {
+      return { eligible: false, reason: "unsupported-platform" };
+    }
+    if (!this.isAutoMobileOwnedAndroidVirtualDevice(device)) {
+      return { eligible: false, reason: "not-automobile-owned" };
+    }
+    return { eligible: true, action: "restart" };
+  }
+
+  private isAutoMobileOwnedAndroidVirtualDevice(
+    device: PooledDevice
+  ): device is PooledDevice & { avdName: string; androidImage: DeviceInfo } {
+    return (
+      device.platform === "android" &&
+      consolePortFromSerial(device.id) !== null &&
+      typeof device.avdName === "string" &&
+      device.androidImage !== undefined
+    );
   }
 
   private getDevicesMatchingCriteria(criteria?: DeviceAllocationCriteria): PooledDevice[] {

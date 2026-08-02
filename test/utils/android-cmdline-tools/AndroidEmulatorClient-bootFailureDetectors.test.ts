@@ -4,7 +4,7 @@ import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
-import type { AvdConfigReader } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
+import { FileAvdConfigReader, type AvdConfigReader } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
 const result = (stdout = "", stderr = ""): ExecResult => ({
   stdout,
@@ -56,7 +56,38 @@ describe("Android emulator boot failure diagnostics", () => {
     expect(error.message).toContain("2048 MB");
   });
 
-  test("keeps a transient offline target within the readiness deadline", async () => {
+  test("applies the RAM floor when the AVD config comes from an absolute registry path", async () => {
+    const path = require("path");
+    const avdHome = path.resolve("fake", "avd");
+    const relocatedAvdHome = path.resolve("custom", "avds");
+    const registryPath = path.join(avdHome, "Pixel_9_Pro.ini");
+    const configPath = path.join(relocatedAvdHome, "Pixel_9_Pro.avd", "config.ini");
+    const reader = new FileAvdConfigReader(
+      async filePath => filePath === registryPath
+        ? `path=${path.join(relocatedAvdHome, "Pixel_9_Pro.avd")}\n`
+        : "hw.ramSize=1024\nimage.sysdir.1=system-images/android-36/google_apis_playstore/arm64-v8a/\ntag.id=google_apis_playstore\n",
+      filePath => filePath === registryPath || filePath === configPath,
+      avdHome,
+    );
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new AndroidEmulatorClient(
+      async (_file, args) => args.includes("-list-avds") ? result("Pixel_9_Pro\n") : result(),
+      (() => { throw new Error("spawn should not be reached"); }) as any,
+      timer,
+      { create: () => new FakeAdbExecutor() } as AdbClientFactory,
+      reader,
+    );
+    (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () => false;
+    (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () => false;
+    (client as unknown as { checkArchitectureCompatibility: () => Promise<unknown> }).checkArchitectureCompatibility = async () => ({ compatible: true });
+
+    const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
+    expect(error.message).toContain("hw.ramSize");
+    expect(error.message).toContain("1024 MB");
+  });
+
+  test("reports a target that remains offline instead of waiting for the generic timeout", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();

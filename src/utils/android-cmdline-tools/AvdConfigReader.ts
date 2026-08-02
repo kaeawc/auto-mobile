@@ -59,6 +59,7 @@ export class FileAvdConfigReader implements AvdConfigReader {
   private readFileFn: (path: string, encoding: string) => Promise<string>;
   private existsFn: (path: string) => boolean;
   private avdHome: string;
+  private configHome: string;
 
   constructor(
     readFileFn?: (path: string, encoding: string) => Promise<string>,
@@ -71,18 +72,32 @@ export class FileAvdConfigReader implements AvdConfigReader {
     this.existsFn = existsFn ?? ((p: string) => fs.existsSync(p));
 
     const homeDir = process.env.HOME || process.env.USERPROFILE;
-    const androidUserHome = process.env.ANDROID_USER_HOME;
+    const androidUserHome = process.env.ANDROID_USER_HOME || undefined;
+    const avdHomeEnv = process.env.ANDROID_AVD_HOME || undefined;
+    const configHome = process.env.ANDROID_EMULATOR_HOME
+      || androidUserHome
+      || (process.env.ANDROID_SDK_HOME ? path.join(process.env.ANDROID_SDK_HOME, ".android") : undefined)
+      || (homeDir ? path.join(homeDir, ".android") : "");
     this.avdHome = avdHome
-      ?? process.env.ANDROID_AVD_HOME
-      ?? (androidUserHome ? path.join(androidUserHome, "avd") : undefined)
-      ?? (homeDir ? path.join(homeDir, ".android", "avd") : "");
+      ?? avdHomeEnv
+      ?? path.join(configHome, "avd");
+    this.configHome = avdHome
+      ? path.dirname(avdHome)
+      : (process.env.ANDROID_EMULATOR_HOME
+        || androidUserHome
+        || (process.env.ANDROID_SDK_HOME ? path.join(process.env.ANDROID_SDK_HOME, ".android") : undefined)
+        || (avdHomeEnv ? path.dirname(this.avdHome) : configHome));
   }
 
   async readConfig(avdName: string): Promise<AvdConfig | null> {
     const path = require("path");
-    const configPath = path.join(this.avdHome, `${avdName}.avd`, "config.ini");
+    const conventionalConfigPath = path.join(this.avdHome, `${avdName}.avd`, "config.ini");
+    let configPath = conventionalConfigPath;
 
-    if (!this.existsFn(configPath)) {
+    const resolvedConfigPath = await this.resolveRegistryConfigPath(avdName);
+    if (resolvedConfigPath) {
+      configPath = resolvedConfigPath;
+    } else if (!this.existsFn(configPath)) {
       logger.debug(`AVD config.ini not found: ${configPath}`);
       return null;
     }
@@ -95,12 +110,36 @@ export class FileAvdConfigReader implements AvdConfigReader {
       return null;
     }
   }
+
+  private async resolveRegistryConfigPath(avdName: string): Promise<string | null> {
+    const path = require("path");
+    const registryPath = path.join(this.avdHome, `${avdName}.ini`);
+    if (!this.existsFn(registryPath)) {return null;}
+    try {
+      const registry = parseKeyValueProperties(await this.readFileFn(registryPath, "utf-8"));
+      const candidates = registryConfigCandidates(registry, this.configHome);
+      return candidates.find(candidate => this.existsFn(candidate)) ?? null;
+    } catch (error) {
+      logger.warn(`Failed to read AVD registry for ${avdName}: ${error}`);
+      return null;
+    }
+  }
 }
 
 /**
  * Parse AVD config.ini content into structured data.
  */
 export function parseAvdConfig(content: string): AvdConfig {
+  const props = parseKeyValueProperties(content);
+  return {
+    ...parseScreenDimensions(props),
+    ...parseRamSize(props),
+    ...parseDeviceMetadata(props),
+    ...parseApiMetadata(props),
+  };
+}
+
+function parseKeyValueProperties(content: string): Map<string, string> {
   const props = new Map<string, string>();
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
@@ -109,44 +148,58 @@ export function parseAvdConfig(content: string): AvdConfig {
     if (eqIdx < 0) {continue;}
     props.set(trimmed.slice(0, eqIdx).trim(), trimmed.slice(eqIdx + 1).trim());
   }
+  return props;
+}
 
-  const config: AvdConfig = {};
-
-  // Screen dimensions
-  const width = props.get("hw.lcd.width");
-  if (width) {config.screenWidth = Number.parseInt(width, 10) || undefined;}
-
-  const height = props.get("hw.lcd.height");
-  if (height) {config.screenHeight = Number.parseInt(height, 10) || undefined;}
-
-  const density = props.get("hw.lcd.density");
-  if (density) {config.screenDensity = Number.parseInt(density, 10) || undefined;}
-
-  const ramSize = props.get("hw.ramSize");
-  if (ramSize) {
-    const parsedRamSize = Number.parseInt(ramSize, 10);
-    if (Number.isFinite(parsedRamSize)) {config.ramSizeMb = parsedRamSize;}
+function registryConfigCandidates(props: Map<string, string>, configHome: string): string[] {
+  const path = require("path");
+  const candidates: string[] = [];
+  const absolutePath = props.get("path");
+  if (absolutePath && path.isAbsolute(absolutePath)) {
+    candidates.push(path.join(absolutePath, "config.ini"));
   }
 
-  // Device name (form factor hint)
-  const deviceName = props.get("hw.device.name");
-  if (deviceName) {config.deviceName = deviceName;}
+  const relativePath = props.get("path.rel");
+  if (relativePath && !path.isAbsolute(relativePath)) {
+    const relativeBase = path.resolve(configHome);
+    const resolvedDirectory = path.resolve(relativeBase, relativePath);
+    candidates.push(path.join(resolvedDirectory, "config.ini"));
+  }
+  return candidates;
+}
 
-  // Tag
-  const tag = props.get("tag.id");
-  if (tag) {config.tag = tag;}
+function parseScreenDimensions(props: Map<string, string>): Pick<AvdConfig, "screenWidth" | "screenHeight" | "screenDensity"> {
+  return {
+    screenWidth: parseDimension(props.get("hw.lcd.width")),
+    screenHeight: parseDimension(props.get("hw.lcd.height")),
+    screenDensity: parseDimension(props.get("hw.lcd.density")),
+  };
+}
 
-  // API level from image.sysdir.1 path
-  // Typical: system-images/android-34/google_apis/arm64-v8a/
+function parseDimension(value: string | undefined): number | undefined {
+  if (!value) {return undefined;}
+  const parsed = Number.parseInt(value, 10);
+  return parsed || undefined;
+}
+
+function parseRamSize(props: Map<string, string>): Pick<AvdConfig, "ramSizeMb"> {
+  const value = props.get("hw.ramSize");
+  if (!value) {return {};}
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? { ramSizeMb: parsed } : {};
+}
+
+function parseDeviceMetadata(props: Map<string, string>): Pick<AvdConfig, "deviceName" | "tag"> {
+  return {
+    ...(props.get("hw.device.name") ? { deviceName: props.get("hw.device.name") } : {}),
+    ...(props.get("tag.id") ? { tag: props.get("tag.id") } : {}),
+  };
+}
+
+function parseApiMetadata(props: Map<string, string>): Pick<AvdConfig, "apiLevel" | "osVersion"> {
   const sysdir = props.get("image.sysdir.1");
-  if (sysdir) {
-    const match = sysdir.match(/android-(\d+)/);
-    if (match) {
-      const level = Number.parseInt(match[1], 10);
-      config.apiLevel = level;
-      config.osVersion = apiLevelToVersion(level) ?? String(level);
-    }
-  }
-
-  return config;
+  const match = sysdir?.match(/android-(\d+)/);
+  if (!match) {return {};}
+  const level = Number.parseInt(match[1], 10);
+  return { apiLevel: level, osVersion: apiLevelToVersion(level) ?? String(level) };
 }

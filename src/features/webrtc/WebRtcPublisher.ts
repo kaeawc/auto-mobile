@@ -13,10 +13,12 @@ import { ReconnectController, type ReconnectState } from "./ReconnectController"
 import { RtpH264TrackWriter } from "./RtpH264TrackWriter";
 import { RtpPcmuTrackWriter } from "./RtpPcmuTrackWriter";
 import {
+  DEFAULT_H264_PROFILE,
   evaluateH264SpsForSend,
-  isCompatibleConstrainedBaselineProfile,
+  h264ProfileLevelId,
+  isCompatibleProfileForSession,
   WEBRTC_H264_LEVEL_IDC,
-  WEBRTC_H264_PROFILE_LEVEL_ID,
+  type H264Profile,
 } from "./h264Level";
 import { parseTrickleIceMediaContexts, TrickleIceForwarder } from "./trickleIce";
 import { WhipClient, type WhipClientOptions } from "./WhipClient";
@@ -56,6 +58,15 @@ export interface WebRtcPublisherConfig {
   trickleIce?: boolean;
   /** Add a sendonly PCMU audio track alongside video. Defaults to false. */
   audioEnabled?: boolean;
+  /**
+   * H.264 profile this session negotiates, chosen by the capture source feeding
+   * it. The Android MediaCodec source declares `"main"`; the iOS ffmpeg and
+   * synthetic sources declare (or default to) `"constrained-baseline"`. The
+   * publisher advertises the matching `profile-level-id` in the SDP offer and
+   * validates each source SPS against THIS profile — never a global profile,
+   * which is the #4877 regression. Defaults to constrained baseline.
+   */
+  h264Profile?: H264Profile;
   /**
    * If set (> 0), while the connection is `connected` the publisher watches for
    * the frame counter to stop advancing. A source that stays alive but stops
@@ -216,6 +227,7 @@ export class WebRtcPublisher {
 
   private readonly trickleIce: boolean;
   private readonly audioEnabled: boolean;
+  private readonly h264Profile: H264Profile;
 
   private pc: RTCPeerConnection | null = null;
   private writer: RtpH264TrackWriter | null = null;
@@ -246,6 +258,7 @@ export class WebRtcPublisher {
     this.config = config;
     this.trickleIce = config.trickleIce ?? false;
     this.audioEnabled = config.audioEnabled ?? false;
+    this.h264Profile = config.h264Profile ?? DEFAULT_H264_PROFILE;
     this.timer = deps.timer ?? defaultTimer;
     this.onBeforeEstablish = deps.onBeforeEstablish;
     this.onConnected = deps.onConnected;
@@ -262,8 +275,8 @@ export class WebRtcPublisher {
           // gathers/trickles ICE candidates (RFC 9725 §4.3.2).
           bundlePolicy: "max-bundle",
           codecs: this.audioEnabled
-            ? { video: [useH264({ parameters: h264CodecParameters() })], audio: [usePCMU()] }
-            : { video: [useH264({ parameters: h264CodecParameters() })] },
+            ? { video: [useH264({ parameters: h264CodecParameters(this.h264Profile) })], audio: [usePCMU()] }
+            : { video: [useH264({ parameters: h264CodecParameters(this.h264Profile) })] },
         }));
     const createWhip = deps.createWhipClient ?? (options => new WhipClient(options));
     this.whip = createWhip({
@@ -444,7 +457,7 @@ export class WebRtcPublisher {
         mtu: this.config.mtu ?? DEFAULT_RTP_MTU,
         timer: this.timer,
         onSps: sps => {
-          const spsCompatibility = evaluateH264SpsForSend(sps);
+          const spsCompatibility = evaluateH264SpsForSend(sps, this.h264Profile);
           if (!spsCompatibility.compatible) {
             throw new Error(spsCompatibility.reason);
           }
@@ -512,9 +525,9 @@ export class WebRtcPublisher {
       // WHIP forbids a misleading partially successful ingest session: reject
       // an answer that did not accept each requested media section.
       // RFC 9725 §4.4.3: https://www.rfc-editor.org/rfc/rfc9725.html#section-4.4.3
-      assertWhipAnswerAcceptsMedia(session.answerSdp, "video", "h264");
+      assertWhipAnswerAcceptsMedia(session.answerSdp, "video", "h264", this.h264Profile);
       if (this.audioEnabled) {
-        assertWhipAnswerAcceptsMedia(session.answerSdp, "audio", "pcmu");
+        assertWhipAnswerAcceptsMedia(session.answerSdp, "audio", "pcmu", this.h264Profile);
       }
 
       this.establishing = false;
@@ -827,7 +840,8 @@ export class WebRtcPublisher {
 function assertWhipAnswerAcceptsMedia(
   answerSdp: string,
   kind: "audio" | "video",
-  codec: "h264" | "pcmu"
+  codec: "h264" | "pcmu",
+  profile: H264Profile
 ): void {
   const section = findSdpMediaSection(answerSdp, kind);
   if (!section) {
@@ -857,7 +871,7 @@ function assertWhipAnswerAcceptsMedia(
   const staticPayloadType = codec === "pcmu" ? "0" : undefined;
   const accepted =
     (staticPayloadType !== undefined && formats.has(staticPayloadType)) ||
-    attributeLines.some(line => isAcceptedCodecRtpMap(line, formats, codec, attributeLines));
+    attributeLines.some(line => isAcceptedCodecRtpMap(line, formats, codec, attributeLines, profile));
   if (!accepted) {
     throw new Error(`WHIP answer did not accept ${codec.toUpperCase()} ${kind}.`);
   }
@@ -894,7 +908,8 @@ function isAcceptedCodecRtpMap(
   line: string,
   formats: Set<string>,
   codec: string,
-  attributeLines: string[]
+  attributeLines: string[],
+  profile: H264Profile
 ): boolean {
   const match = line.match(/^a=rtpmap:(\S+)\s+([^/\s]+)\/(\d+)/i);
   if (!match || !formats.has(match[1]) || match[2].toLowerCase() !== codec) {
@@ -904,8 +919,9 @@ function isAcceptedCodecRtpMap(
     return true;
   }
   // AutoMobile packetizes H.264 at the RFC 6184 fixed 90 kHz clock rate and
-  // uses FU-A, which requires packetization-mode=1. The local werift codec is
-  // constrained-baseline 42e0xx; level may differ when asymmetry is negotiated.
+  // uses FU-A, which requires packetization-mode=1. The local werift codec's
+  // profile is this session's `profile` (Baseline 42e0xx or Main 4d00xx); level
+  // may differ when asymmetry is negotiated.
   return match[3] === "90000" && attributeLines.some(fmtp => {
     if (!fmtp.startsWith(`a=fmtp:${match[1]} `)) {
       return false;
@@ -913,16 +929,24 @@ function isAcceptedCodecRtpMap(
     const parameters = fmtp.slice(fmtp.indexOf(" ") + 1);
     const packetizationMode = /(?:^|;)\s*packetization-mode\s*=\s*1(?:;|$)/i.test(parameters);
     const profileLevelId = /(?:^|;)\s*profile-level-id\s*=\s*([0-9a-f]{6})(?:;|$)/i.exec(parameters)?.[1];
-    return packetizationMode && profileLevelId !== undefined && acceptsLocalH264Send(parameters, profileLevelId);
+    return (
+      packetizationMode &&
+      profileLevelId !== undefined &&
+      acceptsLocalH264Send(parameters, profileLevelId, profile)
+    );
   });
 }
 
-function h264CodecParameters(): string {
-  return `profile-level-id=${WEBRTC_H264_PROFILE_LEVEL_ID};packetization-mode=1;level-asymmetry-allowed=1`;
+function h264CodecParameters(profile: H264Profile): string {
+  return `profile-level-id=${h264ProfileLevelId(profile)};packetization-mode=1;level-asymmetry-allowed=1`;
 }
 
-function acceptsLocalH264Send(parameters: string, profileLevelId: string): boolean {
-  if (!isCompatibleConstrainedBaselineProfile(profileLevelId)) {
+function acceptsLocalH264Send(
+  parameters: string,
+  profileLevelId: string,
+  profile: H264Profile
+): boolean {
+  if (!isCompatibleProfileForSession(profileLevelId, profile)) {
     return false;
   }
   const answerLevelIdc = Number.parseInt(profileLevelId.slice(4, 6), 16);

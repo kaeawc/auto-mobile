@@ -337,6 +337,10 @@ function createStreamRecord(
       bitrateBps,
       trickleIce: config.trickleIce,
       audioEnabled: config.audioEnabled,
+      // The Android video-server MediaCodec encoder emits Main (issue #4756);
+      // iOS ffmpeg and every other source stay Constrained Baseline. WebRTC
+      // negotiates one profile-level-id per session, so it must track the source.
+      h264Profile: device.platform === "android" ? "main" : "constrained-baseline",
       frameStallTimeoutMs: FRAME_STALL_TIMEOUT_MS,
     },
     {

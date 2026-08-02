@@ -339,7 +339,9 @@ describe("WebRtcStreamSocketServer", () => {
           createWhipClient: (options: WhipClientOptions) =>
             new WhipClient({
               ...options,
-              fetchImpl: createSuccessfulWhipFetch(posts),
+              // ANDROID negotiates Main (issue #4756); a conformant WHIP server
+              // echoes the offered Main profile-level-id.
+              fetchImpl: createSuccessfulWhipFetch(posts, "/whip/resource/debug-1", "4d002a"),
             }),
           timer: new FakeTimer(),
         }),

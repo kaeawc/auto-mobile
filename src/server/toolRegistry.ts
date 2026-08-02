@@ -823,11 +823,9 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
           sessionManager.releaseSession(session.sessionId);
           await devicePool.releaseDevice(deviceId);
           NavigationGraphManager.releaseSession(releaseSessionUuid);
-          // Clear the per-device CtrlProxy client's binding to the released session
-          // (#4984) so a nav/hierarchy event arriving before the next session binds
-          // the still-connected device is not attributed to the ended session.
-          AndroidCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(releaseSessionUuid);
-          IOSCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(releaseSessionUuid);
+          // CtrlProxy client binding + detector cleanup for the released session is
+          // handled centrally in the daemon's onSessionRelease hook (#4984), which
+          // covers every release path and each derived label session on its device.
           RealObserveScreen.clearCache(deviceId);
           releasedSessionUuids.push(releaseSessionUuid);
           logger.info(`Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`);

@@ -1719,6 +1719,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     const appId = this.currentAppId;
     const timestamp = this.timer.now();
+    const provenance = this.resolveProvenance(appId);
 
     // Persist the node creation + suggestion promotion atomically. repository.promoteSuggestion
     // does getOrCreateFingerprint + an UPDATE to link the suggestion; without a transaction a
@@ -1737,6 +1738,11 @@ export class NavigationGraphManager implements NavigationGraphService {
 
       // Promote the suggestion (creates fingerprint and links suggestion)
       await repository.promoteSuggestion(suggestionId, node.id, timestamp);
+
+      // Record provenance for the promoted node (#4984): promotion is a reach the
+      // suggestion captured, so the node must appear in build/device-scoped analysis
+      // rather than having a visit count but no observation until reached again.
+      await this.recordNodeProvenance(repository, appId, node.id, timestamp, provenance);
 
       // #4931: touch navigation_apps.updated_at atomically with the promotion.
       await repository.touchApp(appId);

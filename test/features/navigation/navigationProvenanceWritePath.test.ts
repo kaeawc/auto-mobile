@@ -228,8 +228,9 @@ describe("NavigationGraphManager provenance write path", () => {
     expect(after).toHaveLength(before.length);
   });
 
-  test("#4931: promoteSuggestion touches updated_at", async () => {
+  test("#4931: promoteSuggestion touches updated_at and records a node observation", async () => {
     await manager.setCurrentApp(APP);
+    manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
     const repo = new NavigationRepository(db);
     const suggestion = await repo.addOrUpdateSuggestion(APP, "fp-hash", "{}", 100);
     const old = await ageUpdatedAt();
@@ -237,5 +238,16 @@ describe("NavigationGraphManager provenance write path", () => {
     await manager.promoteSuggestion(suggestion.id, "Home");
 
     expect(await updatedAt()).not.toBe(old);
+    // The promoted node is visible in build/device-scoped analysis (#4984), not just
+    // a bare visit count.
+    const node = await repo.getNode(APP, "Home");
+    const obs = await db
+      .selectFrom("navigation_node_observations")
+      .selectAll()
+      .where("node_id", "=", node!.id)
+      .execute();
+    expect(obs).toHaveLength(1);
+    const bk = await db.selectFrom("navigation_build_keys").selectAll().where("id", "=", obs[0].build_key_id).executeTakeFirstOrThrow();
+    expect(bk.version_code).toBe(7);
   });
 });

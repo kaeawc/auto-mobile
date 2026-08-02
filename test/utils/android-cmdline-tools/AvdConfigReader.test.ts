@@ -146,10 +146,12 @@ describe("apiLevelToVersion", () => {
 describe("FileAvdConfigReader", () => {
   const previousAndroidAvdHome = process.env.ANDROID_AVD_HOME;
   const previousAndroidUserHome = process.env.ANDROID_USER_HOME;
+  const previousAndroidEmulatorHome = process.env.ANDROID_EMULATOR_HOME;
 
   afterEach(() => {
     if (previousAndroidAvdHome === undefined) {delete process.env.ANDROID_AVD_HOME;} else {process.env.ANDROID_AVD_HOME = previousAndroidAvdHome;}
     if (previousAndroidUserHome === undefined) {delete process.env.ANDROID_USER_HOME;} else {process.env.ANDROID_USER_HOME = previousAndroidUserHome;}
+    if (previousAndroidEmulatorHome === undefined) {delete process.env.ANDROID_EMULATOR_HOME;} else {process.env.ANDROID_EMULATOR_HOME = previousAndroidEmulatorHome;}
   });
 
   it("reads config from correct path", async () => {
@@ -242,6 +244,30 @@ describe("FileAvdConfigReader", () => {
       },
       filePath => filePath === registryPath || filePath === configPath,
       "/fake/.android/avd",
+    );
+
+    const config = await reader.readConfig("Custom");
+
+    expect(config?.ramSizeMb).toBe(3072);
+    expect(readPaths).toEqual([registryPath, configPath]);
+  });
+
+  it("resolves path.rel from config home when ANDROID_AVD_HOME is overridden", async () => {
+    const path = require("path");
+    process.env.ANDROID_AVD_HOME = "/fake/avd-data";
+    process.env.ANDROID_USER_HOME = "/fake/.android";
+    process.env.ANDROID_EMULATOR_HOME = "/fake/.android";
+    const registryPath = path.join("/fake/avd-data", "Custom.ini");
+    const configPath = path.join("/fake/.android/avd", "Custom.avd", "config.ini");
+    const readPaths: string[] = [];
+    const reader = new FileAvdConfigReader(
+      async filePath => {
+        readPaths.push(filePath);
+        if (filePath === registryPath) {return "path=/stale/Custom.avd\npath.rel=avd/Custom.avd\n";}
+        if (filePath === configPath) {return "hw.ramSize=3072\n";}
+        throw new Error(`Unexpected path: ${filePath}`);
+      },
+      filePath => filePath === registryPath || filePath === configPath,
     );
 
     const config = await reader.readConfig("Custom");

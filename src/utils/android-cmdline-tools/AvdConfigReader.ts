@@ -59,6 +59,7 @@ export class FileAvdConfigReader implements AvdConfigReader {
   private readFileFn: (path: string, encoding: string) => Promise<string>;
   private existsFn: (path: string) => boolean;
   private avdHome: string;
+  private configHome: string;
 
   constructor(
     readFileFn?: (path: string, encoding: string) => Promise<string>,
@@ -72,10 +73,14 @@ export class FileAvdConfigReader implements AvdConfigReader {
 
     const homeDir = process.env.HOME || process.env.USERPROFILE;
     const androidUserHome = process.env.ANDROID_USER_HOME;
+    const configHome = process.env.ANDROID_EMULATOR_HOME
+      ?? androidUserHome
+      ?? (process.env.ANDROID_SDK_HOME ? path.join(process.env.ANDROID_SDK_HOME, ".android") : undefined)
+      ?? (homeDir ? path.join(homeDir, ".android") : "");
     this.avdHome = avdHome
       ?? process.env.ANDROID_AVD_HOME
-      ?? (androidUserHome ? path.join(androidUserHome, "avd") : undefined)
-      ?? (homeDir ? path.join(homeDir, ".android", "avd") : "");
+      ?? path.join(configHome, "avd");
+    this.configHome = avdHome ? path.dirname(avdHome) : configHome;
   }
 
   async readConfig(avdName: string): Promise<AvdConfig | null> {
@@ -106,7 +111,7 @@ export class FileAvdConfigReader implements AvdConfigReader {
     if (!this.existsFn(registryPath)) {return null;}
     try {
       const registry = parseKeyValueProperties(await this.readFileFn(registryPath, "utf-8"));
-      const candidates = registryConfigCandidates(registry, this.avdHome);
+      const candidates = registryConfigCandidates(registry, this.configHome);
       return candidates.find(candidate => this.existsFn(candidate)) ?? null;
     } catch (error) {
       logger.warn(`Failed to read AVD registry for ${avdName}: ${error}`);
@@ -140,7 +145,7 @@ function parseKeyValueProperties(content: string): Map<string, string> {
   return props;
 }
 
-function registryConfigCandidates(props: Map<string, string>, avdHome: string): string[] {
+function registryConfigCandidates(props: Map<string, string>, configHome: string): string[] {
   const path = require("path");
   const candidates: string[] = [];
   const absolutePath = props.get("path");
@@ -150,7 +155,7 @@ function registryConfigCandidates(props: Map<string, string>, avdHome: string): 
 
   const relativePath = props.get("path.rel");
   if (relativePath && !path.isAbsolute(relativePath)) {
-    const relativeBase = path.resolve(path.dirname(avdHome));
+    const relativeBase = path.resolve(configHome);
     const resolvedDirectory = path.resolve(relativeBase, relativePath);
     const relativeToBase = path.relative(relativeBase, resolvedDirectory);
     const escapesBase = relativeToBase === ".."

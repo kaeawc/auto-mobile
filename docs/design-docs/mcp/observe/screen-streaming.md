@@ -91,10 +91,23 @@ New Unix socket: `~/.auto-mobile/video-stream.sock`
 
 ### Connection Handshake
 
+One JSON line each way; everything after the acknowledgement is binary framing.
+
 ```
-Client → Server: { "command": "subscribe", "deviceId": "<optional>" }
-Server → Client: { "type": "stream_started", "deviceId": "...", "platform": "android|ios" }
+Client → Server: { "action": "subscribe", "id": "<uuid>", "sessionUuid": "<daemon session>",
+                   "deviceId": "<optional>", "quality": "low|medium|high", "fps": 30,
+                   "bitrateKbps": 2000, "size": { "width": 720, "height": 1280 } }
+Server → Client: { "type": "video_stream_response", "success": true, "action": "subscribe",
+                   "deviceId": "...", "framing": "h264" }
 ```
+
+All hint fields are optional and validated server-side (an unknown `quality` or non-positive
+`fps`/`bitrateKbps` refuses the subscribe). Captures are shared per device: the first
+subscriber's hints fix the encode and a late joiner's differing hints are ignored. `quality`
+selects the on-device preset (low=540p/2Mbps, medium=720p/4Mbps, high=1080p/8Mbps); on iOS
+only the preset's bitrate applies (resolution self-scales to Level 4.2). `sessionUuid`
+authenticates against the daemon session registry (#4751); `AUTOMOBILE_DAEMON_STREAM_AUTH=0`
+disables the check.
 
 ### Frame Data
 
@@ -120,11 +133,9 @@ self-describing, so corruption recovery is deterministic (issue #4270).
 
 ### Stream Control
 
-```
-Client → Server: { "command": "set_quality", "quality": "low|medium|high" }
-Client → Server: { "command": "unsubscribe" }
-Server → Client: { "type": "stream_stopped", "reason": "..." }
-```
+There is no mid-stream control channel: quality is fixed at subscribe time (first subscriber
+wins for a shared capture) and a client stops by closing its connection. The capture stops
+when the last subscriber for a device disconnects.
 
 ## Quality Presets
 

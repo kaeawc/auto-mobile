@@ -35,7 +35,11 @@ export interface VideoStreamSocketRequest {
    * aspect-preserving resolution cap and default bitrate (see the device
    * `QualityPreset`: low=540p/2Mbps, medium=720p/4Mbps, high=1080p/8Mbps). The
    * right knob for many-stream farm viewers, which want lower decode cost per
-   * pane; an explicit `size` wins over the preset's cap.
+   * pane; an explicit `size` wins over the preset's cap. Captures are shared
+   * per device: the first subscriber's hints fix the encode, and a late
+   * joiner's differing hints are ignored (logged at debug). Android-only for
+   * resolution today; iOS honors the preset's bitrate but self-scales
+   * resolution to Level 4.2.
    */
   quality?: "low" | "medium" | "high";
   /**

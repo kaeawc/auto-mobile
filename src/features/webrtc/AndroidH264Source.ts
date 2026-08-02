@@ -8,6 +8,7 @@ import {
 import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../video/androidScreenrecord";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
+import { qualityPresetBitrateBps } from "./qualityPresets";
 import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
 
 export type { ProcessSpawner, SpawnedProcess } from "./processSpawner";
@@ -148,8 +149,16 @@ export class AndroidH264Source implements H264CaptureSource {
       "--time-limit",
       String(this.segmentTimeLimitSeconds),
     ];
-    if (this.options.bitrateBps && this.options.bitrateBps > 0) {
-      args.push("--bit-rate", String(Math.round(this.options.bitrateBps)));
+    // An explicit bitrate wins; otherwise the quality preset's default applies, mirroring what
+    // the persistent encoder does on-device — without this, a `low` farm subscriber on the
+    // screenrecord fallback would get 540p at screenrecord's own default (~20 Mbps), shipping
+    // the preset's resolution but not its bandwidth.
+    const bitrateBps =
+      this.options.bitrateBps && this.options.bitrateBps > 0
+        ? this.options.bitrateBps
+        : qualityPresetBitrateBps(this.options.quality);
+    if (bitrateBps !== undefined) {
+      args.push("--bit-rate", String(Math.round(bitrateBps)));
     }
     args.push("--size", `${size.width}x${size.height}`);
     args.push("-");
@@ -299,6 +308,7 @@ const QUALITY_PRESET_MAX_LONG_SIDE: Record<"low" | "medium" | "high", number> = 
   medium: 720,
   high: 1080,
 };
+
 
 /**
  * Scale [size] down (never up) so its longer side fits the [quality] preset,

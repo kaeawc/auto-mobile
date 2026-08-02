@@ -52,9 +52,12 @@ sealed class VideoStreamState {
 
 /**
  * Resolution/bitrate preset for a subscription, matching the daemon relay's `quality` hint (and,
- * transitively, the on-device `QualityPreset`): the capture's LONGER dimension is capped at
- * 540/720/1080 with the other side scaled proportionally. Lower presets shrink decode cost
- * quadratically, which is what makes dozens of concurrent farm panes affordable.
+ * transitively, the on-device `QualityPreset`): on Android the capture's LONGER dimension is capped
+ * at 540/720/1080 with the other side scaled proportionally; iOS honors the preset's bitrate but
+ * self-scales resolution to Level 4.2. Lower presets shrink decode cost quadratically, which is
+ * what makes dozens of concurrent farm panes affordable. Captures are shared per device on the
+ * daemon: the FIRST subscriber's hints fix the encode, and a late joiner's differing preset is
+ * ignored.
  */
 enum class VideoStreamQuality(internal val wire: String) {
   Low("low"),
@@ -170,7 +173,12 @@ class VideoStreamClient(
     }
 
     _state.value = VideoStreamState.Connecting
-    readerJob = scope.launch { runSession(deviceId) }
+    readerJob = scope.launch {
+      // Name the dedicated thread per target so a farm's dozens of readers are tellable
+      // apart in a thread dump.
+      Thread.currentThread().name = "video-stream-reader-${deviceId ?: "default"}"
+      runSession(deviceId)
+    }
   }
 
   override fun disconnect() {

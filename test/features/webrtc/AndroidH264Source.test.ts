@@ -111,6 +111,27 @@ describe("AndroidH264Source", () => {
     await source.stop();
   });
 
+  test("the quality preset supplies the screenrecord bitrate when none is explicit", async () => {
+    // Mirrors the on-device preset's bandwidth half: without this, `low` would cap resolution
+    // but leave screenrecord's own (much fatter) default bitrate.
+    const { source, spawnArgs } = makeSource({ quality: "low" }, "Physical size: 1080x2400\n");
+    await source.start();
+    expect(spawnArgs[0].join(" ")).toContain("--bit-rate 2000000");
+    await source.stop();
+  });
+
+  test("an explicit bitrate wins over the quality preset's default", async () => {
+    const { source, spawnArgs } = makeSource(
+      { quality: "low", bitrateBps: 1_000_000 },
+      "Physical size: 1080x2400\n"
+    );
+    await source.start();
+    const args = spawnArgs[0].join(" ");
+    expect(args).toContain("--bit-rate 1000000");
+    expect(args).not.toContain("--bit-rate 2000000");
+    await source.stop();
+  });
+
   test("an explicit size wins over the quality preset", async () => {
     const { source, spawnArgs } = makeSource({
       quality: "low",

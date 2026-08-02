@@ -69,6 +69,71 @@ interface DeviceCapture {
 
 const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
 
+const SUPPORTED_QUALITIES = new Set(["low", "medium", "high"]);
+/** Sanity ceiling for a capture-rate hint; no supported device captures faster. */
+const MAX_FPS_HINT = 120;
+
+/**
+ * Captures are shared per device and the FIRST subscriber's hints fixed the encode; a late
+ * joiner's differing quality/fps/bitrate hints are silently ignored, so leave a trace for the
+ * viewer wondering why its preset didn't apply.
+ */
+function logIgnoredLateHints(deviceId: string, request: VideoStreamSocketRequest): void {
+  if (request.quality || request.fps || request.bitrateKbps) {
+    logger.debug(
+      `[VideoStream] ${deviceId} already captured; ignoring late subscriber hints ` +
+        `(quality=${request.quality}, fps=${request.fps}, bitrateKbps=${request.bitrateKbps})`
+    );
+  }
+}
+
+function isIntegerInRange(value: number, min: number, max: number): boolean {
+  return Number.isInteger(value) && value >= min && value <= max;
+}
+
+function validateQuality(quality: VideoStreamSocketRequest["quality"]): string | null {
+  return quality === undefined || SUPPORTED_QUALITIES.has(quality)
+    ? null
+    : `Unsupported quality "${quality}"; expected low, medium, or high.`;
+}
+
+function validateFps(fps: VideoStreamSocketRequest["fps"]): string | null {
+  return fps === undefined || isIntegerInRange(fps, 1, MAX_FPS_HINT)
+    ? null
+    : `Invalid fps ${fps}; expected an integer between 1 and ${MAX_FPS_HINT}.`;
+}
+
+function validateBitrate(bitrateKbps: VideoStreamSocketRequest["bitrateKbps"]): string | null {
+  return bitrateKbps === undefined || isIntegerInRange(bitrateKbps, 1, Number.MAX_SAFE_INTEGER)
+    ? null
+    : `Invalid bitrateKbps ${bitrateKbps}; expected a positive integer.`;
+}
+
+function validateSize(size: VideoStreamSocketRequest["size"]): string | null {
+  if (size === undefined) {
+    return null;
+  }
+  const { width, height } = size ?? {};
+  return isIntegerInRange(width, 2, Number.MAX_SAFE_INTEGER) &&
+    isIntegerInRange(height, 2, Number.MAX_SAFE_INTEGER)
+    ? null
+    : `Invalid size ${JSON.stringify(size)}; expected integer width/height >= 2.`;
+}
+
+/**
+ * Validate the optional capture hints on a subscribe request, returning an error message for the
+ * first invalid field or null when all hints are usable. TypeScript's wire types are erased at
+ * runtime, so this is the only thing standing between a malformed hint and the encoder argv.
+ */
+export function validateCaptureHints(request: VideoStreamSocketRequest): string | null {
+  return (
+    validateQuality(request.quality) ??
+    validateFps(request.fps) ??
+    validateBitrate(request.bitrateKbps) ??
+    validateSize(request.size)
+  );
+}
+
 /**
  * Relays a device's live H.264 stream to local clients over `~/.auto-mobile/video-stream.sock`.
  *
@@ -151,6 +216,22 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       return;
     }
 
+    // parseJson is a cast, not a validator: a hostile or skewed client can put anything in the
+    // hint fields. An unknown quality would NaN out capToQualityPreset into `--size 0xundefined`
+    // (dead capture, confusing error) and a non-positive fps/bitrate would reach the encoders
+    // verbatim, so refuse the subscribe up front with a message naming the bad field.
+    const hintError = validateCaptureHints(request);
+    if (hintError) {
+      this.sendJson(socket, {
+        id: request.id,
+        type: "video_stream_response",
+        success: false,
+        error: hintError,
+      } satisfies VideoStreamSocketResponse);
+      socket.end();
+      return;
+    }
+
     try {
       // Authenticate before starting or attaching to any capture (issue #4751):
       // an unauthenticated or cross-session subscribe is rejected here so it can
@@ -201,6 +282,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     const deviceId = device.deviceId;
     const existing = this.captures.get(deviceId);
     if (existing) {
+      logIgnoredLateHints(deviceId, request);
       existing.subscribers.add(socket);
       // A client that joins part way through a GOP must not consume inter frames before an IDR.
       existing.waitingForKeyFrame.add(socket);

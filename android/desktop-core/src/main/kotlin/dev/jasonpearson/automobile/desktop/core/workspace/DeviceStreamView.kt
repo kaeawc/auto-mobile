@@ -40,10 +40,11 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 @Composable
 fun DeviceStreamView(
   column: DeviceColumn,
-  // Workspace panes default to the `low` preset (long side capped at 540, ~2 Mbps): pane real
-  // estate can't show more pixels than that anyway, and decode cost scales with pixel count, which
-  // is what makes dozens of concurrent farm panes affordable. Hoisted so a host that wants a
-  // full-resolution mirror can pass VideoStreamQuality.High or a different source entirely.
+  // Workspace panes default to the `low` preset (Android: long side capped at 540 + ~2 Mbps;
+  // iOS: ~2 Mbps, resolution self-scales to Level 4.2): pane real estate can't show more pixels
+  // than that anyway, and decode cost scales with pixel count, which is what makes dozens of
+  // concurrent farm panes affordable. Hoisted so a host that wants a full-resolution mirror can
+  // pass VideoStreamQuality.High or a different source entirely.
   sourceFactory: (deviceId: String) -> VideoStreamSource = {
     VideoStreamClient(quality = VideoStreamQuality.Low)
   },

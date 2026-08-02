@@ -4,7 +4,7 @@
 
 > **Current state:** The Android `video-server` module (`android/video-server/`) is fully implemented — `VideoServer.kt` captures via VirtualDisplay, encodes H.264 with MediaCodec, and streams over a LocalSocket. The `videoRecording` MCP tool (record-to-file) uses this server and is <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>.
 >
-> The **live screen mirroring** pipeline (daemon `video-stream.sock` relay → desktop `DeviceScreenView`) is in progress. Milestones 1–3 are complete: the video-server JAR, the daemon relay (#3994), and the desktop decoder and stream client (#4008). Milestone 4 is outstanding — nothing supplies a live frame to the device view yet, so behaviour is unchanged for users. Tracked in #3995.
+> The **live screen mirroring** pipeline (daemon `video-stream.sock` relay → desktop) is wired end-to-end: the video-server JAR, the daemon relay (#3994), the desktop decoder and stream client (#4008), and the desktop workspace's per-device stream panes (`DeviceStreamView`, #4957) which subscribe with the `low` quality preset for farm-scale viewing. Subscribe-time `quality`/`fps`/`bitrateKbps` hints select the capture preset; captures are shared per device with first-subscriber-wins semantics.
 >
 > Note the decoder is **bytedeco FFmpeg**, not Klarity as originally designed; see [Video Decoder](#video-decoder-bytedeco-ffmpeg) for why.
 >

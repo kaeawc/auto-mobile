@@ -29,6 +29,7 @@ import {
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../../utils/logger";
+import { qualityPresetBitrateBps } from "./qualityPresets";
 import {
   DefaultFfmpegClient,
   resolveFfmpegBinary,
@@ -555,8 +556,13 @@ export class IosH264Source implements H264CaptureSource {
    * passed for the helper to apply against the delivered pixels x fps (#4375).
    */
   private resolveEncodeSettings(): EncodeSettings {
+    // Explicit override > quality preset > bits-per-pixel budget. The preset's resolution cap
+    // cannot be honored here (the helper's --encode self-scales to Level 4.2 with no size flag),
+    // so mapping its bitrate is the half of the preset contract this path can keep.
     const override =
-      this.options.bitrateBps && this.options.bitrateBps > 0 ? this.options.bitrateBps : undefined;
+      this.options.bitrateBps && this.options.bitrateBps > 0
+        ? this.options.bitrateBps
+        : qualityPresetBitrateBps(this.options.quality);
     const bitrate: EncodeBitratePolicy =
       override !== undefined
         ? { kind: "explicitBps", bps: override }
@@ -1464,8 +1470,12 @@ export class IosH264Source implements H264CaptureSource {
     const encodedSize = scale ?? size;
     const explicitBitrateBps =
       this.options.bitrateBps && this.options.bitrateBps > 0 ? this.options.bitrateBps : undefined;
+    // Explicit override > quality preset > resolution-aware Simulator default. iOS cannot honor
+    // the preset's resolution cap (the encoded path self-scales to Level 4.2 and exposes no size
+    // flag), so the preset's bitrate is the half of the contract this source can keep.
     const bitrateBps =
       explicitBitrateBps ??
+      qualityPresetBitrateBps(this.options.quality) ??
       (this.captureKind === "simulator" ? defaultIosBitrateBps(encodedSize, this.fps) : undefined);
     if (bitrateBps !== undefined) {
       args.push("-b:v", String(Math.round(bitrateBps)));

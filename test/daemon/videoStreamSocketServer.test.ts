@@ -208,6 +208,56 @@ describe("VideoStreamSocketServer", () => {
     expect(h.captureOptions[0].fps).toBe(15);
   });
 
+  test("refuses a subscribe carrying an unknown quality instead of NaN-ing the capture", async () => {
+    const h = await startHarness();
+
+    const { ack } = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      quality: "ultra",
+    });
+
+    expect(ack.success).toBe(false);
+    expect(String(ack.error)).toContain('Unsupported quality "ultra"');
+    expect(h.captureOptions).toHaveLength(0);
+  });
+
+  test("refuses non-positive or absurd fps and bitrate hints", async () => {
+    const h = await startHarness();
+
+    const zeroFps = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      fps: 0,
+    });
+    expect(zeroFps.ack.success).toBe(false);
+    expect(String(zeroFps.ack.error)).toContain("Invalid fps");
+
+    const negativeBitrate = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      bitrateKbps: -5,
+    });
+    expect(negativeBitrate.ack.success).toBe(false);
+    expect(String(negativeBitrate.ack.error)).toContain("Invalid bitrateKbps");
+
+    expect(h.captureOptions).toHaveLength(0);
+  });
+
+  test("refuses a malformed size hint", async () => {
+    const h = await startHarness();
+
+    const { ack } = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      size: { width: 0, height: "tall" },
+    });
+
+    expect(ack.success).toBe(false);
+    expect(String(ack.error)).toContain("Invalid size");
+    expect(h.captureOptions).toHaveLength(0);
+  });
+
   test("sends the stream header immediately after the ack", async () => {
     const h = await startHarness();
 

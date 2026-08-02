@@ -216,8 +216,18 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("npx"))
         XCTAssertTrue(DaemonStartupResult.launchTimeout.diagnosticMessage.contains("timed out"))
         XCTAssertEqual(
-            DaemonManager.startupFailure(for: .failed(stderr: "npm ERR! 404 package missing")),
+            DaemonManager.startupFailure(for: DaemonManager.classifyDaemonSubcommandOutcome(
+                .failed(stderr: "npm ERR! 404 package missing"),
+                packageRunner: true
+            )),
             .packageLaunchFailed(stderr: "npm ERR! 404 package missing")
+        )
+        XCTAssertEqual(
+            DaemonManager.startupFailure(for: DaemonManager.classifyDaemonSubcommandOutcome(
+                .failed(stderr: "bun failed"),
+                packageRunner: false
+            )),
+            .launchFailed
         )
         XCTAssertTrue(DaemonStartupResult.packageLaunchFailed(
             stderr: "npm ERR! 404 package missing"
@@ -460,6 +470,11 @@ final class AutoMobileVersionTests: XCTestCase {
             readinessTimeoutSeconds: 15,
             environment: ["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS": "30000"]
         ), 36)
+        XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
+            subcommand: "start",
+            readinessTimeoutSeconds: 15,
+            environment: ["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS": "30000"]
+        ), 30)
         XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
             subcommand: "start",
             readinessTimeoutSeconds: 15,

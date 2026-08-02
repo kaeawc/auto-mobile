@@ -171,6 +171,7 @@ public enum DaemonManager {
         case executableNotFound
         case packageRunnerNotFound
         case failed(stderr: String? = nil)
+        case packageFailed(stderr: String? = nil)
         case timedOut
     }
 
@@ -361,13 +362,30 @@ public enum DaemonManager {
         case .packageRunnerNotFound:
             return .packageRunnerNotFound
         case let .failed(stderr):
-            guard let stderr = stderr?.trimmingCharacters(in: .whitespacesAndNewlines), !stderr.isEmpty else {
-                return .launchFailed
-            }
-            return .packageLaunchFailed(stderr: stderr)
+            return failureResult(stderr: stderr, packageRunner: false)
+        case let .packageFailed(stderr):
+            return failureResult(stderr: stderr, packageRunner: true)
         case .timedOut:
             return .launchTimeout
         }
+    }
+
+    private static func failureResult(stderr: String?, packageRunner: Bool) -> DaemonStartupResult {
+        guard let stderr = stderr?.trimmingCharacters(in: .whitespacesAndNewlines), !stderr.isEmpty else {
+            return .launchFailed
+        }
+        if packageRunner {
+            return .packageLaunchFailed(stderr: stderr)
+        }
+        return .launchFailed
+    }
+
+    static func classifyDaemonSubcommandOutcome(
+        _ outcome: DaemonSubcommandOutcome,
+        packageRunner: Bool
+    ) -> DaemonSubcommandOutcome {
+        guard packageRunner, case let .failed(stderr) = outcome else { return outcome }
+        return .packageFailed(stderr: stderr)
     }
 
     /// Restart the daemon in place — used to replace a stale different-build daemon that owns
@@ -426,12 +444,16 @@ public enum DaemonManager {
             subcommand: subcommand,
             readinessTimeoutSeconds: timeoutSeconds
         )
-        return executeDaemonLaunch(
+        let outcome = executeDaemonLaunch(
             executable: executable,
             arguments: arguments,
             environment: env,
             timeoutSeconds: launcherTimeoutSeconds,
             launcher: launcher
+        )
+        return classifyDaemonSubcommandOutcome(
+            outcome,
+            packageRunner: !hasLocalBuild && resolveDaemonPackageSpecifier(resolveDaemonPackageVersion()) != nil
         )
     }
 
@@ -459,13 +481,13 @@ public enum DaemonManager {
         readinessTimeoutSeconds: TimeInterval,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> TimeInterval {
-        guard subcommand == "restart" else { return readinessTimeoutSeconds }
         let configuredStartupMilliseconds = Int(environment["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS"] ?? "")
             ?? Int(environment["AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS"] ?? "")
             ?? 10_000
         let startupSeconds = configuredStartupMilliseconds > 0
             ? TimeInterval(configuredStartupMilliseconds) / 1000
             : 10
+        guard subcommand == "restart" else { return max(readinessTimeoutSeconds, startupSeconds) }
         // DaemonManager.restart allows shutdown (5s), an inter-phase delay (1s), then startup.
         return max(readinessTimeoutSeconds, 6 + startupSeconds)
     }

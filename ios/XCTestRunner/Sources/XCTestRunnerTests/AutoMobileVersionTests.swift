@@ -200,7 +200,40 @@ final class AutoMobileVersionTests: XCTestCase {
             packageRunner: nil,
             autoMobilePath: "/usr/local/bin/auto-mobile",
             packageVersion: "0.0.40"
-        ), .executableNotFound)
+        ), .packageRunnerNotFound)
+    }
+
+    func testStartupFailureNamesMissingPackageRunnerAndLaunchTimeout() {
+        XCTAssertEqual(
+            DaemonManager.startupFailure(for: .packageRunnerNotFound),
+            .packageRunnerNotFound
+        )
+        XCTAssertEqual(
+            DaemonManager.startupFailure(for: .timedOut),
+            .launchTimeout
+        )
+        XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("bunx"))
+        XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("npx"))
+        XCTAssertTrue(DaemonStartupResult.launchTimeout.diagnosticMessage.contains("timed out"))
+    }
+
+    func testDaemonLaunchPassesTimeoutToInjectedLauncher() {
+        let launcher = FakeDaemonSubcommandLauncher(result: .timedOut)
+
+        XCTAssertEqual(DaemonManager.executeDaemonLaunch(
+            executable: "/usr/bin/env",
+            arguments: ["auto-mobile", "--daemon", "start"],
+            environment: ["PATH": "/usr/bin"],
+            timeoutSeconds: 15,
+            launcher: launcher
+        ), .timedOut)
+        XCTAssertEqual(launcher.invocations, [
+            .init(
+                executable: "/usr/bin/env",
+                arguments: ["auto-mobile", "--daemon", "start"],
+                timeoutSeconds: 15
+            ),
+        ])
     }
 
     func testDaemonLaunchPreservesBuiltCheckoutPrecedenceOverPin() {
@@ -225,6 +258,13 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertEqual(DaemonManager.resolveDaemonClientVersion(
             repoRootHasBuiltEntry: true,
             environment: ["AUTOMOBILE_VERSION": "0.0.40"]
+        ), AutoMobileVersion.current)
+    }
+
+    func testResolveDaemonClientVersionKeepsCheckoutIdentityForUnscopedClients() {
+        XCTAssertEqual(DaemonManager.resolveDaemonClientVersion(
+            repoRootHasBuiltEntry: true,
+            environment: ["AUTOMOBILE_DAEMON_PACKAGE_VERSION": "0.0.40"]
         ), AutoMobileVersion.current)
     }
 
@@ -379,6 +419,35 @@ final class AutoMobileVersionTests: XCTestCase {
     }
 }
 
+private final class FakeDaemonSubcommandLauncher: DaemonManager.DaemonSubcommandLauncher {
+    struct Invocation: Equatable {
+        let executable: String
+        let arguments: [String]
+        let timeoutSeconds: TimeInterval
+    }
+
+    private let result: DaemonManager.DaemonSubcommandOutcome
+    private(set) var invocations: [Invocation] = []
+
+    init(result: DaemonManager.DaemonSubcommandOutcome) {
+        self.result = result
+    }
+
+    func launch(
+        executable: String,
+        arguments: [String],
+        environment _: [String: String],
+        timeoutSeconds: TimeInterval
+    ) -> DaemonManager.DaemonSubcommandOutcome {
+        invocations.append(.init(
+            executable: executable,
+            arguments: arguments,
+            timeoutSeconds: timeoutSeconds
+        ))
+        return result
+    }
+}
+
 private final class FakeDaemonRuntime: DaemonRuntime {
     struct Invocation: Equatable {
         let name: String
@@ -425,7 +494,8 @@ private final class FakeDaemonRuntime: DaemonRuntime {
 
     func runDaemonSubcommand(
         _ subcommand: String,
-        repoRoot: String?
+        repoRoot: String?,
+        timeoutSeconds _: TimeInterval
     )
         -> DaemonManager.DaemonSubcommandOutcome
     {

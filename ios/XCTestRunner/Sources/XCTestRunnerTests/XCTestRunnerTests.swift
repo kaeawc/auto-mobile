@@ -363,7 +363,15 @@ final class XCTestRunnerTests: XCTestCase {
 
     func testDaemonStartupResultReadyIsTheOnlyReadyCase() {
         XCTAssertTrue(DaemonStartupResult.ready.isReady)
-        for result: DaemonStartupResult in [.executableNotFound, .launchFailed, .readinessTimeout, .versionSkew, .assetVersionSkew] {
+        for result: DaemonStartupResult in [
+            .executableNotFound,
+            .packageRunnerNotFound,
+            .launchFailed,
+            .launchTimeout,
+            .readinessTimeout,
+            .versionSkew,
+            .assetVersionSkew,
+        ] {
             XCTAssertFalse(result.isReady, "\(result) must not report ready")
         }
     }
@@ -377,6 +385,8 @@ final class XCTestRunnerTests: XCTestCase {
         XCTAssertTrue(notFound.contains("bun add -g"))
 
         XCTAssertTrue(DaemonStartupResult.launchFailed.diagnosticMessage.contains("exited non-zero"))
+        XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("bunx"))
+        XCTAssertTrue(DaemonStartupResult.launchTimeout.diagnosticMessage.contains("timed out"))
         XCTAssertTrue(DaemonStartupResult.readinessTimeout.diagnosticMessage.contains("did not"))
         XCTAssertTrue(DaemonStartupResult.versionSkew.diagnosticMessage.contains("different-version"))
         XCTAssertTrue(DaemonStartupResult.assetVersionSkew.diagnosticMessage.contains("AUTOMOBILE_VERSION"))
@@ -384,7 +394,9 @@ final class XCTestRunnerTests: XCTestCase {
         // Each failure reason is distinct so a CI log names the specific cause.
         let messages = [
             DaemonStartupResult.executableNotFound,
+            DaemonStartupResult.packageRunnerNotFound,
             DaemonStartupResult.launchFailed,
+            DaemonStartupResult.launchTimeout,
             DaemonStartupResult.readinessTimeout,
             DaemonStartupResult.versionSkew,
             DaemonStartupResult.assetVersionSkew,

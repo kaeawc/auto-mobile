@@ -428,30 +428,9 @@ open class AutoMobileTestCase: XCTestCase {
     }
 
     private func startDaemon() throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["auto-mobile", "--daemon", "start"]
-
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
-        do {
-            try process.run()
-        } catch {
+        guard DaemonManager.ensureDaemonRunning(repoRoot: daemonRepoRoot) else {
             throw AutoMobileTestCaseError.devicePoolUnavailable(
-                "Failed to start daemon: \(error.localizedDescription)"
-            )
-        }
-
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let stderr = String(data: errorData, encoding: .utf8) ?? ""
-            let message = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw AutoMobileTestCaseError.devicePoolUnavailable(
-                "Failed to start daemon: \(message.isEmpty ? "exit code \(process.terminationStatus)" : message)"
+                "Failed to start daemon through the configured AutoMobile launcher."
             )
         }
     }

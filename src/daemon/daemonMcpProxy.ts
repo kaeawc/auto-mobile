@@ -1,7 +1,16 @@
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike, type DaemonClientFactory } from "./client";
 import { DaemonManager, type DaemonManagerLike } from "./manager";
 import { logger } from "../utils/logger";
-import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS, DAEMON_BOUND_SESSION_REPLAY_TTL_MS, DAEMON_CAPABILITY_PROFILE_PARAM } from "./constants";
+import {
+  SOCKET_PATH,
+  DAEMON_STARTUP_TIMEOUT_MS,
+  CONNECTION_TIMEOUT_MS,
+  DAEMON_VERSION,
+  DAEMON_VERSION_RESTART_COOLDOWN_MS,
+  DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
+  DAEMON_CAPABILITY_PROFILE_PARAM,
+  DAEMON_BOUND_SESSION_PARAM,
+} from "./constants";
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
@@ -1003,16 +1012,23 @@ export class DaemonMcpProxy {
     if (this.isBoundSessionReplayExpired()) {
       this.clearBoundSessionUuid();
     }
-    // Only a caller-provided NON-EMPTY STRING sessionUuid counts as an explicit
-    // session selection that bypasses the retained binding. A blank/null/number/
-    // object sessionUuid is not explicit, so the bound UUID is still injected.
-    if (
-      !this.boundSessionUuid ||
-      (typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0)
-    ) {
+    const explicitSessionUuid = typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0
+      ? args.sessionUuid
+      : undefined;
+    if (!this.boundSessionUuid || explicitSessionUuid === this.boundSessionUuid) {
       return args;
     }
-    return { ...args, sessionUuid: this.boundSessionUuid };
+    if (explicitSessionUuid) {
+      throw new Error(
+        `MCP connection is bound to device session ${this.boundSessionUuid}; ` +
+        `cannot route this call to ${explicitSessionUuid} until the binding is released.`
+      );
+    }
+    return {
+      ...args,
+      sessionUuid: this.boundSessionUuid,
+      [DAEMON_BOUND_SESSION_PARAM]: this.boundSessionUuid,
+    };
   }
 
   private withCapabilityProfile(args: Record<string, unknown>): Record<string, unknown> {

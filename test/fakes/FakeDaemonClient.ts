@@ -1,5 +1,6 @@
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { DaemonUnavailableError } from "../../src/daemon/client";
+import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
 import type { DaemonNotification } from "../../src/daemon/types";
 
 export interface FakeDaemonClientOptions {
@@ -52,7 +53,9 @@ export class FakeDaemonClient implements DaemonClientLike {
   }
 
   async callTool(toolName: string, params: Record<string, any>): Promise<any> {
-    this.callToolCalls.push({ toolName, params });
+    const recordedParams = { ...params };
+    delete recordedParams[DAEMON_BOUND_SESSION_PARAM];
+    this.callToolCalls.push({ toolName, params: recordedParams });
     if (this.onCallTool) {
       await this.onCallTool(toolName, params);
     }
@@ -65,7 +68,9 @@ export class FakeDaemonClient implements DaemonClientLike {
   }
 
   async callDaemonMethod(method: string, params: Record<string, any>): Promise<any> {
-    this.callDaemonMethodCalls.push({ method, params });
+    const recordedParams = { ...params };
+    delete recordedParams[DAEMON_BOUND_SESSION_PARAM];
+    this.callDaemonMethodCalls.push({ method, params: recordedParams });
     if (this.onCallDaemonMethod) {
       await this.onCallDaemonMethod(method, params);
     }

@@ -6,7 +6,10 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
-import { DAEMON_CAPABILITY_PROFILE_PARAM } from "../../src/daemon/constants";
+import {
+  DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_CAPABILITY_PROFILE_PARAM,
+} from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
@@ -787,6 +790,38 @@ describe("UnixSocketServer MCP forward serialization", () => {
       firstSocket.close();
       secondSocket.close();
     }
+  });
+
+  test("does not recreate a released session from an implicit proxy binding", async () => {
+    const clientBindings: Array<string | undefined> = [];
+    const forwardedArguments: Array<Record<string, unknown>> = [];
+    server.mcpClientFactory = async boundSessionUuid => {
+      clientBindings.push(boundSessionUuid);
+      return {
+        listTools: async () => ({ tools: [] }),
+        callTool: async (...args: unknown[]) => {
+          const request = args[0] as { arguments?: Record<string, unknown> };
+          forwardedArguments.push(request.arguments ?? {});
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    const response = await sendToolsCallWithArgs(socketPath, "observe", {
+      sessionUuid: "released-session",
+      [DAEMON_BOUND_SESSION_PARAM]: "released-session",
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientBindings).toEqual([undefined]);
+    expect(forwardedArguments).toEqual([expect.not.objectContaining({
+      sessionUuid: expect.anything(),
+      [DAEMON_BOUND_SESSION_PARAM]: expect.anything(),
+    })]);
   });
 
   test("retains a bound socket transport past the idle client deadline", async () => {

@@ -21,11 +21,23 @@ export class SessionToolBinding {
     const explicit = params && typeof params === "object" && !Array.isArray(params)
       ? (params as Record<string, unknown>).sessionUuid
       : undefined;
-    return typeof explicit === "string" && explicit.trim().length > 0
+    const explicitSessionUuid = typeof explicit === "string" && explicit.trim().length > 0
       ? explicit
-      : mcpSessionId
-        ? this.boundDeviceSessions.get(mcpSessionId) ?? this.initialSessionUuid
-        : this.initialSessionUuid;
+      : undefined;
+    const boundSessionUuid = mcpSessionId
+      ? this.boundDeviceSessions.get(mcpSessionId) ?? this.initialSessionUuid
+      : this.initialSessionUuid;
+    if (
+      this.initialSessionUuid &&
+      explicitSessionUuid &&
+      explicitSessionUuid !== this.initialSessionUuid
+    ) {
+      throw new Error(
+        `MCP connection is bound to device session ${this.initialSessionUuid}; ` +
+        `cannot route this call to ${explicitSessionUuid} until the binding is released.`
+      );
+    }
+    return explicitSessionUuid ?? boundSessionUuid;
   }
 
   /**
@@ -50,6 +62,9 @@ export class SessionToolBinding {
       return false;
     }
     if (!mcpSessionId) {
+      return false;
+    }
+    if (this.initialSessionUuid && sessionUuid !== this.initialSessionUuid) {
       return false;
     }
     if (this.boundDeviceSessions.get(mcpSessionId) === sessionUuid) {

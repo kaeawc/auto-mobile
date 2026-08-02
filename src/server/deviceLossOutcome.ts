@@ -1,4 +1,5 @@
 export const DEVICE_LOSS_OUTCOME_CODE = "device_lost";
+const deviceLossByAbortSignal = new WeakMap<AbortSignal, DeviceLostError>();
 
 export interface DeviceLossOutcome {
   code: typeof DEVICE_LOSS_OUTCOME_CODE;
@@ -33,6 +34,19 @@ export function deviceLostErrorFromCancellationReason(reason: string): DeviceLos
     ? reason.slice("device-disconnected:".length)
     : "";
   return deviceId ? new DeviceLostError(deviceId, reason) : undefined;
+}
+
+/**
+ * Bun can report an aborted signal while temporarily hiding `signal.reason`.
+ * Track the typed reason by signal so downstream cancellation checks retain the
+ * infrastructure outcome in that runtime path.
+ */
+export function rememberDeviceLossAbort(signal: AbortSignal, error: DeviceLostError): void {
+  deviceLossByAbortSignal.set(signal, error);
+}
+
+export function deviceLostErrorFromAbortSignal(signal: AbortSignal): DeviceLostError | undefined {
+  return isDeviceLostError(signal.reason) ? signal.reason : deviceLossByAbortSignal.get(signal);
 }
 
 export function deviceLossOutcomeFromError(

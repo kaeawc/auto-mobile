@@ -1,5 +1,8 @@
 import { logger } from "../logger";
 
+/** Minimum guest memory required by modern Play Store system images. */
+export const MIN_AVD_RAM_MB = 2048;
+
 /**
  * Parsed AVD configuration from config.ini
  */
@@ -9,6 +12,8 @@ export interface AvdConfig {
   screenWidth?: number;
   screenHeight?: number;
   screenDensity?: number;
+  /** Configured guest memory in megabytes. */
+  ramSizeMb?: number;
   deviceName?: string;
   tag?: string;
 }
@@ -66,7 +71,11 @@ export class FileAvdConfigReader implements AvdConfigReader {
     this.existsFn = existsFn ?? ((p: string) => fs.existsSync(p));
 
     const homeDir = process.env.HOME || process.env.USERPROFILE;
-    this.avdHome = avdHome ?? process.env.ANDROID_AVD_HOME ?? (homeDir ? path.join(homeDir, ".android", "avd") : "");
+    const androidUserHome = process.env.ANDROID_USER_HOME;
+    this.avdHome = avdHome
+      ?? process.env.ANDROID_AVD_HOME
+      ?? (androidUserHome ? path.join(androidUserHome, "avd") : undefined)
+      ?? (homeDir ? path.join(homeDir, ".android", "avd") : "");
   }
 
   async readConfig(avdName: string): Promise<AvdConfig | null> {
@@ -112,6 +121,12 @@ export function parseAvdConfig(content: string): AvdConfig {
 
   const density = props.get("hw.lcd.density");
   if (density) {config.screenDensity = Number.parseInt(density, 10) || undefined;}
+
+  const ramSize = props.get("hw.ramSize");
+  if (ramSize) {
+    const parsedRamSize = Number.parseInt(ramSize, 10);
+    if (Number.isFinite(parsedRamSize)) {config.ramSizeMb = parsedRamSize;}
+  }
 
   // Device name (form factor hint)
   const deviceName = props.get("hw.device.name");

@@ -52,10 +52,11 @@ interface AndroidHomeWithSystemImages {
   systemImagesPath: string;
 }
 
-// Create default system detection instance
-const createDefaultSystemDetection = (): SystemDetection => {
-  return new DefaultSystemDetection();
-};
+// Create one stable default context so production callers retain the shared
+// detection cache, while injected/fake contexts remain isolated from each
+// other (and from concurrent tests).
+const createDefaultSystemDetection = (): SystemDetection => new DefaultSystemDetection();
+const defaultSystemDetection = createDefaultSystemDetection();
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, "/");
@@ -99,13 +100,13 @@ export function getAndroidHomeWithSystemImages(
 /**
  * In-memory cache for detection results
  */
-let cachedAndroidToolsLocations: AndroidToolsLocation[] | undefined = undefined;
+let cachedAndroidToolsLocations = new WeakMap<SystemDetection, AndroidToolsLocation[]>();
 
 /**
  * Clear cached detection results
  */
 export function clearDetectionCache(): void {
-  cachedAndroidToolsLocations = undefined;
+  cachedAndroidToolsLocations = new WeakMap();
 }
 
 /**
@@ -466,10 +467,11 @@ async function detectAndroidToolsInPath(systemDetection = createDefaultSystemDet
 /**
  * Comprehensive detection of all Android command line tools installations
  */
-export async function detectAndroidCommandLineTools(systemDetection = createDefaultSystemDetection()): Promise<AndroidToolsLocation[]> {
-  if (cachedAndroidToolsLocations !== undefined) {
+export async function detectAndroidCommandLineTools(systemDetection = defaultSystemDetection): Promise<AndroidToolsLocation[]> {
+  const cachedLocations = cachedAndroidToolsLocations.get(systemDetection);
+  if (cachedLocations !== undefined) {
     logger.debug("Already cached Android tools locations. Returning cached result.");
-    return cachedAndroidToolsLocations;
+    return cachedLocations;
   }
 
   const locations: AndroidToolsLocation[] = [];
@@ -523,7 +525,7 @@ export async function detectAndroidCommandLineTools(systemDetection = createDefa
 
   logger.debug(`Detection complete. Found ${uniqueLocations.length} unique Android tools installations.`);
 
-  cachedAndroidToolsLocations = uniqueLocations;
+  cachedAndroidToolsLocations.set(systemDetection, uniqueLocations);
   return uniqueLocations;
 }
 

@@ -16,20 +16,82 @@ import {
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
+import { readSdkManagerVersion } from "../../utils/android-cmdline-tools/SdkManagerClient";
 import { logger } from "../../utils/logger";
+import type { AndroidToolsLocation } from "../../utils/android-cmdline-tools/detection";
+import { FileAvdConfigReader, MIN_AVD_RAM_MB, type AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
+import type { AdbDeviceState } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+
+const MIN_CMDLINE_TOOLS_VERSION = [9, 0] as const;
+type CmdlineToolsVersionReader = (location: AndroidToolsLocation) => Promise<string | null>;
+
+const readCmdlineToolsVersion: CmdlineToolsVersionReader = async location => {
+  return readSdkManagerVersion(undefined, location);
+};
+
+async function checkCmdlineToolsVersion(
+  location: AndroidToolsLocation,
+  reader: CmdlineToolsVersionReader,
+): Promise<CheckResult> {
+  try {
+    const version = await reader(location);
+    if (!version) {
+      return {
+        name: "Android Command Line Tools",
+        status: "warn",
+        message: "Could not determine cmdline-tools version.",
+        recommendation: "Install a current Android SDK Command-line Tools package that supports SDK XML v4.",
+        value: location.path,
+      };
+    }
+    const parts = version.split(".").map(part => Number.parseInt(part, 10) || 0);
+    const isSupported = parts[0] > MIN_CMDLINE_TOOLS_VERSION[0]
+      || (parts[0] === MIN_CMDLINE_TOOLS_VERSION[0] && (parts[1] ?? 0) >= MIN_CMDLINE_TOOLS_VERSION[1]);
+    if (!isSupported) {
+      return {
+        name: "Android Command Line Tools",
+        status: "warn",
+        message: `Android cmdline-tools version ${version} is outdated for current SDK XML/device catalogs.`,
+        recommendation: "Upgrade to Android SDK Command-line Tools 9.0 or newer.",
+        value: location.path,
+      };
+    }
+    return {
+      name: "Android Command Line Tools",
+      status: "pass",
+      message: `Android command line tools detected (version ${version}).`,
+      value: location.path,
+    };
+  } catch (error) {
+    logger.warn(`Failed to determine cmdline-tools version: ${error instanceof Error ? error.message : String(error)}`);
+    return {
+      name: "Android Command Line Tools",
+      status: "warn",
+      message: `Could not determine cmdline-tools version: ${error instanceof Error ? error.message : String(error)}`,
+      recommendation: "Install a current Android SDK Command-line Tools package that supports SDK XML v4.",
+      value: location.path,
+    };
+  }
+}
 
 export interface AndroidDoctorDependencies {
   detectAndroidCommandLineTools: typeof detectAndroidCommandLineTools;
   getBestAndroidToolsLocation: typeof getBestAndroidToolsLocation;
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;
   logger: typeof logger;
+  getCmdlineToolsVersion?: CmdlineToolsVersionReader;
+  listAvds?: () => Promise<Array<{ name: string }>>;
+  readAvdConfig?: AvdConfigReader;
 }
 
 const createAndroidDoctorDependencies = (): AndroidDoctorDependencies => ({
   detectAndroidCommandLineTools,
   getBestAndroidToolsLocation,
   getAndroidHomeWithSystemImages,
-  logger
+  logger,
+  getCmdlineToolsVersion: readCmdlineToolsVersion,
+  listAvds: async () => new AndroidEmulatorClient().listAvds(),
+  readAvdConfig: new FileAvdConfigReader(),
 });
 
 function normalizePath(value: string): string {
@@ -78,6 +140,10 @@ export async function checkAndroidCommandLineTools(
         recommendation: "Ensure Android command line tools are present under ANDROID_HOME."
       };
     }
+  }
+
+  if (dependencies.getCmdlineToolsVersion) {
+    return checkCmdlineToolsVersion(bestLocation, dependencies.getCmdlineToolsVersion);
   }
 
   return {
@@ -249,23 +315,40 @@ export async function checkConnectedDevices(
   try {
     const adb = adbFactory.create();
     const devices = await adb.getBootedAndroidDevices();
-
-    if (devices.length === 0) {
+    if (devices.length > 0) {
+      const deviceNames = devices.map(d => d.deviceId).join(", ");
+      return {
+        name: "Connected Devices",
+        status: "pass",
+        message: `${devices.length} device(s) connected: ${deviceNames}`,
+        value: devices.length,
+      };
+    }
+    let rawStates: AdbDeviceState[] = [];
+    try {
+      rawStates = await adb.getDeviceStates?.() ?? [];
+    } catch (error) {
+      logger.debug(`Could not query offline Android device states: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const offlineDevices = rawStates.filter((state: AdbDeviceState) => state.state === "offline");
+    if (offlineDevices.length > 0) {
+      const ids = offlineDevices.map(device => device.deviceId).join(", ");
       return {
         name: "Connected Devices",
         status: "warn",
-        message: "No Android devices connected",
+        message: `Android device(s) present but offline: ${ids}`,
         value: 0,
-        recommendation: "Connect a device via USB or start an emulator",
+        recommendation: offlineDevices.every(device => device.deviceId.startsWith("emulator-"))
+          ? "Restart the emulator and verify adb access outside restrictive sandboxing."
+          : "Reconnect the device, accept USB debugging authorization, or restart the adb server.",
       };
     }
-
-    const deviceNames = devices.map(d => d.deviceId).join(", ");
     return {
       name: "Connected Devices",
-      status: "pass",
-      message: `${devices.length} device(s) connected: ${deviceNames}`,
-      value: devices.length,
+      status: "warn",
+      message: "No Android devices connected",
+      value: 0,
+      recommendation: "Connect a device via USB or start an emulator",
     };
   } catch (error) {
     logger.warn(`Connected Android devices check failed: ${error instanceof Error ? error.message : String(error)}`, error);
@@ -274,6 +357,72 @@ export async function checkConnectedDevices(
       status: "warn",
       message: `Could not list devices: ${error instanceof Error ? error.message : String(error)}`,
       value: 0,
+    };
+  }
+}
+
+/** Check that configured AVDs have enough guest memory for modern images. */
+export async function checkAvdMemory(
+  dependencies: Pick<AndroidDoctorDependencies, "listAvds" | "readAvdConfig"> = createAndroidDoctorDependencies(),
+): Promise<CheckResult> {
+  if (!dependencies.listAvds || !dependencies.readAvdConfig) {
+    return { name: "AVD Memory", status: "skip", message: "AVD memory could not be checked." };
+  }
+
+  try {
+    const readAvdConfig = dependencies.readAvdConfig;
+    const avds = await dependencies.listAvds();
+    const unverifiableConfigs: string[] = [];
+    const lowMemory = (await Promise.all(avds.map(async avd => {
+      const config = await readAvdConfig.readConfig(avd.name);
+      if (!config) {
+        unverifiableConfigs.push(avd.name);
+        return null;
+      }
+      const isModernPlayImage = config.tag?.toLowerCase().includes("play")
+        && (config.apiLevel ?? 0) >= 30;
+      if (!isModernPlayImage) {
+        return null;
+      }
+      if (config.ramSizeMb === undefined) {
+        unverifiableConfigs.push(avd.name);
+        return null;
+      }
+      return isModernPlayImage && config.ramSizeMb < MIN_AVD_RAM_MB
+        ? `${avd.name} (${config.ramSizeMb} MB)`
+        : null;
+    }))).filter((name): name is string => name !== null);
+    if (unverifiableConfigs.length > 0 && lowMemory.length > 0) {
+      return {
+        name: "AVD Memory",
+        status: "warn",
+        message: `AVD(s) below the ${MIN_AVD_RAM_MB} MB minimum: ${lowMemory.join(", ")}. Could not verify: ${unverifiableConfigs.join(", ")}`,
+        recommendation: "Increase hw.ramSize in affected AVD config.ini files and ensure every AVD config can be read.",
+      };
+    }
+    if (unverifiableConfigs.length > 0) {
+      return {
+        name: "AVD Memory",
+        status: "warn",
+        message: `Could not read or verify AVD memory configuration: ${unverifiableConfigs.join(", ")}`,
+        recommendation: "Check AVD_HOME and the affected AVD config.ini files.",
+      };
+    }
+    if (lowMemory.length > 0) {
+      return {
+        name: "AVD Memory",
+        status: "warn",
+        message: `AVD(s) below the ${MIN_AVD_RAM_MB} MB minimum: ${lowMemory.join(", ")}`,
+        recommendation: "Increase hw.ramSize in each affected AVD config.ini and retry.",
+      };
+    }
+    return { name: "AVD Memory", status: "pass", message: `All applicable modern Play-image AVDs meet the ${MIN_AVD_RAM_MB} MB memory minimum.` };
+  } catch (error) {
+    logger.warn(`AVD memory check failed: ${error instanceof Error ? error.message : String(error)}`);
+    return {
+      name: "AVD Memory",
+      status: "skip",
+      message: `Could not check AVD memory: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }
@@ -329,6 +478,7 @@ export async function runAndroidChecks(options: DoctorOptions = {}): Promise<Che
   results.push(await checkEmulator());
   results.push(await checkConnectedDevices());
   results.push(await checkAvailableAvds());
+  results.push(await checkAvdMemory());
 
   return results;
 }

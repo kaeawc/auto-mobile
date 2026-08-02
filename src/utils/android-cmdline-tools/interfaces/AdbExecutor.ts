@@ -46,6 +46,12 @@ export interface DeviceTimestampResult {
   source: DeviceTimestampSource;
 }
 
+/** A raw row from `adb devices`, including devices that are not online yet. */
+export interface AdbDeviceState {
+  deviceId: string;
+  state: string;
+}
+
 /**
  * Interface for executing ADB commands
  * Enables dependency injection and testing with fakes
@@ -89,6 +95,9 @@ export interface AdbExecutor {
    * @returns Promise with array of booted devices
    */
   getBootedAndroidDevices(options?: { bypassCache?: boolean }): Promise<BootedDevice[]>;
+
+  /** Return raw ADB device states, including `offline` and `unauthorized` rows. */
+  getDeviceStates?(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<AdbDeviceState[]>;
 
   /**
    * Check if the device screen is currently on

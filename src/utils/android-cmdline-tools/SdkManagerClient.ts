@@ -28,6 +28,8 @@ export interface SdkManagerExecutionOptions {
   timeoutMs?: number;
   terminationGraceMs?: number;
   maxOutputChars?: number;
+  /** Use a previously selected command-line-tools installation. */
+  location?: AndroidToolsLocation;
 }
 
 export interface SdkManagerCommandResult {
@@ -102,6 +104,14 @@ export class SdkManagerClient {
     }, options);
   }
 
+  /** Return the installed sdkmanager command-line tools version. */
+  async getVersion(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {
+    return this.run(["--version"], {
+      timeoutMs: LOCAL_COMMAND_TIMEOUT_MS,
+      maxStdoutChars: 1_024,
+    }, options, true);
+  }
+
   async acceptLicenses(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {
     return this.run(["--licenses"], { input: "y\n".repeat(20), timeoutMs: LOCAL_COMMAND_TIMEOUT_MS }, options);
   }
@@ -117,14 +127,18 @@ export class SdkManagerClient {
     args: string[],
     defaultsForCommand: { input?: string; timeoutMs: number; maxStdoutChars?: number },
     options: SdkManagerExecutionOptions,
+    allowBootstrapRoot = false,
   ): Promise<SdkManagerCommandResult> {
-    const { path, env } = await this.resolve();
+    const { path, env } = await this.resolve(allowBootstrapRoot, options.location);
     return this.execute(path, args, { ...defaultsForCommand, env }, options);
   }
 
-  private async resolve(): Promise<{ path: string; env: NodeJS.ProcessEnv }> {
-    const locations = await this.dependencies.detectAndroidCommandLineTools();
-    const location = this.dependencies.getBestAndroidToolsLocation(locations);
+  private async resolve(
+    allowBootstrapRoot = false,
+    selectedLocation?: AndroidToolsLocation,
+  ): Promise<{ path: string; env: NodeJS.ProcessEnv }> {
+    const locations = selectedLocation ? [selectedLocation] : await this.dependencies.detectAndroidCommandLineTools();
+    const location = selectedLocation ?? this.dependencies.getBestAndroidToolsLocation(locations);
     if (!location) {
       throw new Error("Android command line tools not found. Tool installation functionality has been removed. Please install Android SDK Command-line Tools and set ANDROID_HOME or ANDROID_SDK_ROOT to the SDK root.");
     }
@@ -133,7 +147,7 @@ export class SdkManagerClient {
       throw new Error(`Missing required tools: ${validation.missing.join(", ")}. Tool installation functionality has been removed. Install Android SDK Command-line Tools under ANDROID_HOME/cmdline-tools/latest.`);
     }
     const path = this.resolveExecutable(location);
-    const sdkRoot = this.resolveSdkRoot(location);
+    const sdkRoot = this.resolveSdkRoot(location) ?? (allowBootstrapRoot ? this.stripCmdlineToolsPath(location.path) : undefined);
     if (!sdkRoot) {
       throw new Error(`Unable to resolve the Android SDK root for sdkmanager at ${path}. Set ANDROID_HOME or ANDROID_SDK_ROOT to the SDK root containing platforms or system-images.`);
     }
@@ -264,4 +278,22 @@ export class SdkManagerClient {
     const command = `"${[quoteForWindowsCmd(path), ...args.map(quoteForWindowsCmd)].join(" ")}"`;
     return { command: environment.ComSpec ?? environment.COMSPEC ?? "cmd.exe", args: ["/d", "/v:off", "/s", "/c", command] };
   }
+}
+
+/** Read and normalize the installed sdkmanager version for diagnostics. */
+export async function readSdkManagerVersion(
+  client: Pick<SdkManagerClient, "getVersion"> = new SdkManagerClient(),
+  location?: AndroidToolsLocation,
+): Promise<string | null> {
+  const result = await client.getVersion(location ? { location } : {});
+  if (result.exitCode !== 0) {
+    logger.debug(`sdkmanager --version failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
+    return null;
+  }
+  let version: string | null = null;
+  for (const line of `${result.stdout}\n${result.stderr}`.split("\n")) {
+    const match = line.trim().match(/^(\d+(?:\.\d+){0,2})$/);
+    if (match) {version = match[1];}
+  }
+  return version;
 }

@@ -9,10 +9,14 @@ import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./de
 import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import type { AvdConfigReader } from "./AvdConfigReader";
-import { FileAvdConfigReader } from "./AvdConfigReader";
+import { FileAvdConfigReader, MIN_AVD_RAM_MB } from "./AvdConfigReader";
 import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../../features/action/DeviceLockStore";
 import type { FormFactor } from "../../models/DeviceMatchCriteria";
+import type { AdbDeviceState } from "./interfaces/AdbExecutor";
+
+const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
+const OFFLINE_DEVICE_THRESHOLD_MS = 15_000;
 
 /**
  * Interface for Android Emulator (AVD) management
@@ -226,6 +230,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private modelNameCache = new Map<string, string>();
   private avdConfigReader: AvdConfigReader;
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
+  private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
 
   /**
    * Create an AndroidEmulatorClient instance
@@ -543,6 +548,82 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
 
     return { isPanic: false };
+  }
+
+  /** Detect sandbox/JIT entitlement failures that leave an emulator offline. */
+  detectSandboxMprotect(output: string): {
+    isSandboxError: boolean;
+    message?: string;
+    suggestion?: string;
+  } {
+    const mprotectFailure = /qemu_mprotect__osdep:\s*mprotect failed:\s*permission denied/i.test(output);
+    const hvfFailure = /hvf is not enabled on this aarch64 host|HVF error:\s*HV_(?:UNSUPPORTED|ERROR)|failed to initialize HVF:\s*Invalid argument/i.test(output);
+    if (!mprotectFailure && !hvfFailure) {
+      return { isSandboxError: false };
+    }
+
+    return {
+      isSandboxError: true,
+      message: "Emulator hypervisor initialization failed (mprotect/HVF is unavailable)",
+      suggestion: "Run the emulator outside the restrictive sandbox or grant the host hypervisor/JIT entitlement required by QEMU.",
+    };
+  }
+
+  private sandboxFailure(output: string): ActionableError | null {
+    const result = this.detectSandboxMprotect(output);
+    if (!result.isSandboxError) {return null;}
+    return new ActionableError([
+      `Emulator failed to start: ${result.message}`,
+      result.suggestion ? `Suggestion: ${result.suggestion}` : "",
+    ].filter(Boolean).join("\n\n"));
+  }
+
+  private async validateAvdMemory(avdName: string): Promise<void> {
+    const avdConfig = await this.avdConfigReader.readConfig(avdName);
+    if (!avdConfig) {return;}
+    const isModernPlayImage = avdConfig.tag?.toLowerCase().includes("play")
+      && (avdConfig.apiLevel ?? 0) >= MODERN_PLAY_IMAGE_MIN_API_LEVEL;
+    if (isModernPlayImage && avdConfig.ramSizeMb !== undefined && avdConfig.ramSizeMb < MIN_AVD_RAM_MB) {
+      throw new ActionableError(
+        `Cannot start AVD '${avdName}': hw.ramSize is ${avdConfig.ramSizeMb} MB, below the minimum ${MIN_AVD_RAM_MB} MB needed for a modern system image. Increase hw.ramSize in the AVD config and retry.`
+      );
+    }
+  }
+
+  private async detectOfflineFailure(
+    avdName: string,
+    deviceId: string | undefined,
+    tracker: { deviceId: string | null; since: number | null },
+    timeoutMs?: number,
+  ): Promise<ActionableError | null> {
+    let states: AdbDeviceState[];
+    try {
+      states = await this.adbFactory.create(null).getDeviceStates?.({ timeoutMs }) ?? [];
+    } catch (error) {
+      // Auxiliary diagnostic probe; a failure here must not block readiness polling.
+      logger.debug(`Offline-state probe unavailable during emulator readiness: ${error instanceof Error ? error.message : String(error)}`);
+      tracker.deviceId = null;
+      tracker.since = null;
+      return null;
+    }
+    const targetState = deviceId
+      ? states.find((state: AdbDeviceState) => state.deviceId === deviceId)
+      : undefined;
+    if (targetState?.state !== "offline") {
+      tracker.deviceId = null;
+      tracker.since = null;
+      return null;
+    }
+    if (tracker.deviceId !== targetState.deviceId) {
+      tracker.deviceId = targetState.deviceId;
+      tracker.since = this.timer.now();
+    }
+    if (tracker.since !== null && this.timer.now() - tracker.since >= OFFLINE_DEVICE_THRESHOLD_MS) {
+      return new ActionableError(
+        `Emulator '${avdName}' (${targetState.deviceId}) has remained offline for ${OFFLINE_DEVICE_THRESHOLD_MS / 1000} seconds. Restart it outside the restrictive sandbox and verify that adb can reach the emulator.`
+      );
+    }
+    return null;
   }
 
   /**
@@ -991,6 +1072,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return null;
     }
 
+    await this.validateAvdMemory(avdName);
+
     // Check architecture compatibility before attempting to start
     perf.startOperation("architectureCheck");
     const compatibility = await this.checkArchitectureCompatibility(avdName);
@@ -1040,6 +1123,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         outputBuffer.push(...lines);
         if (outputBuffer.length > maxBufferLines) {
           outputBuffer.splice(0, outputBuffer.length - maxBufferLines);
+        }
+
+        // Detect sandbox/JIT entitlement failures before generic PANIC handling.
+        const sandboxError = this.sandboxFailure(initialOutput);
+        if (sandboxError) {
+          logger.error(`Emulator sandbox error detected: ${sandboxError.message}`);
+          this.launchErrors.set(child, sandboxError);
+          if (!child.killed) {child.kill();}
+          if (!startupValidationComplete) {
+            startupValidationComplete = true;
+            perf.endOperation("panicDetection");
+            reject(sandboxError);
+          }
+          return;
         }
 
         // Check for PANIC in the output
@@ -1171,6 +1268,19 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             return;
           }
 
+          // Check if exit was due to a sandbox/JIT entitlement failure.
+          const sandboxError = this.sandboxFailure(initialOutput);
+          if (sandboxError) {
+            logger.error(`Exit was due to emulator sandbox error: ${sandboxError.message}`);
+            this.launchErrors.set(child, sandboxError);
+            if (!startupValidationComplete) {
+              startupValidationComplete = true;
+              perf.endOperation("panicDetection");
+              reject(sandboxError);
+            }
+            return;
+          }
+
           // Check if exit was due to PANIC
           const panicResult = this.detectArchitecturePanic(initialOutput);
           if (panicResult.isPanic) {
@@ -1258,6 +1368,40 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return childProcess ? this.launchTargetDeviceIds.get(childProcess) : undefined;
   }
 
+  private getLaunchError(childProcess?: ChildProcess | null): ActionableError | undefined {
+    return childProcess ? this.launchErrors.get(childProcess) : undefined;
+  }
+
+  private recordLaunchError(
+    childProcess: ChildProcess | null | undefined,
+    onError: (error: ActionableError) => void,
+  ): void {
+    const error = this.getLaunchError(childProcess);
+    if (error) {
+      onError(error);
+    }
+  }
+
+  private readinessTimeoutError(
+    avdName: string,
+    timeoutMs: number,
+    offlineFailure: ActionableError | null,
+    processExitError: ActionableError | null,
+  ): ActionableError {
+    return processExitError
+      ?? offlineFailure
+      ?? new ActionableError(`Emulator '${avdName}' failed to become ready within ${timeoutMs}ms`);
+  }
+
+  private shouldStopReadinessPolling(
+    pollingActive: boolean,
+    elapsedMs: number,
+    timeoutMs: number,
+    offlineFailure: ActionableError | null,
+  ): boolean {
+    return !pollingActive || elapsedMs >= timeoutMs || offlineFailure !== null;
+  }
+
   private unknownEmulatorName(deviceId: string): string {
     return `Unknown (${deviceId})`;
   }
@@ -1327,7 +1471,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     logger.info(`Waiting for emulator '${avdName}' to be ready... (polling interval: ${pollingIntervalMs}ms)`);
 
     // Monitor child process for early exit if provided
-    let processExited = false;
     let processExitError: ActionableError | null = null;
     if (childProcess && childProcess.pid) {
       const processOutput: string[] = [];
@@ -1346,13 +1489,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         // A null code means the process was killed by signal (e.g. SIGABRT from a
         // failed Qt xcb plugin on a headless host) — treat that as a failure too.
         if (code !== 0) {
-          processExited = true;
           const combinedOutput = processOutput.join("");
 
           // Check for known error patterns
+          const sandboxError = this.sandboxFailure(combinedOutput);
           const corruptResult = this.detectCorruptImage(combinedOutput);
           const displayResult = this.detectDisplayError(combinedOutput);
-          if (corruptResult.isCorrupt) {
+          if (sandboxError) {
+            processExitError = sandboxError;
+          } else if (corruptResult.isCorrupt) {
             let msg = `Emulator failed to start: ${corruptResult.message}`;
             if (corruptResult.suggestion) {
               msg += `\n\nSuggestion: ${corruptResult.suggestion}`;
@@ -1382,12 +1527,28 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     // Start background polling immediately with configurable intervals
     let pollingActive = true;
     let foundDeviceId: string | null = null;
+    let offlineFailure: ActionableError | null = null;
+    const offlineTracker = { deviceId: null as string | null, since: null as number | null };
 
     perf.startOperation("devicePolling");
     const backgroundPoller = async () => {
       while (pollingActive && !foundDeviceId) {
         try {
+          this.recordLaunchError(childProcess, error => {
+            processExitError = error;
+          });
           logger.debug(`Background polling iteration - checking for emulator '${avdName}'...`);
+
+          const correlatedTargetDeviceId = targetDeviceId ?? this.getLaunchTargetDeviceId(childProcess);
+          const remainingTimeoutMs = timeoutMs - (this.timer.now() - startTime);
+          if (remainingTimeoutMs <= 0) {
+            pollingActive = false;
+            break;
+          }
+          offlineFailure = await this.detectOfflineFailure(avdName, correlatedTargetDeviceId, offlineTracker, remainingTimeoutMs);
+          if (this.shouldStopReadinessPolling(pollingActive, this.timer.now() - startTime, timeoutMs, offlineFailure)) {
+            break;
+          }
 
           // For local emulators, check for running devices
           logger.debug(`Checking for running local emulators...`);
@@ -1396,8 +1557,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
           if (runningEmulators.length > 0) {
             logger.debug(`Found ${runningEmulators.length} running emulators: ${runningEmulators.map(e => `${e.name}(${e.deviceId})`).join(", ")}`);
-
-            const correlatedTargetDeviceId = targetDeviceId ?? this.getLaunchTargetDeviceId(childProcess);
 
             // Prefer an exact deviceId when startDevice already selected or correlated a device.
             let emulator = correlatedTargetDeviceId
@@ -1500,12 +1659,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     // Main timeout loop
     while (this.timer.now() - startTime < timeoutMs) {
-      // Check if emulator process crashed during readiness wait
-      if (processExited && processExitError) {
+      const readinessFailure = processExitError ?? offlineFailure;
+      if (readinessFailure) {
         pollingActive = false;
         await pollingPromise;
         perf.endOperation("devicePolling");
-        throw processExitError;
+        throw readinessFailure;
       }
 
       if (foundDeviceId) {
@@ -1537,7 +1696,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return bootedDevice;
     }
 
-    throw new ActionableError(`Emulator '${avdName}' failed to become ready within ${timeoutMs}ms`);
+    throw this.readinessTimeoutError(avdName, timeoutMs, offlineFailure, processExitError);
   }
 
   /**

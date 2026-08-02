@@ -20,6 +20,24 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     resetAdbClientCaches();
   });
 
+  test("exposes offline and unauthorized rows through the raw state probe", async () => {
+    const adb = new AdbClient(null, async (command: string): Promise<ExecResult> => command.includes("adb devices")
+      ? createExecResult([
+        "List of devices attached",
+        "emulator-5554\toffline",
+        "emulator-5556\tunauthorized",
+        "emulator-5558\tdevice",
+        "",
+      ].join("\n"))
+      : createExecResult(""));
+
+    await expect(adb.getDeviceStates()).resolves.toEqual([
+      { deviceId: "emulator-5554", state: "offline" },
+      { deviceId: "emulator-5556", state: "unauthorized" },
+      { deviceId: "emulator-5558", state: "device" },
+    ]);
+  });
+
   afterEach(() => {
     resetAdbClientCaches();
   });

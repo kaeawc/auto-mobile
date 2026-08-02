@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { afterEach, describe, it, expect } from "bun:test";
 import { parseAvdConfig, apiLevelToVersion, FileAvdConfigReader } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
 describe("parseAvdConfig", () => {
@@ -31,6 +31,15 @@ describe("parseAvdConfig", () => {
     const config = parseAvdConfig(content);
     expect(config.deviceName).toBe("pixel_6");
     expect(config.tag).toBe("google_apis");
+  });
+
+  it("parses the configured RAM size in megabytes", () => {
+    const config = parseAvdConfig("hw.ramSize=1536\n");
+    expect(config.ramSizeMb).toBe(1536);
+  });
+
+  it("preserves a zero RAM value so the launch preflight can reject it", () => {
+    expect(parseAvdConfig("hw.ramSize=0\n").ramSizeMb).toBe(0);
   });
 
   it("handles unknown API level gracefully", () => {
@@ -135,6 +144,14 @@ describe("apiLevelToVersion", () => {
 });
 
 describe("FileAvdConfigReader", () => {
+  const previousAndroidAvdHome = process.env.ANDROID_AVD_HOME;
+  const previousAndroidUserHome = process.env.ANDROID_USER_HOME;
+
+  afterEach(() => {
+    if (previousAndroidAvdHome === undefined) {delete process.env.ANDROID_AVD_HOME;} else {process.env.ANDROID_AVD_HOME = previousAndroidAvdHome;}
+    if (previousAndroidUserHome === undefined) {delete process.env.ANDROID_USER_HOME;} else {process.env.ANDROID_USER_HOME = previousAndroidUserHome;}
+  });
+
   it("reads config from correct path", async () => {
     const matchesConfigPath = (p: string) => p.includes("TestAvd.avd") && p.endsWith("config.ini");
     const readFileFn = async (path: string, _encoding: string) => {
@@ -171,5 +188,21 @@ describe("FileAvdConfigReader", () => {
     const config = await reader.readConfig("Broken");
 
     expect(config).toBeNull();
+  });
+
+  it("uses ANDROID_USER_HOME/avd when ANDROID_AVD_HOME is unset", async () => {
+    delete process.env.ANDROID_AVD_HOME;
+    process.env.ANDROID_USER_HOME = "/user-home";
+    const path = require("path");
+    const paths: string[] = [];
+    const reader = new FileAvdConfigReader(
+      async path => { paths.push(path); return "image.sysdir.1=system-images/android-34/google_apis_playstore/arm64-v8a/"; },
+      path => { paths.push(path); return true; },
+    );
+
+    const config = await reader.readConfig("Play");
+
+    expect(config?.apiLevel).toBe(34);
+    expect(paths[0]).toBe(path.join("/user-home", "avd", "Play.avd", "config.ini"));
   });
 });

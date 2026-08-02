@@ -11,6 +11,7 @@ import {
 import {
   AdbExecutor,
   type AdbExecuteOptions,
+  type AdbDeviceState,
   type AdbProcess,
   type AdbSpawnOptions,
   type DeviceTimestampResult,
@@ -47,7 +48,10 @@ export class AdbCommandTimeoutError extends Error {
 // Module-level cache configuration and instances
 const moduleTimer: Timer = defaultTimer;
 let deviceListCache: TTLCache<string, BootedDevice[]> | null = null;
-let adbPathCache: TTLCache<string, string> | null = null;
+// Keep production clients sharing the resolved path while isolating injected
+// execution seams. A module-wide path cache keyed only by "adbPath" lets one
+// test/client reuse another client's incomplete or synthetic discovery result.
+let adbPathCaches = new WeakMap<ExecFileAsync, TTLCache<string, string>>();
 
 const DEVICE_LIST_CACHE_TTL_MS = 5000; // 5 seconds
 const ADB_PATH_CACHE_TTL_MS = 60000; // 1 minute - ADB path rarely changes
@@ -59,16 +63,18 @@ function getDeviceListCache(): TTLCache<string, BootedDevice[]> {
   return deviceListCache;
 }
 
-function getAdbPathCache(): TTLCache<string, string> {
-  if (!adbPathCache) {
-    adbPathCache = new TTLCache(moduleTimer, { ttlMs: ADB_PATH_CACHE_TTL_MS });
+function getAdbPathCache(execAsync: ExecFileAsync): TTLCache<string, string> {
+  let cache = adbPathCaches.get(execAsync);
+  if (!cache) {
+    cache = new TTLCache(moduleTimer, { ttlMs: ADB_PATH_CACHE_TTL_MS });
+    adbPathCaches.set(execAsync, cache);
   }
-  return adbPathCache;
+  return cache;
 }
 
 export function resetAdbClientCaches(): void {
   deviceListCache = null;
-  adbPathCache = null;
+  adbPathCaches = new WeakMap();
 }
 
 export function resetAdbDeviceListCache(): void {
@@ -394,7 +400,7 @@ export class AdbClient implements AdbExecutor {
     }
 
     // Check cache first - TTLCache handles expiration automatically
-    const cache = getAdbPathCache();
+    const cache = getAdbPathCache(this.execAsync);
     const cachedPath = cache.get("adbPath");
     if (cachedPath) {
       this.adbPath = cachedPath;
@@ -992,6 +998,44 @@ export class AdbClient implements AdbExecutor {
     cache.set("devices", devices);
 
     return devices;
+  }
+
+  /**
+   * List raw ADB states without applying the online-only filter used by
+   * getBootedAndroidDevices(). Readiness diagnostics use this to distinguish a
+   * device that is absent from one that is present but stuck offline.
+   */
+  async getDeviceStates(options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<AdbDeviceState[]> {
+    if (this.shouldSkipMissingAdbProbe()) {
+      return [];
+    }
+
+    let result: ExecResult;
+    try {
+      result = await this.executeCommand(
+        "devices -l",
+        options.timeoutMs ?? AdbClient.DEVICE_LIST_TIMEOUT_MS,
+        undefined,
+        true,
+        options.signal,
+      );
+    } catch (error) {
+      if (this.isMissingExecutableError(error)) {
+        // Preserve the diagnostic path while treating an unavailable ADB as no connected devices.
+        logger.debug(`[ADB] Unable to query device states because adb is unavailable: ${(error as Error).message}`);
+        this.recordMissingAdbProbe();
+        return [];
+      }
+      throw error;
+    }
+
+    return result.stdout
+      .split("\n")
+      .slice(1)
+      .flatMap(line => {
+        const [deviceId, state] = line.trim().split(/\s+/);
+        return deviceId && state ? [{ deviceId, state }] : [];
+      });
   }
 
   /**

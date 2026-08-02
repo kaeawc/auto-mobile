@@ -47,7 +47,13 @@ function directlyExecutesDevicectl(source: string): boolean {
         const shellIndex = argv.findIndex(argument => ast.strings(argument).includes("-c"));
         return shellIndex >= 0 && ast.strings(argv[shellIndex + 1]).some(value => /(?:^|[\s;&|])xcrun\s+devicectl(?:\s|$|[;&|])/.test(value));
       });
-      return shellDevicectl || shellWrappedDevicectl || directDevicectl ||
+      const argvWrappedDevicectl = commandValues.some(value => value === "env" || value === "sudo") &&
+        argvAlternatives.some(argv => {
+          const values = argv.flatMap(argument => ast.strings(argument));
+          const commandIndex = values.findIndex(value => !value.startsWith("-") && !value.includes("="));
+          return values[commandIndex] === "xcrun" && values.slice(commandIndex + 1).includes("devicectl");
+        });
+      return shellDevicectl || shellWrappedDevicectl || argvWrappedDevicectl || directDevicectl ||
         xcrun && args.some(argument => ast.strings(argument).includes("devicectl"));
     });
   });
@@ -108,6 +114,11 @@ describe("devicectl execution boundary (issue #4053)", () => {
     expect(directlyExecutesDevicectl('spawn("/usr/bin/xcrun", ["devicectl", "device", "list"]);')).toBe(true);
     expect(directlyExecutesDevicectl('spawn("/bin/sh", ["-c", "xcrun devicectl device list"]);')).toBe(true);
     expect(directlyExecutesDevicectl('Bun.spawn(["bash", "-c", "xcrun devicectl device list"]);')).toBe(true);
+    expect(directlyExecutesDevicectl('spawn("env", ["xcrun", "devicectl", "device", "list"]);')).toBe(true);
+    expect(directlyExecutesDevicectl('execFile("sudo", ["xcrun", "devicectl", "device", "list"]);')).toBe(true);
+    expect(directlyExecutesDevicectl(
+      'spawn("bash", enabled ? ["-c", "xcrun devicectl device list"] : ["-c", "echo ok"]);'
+    )).toBe(true);
   });
 
   test("detects INDIRECT devicectl launches through the repo exec seam", () => {

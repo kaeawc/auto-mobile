@@ -52,6 +52,7 @@ describe("archive extraction boundary (issue #4065)", () => {
     )).toBe(true);
     expect(directlyExtractsTar('runExecSeam(cb, opts, { command: "echo", args: ["tar", "-x"] });')).toBe(false);
     expect(directlyExtractsTar('exec(useTar ? "tar -xzf archive.tar.gz" : "unzip archive.zip");')).toBe(true);
+    expect(directlyExtractsTar('exec(process.env.ARCHIVE_CMD ?? "tar -xzf archive.tar.gz");')).toBe(true);
     expect(directlyExtractsTar("exec(String.raw`tar -xzf archive.tar.gz`);")).toBe(true);
   });
 

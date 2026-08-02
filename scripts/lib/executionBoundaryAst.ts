@@ -70,10 +70,14 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (ts.isVariableDeclaration(node)) {
       if (ts.isIdentifier(node.name) && node.initializer) {bind(node.name.text, node.initializer);}
       if (ts.isObjectBindingPattern(node.name)) {
+        const initializer = node.initializer;
+        const fromChildProcess = initializer && ((ts.isIdentifier(initializer) && childProcessNamespaces.has(initializer.text)) ||
+          (ts.isCallExpression(initializer) && ts.isIdentifier(initializer.expression) && initializer.expression.text === "require" &&
+            initializer.arguments.length === 1 && ts.isStringLiteral(initializer.arguments[0]) && CHILD_PROCESS_MODULES.has(initializer.arguments[0].text)));
         for (const element of node.name.elements) {
           const property = element.propertyName && ts.isIdentifier(element.propertyName)
             ? element.propertyName.text : ts.isIdentifier(element.name) ? element.name.text : undefined;
-          if (property && ts.isIdentifier(element.name) && PROCESS_LAUNCHERS.has(property)) {
+          if (fromChildProcess && property && ts.isIdentifier(element.name) && PROCESS_LAUNCHERS.has(property)) {
             launcherAliases.add(element.name.text);
           }
         }
@@ -151,6 +155,10 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (ts.isConditionalExpression(node)) {
       return [...strings(node.whenTrue, seen), ...strings(node.whenFalse, seen)];
     }
+    if (ts.isBinaryExpression(node) && [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken,
+      ts.SyntaxKind.AmpersandAmpersandToken].includes(node.operatorToken.kind)) {
+      return [...strings(node.left, seen), ...strings(node.right, seen)];
+    }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
       const left = strings(node.left, seen); const right = strings(node.right, seen);
       const staticLeft = left.length === 1 && !left[0].includes(DYNAMIC_BOUNDARY);
@@ -174,6 +182,11 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const arrayAlternatives = (node: ts.Expression | undefined, seen = new Set<string>()): ts.Expression[][] | undefined => {
     if (!node) {return undefined;}
     node = unwrapTransparentExpression(node);
+    if (ts.isConditionalExpression(node)) {
+      const whenTrue = arrayAlternatives(node.whenTrue, seen);
+      const whenFalse = arrayAlternatives(node.whenFalse, seen);
+      return whenTrue && whenFalse ? [...whenTrue, ...whenFalse] : whenTrue ?? whenFalse;
+    }
     if (ts.isArrayLiteralExpression(node)) {
       let alternatives: ts.Expression[][] = [[]];
       for (const element of node.elements) {

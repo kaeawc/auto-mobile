@@ -90,8 +90,11 @@ describe("host defaults execution boundary (issue #4062)", () => {
       'import { execFile as run } from "node:child_process"; run("defaults", ["read"]);'
     )).toBe(true);
     expect(directlyExecutesHostDefaults(
-      'const { execFile: run } = childProcess; run("defaults", ["read"]);'
+      'const cp = require("node:child_process"); const { execFile: run } = cp; run("defaults", ["read"]);'
     )).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'const { execFile: run } = fakeApi; run("defaults", ["read"]);'
+    )).toBe(false);
     expect(directlyExecutesHostDefaults(
       'let run; run = execFile; run("defaults", ["read"]);'
     )).toBe(true);

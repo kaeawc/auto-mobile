@@ -147,11 +147,13 @@ describe("FileAvdConfigReader", () => {
   const previousAndroidAvdHome = process.env.ANDROID_AVD_HOME;
   const previousAndroidUserHome = process.env.ANDROID_USER_HOME;
   const previousAndroidEmulatorHome = process.env.ANDROID_EMULATOR_HOME;
+  const previousAndroidSdkHome = process.env.ANDROID_SDK_HOME;
 
   afterEach(() => {
     if (previousAndroidAvdHome === undefined) {delete process.env.ANDROID_AVD_HOME;} else {process.env.ANDROID_AVD_HOME = previousAndroidAvdHome;}
     if (previousAndroidUserHome === undefined) {delete process.env.ANDROID_USER_HOME;} else {process.env.ANDROID_USER_HOME = previousAndroidUserHome;}
     if (previousAndroidEmulatorHome === undefined) {delete process.env.ANDROID_EMULATOR_HOME;} else {process.env.ANDROID_EMULATOR_HOME = previousAndroidEmulatorHome;}
+    if (previousAndroidSdkHome === undefined) {delete process.env.ANDROID_SDK_HOME;} else {process.env.ANDROID_SDK_HOME = previousAndroidSdkHome;}
   });
 
   it("reads config from correct path", async () => {
@@ -296,6 +298,33 @@ describe("FileAvdConfigReader", () => {
       async filePath => {
         readPaths.push(filePath);
         if (filePath === registryPath) {return "path=/stale/Custom.avd\npath.rel=avd/Custom.avd\n";}
+        if (filePath === configPath) {return "hw.ramSize=3072\n";}
+        throw new Error(`Unexpected path: ${filePath}`);
+      },
+      filePath => filePath === registryPath || filePath === configPath,
+    );
+
+    const config = await reader.readConfig("Custom");
+
+    expect(config?.ramSizeMb).toBe(3072);
+    expect(readPaths).toEqual([registryPath, configPath]);
+  });
+
+  it("resolves path.rel from the AVD home parent when only ANDROID_AVD_HOME is set", async () => {
+    const path = require("path");
+    const avdHome = path.resolve("fake", "avd-data");
+    const configHome = path.dirname(avdHome);
+    process.env.ANDROID_AVD_HOME = avdHome;
+    delete process.env.ANDROID_USER_HOME;
+    delete process.env.ANDROID_EMULATOR_HOME;
+    delete process.env.ANDROID_SDK_HOME;
+    const registryPath = path.join(avdHome, "Custom.ini");
+    const configPath = path.join(configHome, "custom-avds", "Custom.avd", "config.ini");
+    const readPaths: string[] = [];
+    const reader = new FileAvdConfigReader(
+      async filePath => {
+        readPaths.push(filePath);
+        if (filePath === registryPath) {return "path.rel=custom-avds/Custom.avd\n";}
         if (filePath === configPath) {return "hw.ramSize=3072\n";}
         throw new Error(`Unexpected path: ${filePath}`);
       },

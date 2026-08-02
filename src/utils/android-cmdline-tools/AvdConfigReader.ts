@@ -80,7 +80,12 @@ export class FileAvdConfigReader implements AvdConfigReader {
     this.avdHome = avdHome
       ?? process.env.ANDROID_AVD_HOME
       ?? path.join(configHome, "avd");
-    this.configHome = avdHome ? path.dirname(avdHome) : configHome;
+    this.configHome = avdHome
+      ? path.dirname(avdHome)
+      : (process.env.ANDROID_EMULATOR_HOME
+        ?? androidUserHome
+        ?? (process.env.ANDROID_SDK_HOME ? path.join(process.env.ANDROID_SDK_HOME, ".android") : undefined)
+        ?? (process.env.ANDROID_AVD_HOME ? path.dirname(this.avdHome) : configHome));
   }
 
   async readConfig(avdName: string): Promise<AvdConfig | null> {

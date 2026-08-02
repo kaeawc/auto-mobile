@@ -125,6 +125,189 @@ final class AutoMobileVersionTests: XCTestCase {
         ))
     }
 
+    func testPinnedDaemonPackageCommandUsesBunxAndAutomobileVersion() throws {
+        let command = try XCTUnwrap(DaemonManager.buildPackageDaemonCommand(
+            packageRunner: "/opt/homebrew/bin/bunx",
+            subcommand: "start",
+            packageVersion: "0.0.40"
+        ))
+
+        XCTAssertEqual(command, [
+            "@kaeawc/auto-mobile@0.0.40",
+            "--daemon",
+            "start",
+        ])
+    }
+
+    func testPinnedDaemonPackageCommandUsesNpxNonInteractiveFlag() throws {
+        let command = try XCTUnwrap(DaemonManager.buildPackageDaemonCommand(
+            packageRunner: "/usr/local/bin/npx",
+            subcommand: "restart",
+            packageVersion: "0.0.40"
+        ))
+
+        XCTAssertEqual(command, [
+            "-y",
+            "@kaeawc/auto-mobile@0.0.40",
+            "--daemon",
+            "restart",
+        ])
+    }
+
+    func testResolveDaemonPackageVersionPrefersExplicitPinThenAutomobileVersion() {
+        XCTAssertEqual(DaemonManager.resolveDaemonPackageVersion(environment: [
+            "AUTOMOBILE_DAEMON_PACKAGE_VERSION": " 0.0.41 ",
+            "AUTOMOBILE_VERSION": "0.0.40",
+        ]), "0.0.41")
+        XCTAssertEqual(DaemonManager.resolveDaemonPackageVersion(environment: [
+            "AUTOMOBILE_VERSION": " 0.0.40 ",
+        ]), "0.0.40")
+        XCTAssertNil(DaemonManager.resolveDaemonPackageVersion(environment: [:]))
+    }
+
+    func testPinnedDaemonPackageCommandRejectsFloatingOrUnknownPins() {
+        XCTAssertNil(DaemonManager.buildPackageDaemonCommand(
+            packageRunner: "/opt/homebrew/bin/bunx",
+            subcommand: "start",
+            packageVersion: "latest"
+        ))
+        XCTAssertNil(DaemonManager.buildPackageDaemonCommand(
+            packageRunner: "/opt/homebrew/bin/bunx",
+            subcommand: "start",
+            packageVersion: "unknown"
+        ))
+    }
+
+    func testDaemonLaunchSelectsPinnedPackageInsteadOfPathExecutable() {
+        XCTAssertEqual(DaemonManager.selectDaemonLaunch(
+            subcommand: "start",
+            localEntry: nil,
+            runtime: nil,
+            packageRunner: "/opt/homebrew/bin/bunx",
+            autoMobilePath: "/usr/local/bin/auto-mobile",
+            packageVersion: "0.0.40"
+        ), .process(
+            executable: "/opt/homebrew/bin/bunx",
+            arguments: ["@kaeawc/auto-mobile@0.0.40", "--daemon", "start"]
+        ))
+    }
+
+    func testDaemonLaunchRejectsPinnedStartWithoutPackageRunner() {
+        XCTAssertEqual(DaemonManager.selectDaemonLaunch(
+            subcommand: "start",
+            localEntry: nil,
+            runtime: nil,
+            packageRunner: nil,
+            autoMobilePath: "/usr/local/bin/auto-mobile",
+            packageVersion: "0.0.40"
+        ), .packageRunnerNotFound)
+    }
+
+    func testStartupFailureNamesMissingPackageRunnerAndLaunchTimeout() {
+        XCTAssertEqual(
+            DaemonManager.startupFailure(for: .packageRunnerNotFound),
+            .packageRunnerNotFound
+        )
+        XCTAssertEqual(
+            DaemonManager.startupFailure(for: .timedOut),
+            .launchTimeout
+        )
+        XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("bunx"))
+        XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("npx"))
+        XCTAssertTrue(DaemonStartupResult.launchTimeout.diagnosticMessage.contains("timed out"))
+        XCTAssertEqual(
+            DaemonManager.startupFailure(for: DaemonManager.classifyDaemonSubcommandOutcome(
+                .failed(stderr: "npm ERR! 404 package missing"),
+                packageRunner: true
+            )),
+            .packageLaunchFailed(stderr: "npm ERR! 404 package missing")
+        )
+        XCTAssertEqual(
+            DaemonManager.startupFailure(for: DaemonManager.classifyDaemonSubcommandOutcome(
+                .failed(stderr: "bun failed"),
+                packageRunner: false
+            )),
+            .launchFailed
+        )
+        XCTAssertTrue(DaemonStartupResult.packageLaunchFailed(
+            stderr: "npm ERR! 404 package missing"
+        ).diagnosticMessage.contains("404"))
+    }
+
+    func testDaemonLaunchPassesTimeoutToInjectedLauncher() {
+        let launcher = FakeDaemonSubcommandLauncher(result: .timedOut)
+
+        XCTAssertEqual(DaemonManager.executeDaemonLaunch(
+            executable: "/usr/bin/env",
+            arguments: ["auto-mobile", "--daemon", "start"],
+            environment: ["PATH": "/usr/bin"],
+            timeoutSeconds: 15,
+            launcher: launcher
+        ), .timedOut)
+        XCTAssertEqual(launcher.invocations, [
+            .init(
+                executable: "/usr/bin/env",
+                arguments: ["auto-mobile", "--daemon", "start"],
+                timeoutSeconds: 15
+            ),
+        ])
+    }
+
+    func testDaemonLaunchPreservesBuiltCheckoutPrecedenceOverPin() {
+        XCTAssertEqual(DaemonManager.selectDaemonLaunch(
+            subcommand: "restart",
+            localEntry: "/repo/dist/src/index.js",
+            runtime: "/opt/homebrew/bin/bun",
+            packageRunner: "/opt/homebrew/bin/bunx",
+            autoMobilePath: "/usr/local/bin/auto-mobile",
+            packageVersion: "0.0.40"
+        ), .process(
+            executable: "/opt/homebrew/bin/bun",
+            arguments: ["/repo/dist/src/index.js", "--daemon", "restart"]
+        ))
+    }
+
+    func testResolveDaemonClientVersionUsesPinWithoutBuiltCheckout() {
+        XCTAssertEqual(DaemonManager.resolveDaemonClientVersion(
+            repoRootHasBuiltEntry: false,
+            environment: ["AUTOMOBILE_VERSION": "0.0.40"]
+        ), "0.0.40")
+        XCTAssertEqual(DaemonManager.resolveDaemonClientVersion(
+            repoRootHasBuiltEntry: true,
+            environment: ["AUTOMOBILE_VERSION": "0.0.40"]
+        ), AutoMobileVersion.current)
+    }
+
+    func testResolveDaemonClientVersionKeepsCheckoutIdentityForUnscopedClients() {
+        XCTAssertEqual(DaemonManager.resolveDaemonClientVersion(
+            repoRootHasBuiltEntry: true,
+            environment: ["AUTOMOBILE_DAEMON_PACKAGE_VERSION": "0.0.40"]
+        ), AutoMobileVersion.current)
+    }
+
+    func testResolveDaemonClientVersionHonorsConfiguredRepoRoot() throws {
+        let repoRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("automobile-configured-root-\(UUID().uuidString)")
+        let entry = repoRoot.appendingPathComponent("dist/src/index.js")
+        try FileManager.default.createDirectory(at: entry.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "// fixture entry".write(to: entry, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        XCTAssertEqual(DaemonManager.resolveDaemonClientVersion(
+            environment: [
+                "AUTOMOBILE_REPO_ROOT": repoRoot.path,
+                "AUTOMOBILE_DAEMON_PACKAGE_VERSION": "0.0.40",
+            ]
+        ), AutoMobileVersion.current)
+    }
+
+    func testResolveDaemonRepoRootPrefersTheProvidedCheckout() {
+        XCTAssertEqual(
+            DaemonManager.resolveDaemonRepoRoot("/repo"),
+            "/repo"
+        )
+    }
+
     func testResolveRepoRootDaemonEntryScript() throws {
         XCTAssertNil(DaemonManager.resolveRepoRootDaemonEntryScript(nil))
         XCTAssertNil(DaemonManager.resolveRepoRootDaemonEntryScript(""))
@@ -254,6 +437,115 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertEqual(result, .ready)
         XCTAssertEqual(runtime.subcommands, [.init(name: "restart", repoRoot: repoRoot.path)])
     }
+
+    func testEnsureDaemonRunningUsesInferredRootForBuildSkew() throws {
+        let repoRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("automobile-inferred-root-\(UUID().uuidString)")
+        let entry = repoRoot.appendingPathComponent("dist/src/index.js")
+        try FileManager.default.createDirectory(at: entry.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "// fixture entry".write(to: entry, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        let currentBuildId = try XCTUnwrap(DaemonManager.computeBuildId(entry.path))
+        let runtime = FakeDaemonRuntime(
+            daemonVersion: AutoMobileVersion.current,
+            daemonBuildId: "different-checkout",
+            daemonEntryScript: "/other-checkout/dist/src/index.js",
+            buildIdAfterRestart: currentBuildId
+        )
+
+        let result = DaemonManager.ensureDaemonRunningResult(
+            repoRoot: nil,
+            timeoutSeconds: 0,
+            runtime: runtime,
+            callerAssetVersion: nil,
+            inferredRepoRoot: repoRoot.path
+        )
+
+        XCTAssertEqual(result, .ready)
+        XCTAssertEqual(runtime.subcommands, [.init(name: "restart", repoRoot: repoRoot.path)])
+    }
+
+    func testDaemonLaunchEnvironmentIncludesSelectedRunnerDirectory() {
+        let environment = DaemonManager.daemonLaunchEnvironment(
+            executable: "/opt/homebrew/bin/npx",
+            environment: ["PATH": "/usr/bin"]
+        )
+
+        XCTAssertEqual(environment["PATH"], "/opt/homebrew/bin:/usr/bin:/usr/local/bin")
+    }
+
+    func testRestartLauncherTimeoutIncludesDaemonLifecycleBudget() {
+        XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
+            subcommand: "restart",
+            readinessTimeoutSeconds: 15,
+            environment: [:]
+        ), 36)
+        XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
+            subcommand: "restart",
+            readinessTimeoutSeconds: 15,
+            environment: ["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS": "30000"]
+        ), 96)
+        XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
+            subcommand: "start",
+            readinessTimeoutSeconds: 15,
+            environment: ["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS": "30000"]
+        ), 90)
+        XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
+            subcommand: "start",
+            readinessTimeoutSeconds: 15,
+            environment: [:]
+        ), 30)
+    }
+
+    func testEnsureDaemonRunningAcceptsDaemonMatchingPinnedClientVersion() {
+        let runtime = FakeDaemonRuntime(
+            daemonVersion: "0.0.40",
+            daemonBuildId: nil,
+            daemonEntryScript: nil,
+            buildIdAfterRestart: ""
+        )
+
+        let result = DaemonManager.ensureDaemonRunningResult(
+            repoRoot: nil,
+            timeoutSeconds: 0,
+            runtime: runtime,
+            callerAssetVersion: nil,
+            clientVersion: "0.0.40"
+        )
+
+        XCTAssertEqual(result, .ready)
+        XCTAssertTrue(runtime.subcommands.isEmpty)
+    }
+}
+
+private final class FakeDaemonSubcommandLauncher: DaemonManager.DaemonSubcommandLauncher {
+    struct Invocation: Equatable {
+        let executable: String
+        let arguments: [String]
+        let timeoutSeconds: TimeInterval
+    }
+
+    private let result: DaemonManager.DaemonSubcommandOutcome
+    private(set) var invocations: [Invocation] = []
+
+    init(result: DaemonManager.DaemonSubcommandOutcome) {
+        self.result = result
+    }
+
+    func launch(
+        executable: String,
+        arguments: [String],
+        environment _: [String: String],
+        timeoutSeconds: TimeInterval
+    ) -> DaemonManager.DaemonSubcommandOutcome {
+        invocations.append(.init(
+            executable: executable,
+            arguments: arguments,
+            timeoutSeconds: timeoutSeconds
+        ))
+        return result
+    }
 }
 
 private final class FakeDaemonRuntime: DaemonRuntime {
@@ -302,7 +594,8 @@ private final class FakeDaemonRuntime: DaemonRuntime {
 
     func runDaemonSubcommand(
         _ subcommand: String,
-        repoRoot: String?
+        repoRoot: String?,
+        timeoutSeconds _: TimeInterval
     )
         -> DaemonManager.DaemonSubcommandOutcome
     {

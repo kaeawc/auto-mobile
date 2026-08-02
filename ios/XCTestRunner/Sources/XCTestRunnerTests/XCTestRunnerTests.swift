@@ -363,7 +363,16 @@ final class XCTestRunnerTests: XCTestCase {
 
     func testDaemonStartupResultReadyIsTheOnlyReadyCase() {
         XCTAssertTrue(DaemonStartupResult.ready.isReady)
-        for result: DaemonStartupResult in [.executableNotFound, .launchFailed, .readinessTimeout, .versionSkew, .assetVersionSkew] {
+        for result: DaemonStartupResult in [
+            .executableNotFound,
+            .packageRunnerNotFound,
+            .launchFailed,
+            .packageLaunchFailed(stderr: "package unavailable"),
+            .launchTimeout,
+            .readinessTimeout,
+            .versionSkew,
+            .assetVersionSkew,
+        ] {
             XCTAssertFalse(result.isReady, "\(result) must not report ready")
         }
     }
@@ -377,6 +386,11 @@ final class XCTestRunnerTests: XCTestCase {
         XCTAssertTrue(notFound.contains("bun add -g"))
 
         XCTAssertTrue(DaemonStartupResult.launchFailed.diagnosticMessage.contains("exited non-zero"))
+        XCTAssertTrue(DaemonStartupResult.packageLaunchFailed(
+            stderr: "package unavailable"
+        ).diagnosticMessage.contains("package unavailable"))
+        XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("bunx"))
+        XCTAssertTrue(DaemonStartupResult.launchTimeout.diagnosticMessage.contains("timed out"))
         XCTAssertTrue(DaemonStartupResult.readinessTimeout.diagnosticMessage.contains("did not"))
         XCTAssertTrue(DaemonStartupResult.versionSkew.diagnosticMessage.contains("different-version"))
         XCTAssertTrue(DaemonStartupResult.assetVersionSkew.diagnosticMessage.contains("AUTOMOBILE_VERSION"))
@@ -384,7 +398,10 @@ final class XCTestRunnerTests: XCTestCase {
         // Each failure reason is distinct so a CI log names the specific cause.
         let messages = [
             DaemonStartupResult.executableNotFound,
+            DaemonStartupResult.packageRunnerNotFound,
             DaemonStartupResult.launchFailed,
+            DaemonStartupResult.packageLaunchFailed(stderr: "package unavailable"),
+            DaemonStartupResult.launchTimeout,
             DaemonStartupResult.readinessTimeout,
             DaemonStartupResult.versionSkew,
             DaemonStartupResult.assetVersionSkew,
@@ -398,7 +415,7 @@ final class XCTestRunnerTests: XCTestCase {
         // A missing CLI and a non-zero launch must map to *distinct* causes, not collapse into one
         // (this is the switch-arm-typo guard the enum-message test can't catch).
         XCTAssertEqual(DaemonManager.startupFailure(for: .executableNotFound), .executableNotFound)
-        XCTAssertEqual(DaemonManager.startupFailure(for: .failed), .launchFailed)
+        XCTAssertEqual(DaemonManager.startupFailure(for: .failed()), .launchFailed)
     }
 
     func testExecutePlanFailureFallsBackToErrorWhenNoFailedStep() throws {

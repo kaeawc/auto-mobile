@@ -98,7 +98,10 @@ enum SimulatorDetection {
 public enum DaemonStartupResult: Equatable {
     case ready
     case executableNotFound
+    case packageRunnerNotFound
     case launchFailed
+    case packageLaunchFailed(stderr: String)
+    case launchTimeout
     case readinessTimeout
     case versionSkew
     case assetVersionSkew
@@ -113,9 +116,18 @@ public enum DaemonStartupResult: Equatable {
             return "Failed to start AutoMobile Daemon: the `auto-mobile` CLI was not found "
                 + "(checked /usr/local/bin, /opt/homebrew/bin, /usr/bin, ~/.bun/bin, ~/.local/bin and PATH). "
                 + "Install it globally (`bun add -g .`) and ensure its bin directory is on PATH."
+        case .packageRunnerNotFound:
+            return "Failed to start AutoMobile Daemon: a pinned daemon requires `bunx` or `npx`, but neither "
+                + "was found on PATH. Install Bun or Node.js with npm/npx, then retry."
         case .launchFailed:
             return "Failed to start AutoMobile Daemon: `auto-mobile --daemon start` exited non-zero. "
                 + "Check the daemon logs."
+        case let .packageLaunchFailed(stderr):
+            return "Failed to start AutoMobile Daemon: the package runner exited non-zero. "
+                + "Package-runner error: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))."
+        case .launchTimeout:
+            return "Failed to start AutoMobile Daemon: the daemon launcher timed out before it completed. "
+                + "Check package-registry connectivity and daemon logs."
         case .readinessTimeout:
             return "Failed to start AutoMobile Daemon: the daemon process launched but its socket did not "
                 + "become ready before the timeout. Check the daemon logs."
@@ -137,7 +149,11 @@ protocol DaemonRuntime {
     func readDaemonAssetVersion() -> String?
     func readDaemonEntryScript() -> String?
     func readDaemonBuildId() -> String?
-    func runDaemonSubcommand(_ subcommand: String, repoRoot: String?) -> DaemonManager.DaemonSubcommandOutcome
+    func runDaemonSubcommand(
+        _ subcommand: String,
+        repoRoot: String?,
+        timeoutSeconds: TimeInterval
+    ) -> DaemonManager.DaemonSubcommandOutcome
     func waitForDaemon(timeoutSeconds: TimeInterval) -> Bool
 }
 
@@ -153,7 +169,96 @@ public enum DaemonManager {
     enum DaemonSubcommandOutcome: Equatable {
         case launched
         case executableNotFound
-        case failed
+        case packageRunnerNotFound
+        case failed(stderr: String? = nil)
+        case packageFailed(stderr: String? = nil)
+        case timedOut
+    }
+
+    enum DaemonLaunch: Equatable {
+        case process(executable: String, arguments: [String])
+        case executableNotFound
+        case packageRunnerNotFound
+    }
+
+    /// Injectable subprocess boundary so launcher timeouts are deterministic in unit tests.
+    protocol DaemonSubcommandLauncher {
+        func launch(
+            executable: String,
+            arguments: [String],
+            environment: [String: String],
+            timeoutSeconds: TimeInterval
+        ) -> DaemonSubcommandOutcome
+    }
+
+    private final class BoundedStandardError {
+        private static let maximumBytes = 4096
+        private let lock = NSLock()
+        private var data = Data()
+        let pipe = Pipe()
+
+        init() {
+            pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                self?.append(handle.availableData)
+            }
+        }
+
+        func text() -> String? {
+            pipe.fileHandleForReading.readabilityHandler = nil
+            append(pipe.fileHandleForReading.readDataToEndOfFile())
+            lock.lock()
+            defer { lock.unlock() }
+            guard !data.isEmpty else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+
+        private func append(_ incoming: Data) {
+            guard !incoming.isEmpty else { return }
+            lock.lock()
+            defer { lock.unlock() }
+            let remaining = Self.maximumBytes - data.count
+            guard remaining > 0 else { return }
+            data.append(incoming.prefix(remaining))
+        }
+
+        deinit {
+            pipe.fileHandleForReading.readabilityHandler = nil
+        }
+    }
+
+    private struct SystemDaemonSubcommandLauncher: DaemonSubcommandLauncher {
+        func launch(
+            executable: String,
+            arguments: [String],
+            environment: [String: String],
+            timeoutSeconds: TimeInterval
+        ) -> DaemonSubcommandOutcome {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = arguments
+            process.environment = environment
+            process.standardOutput = FileHandle.nullDevice
+            let stderr = BoundedStandardError()
+            process.standardError = stderr.pipe
+
+            do {
+                let completion = DispatchSemaphore(value: 0)
+                process.terminationHandler = { _ in completion.signal() }
+                try process.run()
+                PerfTimer.log("runDaemonSubcommand: process launched, waiting for exit")
+                guard completion.wait(timeout: .now() + timeoutSeconds) == .success else {
+                    PerfTimer.log("runDaemonSubcommand: launcher timed out after \(timeoutSeconds)s")
+                    process.terminate()
+                    return .timedOut
+                }
+                let status = process.terminationStatus
+                PerfTimer.log("runDaemonSubcommand: process exited with status \(status)")
+                return status == 0 ? .launched : .failed(stderr: stderr.text())
+            } catch {
+                PerfTimer.log("runDaemonSubcommand: ERROR - failed to run process: \(error)")
+                return .failed(stderr: error.localizedDescription)
+            }
+        }
     }
 
     private struct SystemDaemonRuntime: DaemonRuntime {
@@ -177,8 +282,16 @@ public enum DaemonManager {
             DaemonManager.readDaemonBuildIdFromPidFile()
         }
 
-        func runDaemonSubcommand(_ subcommand: String, repoRoot: String?) -> DaemonSubcommandOutcome {
-            DaemonManager.runDaemonSubcommand(subcommand, repoRoot: repoRoot)
+        func runDaemonSubcommand(
+            _ subcommand: String,
+            repoRoot: String?,
+            timeoutSeconds: TimeInterval
+        ) -> DaemonSubcommandOutcome {
+            DaemonManager.runDaemonSubcommand(
+                subcommand,
+                repoRoot: repoRoot,
+                timeoutSeconds: timeoutSeconds
+            )
         }
 
         func waitForDaemon(timeoutSeconds: TimeInterval) -> Bool {
@@ -246,9 +359,33 @@ public enum DaemonManager {
             return nil
         case .executableNotFound:
             return .executableNotFound
-        case .failed:
+        case .packageRunnerNotFound:
+            return .packageRunnerNotFound
+        case let .failed(stderr):
+            return failureResult(stderr: stderr, packageRunner: false)
+        case let .packageFailed(stderr):
+            return failureResult(stderr: stderr, packageRunner: true)
+        case .timedOut:
+            return .launchTimeout
+        }
+    }
+
+    private static func failureResult(stderr: String?, packageRunner: Bool) -> DaemonStartupResult {
+        guard let stderr = stderr?.trimmingCharacters(in: .whitespacesAndNewlines), !stderr.isEmpty else {
             return .launchFailed
         }
+        if packageRunner {
+            return .packageLaunchFailed(stderr: stderr)
+        }
+        return .launchFailed
+    }
+
+    static func classifyDaemonSubcommandOutcome(
+        _ outcome: DaemonSubcommandOutcome,
+        packageRunner: Bool
+    ) -> DaemonSubcommandOutcome {
+        guard packageRunner, case let .failed(stderr) = outcome else { return outcome }
+        return .packageFailed(stderr: stderr)
     }
 
     /// Restart the daemon in place — used to replace a stale different-build daemon that owns
@@ -258,58 +395,244 @@ public enum DaemonManager {
         return runDaemonSubcommand("restart", repoRoot: repoRoot) == .launched
     }
 
-    static func runDaemonSubcommand(_ subcommand: String, repoRoot: String? = nil) -> DaemonSubcommandOutcome {
+    static func runDaemonSubcommand(
+        _ subcommand: String,
+        repoRoot: String? = nil,
+        timeoutSeconds: TimeInterval = 15,
+        launcher: DaemonSubcommandLauncher = SystemDaemonSubcommandLauncher()
+    ) -> DaemonSubcommandOutcome {
         // When a repo root with a built entrypoint is provided, launch *that* checkout's daemon
         // (`<repoRoot>/dist/src/index.js`) rather than whatever `auto-mobile` is on PATH — so a
         // caller that knows its source build gets a version/build-matched daemon (#2744) instead of
-        // a same-release-but-different-checkout PATH binary. Falls back to the PATH binary otherwise.
-        let executableURL: URL
+        // a same-release-but-different-checkout PATH binary. A concrete package pin takes the
+        // next precedence, and an unpinned launch falls back to the PATH binary.
+        let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot)
+        let localEntry = resolveRepoRootDaemonEntryScript(effectiveRepoRoot)
+        let runtime = findExecutable("bun") ?? findExecutable("node")
+        let launch = selectDaemonLaunch(
+            subcommand: subcommand,
+            localEntry: localEntry,
+            runtime: runtime,
+            packageRunner: findExecutable("bunx") ?? findExecutable("npx"),
+            autoMobilePath: findExecutable("auto-mobile")
+        )
+        let executable: String
         let arguments: [String]
-        if let localEntry = resolveRepoRootDaemonEntryScript(repoRoot),
-           let runtime = findExecutable("bun") ?? findExecutable("node")
-        {
-            PerfTimer.log("runDaemonSubcommand(\(subcommand)): launching local build at \(localEntry)")
-            executableURL = URL(fileURLWithPath: runtime)
-            arguments = [localEntry, "--daemon", subcommand]
+        switch launch {
+        case let .process(launchExecutable, launchArguments):
+            executable = launchExecutable
+            arguments = launchArguments
+        case .executableNotFound:
+            PerfTimer.log("runDaemonSubcommand: ERROR - no compatible daemon executable found")
+            return .executableNotFound
+        case .packageRunnerNotFound:
+            PerfTimer.log("runDaemonSubcommand: ERROR - pinned daemon package runner not found")
+            return .packageRunnerNotFound
+        }
+
+        let hasLocalBuild = localEntry != nil && runtime != nil
+        if hasLocalBuild {
+            PerfTimer.log("runDaemonSubcommand(\(subcommand)): launching local build")
+        } else if resolveDaemonPackageSpecifier(resolveDaemonPackageVersion()) != nil {
+            PerfTimer.log("runDaemonSubcommand(\(subcommand)): launching pinned package")
         } else {
-            PerfTimer.log("runDaemonSubcommand(\(subcommand)): searching for auto-mobile executable")
-            guard let autoMobilePath = findExecutable("auto-mobile") else {
-                PerfTimer.log("runDaemonSubcommand: ERROR - auto-mobile not found in PATH")
-                return .executableNotFound
+            PerfTimer.log("runDaemonSubcommand(\(subcommand)): launching auto-mobile from PATH")
+        }
+
+        let env = daemonLaunchEnvironment(executable: executable)
+        let launcherTimeoutSeconds = daemonLauncherTimeoutSeconds(
+            subcommand: subcommand,
+            readinessTimeoutSeconds: timeoutSeconds
+        )
+        let outcome = executeDaemonLaunch(
+            executable: executable,
+            arguments: arguments,
+            environment: env,
+            timeoutSeconds: launcherTimeoutSeconds,
+            launcher: launcher
+        )
+        return classifyDaemonSubcommandOutcome(
+            outcome,
+            packageRunner: !hasLocalBuild && resolveDaemonPackageSpecifier(resolveDaemonPackageVersion()) != nil
+        )
+    }
+
+    static func daemonLaunchEnvironment(
+        executable: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = environment
+        let existingPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+        let requiredPaths = [
+            URL(fileURLWithPath: executable).deletingLastPathComponent().path,
+            "/usr/bin",
+            "/usr/local/bin",
+        ]
+        environment["PATH"] = (requiredPaths + existingPaths)
+            .reduce(into: [String]()) { paths, path in
+                if !paths.contains(path) { paths.append(path) }
             }
-            PerfTimer.log("runDaemonSubcommand: found auto-mobile at \(autoMobilePath)")
-            executableURL = URL(fileURLWithPath: autoMobilePath)
-            arguments = ["--daemon", subcommand]
+            .joined(separator: ":")
+        return environment
+    }
+
+    static func daemonLauncherTimeoutSeconds(
+        subcommand: String,
+        readinessTimeoutSeconds: TimeInterval,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> TimeInterval {
+        let configuredStartupMilliseconds = Int(environment["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS"] ?? "")
+            ?? Int(environment["AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS"] ?? "")
+            ?? 10_000
+        let startupSeconds = configuredStartupMilliseconds > 0
+            ? TimeInterval(configuredStartupMilliseconds) / 1000
+            : 10
+        // DaemonManager can wait for a lock holder, then make two startup attempts while
+        // recovering an incomplete package extraction, each with the configured startup budget.
+        let startupLifecycleSeconds = 3 * startupSeconds
+        guard subcommand == "restart" else {
+            return max(readinessTimeoutSeconds, startupLifecycleSeconds)
+        }
+        // DaemonManager.restart additionally allows shutdown (5s) and an inter-phase delay (1s).
+        return max(readinessTimeoutSeconds, 6 + startupLifecycleSeconds)
+    }
+
+    static func executeDaemonLaunch(
+        executable: String,
+        arguments: [String],
+        environment: [String: String],
+        timeoutSeconds: TimeInterval,
+        launcher: DaemonSubcommandLauncher
+    ) -> DaemonSubcommandOutcome {
+        PerfTimer.log("runDaemonSubcommand: launching process with args: \(arguments)")
+        return launcher.launch(
+            executable: executable,
+            arguments: arguments,
+            environment: environment,
+            timeoutSeconds: timeoutSeconds
+        )
+    }
+
+    static func selectDaemonLaunch(
+        subcommand: String,
+        localEntry: String?,
+        runtime: String?,
+        packageRunner: String?,
+        autoMobilePath: String?,
+        packageVersion: String? = resolveDaemonPackageVersion()
+    ) -> DaemonLaunch {
+        if let localEntry, let runtime {
+            PerfTimer.log("runDaemonSubcommand(\(subcommand)): launching local build at \(localEntry)")
+            return .process(executable: runtime, arguments: [localEntry, "--daemon", subcommand])
+        }
+        if let packageSpecifier = resolveDaemonPackageSpecifier(packageVersion) {
+            guard let packageRunner else {
+                return .packageRunnerNotFound
+            }
+            return .process(
+                executable: packageRunner,
+                arguments: packageDaemonArguments(
+                    packageRunner: packageRunner,
+                    packageSpecifier: packageSpecifier,
+                    subcommand: subcommand
+                )
+            )
+        }
+        guard let autoMobilePath else {
+            return .executableNotFound
+        }
+        return .process(executable: autoMobilePath, arguments: ["--daemon", subcommand])
+    }
+
+    /// Builds the package-runner arguments for an explicit daemon version pin. `bunx` does not
+    /// require confirmation, while `npx` needs `-y` to keep XCTest runs non-interactive.
+    static func buildPackageDaemonCommand(
+        packageRunner: String,
+        subcommand: String,
+        packageVersion: String? = resolveDaemonPackageVersion()
+    ) -> [String]? {
+        guard let packageSpecifier = resolveDaemonPackageSpecifier(packageVersion) else {
+            return nil
         }
 
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = arguments
+        return packageDaemonArguments(
+            packageRunner: packageRunner,
+            packageSpecifier: packageSpecifier,
+            subcommand: subcommand
+        )
+    }
 
-        // Inherit essential environment variables for device discovery
-        var env = ProcessInfo.processInfo.environment
-        // Ensure PATH includes /usr/bin for xcrun/simctl
-        let currentPath = env["PATH"] ?? ""
-        if !currentPath.contains("/usr/bin") {
-            env["PATH"] = "/usr/bin:/usr/local/bin:\(currentPath)"
+    /// The package version a non-checkout XCTestRunner daemon launch should use. An explicit
+    /// daemon-package pin takes precedence over the shared release pin, matching Android.
+    static func resolveDaemonPackageVersion(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        let explicitPin = environment["AUTOMOBILE_DAEMON_PACKAGE_VERSION"]?
+            .trimmingCharacters(in: .whitespaces)
+        if let explicitPin, !explicitPin.isEmpty {
+            return explicitPin
         }
-        process.environment = env
 
-        PerfTimer.log("runDaemonSubcommand: launching process with args: \(process.arguments ?? [])")
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        let automobileVersion = environment["AUTOMOBILE_VERSION"]?.trimmingCharacters(in: .whitespaces)
+        return automobileVersion?.isEmpty == false ? automobileVersion : nil
+    }
 
-        do {
-            try process.run()
-            PerfTimer.log("runDaemonSubcommand: process launched, waiting for exit")
-            process.waitUntilExit()
-            let status = process.terminationStatus
-            PerfTimer.log("runDaemonSubcommand: process exited with status \(status)")
-            return status == 0 ? .launched : .failed
-        } catch {
-            PerfTimer.log("runDaemonSubcommand: ERROR - failed to run process: \(error)")
-            return .failed
+    private static func resolveDaemonPackageSpecifier(_ packageVersion: String?) -> String? {
+        guard let version = packageVersion?.trimmingCharacters(in: .whitespaces),
+              !version.isEmpty,
+              version.lowercased() != "latest",
+              version.lowercased() != "unknown"
+        else {
+            return nil
         }
+        return "\(packageName)@\(version)"
+    }
+
+    private static func packageDaemonArguments(
+        packageRunner: String,
+        packageSpecifier: String,
+        subcommand: String
+    ) -> [String] {
+        let prefix = URL(fileURLWithPath: packageRunner).deletingPathExtension().lastPathComponent == "npx"
+            ? ["-y"]
+            : []
+        return prefix + [packageSpecifier, "--daemon", subcommand]
+    }
+
+    static func resolveDaemonClientVersion(
+        repoRoot: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot, environment: environment)
+        return resolveDaemonClientVersion(
+            repoRootHasBuiltEntry: resolveRepoRootDaemonEntryScript(effectiveRepoRoot) != nil,
+            environment: environment
+        )
+    }
+
+    /// The checkout used for both daemon launch and the matching client handshake. A caller may
+    /// supply a root explicitly; otherwise XCTestRunner's own source checkout is used when built.
+    static func resolveDaemonRepoRoot(
+        _ repoRoot: String?,
+        inferredRepoRoot: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        repoRoot
+            ?? inferredRepoRoot
+            ?? AutoMobileEnvironment(values: environment).firstNonEmpty(["AUTOMOBILE_REPO_ROOT"])
+            ?? findRepoRoot(startingAt: #filePath)
+    }
+
+    static func resolveDaemonClientVersion(
+        repoRootHasBuiltEntry: Bool,
+        environment: [String: String]
+    ) -> String {
+        guard !repoRootHasBuiltEntry,
+              let packageVersion = resolveDaemonPackageSpecifier(resolveDaemonPackageVersion(environment: environment))
+        else {
+            return AutoMobileVersion.current
+        }
+        return String(packageVersion.dropFirst(packageName.count + 1))
     }
 
     /// The daemon's recorded version from its PID file, trimmed, or nil when absent/unreadable.
@@ -480,10 +803,20 @@ public enum DaemonManager {
         repoRoot: String?,
         timeoutSeconds: TimeInterval,
         runtime: DaemonRuntime,
-        callerAssetVersion: String? = resolveCallerAssetVersionPin()
+        callerAssetVersion: String? = resolveCallerAssetVersionPin(),
+        clientVersion: String? = nil,
+        inferredRepoRoot: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     )
         -> DaemonStartupResult
     {
+        let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot, inferredRepoRoot: inferredRepoRoot)
+        let launcherTimeoutSeconds = daemonLauncherTimeoutSeconds(
+            subcommand: "restart",
+            readinessTimeoutSeconds: timeoutSeconds,
+            environment: environment
+        )
+        let expectedClientVersion = clientVersion ?? resolveDaemonClientVersion(repoRoot: effectiveRepoRoot)
         PerfTimer.log("ensureDaemonRunning: checking isDaemonRunning")
         if runtime.isDaemonRunning() {
             // A stale different-build daemon on the shared socket would reject this runner's
@@ -492,12 +825,12 @@ public enum DaemonManager {
             // also restart a same-release daemon started from a different checkout's entry script.
             let versionSkew = requiresVersionSkewRestart(
                 daemonVersion: runtime.readDaemonVersion(),
-                clientVersion: AutoMobileVersion.current
+                clientVersion: expectedClientVersion
             )
             let buildSkew = requiresRepoRootBuildSkew(
                 daemonBuildId: runtime.readDaemonBuildId(),
                 daemonEntryScript: runtime.readDaemonEntryScript(),
-                repoRoot: repoRoot
+                repoRoot: effectiveRepoRoot
             )
             let assetVersionSkew = requiresAssetVersionPinFailure(
                 daemonAssetVersion: runtime.readDaemonAssetVersion(),
@@ -513,15 +846,20 @@ public enum DaemonManager {
             }
             if versionSkew || buildSkew || assetVersionSkew {
                 PerfTimer.log("ensureDaemonRunning: daemon version/build skew, restarting")
-                if let failure = startupFailure(for: runtime.runDaemonSubcommand("restart", repoRoot: repoRoot)) {
+                if let failure = startupFailure(for: runtime.runDaemonSubcommand(
+                    "restart",
+                    repoRoot: effectiveRepoRoot,
+                    timeoutSeconds: launcherTimeoutSeconds
+                )) {
                     PerfTimer.log("ensureDaemonRunning: restartDaemon failed - \(failure)")
                     return failure
                 }
                 return waitForVersionMatchedDaemon(
-                    repoRoot: repoRoot,
+                    repoRoot: effectiveRepoRoot,
                     timeoutSeconds: timeoutSeconds,
                     runtime: runtime,
-                    callerAssetVersion: callerAssetVersion
+                    callerAssetVersion: callerAssetVersion,
+                    clientVersion: expectedClientVersion
                 )
             }
             PerfTimer.log("ensureDaemonRunning: daemon already running")
@@ -529,16 +867,21 @@ public enum DaemonManager {
         }
 
         PerfTimer.log("ensureDaemonRunning: starting daemon")
-        if let failure = startupFailure(for: runtime.runDaemonSubcommand("start", repoRoot: repoRoot)) {
+        if let failure = startupFailure(for: runtime.runDaemonSubcommand(
+            "start",
+            repoRoot: effectiveRepoRoot,
+            timeoutSeconds: timeoutSeconds
+        )) {
             PerfTimer.log("ensureDaemonRunning: startDaemon failed - \(failure)")
             return failure
         }
 
         return waitForVersionMatchedDaemon(
-            repoRoot: repoRoot,
+            repoRoot: effectiveRepoRoot,
             timeoutSeconds: timeoutSeconds,
             runtime: runtime,
-            callerAssetVersion: callerAssetVersion
+            callerAssetVersion: callerAssetVersion,
+            clientVersion: expectedClientVersion
         )
     }
 
@@ -552,7 +895,8 @@ public enum DaemonManager {
         repoRoot: String?,
         timeoutSeconds: TimeInterval,
         runtime: DaemonRuntime,
-        callerAssetVersion: String?
+        callerAssetVersion: String?,
+        clientVersion: String
     )
         -> DaemonStartupResult
     {
@@ -562,7 +906,7 @@ public enum DaemonManager {
         }
         if requiresVersionSkewRestart(
             daemonVersion: runtime.readDaemonVersion(),
-            clientVersion: AutoMobileVersion.current
+            clientVersion: clientVersion
         ) || requiresRepoRootBuildSkew(
             daemonBuildId: runtime.readDaemonBuildId(),
             daemonEntryScript: runtime.readDaemonEntryScript(),
@@ -680,7 +1024,7 @@ public enum DaemonManager {
             "method": "daemon/releaseSession",
             "params": ["sessionId": sessionId],
             // Declared for the daemon's server-side version handshake gate (#2744).
-            "clientVersion": AutoMobileVersion.current,
+            "clientVersion": resolveDaemonClientVersion(),
         ]
 
         guard let requestData = try? JSONSerialization.data(withJSONObject: request),
@@ -725,7 +1069,7 @@ public enum DaemonManager {
             "method": "daemon/refreshDevices",
             "params": [String: Any](),
             // Declared for the daemon's server-side version handshake gate (#2744).
-            "clientVersion": AutoMobileVersion.current,
+            "clientVersion": resolveDaemonClientVersion(),
         ]
 
         guard let requestData = try? JSONSerialization.data(withJSONObject: request),

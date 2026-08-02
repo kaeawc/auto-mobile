@@ -109,10 +109,11 @@ set `AUTOMOBILE_ALLOW_INSECURE_ASSET_URL=1` to opt back into `http://`.
    `dist/src/index.js`, XCTestRunner starts or restarts that exact checkout's daemon and
    rejects a same-release daemon from a different checkout. Set the variable explicitly
    for an embedding project or CI layout where the runner source cannot identify the
-   checkout. For a package consumer without a built checkout, XCTestRunner falls back to
-   the PATH `auto-mobile` CLI; pin the exact `@kaeawc/auto-mobile@0.0.40` there or start
-   the daemon yourself before the test job. (Embedding a package-version pin in the Swift
-   runner remains tracked by [#2746](https://github.com/kaeawc/auto-mobile/issues/2746).)
+   checkout. For a package consumer without a built checkout, XCTestRunner uses `bunx`
+   (or `npx`) to start the exact `@kaeawc/auto-mobile@0.0.40` package selected by
+   `AUTOMOBILE_VERSION`. Set `AUTOMOBILE_DAEMON_PACKAGE_VERSION` when the daemon pin must
+   intentionally differ from the shared release pin. Without either version variable, it
+   retains the PATH `auto-mobile` CLI fallback.
 2. **Vendor the IPA** so nothing is fetched or compiled at test time:
    ```bash
    export AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH=/opt/automobile/control-proxy.ipa

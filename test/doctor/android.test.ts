@@ -491,6 +491,7 @@ describe("checkConnectedDevices", () => {
     });
 
     expect(result.status).toBe("pass");
+    expect(result.message).toBe("All applicable modern Play-image AVDs meet the 2048 MB memory minimum.");
   });
 
   test("warns when no AVD config can be read", async () => {

@@ -409,7 +409,7 @@ export async function checkAvdMemory(
         recommendation: "Increase hw.ramSize in each affected AVD config.ini and retry.",
       };
     }
-    return { name: "AVD Memory", status: "pass", message: `All AVDs meet the ${MIN_AVD_RAM_MB} MB memory minimum.` };
+    return { name: "AVD Memory", status: "pass", message: `All applicable modern Play-image AVDs meet the ${MIN_AVD_RAM_MB} MB memory minimum.` };
   } catch (error) {
     logger.warn(`AVD memory check failed: ${error instanceof Error ? error.message : String(error)}`);
     return {

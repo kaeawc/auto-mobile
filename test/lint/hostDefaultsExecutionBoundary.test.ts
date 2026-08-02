@@ -19,6 +19,10 @@ export function directlyExecutesHostDefaults(source: string): boolean {
   const ast = executionBoundaryAst(source);
   return ast.calls.some(call => {
     if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
+    if (ast.isRunExecSeam(call)) {
+      return ast.objectPropertyValues(call.arguments[2], "command")
+        .some(value => ast.strings(value).some(text => DEFAULTS_COMMAND.test(text)));
+    }
     const first = call.arguments[0];
     const alternatives = ast.arrayAlternatives(first) ?? [[first]];
     return alternatives.some(([command]) => ast.strings(command).some(value => DEFAULTS_COMMAND.test(value)));
@@ -65,6 +69,9 @@ describe("host defaults execution boundary (issue #4062)", () => {
     expect(directlyExecutesHostDefaults('Bun.spawn(["defaults", "read", "-g", key]);')).toBe(true);
     expect(directlyExecutesHostDefaults('spawn("defaults" as const, ["read", "-g", key]);')).toBe(true);
     expect(directlyExecutesHostDefaults('Bun.spawn(["defaults", "read"] as const);')).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'runExecSeam(cb, opts, { command: "defaults", args: ["read", "-g", key] });'
+    )).toBe(true);
     expect(directlyExecutesHostDefaults('const tool = "defaults"; exec(`${tool} read -g key`);')).toBe(true);
     expect(directlyExecutesHostDefaults(
       'function safe(){ const argv = ["echo"]; Bun.spawn(argv); } function bad(){ const argv = ["defaults", "read"]; Bun.spawn(argv); }'

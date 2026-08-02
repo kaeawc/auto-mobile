@@ -238,7 +238,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       return (initializers.get(node.text) ?? []).some(value => containsCallNamed(value, names, new Set([...seen, node.text])));
     }
     let found = false;
-    ts.forEachChild(node, child => {if (!found && ts.isExpression(child) && containsCallNamed(child, names, seen)) {found = true;}});
+    ts.forEachChild(node, child => {if (!found && containsCallNamed(child as ts.Expression, names, seen)) {found = true;}});
     return found;
   };
 

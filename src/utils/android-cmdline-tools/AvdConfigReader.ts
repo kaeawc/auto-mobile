@@ -72,20 +72,21 @@ export class FileAvdConfigReader implements AvdConfigReader {
     this.existsFn = existsFn ?? ((p: string) => fs.existsSync(p));
 
     const homeDir = process.env.HOME || process.env.USERPROFILE;
-    const androidUserHome = process.env.ANDROID_USER_HOME;
+    const androidUserHome = process.env.ANDROID_USER_HOME || undefined;
+    const avdHomeEnv = process.env.ANDROID_AVD_HOME || undefined;
     const configHome = process.env.ANDROID_EMULATOR_HOME
-      ?? androidUserHome
-      ?? (process.env.ANDROID_SDK_HOME ? path.join(process.env.ANDROID_SDK_HOME, ".android") : undefined)
-      ?? (homeDir ? path.join(homeDir, ".android") : "");
+      || androidUserHome
+      || (process.env.ANDROID_SDK_HOME ? path.join(process.env.ANDROID_SDK_HOME, ".android") : undefined)
+      || (homeDir ? path.join(homeDir, ".android") : "");
     this.avdHome = avdHome
-      ?? process.env.ANDROID_AVD_HOME
+      ?? avdHomeEnv
       ?? path.join(configHome, "avd");
     this.configHome = avdHome
       ? path.dirname(avdHome)
       : (process.env.ANDROID_EMULATOR_HOME
-        ?? androidUserHome
-        ?? (process.env.ANDROID_SDK_HOME ? path.join(process.env.ANDROID_SDK_HOME, ".android") : undefined)
-        ?? (process.env.ANDROID_AVD_HOME ? path.dirname(this.avdHome) : configHome));
+        || androidUserHome
+        || (process.env.ANDROID_SDK_HOME ? path.join(process.env.ANDROID_SDK_HOME, ".android") : undefined)
+        || (avdHomeEnv ? path.dirname(this.avdHome) : configHome));
   }
 
   async readConfig(avdName: string): Promise<AvdConfig | null> {

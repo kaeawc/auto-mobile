@@ -212,6 +212,24 @@ describe("FileAvdConfigReader", () => {
     expect(paths[0]).toBe(path.join("/user-home", "avd", "Play.avd", "config.ini"));
   });
 
+  it("ignores an empty ANDROID_EMULATOR_HOME", async () => {
+    delete process.env.ANDROID_AVD_HOME;
+    process.env.ANDROID_EMULATOR_HOME = "";
+    process.env.ANDROID_USER_HOME = "/user-home";
+    const path = require("path");
+    const expectedConfigPath = path.join("/user-home", "avd", "Play.avd", "config.ini");
+    const reader = new FileAvdConfigReader(
+      async filePath => filePath === expectedConfigPath
+        ? "image.sysdir.1=system-images/android-34/google_apis_playstore/arm64-v8a/"
+        : "",
+      filePath => filePath === expectedConfigPath,
+    );
+
+    const config = await reader.readConfig("Play");
+
+    expect(config?.apiLevel).toBe(34);
+  });
+
   it("resolves an absolute custom path from the AVD registry", async () => {
     const path = require("path");
     const avdHome = path.resolve("fake", "avd");

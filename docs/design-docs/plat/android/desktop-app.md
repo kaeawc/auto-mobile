@@ -110,6 +110,30 @@ graph LR
     class D ext;
 ```
 
+### Unix-daemon session ownership
+
+When the desktop connects to a Unix-socket daemon, `AutoMobileContent` creates one
+`DesktopDaemonSession` for that app run. It generates a UUID once and keeps one
+long-lived `McpDaemonClient` bound to it. Device-aware main-socket tool calls
+automatically carry that UUID (unless a call explicitly supplies another session),
+and the selected device is bound with `setActiveDevice` before authenticated stream
+clients are exposed.
+
+The WebRTC and H.264 stream clients receive the same UUID through their
+`sessionUuidProvider`. This ordering is required because the stream sockets only
+read the daemon session registry; they do not create sessions. On daemon disconnect,
+transport change, or Compose disposal, the holder sends `daemon/releaseSession` once
+so device ownership is reclaimed. While the selected device is bound, the desktop
+sends `daemon/heartbeat` every two seconds; this keeps the daemon's default heartbeat
+lease alive even when the viewer is idle. A failed release is harmless because the
+daemon's normal session-expiry path remains authoritative.
+
+This deliberately gives the desktop exclusive ownership of its selected device while
+it is connected. A concurrent CLI or agent receives the daemon's existing
+"already assigned" error instead of bypassing ownership. Non-Unix transports retain
+their prior behavior, and operators can still use `AUTOMOBILE_DAEMON_STREAM_AUTH=0`
+while migrating older clients.
+
 ### Transport Implementations
 
 | Client | Transport | Session Management | Retry |

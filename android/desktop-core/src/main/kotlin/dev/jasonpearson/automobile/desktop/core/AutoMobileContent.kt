@@ -71,6 +71,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotActions
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotConfigClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotSocketClient
@@ -160,9 +161,17 @@ import dev.jasonpearson.automobile.desktop.core.video.toImageBitmap
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -416,7 +425,7 @@ fun AutoMobileContent(
   notificationHandler: NotificationHandler = NoOpNotificationHandler,
   onOpenSource: ((String, Int, String) -> Unit)? = null,
   menuBarActions: MenuBarActions? = null,
-  videoStreamSourceFactory: () -> VideoStreamSource = { VideoStreamClient() },
+  videoStreamSourceFactory: (() -> VideoStreamSource)? = null,
   /**
    * Opt-in device control for the live layout view (issue #3347). When true, a click on the
    * mirrored device screen in live-layout mode is mapped to a device coordinate and forwarded to
@@ -544,20 +553,6 @@ fun AutoMobileContent(
 
   // Data source mode (Fake/Real) - global toggle for all dashboards
   var dataSourceMode by remember { mutableStateOf(DataSourceMode.Real) }
-  val liveVideoSource =
-    remember(activeDeviceId, dataSourceMode, isLiveLayoutMode) {
-      if (dataSourceMode == DataSourceMode.Real && isLiveLayoutMode && activeDeviceId != null) {
-        videoStreamSourceFactory()
-      } else {
-        null
-      }
-    }
-  val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId, MONOTONIC_NOW_MS)
-  // Forces the control-availability decision to be re-evaluated on a timer, not only when an
-  // observation source produces an update (issue #3348). A stalled observation stream produces
-  // nothing at all — its staleness is visible only as time passing — so without this a frozen
-  // screenshot would stay clickable until some unrelated recomposition happened to run.
-  val controlFreshnessTick = rememberControlFreshnessTick(enableDeviceControl && isLiveLayoutMode)
 
   // Pending failure ID for deep linking from notifications
   var pendingFailureId by remember { mutableStateOf<String?>(null) }
@@ -638,19 +633,52 @@ fun AutoMobileContent(
     }
   }
 
+  // One stable identity and long-lived client per connected Unix daemon. The stream sockets only
+  // read the daemon session registry; they never create or bind a session themselves.
+  val desktopDaemonSession: DesktopDaemonSession? =
+    remember(connectedMcpProcess, dataSourceMode) {
+      val process = connectedMcpProcess
+      if (
+        dataSourceMode == DataSourceMode.Real &&
+          process?.connectionType == McpConnectionType.UnixSocket
+      ) {
+        DesktopDaemonSession.create(process.socketPath ?: DaemonSocketPaths.socketPath())
+      } else {
+        null
+      }
+    }
+
+  val desktopSessionCleanupScope =
+    remember(desktopDaemonSession) {
+      desktopDaemonSession?.let { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+    }
+
+  DisposableEffect(desktopDaemonSession, desktopSessionCleanupScope) {
+    onDispose {
+      if (desktopDaemonSession != null && desktopSessionCleanupScope != null) {
+        desktopSessionCleanupScope.launch {
+          runCatching { desktopDaemonSession.release() }
+            .onFailure { error ->
+              LOG.warn("Failed to release desktop daemon session: ${error.message}")
+            }
+          desktopSessionCleanupScope.cancel()
+        }
+      }
+    }
+  }
+
   // Client provider function for dashboards to access MCP data
   val clientProvider: (() -> AutoMobileClient)? =
-    remember(connectedMcpProcess) {
+    remember(connectedMcpProcess, dataSourceMode, desktopDaemonSession) {
       LOG.info(
         "clientProvider being computed, connectedMcpProcess=${connectedMcpProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}"
       )
       connectedMcpProcess?.let { process ->
         {
           when (process.connectionType) {
-            McpConnectionType.UnixSocket -> {
-              val socketPath = process.socketPath ?: DaemonSocketPaths.socketPath()
-              McpDaemonClient(socketPath)
-            }
+            McpConnectionType.UnixSocket ->
+              desktopDaemonSession?.client
+                ?: McpDaemonClient(process.socketPath ?: DaemonSocketPaths.socketPath())
             McpConnectionType.StreamableHttp -> {
               val port = process.port ?: 3000
               McpHttpClient("http://localhost:$port/auto-mobile/streamable")
@@ -662,6 +690,72 @@ fun AutoMobileContent(
         }
       }
     }
+
+  var desktopSessionBoundDeviceId by
+    remember(desktopDaemonSession) {
+      mutableStateOf<String?>(null)
+    }
+  val desktopSessionBindingMutex = remember(desktopDaemonSession) { Mutex() }
+  val desktopSessionBindingGeneration = remember(desktopDaemonSession) { AtomicLong(0L) }
+  val desktopSessionReady = desktopSessionBoundDeviceId == activeDeviceId && activeDeviceId != null
+
+  LaunchedEffect(desktopDaemonSession, desktopSessionBoundDeviceId) {
+    if (desktopDaemonSession == null || desktopSessionBoundDeviceId == null) return@LaunchedEffect
+    while (isActive) {
+      delay(2_000)
+      runCatching {
+        withContext(Dispatchers.IO) { desktopDaemonSession.heartbeat() }
+      }
+        .onFailure { error ->
+          LOG.warn("Failed to refresh desktop daemon session: ${error.message}")
+        }
+    }
+  }
+
+  // Register and bind the selected device before creating authenticated stream clients. A
+  // stream-socket getSession lookup is read-only, so the main-socket tool call must happen first.
+  LaunchedEffect(dataSourceMode, activeDeviceId, realDevice, clientProvider, desktopDaemonSession) {
+    val bindingGeneration = desktopSessionBindingGeneration.incrementAndGet()
+    val selectedDeviceId = activeDeviceId
+    desktopSessionBoundDeviceId = null
+    if (
+      dataSourceMode != DataSourceMode.Real || selectedDeviceId == null || clientProvider == null
+    ) {
+      return@LaunchedEffect
+    }
+
+    if (desktopDaemonSession == null) {
+      // Non-Unix transports retain their existing behavior; stream auth is a Unix-daemon concern.
+      desktopSessionBoundDeviceId = selectedDeviceId
+      return@LaunchedEffect
+    }
+
+    val platform =
+      if (
+        realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical
+      ) {
+        "ios"
+      } else {
+        "android"
+      }
+    try {
+      // Socket calls are synchronous and cannot be interrupted while a daemon is responding.
+      // Serialize them so a cancelled, stale request cannot overwrite a newer device binding.
+      desktopSessionBindingMutex.withLock {
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+          clientProvider.invoke().setActiveDevice(selectedDeviceId, platform)
+        }
+      }
+      if (desktopSessionBindingGeneration.get() == bindingGeneration) {
+        desktopSessionBoundDeviceId = selectedDeviceId
+      }
+      LOG.info(
+        "Registered desktop daemon session ${desktopDaemonSession.sessionUuid} for device $selectedDeviceId"
+      )
+    } catch (error: Exception) {
+      LOG.warn("Failed to register desktop daemon session for $selectedDeviceId: ${error.message}")
+    }
+  }
 
   // Device snapshots span two transports: the verbs are MCP tool/resource calls, while the
   // retention config is its own Unix socket. Both are null in Fake mode so the dashboard renders
@@ -687,9 +781,41 @@ fun AutoMobileContent(
     remember(clientProvider) { clientProvider?.let { McpVideoRecordingActions(it) } }
   // Screen sharing is daemon-side publishing, so it needs no MCP client -- just the socket.
   val webRtcStreamClient: WebRtcStreamClient? =
-    remember(dataSourceMode) {
-      if (dataSourceMode == DataSourceMode.Real) WebRtcStreamSocketClient() else null
+    remember(dataSourceMode, desktopDaemonSession, desktopSessionReady) {
+      if (
+        dataSourceMode == DataSourceMode.Real &&
+          (desktopDaemonSession == null || desktopSessionReady)
+      ) {
+        WebRtcStreamSocketClient(
+          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+        )
+      } else {
+        null
+      }
     }
+
+  val liveVideoSource =
+    remember(activeDeviceId, dataSourceMode, isLiveLayoutMode, desktopSessionReady) {
+      if (
+        dataSourceMode == DataSourceMode.Real &&
+          isLiveLayoutMode &&
+          activeDeviceId != null &&
+          desktopSessionReady
+      ) {
+        videoStreamSourceFactory?.invoke()
+          ?: VideoStreamClient(
+            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+          )
+      } else {
+        null
+      }
+    }
+  val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId, MONOTONIC_NOW_MS)
+  // Forces the control-availability decision to be re-evaluated on a timer, not only when an
+  // observation source produces an update (issue #3348). A stalled observation stream produces
+  // nothing at all — its staleness is visible only as time passing — so without this a frozen
+  // screenshot would stay clickable until some unrelated recomposition happened to run.
+  val controlFreshnessTick = rememberControlFreshnessTick(enableDeviceControl && isLiveLayoutMode)
 
   // Take-screenshot is driven from both the native menu bar and the in-app menu.
   // Run it on a composition-scoped coroutine (not GlobalScope) so the call and its

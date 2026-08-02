@@ -80,6 +80,9 @@ describe("devicectl execution boundary (issue #4053)", () => {
     expect(directlyExecutesDevicectl(
       'spawnSync("xcrun", ["devicectl", "--version"]);'
     )).toBe(true);
+    expect(directlyExecutesDevicectl(
+      'await this.execFileAsync("xcrun", ["devicectl", "device", "list"]);'
+    )).toBe(true);
   });
 
   test("detects Bun.spawn devicectl launches", () => {

@@ -6,6 +6,7 @@ import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = "src/utils/image/webp/WebpBinaryResolver.ts";
 const BINARY = "(?:cwebp|dwebp|webpmux)";
+const BINARY_COMMAND = new RegExp(`(?:^|[/\\\\\\s])${BINARY}(?:\\s|$)`, "i");
 
 /**
  * A production file "directly executes" a libwebp tool when it launches the
@@ -24,8 +25,11 @@ function directlyExecutesWebp(source: string): boolean {
     if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
     const array = ast.arrayElements(call.arguments[0]);
     const command = array?.[0] ?? call.arguments[0];
-    const values = ast.strings(command).concat(...(array ? array.slice(1) : call.arguments.slice(1)).flatMap(argument => ast.strings(argument)));
-    return values.some(value => new RegExp(BINARY, "i").test(value)) ||
+    const commandValues = ast.strings(command);
+    const shellValues = (array ? array.slice(1) : call.arguments.slice(1)).flatMap(argument => ast.strings(argument));
+    const shellIndex = shellValues.indexOf("-c");
+    const shellCommand = shellIndex >= 0 ? shellValues.slice(shellIndex + 1) : [];
+    return commandValues.some(value => BINARY_COMMAND.test(value)) || shellCommand.some(value => BINARY_COMMAND.test(value)) ||
       ast.containsCallNamed(command, new Set(["resolveCwebp", "resolveDwebp"]));
   });
 }
@@ -93,6 +97,11 @@ describe("webp codec execution boundary (issue #4064)", () => {
     expect(directlyExecutesWebp("const output = await this.binaryResolver.runCwebp(args, pngBuffer);")).toBe(false);
     expect(directlyExecutesWebp('return this.binaryResolver.runDwebp(["-o", "-", "--", "-"], webpBuffer);')).toBe(false);
     expect(directlyExecutesWebp("const binaries = await new WebpBinaryResolver().resolve();")).toBe(false);
+  });
+
+  test("does not mistake codec words in data arguments for execution", () => {
+    expect(directlyExecutesWebp('spawn("echo", ["cwebp"]);')).toBe(false);
+    expect(directlyExecutesWebp('spawn("echo", ["/tmp/cwebp-result.txt"]);')).toBe(false);
   });
 
   test("every documented exception still exists", () => {

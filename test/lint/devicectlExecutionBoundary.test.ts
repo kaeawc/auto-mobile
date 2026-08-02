@@ -36,7 +36,11 @@ function directlyExecutesDevicectl(source: string): boolean {
     const array = ast.arrayElements(call.arguments[0]);
     const command = array?.[0] ?? call.arguments[0];
     const args = array ? array.slice(1) : call.arguments.slice(1);
-    return ast.strings(command).includes("xcrun") && args.some(argument => ast.strings(argument).includes("devicectl"));
+    const commandValues = ast.strings(command);
+    const xcrun = commandValues.some(value => /(?:^|[/\\])xcrun$/.test(value));
+    const directDevicectl = commandValues.some(value => /(?:^|[/\\])devicectl$/.test(value));
+    const shellDevicectl = commandValues.some(value => /(?:^|\s)xcrun\s+devicectl(?:\s|$)/.test(value));
+    return shellDevicectl || directDevicectl || xcrun && args.some(argument => ast.strings(argument).includes("devicectl"));
   });
 }
 
@@ -81,6 +85,12 @@ describe("devicectl execution boundary (issue #4053)", () => {
     expect(directlyExecutesDevicectl(
       'Bun.spawn(["xcrun", "devicectl", "device", "info", "processes"]);'
     )).toBe(true);
+  });
+
+  test("detects shell, direct-binary, and absolute xcrun devicectl forms", () => {
+    expect(directlyExecutesDevicectl('exec("xcrun devicectl device list");')).toBe(true);
+    expect(directlyExecutesDevicectl('execFile("devicectl", ["--version"]);')).toBe(true);
+    expect(directlyExecutesDevicectl('spawn("/usr/bin/xcrun", ["devicectl", "device", "list"]);')).toBe(true);
   });
 
   test("detects INDIRECT devicectl launches through the repo exec seam", () => {

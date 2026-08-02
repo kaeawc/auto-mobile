@@ -105,7 +105,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (ts.isTemplateExpression(node)) {return [node.head.text, ...node.templateSpans.map(span => span.literal.text)];}
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
       const left = strings(node.left, seen); const right = strings(node.right, seen);
-      return left.length === 1 && right.length === 1 ? [left[0] + right[0]] : [...left, ...right];
+      return left.length === 1 && right.length === 1 ? [left[0] + right[0]] : [];
     }
     if (ts.isArrayLiteralExpression(node)) {return node.elements.flatMap(element => ts.isExpression(element) ? strings(element, seen) : []);}
     if (ts.isObjectLiteralExpression(node)) {

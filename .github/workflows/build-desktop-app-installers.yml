@@ -180,9 +180,18 @@ jobs:
           xcrun stapler validate "$APP"
 
       # Assemble the DMG now that the app-image is stapled. Compose's packageDmg
-      # runs jpackage with `--app-image <the createDistributable output>`, so it
-      # wraps the already-stapled app rather than rebuilding it (createDistributable
-      # stays up-to-date — stapling touched its output, not its inputs).
+      # runs jpackage with `--app-image <the createDistributable output>` — verified
+      # in the generated packageDmg.args.txt — so it consumes the stapled app-image.
+      # Two facts verified locally against Compose 1.11.1 (unsigned):
+      #   - Gradle leaves createDistributable UP-TO-DATE when packageDmg runs in a
+      #     later invocation, even though the staple mutated its output dir, so the
+      #     stapled app-image is reused, not rebuilt.
+      #   - jpackage nonetheless RE-SIGNS the app image while wrapping it (codesign
+      #     --force). Stapling is signature-safe (the ticket does not change the
+      #     cdhash), so a same-identity re-sign preserves the notarization, but this
+      #     is the one link that cannot be exercised without real signing/notary
+      #     creds — the "Verify stapled app in DMG" step below is the authoritative
+      #     release-time check that the ticket actually survived into the DMG.
       - name: "Assemble DMG"
         if: matrix.platform == 'macos'
         uses: ./.github/actions/gradle-task-run

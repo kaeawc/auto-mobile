@@ -34,7 +34,7 @@ function propertyNameOf(name: ts.PropertyName): string | undefined {
 function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {
   let current = expression;
   while (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) ||
-    ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
+    ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current) || ts.isParenthesizedExpression(current)) {
     current = current.expression;
   }
   return current;
@@ -139,7 +139,6 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (!node) {return [];}
     node = unwrapTransparentExpression(node);
     if (ts.isStringLiteralLike(node)) {return [node.text];}
-    if (ts.isParenthesizedExpression(node)) {return strings(node.expression, seen);}
     if (ts.isNoSubstitutionTemplateLiteral(node)) {return [node.text];}
     if (ts.isTaggedTemplateExpression(node) && ts.isPropertyAccessExpression(node.tag) &&
       ts.isIdentifier(node.tag.expression) && node.tag.expression.text === "String" && node.tag.name.text === "raw") {

@@ -62,6 +62,7 @@ import {
   type ScreenshotMetadata,
   type ScreenshotPerformanceMetadata,
 } from "../ScreenshotMetadata";
+import { fallbackReasonForCtrlProxyFailure } from "./screenshotFallbackReason";
 import {
   normalizeAnr,
   normalizeCrash,
@@ -959,6 +960,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private a11yScreenshotSupported: boolean | null = null;
   private a11yScreenshotFailures: number = 0;
   private static readonly A11Y_SCREENSHOT_MAX_FAILURES = 3;
+  // Minimum interval between accessibility takeScreenshot() requests. The platform rate-limits
+  // calls below its floor (~333ms, ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT); 350ms sits just
+  // above it so a front-loaded backoff burst or an animation's restart storm cannot trip the
+  // limit into needless ADB-screencap fallover (issue #4927).
+  private static readonly A11Y_SCREENSHOT_MIN_INTERVAL_MS = 350;
 
   // Work profile monitor for polling profiles without accessibility service
   private workProfileMonitor: WorkProfileMonitor | null = null;
@@ -3141,6 +3147,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             const server = getDeviceDataStreamServer();
             return server?.getScreenshotIntervalMsForDevice(this.device.deviceId) ?? 3000;
           },
+          minCaptureIntervalMs: AndroidCtrlProxyClient.A11Y_SCREENSHOT_MIN_INTERVAL_MS,
         },
         this.timer,
         () => {
@@ -3196,7 +3203,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             `${this.a11yScreenshotFailures} consecutive failures, falling back to ADB screencap`);
           this.a11yScreenshotSupported = false;
         }
-        return this.captureScreenshotViaAdb(this.fallbackReasonForCtrlProxyFailure(result.error));
+        return this.captureScreenshotViaAdb(fallbackReasonForCtrlProxyFailure(result.error));
       }
 
       this.a11yScreenshotFailures = 0;
@@ -3219,10 +3226,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     } finally {
       this.screenshotObservationStreamSuppressions.delete(requestId);
     }
-  }
-
-  private fallbackReasonForCtrlProxyFailure(error?: string): ScreenshotFallbackReason {
-    return error === "Screenshot timeout" ? "ctrlproxy_timeout" : "ctrlproxy_failed";
   }
 
   /**

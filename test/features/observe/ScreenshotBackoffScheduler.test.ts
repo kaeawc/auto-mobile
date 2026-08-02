@@ -716,3 +716,90 @@ describe("DefaultScreenshotBackoffScheduler", () => {
     });
   });
 });
+
+describe("DefaultScreenshotBackoffScheduler minCaptureIntervalMs throttle", () => {
+  // The Android accessibility takeScreenshot() API rate-limits calls below a platform floor.
+  // With minCaptureIntervalMs set, the scheduler must never issue two captures closer than the
+  // floor — no matter how dense the burst intervals are or how often the sequence restarts.
+  const FLOOR = 350;
+
+  function makeThrottledScheduler(fakeTimer: FakeTimer, captureTimes: number[]) {
+    return new DefaultScreenshotBackoffScheduler(
+      async () => {
+        captureTimes.push(fakeTimer.now());
+        return { success: true, data: `frame-${captureTimes.length}` };
+      },
+      () => {},
+      {
+        intervals: [0, 100, 300, 500, 800, 1300],
+        keepAliveIntervalMs: null,
+        minCaptureIntervalMs: FLOOR,
+      },
+      fakeTimer
+    );
+  }
+
+  function assertNeverBelowFloor(captureTimes: number[]) {
+    for (let i = 1; i < captureTimes.length; i++) {
+      expect(captureTimes[i] - captureTimes[i - 1]).toBeGreaterThanOrEqual(FLOOR);
+    }
+  }
+
+  it("never captures two frames closer than the floor across a single front-loaded burst", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeThrottledScheduler(fakeTimer, captureTimes);
+
+    scheduler.startBackoffSequence();
+    for (let t = 0; t < 2000; t += 50) {
+      await fakeTimer.advanceTimersByTimeAsync(50);
+    }
+
+    expect(captureTimes.length).toBeGreaterThanOrEqual(2);
+    expect(captureTimes[0]).toBe(0); // leading edge fires immediately
+    assertNeverBelowFloor(captureTimes);
+  });
+
+  it("holds the floor through a restart storm and still captures the settled frame", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeThrottledScheduler(fakeTimer, captureTimes);
+
+    // Simulate an animation: a new hierarchy every 50ms restarts the sequence for ~1s.
+    for (let t = 0; t < 1000; t += 50) {
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(50);
+    }
+    // Let the trailing (settle) capture land after the storm ends.
+    for (let t = 0; t < 800; t += 50) {
+      await fakeTimer.advanceTimersByTimeAsync(50);
+    }
+
+    expect(captureTimes.length).toBeGreaterThanOrEqual(2); // liveness during the storm
+    assertNeverBelowFloor(captureTimes);
+    // A capture must land at/after the last restart so the settled UI is not dropped.
+    expect(Math.max(...captureTimes)).toBeGreaterThanOrEqual(950);
+  });
+
+  it("does not throttle when the floor is unset (default behavior preserved)", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = new DefaultScreenshotBackoffScheduler(
+      async () => {
+        captureTimes.push(fakeTimer.now());
+        return { success: true, data: `frame-${captureTimes.length}` };
+      },
+      () => {},
+      { intervals: [0, 100, 300, 500, 800, 1300], keepAliveIntervalMs: null },
+      fakeTimer
+    );
+
+    scheduler.startBackoffSequence();
+    for (let t = 0; t < 1400; t += 50) {
+      await fakeTimer.advanceTimersByTimeAsync(50);
+    }
+
+    // All six front-loaded intervals fire, including sub-floor gaps (100ms, 200ms).
+    expect(captureTimes).toEqual([0, 100, 300, 500, 800, 1300]);
+  });
+});

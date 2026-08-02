@@ -25,6 +25,7 @@ const OWNER = "src/utils/ios-cmdline-tools/DeviceAppManager.ts";
  * cannot hide a literal xcrun/devicectl call behind that indirection.
  */
 function directlyExecutesDevicectl(source: string): boolean {
+  if (!source.includes("devicectl") || !/(?:spawn|exec|execute|Bun)/i.test(source)) {return false;}
   const ast = executionBoundaryAst(source);
   return ast.calls.some(call => {
     if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
@@ -108,6 +109,9 @@ describe("devicectl execution boundary (issue #4053)", () => {
     expect(directlyExecutesDevicectl(
       'const run = runExecSeam; run(cb, opts, { command: "xcrun", args: ["devicectl", "--version"] });'
     )).toBe(true);
+    expect(directlyExecutesDevicectl(
+      'let run; run = executeCommand; run("xcrun", ["devicectl", "--version"]);'
+    )).toBe(true);
   });
 
   test("detects injected execute seams while ignoring sibling tools and comments", () => {
@@ -130,6 +134,16 @@ describe("devicectl execution boundary (issue #4053)", () => {
     expect(directlyExecutesDevicectl(
       "// route physical-device app queries through devicectl behind DeviceAppManager"
     )).toBe(false);
+  });
+
+  test("does not treat unrelated execute methods as a process seam", () => {
+    expect(directlyExecutesDevicectl('db.execute("xcrun", ["devicectl"]);')).toBe(false);
+    expect(directlyExecutesDevicectl('this.processExecutor.execute("xcrun", ["devicectl"]);')).toBe(true);
+  });
+
+  test("detects a static shell prefix without joining across dynamic values", () => {
+    expect(directlyExecutesDevicectl('exec("xcrun devicectl device list " + udid);')).toBe(true);
+    expect(directlyExecutesDevicectl('exec("xcrun devi" + suffix + "cectl");')).toBe(false);
   });
 
   test("every documented exception still exists", () => {

@@ -6,6 +6,7 @@ export const PROCESS_LAUNCHERS = new Set([
 ]);
 const CHILD_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
 const INJECTED_LAUNCHERS = new Set(["spawn", "spawnSync"]);
+const DYNAMIC_BOUNDARY = "\u0000";
 
 export interface ExecutionBoundaryAst {
   readonly calls: readonly ts.CallExpression[];
@@ -32,7 +33,6 @@ function propertyName(expression: ts.Expression): string | undefined {
 export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const sourceFile = ts.createSourceFile("execution-boundary.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const initializers = new Map<string, ts.Expression[]>();
-  const declarations: ts.VariableDeclaration[] = [];
   const calls: ts.CallExpression[] = [];
   const launcherAliases = new Set(PROCESS_LAUNCHERS);
   const executionSeamAliases = new Set(["executeCommand", "runExecSeam", "execute"]);
@@ -51,7 +51,6 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       }
     }
     if (ts.isVariableDeclaration(node)) {
-      declarations.push(node);
       if (ts.isIdentifier(node.name) && node.initializer) {bind(node.name.text, node.initializer);}
       if (ts.isObjectBindingPattern(node.name)) {
         for (const element of node.name.elements) {
@@ -61,6 +60,12 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
             launcherAliases.add(element.name.text);
           }
         }
+      }
+      if (ts.isIdentifier(node.name) && node.initializer && ts.isCallExpression(node.initializer) &&
+        ts.isIdentifier(node.initializer.expression) && node.initializer.expression.text === "require" &&
+        node.initializer.arguments.length === 1 && ts.isStringLiteral(node.initializer.arguments[0]) &&
+        CHILD_PROCESS_MODULES.has(node.initializer.arguments[0].text)) {
+        childProcessNamespaces.add(node.name.text);
       }
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(node.left)) {
@@ -78,21 +83,22 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     (ts.isPropertyAccessExpression(node) && PROCESS_LAUNCHERS.has(node.name.text) &&
       ts.isIdentifier(node.expression) && childProcessNamespaces.has(node.expression.text)) ||
     isPromisifiedLauncher(node);
+  const isExecutionSeamReference = (node: ts.Expression): boolean =>
+    (ts.isIdentifier(node) && executionSeamAliases.has(node.text)) ||
+    (ts.isPropertyAccessExpression(node) && (
+      node.name.text === "executeCommand" || node.name.text === "runExecSeam" ||
+      (node.name.text === "execute" && (node.expression.kind === ts.SyntaxKind.ThisKeyword ||
+        /(?:executor|host|process)/i.test(node.expression.getText(sourceFile))))
+    ));
   let changed = true;
   while (changed) {
     changed = false;
-    for (const declaration of declarations) {
-      if (ts.isIdentifier(declaration.name) && declaration.initializer &&
-        isLauncherReference(declaration.initializer) && !launcherAliases.has(declaration.name.text)) {
-        launcherAliases.add(declaration.name.text);
-        changed = true;
+    for (const [name, values] of initializers) {
+      if (!launcherAliases.has(name) && values.some(isLauncherReference)) {
+        launcherAliases.add(name); changed = true;
       }
-      if (ts.isIdentifier(declaration.name) && declaration.initializer &&
-        ((ts.isIdentifier(declaration.initializer) && executionSeamAliases.has(declaration.initializer.text)) ||
-          (ts.isPropertyAccessExpression(declaration.initializer) && executionSeamAliases.has(declaration.initializer.name.text))) &&
-        !executionSeamAliases.has(declaration.name.text)) {
-        executionSeamAliases.add(declaration.name.text);
-        changed = true;
+      if (!executionSeamAliases.has(name) && values.some(isExecutionSeamReference)) {
+        executionSeamAliases.add(name); changed = true;
       }
     }
   }
@@ -105,7 +111,10 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (ts.isTemplateExpression(node)) {return [node.head.text, ...node.templateSpans.map(span => span.literal.text)];}
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
       const left = strings(node.left, seen); const right = strings(node.right, seen);
-      return left.length === 1 && right.length === 1 ? [left[0] + right[0]] : [];
+      const staticLeft = left.length === 1 && !left[0].includes(DYNAMIC_BOUNDARY);
+      const staticRight = right.length === 1 && !right[0].includes(DYNAMIC_BOUNDARY);
+      if (staticLeft && staticRight) {return [left[0] + right[0]];}
+      return [...left, DYNAMIC_BOUNDARY, ...right];
     }
     if (ts.isArrayLiteralExpression(node)) {return node.elements.flatMap(element => ts.isExpression(element) ? strings(element, seen) : []);}
     if (ts.isObjectLiteralExpression(node)) {
@@ -152,10 +161,11 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     isLauncher: call => (ts.isIdentifier(call.expression) && launcherAliases.has(call.expression.text)) ||
       (ts.isPropertyAccessExpression(call.expression) &&
         ((ts.isIdentifier(call.expression.expression) && childProcessNamespaces.has(call.expression.expression.text) && PROCESS_LAUNCHERS.has(call.expression.name.text)) ||
+          ["execFile", "execFileSync", "execFileAsync"].includes(call.expression.name.text) ||
           INJECTED_LAUNCHERS.has(call.expression.name.text) ||
           (ts.isIdentifier(call.expression.expression) && call.expression.expression.text === "Bun" &&
             ["spawn", "spawnSync"].includes(call.expression.name.text)))),
-    isExecutionSeam: call => executionSeamAliases.has(propertyName(call.expression) ?? ""),
+    isExecutionSeam: call => isExecutionSeamReference(call.expression),
     strings,
     arrayElements,
     containsCallNamed,

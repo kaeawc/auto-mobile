@@ -6,7 +6,7 @@ import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = "src/utils/image/webp/WebpBinaryResolver.ts";
 const BINARY = "(?:cwebp|dwebp|webpmux)";
-const BINARY_COMMAND = new RegExp(`(?:^|[/\\\\\\s])${BINARY}(?:\\s|$)`, "i");
+const BINARY_COMMAND = new RegExp(`(?:^|[/\\\\\\s])${BINARY}(?:\\.exe)?(?:\\s|$)`, "i");
 
 /**
  * A production file "directly executes" a libwebp tool when it launches the
@@ -20,6 +20,7 @@ const BINARY_COMMAND = new RegExp(`(?:^|[/\\\\\\s])${BINARY}(?:\\s|$)`, "i");
  * resolver return path rather than matching raw source text.
  */
 function directlyExecutesWebp(source: string): boolean {
+  if (!/(?:cwebp|dwebp|webpmux)/i.test(source) || !/(?:spawn|exec|execute|Bun)/i.test(source)) {return false;}
   const ast = executionBoundaryAst(source);
   return ast.calls.some(call => {
     if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
@@ -84,6 +85,7 @@ describe("webp codec execution boundary (issue #4064)", () => {
     expect(directlyExecutesWebp(
       'const binary = "cwebp"; const launch = spawn; launch(binary, ["-o", "-"]);'
     )).toBe(true);
+    expect(directlyExecutesWebp('spawn("C:\\\\tools\\\\cwebp.exe", args);')).toBe(true);
   });
 
   test("flags shell-string and *Sync launcher evasions", () => {
@@ -102,6 +104,11 @@ describe("webp codec execution boundary (issue #4064)", () => {
   test("does not mistake codec words in data arguments for execution", () => {
     expect(directlyExecutesWebp('spawn("echo", ["cwebp"]);')).toBe(false);
     expect(directlyExecutesWebp('spawn("echo", ["/tmp/cwebp-result.txt"]);')).toBe(false);
+  });
+
+  test("detects a static shell prefix without joining across dynamic values", () => {
+    expect(directlyExecutesWebp('exec("cwebp -o - " + input);')).toBe(true);
+    expect(directlyExecutesWebp('exec("cwe" + suffix + "bp -o -");')).toBe(false);
   });
 
   test("every documented exception still exists", () => {

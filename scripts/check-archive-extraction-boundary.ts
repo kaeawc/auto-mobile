@@ -25,6 +25,7 @@ const LAUNCHER_NAMES = new Set([
   "execFile",
   "execFileSync",
   "executeCommand",
+  "runExecSeam",
 ]);
 
 // An extract flag token: `--extract`/`--get`, or a single-dash bundle containing `x` (`-x`, `-xf`,
@@ -66,6 +67,10 @@ export function directlyExtractsTar(source: string): boolean {
   const sharedAst = executionBoundaryAst(source);
   if (sharedAst.calls.some(call => {
     if (!sharedAst.isLauncher(call) && !sharedAst.isExecutionSeam(call)) {return false;}
+    if (sharedAst.calleeName(call) === "runExecSeam" || call.arguments.length >= 3) {
+      const values = sharedAst.strings(call.arguments[2]);
+      return values.includes("tar") && values.some(value => EXTRACT_FLAG.test(value));
+    }
     const array = sharedAst.arrayElements(call.arguments[0]);
     const command = array?.[0] ?? call.arguments[0];
     const args = array ? array.slice(1) : call.arguments.slice(1);

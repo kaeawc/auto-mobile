@@ -14,6 +14,7 @@ const OWNER = "src/utils/HostDefaultsClient.ts";
  * argument leaves those SimCtlClient paths untouched.
  */
 export function directlyExecutesHostDefaults(source: string): boolean {
+  if (!source.includes("defaults") || !/(?:spawn|exec|execute|Bun)/i.test(source)) {return false;}
   const ast = executionBoundaryAst(source);
   return ast.calls.some(call => {
     if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
@@ -82,6 +83,12 @@ describe("host defaults execution boundary (issue #4062)", () => {
     expect(directlyExecutesHostDefaults(
       'const { execFile: run } = childProcess; run("defaults", ["read"]);'
     )).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'let run; run = execFile; run("defaults", ["read"]);'
+    )).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'const cp = require("node:child_process"); cp.execFile("defaults", ["read"]);'
+    )).toBe(true);
   });
 
   test("does not flag simulator defaults routed through a simctl argv", () => {
@@ -91,6 +98,11 @@ describe("host defaults execution boundary (issue #4062)", () => {
 
   test("does not mistake unrelated methods named exec for process launchers", () => {
     expect(directlyExecutesHostDefaults('const matcher = /defaults/; matcher.exec("defaults");')).toBe(false);
+  });
+
+  test("detects a static shell prefix without joining across dynamic values", () => {
+    expect(directlyExecutesHostDefaults('exec("defaults read -g " + key);')).toBe(true);
+    expect(directlyExecutesHostDefaults('exec("defau" + key + "lts read");')).toBe(false);
   });
 
   test("every documented exception still exists", () => {

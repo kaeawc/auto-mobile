@@ -4,6 +4,7 @@ import {
   type DeviceTimestampResult,
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../src/models";
+import type { AdbDeviceState } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 /**
  * Fake implementation of AdbExecutor for testing
@@ -31,6 +32,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   private deviceLock: DeviceLockState | null = null;
   private deviceLockSequence: (DeviceLockState | null)[] | null = null;
   private devices: BootedDevice[] = [];
+  private deviceStates: AdbDeviceState[] = [];
   private users: AndroidUser[] = [{ userId: 0, name: "Owner", flags: 13, running: true }];
   private foregroundApp: { packageName: string; userId: number } | null = null;
   private deviceTimestampMs: number | null = null;
@@ -107,6 +109,10 @@ export class FakeAdbExecutor implements AdbExecutor {
    */
   setDevices(devices: BootedDevice[]): void {
     this.devices = devices;
+  }
+
+  setDeviceStates(states: AdbDeviceState[]): void {
+    this.deviceStates = states;
   }
 
   /**
@@ -277,6 +283,10 @@ export class FakeAdbExecutor implements AdbExecutor {
 
   async getBootedAndroidDevices(): Promise<BootedDevice[]> {
     return this.devices;
+  }
+
+  async getDeviceStates(): Promise<AdbDeviceState[]> {
+    return this.deviceStates;
   }
 
   async isScreenOn(): Promise<boolean> {

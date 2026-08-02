@@ -11,6 +11,7 @@ import {
 import {
   AdbExecutor,
   type AdbExecuteOptions,
+  type AdbDeviceState,
   type AdbProcess,
   type AdbSpawnOptions,
   type DeviceTimestampResult,
@@ -992,6 +993,43 @@ export class AdbClient implements AdbExecutor {
     cache.set("devices", devices);
 
     return devices;
+  }
+
+  /**
+   * List raw ADB states without applying the online-only filter used by
+   * getBootedAndroidDevices(). Readiness diagnostics use this to distinguish a
+   * device that is absent from one that is present but stuck offline.
+   */
+  async getDeviceStates(): Promise<AdbDeviceState[]> {
+    if (this.shouldSkipMissingAdbProbe()) {
+      return [];
+    }
+
+    let result: ExecResult;
+    try {
+      result = await this.executeCommand(
+        "devices -l",
+        AdbClient.DEVICE_LIST_TIMEOUT_MS,
+        undefined,
+        true
+      );
+    } catch (error) {
+      if (this.isMissingExecutableError(error)) {
+        // Preserve the diagnostic path while treating an unavailable ADB as no connected devices.
+        logger.debug(`[ADB] Unable to query device states because adb is unavailable: ${(error as Error).message}`);
+        this.recordMissingAdbProbe();
+        return [];
+      }
+      throw error;
+    }
+
+    return result.stdout
+      .split("\n")
+      .slice(1)
+      .flatMap(line => {
+        const [deviceId, state] = line.trim().split(/\s+/);
+        return deviceId && state ? [{ deviceId, state }] : [];
+      });
   }
 
   /**

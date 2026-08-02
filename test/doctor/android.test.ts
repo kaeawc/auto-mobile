@@ -6,6 +6,7 @@ import {
   checkAdbInstallation,
   checkAdbVersion,
   checkConnectedDevices,
+  checkAvdMemory,
 } from "../../src/doctor/checks/android";
 import { tmpdir } from "node:os";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
@@ -67,6 +68,41 @@ describe("Android doctor command line tools check", () => {
 
     expect(result.status).toBe("pass");
     expect(result.message).toContain("detected");
+  });
+
+  test("warns when cmdline-tools is below the supported SDK XML version", async () => {
+    const location = {
+      path: "/Users/test/Library/Android/sdk/cmdline-tools/latest",
+      source: "android_sdk_root" as const,
+      available_tools: ["avdmanager", "sdkmanager"],
+    };
+    const result = await checkAndroidCommandLineTools({}, {
+      ...baseDependencies,
+      detectAndroidCommandLineTools: async () => [location],
+      getBestAndroidToolsLocation: () => location,
+      getCmdlineToolsVersion: async () => "8.0",
+    });
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("outdated");
+    expect(result.message).toContain("8.0");
+  });
+
+  test("passes when cmdline-tools meets the supported SDK XML version", async () => {
+    const location = {
+      path: "/Users/test/Library/Android/sdk/cmdline-tools/latest",
+      source: "android_sdk_root" as const,
+      available_tools: ["avdmanager", "sdkmanager"],
+    };
+    const result = await checkAndroidCommandLineTools({}, {
+      ...baseDependencies,
+      detectAndroidCommandLineTools: async () => [location],
+      getBestAndroidToolsLocation: () => location,
+      getCmdlineToolsVersion: async () => "13.0",
+    });
+
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("13.0");
   });
 });
 
@@ -264,6 +300,7 @@ describe("checkAdbVersion", () => {
     expect(result.status).toBe("warn");
     expect(result.message).toContain("raw string error");
   });
+
 });
 
 describe("checkConnectedDevices", () => {
@@ -357,5 +394,120 @@ describe("checkConnectedDevices", () => {
     expect(result.status).toBe("warn");
     expect(result.message).toContain("unexpected failure");
     expect(result.value).toBe(0);
+  });
+
+  test("warns when adb reports an offline device", async () => {
+    const fakeFactory: AdbClientFactory = {
+      create: () => ({
+        getDeviceStates: async () => [{ deviceId: "emulator-5554", state: "offline" }],
+        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
+        getBootedAndroidDevices: async () => [],
+        isScreenOn: async () => true,
+        getWakefulness: async () => "Awake" as const,
+        listUsers: async () => [],
+        getForegroundApp: async () => null,
+      }),
+    };
+
+    const result = await checkConnectedDevices(fakeFactory);
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("offline");
+    expect(result.message).toContain("emulator-5554");
+  });
+
+  test("gives physical offline devices USB recovery guidance", async () => {
+    const fakeFactory: AdbClientFactory = {
+      create: () => ({
+        getDeviceStates: async () => [{ deviceId: "R5CT12345", state: "offline" }],
+        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
+        getBootedAndroidDevices: async () => [],
+        isScreenOn: async () => true,
+        getWakefulness: async () => "Awake" as const,
+        listUsers: async () => [],
+        getForegroundApp: async () => null,
+      }),
+    };
+
+    const result = await checkConnectedDevices(fakeFactory);
+    expect(result.recommendation).toContain("USB debugging");
+  });
+
+  test("passes healthy devices even when adb also reports a stale offline device", async () => {
+    const fakeFactory: AdbClientFactory = {
+      create: () => ({
+        getDeviceStates: async () => [{ deviceId: "emulator-5554", state: "offline" }],
+        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
+        getBootedAndroidDevices: async () => [{ name: "Pixel", platform: "android", deviceId: "emulator-5556" }],
+        isScreenOn: async () => true,
+        getWakefulness: async () => "Awake" as const,
+        listUsers: async () => [],
+        getForegroundApp: async () => null,
+      }),
+    };
+
+    const result = await checkConnectedDevices(fakeFactory);
+    expect(result.status).toBe("pass");
+    expect(result.value).toBe(1);
+    expect(result.message).toContain("emulator-5556");
+  });
+
+  test("keeps healthy devices when the auxiliary offline-state probe fails", async () => {
+    const fakeFactory: AdbClientFactory = {
+      create: () => ({
+        getDeviceStates: async () => { throw new Error("adb state probe unavailable"); },
+        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
+        getBootedAndroidDevices: async () => [{ name: "Pixel", platform: "android", deviceId: "emulator-5556" }],
+        isScreenOn: async () => true,
+        getWakefulness: async () => "Awake" as const,
+        listUsers: async () => [],
+        getForegroundApp: async () => null,
+      }),
+    };
+
+    const result = await checkConnectedDevices(fakeFactory);
+    expect(result.status).toBe("pass");
+    expect(result.value).toBe(1);
+  });
+
+  test("warns when an AVD has too little configured RAM", async () => {
+    const result = await checkAvdMemory({
+      listAvds: async () => [{ name: "Tiny" }],
+      readAvdConfig: { readConfig: async () => ({ ramSizeMb: 1024 }) },
+    });
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("Tiny");
+    expect(result.message).toContain("2048 MB");
+  });
+
+  test("warns when no AVD config can be read", async () => {
+    const result = await checkAvdMemory({
+      listAvds: async () => [{ name: "Missing" }],
+      readAvdConfig: { readConfig: async () => null },
+    });
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("Could not read");
+  });
+
+  test("warns when any AVD memory configuration is unverifiable", async () => {
+    const result = await checkAvdMemory({
+      listAvds: async () => [{ name: "Verified" }, { name: "Missing" }],
+      readAvdConfig: { readConfig: async name => name === "Verified" ? { ramSizeMb: 4096 } : null },
+    });
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("Missing");
+    expect(result.message).not.toContain("All AVDs meet");
+  });
+
+  test("skips when AVDs cannot be listed", async () => {
+    const result = await checkAvdMemory({
+      listAvds: async () => { throw new Error("emulator unavailable"); },
+      readAvdConfig: { readConfig: async () => null },
+    });
+
+    expect(result.status).toBe("skip");
+    expect(result.message).toContain("emulator unavailable");
   });
 });

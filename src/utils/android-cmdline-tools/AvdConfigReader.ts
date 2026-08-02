@@ -1,5 +1,8 @@
 import { logger } from "../logger";
 
+/** Minimum guest memory required by modern Play Store system images. */
+export const MIN_AVD_RAM_MB = 2048;
+
 /**
  * Parsed AVD configuration from config.ini
  */
@@ -9,6 +12,8 @@ export interface AvdConfig {
   screenWidth?: number;
   screenHeight?: number;
   screenDensity?: number;
+  /** Configured guest memory in megabytes. */
+  ramSizeMb?: number;
   deviceName?: string;
   tag?: string;
 }
@@ -112,6 +117,12 @@ export function parseAvdConfig(content: string): AvdConfig {
 
   const density = props.get("hw.lcd.density");
   if (density) {config.screenDensity = Number.parseInt(density, 10) || undefined;}
+
+  const ramSize = props.get("hw.ramSize");
+  if (ramSize) {
+    const parsedRamSize = Number.parseInt(ramSize, 10);
+    if (Number.isFinite(parsedRamSize)) {config.ramSizeMb = parsedRamSize;}
+  }
 
   // Device name (form factor hint)
   const deviceName = props.get("hw.device.name");

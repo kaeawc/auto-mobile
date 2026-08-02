@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { join } from "node:path";
-import { SdkManagerClient } from "../../../src/utils/android-cmdline-tools/SdkManagerClient";
+import { readSdkManagerVersion, SdkManagerClient } from "../../../src/utils/android-cmdline-tools/SdkManagerClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 class FakeChild {
@@ -81,6 +81,38 @@ describe("SdkManagerClient", () => {
       args: ["--list"],
       options: expect.objectContaining({ shell: false }),
     }]);
+  });
+
+  test("reads the sdkmanager version through the same argv boundary", async () => {
+    const { client, child, spawns } = createClient();
+    const pending = client.getVersion();
+    await settleSpawn();
+    child.stdoutText("13.0\n");
+    child.close(0);
+
+    await expect(pending).resolves.toMatchObject({ stdout: "13.0\n", exitCode: 0 });
+    expect(spawns[0]?.args).toEqual(["--version"]);
+    expect(spawns[0]?.options).toEqual(expect.objectContaining({ shell: false }));
+  });
+
+  test("probes sdkmanager from a cmdline-tools-only bootstrap SDK", async () => {
+    const { client, child, spawns } = createClient({
+      existsSync: path => {
+        const normalized = path.replaceAll("\\", "/");
+        return normalized.endsWith("/sdkmanager") || normalized === "/sdk";
+      },
+    });
+    const pending = client.getVersion();
+    await settleSpawn();
+    child.stdoutText("13.0\n");
+    child.close(0);
+
+    await expect(pending).resolves.toMatchObject({ stdout: "13.0\n", exitCode: 0 });
+    expect(spawns[0]?.command.replaceAll("\\", "/")).toBe("/sdk/cmdline-tools/latest/bin/sdkmanager");
+  });
+
+  test("does not treat a failed sdkmanager probe diagnostic as a version", async () => {
+    await expect(readSdkManagerVersion({ getVersion: async () => ({ stdout: "", stderr: "Requires Java 17", exitCode: 1, outputTruncated: false }) })).resolves.toBeNull();
   });
 
   test("does not truncate the sdkmanager catalogue by default", async () => {

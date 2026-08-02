@@ -261,6 +261,47 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     expect(error.message).toContain("userdata");
   });
 
+  test("rejects with sandbox guidance when mprotect/HVF failure is reported", async () => {
+    const fakeChild = createFakeChildProcess();
+    const spawnFn = ((_cmd: string, _args: string[]) => {
+      process.nextTick(() => {
+        fakeChild.stderr!.emit("data", Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\nhvf is not enabled on this aarch64 host\n"));
+        fakeChild.emit("exit", 1);
+      });
+      return fakeChild;
+    }) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> =>
+      args.join(" ").includes("-list-avds") ? createExecResult("Pixel_9_Pro\n") : createExecResult("");
+
+    fakeTimer.enableAutoAdvance();
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
+
+    const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
+    expect(error.message).toContain("hypervisor");
+    expect(error.message).toContain("sandbox");
+    expect(error.message).toContain("Suggestion");
+  });
+
+  test("retains a late sandbox error for the readiness waiter", async () => {
+    const fakeChild = createFakeChildProcess();
+    const spawnFn = ((_cmd: string, _args: string[]) => fakeChild) as any;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> =>
+      args.join(" ").includes("-list-avds") ? createExecResult("Pixel_9_Pro\n") : createExecResult("");
+
+    fakeTimer.enableAutoAdvance();
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
+
+    const process = await client.startEmulator("Pixel_9_Pro");
+    expect(process).toBe(fakeChild);
+    fakeChild.stderr!.emit("data", Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"));
+
+    const error = await expectRejection(client.waitForEmulatorReady("Pixel_9_Pro", 60_000, fakeChild));
+    expect(error.message).toContain("hypervisor");
+    expect(error.message).toContain("sandbox");
+  });
+
   test("returns null (not a fabricated handle) when the spawn exits with 'Running multiple emulators with the same AVD'", async () => {
     const fakeChild = createFakeChildProcess();
 

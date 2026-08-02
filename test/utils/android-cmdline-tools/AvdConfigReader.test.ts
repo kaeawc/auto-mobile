@@ -33,6 +33,15 @@ describe("parseAvdConfig", () => {
     expect(config.tag).toBe("google_apis");
   });
 
+  it("parses the configured RAM size in megabytes", () => {
+    const config = parseAvdConfig("hw.ramSize=1536\n");
+    expect(config.ramSizeMb).toBe(1536);
+  });
+
+  it("preserves a zero RAM value so the launch preflight can reject it", () => {
+    expect(parseAvdConfig("hw.ramSize=0\n").ramSizeMb).toBe(0);
+  });
+
   it("handles unknown API level gracefully", () => {
     const content = "image.sysdir.1=system-images/android-99/google_apis/arm64-v8a/";
     const config = parseAvdConfig(content);

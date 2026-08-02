@@ -102,6 +102,14 @@ export class SdkManagerClient {
     }, options);
   }
 
+  /** Return the installed sdkmanager command-line tools version. */
+  async getVersion(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {
+    return this.run(["--version"], {
+      timeoutMs: LOCAL_COMMAND_TIMEOUT_MS,
+      maxStdoutChars: 1_024,
+    }, options, true);
+  }
+
   async acceptLicenses(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {
     return this.run(["--licenses"], { input: "y\n".repeat(20), timeoutMs: LOCAL_COMMAND_TIMEOUT_MS }, options);
   }
@@ -117,12 +125,13 @@ export class SdkManagerClient {
     args: string[],
     defaultsForCommand: { input?: string; timeoutMs: number; maxStdoutChars?: number },
     options: SdkManagerExecutionOptions,
+    allowBootstrapRoot = false,
   ): Promise<SdkManagerCommandResult> {
-    const { path, env } = await this.resolve();
+    const { path, env } = await this.resolve(allowBootstrapRoot);
     return this.execute(path, args, { ...defaultsForCommand, env }, options);
   }
 
-  private async resolve(): Promise<{ path: string; env: NodeJS.ProcessEnv }> {
+  private async resolve(allowBootstrapRoot = false): Promise<{ path: string; env: NodeJS.ProcessEnv }> {
     const locations = await this.dependencies.detectAndroidCommandLineTools();
     const location = this.dependencies.getBestAndroidToolsLocation(locations);
     if (!location) {
@@ -133,7 +142,7 @@ export class SdkManagerClient {
       throw new Error(`Missing required tools: ${validation.missing.join(", ")}. Tool installation functionality has been removed. Install Android SDK Command-line Tools under ANDROID_HOME/cmdline-tools/latest.`);
     }
     const path = this.resolveExecutable(location);
-    const sdkRoot = this.resolveSdkRoot(location);
+    const sdkRoot = this.resolveSdkRoot(location) ?? (allowBootstrapRoot ? this.stripCmdlineToolsPath(location.path) : undefined);
     if (!sdkRoot) {
       throw new Error(`Unable to resolve the Android SDK root for sdkmanager at ${path}. Set ANDROID_HOME or ANDROID_SDK_ROOT to the SDK root containing platforms or system-images.`);
     }
@@ -264,4 +273,13 @@ export class SdkManagerClient {
     const command = `"${[quoteForWindowsCmd(path), ...args.map(quoteForWindowsCmd)].join(" ")}"`;
     return { command: environment.ComSpec ?? environment.COMSPEC ?? "cmd.exe", args: ["/d", "/v:off", "/s", "/c", command] };
   }
+}
+
+/** Read and normalize the installed sdkmanager version for diagnostics. */
+export async function readSdkManagerVersion(
+  client: Pick<SdkManagerClient, "getVersion"> = new SdkManagerClient(),
+): Promise<string | null> {
+  const result = await client.getVersion();
+  if (result.exitCode !== 0) {return null;}
+  return result.stdout.match(/\b(\d+(?:\.\d+){0,2})\b/)?.[1] ?? null;
 }

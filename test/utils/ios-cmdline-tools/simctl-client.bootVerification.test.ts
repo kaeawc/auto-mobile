@@ -224,6 +224,24 @@ describe("SimCtlClient boot self-verification", () => {
     expect(commandTimeouts(harness, `xcrun simctl shutdown ${UDID}`)).toEqual([true]);
   });
 
+  test("caps the complete retry sequence at the caller timeout", async () => {
+    const harness = createHarness({ maxAttempts: 3, retryBackoffMs: 10_000 });
+    const boot = harness.simctl.startSimulator(UDID, 5000).then(
+      () => null,
+      (error: unknown) => error
+    );
+
+    // Set up the first retry before advancing fake time so its deadline starts at zero.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const error = await harness.timer.resolvePromise(boot);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(harness.timer.now()).toBe(5000);
+    expect(harness.timer.getSleepHistory()).toEqual([5000]);
+    expect(bootstatusCalls(harness.calls).length).toBe(1);
+    expect(shutdownCalls(harness.calls).length).toBe(1);
+  });
+
   test("stops after the bounded attempt count and reports the observed state", async () => {
     const harness = createHarness({ maxAttempts: 3, retryBackoffMs: 25 });
 
@@ -282,8 +300,8 @@ describe("SimCtlClient boot self-verification", () => {
     expect(device.deviceId).toBe(UDID);
     expect(bootstatusCalls(harness.calls).length).toBe(2);
     expect(shutdownCalls(harness.calls).length).toBe(1);
-    expect(commandTimeouts(harness, `xcrun simctl bootstatus ${UDID} -b`).slice(0, 2)).toEqual([true, true]);
-    expect(commandTimeouts(harness, "xcrun simctl list devices --json").slice(0, 2)).toEqual([true, true]);
+    expect(commandTimeouts(harness, `xcrun simctl bootstatus ${UDID} -b`)).toEqual([true, true]);
+    expect(commandTimeouts(harness, "xcrun simctl list devices --json")).toEqual([true, true, true]);
   });
 
   test("waitForSimulatorReady rejects a wedged boot instead of returning a device", async () => {

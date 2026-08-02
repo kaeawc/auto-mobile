@@ -1128,7 +1128,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }
         const versionCode = info.versionCode;
         if (!this.contentHashProvider) {
-          this.contentHashProvider = createContentHashProvider(this.device);
+          // Use the injected executor so tests with a fake adb never launch real
+          // `adb`, and custom production executors aren't bypassed (#4984).
+          this.contentHashProvider = createContentHashProvider(this.device, this.adb);
         }
         const contentHash = await this.contentHashProvider.resolveContentHash(this.device, appId, versionCode);
         // Discard if a package change invalidated this app while we were resolving —

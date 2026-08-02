@@ -7,7 +7,7 @@ import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor
 import { GetAppMetadata, type IosAppMetadataSource } from "../features/observe/GetAppMetadata";
 import { hashAppBundle } from "./ios-cmdline-tools/AppBundleHasher";
 import { DefaultChecksumCalculator, type ChecksumCalculator } from "./ChecksumCalculator";
-import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
+import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import { toActionableError } from "../models/ActionableError";
 import { logger } from "./logger";
 
@@ -247,17 +247,21 @@ export class IosBundleContentHasher implements AppContentHasher {
 
 /**
  * Build a caching content-hash provider for a device, picking the platform hasher.
+ *
+ * The Android hasher runs on the supplied `AdbExecutor` — callers MUST pass their
+ * injected executor (e.g. a CtrlProxy client's `this.adb`) so tests with a fake adb
+ * never launch a real `adb` subprocess and custom production executors aren't
+ * bypassed. Defaults to the real factory only when no executor is given.
  */
 export function createContentHashProvider(
   device: BootedDevice,
-  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  adb: AdbExecutor = defaultAdbClientFactory.create(device),
   iosSource: IosAppMetadataSource | null = null
 ): ContentHashProvider {
   if (device.platform === "android") {
-    return new CachingContentHashProvider(
-      new AndroidApkContentHasher(adbFactory.create(device))
-    );
+    return new CachingContentHashProvider(new AndroidApkContentHasher(adb));
   }
-  const metadata = new GetAppMetadata(device, adbFactory, iosSource);
+  // iOS resolves the bundle path via iosSource (adb is unused for iOS metadata).
+  const metadata = new GetAppMetadata(device, defaultAdbClientFactory, iosSource);
   return new CachingContentHashProvider(new IosBundleContentHasher(metadata));
 }

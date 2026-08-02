@@ -1306,6 +1306,8 @@ describe("AndroidCtrlProxyClient", function() {
 
         expect(pkgInfoSpy).toHaveBeenCalled();
         expect(pkgInfoSpy.mock.calls[0][0]).toBe("com.example.nosdk");
+        // Content hashing runs on the INJECTED fake adb, never a real subprocess.
+        expect(fakeAdb.wasCommandExecuted("pm path")).toBe(true);
       } finally {
         pkgInfoSpy.mockRestore();
         await testClient.close();

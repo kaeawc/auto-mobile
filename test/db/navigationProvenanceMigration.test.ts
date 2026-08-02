@@ -108,6 +108,22 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
     expect(edgeObs[0].last_seen_at).toBe(150);
   });
 
+  test("backfill normalizes inverted legacy node bounds (first_seen > last_seen)", async () => {
+    await db.insertInto("navigation_apps").values({ app_id: "com.example.app", updated_at: "2026-01-01T00:00:00.000Z" }).execute();
+    // Legacy getOrCreateNode replaced last_seen_at unconditionally, so an out-of-order
+    // commit could leave first_seen_at (200) > last_seen_at (100).
+    await db
+      .insertInto("navigation_nodes")
+      .values({ app_id: "com.example.app", screen_name: "Home", first_seen_at: 200, last_seen_at: 100, visit_count: 2 })
+      .execute();
+
+    await provenanceUp(db as unknown as Kysely<unknown>);
+
+    const obs = await db.selectFrom("navigation_node_observations").selectAll().executeTakeFirstOrThrow();
+    expect(obs.first_seen_at).toBe(100);
+    expect(obs.last_seen_at).toBe(200);
+  });
+
   test("up() is idempotent / retry-safe (re-running does not violate UNIQUE)", async () => {
     // SqliteAdapter is non-transactional-DDL, so a failed backfill reruns up() from
     // the top on restart. Re-running must not throw a duplicate-key error, and must

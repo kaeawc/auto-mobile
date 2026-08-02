@@ -128,10 +128,15 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     SELECT app_id, 0, '' FROM navigation_apps
   `.execute(db);
 
+  // Normalize with min/max: legacy getOrCreateNode replaced last_seen_at
+  // unconditionally, so out-of-order commits could leave first_seen_at > last_seen_at
+  // on existing rows. Copying those verbatim would carry the inversion into the
+  // observation window (the runtime upserts only keep FUTURE writes monotonic).
   await sql`
     INSERT OR IGNORE INTO navigation_node_observations
       (node_id, build_key_id, device_id, session_uuid, first_seen_at, last_seen_at)
-    SELECT n.id, bk.id, 'legacy', 'legacy', n.first_seen_at, n.last_seen_at
+    SELECT n.id, bk.id, 'legacy', 'legacy',
+      min(n.first_seen_at, n.last_seen_at), max(n.first_seen_at, n.last_seen_at)
     FROM navigation_nodes n
     JOIN navigation_build_keys bk
       ON bk.app_id = n.app_id AND bk.version_code = 0 AND bk.content_hash = ''

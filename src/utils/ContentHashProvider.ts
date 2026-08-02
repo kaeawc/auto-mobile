@@ -50,6 +50,10 @@ export interface AppContentHasher {
  */
 export class CachingContentHashProvider implements ContentHashProvider {
   private readonly cache = new Map<string, string>();
+  // Per-(device,package) generation, bumped by invalidate(). A computeHash that
+  // started before an invalidate must NOT repopulate the cache with a stale hash,
+  // so a result is only cached when the generation is unchanged since it began.
+  private readonly generation = new Map<string, number>();
 
   constructor(private readonly hasher: AppContentHasher) {}
 
@@ -63,9 +67,15 @@ export class CachingContentHashProvider implements ContentHashProvider {
     if (cached !== undefined) {
       return cached;
     }
+    const genKey = `${device.deviceId}::${packageId}`;
+    const startGeneration = this.generation.get(genKey) ?? 0;
     try {
       const hash = await this.hasher.computeHash(device, packageId, versionCode);
-      this.cache.set(key, hash);
+      // Only cache if the package wasn't invalidated (updated/reinstalled) while
+      // this computation was in flight — otherwise the entry would be stale.
+      if ((this.generation.get(genKey) ?? 0) === startGeneration) {
+        this.cache.set(key, hash);
+      }
       return hash;
     } catch (error) {
       // Best-effort: log and fall back to the default build key (never hard-fail).
@@ -75,7 +85,9 @@ export class CachingContentHashProvider implements ContentHashProvider {
   }
 
   invalidate(deviceId: string, packageId: string): void {
-    const prefix = `${deviceId}::${packageId}::`;
+    const genKey = `${deviceId}::${packageId}`;
+    this.generation.set(genKey, (this.generation.get(genKey) ?? 0) + 1);
+    const prefix = `${genKey}::`;
     for (const key of this.cache.keys()) {
       if (key.startsWith(prefix)) {
         this.cache.delete(key);

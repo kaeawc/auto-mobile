@@ -132,6 +132,33 @@ describe("CachingContentHashProvider", () => {
     await provider.resolveContentHash(fakeDevice("emu-1"), "com.other.app", 5);
     expect(hasher.calls).toHaveLength(5);
   });
+
+  test("an in-flight resolution started before invalidate does not repopulate the cache", async () => {
+    // Interleave: start resolve (blocks), invalidate, then let the old computation
+    // finish — it must NOT poison the cache with the pre-update hash.
+    let release: (value: string) => void = () => {};
+    let computeCalls = 0;
+    const hasher: AppContentHasher = {
+      async computeHash() {
+        computeCalls += 1;
+        if (computeCalls === 1) {
+          return new Promise<string>(resolve => { release = resolve; });
+        }
+        return "sha256:FRESH";
+      },
+    } as unknown as AppContentHasher;
+    const provider = new CachingContentHashProvider(hasher);
+
+    const pending = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    provider.invalidate("emu-1", "com.example.app"); // package updated mid-flight
+    release("sha256:STALE");
+    expect(await pending).toBe("sha256:STALE"); // returned to its caller, but not cached
+
+    // A fresh resolution recomputes instead of serving the stale value from cache.
+    const result = await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    expect(result).toBe("sha256:FRESH");
+    expect(computeCalls).toBe(2);
+  });
 });
 
 describe("parsePmPathOutput", () => {

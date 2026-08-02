@@ -36,7 +36,7 @@ import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
-import { NavigationGraphManager, NavigationEvent } from "../../navigation/NavigationGraphManager";
+import { NavigationGraphManager, NavigationEvent, type NavigationBuildContext } from "../../navigation/NavigationGraphManager";
 import { createContentHashProvider, type ContentHashProvider } from "../../../utils/ContentHashProvider";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
@@ -907,10 +907,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private boundSessionId: string | null = null;
 
   // Build/device provenance (#4984): lazily-built content-hash provider (cached by
-  // (deviceId, packageId, versionCode)) and the set of app ids whose build context
-  // resolution has already been kicked off, so we resolve once per install.
+  // (deviceId, packageId, versionCode)), the resolved build context per app (kept on
+  // the per-device client so it survives session rebinds and is re-applied to the
+  // current session's manager on every event), the set of apps whose resolution is
+  // in flight, and a per-app generation bumped on package changes so a resolution
+  // that started before an update can't apply a stale build.
   private contentHashProvider: ContentHashProvider | null = null;
-  private buildContextResolvedApps: Set<string> = new Set();
+  private resolvedBuildContexts: Map<string, NavigationBuildContext> = new Map();
+  private buildContextInFlight: Set<string> = new Set();
+  private buildContextGeneration: Map<string, number> = new Map();
 
   // Hierarchy caching (accessed by delegates via context)
   private cachedHierarchy: CachedHierarchy | null = null;
@@ -1091,17 +1096,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
-   * Eagerly resolve the build/device provenance context for an app and set it on
-   * the session's navigation manager (#4984). Non-blocking and idempotent: the
-   * content hash resolves once per install (cached), so a nav event that arrives
-   * before it lands records under the default build key. Only sets a full build
-   * context once a real content hash is available.
+   * Ensure the build/device provenance context for an app is applied to the CURRENT
+   * session's navigation manager (#4984). Non-blocking.
+   *
+   * Re-applies an already-resolved context on every event: the per-device client
+   * outlives session rebinds, so a context resolved under session A must still be
+   * set on session B's fresh manager. Otherwise it kicks off a one-in-flight
+   * resolution; a nav event arriving before it lands records under the default key.
    */
   private ensureBuildContext(appId: string): void {
-    if (this.buildContextResolvedApps.has(appId)) {
+    const resolved = this.resolvedBuildContexts.get(appId);
+    if (resolved) {
+      this.getNavigationGraphManager().setBuildContext(resolved);
       return;
     }
-    this.buildContextResolvedApps.add(appId);
+    if (this.buildContextInFlight.has(appId)) {
+      return;
+    }
+    this.buildContextInFlight.add(appId);
+    const startGeneration = this.buildContextGeneration.get(appId) ?? 0;
 
     const resolve = async (): Promise<void> => {
       try {
@@ -1111,22 +1124,29 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           this.contentHashProvider = createContentHashProvider(this.device);
         }
         const contentHash = await this.contentHashProvider.resolveContentHash(this.device, appId, versionCode);
-        if (contentHash === null) {
-          // Unresolved hash: leave the default build key in effect and retry on a
-          // later event (drop the memo so ensureBuildContext runs again).
-          this.buildContextResolvedApps.delete(appId);
+        // Discard if a package change invalidated this app while we were resolving —
+        // applying now would stamp observations with the pre-update build's hash.
+        if ((this.buildContextGeneration.get(appId) ?? 0) !== startGeneration) {
           return;
         }
-        this.getNavigationGraphManager().setBuildContext({
+        if (contentHash === null) {
+          // Unresolved hash: leave the default build key; a later event retries.
+          return;
+        }
+        const context: NavigationBuildContext = {
           appId,
           deviceId: this.device.deviceId,
           versionCode,
           contentHash,
-        });
+        };
+        this.resolvedBuildContexts.set(appId, context);
+        this.getNavigationGraphManager().setBuildContext(context);
       } catch (error) {
-        // Best-effort provenance: log and let mutations fall back to the default key.
-        this.buildContextResolvedApps.delete(appId);
-        logger.debug(`[CTRL_PROXY] Build-context resolution failed for ${appId}: ${error}`);
+        // Best-effort provenance: log at warn (unexpected failure of a diagnostic
+        // path per CLAUDE.md) and let mutations fall back to the default key.
+        logger.warn(`[CTRL_PROXY] Build-context resolution failed for ${appId}: ${error}`);
+      } finally {
+        this.buildContextInFlight.delete(appId);
       }
     };
 
@@ -1134,6 +1154,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // so it is NOT enlisted in the DB-write shutdown barrier. Errors are handled
     // inside resolve().
     void resolve();
+  }
+
+  /**
+   * Invalidate all cached build/content-hash provenance for an app (#4984), so its
+   * next nav event re-resolves the hash. Called on a package add/replace/remove — a
+   * rebuild+reinstall (including same-versionCode/different-content) must not keep
+   * recording against the old build. Bumps the generation so an in-flight resolution
+   * that started before the change is discarded rather than applying a stale build.
+   */
+  private invalidateBuildContext(appId: string): void {
+    this.buildContextGeneration.set(appId, (this.buildContextGeneration.get(appId) ?? 0) + 1);
+    this.resolvedBuildContexts.delete(appId);
+    this.contentHashProvider?.invalidate(this.device.deviceId, appId);
+    this.getNavigationGraphManager().clearBuildContext(appId);
   }
 
   /**
@@ -3390,13 +3424,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const repo = this.getInstalledAppsRepository();
 
     // Invalidate cached build/content-hash provenance for this package (#4984) so the
-    // next nav event re-resolves the hash. A rebuild+reinstall — INCLUDING the
-    // same-versionCode/different-content daily-dev case — must not keep recording
-    // against the previous build's hash. Clears the re-lookup guard, the provider's
-    // (device,package) cache across all versionCodes, and the manager's context.
-    this.buildContextResolvedApps.delete(event.packageName);
-    this.contentHashProvider?.invalidate(deviceId, event.packageName);
-    this.getNavigationGraphManager().clearBuildContext(event.packageName);
+    // next nav event re-resolves the hash. Fires for every action (add/replace/remove)
+    // — a rebuild+reinstall, INCLUDING the same-versionCode/different-content daily-dev
+    // case, must not keep recording against the previous build's hash.
+    this.invalidateBuildContext(event.packageName);
 
     try {
       if (event.action === "removed") {

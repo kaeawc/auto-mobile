@@ -108,6 +108,19 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
     expect(edgeObs[0].last_seen_at).toBe(150);
   });
 
+  test("up() is idempotent / retry-safe (re-running does not violate UNIQUE)", async () => {
+    // SqliteAdapter is non-transactional-DDL, so a failed backfill reruns up() from
+    // the top on restart. Re-running must not throw a duplicate-key error, and must
+    // not duplicate the backfilled rows.
+    await seedLegacyGraph();
+    await provenanceUp(db as unknown as Kysely<unknown>);
+    await provenanceUp(db as unknown as Kysely<unknown>); // rerun
+
+    expect(await db.selectFrom("navigation_build_keys").selectAll().execute()).toHaveLength(1);
+    expect(await db.selectFrom("navigation_node_observations").selectAll().execute()).toHaveLength(2);
+    expect(await db.selectFrom("navigation_edge_observations").selectAll().execute()).toHaveLength(1);
+  });
+
   test("down() drops the provenance tables", async () => {
     await provenanceUp(db as unknown as Kysely<unknown>);
     await provenanceDown(db as unknown as Kysely<unknown>);

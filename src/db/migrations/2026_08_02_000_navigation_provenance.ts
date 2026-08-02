@@ -118,13 +118,18 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 
   // --- Backfill (AC4): one DEFAULT build key per app, one observation per row. ---
+  // Kysely's SqliteAdapter reports supportsTransactionalDdl = false, so this up()
+  // is NOT wrapped in a transaction. If a later statement fails after an earlier
+  // insert, the migration is not recorded and reruns from the top — so every
+  // backfill uses INSERT OR IGNORE (safe against its UNIQUE index) to stay
+  // idempotent and retry-safe rather than wedging on a duplicate-key violation.
   await sql`
-    INSERT INTO navigation_build_keys (app_id, version_code, content_hash)
+    INSERT OR IGNORE INTO navigation_build_keys (app_id, version_code, content_hash)
     SELECT app_id, 0, '' FROM navigation_apps
   `.execute(db);
 
   await sql`
-    INSERT INTO navigation_node_observations
+    INSERT OR IGNORE INTO navigation_node_observations
       (node_id, build_key_id, device_id, session_uuid, first_seen_at, last_seen_at)
     SELECT n.id, bk.id, 'legacy', 'legacy', n.first_seen_at, n.last_seen_at
     FROM navigation_nodes n
@@ -133,7 +138,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
 
   await sql`
-    INSERT INTO navigation_edge_observations
+    INSERT OR IGNORE INTO navigation_edge_observations
       (edge_id, build_key_id, device_id, session_uuid, first_seen_at, last_seen_at)
     SELECT e.id, bk.id, 'legacy', 'legacy', e.timestamp, e.timestamp
     FROM navigation_edges e

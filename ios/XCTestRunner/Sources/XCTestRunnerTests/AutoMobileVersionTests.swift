@@ -165,6 +165,30 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertNil(DaemonManager.resolveDaemonPackageVersion(environment: [:]))
     }
 
+    func testResolveDaemonPackageVersionNormalizesSharedLatestSentinel() {
+        XCTAssertEqual(DaemonManager.resolveDaemonPackageVersion(environment: [
+            "AUTOMOBILE_VERSION": "LATEST",
+        ]), AutoMobileVersion.current)
+        XCTAssertEqual(DaemonManager.resolveDaemonPackageVersion(environment: [
+            "AUTOMOBILE_DAEMON_PACKAGE_VERSION": "latest",
+            "AUTOMOBILE_VERSION": "0.0.40",
+        ]), "latest")
+
+        XCTAssertEqual(DaemonManager.selectDaemonLaunch(
+            subcommand: "start",
+            localEntry: nil,
+            runtime: nil,
+            packageRunner: "/opt/homebrew/bin/bunx",
+            autoMobilePath: "/usr/local/bin/auto-mobile",
+            packageVersion: DaemonManager.resolveDaemonPackageVersion(environment: [
+                "AUTOMOBILE_VERSION": "latest",
+            ])
+        ), .process(
+            executable: "/opt/homebrew/bin/bunx",
+            arguments: ["@kaeawc/auto-mobile@\(AutoMobileVersion.current)", "--daemon", "start"]
+        ))
+    }
+
     func testPinnedDaemonPackageCommandRejectsFloatingOrUnknownPins() {
         for packageVersion in ["latest", "unknown", "next", "0.0.x", "^0.0.40", "~0.0.40", ">=0.0.40"] {
             XCTAssertNil(DaemonManager.buildPackageDaemonCommand(

@@ -70,7 +70,10 @@ jobs:
           - os: macos-latest
             platform: macos
             format: dmg
-            gradle-task: ":desktop-app:packageDmg"
+            # Build only the signed app-image here; the DMG is assembled later,
+            # after the app-image is notarized and stapled, so the app bundle
+            # inside the shipped DMG carries its own notarization ticket (#4955).
+            gradle-task: ":desktop-app:createDistributable"
           - os: windows-latest
             platform: windows
             format: msi
@@ -153,6 +156,46 @@ jobs:
           chmod 600 "${KEY_PATH}"
           echo "APPLE_NOTARY_KEY_PATH=${KEY_PATH}" >> "${GITHUB_ENV}"
 
+      # Notarize and STAPLE THE APP BUNDLE before it is packaged into the DMG, so
+      # the app inside the shipped DMG carries its own ticket and passes Gatekeeper
+      # offline after the user drags it to /Applications (#4955). notarytool cannot
+      # ingest a bare .app directory, so submit a zip of it; staple the .app itself.
+      - name: "Notarize and staple app image"
+        if: matrix.platform == 'macos'
+        working-directory: android
+        env:
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          APP=$(find desktop-app/build/compose/binaries/main/app -maxdepth 1 -type d -name '*.app' | head -n 1)
+          if [ -z "$APP" ]; then
+            echo "No .app was produced under desktop-app/build/compose/binaries/main/app" >&2
+            exit 1
+          fi
+          APP_ZIP="${RUNNER_TEMP}/app-image.zip"
+          ditto -c -k --keepParent "$APP" "$APP_ZIP"
+          "${GITHUB_WORKSPACE}/scripts/ci/notarize-macos-artifact.sh" "$APP_ZIP"
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+
+      # Assemble the DMG now that the app-image is stapled. Compose's packageDmg
+      # runs jpackage with `--app-image <the createDistributable output>`, so it
+      # wraps the already-stapled app rather than rebuilding it (createDistributable
+      # stays up-to-date — stapling touched its output, not its inputs).
+      - name: "Assemble DMG"
+        if: matrix.platform == 'macos'
+        uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":desktop-app:packageDmg"
+          gradle-flags: '["-PdesktopPackageVersion=${{ inputs.version }}"]'
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/build-desktop-app-installers-${{ matrix.os }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          # macOS only, matching the "Package installer" step's non-Linux choice.
+          malloc-replacement: "none"
+
       - name: "Notarize and staple DMG"
         if: matrix.platform == 'macos'
         working-directory: android
@@ -166,34 +209,30 @@ jobs:
             echo "No DMG was produced under desktop-app/build/compose/binaries/main/dmg" >&2
             exit 1
           fi
-          echo "Notarizing $DMG"
-          # `notarytool submit --wait` exits 0 even when Apple's verdict is
-          # Invalid, which previously let the step run on to `stapler staple`
-          # and die with an opaque "Record not found" error 65. Parse the JSON
-          # result instead: anything but Accepted fails the step, after dumping
-          # the notary log so the per-file rejection reasons land in CI output.
-          SUBMISSION_JSON=$(xcrun notarytool submit "$DMG" \
-            --key "$APPLE_NOTARY_KEY_PATH" \
-            --key-id "$APPLE_NOTARY_KEY_ID" \
-            --issuer "$APPLE_NOTARY_ISSUER_ID" \
-            --wait \
-            --output-format json)
-          echo "$SUBMISSION_JSON"
-          SUBMISSION_ID=$(jq -r '.id // empty' <<<"$SUBMISSION_JSON")
-          STATUS=$(jq -r '.status // empty' <<<"$SUBMISSION_JSON")
-          if [ "$STATUS" != "Accepted" ]; then
-            echo "Notarization verdict: ${STATUS:-unknown} (submission ${SUBMISSION_ID:-unknown})" >&2
-            if [ -n "$SUBMISSION_ID" ]; then
-              # Best-effort: the log service can lag right after the verdict.
-              xcrun notarytool log "$SUBMISSION_ID" \
-                --key "$APPLE_NOTARY_KEY_PATH" \
-                --key-id "$APPLE_NOTARY_KEY_ID" \
-                --issuer "$APPLE_NOTARY_ISSUER_ID" >&2 || true
-            fi
-            exit 1
-          fi
+          "${GITHUB_WORKSPACE}/scripts/ci/notarize-macos-artifact.sh" "$DMG"
           xcrun stapler staple "$DMG"
           xcrun stapler validate "$DMG"
+
+      # Enforce #4955 at the only place it can run: prove the app INSIDE the shipped
+      # DMG is stapled. If the app-image reuse assumption ever breaks and packageDmg
+      # ships an unstapled app, this fails the release instead of silently
+      # regressing offline first-launch.
+      - name: "Verify stapled app in DMG"
+        if: matrix.platform == 'macos'
+        working-directory: android
+        run: |
+          set -euo pipefail
+          DMG=$(find desktop-app/build/compose/binaries/main/dmg -maxdepth 1 -type f -name '*.dmg' | head -n 1)
+          MOUNT=$(mktemp -d)
+          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MOUNT" >/dev/null
+          trap 'hdiutil detach "$MOUNT" >/dev/null 2>&1 || true' EXIT
+          APP_IN_DMG=$(find "$MOUNT" -maxdepth 1 -type d -name '*.app' | head -n 1)
+          if [ -z "$APP_IN_DMG" ]; then
+            echo "No .app found inside the mounted DMG" >&2
+            exit 1
+          fi
+          echo "Validating stapled ticket on $APP_IN_DMG"
+          xcrun stapler validate "$APP_IN_DMG"
 
       # jpackage names the file after packageName + version (e.g.
       # AutoMobile-1.0.47.dmg, automobile_0.0.47-1_amd64.deb), which varies per

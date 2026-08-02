@@ -62,7 +62,10 @@ import {
   type ScreenshotMetadata,
   type ScreenshotPerformanceMetadata,
 } from "../ScreenshotMetadata";
-import { fallbackReasonForCtrlProxyFailure } from "./screenshotFallbackReason";
+import {
+  CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR,
+  fallbackReasonForCtrlProxyFailure,
+} from "./screenshotFallbackReason";
 import {
   normalizeAnr,
   normalizeCrash,
@@ -2228,7 +2231,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   cancelScreenshotBackoff(): void {
     if (this.screenshotBackoffScheduler) {
-      this.screenshotBackoffScheduler.cancelPendingCaptures();
+      // Fully quiesce (including the trailing throttle capture) — this is a teardown/quiesce path
+      // (disconnect, pre-action), not a sequence restart, so nothing should survive (issue #4927).
+      this.screenshotBackoffScheduler.stop();
     }
   }
 
@@ -3188,7 +3193,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.screenshotObservationStreamSuppressions.add(requestId);
       const screenshotPromise = this.requestManager.register<ScreenshotResult>(
         requestId, "screenshot", 3000,
-        (_id, _type, _timeout) => ({ success: false, error: "Screenshot timeout" })
+        (_id, _type, _timeout) => ({ success: false, error: CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR })
       );
 
       this.ws.send(message);

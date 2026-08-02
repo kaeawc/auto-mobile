@@ -803,3 +803,50 @@ describe("DefaultScreenshotBackoffScheduler minCaptureIntervalMs throttle", () =
     expect(captureTimes).toEqual([0, 100, 300, 500, 800, 1300]);
   });
 });
+
+describe("DefaultScreenshotBackoffScheduler stop() vs cancelPendingCaptures()", () => {
+  // cancelPendingCaptures must preserve the trailing capture (restart-storm survival), but stop()
+  // must clear it so a disconnect genuinely quiesces the scheduler (issue #4927, Finding 1).
+  const FLOOR = 350;
+
+  function makeScheduler(fakeTimer: FakeTimer, captureTimes: number[]) {
+    return new DefaultScreenshotBackoffScheduler(
+      async () => {
+        captureTimes.push(fakeTimer.now());
+        return { success: true, data: `frame-${captureTimes.length}` };
+      },
+      () => {},
+      { intervals: [0, 100], keepAliveIntervalMs: null, minCaptureIntervalMs: FLOOR },
+      fakeTimer
+    );
+  }
+
+  it("cancelPendingCaptures lets an already-armed trailing capture still fire", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeScheduler(fakeTimer, captureTimes);
+
+    scheduler.startBackoffSequence();
+    await fakeTimer.advanceTimersByTimeAsync(0); // leading capture at t=0
+    await fakeTimer.advanceTimersByTimeAsync(100); // t=100 tick defers -> arms trailing at t=350
+    scheduler.cancelPendingCaptures(); // restart-storm semantics: trailing survives
+    await fakeTimer.advanceTimersByTimeAsync(300); // reach t=350
+
+    expect(captureTimes).toEqual([0, 350]);
+  });
+
+  it("stop() clears the trailing capture so nothing fires after quiesce", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeScheduler(fakeTimer, captureTimes);
+
+    scheduler.startBackoffSequence();
+    await fakeTimer.advanceTimersByTimeAsync(0); // leading capture at t=0
+    await fakeTimer.advanceTimersByTimeAsync(100); // arms trailing at t=350
+    scheduler.stop(); // disconnect semantics: trailing must NOT survive
+    await fakeTimer.advanceTimersByTimeAsync(1000);
+
+    expect(captureTimes).toEqual([0]);
+    expect(scheduler.isActive()).toBe(false);
+  });
+});

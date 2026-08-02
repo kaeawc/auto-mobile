@@ -60,8 +60,18 @@ export interface ScreenshotBackoffScheduler {
   /**
    * Cancel any pending screenshot captures.
    * Called when new activity occurs (e.g., new request to accessibility service).
+   *
+   * Deliberately preserves the trailing throttle capture so a storm of sequence restarts during
+   * an animation still lands one settled frame (issue #4927). Use {@link stop} to quiesce fully.
    */
   cancelPendingCaptures(): void;
+
+  /**
+   * Fully quiesce the scheduler: cancel pending captures AND the trailing throttle capture. Unlike
+   * {@link cancelPendingCaptures}, nothing survives — call this when captures should genuinely stop
+   * (e.g. the device connection closed), not on a sequence restart (issue #4927).
+   */
+  stop(): void;
 
   /**
    * Check if a backoff sequence is currently active.
@@ -199,6 +209,18 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
       logger.debug("[ScreenshotBackoff] Cancelling keepalive capture");
       this.timer.clearTimeout(this.keepAliveTimeout);
       this.keepAliveTimeout = null;
+    }
+  }
+
+  stop(): void {
+    this.cancelPendingCaptures();
+    // The trailing capture deliberately outlives cancelPendingCaptures (restart-storm survival),
+    // so it must be cleared explicitly here or a capture armed just before a disconnect fires
+    // afterward and re-bootstraps the keepalive loop (issue #4927).
+    if (this.trailingCaptureTimeout) {
+      logger.debug("[ScreenshotBackoff] Cancelling trailing throttle capture");
+      this.timer.clearTimeout(this.trailingCaptureTimeout);
+      this.trailingCaptureTimeout = null;
     }
   }
 
@@ -432,6 +454,7 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
 export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffScheduler {
   public startBackoffSequenceCalls: number = 0;
   public cancelPendingCapturesCalls: number = 0;
+  public stopCalls: number = 0;
   public rescheduleKeepAliveCalls: number = 0;
   private _isActive: boolean = false;
   private _pendingCount: number = 0;
@@ -446,6 +469,11 @@ export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffSchedule
     this.cancelPendingCapturesCalls++;
     this._isActive = false;
     this._pendingCount = 0;
+  }
+
+  stop(): void {
+    this.stopCalls++;
+    this.cancelPendingCaptures();
   }
 
   isActive(): boolean {
@@ -472,6 +500,7 @@ export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffSchedule
   reset(): void {
     this.startBackoffSequenceCalls = 0;
     this.cancelPendingCapturesCalls = 0;
+    this.stopCalls = 0;
     this.rescheduleKeepAliveCalls = 0;
     this._isActive = false;
     this._pendingCount = 0;

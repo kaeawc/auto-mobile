@@ -100,6 +100,7 @@ public enum DaemonStartupResult: Equatable {
     case executableNotFound
     case packageRunnerNotFound
     case launchFailed
+    case packageLaunchFailed(stderr: String)
     case launchTimeout
     case readinessTimeout
     case versionSkew
@@ -121,6 +122,9 @@ public enum DaemonStartupResult: Equatable {
         case .launchFailed:
             return "Failed to start AutoMobile Daemon: `auto-mobile --daemon start` exited non-zero. "
                 + "Check the daemon logs."
+        case let .packageLaunchFailed(stderr):
+            return "Failed to start AutoMobile Daemon: the package runner exited non-zero. "
+                + "Package-runner error: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))."
         case .launchTimeout:
             return "Failed to start AutoMobile Daemon: the daemon launcher timed out before it completed. "
                 + "Check package-registry connectivity and daemon logs."
@@ -166,7 +170,7 @@ public enum DaemonManager {
         case launched
         case executableNotFound
         case packageRunnerNotFound
-        case failed
+        case failed(stderr: String? = nil)
         case timedOut
     }
 
@@ -186,6 +190,41 @@ public enum DaemonManager {
         ) -> DaemonSubcommandOutcome
     }
 
+    private final class BoundedStandardError {
+        private static let maximumBytes = 4096
+        private let lock = NSLock()
+        private var data = Data()
+        let pipe = Pipe()
+
+        init() {
+            pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                self?.append(handle.availableData)
+            }
+        }
+
+        func text() -> String? {
+            pipe.fileHandleForReading.readabilityHandler = nil
+            append(pipe.fileHandleForReading.readDataToEndOfFile())
+            lock.lock()
+            defer { lock.unlock() }
+            guard !data.isEmpty else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+
+        private func append(_ incoming: Data) {
+            guard !incoming.isEmpty else { return }
+            lock.lock()
+            defer { lock.unlock() }
+            let remaining = Self.maximumBytes - data.count
+            guard remaining > 0 else { return }
+            data.append(incoming.prefix(remaining))
+        }
+
+        deinit {
+            pipe.fileHandleForReading.readabilityHandler = nil
+        }
+    }
+
     private struct SystemDaemonSubcommandLauncher: DaemonSubcommandLauncher {
         func launch(
             executable: String,
@@ -198,7 +237,8 @@ public enum DaemonManager {
             process.arguments = arguments
             process.environment = environment
             process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
+            let stderr = BoundedStandardError()
+            process.standardError = stderr.pipe
 
             do {
                 let completion = DispatchSemaphore(value: 0)
@@ -212,10 +252,10 @@ public enum DaemonManager {
                 }
                 let status = process.terminationStatus
                 PerfTimer.log("runDaemonSubcommand: process exited with status \(status)")
-                return status == 0 ? .launched : .failed
+                return status == 0 ? .launched : .failed(stderr: stderr.text())
             } catch {
                 PerfTimer.log("runDaemonSubcommand: ERROR - failed to run process: \(error)")
-                return .failed
+                return .failed(stderr: error.localizedDescription)
             }
         }
     }
@@ -320,8 +360,11 @@ public enum DaemonManager {
             return .executableNotFound
         case .packageRunnerNotFound:
             return .packageRunnerNotFound
-        case .failed:
-            return .launchFailed
+        case let .failed(stderr):
+            guard let stderr = stderr?.trimmingCharacters(in: .whitespacesAndNewlines), !stderr.isEmpty else {
+                return .launchFailed
+            }
+            return .packageLaunchFailed(stderr: stderr)
         case .timedOut:
             return .launchTimeout
         }
@@ -378,20 +421,53 @@ public enum DaemonManager {
             PerfTimer.log("runDaemonSubcommand(\(subcommand)): launching auto-mobile from PATH")
         }
 
-        // Inherit essential environment variables for device discovery
-        var env = ProcessInfo.processInfo.environment
-        // Ensure PATH includes /usr/bin for xcrun/simctl
-        let currentPath = env["PATH"] ?? ""
-        if !currentPath.contains("/usr/bin") {
-            env["PATH"] = "/usr/bin:/usr/local/bin:\(currentPath)"
-        }
+        let env = daemonLaunchEnvironment(executable: executable)
+        let launcherTimeoutSeconds = daemonLauncherTimeoutSeconds(
+            subcommand: subcommand,
+            readinessTimeoutSeconds: timeoutSeconds
+        )
         return executeDaemonLaunch(
             executable: executable,
             arguments: arguments,
             environment: env,
-            timeoutSeconds: timeoutSeconds,
+            timeoutSeconds: launcherTimeoutSeconds,
             launcher: launcher
         )
+    }
+
+    static func daemonLaunchEnvironment(
+        executable: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = environment
+        let existingPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+        let requiredPaths = [
+            URL(fileURLWithPath: executable).deletingLastPathComponent().path,
+            "/usr/bin",
+            "/usr/local/bin",
+        ]
+        environment["PATH"] = (requiredPaths + existingPaths)
+            .reduce(into: [String]()) { paths, path in
+                if !paths.contains(path) { paths.append(path) }
+            }
+            .joined(separator: ":")
+        return environment
+    }
+
+    static func daemonLauncherTimeoutSeconds(
+        subcommand: String,
+        readinessTimeoutSeconds: TimeInterval,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> TimeInterval {
+        guard subcommand == "restart" else { return readinessTimeoutSeconds }
+        let configuredStartupMilliseconds = Int(environment["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS"] ?? "")
+            ?? Int(environment["AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS"] ?? "")
+            ?? 10_000
+        let startupSeconds = configuredStartupMilliseconds > 0
+            ? TimeInterval(configuredStartupMilliseconds) / 1000
+            : 10
+        // DaemonManager.restart allows shutdown (5s), an inter-phase delay (1s), then startup.
+        return max(readinessTimeoutSeconds, 6 + startupSeconds)
     }
 
     static func executeDaemonLaunch(
@@ -509,8 +585,8 @@ public enum DaemonManager {
 
     /// The checkout used for both daemon launch and the matching client handshake. A caller may
     /// supply a root explicitly; otherwise XCTestRunner's own source checkout is used when built.
-    static func resolveDaemonRepoRoot(_ repoRoot: String?) -> String? {
-        repoRoot ?? findRepoRoot(startingAt: #filePath)
+    static func resolveDaemonRepoRoot(_ repoRoot: String?, inferredRepoRoot: String? = nil) -> String? {
+        repoRoot ?? inferredRepoRoot ?? findRepoRoot(startingAt: #filePath)
     }
 
     static func resolveDaemonClientVersion(
@@ -694,11 +770,18 @@ public enum DaemonManager {
         timeoutSeconds: TimeInterval,
         runtime: DaemonRuntime,
         callerAssetVersion: String? = resolveCallerAssetVersionPin(),
-        clientVersion: String? = nil
+        clientVersion: String? = nil,
+        inferredRepoRoot: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     )
         -> DaemonStartupResult
     {
-        let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot)
+        let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot, inferredRepoRoot: inferredRepoRoot)
+        let launcherTimeoutSeconds = daemonLauncherTimeoutSeconds(
+            subcommand: "restart",
+            readinessTimeoutSeconds: timeoutSeconds,
+            environment: environment
+        )
         let expectedClientVersion = clientVersion ?? resolveDaemonClientVersion(repoRoot: effectiveRepoRoot)
         PerfTimer.log("ensureDaemonRunning: checking isDaemonRunning")
         if runtime.isDaemonRunning() {
@@ -732,7 +815,7 @@ public enum DaemonManager {
                 if let failure = startupFailure(for: runtime.runDaemonSubcommand(
                     "restart",
                     repoRoot: effectiveRepoRoot,
-                    timeoutSeconds: timeoutSeconds
+                    timeoutSeconds: launcherTimeoutSeconds
                 )) {
                     PerfTimer.log("ensureDaemonRunning: restartDaemon failed - \(failure)")
                     return failure

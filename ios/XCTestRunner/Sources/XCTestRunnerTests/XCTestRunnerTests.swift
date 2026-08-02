@@ -367,6 +367,7 @@ final class XCTestRunnerTests: XCTestCase {
             .executableNotFound,
             .packageRunnerNotFound,
             .launchFailed,
+            .packageLaunchFailed(stderr: "package unavailable"),
             .launchTimeout,
             .readinessTimeout,
             .versionSkew,
@@ -385,6 +386,9 @@ final class XCTestRunnerTests: XCTestCase {
         XCTAssertTrue(notFound.contains("bun add -g"))
 
         XCTAssertTrue(DaemonStartupResult.launchFailed.diagnosticMessage.contains("exited non-zero"))
+        XCTAssertTrue(DaemonStartupResult.packageLaunchFailed(
+            stderr: "package unavailable"
+        ).diagnosticMessage.contains("package unavailable"))
         XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("bunx"))
         XCTAssertTrue(DaemonStartupResult.launchTimeout.diagnosticMessage.contains("timed out"))
         XCTAssertTrue(DaemonStartupResult.readinessTimeout.diagnosticMessage.contains("did not"))
@@ -396,6 +400,7 @@ final class XCTestRunnerTests: XCTestCase {
             DaemonStartupResult.executableNotFound,
             DaemonStartupResult.packageRunnerNotFound,
             DaemonStartupResult.launchFailed,
+            DaemonStartupResult.packageLaunchFailed(stderr: "package unavailable"),
             DaemonStartupResult.launchTimeout,
             DaemonStartupResult.readinessTimeout,
             DaemonStartupResult.versionSkew,
@@ -410,7 +415,7 @@ final class XCTestRunnerTests: XCTestCase {
         // A missing CLI and a non-zero launch must map to *distinct* causes, not collapse into one
         // (this is the switch-arm-typo guard the enum-message test can't catch).
         XCTAssertEqual(DaemonManager.startupFailure(for: .executableNotFound), .executableNotFound)
-        XCTAssertEqual(DaemonManager.startupFailure(for: .failed), .launchFailed)
+        XCTAssertEqual(DaemonManager.startupFailure(for: .failed()), .launchFailed)
     }
 
     func testExecutePlanFailureFallsBackToErrorWhenNoFailedStep() throws {

@@ -215,6 +215,13 @@ final class AutoMobileVersionTests: XCTestCase {
         XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("bunx"))
         XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("npx"))
         XCTAssertTrue(DaemonStartupResult.launchTimeout.diagnosticMessage.contains("timed out"))
+        XCTAssertEqual(
+            DaemonManager.startupFailure(for: .failed(stderr: "npm ERR! 404 package missing")),
+            .packageLaunchFailed(stderr: "npm ERR! 404 package missing")
+        )
+        XCTAssertTrue(DaemonStartupResult.packageLaunchFailed(
+            stderr: "npm ERR! 404 package missing"
+        ).diagnosticMessage.contains("404"))
     }
 
     func testDaemonLaunchPassesTimeoutToInjectedLauncher() {
@@ -406,9 +413,14 @@ final class AutoMobileVersionTests: XCTestCase {
     }
 
     func testEnsureDaemonRunningUsesInferredRootForBuildSkew() throws {
-        let repoRoot = try XCTUnwrap(DaemonManager.resolveDaemonRepoRoot(nil))
-        let entry = try XCTUnwrap(DaemonManager.resolveRepoRootDaemonEntryScript(repoRoot))
-        let currentBuildId = try XCTUnwrap(DaemonManager.computeBuildId(entry))
+        let repoRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("automobile-inferred-root-\(UUID().uuidString)")
+        let entry = repoRoot.appendingPathComponent("dist/src/index.js")
+        try FileManager.default.createDirectory(at: entry.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "// fixture entry".write(to: entry, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+
+        let currentBuildId = try XCTUnwrap(DaemonManager.computeBuildId(entry.path))
         let runtime = FakeDaemonRuntime(
             daemonVersion: AutoMobileVersion.current,
             daemonBuildId: "different-checkout",
@@ -420,11 +432,39 @@ final class AutoMobileVersionTests: XCTestCase {
             repoRoot: nil,
             timeoutSeconds: 0,
             runtime: runtime,
-            callerAssetVersion: nil
+            callerAssetVersion: nil,
+            inferredRepoRoot: repoRoot.path
         )
 
         XCTAssertEqual(result, .ready)
-        XCTAssertEqual(runtime.subcommands, [.init(name: "restart", repoRoot: repoRoot)])
+        XCTAssertEqual(runtime.subcommands, [.init(name: "restart", repoRoot: repoRoot.path)])
+    }
+
+    func testDaemonLaunchEnvironmentIncludesSelectedRunnerDirectory() {
+        let environment = DaemonManager.daemonLaunchEnvironment(
+            executable: "/opt/homebrew/bin/npx",
+            environment: ["PATH": "/usr/bin"]
+        )
+
+        XCTAssertEqual(environment["PATH"], "/opt/homebrew/bin:/usr/bin:/usr/local/bin")
+    }
+
+    func testRestartLauncherTimeoutIncludesDaemonLifecycleBudget() {
+        XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
+            subcommand: "restart",
+            readinessTimeoutSeconds: 15,
+            environment: [:]
+        ), 16)
+        XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
+            subcommand: "restart",
+            readinessTimeoutSeconds: 15,
+            environment: ["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS": "30000"]
+        ), 36)
+        XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
+            subcommand: "start",
+            readinessTimeoutSeconds: 15,
+            environment: [:]
+        ), 15)
     }
 
     func testEnsureDaemonRunningAcceptsDaemonMatchingPinnedClientVersion() {

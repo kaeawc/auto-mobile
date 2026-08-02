@@ -580,8 +580,10 @@ public enum DaemonManager {
     private static func resolveDaemonPackageSpecifier(_ packageVersion: String?) -> String? {
         guard let version = packageVersion?.trimmingCharacters(in: .whitespaces),
               !version.isEmpty,
-              version.lowercased() != "latest",
-              version.lowercased() != "unknown"
+              version.range(
+                  of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+                  options: .regularExpression
+              ) != nil
         else {
             return nil
         }

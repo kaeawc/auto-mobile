@@ -166,15 +166,17 @@ final class AutoMobileVersionTests: XCTestCase {
     }
 
     func testPinnedDaemonPackageCommandRejectsFloatingOrUnknownPins() {
-        XCTAssertNil(DaemonManager.buildPackageDaemonCommand(
+        for packageVersion in ["latest", "unknown", "next", "0.0.x", "^0.0.40", "~0.0.40", ">=0.0.40"] {
+            XCTAssertNil(DaemonManager.buildPackageDaemonCommand(
+                packageRunner: "/opt/homebrew/bin/bunx",
+                subcommand: "start",
+                packageVersion: packageVersion
+            ), "\(packageVersion) must not be accepted as a hermetic package pin")
+        }
+        XCTAssertNotNil(DaemonManager.buildPackageDaemonCommand(
             packageRunner: "/opt/homebrew/bin/bunx",
             subcommand: "start",
-            packageVersion: "latest"
-        ))
-        XCTAssertNil(DaemonManager.buildPackageDaemonCommand(
-            packageRunner: "/opt/homebrew/bin/bunx",
-            subcommand: "start",
-            packageVersion: "unknown"
+            packageVersion: "0.0.40-rc.1"
         ))
     }
 

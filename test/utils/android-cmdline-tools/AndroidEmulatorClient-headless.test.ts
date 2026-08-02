@@ -11,6 +11,7 @@ import { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces
 import { ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import { Readable } from "stream";
+import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 
 /**
  * REWRITE-5: await a promise that MUST reject, returning its Error. Replaces the
@@ -136,12 +137,14 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
   let fakeTimer: FakeTimer;
   let fakeAdb: FakeAdbExecutor;
   let fakeFactory: TestAdbClientFactory;
+  let fakeAvdConfigReader: FakeAvdConfigReader;
   const savedHeadless = process.env.AUTOMOBILE_EMULATOR_HEADLESS;
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
     fakeAdb = new FakeAdbExecutor();
     fakeFactory = new TestAdbClientFactory(fakeAdb);
+    fakeAvdConfigReader = new FakeAvdConfigReader();
   });
 
   function restoreEnv() {
@@ -183,11 +186,12 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
     skipEmulatorPathDetection(client);
 
     try {
       await client.startEmulator("Pixel_9_Pro");
+      expect(fakeAvdConfigReader.readConfigCalls).toContain("Pixel_9_Pro");
       expect(capturedArgs).toContain("-no-window");
       expect(capturedArgs).toContain("-no-audio");
     } finally {
@@ -216,7 +220,7 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
     skipEmulatorPathDetection(client);
 
     try {
@@ -249,7 +253,7 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
     skipEmulatorPathDetection(client);
 
     try {
@@ -273,7 +277,7 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       return createExecResult("");
     };
 
-    const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory, fakeAvdConfigReader);
     skipEmulatorPathDetection(client);
 
     await expect(client.startEmulator("Missing_Device")).rejects.toThrow(

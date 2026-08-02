@@ -8,6 +8,7 @@ import { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces
 import { ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import { Readable } from "stream";
+import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 
 /**
  * REWRITE-5: await a promise that MUST reject, returning its Error. Replaces the
@@ -215,11 +216,13 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
   let fakeTimer: FakeTimer;
   let fakeAdb: FakeAdbExecutor;
   let fakeFactory: TestAdbClientFactory;
+  let fakeAvdConfigReader: FakeAvdConfigReader;
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
     fakeAdb = new FakeAdbExecutor();
     fakeFactory = new TestAdbClientFactory(fakeAdb);
+    fakeAvdConfigReader = new FakeAvdConfigReader();
   });
 
   function createFakeChildProcess(): ChildProcess & EventEmitter {
@@ -252,10 +255,11 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
     skipEmulatorPathDetection(client);
 
     const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
+    expect(fakeAvdConfigReader.readConfigCalls).toContain("Pixel_9_Pro");
     expect(error.message).toContain("corrupt");
     expect(error.message).toContain("Suggestion");
     expect(error.message).toContain("userdata");
@@ -274,7 +278,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       args.join(" ").includes("-list-avds") ? createExecResult("Pixel_9_Pro\n") : createExecResult("");
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
     skipEmulatorPathDetection(client);
 
     const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
@@ -290,7 +294,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       args.join(" ").includes("-list-avds") ? createExecResult("Pixel_9_Pro\n") : createExecResult("");
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
     skipEmulatorPathDetection(client);
 
     const process = await client.startEmulator("Pixel_9_Pro");
@@ -325,7 +329,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
     skipEmulatorPathDetection(client);
 
     const result = await client.startEmulator("Pixel_9_Pro");
@@ -351,7 +355,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
     skipEmulatorPathDetection(client);
 
     const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
@@ -383,7 +387,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     fakeAdb.setCommandResponse("shell pm list packages", createExecResult("package:android\n"));
     fakeAdb.setCommandResponse("shell getprop sys.boot_completed", createExecResult("1\n"));
     fakeAdb.setCommandResponse("shell getprop init.svc.bootanim", createExecResult("stopped\n"));
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory, fakeAvdConfigReader);
     skipEmulatorPathDetection(client);
 
     const child = await client.startEmulator("Pixel_9_Pro");

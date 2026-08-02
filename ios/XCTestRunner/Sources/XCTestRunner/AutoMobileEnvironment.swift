@@ -589,8 +589,14 @@ public enum DaemonManager {
             return explicitPin
         }
 
-        let automobileVersion = environment["AUTOMOBILE_VERSION"]?.trimmingCharacters(in: .whitespaces)
-        return automobileVersion?.isEmpty == false ? automobileVersion : nil
+        guard let automobileVersion = environment["AUTOMOBILE_VERSION"]?.trimmingCharacters(in: .whitespaces),
+              !automobileVersion.isEmpty
+        else {
+            return nil
+        }
+        // `AUTOMOBILE_VERSION=latest` is the shared asset-version sentinel. Convert it to this
+        // runner's baked concrete release rather than passing a floating package tag to bunx/npx.
+        return automobileVersion.lowercased() == "latest" ? AutoMobileVersion.current : automobileVersion
     }
 
     private enum DaemonPackageVersionResolution {

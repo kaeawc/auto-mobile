@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type {
   Database,
@@ -1125,8 +1125,10 @@ export class NavigationRepository {
    * Record a per-node provenance observation.
    *
    * Atomic upsert on UNIQUE(node_id, build_key_id, device_id, session_uuid): a
-   * revisit within the same (build, device, session) bumps last_seen_at in SQL;
-   * a new tuple inserts a new row. first_seen_at is left untouched on conflict.
+   * revisit within the same (build, device, session) widens the seen window in SQL.
+   * Android WS handlers are not serialized, so an out-of-order commit could make
+   * first_seen_at > last_seen_at — hence MIN/MAX rather than an unconditional set,
+   * keeping the bounds monotonic regardless of arrival order.
    */
   async recordNodeObservation(
     nodeId: number,
@@ -1151,13 +1153,17 @@ export class NavigationRepository {
       .onConflict(oc =>
         oc
           .columns(["node_id", "build_key_id", "device_id", "session_uuid"])
-          .doUpdateSet({ last_seen_at: seenAt })
+          .doUpdateSet({
+            first_seen_at: sql`min(navigation_node_observations.first_seen_at, ${seenAt})`,
+            last_seen_at: sql`max(navigation_node_observations.last_seen_at, ${seenAt})`,
+          })
       )
       .execute();
   }
 
   /**
-   * Record a per-edge provenance observation (symmetric to recordNodeObservation).
+   * Record a per-edge provenance observation (symmetric to recordNodeObservation),
+   * with the same MIN/MAX monotonic-window handling for out-of-order commits.
    */
   async recordEdgeObservation(
     edgeId: number,
@@ -1182,7 +1188,10 @@ export class NavigationRepository {
       .onConflict(oc =>
         oc
           .columns(["edge_id", "build_key_id", "device_id", "session_uuid"])
-          .doUpdateSet({ last_seen_at: seenAt })
+          .doUpdateSet({
+            first_seen_at: sql`min(navigation_edge_observations.first_seen_at, ${seenAt})`,
+            last_seen_at: sql`max(navigation_edge_observations.last_seen_at, ${seenAt})`,
+          })
       )
       .execute();
   }

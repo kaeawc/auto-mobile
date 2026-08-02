@@ -25,6 +25,13 @@ export interface ContentHashProvider {
     packageId: string,
     versionCode: number
   ): Promise<string | null>;
+
+  /**
+   * Drop every cached hash for `(deviceId, packageId)` across all versionCodes, so
+   * the next resolution recomputes. Called on a package update/reinstall/removal —
+   * a same-versionCode rebuild with different content must not reuse the old hash.
+   */
+  invalidate(deviceId: string, packageId: string): void;
 }
 
 /**
@@ -66,6 +73,15 @@ export class CachingContentHashProvider implements ContentHashProvider {
       return null;
     }
   }
+
+  invalidate(deviceId: string, packageId: string): void {
+    const prefix = `${deviceId}::${packageId}::`;
+    for (const key of this.cache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.cache.delete(key);
+      }
+    }
+  }
 }
 
 const SHA256_HEX = /^[0-9a-f]{64}$/i;
@@ -99,37 +115,48 @@ export function combineApkDigests(sha256sumStdout: string): string {
   return hash.digest("hex");
 }
 
+/** Parse `adb shell pm path <pkg>` output into the installed APK paths (base + splits). */
+export function parsePmPathOutput(stdout: string): string[] {
+  return stdout
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line.startsWith("package:"))
+    .map(line => line.slice("package:".length).trim())
+    .filter(path => path.endsWith(".apk"))
+    .sort();
+}
+
 /**
- * Android: hash the installed APK set. Prefers on-device `sha256sum` (no byte
- * transfer); falls back to `adb pull` + local hashing when `sha256sum` is absent.
- * Uses `codePath` (the installed APK directory) — never `lastUpdateTime`.
+ * Android: hash the installed APK set (base + splits). APK paths come from
+ * `pm path <pkg>` — which works on every path, unlike `GetAppMetadata.installPath`
+ * that is empty when the WebSocket PackageManager call succeeds (only the dumpsys
+ * fallback populates `codePath`). Prefers on-device `sha256sum` (no byte transfer);
+ * falls back to `adb pull` + local hashing when `sha256sum` is absent. Derived from
+ * APK bytes only — never `lastUpdateTime`. versionCode is a cache key, not hashed.
  */
 export class AndroidApkContentHasher implements AppContentHasher {
   constructor(
     private readonly adb: AdbExecutor,
-    private readonly metadata: GetAppMetadata,
     private readonly checksum: ChecksumCalculator = new DefaultChecksumCalculator()
   ) {}
 
   async computeHash(_device: BootedDevice, packageId: string): Promise<string> {
-    const meta = await this.metadata.execute(packageId);
-    const codePath = meta?.installPath;
-    if (!codePath) {
+    const apkPaths = await this.resolveApkPaths(packageId);
+    if (apkPaths.length === 0) {
       throw toActionableError(
-        new Error(`No installPath (codePath) for ${packageId}`),
+        new Error(`pm path returned no APKs for ${packageId}`),
         `Cannot resolve APK path for ${packageId}`
       );
     }
 
-    // On-device digest of every .apk in the code path (base + splits). Guard both
-    // the throw case (modern adb propagates a non-zero exit when sha256sum is
-    // absent) and the empty/garbage-stdout case, so the pull fallback is reachable
-    // and a "sha256sum: not found" line is never hashed as a real digest.
+    // On-device digest of every APK. Guard both the throw case (modern adb
+    // propagates a non-zero exit when sha256sum is absent) and the empty/garbage
+    // -stdout case, so the pull fallback is reachable and a "sha256sum: not found"
+    // line (a legacy adb can merge stderr into stdout) is never hashed as a digest.
     let combined = "";
     try {
-      const onDevice = await this.adb.executeCommand(
-        `shell sh -c 'for f in "${codePath}"/*.apk; do sha256sum "$f"; done'`
-      );
+      const script = apkPaths.map(p => `sha256sum "${p}"`).join("; ");
+      const onDevice = await this.adb.executeCommand(`shell sh -c '${script}'`);
       combined = combineApkDigests(onDevice.stdout ?? "");
     } catch (error) {
       logger.debug(`[ContentHash] on-device sha256sum failed for ${packageId}: ${error}`);
@@ -139,23 +166,15 @@ export class AndroidApkContentHasher implements AppContentHasher {
     }
 
     logger.warn(`[ContentHash] on-device sha256sum unavailable for ${packageId}; using adb pull (slow path)`);
-    return this.computeViaPull(codePath, packageId);
+    return this.computeViaPull(apkPaths, packageId);
   }
 
-  private async computeViaPull(codePath: string, packageId: string): Promise<string> {
-    const listing = await this.adb.executeCommand(`shell ls "${codePath}"/*.apk`);
-    const remotePaths = (listing.stdout ?? "")
-      .split("\n")
-      .map(p => p.trim())
-      .filter(p => p.endsWith(".apk"))
-      .sort();
-    if (remotePaths.length === 0) {
-      throw toActionableError(
-        new Error(`No APK files under ${codePath}`),
-        `Cannot hash APKs for ${packageId}`
-      );
-    }
+  private async resolveApkPaths(packageId: string): Promise<string[]> {
+    const listing = await this.adb.executeCommand(`shell pm path ${packageId}`);
+    return parsePmPathOutput(listing.stdout ?? "");
+  }
 
+  private async computeViaPull(remotePaths: string[], packageId: string): Promise<string> {
     const workDir = await fs.mkdtemp(join(tmpdir(), "automobile-apk-"));
     try {
       const digests: string[] = [];
@@ -208,11 +227,11 @@ export function createContentHashProvider(
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
   iosSource: IosAppMetadataSource | null = null
 ): ContentHashProvider {
-  const metadata = new GetAppMetadata(device, adbFactory, iosSource);
   if (device.platform === "android") {
     return new CachingContentHashProvider(
-      new AndroidApkContentHasher(adbFactory.create(device), metadata)
+      new AndroidApkContentHasher(adbFactory.create(device))
     );
   }
+  const metadata = new GetAppMetadata(device, adbFactory, iosSource);
   return new CachingContentHashProvider(new IosBundleContentHasher(metadata));
 }

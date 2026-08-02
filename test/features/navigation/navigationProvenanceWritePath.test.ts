@@ -102,6 +102,51 @@ describe("NavigationGraphManager provenance write path", () => {
     expect(nodeObs[0].device_id).toBe("legacy");
   });
 
+  test("node and edge of one transition share a single build key (snapshot per event)", async () => {
+    await manager.setCurrentApp(APP);
+    manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
+    await manager.recordNavigationEvent(navEvent("Home", 100));
+    await manager.recordNavigationEvent(navEvent("Details", 200));
+
+    const edgeObs = await db.selectFrom("navigation_edge_observations").selectAll().executeTakeFirstOrThrow();
+    const nodeObs = await db.selectFrom("navigation_node_observations").selectAll().execute();
+    // Every node observation and the edge observation resolve to the same build key.
+    for (const o of nodeObs) {
+      expect(o.build_key_id).toBe(edgeObs.build_key_id);
+    }
+  });
+
+  test("build context is per-app: app B with no context records under default even when app A has one", async () => {
+    await manager.setCurrentApp(APP);
+    manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
+    await manager.recordNavigationEvent(navEvent("Home", 100));
+
+    // Switch to app B whose hash has not resolved yet.
+    await manager.setCurrentApp("com.other.app");
+    await manager.recordNavigationEvent({ ...navEvent("BScreen", 300), applicationId: "com.other.app" });
+
+    const aKey = await db.selectFrom("navigation_build_keys").selectAll().where("app_id", "=", APP).executeTakeFirstOrThrow();
+    expect(aKey.version_code).toBe(7);
+    const bKey = await db.selectFrom("navigation_build_keys").selectAll().where("app_id", "=", "com.other.app").executeTakeFirstOrThrow();
+    // B falls to the default key — never app A's version/hash.
+    expect(bKey.version_code).toBe(0);
+    expect(bKey.content_hash).toBe("");
+  });
+
+  test("returning to app A after app B resolves still uses app A's context (not B's)", async () => {
+    await manager.setCurrentApp(APP);
+    manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
+    manager.setBuildContext({ appId: "com.other.app", deviceId: "emu-1", versionCode: 99, contentHash: "hashB" });
+
+    // Back to A: its observation must carry A's build key, not B's.
+    await manager.setCurrentApp(APP);
+    await manager.recordNavigationEvent(navEvent("Home", 400));
+
+    const aKey = await db.selectFrom("navigation_build_keys").selectAll().where("app_id", "=", APP).executeTakeFirstOrThrow();
+    expect(aKey.version_code).toBe(7);
+    expect(aKey.content_hash).toBe("hashA");
+  });
+
   test("falls back to the default build key when no build context is set", async () => {
     await manager.setCurrentApp(APP);
     await manager.recordNavigationEvent(navEvent("Home", 100));

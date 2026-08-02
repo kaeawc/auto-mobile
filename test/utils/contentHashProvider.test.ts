@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, ExecResult } from "../../src/models";
+import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
+  AndroidApkContentHasher,
   CachingContentHashProvider,
   combineApkDigests,
+  parsePmPathOutput,
   type AppContentHasher,
 } from "../../src/utils/ContentHashProvider";
 
@@ -105,5 +108,80 @@ describe("CachingContentHashProvider", () => {
     const provider = new CachingContentHashProvider(new FakeHasher(new Map()));
     const result = await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
     expect(result).toBeNull();
+  });
+
+  test("invalidate drops every cached versionCode for (device, package) so it recomputes", async () => {
+    const hasher = new FakeHasher(
+      new Map([
+        ["emu-1::com.example.app::5", "V5"],
+        ["emu-1::com.example.app::6", "V6"],
+        ["emu-1::com.other.app::5", "OTHER"],
+      ])
+    );
+    const provider = new CachingContentHashProvider(hasher);
+    await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 6);
+    await provider.resolveContentHash(fakeDevice("emu-1"), "com.other.app", 5);
+    expect(hasher.calls).toHaveLength(3);
+
+    provider.invalidate("emu-1", "com.example.app");
+
+    // Both versionCodes of the invalidated package recompute; the other package stays cached.
+    await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
+    await provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 6);
+    await provider.resolveContentHash(fakeDevice("emu-1"), "com.other.app", 5);
+    expect(hasher.calls).toHaveLength(5);
+  });
+});
+
+describe("parsePmPathOutput", () => {
+  test("extracts base + split APK paths, stripping the package: prefix", () => {
+    const out = "package:/data/app/~~x==/com.example.app-1/base.apk\npackage:/data/app/~~x==/com.example.app-1/split_config.en.apk\n";
+    expect(parsePmPathOutput(out)).toEqual([
+      "/data/app/~~x==/com.example.app-1/base.apk",
+      "/data/app/~~x==/com.example.app-1/split_config.en.apk",
+    ]);
+  });
+
+  test("returns empty for no package: lines", () => {
+    expect(parsePmPathOutput("")).toEqual([]);
+    expect(parsePmPathOutput("Unable to find package\n")).toEqual([]);
+  });
+});
+
+/** Minimal AdbExecutor fake routing by command substring. */
+function fakeAdb(routes: (command: string) => ExecResult): AdbExecutor {
+  return {
+    executeCommand: async (command: string) => routes(command),
+  } as unknown as AdbExecutor;
+}
+
+function ok(stdout: string): ExecResult {
+  return { stdout, stderr: "", exitCode: 0, success: true } as unknown as ExecResult;
+}
+
+describe("AndroidApkContentHasher (pm path resolution)", () => {
+  test("resolves APK paths via pm path and returns a non-null hash (installPath-independent)", async () => {
+    // This is the WS-package-info-success case: GetAppMetadata would return installPath=""
+    // but pm path still yields the APKs, so hashing succeeds on the normal path.
+    const adb = fakeAdb(command => {
+      if (command.includes("pm path")) {
+        return ok("package:/data/app/com.example.app-1/base.apk\n");
+      }
+      if (command.includes("sha256sum")) {
+        return ok(`${DIGEST_A}  /data/app/com.example.app-1/base.apk\n`);
+      }
+      return ok("");
+    });
+    const hasher = new AndroidApkContentHasher(adb);
+    const hash = await hasher.computeHash(fakeDevice("emu-1"), "com.example.app", 0);
+    expect(hash).toBe(combineApkDigests(`${DIGEST_A}  x\n`));
+    expect(hash).not.toBe("");
+  });
+
+  test("throws when pm path returns no APKs", async () => {
+    const adb = fakeAdb(() => ok("Unable to find package\n"));
+    const hasher = new AndroidApkContentHasher(adb);
+    await expect(hasher.computeHash(fakeDevice("emu-1"), "com.missing.app", 0)).rejects.toThrow();
   });
 });

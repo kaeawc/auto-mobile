@@ -66,6 +66,40 @@ describe("NavigationRepository provenance observations", () => {
     expect(obs[0].last_seen_at).toBe(250);
   });
 
+  test("out-of-order node observations keep first_seen <= last_seen (MIN/MAX)", async () => {
+    const node = await repo.getOrCreateNode("com.example.app", "Home", 100);
+    const build = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
+
+    // Arrivals out of order: later timestamp first, then an earlier one.
+    await repo.recordNodeObservation(node.id, build.id, "device-1", "session-1", 200);
+    await repo.recordNodeObservation(node.id, build.id, "device-1", "session-1", 50);
+    await repo.recordNodeObservation(node.id, build.id, "device-1", "session-1", 120);
+
+    const obs = await db
+      .selectFrom("navigation_node_observations")
+      .selectAll()
+      .where("node_id", "=", node.id)
+      .executeTakeFirstOrThrow();
+    expect(obs.first_seen_at).toBe(50);
+    expect(obs.last_seen_at).toBe(200);
+  });
+
+  test("out-of-order edge observations keep first_seen <= last_seen (MIN/MAX)", async () => {
+    const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
+    const build = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
+
+    await repo.recordEdgeObservation(edge.id, build.id, "device-1", "session-1", 300);
+    await repo.recordEdgeObservation(edge.id, build.id, "device-1", "session-1", 100);
+
+    const obs = await db
+      .selectFrom("navigation_edge_observations")
+      .selectAll()
+      .where("edge_id", "=", edge.id)
+      .executeTakeFirstOrThrow();
+    expect(obs.first_seen_at).toBe(100);
+    expect(obs.last_seen_at).toBe(300);
+  });
+
   test("edge observations dedup on (edge, build, device, session)", async () => {
     const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
     const build = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");

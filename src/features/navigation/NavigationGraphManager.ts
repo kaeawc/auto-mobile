@@ -53,7 +53,8 @@ export interface NavigationGraphService extends NavigationGraph, NavigationGraph
   getCurrentAppId(): string | null;
 
   // Build/device provenance (#4984)
-  setBuildContext(context: NavigationBuildContext | null): void;
+  setBuildContext(context: NavigationBuildContext): void;
+  clearBuildContext(appId: string): void;
 
   // Screen tracking
   getCurrentScreen(): string | null;
@@ -125,6 +126,14 @@ export interface NavigationBuildContext {
 /** Non-null legacy sentinel used when a provenance dimension is unknown (#4984). */
 const LEGACY_PROVENANCE_SENTINEL = "legacy";
 
+/** Immutable provenance snapshot captured once per event and shared by its writes (#4984). */
+interface ResolvedProvenance {
+  versionCode: number;
+  contentHash: string;
+  deviceId: string;
+  sessionUuid: string;
+}
+
 /**
  * Manages the navigation graph with SQLite persistence.
  * Tracks screen visits and correlates navigation events with tool calls.
@@ -143,12 +152,14 @@ export class NavigationGraphManager implements NavigationGraphService {
 
   // Session + build/device provenance (#4984). sessionUuid identifies the owning
   // agent session; the build context (deviceId, versionCode, contentHash) is set
-  // by the CtrlProxy client that binds a device. When the build context is unset
+  // per app by the CtrlProxy client that binds a device. Keyed by app_id so a
+  // context resolved for one app is never applied to another when a session
+  // observes multiple apps on a device. When no context exists for the current app
   // (no device bound yet, or an unresolved content hash), mutations record under
   // the default build key so a write never blocks on — or fails because of —
   // provenance resolution.
   private sessionUuid: string | null;
-  private currentBuildContext: NavigationBuildContext | null = null;
+  private buildContexts: Map<string, NavigationBuildContext> = new Map();
 
   // Tool call history kept in memory for correlation (transient data)
   private toolCallHistory: ToolCallInteraction[] = [];
@@ -187,13 +198,22 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
-   * Set the build/device provenance context for subsequent graph mutations
-   * (#4984). Called by the CtrlProxy client that owns the device; the content hash
-   * is resolved eagerly (and cached) at bind time so nav events that arrive later
-   * record under the real build key. Pass `null` to clear.
+   * Set the build/device provenance context for `context.appId` (#4984). Called by
+   * the CtrlProxy client that owns the device; the content hash is resolved eagerly
+   * (and cached) at bind time so nav events that arrive later record under the real
+   * build key. Stored per app so switching apps never applies one app's context to
+   * another.
    */
-  public setBuildContext(context: NavigationBuildContext | null): void {
-    this.currentBuildContext = context;
+  public setBuildContext(context: NavigationBuildContext): void {
+    this.buildContexts.set(context.appId, context);
+  }
+
+  /**
+   * Drop the build context for an app (#4984), so its next mutation falls to the
+   * default key until re-resolved. Called on a package update/reinstall/removal.
+   */
+  public clearBuildContext(appId: string): void {
+    this.buildContexts.delete(appId);
   }
 
   /**
@@ -360,23 +380,22 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
-   * Resolve the provenance dimensions for a mutation (#4984): the build key
-   * (versionCode + contentHash), the deviceId, and the sessionUuid. When no build
-   * context is set the mutation records under the default build key with non-null
-   * legacy sentinels — today's single-build behavior as the degenerate default.
+   * Resolve the provenance dimensions for the current app (#4984): the build key
+   * (versionCode + contentHash), the deviceId, and the sessionUuid. Looked up by
+   * app_id, so a context resolved for a different app is never applied here. When
+   * no context exists for the current app the mutation records under the default
+   * build key with non-null legacy sentinels — today's single-build behavior as the
+   * degenerate default.
+   *
+   * Capture ONE snapshot per event (before opening the transaction) and thread it
+   * into both the node and edge writes: a fire-and-forget hash resolution can call
+   * setBuildContext mid-transaction, and resolving separately per observation would
+   * split a single transition across two build keys.
    */
-  private resolveProvenance(): {
-    versionCode: number;
-    contentHash: string;
-    deviceId: string;
-    sessionUuid: string;
-    } {
-    const ctx = this.currentBuildContext;
+  private resolveProvenance(): ResolvedProvenance {
     const sessionUuid = this.sessionUuid ?? LEGACY_PROVENANCE_SENTINEL;
-    // Only apply the context to the app it was resolved for; a context for a
-    // different (or unset) app falls back to the default key rather than stamping
-    // this app's provenance with another build's version/hash.
-    if (ctx && ctx.appId === this.currentAppId) {
+    const ctx = this.currentAppId ? this.buildContexts.get(this.currentAppId) : undefined;
+    if (ctx) {
       return {
         versionCode: ctx.versionCode,
         contentHash: ctx.contentHash,
@@ -394,31 +413,32 @@ export class NavigationGraphManager implements NavigationGraphService {
   /**
    * Record a per-node provenance observation inside the caller's transaction
    * (#4984). Must run on the transaction-bound repository so it commits atomically
-   * with the node mutation.
+   * with the node mutation, using the caller's pre-captured provenance snapshot.
    */
   private async recordNodeProvenance(
     repository: NavigationRepository,
     appId: string,
     nodeId: number,
-    timestamp: number
+    timestamp: number,
+    provenance: ResolvedProvenance
   ): Promise<void> {
-    const p = this.resolveProvenance();
-    const buildKey = await repository.getOrCreateBuildKey(appId, p.versionCode, p.contentHash);
-    await repository.recordNodeObservation(nodeId, buildKey.id, p.deviceId, p.sessionUuid, timestamp);
+    const buildKey = await repository.getOrCreateBuildKey(appId, provenance.versionCode, provenance.contentHash);
+    await repository.recordNodeObservation(nodeId, buildKey.id, provenance.deviceId, provenance.sessionUuid, timestamp);
   }
 
   /**
-   * Record a per-edge provenance observation inside the caller's transaction (#4984).
+   * Record a per-edge provenance observation inside the caller's transaction (#4984),
+   * using the same provenance snapshot as the node write for that transition.
    */
   private async recordEdgeProvenance(
     repository: NavigationRepository,
     appId: string,
     edgeId: number,
-    timestamp: number
+    timestamp: number,
+    provenance: ResolvedProvenance
   ): Promise<void> {
-    const p = this.resolveProvenance();
-    const buildKey = await repository.getOrCreateBuildKey(appId, p.versionCode, p.contentHash);
-    await repository.recordEdgeObservation(edgeId, buildKey.id, p.deviceId, p.sessionUuid, timestamp);
+    const buildKey = await repository.getOrCreateBuildKey(appId, provenance.versionCode, provenance.contentHash);
+    await repository.recordEdgeObservation(edgeId, buildKey.id, provenance.deviceId, provenance.sessionUuid, timestamp);
   }
 
   /**
@@ -484,6 +504,10 @@ export class NavigationGraphManager implements NavigationGraphService {
     const recentToolCall = this.findCorrelatedToolCall(timestamp);
     const currentModalStack = recentToolCall?.uiState?.modalStack;
 
+    // Snapshot provenance ONCE for this transition so the node and edge observations
+    // share one build key even if a fire-and-forget hash lands mid-transaction (#4984).
+    const provenance = this.resolveProvenance();
+
     // Persist the whole graph write atomically across BOTH repos via the shared helper,
     // which owns the assertSharedConnection() precondition and the bind-both-repos
     // preamble (#3075). Every read and write inside the callback runs on the transaction
@@ -498,7 +522,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
       // Record per-node provenance for the current build/device/session (#4984),
       // in the same transaction as the node mutation.
-      await this.recordNodeProvenance(repository, appId, n.id, timestamp);
+      await this.recordNodeProvenance(repository, appId, n.id, timestamp, provenance);
 
       // Record node visit for test coverage if session is active
       if (this.activeTestSession) {
@@ -535,8 +559,8 @@ export class NavigationGraphManager implements NavigationGraphService {
           timestamp
         );
 
-        // Record per-edge provenance for the current build/device/session (#4984).
-        await this.recordEdgeProvenance(repository, appId, edge.id, timestamp);
+        // Record per-edge provenance using the SAME snapshot as the node (#4984).
+        await this.recordEdgeProvenance(repository, appId, edge.id, timestamp, provenance);
 
         // Record edge traversal for test coverage if session is active
         if (this.activeTestSession) {
@@ -705,6 +729,7 @@ export class NavigationGraphManager implements NavigationGraphService {
     const existingNode = await this.repository.getNodeByFingerprint(this.currentAppId, fingerprintHash);
     if (existingNode) {
       const appId = this.currentAppId;
+      const provenance = this.resolveProvenance();
 
       // Persist the counter writes atomically across BOTH repos via the shared helper,
       // which owns the assertSharedConnection() precondition and the bind-both-repos
@@ -719,7 +744,7 @@ export class NavigationGraphManager implements NavigationGraphService {
         await repository.updateNodeVisit(existingNode.id, timestamp);
 
         // Record per-node provenance for this reach (#4984), same transaction.
-        await this.recordNodeProvenance(repository, appId, existingNode.id, timestamp);
+        await this.recordNodeProvenance(repository, appId, existingNode.id, timestamp, provenance);
 
         // Record node visit for test coverage if session is active
         if (this.activeTestSession) {

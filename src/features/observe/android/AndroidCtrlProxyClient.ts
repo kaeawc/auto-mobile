@@ -3389,6 +3389,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const eventTimestamp = typeof timestamp === "number" ? timestamp : this.timer.now();
     const repo = this.getInstalledAppsRepository();
 
+    // Invalidate cached build/content-hash provenance for this package (#4984) so the
+    // next nav event re-resolves the hash. A rebuild+reinstall — INCLUDING the
+    // same-versionCode/different-content daily-dev case — must not keep recording
+    // against the previous build's hash. Clears the re-lookup guard, the provider's
+    // (device,package) cache across all versionCodes, and the manager's context.
+    this.buildContextResolvedApps.delete(event.packageName);
+    this.contentHashProvider?.invalidate(deviceId, event.packageName);
+    this.getNavigationGraphManager().clearBuildContext(event.packageName);
+
     try {
       if (event.action === "removed") {
         if (event.removedForAllUsers) {

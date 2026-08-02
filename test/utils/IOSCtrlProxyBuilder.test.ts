@@ -8,6 +8,7 @@ import * as path from "path";
 import os from "os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
+import { logger } from "../../src/utils/logger";
 
 describe("IOSCtrlProxyBuilder", function() {
   let originalProjectRoot: string | undefined;
@@ -844,9 +845,16 @@ describe("IOSCtrlProxyBuilder", function() {
       const { builder, verifier } = await buildForCodesign();
       verifier.outcome = { verified: false, notarized: true, teamId: "ABCDE12345", detail: "bad seal" };
 
-      // DEFAULT = warn-and-proceed: no throw.
-      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
-      expect(verifier.verifiedPaths).toHaveLength(1);
+      const warn = spyOn(logger, "warn");
+      try {
+        // DEFAULT = warn-and-proceed: no throw.
+        await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+
+        expect(verifier.verifiedPaths).toHaveLength(1);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("Code-signing verification issues"));
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     test("codesign --verify failure refuses launch when require flag is set (#4760)", async function() {

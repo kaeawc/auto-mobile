@@ -110,10 +110,13 @@ type HistoryCursor = {
 
 /**
  * Build/device provenance context for a graph mutation (#4984). The build key is
- * (packageId=current app, versionCode, contentHash); deviceId names the device
- * the mutation was observed on.
+ * (packageId=appId, versionCode, contentHash); deviceId names the device the
+ * mutation was observed on. appId is carried so a context resolved for one app is
+ * never applied to another when a session observes multiple apps on a device —
+ * a stale context falls back to the default build key instead of mis-stamping.
  */
 export interface NavigationBuildContext {
+  appId: string;
   deviceId: string;
   versionCode: number;
   contentHash: string;
@@ -370,7 +373,10 @@ export class NavigationGraphManager implements NavigationGraphService {
     } {
     const ctx = this.currentBuildContext;
     const sessionUuid = this.sessionUuid ?? LEGACY_PROVENANCE_SENTINEL;
-    if (ctx) {
+    // Only apply the context to the app it was resolved for; a context for a
+    // different (or unset) app falls back to the default key rather than stamping
+    // this app's provenance with another build's version/hash.
+    if (ctx && ctx.appId === this.currentAppId) {
       return {
         versionCode: ctx.versionCode,
         contentHash: ctx.contentHash,
@@ -379,7 +385,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       };
     }
     logger.debug(
-      `[NAVIGATION_GRAPH] No build context set for ${this.currentAppId ?? "?"}; ` +
+      `[NAVIGATION_GRAPH] No matching build context for ${this.currentAppId ?? "?"}; ` +
       `recording provenance under the default build key`
     );
     return { versionCode: 0, contentHash: "", deviceId: LEGACY_PROVENANCE_SENTINEL, sessionUuid };

@@ -1118,6 +1118,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           return;
         }
         this.getNavigationGraphManager().setBuildContext({
+          appId,
           deviceId: this.device.deviceId,
           versionCode,
           contentHash,

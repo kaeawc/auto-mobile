@@ -68,10 +68,17 @@ export class CachingContentHashProvider implements ContentHashProvider {
   }
 }
 
+const SHA256_HEX = /^[0-9a-f]{64}$/i;
+
 /**
  * Combine per-APK SHA-256 digests (from `sha256sum` output: `<hex>  <path>` per
  * line) into a single content hash. Sorted so split-APK ordering does not affect
  * the result, and derived from digests only (no filesystem timestamps/metadata).
+ *
+ * Only lines whose first token is a valid 64-char hex SHA-256 are used; other
+ * lines (e.g. a legacy `adb shell` merging `sha256sum: not found` into stdout) are
+ * ignored. Returns `""` when no valid digest is present, so the caller can fall
+ * back to the pull path instead of caching a meaningless hash.
  */
 export function combineApkDigests(sha256sumStdout: string): string {
   const digests = sha256sumStdout
@@ -79,8 +86,11 @@ export function combineApkDigests(sha256sumStdout: string): string {
     .map(line => line.trim())
     .filter(line => line.length > 0)
     .map(line => line.split(/\s+/)[0])
-    .filter((digest): digest is string => Boolean(digest))
+    .filter((digest): digest is string => Boolean(digest) && SHA256_HEX.test(digest))
     .sort();
+  if (digests.length === 0) {
+    return "";
+  }
   const hash = createHash("sha256");
   for (const digest of digests) {
     hash.update(digest);
@@ -111,15 +121,21 @@ export class AndroidApkContentHasher implements AppContentHasher {
       );
     }
 
-    // On-device digest of every .apk in the code path (base + splits).
-    const onDevice = await this.adb.executeCommand(
-      `shell sh -c 'for f in "${codePath}"/*.apk; do sha256sum "$f"; done'`
-    );
-    const stdout = onDevice.stdout ?? "";
-    const stderr = onDevice.stderr ?? "";
-    const sha256sumMissing = /not found|no such tool|inaccessible|permission denied/i.test(stderr);
-    if (stdout.trim() && !sha256sumMissing) {
-      return combineApkDigests(stdout);
+    // On-device digest of every .apk in the code path (base + splits). Guard both
+    // the throw case (modern adb propagates a non-zero exit when sha256sum is
+    // absent) and the empty/garbage-stdout case, so the pull fallback is reachable
+    // and a "sha256sum: not found" line is never hashed as a real digest.
+    let combined = "";
+    try {
+      const onDevice = await this.adb.executeCommand(
+        `shell sh -c 'for f in "${codePath}"/*.apk; do sha256sum "$f"; done'`
+      );
+      combined = combineApkDigests(onDevice.stdout ?? "");
+    } catch (error) {
+      logger.debug(`[ContentHash] on-device sha256sum failed for ${packageId}: ${error}`);
+    }
+    if (combined) {
+      return combined;
     }
 
     logger.warn(`[ContentHash] on-device sha256sum unavailable for ${packageId}; using adb pull (slow path)`);
@@ -149,7 +165,14 @@ export class AndroidApkContentHasher implements AppContentHasher {
         const { checksum } = await this.checksum.computeFileSha256(localPath);
         digests.push(`${checksum}  ${remote}`);
       }
-      return combineApkDigests(digests.join("\n"));
+      const combined = combineApkDigests(digests.join("\n"));
+      if (!combined) {
+        throw toActionableError(
+          new Error(`No valid APK digests computed for ${packageId}`),
+          `Cannot hash APKs for ${packageId}`
+        );
+      }
+      return combined;
     } finally {
       await fs.rm(workDir, { recursive: true, force: true });
     }

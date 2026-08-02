@@ -35,17 +35,34 @@ class FakeHasher implements AppContentHasher {
   }
 }
 
+const DIGEST_A = "a".repeat(64);
+const DIGEST_B = "b".repeat(64);
+const DIGEST_Z = "f".repeat(64);
+
 describe("combineApkDigests", () => {
   test("is order-independent and content-derived (split APKs)", () => {
-    const a = combineApkDigests("aaa  /data/app/base.apk\nbbb  /data/app/split_config.apk\n");
-    const reordered = combineApkDigests("bbb  /data/app/split_config.apk\naaa  /data/app/base.apk\n");
+    const a = combineApkDigests(`${DIGEST_A}  /data/app/base.apk\n${DIGEST_B}  /data/app/split_config.apk\n`);
+    const reordered = combineApkDigests(`${DIGEST_B}  /data/app/split_config.apk\n${DIGEST_A}  /data/app/base.apk\n`);
     expect(a).toBe(reordered);
   });
 
   test("changes when any APK's content digest changes", () => {
-    const a = combineApkDigests("aaa  /data/app/base.apk\n");
-    const b = combineApkDigests("zzz  /data/app/base.apk\n");
+    const a = combineApkDigests(`${DIGEST_A}  /data/app/base.apk\n`);
+    const b = combineApkDigests(`${DIGEST_Z}  /data/app/base.apk\n`);
     expect(a).not.toBe(b);
+  });
+
+  test("returns empty string when no valid sha256 digest is present", () => {
+    // A legacy adb shell can merge stderr into stdout; such lines must not be hashed.
+    expect(combineApkDigests("sha256sum: not found\n")).toBe("");
+    expect(combineApkDigests("")).toBe("");
+    expect(combineApkDigests("/system/bin/sh: sha256sum: inaccessible or not found\n")).toBe("");
+  });
+
+  test("ignores non-digest lines mixed with a valid digest", () => {
+    const mixed = combineApkDigests(`sha256sum: not found\n${DIGEST_A}  /data/app/base.apk\n`);
+    const clean = combineApkDigests(`${DIGEST_A}  /data/app/base.apk\n`);
+    expect(mixed).toBe(clean);
   });
 });
 

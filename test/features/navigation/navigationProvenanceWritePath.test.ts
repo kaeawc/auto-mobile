@@ -64,7 +64,7 @@ describe("NavigationGraphManager provenance write path", () => {
 
   test("records node + edge observations under the current build key/device/session", async () => {
     await manager.setCurrentApp(APP);
-    manager.setBuildContext({ deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
+    manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
 
     await manager.recordNavigationEvent(navEvent("Home", 100));
     await manager.recordNavigationEvent(navEvent("Details", 200));
@@ -86,6 +86,20 @@ describe("NavigationGraphManager provenance write path", () => {
     expect(edgeObs).toHaveLength(1);
     expect(edgeObs[0].device_id).toBe("emu-1");
     expect(edgeObs[0].session_uuid).toBe(SESSION);
+  });
+
+  test("falls back to the default build key when the build context is for a different app", async () => {
+    await manager.setCurrentApp(APP);
+    // Context resolved for another app must not stamp APP's provenance.
+    manager.setBuildContext({ appId: "com.other.app", deviceId: "emu-1", versionCode: 9, contentHash: "hashOther" });
+    await manager.recordNavigationEvent(navEvent("Home", 100));
+
+    const buildKeys = await db.selectFrom("navigation_build_keys").selectAll().execute();
+    expect(buildKeys).toHaveLength(1);
+    expect(buildKeys[0].version_code).toBe(0);
+    expect(buildKeys[0].content_hash).toBe("");
+    const nodeObs = await db.selectFrom("navigation_node_observations").selectAll().execute();
+    expect(nodeObs[0].device_id).toBe("legacy");
   });
 
   test("falls back to the default build key when no build context is set", async () => {

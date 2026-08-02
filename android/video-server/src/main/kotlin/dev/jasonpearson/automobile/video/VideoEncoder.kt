@@ -11,7 +11,9 @@ import android.view.Surface
  * MediaCodec wrapper for H.264 encoding with Surface input.
  *
  * Configures the encoder for low-latency streaming with:
- * - H.264 Baseline profile for maximum compatibility
+ * - H.264 Main profile ([H264EncoderProfile]) — saves ~10-30% bitrate at equal quality vs
+ *   Constrained Baseline (CABAC, no B-frames, so no added latency). werift and Chromium both decode
+ *   Main. The host publisher advertises the matching `profile-level-id` per session (issue #4756).
  * - Surface input for zero-copy GPU rendering
  * - VBR bitrate mode so bursty screen content lets idle frames stay cheap and transitions borrow
  *   headroom
@@ -63,14 +65,13 @@ class VideoEncoder(
         // Repeat frame after 100ms of no changes (reduces idle bandwidth)
         setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000)
 
-        // Request baseline profile but let MediaCodec choose a supported level
-        // for this device and capture size. The publisher validates the emitted
-        // SPS before forwarding it, so an unsupported encoder level reconnects
-        // safely instead of making MediaCodec.configure() fail up front.
-        setInteger(
-          MediaFormat.KEY_PROFILE,
-          MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline,
-        )
+        // Request Main profile (issue #4756) but let MediaCodec choose a supported
+        // level for this device and capture size. Main is universally supported by
+        // hardware AVC encoders on modern API levels; the host publisher validates
+        // the emitted SPS profile against the negotiated Main profile-level-id
+        // before forwarding, so a device that falls back to a different profile
+        // reconnects safely instead of making MediaCodec.configure() fail up front.
+        setInteger(MediaFormat.KEY_PROFILE, H264EncoderProfile.KEY_PROFILE)
 
         // VBR (not CBR) for bursty screen-automation content. The transport is
         // adb forward over USB, so CBR's predictable pacing buys little here while

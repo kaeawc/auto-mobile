@@ -365,7 +365,7 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
 
     publisher.writeH264Chunk(Buffer.from([0, 0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 0, 1]));
 
-    expect(failure?.message).toContain("incompatible with negotiated constrained baseline");
+    expect(failure?.message).toContain("incompatible with negotiated constrained-baseline");
     await publisher.stop();
   });
 

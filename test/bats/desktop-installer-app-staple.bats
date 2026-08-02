@@ -60,6 +60,13 @@ wiring_requires_yq() {
   run yq -r '.jobs.build.steps[] | select(.name == "Assemble DMG") | .with["gradle-tasks"]' "$WORKFLOW"
   [ "$status" -eq 0 ]
   [[ "$output" == *":desktop-app:packageDmg"* ]]
+
+  # The producer is EXCLUDED from this invocation (-x), so Gradle cannot re-run or
+  # cache-restore createDistributable and replace the stapled bundle.
+  run yq -r '.jobs.build.steps[] | select(.name == "Assemble DMG") | .with["gradle-flags"]' "$WORKFLOW"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-x"* ]]
+  [[ "$output" == *":desktop-app:createDistributable"* ]]
 }
 
 @test "the release verifies the app inside the shipped DMG is stapled (AC-1 enforcement)" {

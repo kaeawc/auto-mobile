@@ -181,23 +181,27 @@ jobs:
 
       # Assemble the DMG now that the app-image is stapled. Compose's packageDmg
       # runs jpackage with `--app-image <the createDistributable output>` — verified
-      # in the generated packageDmg.args.txt — so it consumes the stapled app-image.
-      # Two facts verified locally against Compose 1.11.1 (unsigned):
-      #   - Gradle leaves createDistributable UP-TO-DATE when packageDmg runs in a
-      #     later invocation, even though the staple mutated its output dir, so the
-      #     stapled app-image is reused, not rebuilt.
-      #   - jpackage nonetheless RE-SIGNS the app image while wrapping it (codesign
-      #     --force). Stapling is signature-safe (the ticket does not change the
-      #     cdhash), so a same-identity re-sign preserves the notarization, but this
-      #     is the one link that cannot be exercised without real signing/notary
-      #     creds — the "Verify stapled app in DMG" step below is the authoritative
-      #     release-time check that the ticket actually survived into the DMG.
+      # in the generated packageDmg.args.txt — so it wraps the on-disk app-image.
+      #
+      # `-x :desktop-app:createDistributable` EXCLUDES the producer from this
+      # invocation, so Gradle can neither re-run nor cache-restore it and thereby
+      # replace the stapled bundle. Verified locally (Compose 1.11.1): with the
+      # exclusion, a probe file added to the app-image survives into packageDmg's
+      # input, and createDistributable reports "excluded". (It also stayed
+      # UP-TO-DATE without the exclusion, but excluding removes all doubt, including
+      # any build-cache restore on the CI runner's shared gradle home.)
+      #
+      # jpackage still RE-SIGNS the app image while wrapping it (codesign --force).
+      # Stapling is signature-safe (the ticket does not change the cdhash), so a
+      # same-identity re-sign preserves the notarization — but that one link cannot
+      # be exercised without real signing/notary creds, so the "Verify stapled app
+      # in DMG" step below is the authoritative release-time check.
       - name: "Assemble DMG"
         if: matrix.platform == 'macos'
         uses: ./.github/actions/gradle-task-run
         with:
           gradle-tasks: ":desktop-app:packageDmg"
-          gradle-flags: '["-PdesktopPackageVersion=${{ inputs.version }}"]'
+          gradle-flags: '["-PdesktopPackageVersion=${{ inputs.version }}", "-x", ":desktop-app:createDistributable"]'
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/build-desktop-app-installers-${{ matrix.os }}"
           reuse-configuration-cache: true
@@ -232,6 +236,10 @@ jobs:
         run: |
           set -euo pipefail
           DMG=$(find desktop-app/build/compose/binaries/main/dmg -maxdepth 1 -type f -name '*.dmg' | head -n 1)
+          if [ -z "$DMG" ]; then
+            echo "No DMG was produced under desktop-app/build/compose/binaries/main/dmg" >&2
+            exit 1
+          fi
           MOUNT=$(mktemp -d)
           hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MOUNT" >/dev/null
           trap 'hdiutil detach "$MOUNT" >/dev/null 2>&1 || true' EXIT

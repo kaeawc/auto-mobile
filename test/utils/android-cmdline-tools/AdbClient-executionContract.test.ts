@@ -262,6 +262,26 @@ describe("AdbClient.getDeviceTimestampMs three-tier fallback", () => {
     expect(await client.getDeviceTimestampMs()).toBe(1700000000000);
   });
 
+  test("rejects seconds values whose millisecond conversion is not safe", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_650_000_000_000);
+    const exec = (command: string): Promise<ExecResult> => {
+      if (command.includes("+%s%3N")) {
+        return Promise.resolve(ok(""));
+      }
+      if (command.includes("+%s")) {
+        return Promise.resolve(ok("9007199254740991"));
+      }
+      return Promise.resolve(ok(""));
+    };
+    const client = new AdbClient(DEVICE, exec, null, defaultRetryExecutor, timer);
+
+    expect(await client.getDeviceTimestampMsWithSource()).toEqual({
+      timestampMs: 1_650_000_000_000,
+      source: "host",
+    });
+  });
+
   test("falls back to the host clock when both device tiers fail", async () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(1_650_000_000_000);

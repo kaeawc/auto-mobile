@@ -577,8 +577,9 @@ export class AdbClient implements AdbExecutor {
       const trimmed = result.stdout.trim();
       if (/^\d+$/.test(trimmed)) {
         const parsed = Number(trimmed);
-        if (Number.isSafeInteger(parsed) && parsed > 0) {
-          return { timestampMs: parsed * 1000, source: "device-seconds" };
+        const timestampMs = parsed * 1000;
+        if (Number.isSafeInteger(parsed) && parsed > 0 && Number.isSafeInteger(timestampMs)) {
+          return { timestampMs, source: "device-seconds" };
         }
       }
     } catch (error) {

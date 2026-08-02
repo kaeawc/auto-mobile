@@ -193,6 +193,7 @@ describe("FileAvdConfigReader", () => {
   it("uses ANDROID_USER_HOME/avd when ANDROID_AVD_HOME is unset", async () => {
     delete process.env.ANDROID_AVD_HOME;
     process.env.ANDROID_USER_HOME = "/user-home";
+    const path = require("path");
     const paths: string[] = [];
     const reader = new FileAvdConfigReader(
       async path => { paths.push(path); return "image.sysdir.1=system-images/android-34/google_apis_playstore/arm64-v8a/"; },
@@ -202,6 +203,6 @@ describe("FileAvdConfigReader", () => {
     const config = await reader.readConfig("Play");
 
     expect(config?.apiLevel).toBe(34);
-    expect(paths[0]).toBe("/user-home/avd/Play.avd/config.ini");
+    expect(paths[0]).toBe(path.join("/user-home", "avd", "Play.avd", "config.ini"));
   });
 });

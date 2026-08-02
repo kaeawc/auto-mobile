@@ -624,6 +624,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * Bind this client to a session for multi-agent NavigationGraphManager isolation.
    */
   public bindSession(sessionId: string): void {
+    // Binding means this session is live again — clear any released-tombstone so a
+    // reused uuid (e.g. setActiveDevice re-creating the session on another device)
+    // gets its own manager rather than the unattributed global (#4984).
+    NavigationGraphManager.clearReleasedSession(sessionId);
     if (this.boundSessionId !== sessionId) {
       // See AndroidCtrlProxyClient.bindSession: a per-device client is
       // last-writer-wins. Trace a transition off a previously-bound session so a

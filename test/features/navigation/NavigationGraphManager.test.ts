@@ -99,6 +99,22 @@ describe("NavigationGraphManager", () => {
 
       NavigationGraphManager.resetInstance();
     });
+
+    test("clearReleasedSession lets a reused uuid (setActiveDevice) get a real manager again", () => {
+      NavigationGraphManager.resetInstance();
+      const global = NavigationGraphManager.getInstance();
+      NavigationGraphManager.getInstanceForSession("session-A");
+      NavigationGraphManager.releaseSession("session-A");
+      expect(NavigationGraphManager.getInstanceForSession("session-A")).toBe(global);
+
+      // setActiveDevice re-creates the session with the same uuid; bindSession clears
+      // the tombstone, so the live replacement gets its own manager, not the global.
+      NavigationGraphManager.clearReleasedSession("session-A");
+      const revived = NavigationGraphManager.getInstanceForSession("session-A");
+      expect(revived).not.toBe(global);
+
+      NavigationGraphManager.resetInstance();
+    });
   });
 
   describe("listAppsWithGraph", () => {

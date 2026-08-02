@@ -1054,6 +1054,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * Called when a tool execution context binds a session to this device.
    */
   public bindSession(sessionId: string): void {
+    // Binding means this session is live again — clear any released-tombstone so a
+    // reused uuid (e.g. setActiveDevice re-creating the session on another device)
+    // gets its own manager rather than the unattributed global (#4984).
+    NavigationGraphManager.clearReleasedSession(sessionId);
     if (this.boundSessionId !== sessionId) {
       // A per-device client routes nav events to whichever session bound last.
       // That is correct under the pool's one-device-one-live-session invariant

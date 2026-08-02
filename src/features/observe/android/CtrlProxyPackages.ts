@@ -14,6 +14,7 @@ import type {
   A11yLaunchIntentResult,
 } from "./types";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
+import { logger } from "../../../utils/logger";
 
 export interface PackageInfoOptions {
   includePermissions?: boolean;
@@ -48,6 +49,14 @@ export class CtrlProxyPackages {
         };
       }
 
+      // Check the socket is OPEN BEFORE registering, so an already-closed socket
+      // never leaves a registered request orphaned (a later cancelAll would reject
+      // an un-awaited promise as an unhandled rejection).
+      const ws = this.context.getWebSocket();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not connected");
+      }
+
       const requestId = `installed_packages_${this.context.timer.now()}_${generateSecureId()}`;
       const resultPromise = this.context.requestManager.register<A11yInstalledPackagesResult>(
         requestId,
@@ -62,15 +71,21 @@ export class CtrlProxyPackages {
         })
       );
 
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
+      try {
+        ws.send(
+          serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestInstalledPackages({ requestId, includeSystem, userId })
+          )
+        );
+      } catch (sendError) {
+        // Settle the registered request rather than orphaning it (see requestPackageInfo).
+        logger.warn(`[CtrlProxyPackages] installed_packages send failed: ${sendError}`);
+        this.context.requestManager.resolveError(
+          requestId,
+          `${sendError}`,
+          this.context.timer.now() - startTime
+        );
       }
-      ws.send(
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestInstalledPackages({ requestId, includeSystem, userId })
-        )
-      );
 
       return await resultPromise;
     } catch (error) {
@@ -146,6 +161,7 @@ export class CtrlProxyPackages {
         // Settle the just-registered request rather than orphaning it, so the
         // always-awaited resultPromise below returns the failure instead of a later
         // cancelAll surfacing an unhandled rejection.
+        logger.warn(`[CtrlProxyPackages] package_info send failed for ${packageName}: ${sendError}`);
         this.context.requestManager.resolveError(
           requestId,
           `${sendError}`,
@@ -187,6 +203,14 @@ export class CtrlProxyPackages {
         };
       }
 
+      // Check the socket is OPEN BEFORE registering, so an already-closed socket
+      // never leaves a registered request orphaned (a later cancelAll would reject
+      // an un-awaited promise as an unhandled rejection).
+      const ws = this.context.getWebSocket();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not connected");
+      }
+
       const requestId = `launch_intent_${this.context.timer.now()}_${generateSecureId()}`;
       const resultPromise = this.context.requestManager.register<A11yLaunchIntentResult>(
         requestId,
@@ -200,13 +224,19 @@ export class CtrlProxyPackages {
         })
       );
 
-      const ws = this.context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
+      try {
+        ws.send(
+          serializeCtrlProxyRequest(ctrlProxyRequests.requestLaunchIntent({ requestId, packageName }))
+        );
+      } catch (sendError) {
+        // Settle the registered request rather than orphaning it (see requestPackageInfo).
+        logger.warn(`[CtrlProxyPackages] launch_intent send failed for ${packageName}: ${sendError}`);
+        this.context.requestManager.resolveError(
+          requestId,
+          `${sendError}`,
+          this.context.timer.now() - startTime
+        );
       }
-      ws.send(
-        serializeCtrlProxyRequest(ctrlProxyRequests.requestLaunchIntent({ requestId, packageName }))
-      );
 
       return await resultPromise;
     } catch (error) {

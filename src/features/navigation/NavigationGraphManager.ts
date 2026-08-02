@@ -256,6 +256,17 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
+   * Clear a session's released-tombstone (#4984). Session UUIDs are normally not
+   * reused, but `setActiveDevice` releases an existing session and immediately
+   * re-creates it with the SAME uuid on another device — so when a session is
+   * (re)bound, drop any tombstone so getInstanceForSession builds it a real manager
+   * again instead of routing it to the unattributed global.
+   */
+  public static clearReleasedSession(sessionId: string): void {
+    NavigationGraphManager.releasedSessions.delete(sessionId);
+  }
+
+  /**
    * Release a session-scoped instance and its transient state.
    */
   public static releaseSession(sessionId: string): void {

@@ -31,22 +31,26 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
  * disposes it when the pane leaves the composition, so closing a column or flipping it to Inspect
  * mode tears the relay subscription down.
  *
- * [sourceFactory] is hoisted so tests inject a fake instead of opening a socket. The default real
- * client sends no `sessionUuid` yet (#4924 tracks the desktop session-identity design); until that
- * lands, a daemon enforcing stream-socket auth (#4751, on by default) refuses the subscribe and
- * this pane shows the refusal reason — the interim operator escape hatch is
- * `AUTOMOBILE_DAEMON_STREAM_AUTH=0`.
+ * [sessionUuidProvider] authenticates the subscribe against the stream-socket session guard
+ * (#4751): the host supplies a provider from its `DesktopDaemonSession` (#4977). The workspace
+ * session binds only the focused device, so this pane's subscribe passes either as the session's
+ * own device or — for every other observed device — via the auth's unowned-device branch. When the
+ * provider yields null (no session, or a non-Unix daemon) the subscribe is refused and the pane
+ * shows the reason; the operator escape hatch remains `AUTOMOBILE_DAEMON_STREAM_AUTH=0`.
+ *
+ * [sourceFactory] is hoisted so tests inject a fake instead of opening a socket.
  */
 @Composable
 fun DeviceStreamView(
   column: DeviceColumn,
+  sessionUuidProvider: () -> String? = { null },
   // Workspace panes default to the `low` preset (Android: long side capped at 540 + ~2 Mbps;
   // iOS: ~2 Mbps, resolution self-scales to Level 4.2): pane real estate can't show more pixels
   // than that anyway, and decode cost scales with pixel count, which is what makes dozens of
   // concurrent farm panes affordable. Hoisted so a host that wants a full-resolution mirror can
   // pass VideoStreamQuality.High or a different source entirely.
   sourceFactory: (deviceId: String) -> VideoStreamSource = {
-    VideoStreamClient(quality = VideoStreamQuality.Low)
+    VideoStreamClient(quality = VideoStreamQuality.Low, sessionUuidProvider = sessionUuidProvider)
   },
 ) {
   val source = remember(column.deviceId) { sourceFactory(column.deviceId) }

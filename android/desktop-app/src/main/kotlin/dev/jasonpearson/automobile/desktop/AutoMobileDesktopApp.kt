@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -15,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
@@ -35,6 +37,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceAction
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceEffect
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceFacetPlaceholder
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell
+import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
 import dev.jasonpearson.automobile.desktop.core.workspace.deriveWorkspaceStatus
@@ -45,11 +48,20 @@ import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerVie
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootController
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private val LOG = LoggerFactory.getLogger("AutoMobileDesktopApp")
+
+// How often the workspace refreshes its daemon session so the idle watchdog does not reap it.
+// Matches AutoMobileContent's binding heartbeat cadence.
+private const val DESKTOP_SESSION_HEARTBEAT_MS = 2_000L
 
 // How often the top-bar status dot re-probes daemon connectivity. Matches the health sheet's
 // read-only refresh cadence (WorkspaceShell.HEALTH_SHEET_REFRESH_MS).
@@ -122,6 +134,65 @@ fun AutoMobileDesktopApp(
   var pickerOpen by remember { mutableStateOf(false) }
   var paletteOpen by remember { mutableStateOf(false) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
+
+  // One stable daemon session per app run, used to authenticate the stream sockets (#4751/#4977).
+  // The stream socket's getSession check is read-only, so the session must first be REGISTERED by
+  // a main-socket tool call — done below by binding the focused device with setActiveDevice.
+  // Unix-daemon only; other transports leave it null and the panes fall back to the auth escape
+  // hatch. `getOrNull` so a construction failure (no reachable daemon) degrades to a null provider.
+  val desktopDaemonSession =
+    remember(graph) {
+      if (graph.autoMobileClient.transportName == "Unix Socket") {
+        runCatching { DesktopDaemonSession.create() }
+          .onFailure { LOG.warn("Could not create a desktop daemon session: ${it.message}") }
+          .getOrNull()
+      } else {
+        null
+      }
+    }
+  val sessionCleanupScope =
+    remember(desktopDaemonSession) {
+      desktopDaemonSession?.let { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+    }
+  DisposableEffect(desktopDaemonSession, sessionCleanupScope) {
+    onDispose {
+      if (desktopDaemonSession != null && sessionCleanupScope != null) {
+        sessionCleanupScope.launch {
+          runCatching { desktopDaemonSession.release() }
+            .onFailure { LOG.warn("Failed to release desktop daemon session: ${it.message}") }
+          sessionCleanupScope.cancel()
+        }
+      }
+    }
+  }
+
+  // Register + bind the session to the FOCUSED device. Stream auth then admits every pane: the
+  // focused device is owned by this session, and each other observed device is unowned (its
+  // subscribe passes the auth's unowned-device branch). Binding is idempotent and re-runs when the
+  // focus changes; a bind failure only means that pane shows the refusal reason.
+  val focusedColumn =
+    (workspaceState as? WorkspaceUiState.Content)?.let { content ->
+      content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
+    }
+  LaunchedEffect(desktopDaemonSession, focusedColumn?.deviceId, focusedColumn?.platform) {
+    val session = desktopDaemonSession ?: return@LaunchedEffect
+    val column = focusedColumn ?: return@LaunchedEffect
+    val platform = if (column.platform == Platform.Ios) "ios" else "android"
+    runCatching {
+        withContext(Dispatchers.IO) { session.client.setActiveDevice(column.deviceId, platform) }
+      }
+      .onFailure { LOG.warn("Failed to bind desktop session to ${column.deviceId}: ${it.message}") }
+  }
+
+  // Keep the session alive against the daemon's idle watchdog while the workspace is open.
+  LaunchedEffect(desktopDaemonSession) {
+    val session = desktopDaemonSession ?: return@LaunchedEffect
+    while (isActive) {
+      delay(DESKTOP_SESSION_HEARTBEAT_MS)
+      runCatching { withContext(Dispatchers.IO) { session.heartbeat() } }
+        .onFailure { LOG.warn("Failed to refresh desktop daemon session: ${it.message}") }
+    }
+  }
 
   // Window-level ⌘K/Ctrl+K (Main.kt) bumps openPaletteRequest; open the palette in response, but
   // only while the workspace is showing — onboarding and the device picker own the screen and have
@@ -203,10 +274,16 @@ fun AutoMobileDesktopApp(
               statusDetail = workspaceStatus.detail,
               facetContent = { column, tool -> WorkspaceFacet(column, tool) },
               // Live device mirror in each pane's stream area, fed by the daemon's video-stream
-              // relay. Until the desktop can supply a daemon sessionUuid (#4924), a daemon with
-              // stream-socket auth at its default (on, #4751) refuses the subscribe and the pane
-              // shows the reason; AUTOMOBILE_DAEMON_STREAM_AUTH=0 is the interim escape hatch.
-              streamContent = { column -> DeviceStreamView(column) },
+              // relay. The pane authenticates with the workspace daemon session (#4977) bound to
+              // the focused device above; when no session is available (non-Unix daemon, or the
+              // bind failed) the provider yields null and the pane shows the auth refusal, with
+              // AUTOMOBILE_DAEMON_STREAM_AUTH=0 as the operator escape hatch.
+              streamContent = { column ->
+                DeviceStreamView(
+                  column,
+                  sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                )
+              },
             )
             if (paletteOpen) {
               CommandPalette(

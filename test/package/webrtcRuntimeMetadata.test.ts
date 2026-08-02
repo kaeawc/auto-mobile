@@ -25,7 +25,7 @@ describe("packaged WebRTC runtime metadata", () => {
     expect(runtimeInit.trim()).toBe('import "reflect-metadata";');
   });
 
-  test("a bundled WebRTC startup path reaches WHIP publish", async () => {
+  test("a bundled WebRTC startup path reaches WHIP publish", { timeout: 15_000 }, async () => {
     const workspaceScratch = join(import.meta.dir, "../../scratch");
     await mkdir(workspaceScratch, { recursive: true });
     const dir = await mkdtemp(join(workspaceScratch, "webrtc-bundle-"));

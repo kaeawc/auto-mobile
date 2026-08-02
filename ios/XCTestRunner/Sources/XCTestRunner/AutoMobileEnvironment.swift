@@ -208,7 +208,6 @@ public enum DaemonManager {
                 guard completion.wait(timeout: .now() + timeoutSeconds) == .success else {
                     PerfTimer.log("runDaemonSubcommand: launcher timed out after \(timeoutSeconds)s")
                     process.terminate()
-                    process.waitUntilExit()
                     return .timedOut
                 }
                 let status = process.terminationStatus
@@ -346,7 +345,8 @@ public enum DaemonManager {
         // caller that knows its source build gets a version/build-matched daemon (#2744) instead of
         // a same-release-but-different-checkout PATH binary. A concrete package pin takes the
         // next precedence, and an unpinned launch falls back to the PATH binary.
-        let localEntry = resolveRepoRootDaemonEntryScript(repoRoot)
+        let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot)
+        let localEntry = resolveRepoRootDaemonEntryScript(effectiveRepoRoot)
         let runtime = findExecutable("bun") ?? findExecutable("node")
         let launch = selectDaemonLaunch(
             subcommand: subcommand,
@@ -500,11 +500,17 @@ public enum DaemonManager {
         repoRoot: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> String {
-        let effectiveRepoRoot = repoRoot ?? findRepoRoot(startingAt: #filePath)
+        let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot)
         return resolveDaemonClientVersion(
             repoRootHasBuiltEntry: resolveRepoRootDaemonEntryScript(effectiveRepoRoot) != nil,
             environment: environment
         )
+    }
+
+    /// The checkout used for both daemon launch and the matching client handshake. A caller may
+    /// supply a root explicitly; otherwise XCTestRunner's own source checkout is used when built.
+    static func resolveDaemonRepoRoot(_ repoRoot: String?) -> String? {
+        repoRoot ?? findRepoRoot(startingAt: #filePath)
     }
 
     static func resolveDaemonClientVersion(

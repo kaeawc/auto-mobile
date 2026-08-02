@@ -268,6 +268,13 @@ final class AutoMobileVersionTests: XCTestCase {
         ), AutoMobileVersion.current)
     }
 
+    func testResolveDaemonRepoRootPrefersTheProvidedCheckout() {
+        XCTAssertEqual(
+            DaemonManager.resolveDaemonRepoRoot("/repo"),
+            "/repo"
+        )
+    }
+
     func testResolveRepoRootDaemonEntryScript() throws {
         XCTAssertNil(DaemonManager.resolveRepoRootDaemonEntryScript(nil))
         XCTAssertNil(DaemonManager.resolveRepoRootDaemonEntryScript(""))

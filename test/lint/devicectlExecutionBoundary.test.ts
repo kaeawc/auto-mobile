@@ -41,11 +41,11 @@ function directlyExecutesDevicectl(source: string): boolean {
       const commandValues = ast.strings(command);
       const xcrun = commandValues.some(value => /(?:^|[/\\])xcrun$/.test(value));
       const directDevicectl = commandValues.some(value => /(?:^|[/\\])devicectl$/.test(value));
-      const shellDevicectl = commandValues.some(value => /(?:^|\s)xcrun\s+devicectl(?:\s|$)/.test(value));
+      const shellDevicectl = commandValues.some(value => /(?:^|[\s;&|])xcrun\s+devicectl(?:\s|$|[;&|])/.test(value));
       const argvAlternatives = arrayArgs.length > 0 ? [arrayArgs] : ast.arrayAlternatives(call.arguments[1]) ?? [];
       const shellWrappedDevicectl = argvAlternatives.some(argv => {
         const shellIndex = argv.findIndex(argument => ast.strings(argument).includes("-c"));
-        return shellIndex >= 0 && ast.strings(argv[shellIndex + 1]).some(value => /(?:^|\s)xcrun\s+devicectl(?:\s|$)/.test(value));
+        return shellIndex >= 0 && ast.strings(argv[shellIndex + 1]).some(value => /(?:^|[\s;&|])xcrun\s+devicectl(?:\s|$|[;&|])/.test(value));
       });
       return shellDevicectl || shellWrappedDevicectl || directDevicectl ||
         xcrun && args.some(argument => ast.strings(argument).includes("devicectl"));
@@ -103,6 +103,7 @@ describe("devicectl execution boundary (issue #4053)", () => {
   test("detects shell, direct-binary, and absolute xcrun devicectl forms", () => {
     expect(directlyExecutesDevicectl('exec("xcrun devicectl device list");')).toBe(true);
     expect(directlyExecutesDevicectl('const tool = "xcrun"; exec(`${tool} devicectl device list`);')).toBe(true);
+    expect(directlyExecutesDevicectl('exec("echo ok;xcrun devicectl&&echo done");')).toBe(true);
     expect(directlyExecutesDevicectl('execFile("devicectl", ["--version"]);')).toBe(true);
     expect(directlyExecutesDevicectl('spawn("/usr/bin/xcrun", ["devicectl", "device", "list"]);')).toBe(true);
     expect(directlyExecutesDevicectl('spawn("/bin/sh", ["-c", "xcrun devicectl device list"]);')).toBe(true);

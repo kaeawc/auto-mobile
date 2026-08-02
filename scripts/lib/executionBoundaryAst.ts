@@ -132,6 +132,10 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (ts.isStringLiteralLike(node)) {return [node.text];}
     if (ts.isParenthesizedExpression(node)) {return strings(node.expression, seen);}
     if (ts.isNoSubstitutionTemplateLiteral(node)) {return [node.text];}
+    if (ts.isTaggedTemplateExpression(node) && ts.isPropertyAccessExpression(node.tag) &&
+      ts.isIdentifier(node.tag.expression) && node.tag.expression.text === "String" && node.tag.name.text === "raw") {
+      return strings(node.template, seen);
+    }
     if (ts.isTemplateExpression(node)) {
       let values = [node.head.text];
       for (const span of node.templateSpans) {

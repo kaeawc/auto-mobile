@@ -52,6 +52,7 @@ describe("archive extraction boundary (issue #4065)", () => {
     )).toBe(true);
     expect(directlyExtractsTar('runExecSeam(cb, opts, { command: "echo", args: ["tar", "-x"] });')).toBe(false);
     expect(directlyExtractsTar('exec(useTar ? "tar -xzf archive.tar.gz" : "unzip archive.zip");')).toBe(true);
+    expect(directlyExtractsTar("exec(String.raw`tar -xzf archive.tar.gz`);")).toBe(true);
   });
 
   test("detects array-first tar extraction (Bun.spawn's single-array signature)", () => {
@@ -91,6 +92,7 @@ describe("archive extraction boundary (issue #4065)", () => {
 
   test("does not flag tar creation, listing, or non-extract options", () => {
     expect(directlyExtractsTar('executeCommand("tar", ["-czf", archivePath, dir]);')).toBe(false);
+    expect(directlyExtractsTar('spawn("tar", ["-czf", archive], { env: { MODE: "-x" } });')).toBe(false);
     expect(directlyExtractsTar('executeCommand("tar", ["-tzf", archivePath]);')).toBe(false);
     // `-C` change-dir on its own is not extraction.
     expect(directlyExtractsTar('executeCommand("tar", ["-C", dir]);')).toBe(false);

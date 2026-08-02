@@ -52,9 +52,9 @@ export function directlyExtractsTar(source: string): boolean {
     const alternatives = sharedAst.arrayAlternatives(call.arguments[0]) ?? [[call.arguments[0]]];
     return alternatives.some(([command, ...args]) => {
       if (sharedAst.strings(command).some(value => SHELL_TAR_EXTRACT.test(value))) {return true;}
-      const argv = args.length > 0 ? args : call.arguments.slice(1);
-      return sharedAst.strings(command).includes("tar") && argv.some(argument =>
-        sharedAst.strings(argument).some(value => EXTRACT_FLAG.test(value)));
+      const argvAlternatives = args.length > 0 ? [args] : sharedAst.arrayAlternatives(call.arguments[1]) ?? [];
+      return sharedAst.strings(command).includes("tar") && argvAlternatives.some(argv =>
+        argv.some(argument => sharedAst.strings(argument).some(value => EXTRACT_FLAG.test(value))));
     });
   });
 }

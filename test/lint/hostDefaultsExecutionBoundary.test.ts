@@ -5,7 +5,7 @@ import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const OWNER = "src/utils/HostDefaultsClient.ts";
-const DEFAULTS_COMMAND = /(?:^|[/\\])defaults(?:\s|$)/;
+const DEFAULTS_COMMAND = /(?:^|[;&|])\s*(?:[^\s;&|]*[/\\])?defaults(?:\s|$)/;
 
 /**
  * Detects direct production execution of the host `defaults` binary (issue
@@ -59,6 +59,7 @@ describe("host defaults execution boundary (issue #4062)", () => {
     expect(directlyExecutesHostDefaults('spawn("defaults", ["read", "-g", "AppleInterfaceStyle"]);')).toBe(true);
     expect(directlyExecutesHostDefaults('await executor.executeCommand("defaults", ["read", "-g", key]);')).toBe(true);
     expect(directlyExecutesHostDefaults('exec("defaults read -g AppleInterfaceStyle");')).toBe(true);
+    expect(directlyExecutesHostDefaults('exec("echo /tmp/defaults read");')).toBe(false);
     expect(directlyExecutesHostDefaults('exec("defaults\\tread -g AppleInterfaceStyle");')).toBe(true);
     expect(directlyExecutesHostDefaults('spawn("/usr/bin/defaults", ["read", "-g", key]);')).toBe(true);
     expect(directlyExecutesHostDefaults('Bun.spawn(["defaults", "read", "-g", key]);')).toBe(true);

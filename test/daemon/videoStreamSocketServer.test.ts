@@ -258,6 +258,38 @@ describe("VideoStreamSocketServer", () => {
     expect(h.captureOptions).toHaveLength(0);
   });
 
+  test("refuses an fps outside the backends' shared 5-60 range", async () => {
+    const h = await startHarness();
+
+    // 2 fps passes a naive positivity check but throws at iOS Simulator capture
+    // (the helper enforces [5, 60]); 90 fps exceeds every backend.
+    for (const fps of [2, 90]) {
+      const { ack } = await subscribe(h.socketPath, {
+        action: "subscribe",
+        deviceId: DEVICE.deviceId,
+        fps,
+      });
+      expect(ack.success).toBe(false);
+      expect(String(ack.error)).toContain("Invalid fps");
+    }
+    expect(h.captureOptions).toHaveLength(0);
+  });
+
+  test("refuses a bitrate that would lose integer precision after the kbps->bps conversion", async () => {
+    const h = await startHarness();
+
+    // A huge-but-finite kbps passes Number.isInteger yet overflows past
+    // MAX_SAFE_INTEGER once multiplied by 1000 downstream.
+    const { ack } = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      bitrateKbps: 9_000_000_000_000,
+    });
+    expect(ack.success).toBe(false);
+    expect(String(ack.error)).toContain("Invalid bitrateKbps");
+    expect(h.captureOptions).toHaveLength(0);
+  });
+
   test("sends the stream header immediately after the ack", async () => {
     const h = await startHarness();
 

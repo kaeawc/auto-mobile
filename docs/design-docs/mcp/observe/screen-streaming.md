@@ -22,7 +22,8 @@ constructing MCP tool payloads directly.
 - Support USB-connected physical devices and emulators/simulators
 - Include audio streaming for complete mirroring
 - Integrate with existing observation architecture
-- Single device streaming at a time (no multi-device simultaneous streams)
+- Concurrent per-device streams: one shared capture per device, fanned out to multiple
+  subscribers, so the desktop workspace can mirror many device panes at once
 
 ## Architecture
 
@@ -93,7 +94,7 @@ New Unix socket: `~/.auto-mobile/video-stream.sock`
 
 One JSON line each way; everything after the acknowledgement is binary framing.
 
-```
+```text
 Client → Server: { "action": "subscribe", "id": "<uuid>", "sessionUuid": "<daemon session>",
                    "deviceId": "<optional>", "quality": "low|medium|high", "fps": 30,
                    "bitrateKbps": 2000, "size": { "width": 720, "height": 1280 } }
@@ -101,13 +102,17 @@ Server → Client: { "type": "video_stream_response", "success": true, "action":
                    "deviceId": "...", "framing": "h264" }
 ```
 
-All hint fields are optional and validated server-side (an unknown `quality` or non-positive
-`fps`/`bitrateKbps` refuses the subscribe). Captures are shared per device: the first
-subscriber's hints fix the encode and a late joiner's differing hints are ignored. `quality`
-selects the on-device preset (low=540p/2Mbps, medium=720p/4Mbps, high=1080p/8Mbps); on iOS
-only the preset's bitrate applies (resolution self-scales to Level 4.2). `sessionUuid`
-authenticates against the daemon session registry (#4751); `AUTOMOBILE_DAEMON_STREAM_AUTH=0`
-disables the check.
+All hint fields are optional and validated server-side (an unknown `quality`, an `fps` outside
+the capture backends' shared 5–60 range, or a non-positive/oversized `bitrateKbps` refuses the
+subscribe). Captures are shared per device: the first subscriber's hints fix the encode and a
+late joiner's differing hints are ignored. `quality` selects the on-device preset
+(low=540p/2Mbps, medium=720p/4Mbps, high=1080p/8Mbps); on iOS only the preset's bitrate applies
+(resolution self-scales to Level 4.2), and `fps` is honored only by the Android persistent
+encoder — the `screenrecord` fallback captures at the display's native rate. `sessionUuid`
+authenticates against the daemon session registry (#4751); when auth is on (the default) a
+subscribe without a live session is refused. The desktop workspace client does not yet supply
+one (#4924), so it relies on `AUTOMOBILE_DAEMON_STREAM_AUTH=0` in the interim; the IDE-plugin
+and future clients that hold a daemon session send `sessionUuid`.
 
 ### Frame Data
 

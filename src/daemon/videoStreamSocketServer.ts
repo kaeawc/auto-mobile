@@ -70,8 +70,17 @@ interface DeviceCapture {
 const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
 
 const SUPPORTED_QUALITIES = new Set(["low", "medium", "high"]);
-/** Sanity ceiling for a capture-rate hint; no supported device captures faster. */
-const MAX_FPS_HINT = 120;
+// The relay resolves the device only after this validation, so it bounds fps to the range every
+// capture backend can honor rather than a per-platform limit. The iOS Simulator helper is the
+// tightest at [5, 60] (SIMULATOR_FPS_MIN/MAX); the Android video-server accepts any positive
+// rate, so [5, 60] is the safe universal window — a hint outside it would pass here and then throw
+// at iOS capture startup.
+const MIN_FPS_HINT = 5;
+const MAX_FPS_HINT = 60;
+// A generous encoder ceiling (~1 Gbps) that still leaves headroom below Number.MAX_SAFE_INTEGER
+// after the kbps→bps ×1000 conversion at the capture-options boundary, so a huge-but-finite hint
+// cannot silently lose integer precision downstream.
+const MAX_BITRATE_KBPS = 1_000_000;
 
 /**
  * Captures are shared per device and the FIRST subscriber's hints fixed the encode; a late
@@ -98,15 +107,15 @@ function validateQuality(quality: VideoStreamSocketRequest["quality"]): string |
 }
 
 function validateFps(fps: VideoStreamSocketRequest["fps"]): string | null {
-  return fps === undefined || isIntegerInRange(fps, 1, MAX_FPS_HINT)
+  return fps === undefined || isIntegerInRange(fps, MIN_FPS_HINT, MAX_FPS_HINT)
     ? null
-    : `Invalid fps ${fps}; expected an integer between 1 and ${MAX_FPS_HINT}.`;
+    : `Invalid fps ${fps}; expected an integer between ${MIN_FPS_HINT} and ${MAX_FPS_HINT}.`;
 }
 
 function validateBitrate(bitrateKbps: VideoStreamSocketRequest["bitrateKbps"]): string | null {
-  return bitrateKbps === undefined || isIntegerInRange(bitrateKbps, 1, Number.MAX_SAFE_INTEGER)
+  return bitrateKbps === undefined || isIntegerInRange(bitrateKbps, 1, MAX_BITRATE_KBPS)
     ? null
-    : `Invalid bitrateKbps ${bitrateKbps}; expected a positive integer.`;
+    : `Invalid bitrateKbps ${bitrateKbps}; expected an integer between 1 and ${MAX_BITRATE_KBPS}.`;
 }
 
 function validateSize(size: VideoStreamSocketRequest["size"]): string | null {

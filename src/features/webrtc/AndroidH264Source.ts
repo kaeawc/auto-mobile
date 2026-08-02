@@ -309,7 +309,6 @@ const QUALITY_PRESET_MAX_LONG_SIDE: Record<"low" | "medium" | "high", number> = 
   high: 1080,
 };
 
-
 /**
  * Scale [size] down (never up) so its longer side fits the [quality] preset,
  * truncating to even pixels exactly as the on-device scaler does.

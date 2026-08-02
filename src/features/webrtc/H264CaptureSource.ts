@@ -45,11 +45,14 @@ export interface H264CaptureSourceOptions {
   /**
    * Capture frame rate.
    *
-   * On Android it is forwarded to the video-server as `--fps`, overriding the
-   * quality preset's default (carrying `WebRtcStreamingConfig.androidFps`). On
-   * iOS Simulator it requests a capture rate (carrying
-   * `WebRtcStreamingConfig.iosSimulatorFps`); physical iOS captures at its own
-   * AVFoundation rate but still takes its declared rawvideo input rate and GOP
+   * On Android it is forwarded to the persistent video-server as `--fps`,
+   * overriding the quality preset's default (carrying
+   * `WebRtcStreamingConfig.androidFps`). The `screenrecord` fallback
+   * (`AndroidH264Source`) has no frame-rate flag and captures at the display's
+   * native rate, so the hint is a no-op there. On iOS Simulator it requests a
+   * capture rate (carrying `WebRtcStreamingConfig.iosSimulatorFps`); physical
+   * iOS captures at its own AVFoundation rate but still takes its declared
+   * rawvideo input rate and GOP
    * length from it.
    */
   fps?: number;

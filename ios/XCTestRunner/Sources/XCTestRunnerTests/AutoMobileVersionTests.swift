@@ -166,15 +166,17 @@ final class AutoMobileVersionTests: XCTestCase {
     }
 
     func testPinnedDaemonPackageCommandRejectsFloatingOrUnknownPins() {
-        XCTAssertNil(DaemonManager.buildPackageDaemonCommand(
+        for packageVersion in ["latest", "unknown", "next", "0.0.x", "^0.0.40", "~0.0.40", ">=0.0.40"] {
+            XCTAssertNil(DaemonManager.buildPackageDaemonCommand(
+                packageRunner: "/opt/homebrew/bin/bunx",
+                subcommand: "start",
+                packageVersion: packageVersion
+            ), "\(packageVersion) must not be accepted as a hermetic package pin")
+        }
+        XCTAssertNotNil(DaemonManager.buildPackageDaemonCommand(
             packageRunner: "/opt/homebrew/bin/bunx",
             subcommand: "start",
-            packageVersion: "latest"
-        ))
-        XCTAssertNil(DaemonManager.buildPackageDaemonCommand(
-            packageRunner: "/opt/homebrew/bin/bunx",
-            subcommand: "start",
-            packageVersion: "unknown"
+            packageVersion: "0.0.40-rc.1"
         ))
     }
 
@@ -203,10 +205,32 @@ final class AutoMobileVersionTests: XCTestCase {
         ), .packageRunnerNotFound)
     }
 
+    func testDaemonLaunchFailsClosedForInvalidPackagePins() {
+        for (environment, expectedVersion) in [
+            (["AUTOMOBILE_DAEMON_PACKAGE_VERSION": "next"], "next"),
+            (["AUTOMOBILE_VERSION": "^0.0.40"], "^0.0.40"),
+        ] {
+            let packageVersion = DaemonManager.resolveDaemonPackageVersion(environment: environment)
+            XCTAssertEqual(packageVersion, expectedVersion)
+            XCTAssertEqual(DaemonManager.selectDaemonLaunch(
+                subcommand: "start",
+                localEntry: nil,
+                runtime: nil,
+                packageRunner: "/opt/homebrew/bin/bunx",
+                autoMobilePath: "/usr/local/bin/auto-mobile",
+                packageVersion: packageVersion
+            ), .invalidPackageVersion(expectedVersion))
+        }
+    }
+
     func testStartupFailureNamesMissingPackageRunnerAndLaunchTimeout() {
         XCTAssertEqual(
             DaemonManager.startupFailure(for: .packageRunnerNotFound),
             .packageRunnerNotFound
+        )
+        XCTAssertEqual(
+            DaemonManager.startupFailure(for: .invalidPackageVersion("next")),
+            .invalidPackageVersion("next")
         )
         XCTAssertEqual(
             DaemonManager.startupFailure(for: .timedOut),
@@ -214,6 +238,7 @@ final class AutoMobileVersionTests: XCTestCase {
         )
         XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("bunx"))
         XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("npx"))
+        XCTAssertTrue(DaemonStartupResult.invalidPackageVersion("next").diagnosticMessage.contains("exact package version"))
         XCTAssertTrue(DaemonStartupResult.launchTimeout.diagnosticMessage.contains("timed out"))
         XCTAssertEqual(
             DaemonManager.startupFailure(for: DaemonManager.classifyDaemonSubcommandOutcome(
@@ -516,6 +541,31 @@ final class AutoMobileVersionTests: XCTestCase {
 
         XCTAssertEqual(result, .ready)
         XCTAssertTrue(runtime.subcommands.isEmpty)
+    }
+
+    func testEnsureDaemonRunningFailsClosedForInvalidPinsBeforeDaemonReuse() {
+        for (environment, expectedVersion) in [
+            (["AUTOMOBILE_DAEMON_PACKAGE_VERSION": "next"], "next"),
+            (["AUTOMOBILE_VERSION": "^0.0.40"], "^0.0.40"),
+        ] {
+            let runtime = FakeDaemonRuntime(
+                daemonVersion: AutoMobileVersion.current,
+                daemonBuildId: nil,
+                daemonEntryScript: nil,
+                buildIdAfterRestart: ""
+            )
+
+            let result = DaemonManager.ensureDaemonRunningResult(
+                repoRoot: "",
+                timeoutSeconds: 0,
+                runtime: runtime,
+                callerAssetVersion: nil,
+                environment: environment
+            )
+
+            XCTAssertEqual(result, .invalidPackageVersion(expectedVersion))
+            XCTAssertTrue(runtime.subcommands.isEmpty)
+        }
     }
 }
 

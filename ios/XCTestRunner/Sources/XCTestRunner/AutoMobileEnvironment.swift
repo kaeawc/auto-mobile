@@ -99,6 +99,7 @@ public enum DaemonStartupResult: Equatable {
     case ready
     case executableNotFound
     case packageRunnerNotFound
+    case invalidPackageVersion(String)
     case launchFailed
     case packageLaunchFailed(stderr: String)
     case launchTimeout
@@ -119,6 +120,9 @@ public enum DaemonStartupResult: Equatable {
         case .packageRunnerNotFound:
             return "Failed to start AutoMobile Daemon: a pinned daemon requires `bunx` or `npx`, but neither "
                 + "was found on PATH. Install Bun or Node.js with npm/npx, then retry."
+        case let .invalidPackageVersion(version):
+            return "Failed to start AutoMobile Daemon: `\(version)` is not an exact package version. "
+                + "Set AUTOMOBILE_DAEMON_PACKAGE_VERSION or AUTOMOBILE_VERSION to MAJOR.MINOR.PATCH, then retry."
         case .launchFailed:
             return "Failed to start AutoMobile Daemon: `auto-mobile --daemon start` exited non-zero. "
                 + "Check the daemon logs."
@@ -170,6 +174,7 @@ public enum DaemonManager {
         case launched
         case executableNotFound
         case packageRunnerNotFound
+        case invalidPackageVersion(String)
         case failed(stderr: String? = nil)
         case packageFailed(stderr: String? = nil)
         case timedOut
@@ -179,6 +184,7 @@ public enum DaemonManager {
         case process(executable: String, arguments: [String])
         case executableNotFound
         case packageRunnerNotFound
+        case invalidPackageVersion(String)
     }
 
     /// Injectable subprocess boundary so launcher timeouts are deterministic in unit tests.
@@ -361,6 +367,8 @@ public enum DaemonManager {
             return .executableNotFound
         case .packageRunnerNotFound:
             return .packageRunnerNotFound
+        case let .invalidPackageVersion(version):
+            return .invalidPackageVersion(version)
         case let .failed(stderr):
             return failureResult(stderr: stderr, packageRunner: false)
         case let .packageFailed(stderr):
@@ -428,6 +436,9 @@ public enum DaemonManager {
         case .packageRunnerNotFound:
             PerfTimer.log("runDaemonSubcommand: ERROR - pinned daemon package runner not found")
             return .packageRunnerNotFound
+        case let .invalidPackageVersion(version):
+            PerfTimer.log("runDaemonSubcommand: ERROR - invalid pinned daemon package version: \(version)")
+            return .invalidPackageVersion(version)
         }
 
         let hasLocalBuild = localEntry != nil && runtime != nil
@@ -525,7 +536,8 @@ public enum DaemonManager {
             PerfTimer.log("runDaemonSubcommand(\(subcommand)): launching local build at \(localEntry)")
             return .process(executable: runtime, arguments: [localEntry, "--daemon", subcommand])
         }
-        if let packageSpecifier = resolveDaemonPackageSpecifier(packageVersion) {
+        switch daemonPackageVersionResolution(packageVersion) {
+        case let .valid(packageSpecifier):
             guard let packageRunner else {
                 return .packageRunnerNotFound
             }
@@ -537,6 +549,10 @@ public enum DaemonManager {
                     subcommand: subcommand
                 )
             )
+        case let .invalid(version):
+            return .invalidPackageVersion(version)
+        case .absent:
+            break
         }
         guard let autoMobilePath else {
             return .executableNotFound
@@ -577,15 +593,30 @@ public enum DaemonManager {
         return automobileVersion?.isEmpty == false ? automobileVersion : nil
     }
 
+    private enum DaemonPackageVersionResolution {
+        case absent
+        case valid(String)
+        case invalid(String)
+    }
+
+    private static func daemonPackageVersionResolution(_ packageVersion: String?) -> DaemonPackageVersionResolution {
+        guard let version = packageVersion?.trimmingCharacters(in: .whitespaces), !version.isEmpty else {
+            return .absent
+        }
+        guard version.range(
+                  of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+                  options: .regularExpression
+              ) != nil else {
+            return .invalid(version)
+        }
+        return .valid("\(packageName)@\(version)")
+    }
+
     private static func resolveDaemonPackageSpecifier(_ packageVersion: String?) -> String? {
-        guard let version = packageVersion?.trimmingCharacters(in: .whitespaces),
-              !version.isEmpty,
-              version.lowercased() != "latest",
-              version.lowercased() != "unknown"
-        else {
+        guard case let .valid(specifier) = daemonPackageVersionResolution(packageVersion) else {
             return nil
         }
-        return "\(packageName)@\(version)"
+        return specifier
     }
 
     private static func packageDaemonArguments(
@@ -811,6 +842,15 @@ public enum DaemonManager {
         -> DaemonStartupResult
     {
         let effectiveRepoRoot = resolveDaemonRepoRoot(repoRoot, inferredRepoRoot: inferredRepoRoot)
+        let hasLocalBuild = resolveRepoRootDaemonEntryScript(effectiveRepoRoot) != nil
+        if !hasLocalBuild,
+           case let .invalid(version) = daemonPackageVersionResolution(
+               resolveDaemonPackageVersion(environment: environment)
+           )
+        {
+            PerfTimer.log("ensureDaemonRunning: invalid pinned daemon package version: \(version)")
+            return .invalidPackageVersion(version)
+        }
         let launcherTimeoutSeconds = daemonLauncherTimeoutSeconds(
             subcommand: "restart",
             readinessTimeoutSeconds: timeoutSeconds,

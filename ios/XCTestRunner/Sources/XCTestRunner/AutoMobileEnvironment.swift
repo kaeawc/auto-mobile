@@ -487,9 +487,14 @@ public enum DaemonManager {
         let startupSeconds = configuredStartupMilliseconds > 0
             ? TimeInterval(configuredStartupMilliseconds) / 1000
             : 10
-        guard subcommand == "restart" else { return max(readinessTimeoutSeconds, startupSeconds) }
-        // DaemonManager.restart allows shutdown (5s), an inter-phase delay (1s), then startup.
-        return max(readinessTimeoutSeconds, 6 + startupSeconds)
+        // DaemonManager can wait once for an existing lock holder and once for the lock winner's
+        // startup/retry, each with the configured startup budget.
+        let startupLifecycleSeconds = 2 * startupSeconds
+        guard subcommand == "restart" else {
+            return max(readinessTimeoutSeconds, startupLifecycleSeconds)
+        }
+        // DaemonManager.restart additionally allows shutdown (5s) and an inter-phase delay (1s).
+        return max(readinessTimeoutSeconds, 6 + startupLifecycleSeconds)
     }
 
     static func executeDaemonLaunch(

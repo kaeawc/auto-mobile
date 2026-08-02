@@ -464,22 +464,22 @@ final class AutoMobileVersionTests: XCTestCase {
             subcommand: "restart",
             readinessTimeoutSeconds: 15,
             environment: [:]
-        ), 16)
+        ), 26)
         XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
             subcommand: "restart",
             readinessTimeoutSeconds: 15,
             environment: ["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS": "30000"]
-        ), 36)
+        ), 66)
         XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
             subcommand: "start",
             readinessTimeoutSeconds: 15,
             environment: ["AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS": "30000"]
-        ), 30)
+        ), 60)
         XCTAssertEqual(DaemonManager.daemonLauncherTimeoutSeconds(
             subcommand: "start",
             readinessTimeoutSeconds: 15,
             environment: [:]
-        ), 15)
+        ), 20)
     }
 
     func testEnsureDaemonRunningAcceptsDaemonMatchingPinnedClientVersion() {

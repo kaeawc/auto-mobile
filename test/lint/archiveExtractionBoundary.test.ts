@@ -44,6 +44,7 @@ describe("archive extraction boundary (issue #4065)", () => {
     expect(directlyExtractsTar(
       'const seam = runExecSeam; seam(cb, opts, { command: "tar", args: ["-xzf", archive] });'
     )).toBe(true);
+    expect(directlyExtractsTar('exec(useTar ? "tar -xzf archive.tar.gz" : "unzip archive.zip");')).toBe(true);
   });
 
   test("detects array-first tar extraction (Bun.spawn's single-array signature)", () => {

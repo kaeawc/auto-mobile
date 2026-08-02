@@ -127,6 +127,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (ts.isParenthesizedExpression(node)) {return strings(node.expression, seen);}
     if (ts.isNoSubstitutionTemplateLiteral(node)) {return [node.text];}
     if (ts.isTemplateExpression(node)) {return [node.head.text, ...node.templateSpans.map(span => span.literal.text)];}
+    if (ts.isConditionalExpression(node)) {
+      return [...strings(node.whenTrue, seen), ...strings(node.whenFalse, seen)];
+    }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
       const left = strings(node.left, seen); const right = strings(node.right, seen);
       const staticLeft = left.length === 1 && !left[0].includes(DYNAMIC_BOUNDARY);

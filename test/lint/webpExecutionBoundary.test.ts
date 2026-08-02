@@ -27,9 +27,9 @@ function directlyExecutesWebp(source: string): boolean {
     const array = ast.arrayElements(call.arguments[0]);
     const command = array?.[0] ?? call.arguments[0];
     const commandValues = ast.strings(command);
-    const shellValues = (array ? array.slice(1) : call.arguments.slice(1)).flatMap(argument => ast.strings(argument));
-    const shellIndex = shellValues.indexOf("-c");
-    const shellCommand = shellIndex >= 0 ? shellValues.slice(shellIndex + 1) : [];
+    const argv = array ? array.slice(1) : ast.arrayElements(call.arguments[1]) ?? [];
+    const shellIndex = argv.findIndex(argument => ast.strings(argument).includes("-c"));
+    const shellCommand = shellIndex >= 0 ? ast.strings(argv[shellIndex + 1]) : [];
     return commandValues.some(value => BINARY_COMMAND.test(value)) || shellCommand.some(value => BINARY_COMMAND.test(value)) ||
       ast.containsCallNamed(command, new Set(["resolveCwebp", "resolveDwebp"]));
   });
@@ -107,6 +107,7 @@ describe("webp codec execution boundary (issue #4064)", () => {
   test("does not mistake codec words in data arguments for execution", () => {
     expect(directlyExecutesWebp('spawn("echo", ["cwebp"]);')).toBe(false);
     expect(directlyExecutesWebp('spawn("echo", ["/tmp/cwebp-result.txt"]);')).toBe(false);
+    expect(directlyExecutesWebp('spawn("bash", ["-c", script], { env: { TOOL: "cwebp" } });')).toBe(false);
   });
 
   test("detects a static shell prefix without joining across dynamic values", () => {

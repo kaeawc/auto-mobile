@@ -205,10 +205,32 @@ final class AutoMobileVersionTests: XCTestCase {
         ), .packageRunnerNotFound)
     }
 
+    func testDaemonLaunchFailsClosedForInvalidPackagePins() {
+        for (environment, expectedVersion) in [
+            (["AUTOMOBILE_DAEMON_PACKAGE_VERSION": "next"], "next"),
+            (["AUTOMOBILE_VERSION": "^0.0.40"], "^0.0.40"),
+        ] {
+            let packageVersion = DaemonManager.resolveDaemonPackageVersion(environment: environment)
+            XCTAssertEqual(packageVersion, expectedVersion)
+            XCTAssertEqual(DaemonManager.selectDaemonLaunch(
+                subcommand: "start",
+                localEntry: nil,
+                runtime: nil,
+                packageRunner: "/opt/homebrew/bin/bunx",
+                autoMobilePath: "/usr/local/bin/auto-mobile",
+                packageVersion: packageVersion
+            ), .invalidPackageVersion(expectedVersion))
+        }
+    }
+
     func testStartupFailureNamesMissingPackageRunnerAndLaunchTimeout() {
         XCTAssertEqual(
             DaemonManager.startupFailure(for: .packageRunnerNotFound),
             .packageRunnerNotFound
+        )
+        XCTAssertEqual(
+            DaemonManager.startupFailure(for: .invalidPackageVersion("next")),
+            .invalidPackageVersion("next")
         )
         XCTAssertEqual(
             DaemonManager.startupFailure(for: .timedOut),
@@ -216,6 +238,7 @@ final class AutoMobileVersionTests: XCTestCase {
         )
         XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("bunx"))
         XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("npx"))
+        XCTAssertTrue(DaemonStartupResult.invalidPackageVersion("next").diagnosticMessage.contains("exact package version"))
         XCTAssertTrue(DaemonStartupResult.launchTimeout.diagnosticMessage.contains("timed out"))
         XCTAssertEqual(
             DaemonManager.startupFailure(for: DaemonManager.classifyDaemonSubcommandOutcome(

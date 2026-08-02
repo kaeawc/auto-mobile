@@ -366,6 +366,7 @@ final class XCTestRunnerTests: XCTestCase {
         for result: DaemonStartupResult in [
             .executableNotFound,
             .packageRunnerNotFound,
+            .invalidPackageVersion("next"),
             .launchFailed,
             .packageLaunchFailed(stderr: "package unavailable"),
             .launchTimeout,
@@ -390,6 +391,7 @@ final class XCTestRunnerTests: XCTestCase {
             stderr: "package unavailable"
         ).diagnosticMessage.contains("package unavailable"))
         XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("bunx"))
+        XCTAssertTrue(DaemonStartupResult.invalidPackageVersion("next").diagnosticMessage.contains("exact package version"))
         XCTAssertTrue(DaemonStartupResult.launchTimeout.diagnosticMessage.contains("timed out"))
         XCTAssertTrue(DaemonStartupResult.readinessTimeout.diagnosticMessage.contains("did not"))
         XCTAssertTrue(DaemonStartupResult.versionSkew.diagnosticMessage.contains("different-version"))
@@ -399,6 +401,7 @@ final class XCTestRunnerTests: XCTestCase {
         let messages = [
             DaemonStartupResult.executableNotFound,
             DaemonStartupResult.packageRunnerNotFound,
+            DaemonStartupResult.invalidPackageVersion("next"),
             DaemonStartupResult.launchFailed,
             DaemonStartupResult.packageLaunchFailed(stderr: "package unavailable"),
             DaemonStartupResult.launchTimeout,

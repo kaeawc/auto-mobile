@@ -7,6 +7,7 @@ import { UnixSocketServer } from "./socketServer";
 import { SessionManager } from "./sessionManager";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { DevicePool, type PooledDevice } from "./devicePool";
+import { parseDeviceRecoveryPolicy } from "./poolConfig";
 import { DaemonState } from "./daemonState";
 import {
   DEFAULT_DAEMON_PORT,
@@ -208,6 +209,14 @@ export class Daemon {
       SessionReleaseBroadcaster.emit(sessionId);
     });
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
+    const recoveryConfiguration = parseDeviceRecoveryPolicy(process.env);
+    for (const warning of recoveryConfiguration.warnings) {
+      logger.warn(`[Daemon] ${warning}`);
+    }
+    logger.info(
+      `[Daemon] Device recovery policy: onLoss=${recoveryConfiguration.policy.onLoss}, ` +
+      `maxAttempts=${recoveryConfiguration.policy.maxAttempts}`
+    );
     this.devicePool = new DevicePool(
       this.sessionManager,
       this.daemonSessionId,
@@ -218,7 +227,9 @@ export class Daemon {
       this.deviceSessionRepository,
       undefined,
       (sessionId, _deviceId, releaseReason) => this.cancelAndReleaseSession(sessionId, releaseReason),
-      deviceId => this.socketServer?.evictDeviceInputCache(deviceId)
+      deviceId => this.socketServer?.evictDeviceInputCache(deviceId),
+      undefined,
+      recoveryConfiguration.policy,
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(this.sessionManager, this.devicePool);

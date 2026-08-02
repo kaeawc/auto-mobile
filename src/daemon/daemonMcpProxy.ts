@@ -176,6 +176,8 @@ export interface DaemonMcpProxyConfig {
   buildIdentity?: BuildIdentity;
   /** This client's version for the daemon version gate (defaults to DAEMON_VERSION; injectable for testing) */
   clientVersion?: string;
+  /** Existing device-pool session bound before the first discovery request. */
+  initialSessionUuid?: string;
 }
 
 /**
@@ -399,6 +401,10 @@ export class DaemonMcpProxy {
       this.config.connectionTimeoutMs
     ));
     this.timer = config.timer ?? defaultTimer;
+    if (typeof config.initialSessionUuid === "string" && config.initialSessionUuid.trim().length > 0) {
+      this.boundSessionUuid = config.initialSessionUuid;
+      this.boundSessionUuidAt = this.timer.now();
+    }
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
     this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
     this.clientAssetVersion = isExplicitPin()

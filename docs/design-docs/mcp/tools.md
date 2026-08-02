@@ -144,7 +144,9 @@ cat "$APP_CONTAINER/Documents/fixtures/hello.txt"
 - 📋 Device inventory and pool status are exposed via the `automobile:devices/booted` resource.
 - 🚀 `startDevice` starts a device with the specified device image.
 - ❌ `killDevice` terminates a running device.
-- 🔧 `setActiveDevice` sets the active device for subsequent operations.
+- 🔧 `setActiveDevice` sets the active device for subsequent operations. It is a
+  compatibility API; new multi-client daemon integrations should bind a
+  device-pool session when the MCP connection starts.
 
 #### Testing & Debugging {#testing-debugging}
 

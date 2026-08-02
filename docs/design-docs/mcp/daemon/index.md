@@ -53,6 +53,33 @@ The daemon exposes a full [Unix Socket API](unix-socket-api.md) for IDE plugins 
 - **MCP proxy** — `tools/list`, `tools/call`, `resources/list`, `resources/read`
 - **Daemon management** — device pool queries, session lifecycle
 
+## MCP Device-Session Routing
+
+An MCP connection can be bound to an already-allocated device-pool session at
+startup. Integrations create their proxy with
+`createProxyMcpServer({ proxyConfig: { initialSessionUuid } })` before the
+first `tools/list`. That binding scopes discovery and every device-aware call
+without relying on mutable active-device state, and remains specific to that
+connection across daemon transport recreation.
+
+The device-pool session is separate from the MCP transport session and from a
+tool-capability profile. When the bound device session is released, the
+connection binding is removed; later sessionless calls do not recreate it.
+`setActiveDevice` remains available as a migration compatibility API, but new
+multi-client integrations should use connection-bound device-pool sessions.
+
+If a confirmed device loss cancels an active call, the MCP result is an error
+with `structuredContent` and text JSON of this form:
+
+```json
+{
+  "code": "device_lost",
+  "deviceId": "emulator-5554",
+  "sessionUuid": "device-session-1",
+  "reason": "confirmed-unavailable"
+}
+```
+
 ## Session Heartbeats
 
 The daemon reclaims sessions whose client heartbeat has gone stale. Sessions using the default heartbeat policy that never send their first heartbeat are reclaimed after a short grace period, while custom-heartbeat sessions, including autolock sessions, keep using their configured heartbeat timeout.

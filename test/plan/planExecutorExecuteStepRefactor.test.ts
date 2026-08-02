@@ -8,6 +8,7 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 import type { SessionToolProfileService } from "../../src/features/toolCapabilities/SessionToolProfileService";
 
 interface CapturedCall {
@@ -147,6 +148,38 @@ describe("PlanExecutor executeStep refactor", () => {
     expect(result.failedStep?.error).toBe("button missing");
     expect(result.failedStep?.failureObservation?.visibleTextsSample).toContain("Failure Screen");
     expect(result.perDeviceResults?.get("device-a")?.failedStep?.failureObservation).toBeDefined();
+  });
+
+  test("propagates confirmed device loss through sequential and parallel plans", async () => {
+    ToolRegistry.register(
+      "executeStepRefactorDeviceLost",
+      "loses its device",
+      z.object({
+        platform: z.string().optional(),
+        device: z.string().optional(),
+        deviceId: z.string().optional(),
+        sessionUuid: z.string().optional(),
+      }),
+      mock(async () => {
+        throw new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554");
+      }),
+    );
+    (ToolRegistry.getTool("executeStepRefactorDeviceLost") as { requiresDevice: boolean }).requiresDevice = true;
+
+    await expect(
+      planExecutor.executePlan({
+        name: "sequential-device-lost",
+        steps: [{ tool: "executeStepRefactorDeviceLost", params: {} }],
+      }, 0, "android", "emulator-5554", "session-a"),
+    ).rejects.toThrow("device-disconnected:emulator-5554");
+
+    await expect(
+      planExecutor.executePlan({
+        name: "parallel-device-lost",
+        devices: ["device-a"],
+        steps: [{ tool: "executeStepRefactorDeviceLost", params: { device: "device-a" } }],
+      }, 0, "android", "emulator-5554", "session-a"),
+    ).rejects.toThrow("device-disconnected:emulator-5554");
   });
 
   test("multi-device immediate abort uses AbortSignal.any and cancels sibling tracks", async () => {

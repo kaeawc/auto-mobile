@@ -359,7 +359,8 @@ describe("MCP Booted Device Resources", () => {
         idle: 1,
         assigned: 1,
         error: 0,
-        total: 2
+        total: 2,
+        recoveryPolicy: { onLoss: false, maxAttempts: 2 }
       });
 
       const assignedDevice = data.devices.find(device => device.assignedSession === sessionId);
@@ -413,7 +414,8 @@ describe("MCP Booted Device Resources", () => {
         idle: 0,
         assigned: 0,
         error: 0,
-        total: 0
+        total: 0,
+        recoveryPolicy: { onLoss: false, maxAttempts: 2 }
       });
 
       sessionManager.stopCleanupTimer();
@@ -470,7 +472,8 @@ describe("MCP Booted Device Resources", () => {
         idle: 0,
         assigned: 1,
         error: 0,
-        total: 1
+        total: 1,
+        recoveryPolicy: { onLoss: false, maxAttempts: 2 }
       });
 
       sessionManager.stopCleanupTimer();

@@ -1064,8 +1064,14 @@ describe("Daemon manager available-devices", () => {
               idle: 2,
               assigned: 1,
               error: 0,
-              total: 3
-            }
+              total: 3,
+              recoveryPolicy: { onLoss: true, maxAttempts: 2 },
+            },
+            devices: [{
+              deviceId: "emulator-5554",
+              platform: "android",
+              recoveryEligibility: { eligible: true, action: "restart" },
+            }],
           })
         }
       ]
@@ -1099,7 +1105,13 @@ describe("Daemon manager available-devices", () => {
       availableDevices: 2,
       totalDevices: 3,
       assignedDevices: 1,
-      errorDevices: 0
+      errorDevices: 0,
+      recoveryPolicy: { onLoss: true, maxAttempts: 2 },
+      devices: [{
+        deviceId: "emulator-5554",
+        platform: "android",
+        recoveryEligibility: { eligible: true, action: "restart" },
+      }],
     }));
   });
 
@@ -1118,7 +1130,13 @@ describe("Daemon manager available-devices", () => {
           assigned: 2,
           error: 1,
           total: 4
-        })
+        }),
+        getRecoveryPolicy: () => ({ onLoss: false, maxAttempts: 2 }),
+        getAllDevices: () => [{
+          id: "physical-ios-device",
+          platform: "ios",
+        }],
+        getRecoveryEligibility: () => ({ eligible: false, reason: "unsupported-platform" }),
       } as any),
       getSessionManager: () => ({
         getSession: () => null,
@@ -1140,7 +1158,13 @@ describe("Daemon manager available-devices", () => {
       availableDevices: 1,
       totalDevices: 4,
       assignedDevices: 2,
-      errorDevices: 1
+      errorDevices: 1,
+      recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+      devices: [{
+        deviceId: "physical-ios-device",
+        platform: "ios",
+        recoveryEligibility: { eligible: false, reason: "unsupported-platform" },
+      }],
     }));
   });
 });

@@ -12,6 +12,7 @@ import { runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
+import { deviceLossOutcomeFromError } from "./deviceLossOutcome";
 
 // Import the tool registry
 import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
@@ -543,6 +544,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         logger.debug("[MCP] Omitted structuredContent", { tool: name, reason: omissionReason });
       }
       return stripToolResultStructuredContent(result, omissionReason);
+    } catch (error) {
+      const deviceLoss = deviceLossOutcomeFromError(error, providedSessionUuid ?? routingSessionUuid);
+      if (deviceLoss) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(deviceLoss) }],
+          structuredContent: deviceLoss,
+          isError: true,
+        };
+      }
+      throw error;
     } finally {
       executionTracker.endExecution(execution.id);
     }

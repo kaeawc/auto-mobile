@@ -129,6 +129,62 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("scopes first discovery and device-aware calls to the configured initial session", async () => {
+      const firstClient = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "first" }] },
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "firstScopedTool", inputSchema: {} }] }],
+        ]),
+      });
+      const secondClient = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "second" }] },
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "secondScopedTool", inputSchema: {} }] }],
+        ]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const firstProxy = new DaemonMcpProxy({
+        initialSessionUuid: "device-session-a",
+        clientFactory: () => firstClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+      const secondProxy = new DaemonMcpProxy({
+        initialSessionUuid: "device-session-b",
+        clientFactory: () => secondClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await Promise.all([
+          firstProxy.listTools(),
+          secondProxy.listTools(),
+        ]);
+        await Promise.all([
+          firstProxy.callTool("observe", { deviceId: "device-a" }),
+          secondProxy.callTool("observe", { deviceId: "device-b" }),
+        ]);
+
+        expect(firstClient.callDaemonMethodCalls).toEqual([
+          { method: "tools/list", params: { sessionUuid: "device-session-a" } },
+        ]);
+        expect(secondClient.callDaemonMethodCalls).toEqual([
+          { method: "tools/list", params: { sessionUuid: "device-session-b" } },
+        ]);
+        expect(firstClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "device-session-a" } },
+        ]);
+        expect(secondClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { deviceId: "device-b", sessionUuid: "device-session-b" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await firstProxy.close();
+        await secondProxy.close();
+      }
+    });
+
     test("auto-starts daemon when not running", async () => {
       const fakeClient = new FakeDaemonClient({
         daemonMethodResults: new Map([
@@ -1366,7 +1422,7 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("listTools re-seeds the bound session on a reconnect so discovery stays session-scoped", async () => {
+    test("listTools re-seeds an initial session binding on reconnect so discovery stays session-scoped", async () => {
       // listTools forwards to a shared transport. A reconnect mid-listTools would
       // otherwise retry tools/list with empty params against the fresh unseeded
       // transport, returning the full unfiltered tool list instead of the
@@ -1384,15 +1440,13 @@ describe("DaemonMcpProxy", () => {
       const clients = [staleClient, freshClient];
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
       const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
         clientFactory: () => clients.shift()!,
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
       });
 
       try {
-        // Bind the proxy to session-a via a successful tool call.
-        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
-
         const tools = await proxy.listTools();
 
         expect(tools).toEqual([{ name: "scopedTool", inputSchema: {} }]);
@@ -1773,20 +1827,21 @@ describe("DaemonMcpProxy", () => {
     // instead of waiting out the replay-TTL guess. The TTL stays as a
     // dropped-frame backstop.
 
-    test("a released signal for the bound UUID clears the binding", async () => {
+    test("a released signal clears an initial binding before a later sessionless call", async () => {
       const fakeClient = new FakeDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
       });
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
       const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
         clientFactory: () => fakeClient,
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
       });
 
       try {
-        // Bind session-a via an explicit call, then the daemon releases it.
-        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        // The initial routing binding scopes calls before any mutable device selection.
+        await proxy.callTool("observe", { deviceId: "device-a" });
         fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
         // The next sessionless call must NOT be rewritten to the retired UUID.
         await proxy.callTool("observe", { deviceId: "device-a" });

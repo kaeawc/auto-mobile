@@ -211,6 +211,9 @@ export const getStructuredField = <TPayload, K extends keyof TPayload & string>(
 
 export const throwIfAborted = (signal?: AbortSignal): void => {
   if (signal?.aborted) {
+    if (signal.reason instanceof Error && signal.reason.name === "DeviceLostError") {
+      throw signal.reason;
+    }
     throw new Error(OPERATION_CANCELLED_MESSAGE);
   }
 };

@@ -46,6 +46,7 @@ import {
   getToolCapabilityContext,
   runWithToolCapabilityContext,
 } from "../features/toolCapabilities/toolCapabilityContext";
+import { isDeviceLostError } from "./deviceLossOutcome";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
@@ -1034,7 +1035,7 @@ export class ToolRegistryClass {
               toolDurationMs = afterToolCallResult.durationMs;
               return afterToolCallResult.finalizedResponse;
             } catch (error) {
-              if (error instanceof ActionableError) {
+              if (error instanceof ActionableError || isDeviceLostError(error)) {
                 throw error;
               }
               const deviceContext = resolvedTarget.device ? ` on device ${resolvedTarget.device.deviceId}` : "";

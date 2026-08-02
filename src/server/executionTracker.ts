@@ -1,6 +1,7 @@
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { deviceLostErrorFromCancellationReason } from "./deviceLossOutcome";
 
 interface ActiveExecution {
   id: string;
@@ -178,7 +179,7 @@ export class ExecutionTracker {
         // authoritative `cancelReason` is set synchronously with the counted cancellation
         // regardless of how the runtime surfaces `signal.reason` (issue #3909). The same
         // Error instance is passed to abort() so consumers reading the signal still match.
-        const reasonError = new Error(cancelReason);
+        const reasonError = deviceLostErrorFromCancellationReason(cancelReason) ?? new Error(cancelReason);
         execution.cancelReason = reasonError;
         execution.abortController.abort(reasonError);
       } else {

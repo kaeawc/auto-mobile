@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeAll, mock } from "bun:test";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 
 // Mock planUtils so executePlan throws while importPlanFromYaml works normally.
 // This is safe because no other test imports from "../../src/utils/planUtils" via
@@ -78,5 +79,20 @@ describe("executePlanTool — executePlan throws", () => {
 
     // Verify the response contains the specific error message from executePlan
     expect(payload.error).toContain("device disconnected");
+  });
+
+  test("rethrows confirmed device loss for the MCP boundary", async () => {
+    mockExecutePlan.mockImplementationOnce(() =>
+      Promise.reject(new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554"))
+    );
+    const tool = ToolRegistry.getTool("executePlan");
+    expect(tool).toBeDefined();
+
+    await expect(tool!.deviceAwareHandler!(mockDevice, {
+      planContent: VALID_PLAN_YAML,
+      startStep: 0,
+      platform: "android",
+      deviceAllocationTimeoutMs: 5000,
+    })).rejects.toThrow("device-disconnected:emulator-5554");
   });
 });

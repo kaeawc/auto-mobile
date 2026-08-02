@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ExecutionTracker, type ExecutionScopeOptions } from "../../src/server/executionTracker";
+import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -20,7 +21,7 @@ describe("ExecutionTracker", function() {
   // (a Bun `AbortSignal.reason` observability quirk, not a logic race — the abort is dispatched
   // synchronously). We assert the tracker's own `cancelReason`, recorded synchronously at
   // cancellation, which is deterministic across runtimes, plus that the signal did abort.
-  test("records the custom cancellation reason for a device-disconnected cancel", async function() {
+  test("records a typed device-loss reason for a device-disconnected cancel", async function() {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
     const execution = tracker.startExecution("tapOn", undefined, "session-uuid");
 
@@ -31,7 +32,11 @@ describe("ExecutionTracker", function() {
 
     expect(cancelled).toBe(1);
     expect(execution.abortController.signal.aborted).toBe(true);
-    expect(execution.cancelReason).toEqual(new Error("device-disconnected:emulator-5554"));
+    expect(execution.cancelReason).toBeInstanceOf(DeviceLostError);
+    expect(execution.cancelReason).toMatchObject({
+      deviceId: "emulator-5554",
+      message: "device-disconnected:emulator-5554",
+    });
   });
 
   test("keeps transport cancellation reasons log-only", async function() {

@@ -1,5 +1,10 @@
 import { DaemonRequest } from "./types";
 import { DeviceLabelMap, Session } from "./sessionManager";
+import type {
+  DeviceRecoveryEligibility,
+  DeviceRecoveryPolicy,
+  PooledDevice,
+} from "./devicePool";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
 export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -20,6 +25,9 @@ export interface DaemonStateAccess {
     refreshDevices(): Promise<number>;
     getStats(): DevicePoolStats;
     releaseDevice(deviceId: string): Promise<void>;
+    getAllDevices?(): PooledDevice[];
+    getRecoveryPolicy?(): DeviceRecoveryPolicy;
+    getRecoveryEligibility?(deviceId: string): DeviceRecoveryEligibility;
     resolveAutolockSessionForMcpSession?(
       mcpSessionId: string | undefined,
       platform?: "android" | "ios"
@@ -106,6 +114,12 @@ export async function handleDaemonRequest(
     case "daemon/availableDevices": {
       const pool = state.getDevicePool();
       const stats = pool.getStats();
+      const recoveryPolicy = pool.getRecoveryPolicy?.();
+      const devices = pool.getAllDevices?.().map(device => ({
+        deviceId: device.id,
+        platform: device.platform,
+        recoveryEligibility: pool.getRecoveryEligibility?.(device.id),
+      }));
       return {
         success: true,
         result: {
@@ -114,6 +128,8 @@ export async function handleDaemonRequest(
           assignedDevices: stats.assigned,
           errorDevices: stats.error,
           stats,
+          ...(recoveryPolicy ? { recoveryPolicy } : {}),
+          ...(devices ? { devices } : {}),
         },
       };
     }

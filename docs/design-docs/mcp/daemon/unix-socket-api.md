@@ -949,7 +949,8 @@ The list is intentionally extensible; clients must ignore capability strings the
 
 ### `daemon/availableDevices`
 
-Returns current device pool statistics.
+Returns current device-pool statistics, its startup-fixed recovery policy, and
+recovery eligibility for each pooled device.
 
 **Params:** none
 
@@ -966,7 +967,13 @@ Returns current device pool statistics.
     "idle": 3,
     "assigned": 1,
     "error": 0
-  }
+  },
+  "recoveryPolicy": { "onLoss": true, "maxAttempts": 2 },
+  "devices": [{
+    "deviceId": "emulator-5554",
+    "platform": "android",
+    "recoveryEligibility": { "eligible": true, "action": "restart" }
+  }]
 }
 ```
 

@@ -53,7 +53,11 @@ describe("archive extraction boundary (issue #4065)", () => {
     expect(directlyExtractsTar('runExecSeam(cb, opts, { command: "echo", args: ["tar", "-x"] });')).toBe(false);
     expect(directlyExtractsTar('exec(useTar ? "tar -xzf archive.tar.gz" : "unzip archive.zip");')).toBe(true);
     expect(directlyExtractsTar('exec(process.env.ARCHIVE_CMD ?? "tar -xzf archive.tar.gz");')).toBe(true);
+    expect(directlyExtractsTar('import cp = require("node:child_process"); cp.exec("tar -xzf archive.tar.gz");')).toBe(true);
     expect(directlyExtractsTar("exec(String.raw`tar -xzf archive.tar.gz`);")).toBe(true);
+    expect(directlyExtractsTar(
+      'runExecSeam(cb, opts, enabled ? { command: "tar", args: ["-xzf", archive] } : { command: "echo", args: [] });'
+    )).toBe(true);
   });
 
   test("detects array-first tar extraction (Bun.spawn's single-array signature)", () => {

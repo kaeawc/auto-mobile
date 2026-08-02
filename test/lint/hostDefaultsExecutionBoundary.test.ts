@@ -72,6 +72,9 @@ describe("host defaults execution boundary (issue #4062)", () => {
     expect(directlyExecutesHostDefaults(
       'runExecSeam(cb, opts, { command: "defaults", args: ["read", "-g", key] });'
     )).toBe(true);
+    expect(directlyExecutesHostDefaults(
+      'runExecSeam(cb, opts, enabled ? { command: "defaults", args: ["read"] } : { command: "echo", args: [] });'
+    )).toBe(true);
     expect(directlyExecutesHostDefaults('const tool = "defaults"; exec(`${tool} read -g key`);')).toBe(true);
     expect(directlyExecutesHostDefaults(
       'function safe(){ const argv = ["echo"]; Bun.spawn(argv); } function bad(){ const argv = ["defaults", "read"]; Bun.spawn(argv); }'

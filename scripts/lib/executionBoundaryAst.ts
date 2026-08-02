@@ -67,6 +67,11 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         }
       }
     }
+    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) &&
+      node.moduleReference.expression && ts.isStringLiteral(node.moduleReference.expression) &&
+      CHILD_PROCESS_MODULES.has(node.moduleReference.expression.text)) {
+      childProcessNamespaces.add(node.name.text);
+    }
     if (ts.isVariableDeclaration(node)) {
       if (ts.isIdentifier(node.name) && node.initializer) {bind(node.name.text, node.initializer);}
       if (ts.isObjectBindingPattern(node.name)) {
@@ -217,6 +222,10 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const objectPropertyValues = (node: ts.Expression | undefined, propertyName: string, seen = new Set<string>()): ts.Expression[] => {
     if (!node) {return [];}
     node = unwrapTransparentExpression(node);
+    if (ts.isConditionalExpression(node)) {
+      return [...objectPropertyValues(node.whenTrue, propertyName, seen),
+        ...objectPropertyValues(node.whenFalse, propertyName, seen)];
+    }
     if (ts.isObjectLiteralExpression(node)) {
       return node.properties.flatMap(property => {
         if (ts.isPropertyAssignment(property) && propertyNameOf(property.name) === propertyName) {return [property.initializer];}

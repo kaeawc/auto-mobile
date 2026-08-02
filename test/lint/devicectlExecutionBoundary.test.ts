@@ -50,7 +50,15 @@ function directlyExecutesDevicectl(source: string): boolean {
       const argvWrappedDevicectl = commandValues.some(value => value === "env" || value === "sudo") &&
         argvAlternatives.some(argv => {
           const values = argv.flatMap(argument => ast.strings(argument));
-          const commandIndex = values.findIndex(value => !value.startsWith("-") && !value.includes("="));
+          let commandIndex = 0;
+          while (commandIndex < values.length) {
+            const value = values[commandIndex];
+            if (["-u", "--user", "-g", "--group", "-h", "--host", "-C", "--close-from"].includes(value)) {
+              commandIndex += 2;
+            } else if (value.startsWith("-") || value.includes("=")) {
+              commandIndex++;
+            } else {break;}
+          }
           return values[commandIndex] === "xcrun" && values.slice(commandIndex + 1).includes("devicectl");
         });
       return shellDevicectl || shellWrappedDevicectl || argvWrappedDevicectl || directDevicectl ||
@@ -116,6 +124,7 @@ describe("devicectl execution boundary (issue #4053)", () => {
     expect(directlyExecutesDevicectl('Bun.spawn(["bash", "-c", "xcrun devicectl device list"]);')).toBe(true);
     expect(directlyExecutesDevicectl('spawn("env", ["xcrun", "devicectl", "device", "list"]);')).toBe(true);
     expect(directlyExecutesDevicectl('execFile("sudo", ["xcrun", "devicectl", "device", "list"]);')).toBe(true);
+    expect(directlyExecutesDevicectl('execFile("sudo", ["-u", "root", "xcrun", "devicectl", "device", "list"]);')).toBe(true);
     expect(directlyExecutesDevicectl(
       'spawn("bash", enabled ? ["-c", "xcrun devicectl device list"] : ["-c", "echo ok"]);'
     )).toBe(true);
@@ -135,6 +144,9 @@ describe("devicectl execution boundary (issue #4053)", () => {
     )).toBe(true);
     expect(directlyExecutesDevicectl(
       'const command = "xcrun"; const args = ["devicectl", "--version"]; runExecSeam(cb, opts, { command, args });'
+    )).toBe(true);
+    expect(directlyExecutesDevicectl(
+      'runExecSeam(cb, opts, enabled ? { command: "xcrun", args: ["devicectl"] } : { command: "echo", args: [] });'
     )).toBe(true);
     expect(directlyExecutesDevicectl(
       'const run = runExecSeam; run(cb, opts, { command: "xcrun", args: ["devicectl", "--version"] });'

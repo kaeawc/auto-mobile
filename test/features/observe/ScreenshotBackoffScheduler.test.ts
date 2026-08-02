@@ -850,3 +850,34 @@ describe("DefaultScreenshotBackoffScheduler stop() vs cancelPendingCaptures()", 
     expect(scheduler.isActive()).toBe(false);
   });
 });
+
+describe("DefaultScreenshotBackoffScheduler keepalive respects the floor", () => {
+  // A subscriber can request a keepalive cadence below the platform floor; keepalive captures must
+  // not bypass the throttle or they keep tripping the rate limit in steady state (issue #4927 P1).
+  const FLOOR = 350;
+
+  it("never issues keepalive captures faster than the floor even at a sub-floor cadence", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = new DefaultScreenshotBackoffScheduler(
+      async () => {
+        captureTimes.push(fakeTimer.now());
+        return { success: true, data: `frame-${captureTimes.length}` };
+      },
+      () => {},
+      { intervals: [0], keepAliveIntervalMs: 250, minCaptureIntervalMs: FLOOR },
+      fakeTimer
+    );
+
+    scheduler.startBackoffSequence();
+    for (let t = 0; t < 1200; t += 50) {
+      await fakeTimer.advanceTimersByTimeAsync(50);
+    }
+
+    expect(captureTimes[0]).toBe(0);
+    expect(captureTimes.length).toBeGreaterThan(1); // keepalive still provides liveness
+    for (let i = 1; i < captureTimes.length; i++) {
+      expect(captureTimes[i] - captureTimes[i - 1]).toBeGreaterThanOrEqual(FLOOR);
+    }
+  });
+});

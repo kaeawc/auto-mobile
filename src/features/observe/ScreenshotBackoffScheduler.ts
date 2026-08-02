@@ -345,6 +345,16 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
       return;
     }
 
+    // A subscriber can request a keepalive cadence below the platform floor (screenshot interval
+    // clamps to 250ms, under the 350ms accessibility floor), and a burst capture may have just
+    // fired. Skip this beat rather than trip the rate limit; the reschedule below keeps liveness
+    // going at an effective cadence no faster than the floor (issue #4927).
+    if (this.shouldDeferForFloor()) {
+      logger.debug("[ScreenshotBackoff] Skipping keepalive capture - within the rate-limit floor");
+      this.scheduleKeepAliveIfIdle(sequenceId);
+      return;
+    }
+
     logger.debug(`[ScreenshotBackoff] Capturing keepalive screenshot (sequence ${sequenceId})`);
 
     try {

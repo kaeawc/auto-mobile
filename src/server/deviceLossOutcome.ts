@@ -1,5 +1,9 @@
 export const DEVICE_LOSS_OUTCOME_CODE = "device_lost";
-const deviceLossByAbortSignal = new WeakMap<AbortSignal, DeviceLostError>();
+const DEVICE_LOSS_ABORT_ERROR = Symbol.for("automobile.device-loss-error");
+
+type DeviceLossAwareAbortSignal = AbortSignal & {
+  [DEVICE_LOSS_ABORT_ERROR]?: DeviceLostError;
+};
 
 export interface DeviceLossOutcome {
   code: typeof DEVICE_LOSS_OUTCOME_CODE;
@@ -42,11 +46,13 @@ export function deviceLostErrorFromCancellationReason(reason: string): DeviceLos
  * infrastructure outcome in that runtime path.
  */
 export function rememberDeviceLossAbort(signal: AbortSignal, error: DeviceLostError): void {
-  deviceLossByAbortSignal.set(signal, error);
+  (signal as DeviceLossAwareAbortSignal)[DEVICE_LOSS_ABORT_ERROR] = error;
 }
 
 export function deviceLostErrorFromAbortSignal(signal: AbortSignal): DeviceLostError | undefined {
-  return isDeviceLostError(signal.reason) ? signal.reason : deviceLossByAbortSignal.get(signal);
+  return isDeviceLostError(signal.reason)
+    ? signal.reason
+    : (signal as DeviceLossAwareAbortSignal)[DEVICE_LOSS_ABORT_ERROR];
 }
 
 export function deviceLossOutcomeFromError(

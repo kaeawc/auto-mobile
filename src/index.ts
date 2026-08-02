@@ -141,6 +141,7 @@ async function main() {
       cliArgs,
       daemonPort,
       daemonHost,
+      initialSessionUuid,
       debugPerf,
       debug,
       uiPerfMode,
@@ -505,7 +506,11 @@ async function main() {
       try {
         if (useProxyMode) {
           const result = createProxyMcpServer({
-            proxyConfig: { autoStartDaemon: !noDaemon, daemonOptions: daemonStartupOptions }
+            proxyConfig: {
+              autoStartDaemon: !noDaemon,
+              daemonOptions: daemonStartupOptions,
+              initialSessionUuid,
+            }
           });
           server = result.server;
           stdioProxy = result.proxy;

@@ -360,6 +360,9 @@ export class DaemonMcpProxy {
   // refreshing it, the remembered UUID is treated as retired so a sessionless
   // call is not rewritten to a released session (issue #4610).
   private boundSessionUuidAt: number | undefined;
+  // Startup bindings remain authoritative until the daemon signals release.
+  // Replay expiration only protects bindings inferred from ordinary calls.
+  private initialSessionBindingConfigured = false;
   // A connection-level capability profile is not a daemon device session. It
   // survives executePlan's device-session release and is forwarded through the
   // socket only when no explicit/remembered routing session is in use.
@@ -411,8 +414,9 @@ export class DaemonMcpProxy {
     ));
     this.timer = config.timer ?? defaultTimer;
     if (typeof config.initialSessionUuid === "string" && config.initialSessionUuid.trim().length > 0) {
-      this.boundSessionUuid = config.initialSessionUuid;
+      this.boundSessionUuid = config.initialSessionUuid.trim();
       this.boundSessionUuidAt = this.timer.now();
+      this.initialSessionBindingConfigured = true;
     }
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
     this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
@@ -1058,7 +1062,11 @@ export class DaemonMcpProxy {
   }
 
   private isBoundSessionReplayExpired(): boolean {
-    if (this.boundSessionUuid === undefined || this.boundSessionUuidAt === undefined) {
+    if (
+      this.initialSessionBindingConfigured ||
+      this.boundSessionUuid === undefined ||
+      this.boundSessionUuidAt === undefined
+    ) {
       return false;
     }
     return this.timer.now() - this.boundSessionUuidAt >= DAEMON_BOUND_SESSION_REPLAY_TTL_MS;
@@ -1067,6 +1075,7 @@ export class DaemonMcpProxy {
   private clearBoundSessionUuid(): void {
     this.boundSessionUuid = undefined;
     this.boundSessionUuidAt = undefined;
+    this.initialSessionBindingConfigured = false;
   }
 
   // Record that the daemon released a specific session UUID, advancing the global
@@ -1235,7 +1244,9 @@ export class DaemonMcpProxy {
    * Read a resource from the daemon
    */
   async readResource(uri: string): Promise<any> {
-    return await this.withRecoverableReconnect(() => this.client!.readResource(uri));
+    return await this.withRecoverableReconnect(() =>
+      this.client!.readResource(uri, this.withBoundSessionUuid({}))
+    );
   }
 
   /**

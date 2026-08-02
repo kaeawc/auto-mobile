@@ -43,6 +43,7 @@ const matchingDaemonManager = (): FakeDaemonManager => {
 class ScriptedDaemonClient implements DaemonClientLike {
   readonly callToolCalls: Array<{ toolName: string; params: Record<string, any> }> = [];
   readonly readResourceCalls: string[] = [];
+  readonly readResourceParams: Array<Record<string, any>> = [];
   readonly callDaemonMethodCalls: Array<{ method: string; params: Record<string, any> }> = [];
   connectCallCount = 0;
   closeCallCount = 0;
@@ -81,8 +82,11 @@ class ScriptedDaemonClient implements DaemonClientLike {
     return this.behavior.toolResult ?? { content: [{ type: "text", text: "success" }] };
   }
 
-  async readResource(uri: string): Promise<any> {
+  async readResource(uri: string, params: Record<string, any> = {}): Promise<any> {
     this.readResourceCalls.push(uri);
+    const recordedParams = { ...params };
+    delete recordedParams.__autoMobileBoundSessionUuid;
+    this.readResourceParams.push(recordedParams);
     if (this.behavior.resourceError) {
       throw this.behavior.resourceError;
     }
@@ -1274,12 +1278,13 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("readResource forwards to daemon", async () => {
+    test("readResource forwards a trimmed initial binding to the daemon", async () => {
       const expectedResult = { contents: [{ uri: "automobile:test", text: "data" }] };
       const fakeClient = new FakeDaemonClient({ resourceResult: expectedResult });
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
 
       const proxy = new DaemonMcpProxy({
+        initialSessionUuid: " session-a ",
         clientFactory: () => fakeClient,
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
@@ -1290,13 +1295,14 @@ describe("DaemonMcpProxy", () => {
 
         expect(result).toEqual(expectedResult);
         expect(fakeClient.readResourceCalls).toContain("automobile:devices/booted");
+        expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-a" }]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
       }
     });
 
-    test("readResource reconnects and retries once when daemon session is stale", async () => {
+    test("readResource reconnects and retries once with its initial session binding", async () => {
       const recoveredResult = { contents: [{ uri: "automobile:devices/booted", text: "[]" }] };
       const staleClient = new ScriptedDaemonClient({
         resourceError: new Error("MCP error -32603: Failed to read resource from daemon: Session not found"),
@@ -1308,6 +1314,7 @@ describe("DaemonMcpProxy", () => {
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
 
       const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
         clientFactory: () => clients.shift()!,
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false
@@ -1320,8 +1327,10 @@ describe("DaemonMcpProxy", () => {
         expect(staleClient.connectCallCount).toBe(1);
         expect(staleClient.closeCallCount).toBe(1);
         expect(staleClient.readResourceCalls).toEqual(["automobile:devices/booted"]);
+        expect(staleClient.readResourceParams).toEqual([{ sessionUuid: "session-a" }]);
         expect(freshClient.connectCallCount).toBe(1);
         expect(freshClient.readResourceCalls).toEqual(["automobile:devices/booted"]);
+        expect(freshClient.readResourceParams).toEqual([{ sessionUuid: "session-a" }]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
@@ -2067,6 +2076,31 @@ describe("DaemonMcpProxy", () => {
         expect(fakeClient.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
           { toolName: "observe", params: { deviceId: "device-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does not expire a configured initial binding before its release signal", async () => {
+      const timer = new FakeTimer();
+      const fakeClient = new FakeDaemonClient();
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();

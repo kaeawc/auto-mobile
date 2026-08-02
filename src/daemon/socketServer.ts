@@ -792,8 +792,7 @@ export class UnixSocketServer {
     }
 
     if (request.method === "resources/read") {
-      const uri = request.params?.uri;
-      return this.sharedMcpForwardRoute(typeof uri === "string" ? `resource:${uri}` : "resource:unknown");
+      return this.getResourceReadForwardRoute(request, socketSessionId);
     }
 
     return this.sharedMcpForwardRoute(`method:${request.method}`);
@@ -819,6 +818,18 @@ export class UnixSocketServer {
       return boundRoute ? { ...boundRoute, executionKey } : this.sharedMcpForwardRoute(executionKey);
     }
     return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
+  }
+
+  private getResourceReadForwardRoute(
+    request: DaemonRequest,
+    socketSessionId: string,
+  ): McpForwardRoute {
+    const sessionUuid = this.getSessionUuid(request.params);
+    if (sessionUuid && !this.isReleasedBoundSession(request.params)) {
+      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined);
+    }
+    const uri = request.params?.uri;
+    return this.sharedMcpForwardRoute(typeof uri === "string" ? `resource:${uri}` : "resource:unknown");
   }
 
   private getToolsCallForwardRoute(args: unknown, socketSessionId: string): McpForwardRoute {

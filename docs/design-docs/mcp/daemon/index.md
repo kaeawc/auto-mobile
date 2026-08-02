@@ -61,6 +61,8 @@ startup. Integrations create their proxy with
 first `tools/list`. That binding scopes discovery and every device-aware call
 without relying on mutable active-device state, and remains specific to that
 connection across daemon transport recreation.
+The packaged stdio entrypoint accepts the same binding as
+`--initial-session-uuid <uuid>`.
 
 The device-pool session is separate from the MCP transport session and from a
 tool-capability profile. When the bound device session is released, the
@@ -69,7 +71,9 @@ connection binding is removed; later sessionless calls do not recreate it.
 multi-client integrations should use connection-bound device-pool sessions.
 
 If a confirmed device loss cancels an active call, the MCP result is an error
-with `structuredContent` and text JSON of this form:
+whose first text content item is machine-readable JSON of this form. It does
+not include `structuredContent`, because the device-loss envelope is independent
+of the interrupted tool's output schema:
 
 ```json
 {

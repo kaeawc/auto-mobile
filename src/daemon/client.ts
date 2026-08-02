@@ -405,8 +405,8 @@ export class DaemonClient {
   /**
    * Read a resource from the daemon
    */
-  async readResource(uri: string): Promise<any> {
-    return this.sendRequest("resources/read", { uri });
+  async readResource(uri: string, params: Record<string, any> = {}): Promise<any> {
+    return this.sendRequest("resources/read", { uri, ...params });
   }
 
   private async sendRequest(method: string, params: Record<string, any>): Promise<any> {
@@ -539,7 +539,7 @@ export interface DaemonClientLike {
   connect(): Promise<void>;
   close(): Promise<void>;
   callTool(toolName: string, params: Record<string, any>): Promise<any>;
-  readResource(uri: string): Promise<any>;
+  readResource(uri: string, params?: Record<string, any>): Promise<any>;
   callDaemonMethod(method: string, params: Record<string, any>): Promise<any>;
   /**
    * Optional daemon-push capability (issue #3223). Clients that cannot surface

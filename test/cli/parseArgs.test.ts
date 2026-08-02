@@ -22,4 +22,10 @@ describe("parseArgs (#4277)", () => {
     expect(parsed.embeddedSdk).toBe(false);
     expect(parsed.networkMockable).toBe(false);
   });
+
+  test("parses an initial device-session binding for proxy mode", () => {
+    const parsed = parseArgs(["--initial-session-uuid", "device-session-a"], logger);
+
+    expect(parsed.initialSessionUuid).toBe("device-session-a");
+  });
 });

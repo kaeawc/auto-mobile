@@ -21,6 +21,7 @@ export interface FakeDaemonClientOptions {
 export class FakeDaemonClient implements DaemonClientLike {
   readonly callToolCalls: Array<{ toolName: string; params: Record<string, any> }> = [];
   readonly readResourceCalls: string[] = [];
+  readonly readResourceParams: Array<Record<string, any>> = [];
   readonly callDaemonMethodCalls: Array<{ method: string; params: Record<string, any> }> = [];
   private connected = false;
   private toolResult: any;
@@ -62,8 +63,11 @@ export class FakeDaemonClient implements DaemonClientLike {
     return this.toolResult;
   }
 
-  async readResource(uri: string): Promise<any> {
+  async readResource(uri: string, params: Record<string, any> = {}): Promise<any> {
     this.readResourceCalls.push(uri);
+    const recordedParams = { ...params };
+    delete recordedParams[DAEMON_BOUND_SESSION_PARAM];
+    this.readResourceParams.push(recordedParams);
     return this.resourceResult;
   }
 

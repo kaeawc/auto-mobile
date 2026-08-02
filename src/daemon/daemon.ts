@@ -166,7 +166,8 @@ export class Daemon {
     databaseInitializer: DatabaseInitializer = new DefaultDatabaseInitializer(),
     startupFailureTracker: StartupFailureTracker = new DefaultStartupFailureTracker(),
     databaseHealthProbe: DatabaseHealthProbe = new DefaultDatabaseHealthProbe({ timer }),
-    recoverFromDatabaseHealthFailure?: DatabaseHealthFailureRecovery
+    recoverFromDatabaseHealthFailure?: DatabaseHealthFailureRecovery,
+    recoveryPolicyEnvironment: NodeJS.ProcessEnv = process.env,
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -209,7 +210,7 @@ export class Daemon {
       SessionReleaseBroadcaster.emit(sessionId);
     });
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
-    const recoveryConfiguration = parseDeviceRecoveryPolicy(process.env);
+    const recoveryConfiguration = parseDeviceRecoveryPolicy(recoveryPolicyEnvironment);
     for (const warning of recoveryConfiguration.warnings) {
       logger.warn(`[Daemon] ${warning}`);
     }

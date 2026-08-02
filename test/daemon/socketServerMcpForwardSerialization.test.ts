@@ -824,6 +824,36 @@ describe("UnixSocketServer MCP forward serialization", () => {
     })]);
   });
 
+  test("routes a bound resources/read call through its session-scoped MCP client", async () => {
+    sessionDevices.set("session-a", "device-a");
+    const clientBindings: Array<string | undefined> = [];
+    server.mcpClientFactory = async boundSessionUuid => {
+      clientBindings.push(boundSessionUuid);
+      return {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => ({ content: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [{ uri: "automobile:devices/booted", text: "[]" }] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+    };
+
+    const response = await sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "resources/read",
+      params: {
+        uri: "automobile:devices/booted",
+        sessionUuid: "session-a",
+        [DAEMON_BOUND_SESSION_PARAM]: "session-a",
+      },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientBindings).toEqual(["session-a"]);
+  });
+
   test("retains a bound socket transport past the idle client deadline", async () => {
     sessionDevices.set("session-a", "device-a");
     let closeCalls = 0;

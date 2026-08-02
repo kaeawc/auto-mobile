@@ -38,6 +38,7 @@ export function parseArgs(args: string[], log: ParseLogger) {
   const hasFlag = (name: string) => values[name] === true;
   let daemonPort: number | undefined;
   let daemonHost: string | undefined;
+  let initialSessionUuid: string | undefined;
   const cliMode = hasFlag("cli");
   const daemonMode = hasFlag("daemon-mode");
   const noProxy = hasFlag("no-proxy") || hasFlag("direct");
@@ -127,6 +128,14 @@ export function parseArgs(args: string[], log: ParseLogger) {
       const host = args[i + 1];
       if (host && !host.startsWith("--")) {daemonHost = host;} else {log.warn(`Invalid host: ${host}`);}
       i++;
+    } else if (arg === "--initial-session-uuid") {
+      const sessionUuid = args[i + 1];
+      if (sessionUuid && !sessionUuid.startsWith("--")) {
+        initialSessionUuid = sessionUuid;
+      } else {
+        log.warn(`Invalid initial session UUID: ${sessionUuid}`);
+      }
+      i++;
     } else if (arg === "--a11y-level") {
       a11yLevel = args[++i];
     } else if (arg === "--a11y-failure-mode") {
@@ -148,5 +157,5 @@ export function parseArgs(args: string[], log: ParseLogger) {
       const value = parsePositiveNumber(args[++i], "video max archive size", true); if (value !== undefined) {videoRecordingDefaults.maxArchiveSizeMb = value;}
     }
   }
-  return { cliMode, cliArgs, daemonPort, daemonHost, debugPerf, debug, uiPerfMode, memPerfAuditMode, a11yAuditMode, a11yLevel, a11yFailureMode, a11yMinSeverity, a11yUseBaseline, predictiveUi, rawElementSearch, planExecutionLockScope, videoRecordingDefaults, daemonMode, daemonCommand, daemonArgs, skipCtrlProxyDownload, embeddedSdk, networkMockable, dismissKeyboardAfterInput, eventAllMarkers, eventAllMarkersCliOverride, mcpRecording, navigationScreenshots, noWaitForPollingOverhead, noProxy, noDaemon, noA11yIncludeNotImportantViews, noA11yReportViewIds, noA11yRetrieveInteractiveWindows, noOcclusion, safeAreaWarnings, outputReduction, toolOutputsDir };
+  return { cliMode, cliArgs, daemonPort, daemonHost, initialSessionUuid, debugPerf, debug, uiPerfMode, memPerfAuditMode, a11yAuditMode, a11yLevel, a11yFailureMode, a11yMinSeverity, a11yUseBaseline, predictiveUi, rawElementSearch, planExecutionLockScope, videoRecordingDefaults, daemonMode, daemonCommand, daemonArgs, skipCtrlProxyDownload, embeddedSdk, networkMockable, dismissKeyboardAfterInput, eventAllMarkers, eventAllMarkersCliOverride, mcpRecording, navigationScreenshots, noWaitForPollingOverhead, noProxy, noDaemon, noA11yIncludeNotImportantViews, noA11yReportViewIds, noA11yRetrieveInteractiveWindows, noOcclusion, safeAreaWarnings, outputReduction, toolOutputsDir };
 }

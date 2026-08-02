@@ -135,7 +135,7 @@ export class DevicePool {
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
   private readonly androidDeviceReboot: AndroidDeviceReboot;
-  private readonly recoveryPolicy: DeviceRecoveryPolicy | undefined;
+  private readonly recoveryPolicy: DeviceRecoveryPolicy;
   private readonly recoveringAndroidImages: Map<string, DeviceInfo> = new Map();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
@@ -172,10 +172,12 @@ export class DevicePool {
     this.deviceSessionRepository = deviceSessionRepository;
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
-    this.recoveryPolicy = recoveryPolicy;
+    // Resolve recovery policy once so retries and status agree even if the
+    // process environment changes after construction.
+    this.recoveryPolicy = { ...(recoveryPolicy ?? getDeviceRecoveryPolicy()) };
     this.androidDeviceReboot = androidDeviceReboot ?? new BoundedAndroidDeviceReboot(
       timer,
-      recoveryPolicy?.maxAttempts,
+      this.recoveryPolicy.maxAttempts,
     );
     this.releaseSessionForDisconnectedDevice = releaseSessionForDisconnectedDevice ?? (async (
       sessionId,
@@ -2208,7 +2210,7 @@ export class DevicePool {
 
   /** Effective daemon-startup policy, copied so callers cannot mutate pool state. */
   getRecoveryPolicy(): DeviceRecoveryPolicy {
-    return { ...(this.recoveryPolicy ?? getDeviceRecoveryPolicy()) };
+    return { ...this.recoveryPolicy };
   }
 
   getRecoveryEligibility(deviceId: string): DeviceRecoveryEligibility {

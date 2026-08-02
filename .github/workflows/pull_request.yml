@@ -1669,8 +1669,10 @@ jobs:
       AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"
       AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "60000"
       # This job builds CtrlProxy into /tmp/automobile-ctrl-proxy before daemon
-      # startup. Make that local build authoritative so PR runs do not depend on
+      # startup. Pin both the build script and every restarted daemon to that
+      # path, and make the local build authoritative so PR runs do not depend on
       # a published release IPA existing for package.json's current version.
+      AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA: "/tmp/automobile-ctrl-proxy"
       AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD: "true"
     steps:
       - name: "Git Checkout"

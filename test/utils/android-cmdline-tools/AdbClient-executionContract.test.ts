@@ -221,6 +221,29 @@ describe("AdbClient.getDeviceTimestampMs three-tier fallback", () => {
     const client = new AdbClient(DEVICE, exec, null, defaultRetryExecutor, new FakeTimer());
 
     expect(await client.getDeviceTimestampMs()).toBe(1700000000123);
+    expect(await client.getDeviceTimestampMsWithSource()).toEqual({
+      timestampMs: 1700000000123,
+      source: "device-ms",
+    });
+  });
+
+  test("rejects literal %3N suffixes instead of treating seconds as milliseconds", async () => {
+    const exec = (command: string): Promise<ExecResult> => {
+      if (command.includes("+%s%3N")) {
+        return Promise.resolve(ok("1754063999%3N"));
+      }
+      if (command.includes("+%s")) {
+        return Promise.resolve(ok("1700000000"));
+      }
+      return Promise.resolve(ok(""));
+    };
+    const client = new AdbClient(DEVICE, exec, null, defaultRetryExecutor, new FakeTimer());
+
+    expect(await client.getDeviceTimestampMs()).toBe(1700000000000);
+    expect(await client.getDeviceTimestampMsWithSource()).toEqual({
+      timestampMs: 1700000000000,
+      source: "device-seconds",
+    });
   });
 
   test("scales seconds to milliseconds when the millisecond tier yields nothing usable", async () => {
@@ -246,6 +269,10 @@ describe("AdbClient.getDeviceTimestampMs three-tier fallback", () => {
     const client = new AdbClient(DEVICE, exec, null, defaultRetryExecutor, timer);
 
     expect(await client.getDeviceTimestampMs()).toBe(1_650_000_000_000);
+    expect(await client.getDeviceTimestampMsWithSource()).toEqual({
+      timestampMs: 1_650_000_000_000,
+      source: "host",
+    });
   });
 });
 

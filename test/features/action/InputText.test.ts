@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -669,6 +670,79 @@ describe("InputText", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe("eventOnly requires a focused editable field");
     expect(observeExecuteOptions[0]?.minTimestamp).toBe(deviceNowMs);
+    expect(inputCommands(factory)).toEqual([]);
+  });
+
+  test("eventOnly advances a second-granularity lower bound past the current second", async () => {
+    const fakeAdb = new FakeAdbClient();
+    fakeAdb.setDeviceTimestampMs(1_700_000_000_000);
+    fakeAdb.setDeviceTimestampSource("device-seconds");
+    const factory = new FakeAdbClientFactory(fakeAdb);
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const observeExecuteOptions: ObserveScreenExecuteOptions[] = [];
+    inputText.observeScreen = {
+      execute: async (options?: ObserveScreenExecuteOptions): Promise<ObserveResult> => {
+        observeExecuteOptions.push({ ...(options ?? {}) });
+        const lowerBound = options?.minTimestamp ?? 0;
+        const actualTimestamp = 1_700_000_000_500;
+        return {
+          viewHierarchy: observeResultWithFocusedText("old").viewHierarchy,
+          freshness: {
+            requestedAfter: lowerBound,
+            actualTimestamp,
+            isFresh: actualTimestamp >= lowerBound,
+            staleDurationMs: Math.max(0, lowerBound - actualTimestamp),
+          },
+        } as ObserveResult;
+      },
+    } as unknown as ObserveScreen;
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "next",
+      undefined,
+      false,
+      "eventOnly",
+      { viewHierarchy: { hierarchy: { node: { class: "android.view.View" } } } } as ObserveResult
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("eventOnly requires a focused editable field");
+    expect(observeExecuteOptions[0]?.minTimestamp).toBe(1_700_000_001_000);
+    expect(inputCommands(factory)).toEqual([]);
+  });
+
+  test("eventOnly fails closed when the device timestamp falls back to the host clock", async () => {
+    const fakeAdb = new FakeAdbClient();
+    fakeAdb.setDeviceTimestampMs(0);
+    fakeAdb.setDeviceTimestampSource("host");
+    const factory = new FakeAdbClientFactory(fakeAdb);
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const observeExecuteOptions: ObserveScreenExecuteOptions[] = [];
+    inputText.observeScreen = {
+      execute: async (options?: ObserveScreenExecuteOptions): Promise<ObserveResult> => {
+        observeExecuteOptions.push({ ...(options ?? {}) });
+        return {
+          viewHierarchy: observeResultWithFocusedText("old").viewHierarchy,
+          freshness: {
+            requestedAfter: options?.minTimestamp ?? 0,
+            actualTimestamp: 1,
+            isFresh: true,
+          },
+        } as ObserveResult;
+      },
+    } as unknown as ObserveScreen;
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "next",
+      undefined,
+      false,
+      "eventOnly",
+      { viewHierarchy: { hierarchy: { node: { class: "android.view.View" } } } } as ObserveResult
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("eventOnly requires a focused editable field");
+    expect(observeExecuteOptions).toEqual([]);
     expect(inputCommands(factory)).toEqual([]);
   });
 

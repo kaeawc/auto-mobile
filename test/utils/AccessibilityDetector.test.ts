@@ -17,6 +17,10 @@ class FakeAdbExecutor implements AdbExecutor {
     return 0;
   }
 
+  async getDeviceTimestampMsWithSource(): Promise<{ timestampMs: number; source: "device-ms" }> {
+    return { timestampMs: 0, source: "device-ms" };
+  }
+
   setResponse(output: string): void {
     this.responses.set("default", output);
   }
@@ -62,10 +66,6 @@ class FakeAdbExecutor implements AdbExecutor {
 
   async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
     return null;
-  }
-
-  async getDeviceTimestampMs(): Promise<number> {
-    return 0;
   }
 
   async getAdbPathOnly(): Promise<string> {

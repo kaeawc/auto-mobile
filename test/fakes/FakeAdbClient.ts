@@ -3,13 +3,15 @@ import type {
   AdbExecutor,
   AdbProcess,
   AdbSpawnOptions,
+  DeviceTimestampSource,
+  DeviceTimestampResult,
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ExecResult } from "../../src/models";
 import { FakeAdbProcess } from "./FakeAdbProcess";
 
 type FakeAdbClientContract = Pick<
   AdbExecutor,
-  "execute" | "executeCommand" | "getForegroundApp" | "getDeviceTimestampMs" | "listUsers" | "spawn"
+  "execute" | "executeCommand" | "getForegroundApp" | "getDeviceTimestampMs" | "getDeviceTimestampMsWithSource" | "listUsers" | "spawn"
 >;
 
 /** How a spawned command should terminate, keyed by a substring of its argv. */
@@ -42,6 +44,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
   private hangingCommandPatterns: string[] = [];
   private users: Array<{ userId: number; name: string; flags?: number; running?: boolean }> = [];
   private deviceTimestampMs: number | null = null;
+  private deviceTimestampSource: DeviceTimestampSource = "device-ms";
   private spawnCalls: string[][] = [];
   private spawnBehaviors: SpawnBehavior[] = [];
 
@@ -240,6 +243,10 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.deviceTimestampMs = timestampMs;
   }
 
+  setDeviceTimestampSource(source: DeviceTimestampSource): void {
+    this.deviceTimestampSource = source;
+  }
+
   /**
    * Return the configured device time (device-authored clock domain), or a
    * deterministic `0` when unset. `0` is the faithful fake equivalent of the
@@ -249,6 +256,13 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   async getDeviceTimestampMs(): Promise<number> {
     return this.deviceTimestampMs ?? 0;
+  }
+
+  async getDeviceTimestampMsWithSource(): Promise<DeviceTimestampResult> {
+    return {
+      timestampMs: this.deviceTimestampMs ?? 0,
+      source: this.deviceTimestampSource,
+    };
   }
 
   /**

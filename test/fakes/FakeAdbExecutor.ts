@@ -1,4 +1,8 @@
-import { AdbExecutor, type AdbExecuteOptions } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import {
+  AdbExecutor,
+  type AdbExecuteOptions,
+  type DeviceTimestampResult,
+} from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../src/models";
 
 /**
@@ -316,6 +320,14 @@ export class FakeAdbExecutor implements AdbExecutor {
 
   async getDeviceTimestampMs(): Promise<number> {
     return this.deviceTimestampMs ?? Date.now();
+  }
+
+  async getDeviceTimestampMsWithSource(): Promise<DeviceTimestampResult> {
+    const timestampMs = await this.getDeviceTimestampMs();
+    return {
+      timestampMs,
+      source: this.deviceTimestampMs === null ? "host" : "device-ms",
+    };
   }
 
   async getAdbPathOnly(): Promise<string> {

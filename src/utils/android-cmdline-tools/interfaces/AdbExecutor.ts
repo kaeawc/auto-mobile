@@ -39,6 +39,13 @@ export interface AdbSpawnOptions {
   signal?: AbortSignal;
 }
 
+export type DeviceTimestampSource = "device-ms" | "device-seconds" | "host";
+
+export interface DeviceTimestampResult {
+  timestampMs: number;
+  source: DeviceTimestampSource;
+}
+
 /**
  * Interface for executing ADB commands
  * Enables dependency injection and testing with fakes
@@ -70,6 +77,12 @@ export interface AdbExecutor {
    * Falls back to the host time when device time cannot be retrieved.
    */
   getDeviceTimestampMs(): Promise<number>;
+
+  /**
+   * Get the device time with the clock source used to derive it.
+   * Host fallback is retained for callers that accept a best-effort timestamp.
+   */
+  getDeviceTimestampMsWithSource(): Promise<DeviceTimestampResult>;
 
   /**
    * Get the list of booted Android devices

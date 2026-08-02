@@ -142,6 +142,13 @@ export class NavigationGraphManager implements NavigationGraphService {
   private static instance: NavigationGraphManager | null = null;
   // Per-session instances for multi-agent isolation
   private static sessionInstances: Map<string, NavigationGraphManager> = new Map();
+  // Session UUIDs that have been released (#4984). Session UUIDs are never reused, so
+  // a getInstanceForSession() for a released id is a post-release stray event — it
+  // must resolve to the unattributed global singleton, never recreate a manager that
+  // would attribute the observation to the ended session. Bounded to avoid unbounded
+  // growth over a long-lived daemon.
+  private static releasedSessions: Set<string> = new Set();
+  private static readonly RELEASED_SESSIONS_CAP = 4096;
 
   private repository: NavigationRepository;
   private testCoverageRepository: TestCoverageRepository;
@@ -235,6 +242,13 @@ export class NavigationGraphManager implements NavigationGraphService {
   public static getInstanceForSession(sessionId: string): NavigationGraphManager {
     let instance = NavigationGraphManager.sessionInstances.get(sessionId);
     if (!instance) {
+      // A released session never legitimately returns (UUIDs are unique), so a
+      // request for one here is a stray post-release event: route it to the
+      // unattributed global singleton instead of minting a manager that would
+      // attribute the observation to the ended session (#4984).
+      if (NavigationGraphManager.releasedSessions.has(sessionId)) {
+        return NavigationGraphManager.getInstance();
+      }
       instance = new NavigationGraphManager(undefined, undefined, undefined, sessionId);
       NavigationGraphManager.sessionInstances.set(sessionId, instance);
     }
@@ -254,6 +268,16 @@ export class NavigationGraphManager implements NavigationGraphService {
       NavigationGraphManager.sessionInstances.delete(sessionId);
       logger.debug(`[NAV_GRAPH] Released session instance: ${sessionId}`);
     }
+    // Mark released even if no instance existed yet, so a later stray event for this
+    // session resolves to the unattributed global rather than minting a manager for
+    // the ended session (#4984). Bounded FIFO to cap long-daemon growth.
+    NavigationGraphManager.releasedSessions.add(sessionId);
+    if (NavigationGraphManager.releasedSessions.size > NavigationGraphManager.RELEASED_SESSIONS_CAP) {
+      const oldest = NavigationGraphManager.releasedSessions.values().next().value;
+      if (oldest !== undefined) {
+        NavigationGraphManager.releasedSessions.delete(oldest);
+      }
+    }
   }
 
   /**
@@ -262,6 +286,7 @@ export class NavigationGraphManager implements NavigationGraphService {
   public static resetInstance(): void {
     NavigationGraphManager.instance = null;
     NavigationGraphManager.sessionInstances.clear();
+    NavigationGraphManager.releasedSessions.clear();
   }
 
   /**
@@ -288,6 +313,8 @@ export class NavigationGraphManager implements NavigationGraphService {
     sessionId: string,
     instance: NavigationGraphManager
   ): void {
+    // Installing an instance clears any released-mark so the id resolves to it.
+    NavigationGraphManager.releasedSessions.delete(sessionId);
     NavigationGraphManager.sessionInstances.set(sessionId, instance);
   }
 

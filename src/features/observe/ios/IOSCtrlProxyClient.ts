@@ -653,6 +653,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   /**
+   * Release this client's binding to a session that has ended (#4984). If still
+   * bound to `sessionId`, drop the binding and dispose the cached hierarchy detector
+   * so a post-release event routes to the unattributed global manager, never the
+   * ended session's. Mirrors AndroidCtrlProxyClient.releaseSessionBinding.
+   */
+  public releaseSessionBinding(sessionId: string): void {
+    if (this.boundSessionId === sessionId) {
+      this.boundSessionId = null;
+      if (this.hierarchyNavigationDetector) {
+        this.hierarchyNavigationDetector.dispose();
+        this.hierarchyNavigationDetector = null;
+      }
+    }
+  }
+
+  /**
    * Get the NavigationGraphManager for the bound session, or the global singleton.
    */
   private getNavigationGraphManager(): NavigationGraphManager {

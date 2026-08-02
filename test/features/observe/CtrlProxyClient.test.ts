@@ -1360,6 +1360,36 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
+    test("releaseSessionBinding clears the binding and cached detector for the released session (#4984)", async function() {
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+
+      try {
+        testClient.bindSession("session-A");
+        expect(testClient.getBoundSessionIdForTesting()).toBe("session-A");
+        const detectorBoundToA = testClient.getHierarchyNavigationDetector();
+
+        testClient.releaseSessionBinding("session-A");
+
+        // Binding cleared and the cached detector dropped (recreated on next access),
+        // so post-release events route to the unattributed global manager, not A's.
+        expect(testClient.getBoundSessionIdForTesting()).toBeNull();
+        expect(testClient.getHierarchyNavigationDetector()).not.toBe(detectorBoundToA);
+
+        // A non-matching release is a no-op once a new session has bound.
+        testClient.bindSession("session-B");
+        testClient.releaseSessionBinding("session-A");
+        expect(testClient.getBoundSessionIdForTesting()).toBe("session-B");
+      } finally {
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
     test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#2885)", async function() {
       resetDbWriteBarrier();
       // The Android handler resolves getDbWriteBarrier() per write (#2912), so a

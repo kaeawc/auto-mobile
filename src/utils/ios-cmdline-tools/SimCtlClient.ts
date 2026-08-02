@@ -794,6 +794,7 @@ export class SimCtlClient implements SimCtl {
         if (!isAlreadyBootedCoreSimulator405(error)) {
           throw error;
         }
+        logger.debug(`[iOS] bootstatus returned expected CoreSimulator error 405 for ${udid}; verifying simulator state: ${error}`);
         bootstatusReportedAlreadyBooted = true;
       }
 

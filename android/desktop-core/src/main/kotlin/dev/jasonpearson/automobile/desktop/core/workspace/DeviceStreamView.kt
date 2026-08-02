@@ -54,7 +54,10 @@ fun DeviceStreamView(
   },
 ) {
   val source = remember(column.deviceId) { sourceFactory(column.deviceId) }
-  val liveFrame = rememberLiveVideoFrame(source, column.deviceId)
+  // Farm panes auto-reconnect: a dropped relay or a subscribe rejected while the workspace daemon
+  // session re-registers (e.g. after a daemon restart) heals itself instead of staying "stopped"
+  // until the pane is torn down.
+  val liveFrame = rememberLiveVideoFrame(source, column.deviceId, autoReconnect = true)
   val state by source.state.collectAsState()
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
     val bitmap = liveFrame?.bitmap

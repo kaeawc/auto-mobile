@@ -201,6 +201,10 @@ internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String
  * into that policy, which decides on frame *provenance* rather than on dimensions.
  */
 
+/** Reconnect backoff bounds for [rememberLiveVideoFrame] when [autoReconnect] is on. */
+internal const val LIVE_RECONNECT_INITIAL_MS = 1_000L
+internal const val LIVE_RECONNECT_MAX_MS = 15_000L
+
 /**
  * Connects a live-mirroring source for this composition and exposes only its newest frame.
  *
@@ -208,11 +212,19 @@ internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String
  * thread (issues #3348/#4786) — so this only conflates to the newest and gates on the stream state:
  * a frame that raced the relay's death must not restore a dead mirror. A refused or unavailable
  * relay clears the frame, allowing [DeviceScreenView] to continue rendering screenshot updates.
+ *
+ * With [autoReconnect] on, an `Unavailable` state (relay dropped, "Live mirroring stopped", or a
+ * transient subscribe rejection while the daemon session re-registers) triggers a bounded
+ * exponential-backoff [VideoStreamSource.connect] retry rather than staying dead until the pane is
+ * torn down and rebuilt. Off (the default) preserves the original clear-and-stop behavior for the
+ * IDE-plugin/`AutoMobileContent` path, which blends in screenshot updates instead.
  */
 @Composable
 internal fun rememberLiveVideoFrame(
   source: VideoStreamSource?,
   deviceId: String?,
+  autoReconnect: Boolean = false,
+  reconnectInitialMs: Long = LIVE_RECONNECT_INITIAL_MS,
 ): LiveVideoFrame? {
   var liveFrame by remember(source, deviceId) { mutableStateOf<LiveVideoFrame?>(null) }
 
@@ -232,9 +244,24 @@ internal fun rememberLiveVideoFrame(
     }
   }
 
-  LaunchedEffect(source) {
-    source?.state?.collect { state ->
-      if (state is VideoStreamState.Unavailable) liveFrame = null
+  LaunchedEffect(source, deviceId, autoReconnect) {
+    if (source == null) return@LaunchedEffect
+    var backoffMs = reconnectInitialMs
+    source.state.collect { state ->
+      when (state) {
+        is VideoStreamState.Streaming -> backoffMs = LIVE_RECONNECT_INITIAL_MS
+        is VideoStreamState.Unavailable -> {
+          liveFrame = null
+          if (autoReconnect && deviceId != null) {
+            // Cancelled by composition disposal, so a torn-down pane never reconnects. connect()
+            // no-ops while a reader is already active, so a spurious retry cannot double-subscribe.
+            delay(backoffMs)
+            backoffMs = (backoffMs * 2).coerceAtMost(LIVE_RECONNECT_MAX_MS)
+            source.connect(deviceId)
+          }
+        }
+        else -> {}
+      }
     }
   }
 

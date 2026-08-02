@@ -5,9 +5,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class LiveVideoStreamTest {
@@ -63,6 +65,32 @@ class LiveVideoStreamTest {
     source.emitFrame(width = 1, height = 1)
     waitForIdle()
     assertNull(observedFrame)
+  }
+
+  @Test
+  fun `auto-reconnect re-subscribes after the relay drops`() = runComposeUiTest {
+    // A dropped relay ("Live mirroring stopped") must heal itself rather than stay dead until the
+    // pane is torn down. With autoReconnect on, an Unavailable state triggers a connect() retry —
+    // the only path back to Streaming here, since the test never calls connect() again itself.
+    val source = FakeVideoStreamSource()
+    setContent {
+      rememberLiveVideoFrame(source, "emulator-5554", autoReconnect = true, reconnectInitialMs = 10)
+    }
+    waitUntil { source.state.value is VideoStreamState.Streaming }
+
+    source.becomeUnavailable("Live mirroring stopped")
+    waitUntil(timeoutMillis = 2_000) { source.state.value is VideoStreamState.Streaming }
+  }
+
+  @Test
+  fun `without auto-reconnect a dropped relay stays unavailable`() = runComposeUiTest {
+    val source = FakeVideoStreamSource()
+    setContent { rememberLiveVideoFrame(source, "emulator-5554") }
+    waitUntil { source.state.value is VideoStreamState.Streaming }
+
+    source.becomeUnavailable("Live mirroring stopped")
+    waitForIdle()
+    assertTrue(source.state.value is VideoStreamState.Unavailable)
   }
 
   @Test

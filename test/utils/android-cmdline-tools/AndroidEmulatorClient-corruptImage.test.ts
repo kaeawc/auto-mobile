@@ -259,7 +259,10 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     skipEmulatorPathDetection(client);
 
     const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
-    expect(fakeAvdConfigReader.readConfigCalls).toContain("Pixel_9_Pro");
+    expect(fakeAvdConfigReader.readConfigCalls).toEqual([
+      "Pixel_9_Pro", // listAvds() enrichment
+      "Pixel_9_Pro", // validateAvdMemory()
+    ]);
     expect(error.message).toContain("corrupt");
     expect(error.message).toContain("Suggestion");
     expect(error.message).toContain("userdata");

@@ -191,7 +191,10 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
 
     try {
       await client.startEmulator("Pixel_9_Pro");
-      expect(fakeAvdConfigReader.readConfigCalls).toContain("Pixel_9_Pro");
+      expect(fakeAvdConfigReader.readConfigCalls).toEqual([
+        "Pixel_9_Pro", // listAvds() enrichment
+        "Pixel_9_Pro", // validateAvdMemory()
+      ]);
       expect(capturedArgs).toContain("-no-window");
       expect(capturedArgs).toContain("-no-audio");
     } finally {

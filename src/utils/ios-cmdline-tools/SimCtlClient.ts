@@ -399,6 +399,12 @@ function inferIosFormFactor(deviceTypeId: string | undefined): "phone" | "tablet
   return undefined;
 }
 
+function isAlreadyBootedCoreSimulator405(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("domain=com.apple.CoreSimulator.SimError, code=405") &&
+    message.includes("Unable to boot device in current state: Booted");
+}
+
 /**
  * This file provides an interface to interact with iOS simulators using simctl.
  * It allows you to list, create, boot, and delete simulators.
@@ -778,18 +784,27 @@ export class SimCtlClient implements SimCtl {
     let lastFailure = "";
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      // A bootstatus failure (nonexistent UDID, timeout, simctl error) already
-      // reports itself and has consumed the caller's timeout budget, so it
-      // propagates unchanged rather than being retried. The retry here exists
-      // for the silent case: exit 0 with a device that never became Booted.
-      await this.executeCommandArgs(["bootstatus", udid, "-b"], timeoutMs);
+      let bootstatusReportedAlreadyBooted = false;
+      try {
+        await this.executeCommandArgs(["bootstatus", udid, "-b"], timeoutMs);
+      } catch (error) {
+        // CoreSimulator can transiently reject bootstatus with error 405 while
+        // reporting the requested simulator is already Booted. Verify its state
+        // before deciding whether the command failure is actionable.
+        if (!isAlreadyBootedCoreSimulator405(error)) {
+          throw error;
+        }
+        bootstatusReportedAlreadyBooted = true;
+      }
 
       const state = await this.readSimulatorState(udid);
       if (state === "Booted") {
         return;
       }
 
-      lastFailure = `bootstatus exited 0 but device state is ${state ?? "unknown"}, not Booted`;
+      lastFailure = bootstatusReportedAlreadyBooted
+        ? `bootstatus reported CoreSimulator error 405 but device state is ${state ?? "unknown"}, not Booted`
+        : `bootstatus exited 0 but device state is ${state ?? "unknown"}, not Booted`;
       logger.warn(`[iOS] Boot verification failed for ${udid} on attempt ${attempt}/${maxAttempts}: ${lastFailure}`);
 
       if (attempt < maxAttempts) {

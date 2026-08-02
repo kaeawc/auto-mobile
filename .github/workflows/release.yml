@@ -223,6 +223,11 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.prepare_run_id }}
 
+      - name: Verify prepared desktop installers
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: bash scripts/ci/verify-desktop-installer-assets.sh "$VERSION" /tmp/desktop
+
       - name: Read checksums prepared for this release
         id: prepared_checksums
         env:
@@ -503,27 +508,54 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          # Explicit, not derived from github.ref. The action throws "GitHub
-          # Releases requires a tag" on a non-tag ref, and this step runs after
-          # npm/Homebrew/MCP/Maven/Docker have already published irreversibly.
-          tag_name: ${{ needs.validate-release-tag.outputs.tag }}
-          # Plain semver title (e.g. "0.0.47") to match every prior release.
-          name: ${{ steps.version.outputs.version }}
-          body_path: release_notes.txt
-          files: |
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.validate-release-tag.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          files=(
             /tmp/control-proxy-debug.apk
             /tmp/control-proxy.ipa
             /tmp/automobile-video.jar
             /tmp/screen-capture-helper-macos-universal.zip
-            /tmp/desktop/AutoMobile-*-macos.dmg
-            /tmp/desktop/AutoMobile-*-windows.msi
-            /tmp/desktop/AutoMobile-*-linux.deb
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            /tmp/desktop/AutoMobile-${VERSION}-macos.dmg
+            /tmp/desktop/AutoMobile-${VERSION}-windows.msi
+            /tmp/desktop/AutoMobile-${VERSION}-linux.deb
+          )
+
+          # Use the GitHub Release API directly through gh. `gh release create`
+          # uploads through a draft before publishing, so a failed first attempt
+          # can leave a mutable draft. Only that draft is safe to repair with
+          # --clobber; never delete assets from an already-published release.
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            release_json="$(gh release view "$TAG" --repo "$REPO" --json isDraft,assets)"
+            if [ "$(jq -r '.isDraft' <<<"$release_json")" = "true" ]; then
+              gh release upload "$TAG" "${files[@]}" --repo "$REPO" --clobber
+              gh release edit "$TAG" --repo "$REPO" --title "$VERSION" \
+                --notes-file release_notes.txt --draft=false
+            else
+              missing=0
+              for file in "${files[@]}"; do
+                asset_name="${file##*/}"
+                if ! jq -e --arg name "$asset_name" \
+                  '.assets[] | select(.name == $name)' <<<"$release_json" >/dev/null; then
+                  echo "Published release $TAG is missing expected asset: $asset_name" >&2
+                  missing=1
+                fi
+              done
+              if [ "$missing" -ne 0 ]; then
+                echo "Refusing to overwrite assets on a published release." >&2
+                exit 1
+              fi
+              gh release edit "$TAG" --repo "$REPO" --title "$VERSION" --notes-file release_notes.txt
+            fi
+          else
+            gh release create "$TAG" "${files[@]}" --repo "$REPO" \
+              --title "$VERSION" --notes-file release_notes.txt --verify-tag
+          fi
 
       - name: Summary
         env:

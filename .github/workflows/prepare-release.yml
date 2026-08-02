@@ -312,6 +312,24 @@ jobs:
           name: screen-capture-helper
           path: /tmp
 
+      - name: "Download desktop macOS DMG"
+        uses: actions/download-artifact@v7
+        with:
+          name: automobile-desktop-macos
+          path: /tmp/desktop
+
+      - name: "Download desktop Windows MSI"
+        uses: actions/download-artifact@v7
+        with:
+          name: automobile-desktop-windows
+          path: /tmp/desktop
+
+      - name: "Download desktop Linux Deb"
+        uses: actions/download-artifact@v7
+        with:
+          name: automobile-desktop-linux
+          path: /tmp/desktop
+
       - name: Verify prepared release artifacts
         env:
           VERSION: ${{ inputs.version }}
@@ -322,6 +340,7 @@ jobs:
           bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-video.jar videojar
           bash scripts/ci/verify-artifact-sha256.sh /tmp/screen-capture-helper-macos-universal.zip screencapturehelper
           bash scripts/ci/verify-release-integrity.sh "$VERSION" /tmp/control-proxy.ipa
+          bash scripts/ci/verify-desktop-installer-assets.sh "$VERSION" /tmp/desktop
 
       - name: Promote verified release and create tag
         shell: bash

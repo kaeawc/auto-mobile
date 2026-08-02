@@ -455,13 +455,40 @@ wiring_requires_yq() {
 # action-gh-release throws "GitHub Releases requires a tag" when github.ref is not
 # a tag ref, and that step runs after npm/Homebrew/MCP/Maven/Docker have already
 # published irreversibly. The tag must be explicit, never inferred from the ref.
-@test "release.yml passes an explicit tag_name to action-gh-release (#4157)" {
+@test "release.yml creates the explicitly validated tag through the GitHub Release API (#4157)" {
   wiring_requires_yq
   run yq -r '.jobs."verify-and-release".steps[]
-    | select(.uses != null and (.uses | test("^softprops/action-gh-release")))
-    | .with.tag_name' ".github/workflows/release.yml"
+    | select(.name == "Create GitHub Release") | .run' ".github/workflows/release.yml"
   [ "$status" -eq 0 ]
-  [ "$output" = '${{ needs.validate-release-tag.outputs.tag }}' ]
+  [[ "$output" == *'gh release create "$TAG"'* ]]
+  [[ "$output" == *'--verify-tag'* ]]
+  [[ "$output" == *'gh release upload "$TAG"'* ]]
+  [[ "$output" == *'--clobber'* ]]
+  [[ "$output" == *'--json isDraft,assets'* ]]
+  [[ "$output" == *'--draft=false'* ]]
+  [[ "$output" == *'Refusing to overwrite assets on a published release.'* ]]
+  [[ "$output" == *'AutoMobile-${VERSION}-macos.dmg'* ]]
+  [[ "$output" != *'AutoMobile-*-macos.dmg'* ]]
+}
+
+@test "desktop installer verification requires the stable versioned asset names" {
+  local script="scripts/ci/verify-desktop-installer-assets.sh"
+  [ -x "$script" ]
+
+  local fixture
+  fixture="$(mktemp -d)"
+  printf 'installer\n' > "$fixture/AutoMobile-1.2.3-macos.dmg"
+  printf 'installer\n' > "$fixture/AutoMobile-1.2.3-windows.msi"
+  printf 'installer\n' > "$fixture/AutoMobile-1.2.3-linux.deb"
+
+  run bash "$script" "1.2.3" "$fixture"
+  [ "$status" -eq 0 ]
+
+  rm "$fixture/AutoMobile-1.2.3-linux.deb"
+  run bash "$script" "1.2.3" "$fixture"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"AutoMobile-1.2.3-linux.deb"* ]]
+  rm -rf "$fixture"
 }
 
 # release.yml publishes to six targets in one job and npm publish is not

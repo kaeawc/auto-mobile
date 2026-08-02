@@ -872,7 +872,19 @@ export class DaemonMcpProxy {
       );
       await this.resetConnection();
       await this.ensureConnected();
-      return await operation();
+      try {
+        return await operation();
+      } catch (retryError) {
+        // A configured binding normally survives beyond the replay TTL, because
+        // only an actual daemon release may retire it. If the release push was
+        // missed, two authoritative "Session not found" responses prove the
+        // configured session is gone, so unblock an explicit replacement.
+        if (this.initialSessionBindingConfigured && this.isDaemonSessionNotFoundError(retryError)) {
+          this.discoveryEpoch += 1;
+          this.clearBoundSessionUuid();
+        }
+        throw retryError;
+      }
     }
   }
 
@@ -881,12 +893,16 @@ export class DaemonMcpProxy {
       return true;
     }
 
-    const message = error instanceof Error ? error.message : String(error);
     // "Unknown tool" means the frontend advertised a tool the daemon rejects —
     // typically a wrong-build daemon serving this frontend. Reconnecting drops the
     // stale tool cache and re-runs the build-identity handshake (which restarts the
     // daemon to the correct build on skew), so retry once before giving up.
-    return message.includes("Session not found") || this.isUnknownToolError(error);
+    return this.isDaemonSessionNotFoundError(error) || this.isUnknownToolError(error);
+  }
+
+  private isDaemonSessionNotFoundError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("Session not found");
   }
 
   private isUnknownToolError(error: unknown): boolean {
@@ -1022,11 +1038,14 @@ export class DaemonMcpProxy {
     if (!this.boundSessionUuid || explicitSessionUuid === this.boundSessionUuid) {
       return args;
     }
-    if (explicitSessionUuid) {
+    if (explicitSessionUuid && this.initialSessionBindingConfigured) {
       throw new Error(
         `MCP connection is bound to device session ${this.boundSessionUuid}; ` +
         `cannot route this call to ${explicitSessionUuid} until the binding is released.`
       );
+    }
+    if (explicitSessionUuid) {
+      return args;
     }
     return {
       ...args,

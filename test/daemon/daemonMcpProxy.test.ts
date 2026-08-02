@@ -1608,6 +1608,31 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("allows a learned binding to retarget to a later explicit session", async () => {
+      const client = new FakeDaemonClient();
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" });
+        await proxy.callTool("observe", { deviceId: "device-b" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "observe", params: { sessionUuid: "session-b", deviceId: "device-b" } },
+          { toolName: "observe", params: { sessionUuid: "session-b", deviceId: "device-b" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("keeps replaying a bound session across continuous implicit activity beyond one TTL", async () => {
       // Continuous implicit (sessionless) calls forward the bound UUID and extend
       // the live daemon session, so the replay lease must refresh off the forwarded
@@ -2101,6 +2126,37 @@ describe("DaemonMcpProxy", () => {
 
         expect(fakeClient.callToolCalls).toEqual([
           { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("clears a configured binding after a confirmed missing-session fallback", async () => {
+      const firstClient = new ScriptedDaemonClient({
+        toolError: new Error("Session not found"),
+      });
+      const retryClient = new ScriptedDaemonClient({
+        toolError: new Error("Session not found"),
+      });
+      const replacementClient = new FakeDaemonClient();
+      const clients: DaemonClientLike[] = [firstClient, retryClient, replacementClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow("Session not found");
+        await proxy.close();
+        await proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" });
+
+        expect(replacementClient.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-b", deviceId: "device-b" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();

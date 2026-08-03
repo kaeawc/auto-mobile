@@ -1,5 +1,47 @@
 # Changelog
 
+## [v0.0.49] - 2026-08-03
+### Added
+- macOS DMG: staple the notarization ticket to AutoMobile.app, not only the DMG (offline first-launch) ([#4955](https://github.com/kaeawc/auto-mobile/issues/4955)) (release engineering)
+- iOS WebRTC: in-helper encode for the physical-device capture path (AVFoundation 420v) ([#4790](https://github.com/kaeawc/auto-mobile/issues/4790)) (ios, performance, webrtc)
+- iOS WebRTC: consume in-helper encoded H.264 in IosH264Source (no ffmpeg on the encoded path) ([#4789](https://github.com/kaeawc/auto-mobile/issues/4789)) (ios, performance, webrtc)
+- iOS screen-capture helper: 420v capture + VTCompressionSession H.264 encode behind --encode h264 ([#4788](https://github.com/kaeawc/auto-mobile/issues/4788)) (ios, performance, webrtc)
+- iOS WebRTC wire protocol: encoded H.264 record kind + helper capability handshake ([#4787](https://github.com/kaeawc/auto-mobile/issues/4787)) (ios, performance, webrtc)
+- video-stream protocol: attest display rotation end-to-end (populate LiveVideoFrame.rotation) ([#4786](https://github.com/kaeawc/auto-mobile/issues/4786)) (android, video, webrtc)
+- video-server: recreate capture/encoder on device rotation (fix mid-stream distortion) ([#4785](https://github.com/kaeawc/auto-mobile/issues/4785)) (android, video, webrtc)
+- perf(android-video): move H.264 encoder off Constrained Baseline to Main/High profile ([#4756](https://github.com/kaeawc/auto-mobile/issues/4756)) (android, performance, video, webrtc)
+- eventOnly fresh-focus: harden getDeviceTimestampMs degraded modes (lenient %3N parse / second truncation / host-timer fallback) ([#4720](https://github.com/kaeawc/auto-mobile/issues/4720))
+- Client Screen Control: input forwarding (parent) ([#1099](https://github.com/kaeawc/auto-mobile/issues/1099)) (android, ios)
+### Changed
+- Upgrade execution-boundary lint guards from regex to AST-based detection ([#4830](https://github.com/kaeawc/auto-mobile/issues/4830))
+### Fixed
+- Android: resolve custom AVD registry paths before RAM validation ([#4993](https://github.com/kaeawc/auto-mobile/issues/4993)) (android)
+- Android: keep transient offline emulator states within readiness deadline ([#4992](https://github.com/kaeawc/auto-mobile/issues/4992)) (android)
+- XCTestRunner Simulator Tests red on every PR since #4934: daemon reads new secure derived-data path while CI builds CtrlProxy iOS into /tmp/automobile-ctrl-proxy ([#4966](https://github.com/kaeawc/auto-mobile/issues/4966)) (ios, ci)
+- bug(ios): tolerate bootstatus error 405 when the requested simulator is already Booted ([#4958](https://github.com/kaeawc/auto-mobile/issues/4958)) (ios)
+- iOS codesign warn-gate log line ends with stray `undefined` (IOSCtrlProxyBuilder) ([#4954](https://github.com/kaeawc/auto-mobile/issues/4954)) (ios)
+- main red: WebRTC Publisher Integration (MediaMTX) broken by #4877 (H.264 encoder → Main profile) ([#4882](https://github.com/kaeawc/auto-mobile/issues/4882)) (webrtc)
+- release: verify published GitHub Release assets against the checksum registry (digest-based audit) ([#4685](https://github.com/kaeawc/auto-mobile/issues/4685)) (ci, release engineering)
+- 0.0.46 published with assets that mismatch the pinned checksums: client hard-fails runner provisioning ([#4672](https://github.com/kaeawc/auto-mobile/issues/4672)) (ci, release engineering)
+### Security
+- [security] Low-severity capture hardening: audio over-read, INFO path logging, resource-path confinement, overflow arithmetic ([#4765](https://github.com/kaeawc/auto-mobile/issues/4765)) (ios, video)
+- [security] Verify captured window belongs to the iOS Simulator at capture time (windowID reuse/TOCTOU) ([#4763](https://github.com/kaeawc/auto-mobile/issues/4763)) (bug, ios)
+- [security] Video recording retention: add TTL, cap in-progress size, document secure-delete ([#4762](https://github.com/kaeawc/auto-mobile/issues/4762)) (enhancement, video)
+- [security] Close iOS helper download integrity bypasses (cached-fallback verify, http:// base URL, device-runner hash) ([#4761](https://github.com/kaeawc/auto-mobile/issues/4761)) (bug, ios, release engineering)
+- [security] Add codesign/notarization gate before launching the downloaded iOS helper ([#4760](https://github.com/kaeawc/auto-mobile/issues/4760)) (enhancement, ios, release engineering)
+### Other
+- Test: inject AVD config fakes into mocked emulator launch tests ([#4994](https://github.com/kaeawc/auto-mobile/issues/4994)) (android, testing)
+- Make managed-device sessions and recovery explicit ([#4979](https://github.com/kaeawc/auto-mobile/issues/4979))
+- Emulator boot failures collapse into a generic 120s timeout — add detectors for mprotect/HVF, stuck-offline, tiny-RAM AVDs, and outdated cmdline-tools ([#4974](https://github.com/kaeawc/auto-mobile/issues/4974))
+- Desktop WebRTC client: send sessionUuid so it works with #4751 stream-socket auth (on by default) ([#4924](https://github.com/kaeawc/auto-mobile/issues/4924)) (android, webrtc)
+- daemon: propagate on-demand navigation-graph export failures through the stream (currently swallowed to null) ([#4918](https://github.com/kaeawc/auto-mobile/issues/4918))
+- Re-cut the screen-capture-helper release asset to ship merged Swift fixes (#4764, #4768, #4737) ([#4902](https://github.com/kaeawc/auto-mobile/issues/4902)) (ios, release engineering)
+- research(android): reduce the Maven Central Dokka Javadoc artifact payload ([#4852](https://github.com/kaeawc/auto-mobile/issues/4852)) (android, release engineering, research)
+- research(release): publish only Maven modules affected by a tagged release ([#4850](https://github.com/kaeawc/auto-mobile/issues/4850)) (release engineering, research)
+- release: trigger on tag pushes only, not every branch creation ([#4697](https://github.com/kaeawc/auto-mobile/issues/4697)) (ci, release engineering)
+- Ship the prebuilt iOS screen-capture helper as a GitHub release asset: macOS build/sign/notarize job + checksum bake ([#4402](https://github.com/kaeawc/auto-mobile/issues/4402)) (ios, release engineering)
+- iOS: honor AUTOMOBILE_VERSION when the XCTestRunner autostarts the daemon (Swift startDaemon) ([#2813](https://github.com/kaeawc/auto-mobile/issues/2813)) (ios, release engineering)
+
 ## [v0.0.48] - 2026-08-01
 ### Added
 - Chart daily release download counts (GitHub assets + npm) on a docs dashboard ([#4890](https://github.com/kaeawc/auto-mobile/issues/4890)) (devxp)

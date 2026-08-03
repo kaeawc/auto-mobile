@@ -19,5 +19,5 @@ import Foundation
 /// matches a source-checkout daemon carrying a `+g<sha>` dev stamp at the same release.
 public enum AutoMobileVersion {
     /// The current AutoMobile release version. Generated — do not edit by hand.
-    public static let current = "0.0.48"
+    public static let current = "0.0.49"
 }

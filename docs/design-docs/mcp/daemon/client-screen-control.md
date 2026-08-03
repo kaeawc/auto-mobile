@@ -224,7 +224,7 @@ also what lets the retained-frame rule below notice a transition *into* an unkno
   snapshot. Keep its mirror in inspector mode rather than omitting `frameContext` from an input
   request and guessing. The optional field remains compatible with generic, non-screen-control
   socket clients that do not have an observation snapshot.
-- **Release availability:** the default `0.0.48` CtrlProxy artifacts predate `frameContext`
+- **Release availability:** the default `0.0.49` CtrlProxy artifacts predate `frameContext`
   support. Use runners built from a revision that publishes the field before enabling this control
   flow; otherwise treat the runner as legacy and keep the mirror in inspector mode.
 - **Active device:** every message's `deviceId` identifies its device. Subscribe with the selected

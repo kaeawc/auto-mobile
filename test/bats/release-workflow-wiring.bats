@@ -168,15 +168,24 @@
   [[ "$final_commit" != *'git push origin HEAD:main'* ]]
 }
 
-@test "prepare-release allows version-synchronized CtrlProxy docs" {
+@test "prepare-release consumes the bump script's managed-path allow-list (#5008)" {
   wiring_requires_yq
   local commit_step
   commit_step="$(yq -r '.jobs."prepare-version".steps[] | select(.id == "commit") | .run' .github/workflows/prepare-release.yml)"
+  # The allow-list is owned by bump-versions.sh, not restated in the workflow.
+  [[ "$commit_step" == *'bump-versions.sh --print-managed-paths'* ]]
+  # CHANGELOG.md is written by the changelog step, so the workflow appends it.
+  [[ "$commit_step" == *'allowed_patterns+=("CHANGELOG.md")'* ]]
+}
+
+@test "bump script managed paths cover the version-synchronized CtrlProxy docs" {
+  local managed
+  managed="$(bash scripts/versioning/bump-versions.sh --print-managed-paths)"
   for path in \
     "docs/design-docs/mcp/daemon/client-frame-snapshot.md" \
     "docs/design-docs/mcp/daemon/client-screen-control.md" \
     "docs/design-docs/mcp/daemon/unix-socket-api.md"; do
-    [[ "$commit_step" == *"$path"* ]]
+    [[ "$managed" == *"$path"* ]]
   done
 }
 

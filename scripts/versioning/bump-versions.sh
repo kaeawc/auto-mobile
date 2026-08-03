@@ -2,6 +2,24 @@
 
 set -euo pipefail
 
+# Every path (or glob pattern) this script may rewrite. The prepare-release
+# workflow's versioned-tree guard consumes this list via --print-managed-paths,
+# so a new managed file added here extends the release allow-list automatically
+# instead of tripping the guard on the next release run (#5008). Patterns use
+# bash [[ == ]] semantics, where `*` also matches `/`.
+managed_path_patterns=(
+  ".claude-plugin/marketplace.json"
+  ".claude-plugin/plugin.json"
+  "android/gradle.properties"
+  "android/*/build.gradle.kts"
+  "docs/design-docs/mcp/daemon/client-frame-snapshot.md"
+  "docs/design-docs/mcp/daemon/client-screen-control.md"
+  "docs/design-docs/mcp/daemon/unix-socket-api.md"
+  "ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift"
+  "package.json"
+  "server.json"
+)
+
 new_version=""
 dry_run=false
 
@@ -14,6 +32,10 @@ while [[ $# -gt 0 ]]; do
     --dry-run)
       dry_run=true
       shift
+      ;;
+    --print-managed-paths)
+      printf '%s\n' "${managed_path_patterns[@]}"
+      exit 0
       ;;
     *)
       echo "Unknown argument: $1" >&2

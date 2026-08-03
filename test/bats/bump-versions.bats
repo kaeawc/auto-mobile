@@ -159,3 +159,48 @@ run_bump() {
   run bash -c "cd '${TEST_ROOT}' && bash '${SCRIPT_ABS}' --new-version '1.2.3-beta.1' --dry-run"
   [ "$status" -eq 0 ]
 }
+
+@test "--print-managed-paths lists patterns without requiring a version or writing files (#5008)" {
+  run bash -c "cd '${TEST_ROOT}' && bash '${SCRIPT_ABS}' --print-managed-paths"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"package.json"* ]]
+  [[ "$output" == *"android/*/build.gradle.kts"* ]]
+  # No file may be modified by a print-only invocation.
+  [ "$(json_field "${TEST_ROOT}/package.json" 'data["version"]')" = "0.0.1" ]
+}
+
+@test "every file the bump rewrites matches a managed path pattern (#5008)" {
+  # The prepare-release guard allow-lists exactly the patterns from
+  # --print-managed-paths; a bump that writes an unlisted file would fail the
+  # next release run, so catch the drift here instead.
+  local marker="${TEST_ROOT}/.bump-started"
+  touch "$marker"
+  run_bump
+  [ "$status" -eq 0 ]
+
+  local patterns
+  mapfile -t patterns < <(bash "${SCRIPT_ABS}" --print-managed-paths)
+  (("${#patterns[@]}" > 0))
+
+  local file rel pattern matched rewritten_count=0
+  while IFS= read -r file; do
+    rel="${file#"${TEST_ROOT}"/}"
+    [[ "$rel" == bin/* ]] && continue
+    rewritten_count=$((rewritten_count + 1))
+    matched=false
+    for pattern in "${patterns[@]}"; do
+      # shellcheck disable=SC2053  # unquoted RHS: patterns must glob-match
+      if [[ "$rel" == $pattern ]]; then
+        matched=true
+        break
+      fi
+    done
+    if [[ "$matched" == false ]]; then
+      echo "bump rewrote unmanaged file: $rel" >&2
+      return 1
+    fi
+  done < <(find "${TEST_ROOT}" -type f -newer "$marker" ! -name "$(basename "$marker")")
+
+  # Guard against a vacuous pass: the bump must have visibly rewritten files.
+  (("$rewritten_count" > 0))
+}

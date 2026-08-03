@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 
 /**
  * Session-scope the video recording archive (issue #4752).
@@ -12,10 +12,17 @@ import type { Kysely } from "kysely";
  * existing archive.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
-  await db.schema
-    .alterTable("video_recordings")
-    .addColumn("owner_session_uuid", "text")
-    .execute();
+  const existingColumn = await sql<{ name: string }>`
+    SELECT name FROM pragma_table_info('video_recordings')
+    WHERE name = 'owner_session_uuid'
+  `.execute(db);
+
+  if (existingColumn.rows.length === 0) {
+    await db.schema
+      .alterTable("video_recordings")
+      .addColumn("owner_session_uuid", "text")
+      .execute();
+  }
 
   await db.schema
     .createIndex("idx_video_recordings_owner_session")

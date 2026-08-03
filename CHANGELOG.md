@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.0.50] - 2026-08-03
+### Other
+- Keep release-versioned documentation synchronized during prepare-release ([#5006](https://github.com/kaeawc/auto-mobile/issues/5006))
+- bug(sqlite): recover partially applied video-recordings owner-session migration ([#5004](https://github.com/kaeawc/auto-mobile/issues/5004))
+
 ## [v0.0.49] - 2026-08-03
 ### Added
 - macOS DMG: staple the notarization ticket to AutoMobile.app, not only the DMG (offline first-launch) ([#4955](https://github.com/kaeawc/auto-mobile/issues/4955)) (release engineering)

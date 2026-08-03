@@ -14,7 +14,7 @@ type PlanMigrationReport = {
   outdated: boolean;
 };
 
-const parseVersion = (version: string | undefined): number[] | null => {
+export const parseVersion = (version: string | undefined): number[] | null => {
   if (!version || version === "unknown" || version === "latest") {
     return null;
   }
@@ -29,7 +29,7 @@ const parseVersion = (version: string | undefined): number[] | null => {
   return numericParts.slice(0, 3);
 };
 
-const isOlderVersion = (version: string | undefined, target: string): boolean => {
+export const isOlderVersion = (version: string | undefined, target: string): boolean => {
   const parsedVersion = parseVersion(version);
   const parsedTarget = parseVersion(target);
   if (!parsedVersion || !parsedTarget) {

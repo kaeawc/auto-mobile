@@ -13,6 +13,8 @@
  * as permanent means it gets backoff protection, which is the fail-safe choice
  * against pinning CPU in a hot loop.
  */
+import { logger } from "../utils/logger";
+
 export type DatabaseFailureKind = "transient" | "permanent";
 
 const TRANSIENT_PATTERNS: RegExp[] = [
@@ -24,8 +26,26 @@ const TRANSIENT_PATTERNS: RegExp[] = [
   /resource (?:busy|temporarily unavailable)/i,
 ];
 
+/**
+ * `String(value)` throws for a null-prototype object (no inherited
+ * `.toString`). Classification must stay total over `unknown` input, so an
+ * unstringifiable value falls back to an empty haystack — it matches no
+ * `TRANSIENT_PATTERNS` and is classified `permanent`, the same fail-safe
+ * default as any other unrecognized failure.
+ */
+function stringifyErrorLike(error: unknown): string {
+  try {
+    return String(error ?? "");
+  } catch (stringifyError) {
+    // Null-prototype (or otherwise non-stringifiable) thrown values are rare
+    // but not errors in themselves; falling back to "" is expected here.
+    logger.debug(`Could not stringify error-like value for classification: ${stringifyError}`);
+    return "";
+  }
+}
+
 export function classifyDatabaseFailure(error: unknown): DatabaseFailureKind {
-  const message = error instanceof Error ? error.message : String(error ?? "");
+  const message = error instanceof Error ? error.message : stringifyErrorLike(error);
   const code = (error as { code?: unknown } | null | undefined)?.code;
   const haystack = typeof code === "string" ? `${code} ${message}` : message;
 

@@ -165,6 +165,18 @@
   [[ "$final_commit" != *'git push origin HEAD:main'* ]]
 }
 
+@test "prepare-release allows version-synchronized CtrlProxy docs" {
+  wiring_requires_yq
+  local commit_step
+  commit_step="$(yq -r '.jobs."prepare-version".steps[] | select(.id == "commit") | .run' .github/workflows/prepare-release.yml)"
+  for path in \
+    "docs/design-docs/mcp/daemon/client-frame-snapshot.md" \
+    "docs/design-docs/mcp/daemon/client-screen-control.md" \
+    "docs/design-docs/mcp/daemon/unix-socket-api.md"; do
+    [[ "$commit_step" == *"$path"* ]]
+  done
+}
+
 @test "prepared release artifacts survive delayed publication retries (#4686)" {
   wiring_requires_yq
   local workflow

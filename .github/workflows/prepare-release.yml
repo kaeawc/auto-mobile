@@ -77,6 +77,9 @@ jobs:
               CHANGELOG.md | \
               android/gradle.properties | \
               android/*/build.gradle.kts | \
+              docs/design-docs/mcp/daemon/client-frame-snapshot.md | \
+              docs/design-docs/mcp/daemon/client-screen-control.md | \
+              docs/design-docs/mcp/daemon/unix-socket-api.md | \
               ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift | \
               package.json | \
               server.json)

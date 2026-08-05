@@ -103,7 +103,7 @@ function createToolErrorResponse(code: string, message: string) {
     isError: true,
     content: [{
       type: "text" as const,
-      text: JSON.stringify({ success: false, error: { code, message } }),
+      text: JSON.stringify({ success: false, message, error: { code, message } }),
     }],
   };
 }
@@ -525,10 +525,10 @@ export function registerDeviceTools() {
       try {
         await deviceUtils.killDevice(args.device);
       } catch (error) {
-        devicePool?.clearIntentionalShutdown(args.device.deviceId);
         if (isAlreadyStoppedDeviceError(args.device.platform, error)) {
           alreadyStoppedMessage = `Failed to kill ${args.device.platform} device: ${error}`;
         } else {
+          devicePool?.clearIntentionalShutdown(args.device.deviceId);
           throw error;
         }
       }

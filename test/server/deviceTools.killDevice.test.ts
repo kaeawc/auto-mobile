@@ -213,8 +213,20 @@ describe("killDevice handler", () => {
   ] as const)("returns a structured terminal error for an already-stopped %s device", async (platform, message) => {
     let cleanupCalled = false;
     let notifyCalled = false;
+    let markedIntentionalShutdown = 0;
+    let clearedIntentionalShutdown = 0;
     const stoppedManager = new AlreadyStoppedKillDeviceManager(message);
     manager = stoppedManager;
+    if (platform === "android") {
+      DaemonState.getInstance().initialize({} as SessionManager, {
+        markIntentionalShutdown: () => {
+          markedIntentionalShutdown++;
+        },
+        clearIntentionalShutdown: () => {
+          clearedIntentionalShutdown++;
+        },
+      } as never);
+    }
     setDeviceToolsDependencies({
       deviceManagerFactory: () => stoppedManager,
       notifyResourcesChanged: async () => {
@@ -242,6 +254,7 @@ describe("killDevice handler", () => {
     expect(response.isError).toBe(true);
     expect(JSON.parse(response.content[0].text)).toEqual({
       success: false,
+      message: expect.stringContaining(message),
       error: {
         code: "device_already_stopped",
         message: expect.stringContaining(message),
@@ -249,6 +262,10 @@ describe("killDevice handler", () => {
     });
     expect(cleanupCalled).toBe(true);
     expect(notifyCalled).toBe(true);
+    if (platform === "android") {
+      expect(markedIntentionalShutdown).toBe(1);
+      expect(clearedIntentionalShutdown).toBe(0);
+    }
   });
 
   test("keeps recording-list failures as actionable errors", async () => {

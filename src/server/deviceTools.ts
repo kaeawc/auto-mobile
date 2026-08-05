@@ -92,7 +92,8 @@ function isAlreadyStoppedDeviceError(platform: SomePlatform, error: unknown): bo
       message.includes("already shut down") ||
       message.includes("already shutdown") ||
       message.includes("not booted") ||
-      message.includes("invalid device state")
+      message.includes("invalid device state") ||
+      message.includes("current state: shutdown")
     );
   }
   return false;

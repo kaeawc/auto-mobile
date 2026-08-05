@@ -52,6 +52,10 @@ export interface NavigationGraphService extends NavigationGraph, NavigationGraph
   setCurrentApp(appId: string): Promise<void>;
   getCurrentAppId(): string | null;
 
+  // Build/device provenance (#4984)
+  setBuildContext(context: NavigationBuildContext): void;
+  clearBuildContext(appId: string): void;
+
   // Screen tracking
   getCurrentScreen(): string | null;
   recordBackStack(backStack: BackStackInfo): Promise<void>;
@@ -106,6 +110,31 @@ type HistoryCursor = {
 };
 
 /**
+ * Build/device provenance context for a graph mutation (#4984). The build key is
+ * (packageId=appId, versionCode, contentHash); deviceId names the device the
+ * mutation was observed on. appId is carried so a context resolved for one app is
+ * never applied to another when a session observes multiple apps on a device —
+ * a stale context falls back to the default build key instead of mis-stamping.
+ */
+export interface NavigationBuildContext {
+  appId: string;
+  deviceId: string;
+  versionCode: number;
+  contentHash: string;
+}
+
+/** Non-null legacy sentinel used when a provenance dimension is unknown (#4984). */
+const LEGACY_PROVENANCE_SENTINEL = "legacy";
+
+/** Immutable provenance snapshot captured once per event and shared by its writes (#4984). */
+interface ResolvedProvenance {
+  versionCode: number;
+  contentHash: string;
+  deviceId: string;
+  sessionUuid: string;
+}
+
+/**
  * Manages the navigation graph with SQLite persistence.
  * Tracks screen visits and correlates navigation events with tool calls.
  */
@@ -113,6 +142,13 @@ export class NavigationGraphManager implements NavigationGraphService {
   private static instance: NavigationGraphManager | null = null;
   // Per-session instances for multi-agent isolation
   private static sessionInstances: Map<string, NavigationGraphManager> = new Map();
+  // Session UUIDs that have been released (#4984). Session UUIDs are never reused, so
+  // a getInstanceForSession() for a released id is a post-release stray event — it
+  // must resolve to the unattributed global singleton, never recreate a manager that
+  // would attribute the observation to the ended session. Bounded to avoid unbounded
+  // growth over a long-lived daemon.
+  private static releasedSessions: Set<string> = new Set();
+  private static readonly RELEASED_SESSIONS_CAP = 4096;
 
   private repository: NavigationRepository;
   private testCoverageRepository: TestCoverageRepository;
@@ -120,6 +156,17 @@ export class NavigationGraphManager implements NavigationGraphService {
   private currentAppId: string | null = null;
   private currentScreen: string | null = null;
   private graphUpdateListeners: Array<() => void | Promise<void>> = [];
+
+  // Session + build/device provenance (#4984). sessionUuid identifies the owning
+  // agent session; the build context (deviceId, versionCode, contentHash) is set
+  // per app by the CtrlProxy client that binds a device. Keyed by app_id so a
+  // context resolved for one app is never applied to another when a session
+  // observes multiple apps on a device. When no context exists for the current app
+  // (no device bound yet, or an unresolved content hash), mutations record under
+  // the default build key so a write never blocks on — or fails because of —
+  // provenance resolution.
+  private sessionUuid: string | null;
+  private buildContexts: Map<string, NavigationBuildContext> = new Map();
 
   // Tool call history kept in memory for correlation (transient data)
   private toolCallHistory: ToolCallInteraction[] = [];
@@ -148,11 +195,32 @@ export class NavigationGraphManager implements NavigationGraphService {
   constructor(
     repository?: NavigationRepository,
     testCoverageRepository?: TestCoverageRepository,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    sessionUuid: string | null = null
   ) {
     this.repository = repository ?? new NavigationRepository();
     this.testCoverageRepository = testCoverageRepository ?? new TestCoverageRepository();
     this.timer = timer;
+    this.sessionUuid = sessionUuid;
+  }
+
+  /**
+   * Set the build/device provenance context for `context.appId` (#4984). Called by
+   * the CtrlProxy client that owns the device; the content hash is resolved eagerly
+   * (and cached) at bind time so nav events that arrive later record under the real
+   * build key. Stored per app so switching apps never applies one app's context to
+   * another.
+   */
+  public setBuildContext(context: NavigationBuildContext): void {
+    this.buildContexts.set(context.appId, context);
+  }
+
+  /**
+   * Drop the build context for an app (#4984), so its next mutation falls to the
+   * default key until re-resolved. Called on a package update/reinstall/removal.
+   */
+  public clearBuildContext(appId: string): void {
+    this.buildContexts.delete(appId);
   }
 
   /**
@@ -174,10 +242,28 @@ export class NavigationGraphManager implements NavigationGraphService {
   public static getInstanceForSession(sessionId: string): NavigationGraphManager {
     let instance = NavigationGraphManager.sessionInstances.get(sessionId);
     if (!instance) {
-      instance = new NavigationGraphManager();
+      // A released session never legitimately returns (UUIDs are unique), so a
+      // request for one here is a stray post-release event: route it to the
+      // unattributed global singleton instead of minting a manager that would
+      // attribute the observation to the ended session (#4984).
+      if (NavigationGraphManager.releasedSessions.has(sessionId)) {
+        return NavigationGraphManager.getInstance();
+      }
+      instance = new NavigationGraphManager(undefined, undefined, undefined, sessionId);
       NavigationGraphManager.sessionInstances.set(sessionId, instance);
     }
     return instance;
+  }
+
+  /**
+   * Clear a session's released-tombstone (#4984). Session UUIDs are normally not
+   * reused, but `setActiveDevice` releases an existing session and immediately
+   * re-creates it with the SAME uuid on another device — so when a session is
+   * (re)bound, drop any tombstone so getInstanceForSession builds it a real manager
+   * again instead of routing it to the unattributed global.
+   */
+  public static clearReleasedSession(sessionId: string): void {
+    NavigationGraphManager.releasedSessions.delete(sessionId);
   }
 
   /**
@@ -193,6 +279,16 @@ export class NavigationGraphManager implements NavigationGraphService {
       NavigationGraphManager.sessionInstances.delete(sessionId);
       logger.debug(`[NAV_GRAPH] Released session instance: ${sessionId}`);
     }
+    // Mark released even if no instance existed yet, so a later stray event for this
+    // session resolves to the unattributed global rather than minting a manager for
+    // the ended session (#4984). Bounded FIFO to cap long-daemon growth.
+    NavigationGraphManager.releasedSessions.add(sessionId);
+    if (NavigationGraphManager.releasedSessions.size > NavigationGraphManager.RELEASED_SESSIONS_CAP) {
+      const oldest = NavigationGraphManager.releasedSessions.values().next().value;
+      if (oldest !== undefined) {
+        NavigationGraphManager.releasedSessions.delete(oldest);
+      }
+    }
   }
 
   /**
@@ -201,6 +297,7 @@ export class NavigationGraphManager implements NavigationGraphService {
   public static resetInstance(): void {
     NavigationGraphManager.instance = null;
     NavigationGraphManager.sessionInstances.clear();
+    NavigationGraphManager.releasedSessions.clear();
   }
 
   /**
@@ -227,6 +324,8 @@ export class NavigationGraphManager implements NavigationGraphService {
     sessionId: string,
     instance: NavigationGraphManager
   ): void {
+    // Installing an instance clears any released-mark so the id resolves to it.
+    NavigationGraphManager.releasedSessions.delete(sessionId);
     NavigationGraphManager.sessionInstances.set(sessionId, instance);
   }
 
@@ -249,9 +348,10 @@ export class NavigationGraphManager implements NavigationGraphService {
   public static createForTesting(
     repository?: NavigationRepository,
     testCoverageRepository?: TestCoverageRepository,
-    timer?: Timer
+    timer?: Timer,
+    sessionUuid?: string
   ): NavigationGraphManager {
-    return new NavigationGraphManager(repository, testCoverageRepository, timer);
+    return new NavigationGraphManager(repository, testCoverageRepository, timer, sessionUuid ?? null);
   }
 
   /**
@@ -318,6 +418,68 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
+   * Resolve the provenance dimensions for the current app (#4984): the build key
+   * (versionCode + contentHash), the deviceId, and the sessionUuid. Looked up by
+   * app_id, so a context resolved for a different app is never applied here. When
+   * no context exists for the current app the mutation records under the default
+   * build key with non-null legacy sentinels — today's single-build behavior as the
+   * degenerate default.
+   *
+   * Capture ONE snapshot per event (before opening the transaction) and thread it
+   * into both the node and edge writes: a fire-and-forget hash resolution can call
+   * setBuildContext mid-transaction, and resolving separately per observation would
+   * split a single transition across two build keys.
+   */
+  private resolveProvenance(appId: string | null): ResolvedProvenance {
+    const sessionUuid = this.sessionUuid ?? LEGACY_PROVENANCE_SENTINEL;
+    const ctx = appId ? this.buildContexts.get(appId) : undefined;
+    if (ctx) {
+      return {
+        versionCode: ctx.versionCode,
+        contentHash: ctx.contentHash,
+        deviceId: ctx.deviceId,
+        sessionUuid,
+      };
+    }
+    logger.debug(
+      `[NAVIGATION_GRAPH] No matching build context for ${appId ?? "?"}; ` +
+      `recording provenance under the default build key`
+    );
+    return { versionCode: 0, contentHash: "", deviceId: LEGACY_PROVENANCE_SENTINEL, sessionUuid };
+  }
+
+  /**
+   * Record a per-node provenance observation inside the caller's transaction
+   * (#4984). Must run on the transaction-bound repository so it commits atomically
+   * with the node mutation, using the caller's pre-captured provenance snapshot.
+   */
+  private async recordNodeProvenance(
+    repository: NavigationRepository,
+    appId: string,
+    nodeId: number,
+    timestamp: number,
+    provenance: ResolvedProvenance
+  ): Promise<void> {
+    const buildKey = await repository.getOrCreateBuildKey(appId, provenance.versionCode, provenance.contentHash);
+    await repository.recordNodeObservation(nodeId, buildKey.id, provenance.deviceId, provenance.sessionUuid, timestamp);
+  }
+
+  /**
+   * Record a per-edge provenance observation inside the caller's transaction (#4984),
+   * using the same provenance snapshot as the node write for that transition.
+   */
+  private async recordEdgeProvenance(
+    repository: NavigationRepository,
+    appId: string,
+    edgeId: number,
+    timestamp: number,
+    provenance: ResolvedProvenance
+  ): Promise<void> {
+    const buildKey = await repository.getOrCreateBuildKey(appId, provenance.versionCode, provenance.contentHash);
+    await repository.recordEdgeObservation(edgeId, buildKey.id, provenance.deviceId, provenance.sessionUuid, timestamp);
+  }
+
+  /**
    * Record back stack information for the current screen.
    * Updates the current node with back stack depth and task ID.
    */
@@ -327,15 +489,25 @@ export class NavigationGraphManager implements NavigationGraphService {
       return;
     }
 
-    await this.repository.updateNodeBackStack(
-      this.currentAppId,
-      this.currentScreen,
-      backStack.depth,
-      backStack.currentTaskId
-    );
+    const appId = this.currentAppId;
+    const screenName = this.currentScreen;
+
+    // Persist the back-stack update + app touch atomically (#4931): both run on the
+    // transaction-bound repository so a throw rolls back together and the exclusive
+    // connection is never held across non-DB work.
+    await this.repository.runInTransaction(async trx => {
+      const repository = this.repository.withExecutor(trx);
+      await repository.updateNodeBackStack(
+        appId,
+        screenName,
+        backStack.depth,
+        backStack.currentTaskId
+      );
+      await repository.touchApp(appId);
+    });
 
     logger.debug(
-      `[NAVIGATION_GRAPH] Updated back stack for ${this.currentScreen}: ` +
+      `[NAVIGATION_GRAPH] Updated back stack for ${screenName}: ` +
       `depth=${backStack.depth}, taskId=${backStack.currentTaskId}`
     );
   }
@@ -370,6 +542,10 @@ export class NavigationGraphManager implements NavigationGraphService {
     const recentToolCall = this.findCorrelatedToolCall(timestamp);
     const currentModalStack = recentToolCall?.uiState?.modalStack;
 
+    // Snapshot provenance ONCE for this transition so the node and edge observations
+    // share one build key even if a fire-and-forget hash lands mid-transaction (#4984).
+    const provenance = this.resolveProvenance(appId);
+
     // Persist the whole graph write atomically across BOTH repos via the shared helper,
     // which owns the assertSharedConnection() precondition and the bind-both-repos
     // preamble (#3075). Every read and write inside the callback runs on the transaction
@@ -381,6 +557,10 @@ export class NavigationGraphManager implements NavigationGraphService {
     const node = await this.runBothReposInTransaction(async (repository, testCoverageRepository) => {
       // Get or create node and update visit count
       const n = await repository.getOrCreateNode(appId, screenName, timestamp);
+
+      // Record per-node provenance for the current build/device/session (#4984),
+      // in the same transaction as the node mutation.
+      await this.recordNodeProvenance(repository, appId, n.id, timestamp, provenance);
 
       // Record node visit for test coverage if session is active
       if (this.activeTestSession) {
@@ -416,6 +596,9 @@ export class NavigationGraphManager implements NavigationGraphService {
           toolArgs,
           timestamp
         );
+
+        // Record per-edge provenance using the SAME snapshot as the node (#4984).
+        await this.recordEdgeProvenance(repository, appId, edge.id, timestamp, provenance);
 
         // Record edge traversal for test coverage if session is active
         if (this.activeTestSession) {
@@ -580,10 +763,19 @@ export class NavigationGraphManager implements NavigationGraphService {
     const fingerprintData = event.fingerprintData || JSON.stringify({ hash: fingerprintHash });
     const timestamp = event.timestamp;
 
+    // Snapshot the FULL provenance (app + device + build key) ONCE before the first
+    // await: reading only appId early but re-reading the mutable build/device context
+    // after the fingerprint lookup would let a concurrent event (a second unbound
+    // device routing through the global manager) swap the context mid-lookup, stamping
+    // this reach with another device's identity/hash. Capturing everything up front and
+    // threading the immutable snapshot means no code path re-reads mutable state after
+    // any await (#4984).
+    const appId = this.currentAppId;
+    const provenance = this.resolveProvenance(appId);
+
     // Case 1: Check if fingerprint is already correlated to a named node (scoped to this app)
-    const existingNode = await this.repository.getNodeByFingerprint(this.currentAppId, fingerprintHash);
+    const existingNode = await this.repository.getNodeByFingerprint(appId, fingerprintHash);
     if (existingNode) {
-      const appId = this.currentAppId;
 
       // Persist the counter writes atomically across BOTH repos via the shared helper,
       // which owns the assertSharedConnection() precondition and the bind-both-repos
@@ -596,6 +788,9 @@ export class NavigationGraphManager implements NavigationGraphService {
       await this.runBothReposInTransaction(async (repository, testCoverageRepository) => {
         // Update the existing node's visit count and last_seen_at
         await repository.updateNodeVisit(existingNode.id, timestamp);
+
+        // Record per-node provenance for this reach (#4984), same transaction.
+        await this.recordNodeProvenance(repository, appId, existingNode.id, timestamp, provenance);
 
         // Record node visit for test coverage if session is active
         if (this.activeTestSession) {
@@ -1496,7 +1691,14 @@ export class NavigationGraphManager implements NavigationGraphService {
     screenName: string,
     screenshotPath: string | null
   ): Promise<void> {
-    await this.repository.updateNodeScreenshot(appId, screenName, screenshotPath);
+    // #4931: touch navigation_apps.updated_at atomically with the screenshot write.
+    // This is enrichment, not a device reach, so it records NO provenance observation
+    // (observations are reach events; see #4984 decision).
+    await this.repository.runInTransaction(async trx => {
+      const repository = this.repository.withExecutor(trx);
+      await repository.updateNodeScreenshot(appId, screenName, screenshotPath);
+      await repository.touchApp(appId);
+    });
     logger.debug(`[NAVIGATION_GRAPH] Updated screenshot for ${screenName}: ${screenshotPath}`);
     this.notifyGraphUpdated();
   }
@@ -1532,6 +1734,19 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     const appId = this.currentAppId;
     const timestamp = this.timer.now();
+    // Record the promoted node under the DEFAULT/unknown build key, NOT the current
+    // (promotion-time) build/device (#4984). The suggestion's original reaches were
+    // captured under whatever build saw them, but `navigation_suggestions` stores no
+    // provenance, so stamping promotion-time identity would falsely claim the promoting
+    // build/device did the historical reach. Recording under the default key makes the
+    // promoted node visible without a false claim; transferring real suggestion
+    // provenance is a follow-up (needs a suggestions-schema change).
+    const provenance: ResolvedProvenance = {
+      versionCode: 0,
+      contentHash: "",
+      deviceId: LEGACY_PROVENANCE_SENTINEL,
+      sessionUuid: this.sessionUuid ?? LEGACY_PROVENANCE_SENTINEL,
+    };
 
     // Persist the node creation + suggestion promotion atomically. repository.promoteSuggestion
     // does getOrCreateFingerprint + an UPDATE to link the suggestion; without a transaction a
@@ -1550,6 +1765,14 @@ export class NavigationGraphManager implements NavigationGraphService {
 
       // Promote the suggestion (creates fingerprint and links suggestion)
       await repository.promoteSuggestion(suggestionId, node.id, timestamp);
+
+      // Record an observation for the promoted node under the default/unknown key
+      // (see the provenance snapshot above), so it is visible in analysis rather than
+      // having a visit count but no observation, without a false build/device claim.
+      await this.recordNodeProvenance(repository, appId, node.id, timestamp, provenance);
+
+      // #4931: touch navigation_apps.updated_at atomically with the promotion.
+      await repository.touchApp(appId);
     });
 
     logger.info(

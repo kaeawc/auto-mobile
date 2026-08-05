@@ -1,0 +1,295 @@
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import type { Kysely } from "kysely";
+import { createTestDatabase } from "../../db/testDbHelper";
+import type { Database } from "../../../src/db/types";
+import { NavigationRepository } from "../../../src/db/navigationRepository";
+import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
+import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
+import { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryRecorder";
+import type { NavigationEvent } from "../../../src/utils/interfaces/NavigationGraph";
+
+/**
+ * AC3 coverage for #4984: every graph mutation records provenance
+ * (buildKey + deviceId + sessionUuid + seenAt) in the SAME transaction as the
+ * mutation, and the #4931 fold-in touches navigation_apps.updated_at on
+ * promoteSuggestion / recordBackStack / updateNodeScreenshot.
+ */
+const APP = "com.example.app";
+const SESSION = "session-xyz";
+
+function navEvent(destination: string, timestamp: number): NavigationEvent {
+  return {
+    destination,
+    source: "prev",
+    arguments: {},
+    metadata: {},
+    timestamp,
+    sequenceNumber: timestamp,
+    applicationId: APP,
+  };
+}
+
+describe("NavigationGraphManager provenance write path", () => {
+  let db: Kysely<Database>;
+  let manager: NavigationGraphManager;
+  let telemetrySpy: ReturnType<typeof spyOn>;
+
+  beforeEach(async () => {
+    db = await createTestDatabase();
+    const navRepo = new NavigationRepository(db);
+    const coverageRepo = new TestCoverageRepository(undefined, db);
+    manager = NavigationGraphManager.createForTesting(navRepo, coverageRepo, undefined, SESSION);
+    NavigationGraphManager.setInstanceForTesting(manager);
+    TelemetryRecorder.resetInstance();
+    telemetrySpy = spyOn(TelemetryRecorder.getInstance(), "recordNavigationEvent").mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    telemetrySpy.mockRestore();
+    TelemetryRecorder.resetInstance();
+    NavigationGraphManager.resetInstance();
+    await db.destroy();
+  });
+
+  async function ageUpdatedAt(): Promise<string> {
+    const old = "2000-01-01T00:00:00.000Z";
+    await db.updateTable("navigation_apps").set({ updated_at: old }).where("app_id", "=", APP).execute();
+    return old;
+  }
+
+  async function updatedAt(): Promise<string> {
+    const row = await db.selectFrom("navigation_apps").select("updated_at").where("app_id", "=", APP).executeTakeFirstOrThrow();
+    return row.updated_at;
+  }
+
+  test("records node + edge observations under the current build key/device/session", async () => {
+    await manager.setCurrentApp(APP);
+    manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
+
+    await manager.recordNavigationEvent(navEvent("Home", 100));
+    await manager.recordNavigationEvent(navEvent("Details", 200));
+
+    const buildKeys = await db.selectFrom("navigation_build_keys").selectAll().execute();
+    expect(buildKeys).toHaveLength(1);
+    expect(buildKeys[0].version_code).toBe(7);
+    expect(buildKeys[0].content_hash).toBe("hashA");
+
+    const nodeObs = await db.selectFrom("navigation_node_observations").selectAll().execute();
+    expect(nodeObs.length).toBeGreaterThanOrEqual(2);
+    for (const o of nodeObs) {
+      expect(o.build_key_id).toBe(buildKeys[0].id);
+      expect(o.device_id).toBe("emu-1");
+      expect(o.session_uuid).toBe(SESSION);
+    }
+
+    const edgeObs = await db.selectFrom("navigation_edge_observations").selectAll().execute();
+    expect(edgeObs).toHaveLength(1);
+    expect(edgeObs[0].device_id).toBe("emu-1");
+    expect(edgeObs[0].session_uuid).toBe(SESSION);
+  });
+
+  test("falls back to the default build key when the build context is for a different app", async () => {
+    await manager.setCurrentApp(APP);
+    // Context resolved for another app must not stamp APP's provenance.
+    manager.setBuildContext({ appId: "com.other.app", deviceId: "emu-1", versionCode: 9, contentHash: "hashOther" });
+    await manager.recordNavigationEvent(navEvent("Home", 100));
+
+    const buildKeys = await db.selectFrom("navigation_build_keys").selectAll().execute();
+    expect(buildKeys).toHaveLength(1);
+    expect(buildKeys[0].version_code).toBe(0);
+    expect(buildKeys[0].content_hash).toBe("");
+    const nodeObs = await db.selectFrom("navigation_node_observations").selectAll().execute();
+    expect(nodeObs[0].device_id).toBe("legacy");
+  });
+
+  test("node and edge of one transition share a single build key (snapshot per event)", async () => {
+    await manager.setCurrentApp(APP);
+    manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
+    await manager.recordNavigationEvent(navEvent("Home", 100));
+    await manager.recordNavigationEvent(navEvent("Details", 200));
+
+    const edgeObs = await db.selectFrom("navigation_edge_observations").selectAll().executeTakeFirstOrThrow();
+    const nodeObs = await db.selectFrom("navigation_node_observations").selectAll().execute();
+    // Every node observation and the edge observation resolve to the same build key.
+    for (const o of nodeObs) {
+      expect(o.build_key_id).toBe(edgeObs.build_key_id);
+    }
+  });
+
+  test("build context is per-app: app B with no context records under default even when app A has one", async () => {
+    await manager.setCurrentApp(APP);
+    manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
+    await manager.recordNavigationEvent(navEvent("Home", 100));
+
+    // Switch to app B whose hash has not resolved yet.
+    await manager.setCurrentApp("com.other.app");
+    await manager.recordNavigationEvent({ ...navEvent("BScreen", 300), applicationId: "com.other.app" });
+
+    const aKey = await db.selectFrom("navigation_build_keys").selectAll().where("app_id", "=", APP).executeTakeFirstOrThrow();
+    expect(aKey.version_code).toBe(7);
+    const bKey = await db.selectFrom("navigation_build_keys").selectAll().where("app_id", "=", "com.other.app").executeTakeFirstOrThrow();
+    // B falls to the default key — never app A's version/hash.
+    expect(bKey.version_code).toBe(0);
+    expect(bKey.content_hash).toBe("");
+  });
+
+  test("returning to app A after app B resolves still uses app A's context (not B's)", async () => {
+    await manager.setCurrentApp(APP);
+    manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
+    manager.setBuildContext({ appId: "com.other.app", deviceId: "emu-1", versionCode: 99, contentHash: "hashB" });
+
+    // Back to A: its observation must carry A's build key, not B's.
+    await manager.setCurrentApp(APP);
+    await manager.recordNavigationEvent(navEvent("Home", 400));
+
+    const aKey = await db.selectFrom("navigation_build_keys").selectAll().where("app_id", "=", APP).executeTakeFirstOrThrow();
+    expect(aKey.version_code).toBe(7);
+    expect(aKey.content_hash).toBe("hashA");
+  });
+
+  test("fingerprint path: an app switch during the lookup does not cross-link A's node to B's build key", async () => {
+    // Repo whose getNodeByFingerprint switches the current app mid-await, simulating
+    // an app switch landing during the awaited fingerprint lookup.
+    class SwitchingRepo extends NavigationRepository {
+      public onLookup: (() => Promise<void>) | undefined;
+      async getNodeByFingerprint(appId: string, hash: string) {
+        if (this.onLookup) { await this.onLookup(); }
+        return super.getNodeByFingerprint(appId, hash);
+      }
+    }
+    const switchingRepo = new SwitchingRepo(db);
+    const coverageRepo = new TestCoverageRepository(undefined, db);
+    const m = NavigationGraphManager.createForTesting(switchingRepo, coverageRepo, undefined, SESSION);
+
+    await m.setCurrentApp(APP);
+    m.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
+    m.setBuildContext({ appId: "com.other.app", deviceId: "emu-1", versionCode: 99, contentHash: "hashB" });
+
+    // Seed a named node + correlated fingerprint for APP.
+    const node = await switchingRepo.getOrCreateNode(APP, "Home", 100);
+    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", "{}", 100);
+
+    switchingRepo.onLookup = async () => { await m.setCurrentApp("com.other.app"); };
+
+    await m.recordHierarchyNavigation({
+      fromFingerprint: null,
+      toFingerprint: "fp-1",
+      packageName: APP,
+      timestamp: 200,
+    } as never);
+
+    const obs = await db
+      .selectFrom("navigation_node_observations")
+      .selectAll()
+      .where("node_id", "=", node.id)
+      .executeTakeFirstOrThrow();
+    const bk = await db
+      .selectFrom("navigation_build_keys")
+      .selectAll()
+      .where("id", "=", obs.build_key_id)
+      .executeTakeFirstOrThrow();
+    // A's node is recorded under A's build key (v7), not B's (v99).
+    expect(bk.app_id).toBe(APP);
+    expect(bk.version_code).toBe(7);
+  });
+
+  test("fingerprint path: a build-context swap during the lookup does not change the recorded build/device", async () => {
+    // A second unbound device routing through the same manager swaps app P's context
+    // mid-lookup; the reach must keep the device+hash captured BEFORE the await.
+    class SwitchingRepo extends NavigationRepository {
+      public onLookup: (() => void) | undefined;
+      async getNodeByFingerprint(appId: string, hash: string) {
+        if (this.onLookup) { this.onLookup(); }
+        return super.getNodeByFingerprint(appId, hash);
+      }
+    }
+    const switchingRepo = new SwitchingRepo(db);
+    const coverageRepo = new TestCoverageRepository(undefined, db);
+    const m = NavigationGraphManager.createForTesting(switchingRepo, coverageRepo, undefined, SESSION);
+
+    await m.setCurrentApp(APP);
+    m.setBuildContext({ appId: APP, deviceId: "device-A", versionCode: 7, contentHash: "hashA" });
+    const node = await switchingRepo.getOrCreateNode(APP, "Home", 100);
+    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", "{}", 100);
+
+    // Device B swaps APP's context in the manager during the awaited lookup.
+    switchingRepo.onLookup = () => {
+      m.setBuildContext({ appId: APP, deviceId: "device-B", versionCode: 99, contentHash: "hashB" });
+    };
+
+    await m.recordHierarchyNavigation({
+      fromFingerprint: null, toFingerprint: "fp-1", packageName: APP, timestamp: 200,
+    } as never);
+
+    const obs = await db
+      .selectFrom("navigation_node_observations")
+      .selectAll()
+      .where("node_id", "=", node.id)
+      .executeTakeFirstOrThrow();
+    expect(obs.device_id).toBe("device-A"); // snapshot before await, not B
+    const bk = await db.selectFrom("navigation_build_keys").selectAll().where("id", "=", obs.build_key_id).executeTakeFirstOrThrow();
+    expect(bk.version_code).toBe(7);
+    expect(bk.content_hash).toBe("hashA");
+  });
+
+  test("falls back to the default build key when no build context is set", async () => {
+    await manager.setCurrentApp(APP);
+    await manager.recordNavigationEvent(navEvent("Home", 100));
+
+    const buildKeys = await db.selectFrom("navigation_build_keys").selectAll().execute();
+    expect(buildKeys).toHaveLength(1);
+    expect(buildKeys[0].version_code).toBe(0);
+    expect(buildKeys[0].content_hash).toBe("");
+
+    const nodeObs = await db.selectFrom("navigation_node_observations").selectAll().execute();
+    expect(nodeObs.length).toBeGreaterThanOrEqual(1);
+    expect(nodeObs[0].device_id).toBe("legacy");
+  });
+
+  test("#4931: recordBackStack touches navigation_apps.updated_at", async () => {
+    await manager.setCurrentApp(APP);
+    await manager.recordNavigationEvent(navEvent("Home", 100)); // sets currentScreen
+    const old = await ageUpdatedAt();
+    await manager.recordBackStack({ depth: 1, currentTaskId: 1 });
+    expect(await updatedAt()).not.toBe(old);
+  });
+
+  test("#4931: updateNodeScreenshot touches updated_at but records NO reach observation", async () => {
+    await manager.setCurrentApp(APP);
+    await manager.recordNavigationEvent(navEvent("Home", 100));
+    const before = await db.selectFrom("navigation_node_observations").selectAll().execute();
+    const old = await ageUpdatedAt();
+
+    await manager.updateNodeScreenshot(APP, "Home", "/tmp/home.png");
+
+    expect(await updatedAt()).not.toBe(old);
+    const after = await db.selectFrom("navigation_node_observations").selectAll().execute();
+    expect(after).toHaveLength(before.length);
+  });
+
+  test("#4931: promoteSuggestion touches updated_at and records the node under the DEFAULT key", async () => {
+    await manager.setCurrentApp(APP);
+    // Even with a current (promotion-time) build context, the promoted observation must
+    // NOT claim that build — the suggestion stores no provenance (#4984).
+    manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
+    const repo = new NavigationRepository(db);
+    const suggestion = await repo.addOrUpdateSuggestion(APP, "fp-hash", "{}", 100);
+    const old = await ageUpdatedAt();
+
+    await manager.promoteSuggestion(suggestion.id, "Home");
+
+    expect(await updatedAt()).not.toBe(old);
+    // The promoted node is visible, but under the default/unknown key — not v7.
+    const node = await repo.getNode(APP, "Home");
+    const obs = await db
+      .selectFrom("navigation_node_observations")
+      .selectAll()
+      .where("node_id", "=", node!.id)
+      .execute();
+    expect(obs).toHaveLength(1);
+    expect(obs[0].device_id).toBe("legacy");
+    const bk = await db.selectFrom("navigation_build_keys").selectAll().where("id", "=", obs[0].build_key_id).executeTakeFirstOrThrow();
+    expect(bk.version_code).toBe(0);
+    expect(bk.content_hash).toBe("");
+  });
+});

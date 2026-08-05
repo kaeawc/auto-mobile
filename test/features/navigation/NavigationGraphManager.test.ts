@@ -79,6 +79,44 @@ describe("NavigationGraphManager", () => {
     });
   });
 
+  describe("session lifecycle (#4984)", () => {
+    test("a released session's stray event resolves to the unattributed global, not a recreated session manager", () => {
+      NavigationGraphManager.resetInstance();
+      const global = NavigationGraphManager.getInstance();
+      const a = NavigationGraphManager.getInstanceForSession("session-A");
+      expect(a).not.toBe(global);
+
+      NavigationGraphManager.releaseSession("session-A");
+
+      // A stray post-release event must NOT mint a new manager attributed to A.
+      const strayA = NavigationGraphManager.getInstanceForSession("session-A");
+      expect(strayA).toBe(global);
+
+      // A genuinely new session still gets its own dedicated manager.
+      const b = NavigationGraphManager.getInstanceForSession("session-B");
+      expect(b).not.toBe(global);
+      expect(b).not.toBe(a);
+
+      NavigationGraphManager.resetInstance();
+    });
+
+    test("clearReleasedSession lets a reused uuid (setActiveDevice) get a real manager again", () => {
+      NavigationGraphManager.resetInstance();
+      const global = NavigationGraphManager.getInstance();
+      NavigationGraphManager.getInstanceForSession("session-A");
+      NavigationGraphManager.releaseSession("session-A");
+      expect(NavigationGraphManager.getInstanceForSession("session-A")).toBe(global);
+
+      // setActiveDevice re-creates the session with the same uuid; bindSession clears
+      // the tombstone, so the live replacement gets its own manager, not the global.
+      NavigationGraphManager.clearReleasedSession("session-A");
+      const revived = NavigationGraphManager.getInstanceForSession("session-A");
+      expect(revived).not.toBe(global);
+
+      NavigationGraphManager.resetInstance();
+    });
+  });
+
   describe("listAppsWithGraph", () => {
     test("maps persisted apps with nodes to summaries and omits display name", async () => {
       const repo = new NavigationRepository(harness.db);

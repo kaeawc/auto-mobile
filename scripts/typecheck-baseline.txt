@@ -306,7 +306,6 @@ src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-prop
 # swap-fp: 7 :: src/features/action/swipeon/SwipeOn.ts: error TS2322: Type '(block: (observeResult: ObserveResult) => Promise<any>, options: ObservedChangeOptions) => Promise<any>' is not assignable to type '<T>(action: (observeResult: ObserveResult) => Promise<T>, options: { changeExpected: boolean; timeoutMs: number; progress?: unknown; perf?: PerformanceTracker | undefined; skipPreviousObserve?: boolean | undefined; queryOptions?: { ...; } | undefined; predictionContext?: { ...; } | undefined; }) => Promise<...>'.
 # swap-fp: 7 :: src/features/action/swipeon/SwipeOn.ts: error TS2322: Type 'AndroidCtrlProxyClient' is not assignable to type 'ScrollAccessibilityService'.
 # swap-fp: 7 :: src/features/navigation/NavigateTo.ts: error TS2345: Argument of type 'NavigationGraphService' is not assignable to parameter of type 'NavigationGraphManager'.
-# swap-fp: 7 :: src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
 # swap-fp: 7 :: src/features/observe/Idle.ts: error TS2741: Property 'updatedPrevTotalFrames' is missing in type '{ isStable: false; shouldUpdateLastNonIdleTime: true; updatedPrevMissedVsync: null; updatedPrevSlowUiThread: null; updatedPrevFrameDeadlineMissed: null; updatedFirstGfxInfoLog: false; }' but required in type 'UiStabilityResult'.
 # swap-fp: 7 :: src/index.ts: error TS2322: Type '["debug", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
 # swap-fp: 7 :: src/index.ts: error TS2322: Type '["debug-perf", boolean, string]' is not assignable to type '[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]'.
@@ -325,6 +324,7 @@ src/utils/plan/PlanSchemaValidator.ts: error TS1343: The 'import.meta' meta-prop
 # swap-fp: 88 :: src/server/testRunResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"latestOnly" | "limit" | "lookbackDays" | "orderDirection" | "testClass" | "testMethod"'.
 # swap-fp: 9 :: src/daemon/manager.ts: error TS18048: 'signal' is possibly 'undefined'.
 # swap-fp: 9 :: src/features/action/LaunchApp.ts: error TS2322: Type 'boolean | null' is not assignable to type 'boolean'.
+# swap-fp: 9 :: src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
 # swap-fp: 9 :: src/features/observe/android/CtrlProxyHighlights.ts: error TS2322: Type 'null | undefined' is not assignable to type 'NormalizedHighlightBounds | undefined'.
 # swap-fp: 9 :: src/server/networkGraph.ts: error TS2322: Type 'null | string | undefined' is not assignable to type 'null | string'.
 # swap-fp: 9,12 :: src/server/interactionTools.ts: error TS18048: 'searchStats' is possibly 'undefined'.

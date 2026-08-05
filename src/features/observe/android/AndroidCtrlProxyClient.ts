@@ -36,7 +36,8 @@ import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
-import { NavigationGraphManager, NavigationEvent } from "../../navigation/NavigationGraphManager";
+import { NavigationGraphManager, NavigationEvent, type NavigationBuildContext } from "../../navigation/NavigationGraphManager";
+import { createContentHashProvider, type ContentHashProvider } from "../../../utils/ContentHashProvider";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
@@ -905,6 +906,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Session binding for multi-agent isolation
   private boundSessionId: string | null = null;
 
+  // Build/device provenance (#4984): lazily-built content-hash provider (cached by
+  // (deviceId, packageId, versionCode)), the resolved build context per app (kept on
+  // the per-device client so it survives session rebinds and is re-applied to the
+  // current session's manager on every event), the set of apps whose resolution is
+  // in flight, and a per-app generation bumped on package changes so a resolution
+  // that started before an update can't apply a stale build.
+  private contentHashProvider: ContentHashProvider | null = null;
+  private resolvedBuildContexts: Map<string, NavigationBuildContext> = new Map();
+  private buildContextInFlight: Set<string> = new Set();
+  private buildContextGeneration: Map<string, number> = new Map();
+
   // Hierarchy caching (accessed by delegates via context)
   private cachedHierarchy: CachedHierarchy | null = null;
 
@@ -1042,6 +1054,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * Called when a tool execution context binds a session to this device.
    */
   public bindSession(sessionId: string): void {
+    // Binding means this session is live again — clear any released-tombstone so a
+    // reused uuid (e.g. setActiveDevice re-creating the session on another device)
+    // gets its own manager rather than the unattributed global (#4984).
+    NavigationGraphManager.clearReleasedSession(sessionId);
     if (this.boundSessionId !== sessionId) {
       // A per-device client routes nav events to whichever session bound last.
       // That is correct under the pool's one-device-one-live-session invariant
@@ -1075,12 +1091,125 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * Release this client's binding to a session that has ended (#4984). If still
+   * bound to `sessionId`, drop the binding and dispose the cached hierarchy detector
+   * so a post-release event (before any new session binds the still-connected
+   * device) routes to the unattributed global manager, never the ended session's.
+   */
+  public releaseSessionBinding(sessionId: string): void {
+    if (this.boundSessionId === sessionId) {
+      this.boundSessionId = null;
+      if (this.hierarchyNavigationDetector) {
+        this.hierarchyNavigationDetector.dispose();
+        this.hierarchyNavigationDetector = null;
+      }
+    }
+  }
+
+  /**
    * Get the NavigationGraphManager for the bound session, or the global singleton.
    */
   private getNavigationGraphManager(): NavigationGraphManager {
     return this.boundSessionId
       ? NavigationGraphManager.getInstanceForSession(this.boundSessionId)
       : NavigationGraphManager.getInstance();
+  }
+
+  /**
+   * Ensure the build/device provenance context for an app is applied to the CURRENT
+   * session's navigation manager (#4984). Non-blocking.
+   *
+   * Re-applies an already-resolved context on every event: the per-device client
+   * outlives session rebinds, so a context resolved under session A must still be
+   * set on session B's fresh manager. Otherwise it kicks off a one-in-flight
+   * resolution; a nav event arriving before it lands records under the default key.
+   */
+  private ensureBuildContext(appId: string): void {
+    const resolved = this.resolvedBuildContexts.get(appId);
+    if (resolved) {
+      this.getNavigationGraphManager().setBuildContext(resolved);
+      return;
+    }
+    // No resolved context on THIS client for the app: clear it from the currently
+    // selected manager so a context left by a previous binding/selection (e.g. set on
+    // the global manager while unbound, then not cleared when a later package_event
+    // invalidated only the bound manager) is never served as stale (#4984). Falls to
+    // the default/unattributed key until (re)resolution lands. Synchronous, so it
+    // takes effect before this event's write reads provenance.
+    this.getNavigationGraphManager().clearBuildContext(appId);
+    if (this.buildContextInFlight.has(appId)) {
+      return;
+    }
+    this.buildContextInFlight.add(appId);
+    const startGeneration = this.buildContextGeneration.get(appId) ?? 0;
+
+    const resolve = async (): Promise<void> => {
+      try {
+        const info = await this.requestPackageInfo(appId, { includePermissions: false }, 4000);
+        // A transient package-info failure (timeout / success:false) must NOT be
+        // cached as version 0 — that would attribute the whole install to a bogus
+        // version until a package event. Defer; a later event retries.
+        if (!info.success || typeof info.versionCode !== "number") {
+          logger.debug(`[CTRL_PROXY] Package info unavailable for ${appId}; deferring build-context resolution`);
+          return;
+        }
+        const versionCode = info.versionCode;
+        if (!this.contentHashProvider) {
+          // Use the injected executor so tests with a fake adb never launch real
+          // `adb`, and custom production executors aren't bypassed (#4984).
+          this.contentHashProvider = createContentHashProvider(this.device, this.adb);
+        }
+        const contentHash = await this.contentHashProvider.resolveContentHash(this.device, appId, versionCode);
+        // Discard if a package change invalidated this app while we were resolving —
+        // applying now would stamp observations with the pre-update build's hash.
+        if ((this.buildContextGeneration.get(appId) ?? 0) !== startGeneration) {
+          return;
+        }
+        if (contentHash === null) {
+          // Unresolved hash: leave the default build key; a later event retries.
+          return;
+        }
+        const context: NavigationBuildContext = {
+          appId,
+          deviceId: this.device.deviceId,
+          versionCode,
+          contentHash,
+        };
+        this.resolvedBuildContexts.set(appId, context);
+        this.getNavigationGraphManager().setBuildContext(context);
+      } catch (error) {
+        // Best-effort provenance: log at warn (unexpected failure of a diagnostic
+        // path per CLAUDE.md) and let mutations fall back to the default key.
+        logger.warn(`[CTRL_PROXY] Build-context resolution failed for ${appId}: ${error}`);
+      } finally {
+        this.buildContextInFlight.delete(appId);
+      }
+    };
+
+    // Defer the resolution to a macrotask so NO work runs inline with the current
+    // WebSocket message handler (#4984/#2885). resolve() would otherwise call
+    // requestPackageInfo synchronously — a WS send plus a RequestManager timeout
+    // timer — which reorders the barrier-tracked navigation-graph write and the
+    // socket-close cache invalidation on differently-scheduled runners (macOS/Windows
+    // CI). Scheduling on the injected timer keeps the event handler's barrier
+    // registration synchronous and first, with the hash resolving out-of-band.
+    // Fire-and-forget: resolution only sets in-memory build context (no DB write),
+    // so it is NOT enlisted in the DB-write shutdown barrier.
+    this.timer.setTimeout(() => { void resolve(); }, 0);
+  }
+
+  /**
+   * Invalidate all cached build/content-hash provenance for an app (#4984), so its
+   * next nav event re-resolves the hash. Called on a package add/replace/remove — a
+   * rebuild+reinstall (including same-versionCode/different-content) must not keep
+   * recording against the old build. Bumps the generation so an in-flight resolution
+   * that started before the change is discarded rather than applying a stale build.
+   */
+  private invalidateBuildContext(appId: string): void {
+    this.buildContextGeneration.set(appId, (this.buildContextGeneration.get(appId) ?? 0) + 1);
+    this.resolvedBuildContexts.delete(appId);
+    this.contentHashProvider?.invalidate(this.device.deviceId, appId);
+    this.getNavigationGraphManager().clearBuildContext(appId);
   }
 
   /**
@@ -1378,8 +1507,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.hierarchyNavigationDetector = null;
     }
 
+    // Revalidate build/device provenance across a disconnect (#4984): while the WS has
+    // no client, a package_event has zero listeners, so an app could be replaced
+    // unobserved. Invalidate every known app's cached context — clearing the resolved
+    // context, the provider's hash cache, and bumping the generation so any in-flight
+    // resolution is discarded — so the next nav event after reconnect re-resolves the
+    // hash instead of attributing to the pre-update build indefinitely.
+    for (const appId of this.knownBuildContextApps()) {
+      this.invalidateBuildContext(appId);
+    }
+
     // Stop work profile monitor when connection closes
     this.stopWorkProfileMonitor();
+  }
+
+  /** Every app id with cached or in-flight build-context state (#4984). */
+  private knownBuildContextApps(): string[] {
+    return Array.from(new Set([
+      ...this.resolvedBuildContexts.keys(),
+      ...this.buildContextInFlight,
+    ]));
   }
 
   protected async setupBeforeConnect(perf: PerformanceTracker): Promise<void> {
@@ -2772,6 +2919,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           }
           if (event.applicationId) {
             this.sdkNavigationAppIds.add(event.applicationId);
+            // Eagerly resolve build/device provenance for this app (#4984).
+            // Non-blocking: later events pick up the resolved build key; this
+            // event may still record under the default key.
+            this.ensureBuildContext(event.applicationId);
           }
           // Attach last interaction for telemetry correlation
           if (this.lastInteraction) {
@@ -2982,6 +3133,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     } else if (!this.shouldUseHierarchyNavigation(data.packageName)) {
       logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${data.packageName}`);
     } else {
+      // Resolve build/device provenance for hierarchy-driven reaches too (#4984):
+      // non-SDK apps never emit navigation_event, so this is the only path that gives
+      // them a real build key instead of the default/legacy one.
+      if (data.packageName) {
+        this.ensureBuildContext(data.packageName);
+      }
       this.getHierarchyNavigationDetector().onHierarchyUpdate(data);
     }
   }
@@ -3331,6 +3488,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const deviceId = this.device.deviceId;
     const eventTimestamp = typeof timestamp === "number" ? timestamp : this.timer.now();
     const repo = this.getInstalledAppsRepository();
+
+    // Invalidate cached build/content-hash provenance for this package (#4984) so the
+    // next nav event re-resolves the hash. Fires for every action (add/replace/remove)
+    // — a rebuild+reinstall, INCLUDING the same-versionCode/different-content daily-dev
+    // case, must not keep recording against the previous build's hash.
+    this.invalidateBuildContext(event.packageName);
 
     try {
       if (event.action === "removed") {

@@ -154,6 +154,40 @@ export interface ScrollPositionsTable {
   created_at: Generated<string>;
 }
 
+// Navigation build-key dimension (#4984): (packageId=app_id, versionCode, contentHash).
+// Provenance on the app-level union graph, not a separate-graph partition.
+export interface NavigationBuildKeysTable {
+  id: Generated<number>;
+  app_id: string;
+  version_code: number;
+  content_hash: string;
+  created_at: Generated<string>;
+}
+
+// Per-node observation records (#4984): a screen reached by many builds/devices/sessions.
+export interface NavigationNodeObservationsTable {
+  id: Generated<number>;
+  node_id: number;
+  build_key_id: number;
+  device_id: string;
+  session_uuid: string;
+  first_seen_at: number;
+  last_seen_at: number;
+  created_at: Generated<string>;
+}
+
+// Per-edge observation records (#4984), symmetric to node observations.
+export interface NavigationEdgeObservationsTable {
+  id: Generated<number>;
+  edge_id: number;
+  build_key_id: number;
+  device_id: string;
+  session_uuid: string;
+  first_seen_at: number;
+  last_seen_at: number;
+  created_at: Generated<string>;
+}
+
 // Navigation node fingerprints table - tracks fingerprints associated with named nodes
 interface NavigationNodeFingerprintsTable {
   id: Generated<number>;
@@ -704,6 +738,9 @@ export interface Database {
   anrs: AnrsTable;
   navigation_node_fingerprints: NavigationNodeFingerprintsTable;
   navigation_suggestions: NavigationSuggestionsTable;
+  navigation_build_keys: NavigationBuildKeysTable;
+  navigation_node_observations: NavigationNodeObservationsTable;
+  navigation_edge_observations: NavigationEdgeObservationsTable;
   network_events: NetworkEventsTable;
   log_events: LogEventsTable;
 
@@ -739,6 +776,15 @@ export type NewNavigationNode = Insertable<NavigationNodesTable>;
 
 export type NavigationEdge = Selectable<NavigationEdgesTable>;
 export type NewNavigationEdge = Insertable<NavigationEdgesTable>;
+
+export type NavigationBuildKey = Selectable<NavigationBuildKeysTable>;
+export type NewNavigationBuildKey = Insertable<NavigationBuildKeysTable>;
+
+export type NavigationNodeObservation = Selectable<NavigationNodeObservationsTable>;
+export type NewNavigationNodeObservation = Insertable<NavigationNodeObservationsTable>;
+
+export type NavigationEdgeObservation = Selectable<NavigationEdgeObservationsTable>;
+export type NewNavigationEdgeObservation = Insertable<NavigationEdgeObservationsTable>;
 
 export type UIElement = Selectable<UIElementsTable>;
 export type NewUIElement = Insertable<UIElementsTable>;

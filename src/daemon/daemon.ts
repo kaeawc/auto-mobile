@@ -200,6 +200,14 @@ export class Daemon {
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
       NavigationGraphManager.releaseSession(sessionId);
       RealObserveScreen.clearCache(deviceId);
+      // Clear the per-device CtrlProxy client's binding to the released session
+      // (#4984) so a nav/hierarchy event arriving before the next session binds the
+      // still-connected device is never attributed to the ended session, and its
+      // cached hierarchy detector (which retains the released session's manager) is
+      // dropped. Central here so it covers EVERY release path — explicit, idle,
+      // heartbeat, device-switch, and derived `${base}:${label}` sessions alike.
+      AndroidCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
+      IOSCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
     });
     // Emit a real "session released" signal so a connected DaemonMcpProxy clears
     // its remembered session binding the moment the daemon releases the session

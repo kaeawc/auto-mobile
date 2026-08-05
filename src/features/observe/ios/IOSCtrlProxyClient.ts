@@ -624,6 +624,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * Bind this client to a session for multi-agent NavigationGraphManager isolation.
    */
   public bindSession(sessionId: string): void {
+    // Binding means this session is live again — clear any released-tombstone so a
+    // reused uuid (e.g. setActiveDevice re-creating the session on another device)
+    // gets its own manager rather than the unattributed global (#4984).
+    NavigationGraphManager.clearReleasedSession(sessionId);
     if (this.boundSessionId !== sessionId) {
       // See AndroidCtrlProxyClient.bindSession: a per-device client is
       // last-writer-wins. Trace a transition off a previously-bound session so a
@@ -650,6 +654,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public getBoundSessionIdForTesting(): string | null {
     return this.boundSessionId;
+  }
+
+  /**
+   * Release this client's binding to a session that has ended (#4984). If still
+   * bound to `sessionId`, drop the binding and dispose the cached hierarchy detector
+   * so a post-release event routes to the unattributed global manager, never the
+   * ended session's. Mirrors AndroidCtrlProxyClient.releaseSessionBinding.
+   */
+  public releaseSessionBinding(sessionId: string): void {
+    if (this.boundSessionId === sessionId) {
+      this.boundSessionId = null;
+      if (this.hierarchyNavigationDetector) {
+        this.hierarchyNavigationDetector.dispose();
+        this.hierarchyNavigationDetector = null;
+      }
+    }
   }
 
   /**

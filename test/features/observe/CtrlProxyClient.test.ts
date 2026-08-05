@@ -1269,6 +1269,233 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
+    test("resolves build/device provenance on the hierarchy path for a non-SDK app (#4984)", async function() {
+      // Apps without the AutoMobile SDK never emit navigation_event, so the hierarchy
+      // path must kick off build-context resolution — otherwise every reach records
+      // under the default/legacy build. Asserting requestPackageInfo is consulted
+      // proves ensureBuildContext ran on this path.
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: true, versionCode: 42 } as never);
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: testTimer.now(),
+            packageName: "com.example.nosdk",
+            hierarchy: { "text": "Home", "resource-id": "com.example.nosdk:id/home" },
+          }
+        }));
+
+        await resultPromise;
+        for (let i = 0; i < 10; i++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+          await testTimer.advanceTimersByTimeAsync(1);
+        }
+
+        expect(pkgInfoSpy).toHaveBeenCalled();
+        expect(pkgInfoSpy.mock.calls[0][0]).toBe("com.example.nosdk");
+        // Content hashing runs on the INJECTED fake adb, never a real subprocess.
+        expect(fakeAdb.wasCommandExecuted("pm path")).toBe(true);
+      } finally {
+        pkgInfoSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
+    test("does not apply a build context built from a failed package-info result (#4984)", async function() {
+      // A transient package-info failure must NOT be persisted as version 0 — defer
+      // instead, so a later event retries. setBuildContext must not be called.
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+      const setCtxSpy = spyOn(navHarness.manager, "setBuildContext");
+
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: false } as never);
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: testTimer.now(),
+            packageName: "com.example.nosdk",
+            hierarchy: { "text": "Home", "resource-id": "com.example.nosdk:id/home" },
+          }
+        }));
+
+        await resultPromise;
+        for (let i = 0; i < 10; i++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+          await testTimer.advanceTimersByTimeAsync(1);
+        }
+
+        expect(pkgInfoSpy).toHaveBeenCalled();
+        // Failed metadata → deferred → no (bogus version-0) context applied.
+        expect(setCtxSpy).not.toHaveBeenCalled();
+      } finally {
+        pkgInfoSpy.mockRestore();
+        setCtxSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
+    test("releaseSessionBinding clears the binding and cached detector for the released session (#4984)", async function() {
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+
+      try {
+        testClient.bindSession("session-A");
+        expect(testClient.getBoundSessionIdForTesting()).toBe("session-A");
+        const detectorBoundToA = testClient.getHierarchyNavigationDetector();
+
+        testClient.releaseSessionBinding("session-A");
+
+        // Binding cleared and the cached detector dropped (recreated on next access),
+        // so post-release events route to the unattributed global manager, not A's.
+        expect(testClient.getBoundSessionIdForTesting()).toBeNull();
+        expect(testClient.getHierarchyNavigationDetector()).not.toBe(detectorBoundToA);
+
+        // A non-matching release is a no-op once a new session has bound.
+        testClient.bindSession("session-B");
+        testClient.releaseSessionBinding("session-A");
+        expect(testClient.getBoundSessionIdForTesting()).toBe("session-B");
+      } finally {
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
+    test("build-context resolution is deferred out-of-band, not run inline with the message handler (#2885/#4984)", async function() {
+      // Regression guard for the macOS/Windows-CI-only #2885 failure: ensureBuildContext
+      // must NOT call requestPackageInfo (a WS send + RequestManager timeout timer)
+      // synchronously inside the WS message handler, or it reorders the barrier-tracked
+      // nav write vs the socket-close cache invalidation on differently-scheduled runners.
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: false } as never);
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "navigation_event",
+          event: {
+            destination: "Home", source: "Start", arguments: {}, metadata: {},
+            timestamp: testTimer.now(), sequenceNumber: 1, applicationId: "com.example.app",
+          }
+        }));
+
+        // Drain MICROTASKS only (never setImmediate): the deferred resolution is
+        // dispatched on a macrotask, so if it ran inline requestPackageInfo would
+        // already have fired here. It must not have.
+        for (let i = 0; i < 5; i++) { await Promise.resolve(); }
+        expect(pkgInfoSpy).not.toHaveBeenCalled();
+
+        // Let getLatestHierarchy resolve, then allow macrotasks: the deferred
+        // resolution now runs and consults requestPackageInfo out-of-band.
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: { updatedAt: testTimer.now(), packageName: "com.example.app", hierarchy: { "text": "Home" } }
+        }));
+        await resultPromise;
+        for (let i = 0; i < 10; i++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+          await testTimer.advanceTimersByTimeAsync(1);
+        }
+        expect(pkgInfoSpy).toHaveBeenCalled();
+      } finally {
+        pkgInfoSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
+    test("clears resolved build contexts on connection close so the next event re-resolves (#4984)", async function() {
+      // While the WS has no client, a package_event has zero listeners, so an app can be
+      // replaced unobserved. onConnectionClosed must invalidate cached contexts so the
+      // next event after reconnect re-resolves the hash instead of using the stale build.
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      const DIGEST = "a".repeat(64);
+      fakeAdb.setCommandResponse("pm path", { stdout: "package:/a/base.apk", stderr: "" });
+      fakeAdb.setCommandResponse("sha256sum", { stdout: `${DIGEST}  /a/base.apk`, stderr: "" });
+      const pkgSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: true, versionCode: 5 } as never);
+      const settle = async (): Promise<void> => {
+        for (let i = 0; i < 10; i++) { await new Promise<void>(r => setImmediate(r)); await testTimer.advanceTimersByTimeAsync(1); }
+      };
+      const navEvent = (dest: string): void => socket!.simulateMessage(JSON.stringify({
+        type: "navigation_event",
+        event: { destination: dest, source: "s", arguments: {}, metadata: {}, timestamp: testTimer.now(), sequenceNumber: 1, applicationId: "com.example.app" }
+      }));
+      let socket: Awaited<ReturnType<typeof waitForSocket>>;
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        navEvent("Home");
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update", timestamp: testTimer.now(),
+          data: { updatedAt: testTimer.now(), packageName: "com.example.app", hierarchy: { "text": "Home" } }
+        }));
+        await resultPromise;
+        await settle();
+        expect(pkgSpy).toHaveBeenCalledTimes(1); // resolved once
+
+        navEvent("Details");
+        await settle();
+        expect(pkgSpy).toHaveBeenCalledTimes(1); // cached — no re-resolution
+
+        // Connection drops (app may be replaced unobserved), then a later event arrives.
+        (testClient as unknown as { onConnectionClosed: () => void }).onConnectionClosed();
+
+        navEvent("Home2");
+        await settle();
+        expect(pkgSpy).toHaveBeenCalledTimes(2); // re-resolved after close
+      } finally {
+        pkgSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
     test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#2885)", async function() {
       resetDbWriteBarrier();
       // The Android handler resolves getDbWriteBarrier() per write (#2912), so a

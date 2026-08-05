@@ -6,6 +6,7 @@ import { createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { formatStructuredToolError } from "../utils/formatStructuredToolError";
 
 // Schema for steps inside critical section.
 // Every sub-step MUST declare a target `device` — there is no routing
@@ -101,24 +102,10 @@ function unwrapCriticalSectionResult(result: unknown): Record<string, unknown> |
 }
 
 function formatCriticalSectionError(result: Record<string, unknown>, tool: string): string {
-  const error = result.error;
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error && typeof error === "object") {
-    const structuredError = error as Record<string, unknown>;
-    const code = typeof structuredError.code === "string" ? structuredError.code : undefined;
-    const message = typeof structuredError.message === "string" ? structuredError.message : undefined;
-    if (code && message) {
-      return `${code}: ${message}`;
-    }
-    if (message) {
-      return message;
-    }
-  }
-  return typeof result.message === "string"
-    ? result.message
-    : `Tool "${tool}" returned failure status`;
+  return formatStructuredToolError(result.error)
+    ?? (typeof result.message === "string"
+      ? result.message
+      : `Tool "${tool}" returned failure status`);
 }
 
 /**

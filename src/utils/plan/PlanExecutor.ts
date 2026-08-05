@@ -23,19 +23,14 @@ import { Timer, defaultTimer } from "../SystemTimer";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
 import { isDeviceLostError } from "../../server/deviceLossOutcome";
+import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
   summarizeObserveResultForFailure,
   trimObservationForStepCapture,
 } from "./summarizeFailureObservation";
 
 function formatToolError(error: unknown): string {
-  if (error && typeof error === "object") {
-    const details = error as Record<string, unknown>;
-    if (typeof details.code === "string" && typeof details.message === "string") {
-      return `${details.code}: ${details.message}`;
-    }
-  }
-  return String(error);
+  return formatStructuredToolError(error) ?? String(error);
 }
 
 type StepExecutionStatus = "completed" | "failed" | "skipped";

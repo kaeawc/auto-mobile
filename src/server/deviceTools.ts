@@ -101,7 +101,10 @@ function isAlreadyStoppedDeviceError(platform: SomePlatform, error: unknown): bo
 function createToolErrorResponse(code: string, message: string) {
   return {
     isError: true,
-    content: [{ type: "text" as const, text: JSON.stringify({ error: { code, message } }) }],
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({ success: false, error: { code, message } }),
+    }],
   };
 }
 
@@ -501,6 +504,12 @@ export function registerDeviceTools() {
         await deviceUtils.killDevice(args.device);
       } catch (error) {
         devicePool?.clearIntentionalShutdown(args.device.deviceId);
+        if (isAlreadyStoppedDeviceError(args.device.platform, error)) {
+          return createToolErrorResponse(
+            DEVICE_ALREADY_STOPPED_ERROR_CODE,
+            `Failed to kill ${args.device.platform} device: ${error}`,
+          );
+        }
         throw error;
       }
       perf.endOperation("killProcess");
@@ -524,12 +533,6 @@ export function registerDeviceTools() {
         platform: args.device.platform
       });
     } catch (error) {
-      if (isAlreadyStoppedDeviceError(args.device.platform, error)) {
-        return createToolErrorResponse(
-          DEVICE_ALREADY_STOPPED_ERROR_CODE,
-          `Failed to kill ${args.device.platform} device: ${error}`,
-        );
-      }
       throw new ActionableError(`Failed to kill ${args.device.platform} device: ${error}`);
     }
   };

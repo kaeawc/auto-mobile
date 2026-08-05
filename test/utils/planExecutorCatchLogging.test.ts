@@ -16,6 +16,27 @@ function registerThrowingTool(name: string): void {
   );
 }
 
+function registerStructuredFailureTool(name: string): void {
+  ToolRegistry.register(
+    name,
+    "Returns a structured failure for plan execution tests",
+    z.object({}),
+    async () => ({
+      isError: true,
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          success: false,
+          error: {
+            code: "device_already_stopped",
+            message: "The device is already stopped",
+          },
+        }),
+      }],
+    })
+  );
+}
+
 afterEach(() => {
   ToolRegistry.clearTools();
 });
@@ -55,5 +76,22 @@ describe("PlanExecutor catch logging", () => {
       message: "[PLAN_STEP_1] step requiredThrowingTool threw; returning failed status",
       args: [expect.objectContaining({ message: "requiredThrowingTool boom" })],
     }));
+  });
+
+  test("returns a failed status for a structured failure envelope", async () => {
+    registerStructuredFailureTool("structuredFailureTool");
+    const executor = new DefaultPlanExecutor(undefined, new FakeLogger());
+    const plan: Plan = {
+      name: "structured failure",
+      steps: [{ tool: "structuredFailureTool", params: {} }],
+    };
+
+    const result = await executor.executePlan(plan, 0);
+
+    expect(result.success).toBe(false);
+    expect(result.failedStep).toMatchObject({
+      stepIndex: 0,
+      tool: "structuredFailureTool",
+    });
   });
 });

@@ -235,10 +235,39 @@ describe("killDevice handler", () => {
 
     expect(response.isError).toBe(true);
     expect(JSON.parse(response.content[0].text)).toEqual({
+      success: false,
       error: {
         code: "device_already_stopped",
         message: expect.stringContaining(message),
       },
     });
+  });
+
+  test("keeps recording-list failures as actionable errors", async () => {
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: {} as never,
+      recordingRepository: {
+        listRecordings: async () => {
+          throw new Error("Emulator 'forge-ivory-crown' is not running");
+        },
+      } as never,
+      configRepository: {} as never,
+      highlightClient: {} as never,
+      timer: new FakeTimer(),
+      now: () => new Date(0),
+    });
+
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await expect(tool.handler({
+      device: {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+      },
+    })).rejects.toThrow("Failed to kill android device");
   });
 });

@@ -48,6 +48,16 @@ class SuccessfulKillDeviceManager extends FailingKillDeviceManager {
   override async killDevice(): Promise<void> {}
 }
 
+class AlreadyStoppedKillDeviceManager extends FailingKillDeviceManager {
+  constructor(private readonly message: string) {
+    super();
+  }
+
+  override async killDevice(): Promise<void> {
+    throw new Error(this.message);
+  }
+}
+
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
   override async upsertActiveSession(): Promise<void> {}
   override async markReleased(): Promise<void> {}
@@ -195,5 +205,40 @@ describe("killDevice handler", () => {
 
     expect(successfulManager.getCallCount("startDevice")).toBe(1);
     expect(pool.getDevice("emulator-5554")).toBeNull();
+  });
+
+  test.each([
+    ["android", "Emulator 'forge-ivory-crown' is not running"],
+    ["ios", "Unable to shutdown device: device is already shut down"],
+  ] as const)("returns a structured terminal error for an already-stopped %s device", async (platform, message) => {
+    const stoppedManager = new AlreadyStoppedKillDeviceManager(message);
+    manager = stoppedManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => stoppedManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+    });
+    registerDeviceTools();
+
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+    const response = await tool.handler({
+      device: {
+        name: platform === "android" ? "Pixel 8" : "iPhone 16",
+        platform,
+        deviceId: platform === "android" ? "emulator-5554" : "IOS-UDID",
+      },
+    });
+
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text)).toEqual({
+      error: {
+        code: "device_already_stopped",
+        message: expect.stringContaining(message),
+      },
+    });
   });
 });

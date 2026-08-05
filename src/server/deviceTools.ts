@@ -80,6 +80,31 @@ export const killDeviceSchema = z.object({
   })
 });
 
+export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
+
+function isAlreadyStoppedDeviceError(platform: SomePlatform, error: unknown): boolean {
+  const message = String(error instanceof Error ? error.message : error).toLowerCase();
+  if (platform === "android") {
+    return message.includes("not running") && message.includes("emulator");
+  }
+  if (platform === "ios") {
+    return (
+      message.includes("already shut down") ||
+      message.includes("already shutdown") ||
+      message.includes("not booted") ||
+      message.includes("invalid device state")
+    );
+  }
+  return false;
+}
+
+function createToolErrorResponse(code: string, message: string) {
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: JSON.stringify({ error: { code, message } }) }],
+  };
+}
+
 // Export interfaces for type safety
 export interface StartDeviceArgs {
   platform: "android" | "ios";
@@ -499,6 +524,12 @@ export function registerDeviceTools() {
         platform: args.device.platform
       });
     } catch (error) {
+      if (isAlreadyStoppedDeviceError(args.device.platform, error)) {
+        return createToolErrorResponse(
+          DEVICE_ALREADY_STOPPED_ERROR_CODE,
+          `Failed to kill ${args.device.platform} device: ${error}`,
+        );
+      }
       throw new ActionableError(`Failed to kill ${args.device.platform} device: ${error}`);
     }
   };

@@ -87,6 +87,14 @@ export interface ScreenshotBackoffScheduler {
    * Recompute the pending keepalive timeout using the current cadence.
    */
   rescheduleKeepAlive(): void;
+
+  /**
+   * Record that a capture was just issued outside the scheduler's own timers (e.g. the direct
+   * initial-frame capture at subscriber connect). Advances the shared rate-limit floor clock so a
+   * scheduler capture armed for the same instant coalesces instead of firing a second, redundant
+   * accessibility screenshot the platform would reject as rate-limited (issue #4927).
+   */
+  noteCaptureStarted(): void;
 }
 
 /**
@@ -286,6 +294,12 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
    * Whether a capture requested now would violate the rate-limit floor. False when throttling is
    * disabled or no capture has happened yet (the leading edge always fires immediately).
    */
+  noteCaptureStarted(): void {
+    // Same clock the scheduler's own captures stamp in captureAndEmit, so an external capture and a
+    // scheduler-owned one share one floor window (issue #4927).
+    this.lastCaptureStartMs = this.timer.now();
+  }
+
   private shouldDeferForFloor(): boolean {
     const floor = this.config.minCaptureIntervalMs;
     if (!floor || floor <= 0 || this.lastCaptureStartMs === null) {
@@ -466,6 +480,7 @@ export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffSchedule
   public cancelPendingCapturesCalls: number = 0;
   public stopCalls: number = 0;
   public rescheduleKeepAliveCalls: number = 0;
+  public noteCaptureStartedCalls: number = 0;
   private _isActive: boolean = false;
   private _pendingCount: number = 0;
 
@@ -498,6 +513,10 @@ export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffSchedule
     this.rescheduleKeepAliveCalls++;
   }
 
+  noteCaptureStarted(): void {
+    this.noteCaptureStartedCalls++;
+  }
+
   // Test helpers
   setActive(active: boolean): void {
     this._isActive = active;
@@ -512,6 +531,7 @@ export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffSchedule
     this.cancelPendingCapturesCalls = 0;
     this.stopCalls = 0;
     this.rescheduleKeepAliveCalls = 0;
+    this.noteCaptureStartedCalls = 0;
     this._isActive = false;
     this._pendingCount = 0;
   }

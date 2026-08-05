@@ -881,3 +881,47 @@ describe("DefaultScreenshotBackoffScheduler keepalive respects the floor", () =>
     }
   });
 });
+
+describe("DefaultScreenshotBackoffScheduler noteCaptureStarted() (external capture participates)", () => {
+  // The initial-frame path issues a direct capture AND arms a backoff sequence; without sharing the
+  // floor clock the armed leading (t=0) capture fires a second a11y screenshot in the same window
+  // and trips the rate limit (issue #4927 P2).
+  const FLOOR = 350;
+
+  function makeScheduler(fakeTimer: FakeTimer, captureTimes: number[]) {
+    return new DefaultScreenshotBackoffScheduler(
+      async () => {
+        captureTimes.push(fakeTimer.now());
+        return { success: true, data: `frame-${captureTimes.length}` };
+      },
+      () => {},
+      { intervals: [0, 100, 300], keepAliveIntervalMs: null, minCaptureIntervalMs: FLOOR },
+      fakeTimer
+    );
+  }
+
+  it("defers the armed leading capture when an external capture was just recorded", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeScheduler(fakeTimer, captureTimes);
+
+    // Simulate the direct initial-frame capture, then the backoff armed alongside it.
+    scheduler.noteCaptureStarted();
+    scheduler.startBackoffSequence();
+    await fakeTimer.advanceTimersByTimeAsync(0); // t=0 leading tick: must DEFER, not capture
+    await fakeTimer.advanceTimersByTimeAsync(400); // reach the floor boundary -> trailing fires
+
+    expect(captureTimes).toEqual([FLOOR]); // one settled capture at the floor, no t=0 collision
+  });
+
+  it("without noteCaptureStarted the leading capture fires immediately (control)", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeScheduler(fakeTimer, captureTimes);
+
+    scheduler.startBackoffSequence();
+    await fakeTimer.advanceTimersByTimeAsync(0);
+
+    expect(captureTimes).toEqual([0]); // leading edge fires when nothing preceded it
+  });
+});

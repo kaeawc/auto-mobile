@@ -3196,6 +3196,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         (_id, _type, _timeout) => ({ success: false, error: CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR })
       );
 
+      // Advance the shared rate-limit floor clock at the a11y-request boundary so a direct capture
+      // (e.g. the initial subscriber frame) and a scheduler-armed capture cannot both hit the
+      // accessibility screenshot API in the same floor window (issue #4927).
+      this.getScreenshotBackoffScheduler().noteCaptureStarted();
       this.ws.send(message);
 
       const result = await screenshotPromise;

@@ -211,13 +211,19 @@ describe("killDevice handler", () => {
     ["android", "Emulator 'forge-ivory-crown' is not running"],
     ["ios", "Unable to shutdown device: device is already shut down"],
   ] as const)("returns a structured terminal error for an already-stopped %s device", async (platform, message) => {
+    let cleanupCalled = false;
+    let notifyCalled = false;
     const stoppedManager = new AlreadyStoppedKillDeviceManager(message);
     manager = stoppedManager;
     setDeviceToolsDependencies({
       deviceManagerFactory: () => stoppedManager,
-      notifyResourcesChanged: async () => {},
+      notifyResourcesChanged: async () => {
+        notifyCalled = true;
+      },
       ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
+      clearInstalledAppsForDevice: async () => {
+        cleanupCalled = true;
+      },
     });
     registerDeviceTools();
 
@@ -241,6 +247,8 @@ describe("killDevice handler", () => {
         message: expect.stringContaining(message),
       },
     });
+    expect(cleanupCalled).toBe(true);
+    expect(notifyCalled).toBe(true);
   });
 
   test("keeps recording-list failures as actionable errors", async () => {

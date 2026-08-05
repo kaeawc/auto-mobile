@@ -28,6 +28,16 @@ import {
   trimObservationForStepCapture,
 } from "./summarizeFailureObservation";
 
+function formatToolError(error: unknown): string {
+  if (error && typeof error === "object") {
+    const details = error as Record<string, unknown>;
+    if (typeof details.code === "string" && typeof details.message === "string") {
+      return `${details.code}: ${details.message}`;
+    }
+  }
+  return String(error);
+}
+
 type StepExecutionStatus = "completed" | "failed" | "skipped";
 
 interface StepExecutionContext {
@@ -421,7 +431,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         "success" in checkResult &&
         checkResult.success === false
       ) {
-        const error = "error" in checkResult ? String(checkResult.error) : "Tool execution failed";
+        const error = "error" in checkResult ? formatToolError(checkResult.error) : "Tool execution failed";
         if (step.optional) {
           return {
             status: "skipped",

@@ -108,6 +108,27 @@ function createToolErrorResponse(code: string, message: string) {
   };
 }
 
+function createKillDeviceResponse(
+  args: KillDeviceArgs,
+  timing: unknown,
+  alreadyStoppedMessage?: string,
+) {
+  if (alreadyStoppedMessage !== undefined) {
+    return createToolErrorResponse(
+      DEVICE_ALREADY_STOPPED_ERROR_CODE,
+      alreadyStoppedMessage,
+    );
+  }
+
+  return createJSONToolResponse({
+    message: `${args.device.platform} '${args.device.name}' shutdown successfully`,
+    udid: args.device.deviceId,
+    name: args.device.name,
+    timing,
+    platform: args.device.platform
+  });
+}
+
 // Export interfaces for type safety
 export interface StartDeviceArgs {
   platform: "android" | "ios";
@@ -500,17 +521,16 @@ export function registerDeviceTools() {
       if (args.device.platform === "android") {
         devicePool?.markIntentionalShutdown(args.device.deviceId);
       }
+      let alreadyStoppedMessage: string | undefined;
       try {
         await deviceUtils.killDevice(args.device);
       } catch (error) {
         devicePool?.clearIntentionalShutdown(args.device.deviceId);
         if (isAlreadyStoppedDeviceError(args.device.platform, error)) {
-          return createToolErrorResponse(
-            DEVICE_ALREADY_STOPPED_ERROR_CODE,
-            `Failed to kill ${args.device.platform} device: ${error}`,
-          );
+          alreadyStoppedMessage = `Failed to kill ${args.device.platform} device: ${error}`;
+        } else {
+          throw error;
         }
-        throw error;
       }
       perf.endOperation("killProcess");
 
@@ -525,13 +545,7 @@ export function registerDeviceTools() {
       perf.end();
       const timing = perf.getTimings();
 
-      return createJSONToolResponse({
-        message: `${args.device.platform} '${args.device.name}' shutdown successfully`,
-        udid: args.device.deviceId,
-        name: args.device.name,
-        timing,
-        platform: args.device.platform
-      });
+      return createKillDeviceResponse(args, timing, alreadyStoppedMessage);
     } catch (error) {
       throw new ActionableError(`Failed to kill ${args.device.platform} device: ${error}`);
     }

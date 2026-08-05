@@ -92,6 +92,7 @@ describe("PlanExecutor catch logging", () => {
     expect(result.failedStep).toMatchObject({
       stepIndex: 0,
       tool: "structuredFailureTool",
+      error: "device_already_stopped: The device is already stopped",
     });
   });
 });

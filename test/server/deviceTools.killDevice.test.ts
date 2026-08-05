@@ -209,6 +209,7 @@ describe("killDevice handler", () => {
 
   test.each([
     ["android", "Emulator 'forge-ivory-crown' is not running"],
+    ["android", "adb: device 'emulator-5554' not found"],
     ["ios", "Unable to shutdown device: device is already shut down"],
   ] as const)("returns a structured terminal error for an already-stopped %s device", async (platform, message) => {
     let cleanupCalled = false;

@@ -24,7 +24,14 @@ object ToolResultParser {
       element as? JsonObject ?: throw SerializationException("Tool result is not a JSON object")
 
     val success = inferSuccess(objectElement)
-    val error = objectElement["error"]?.jsonPrimitive?.content
+    val error =
+      objectElement["error"]?.let { errorElement ->
+        when (errorElement) {
+          is JsonObject ->
+            errorElement["message"]?.jsonPrimitive?.content ?: errorElement.toString()
+          else -> errorElement.jsonPrimitive.content
+        }
+      }
 
     val response =
       when (toolName) {

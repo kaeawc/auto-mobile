@@ -124,6 +124,32 @@ class ToolResultParserTest {
   }
 
   @Test
+  fun `parse structured error object without losing its message`() {
+    val result =
+      ToolResultParser.parseToolResult(
+        0,
+        "killDevice",
+        """
+        {
+          "success": false,
+          "message": "Failed to kill android device: device already stopped",
+          "error": {
+            "code": "device_already_stopped",
+            "message": "Failed to kill android device: device already stopped"
+          }
+        }
+        """
+          .trimIndent(),
+      )
+
+    assertTrue(!result.success)
+    assertEquals(
+      "Failed to kill android device: device already stopped",
+      result.error,
+    )
+  }
+
+  @Test
   fun `parse MCP response wrapper`() {
     val payload =
       """

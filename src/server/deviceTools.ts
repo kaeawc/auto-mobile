@@ -24,6 +24,7 @@ import { DaemonState } from "../daemon/daemonState";
 import { DeviceBootService } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
+import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -82,10 +83,17 @@ export const killDeviceSchema = z.object({
 
 export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 
-function isAlreadyStoppedDeviceError(platform: SomePlatform, error: unknown): boolean {
+function isAlreadyStoppedDeviceError(
+  platform: SomePlatform,
+  deviceId: string,
+  error: unknown,
+): boolean {
   const message = String(error instanceof Error ? error.message : error).toLowerCase();
   if (platform === "android") {
-    return message.includes("not running") && message.includes("emulator");
+    return (
+      (message.includes("not running") && message.includes("emulator")) ||
+      isAdbMissingDeviceError(error, deviceId)
+    );
   }
   if (platform === "ios") {
     return (
@@ -526,7 +534,7 @@ export function registerDeviceTools() {
       try {
         await deviceUtils.killDevice(args.device);
       } catch (error) {
-        if (isAlreadyStoppedDeviceError(args.device.platform, error)) {
+        if (isAlreadyStoppedDeviceError(args.device.platform, args.device.deviceId, error)) {
           alreadyStoppedMessage = `Failed to kill ${args.device.platform} device: ${error}`;
         } else {
           devicePool?.clearIntentionalShutdown(args.device.deviceId);

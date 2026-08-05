@@ -864,7 +864,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     {
       const adb = this.adbFactory.create(null);
       perf.startOperation("adbDeviceScan");
-      const devices = await adb.getBootedAndroidDevices({ bypassCache: options.bypassDeviceListCache });
+      const devices = await adb.getBootedAndroidDevices({
+        bypassCache: options.bypassDeviceListCache,
+        throwOnMissingAdb: true,
+      });
       perf.endOperation("adbDeviceScan");
       const runningDevices: BootedDevice[] = [];
 

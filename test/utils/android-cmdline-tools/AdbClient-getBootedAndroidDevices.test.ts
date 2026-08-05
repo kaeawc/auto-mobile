@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "events";
 import { PassThrough } from "stream";
-import { AdbClient, resetAdbClientCaches } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import {
+  AdbClient,
+  AdbUnavailableError,
+  resetAdbClientCaches,
+} from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { ExecResult } from "../../../src/models";
 import { isAdbMissingDeviceError } from "../../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 
@@ -87,6 +91,30 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     expect(await adb.getBootedAndroidDevices()).toMatchObject([{ transportId: "1" }]);
     expect(await adb.getBootedAndroidDevices({ bypassCache: true })).toMatchObject([{ transportId: "2" }]);
     expect(calls).toBe(2);
+  });
+
+  test("can rethrow when adb is unavailable for strict discovery", async () => {
+    const adb = new AdbClient(null, async () => {
+      throw new Error("spawn adb ENOENT");
+    });
+
+    await expect(
+      adb.getBootedAndroidDevices({ throwOnMissingAdb: true })
+    ).rejects.toBeInstanceOf(AdbUnavailableError);
+  });
+
+  test("bypasses the device-list cache for strict discovery", async () => {
+    const availableAdb = new AdbClient(null, async () => createExecResult(
+      "List of devices attached\n"
+    ));
+    await expect(availableAdb.getBootedAndroidDevices()).resolves.toEqual([]);
+
+    const unavailableAdb = new AdbClient(null, async () => {
+      throw new Error("spawn adb ENOENT");
+    });
+    await expect(
+      unavailableAdb.getBootedAndroidDevices({ throwOnMissingAdb: true })
+    ).rejects.toBeInstanceOf(AdbUnavailableError);
   });
 
   test("does not retry commands when adb reports the target serial is gone", async () => {

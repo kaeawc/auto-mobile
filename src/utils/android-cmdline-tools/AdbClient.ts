@@ -45,6 +45,13 @@ export class AdbCommandTimeoutError extends Error {
   }
 }
 
+export class AdbUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AdbUnavailableError";
+  }
+}
+
 // Module-level cache configuration and instances
 const moduleTimer: Timer = defaultTimer;
 let deviceListCache: TTLCache<string, BootedDevice[]> | null = null;
@@ -945,14 +952,21 @@ export class AdbClient implements AdbExecutor {
    * Get the list of connected devices
    * @returns Promise with an array of device IDs
    */
-  async getBootedAndroidDevices(options: { bypassCache?: boolean } = {}): Promise<BootedDevice[]> {
+  async getBootedAndroidDevices(
+    options: { bypassCache?: boolean; throwOnMissingAdb?: boolean } = {}
+  ): Promise<BootedDevice[]> {
     if (this.shouldSkipMissingAdbProbe()) {
+      if (options.throwOnMissingAdb) {
+        throw new AdbUnavailableError("ADB executable is unavailable");
+      }
       return [];
     }
 
     // Check cache first - TTLCache handles expiration automatically
     const cache = getDeviceListCache();
-    const cachedDevices = options.bypassCache ? undefined : cache.get("devices");
+    const cachedDevices = options.bypassCache || options.throwOnMissingAdb
+      ? undefined
+      : cache.get("devices");
     if (cachedDevices) {
       logger.debug("Getting list of connected devices (cached)");
       return cachedDevices;
@@ -970,6 +984,9 @@ export class AdbClient implements AdbExecutor {
     } catch (error) {
       if (this.isMissingExecutableError(error)) {
         this.recordMissingAdbProbe();
+        if (options.throwOnMissingAdb) {
+          throw new AdbUnavailableError(`ADB executable is unavailable: ${(error as Error).message}`);
+        }
         return [];
       }
       throw error;

@@ -964,9 +964,7 @@ export class AdbClient implements AdbExecutor {
 
     // Check cache first - TTLCache handles expiration automatically
     const cache = getDeviceListCache();
-    const cachedDevices = options.bypassCache || options.throwOnMissingAdb
-      ? undefined
-      : cache.get("devices");
+    const cachedDevices = options.bypassCache ? undefined : cache.get("devices");
     if (cachedDevices) {
       logger.debug("Getting list of connected devices (cached)");
       return cachedDevices;

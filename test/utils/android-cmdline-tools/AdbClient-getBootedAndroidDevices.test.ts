@@ -103,17 +103,27 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     ).rejects.toBeInstanceOf(AdbUnavailableError);
   });
 
-  test("bypasses the device-list cache for strict discovery", async () => {
-    const availableAdb = new AdbClient(null, async () => createExecResult(
-      "List of devices attached\n"
-    ));
-    await expect(availableAdb.getBootedAndroidDevices()).resolves.toEqual([]);
+  test("serves the device-list cache for strict discovery unless the caller bypasses it", async () => {
+    const availableAdb = new AdbClient(null, async () => createExecResult([
+      "List of devices attached",
+      "emulator-5554\tdevice",
+      "",
+    ].join("\n")));
+    await expect(availableAdb.getBootedAndroidDevices()).resolves.toMatchObject([
+      { deviceId: "emulator-5554" },
+    ]);
 
+    // Strict discovery only changes how a missing adb is reported; hot read
+    // paths keep the shared cache. Boot/terminate flows opt into fresh data
+    // with bypassCache.
     const unavailableAdb = new AdbClient(null, async () => {
       throw new Error("spawn adb ENOENT");
     });
     await expect(
       unavailableAdb.getBootedAndroidDevices({ throwOnMissingAdb: true })
+    ).resolves.toMatchObject([{ deviceId: "emulator-5554" }]);
+    await expect(
+      unavailableAdb.getBootedAndroidDevices({ throwOnMissingAdb: true, bypassCache: true })
     ).rejects.toBeInstanceOf(AdbUnavailableError);
   });
 

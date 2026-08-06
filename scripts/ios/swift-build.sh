@@ -15,8 +15,17 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ios/local-sim-build-args.sh disable=SC1091
+source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IOS_DIR="${PROJECT_ROOT}/ios"
+
+# On a local arm64 host, build only the arch the simulator runs and skip the
+# index store; empty in CI / on Intel so those keep building universal (#5024).
+LOCAL_SIM_ARGS=()
+while IFS= read -r _arg; do
+    [ -n "${_arg}" ] && LOCAL_SIM_ARGS+=("${_arg}")
+done < <(local_sim_build_args)
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  Swift Package Build${NC}"
@@ -125,7 +134,7 @@ for package in "${IOS_ONLY_PACKAGES[@]}"; do
     if [ -f "${PACKAGE_DIR}/Package.swift" ]; then
         echo -e "  Building ${package} for iOS simulator..."
         # Use xcodebuild to build for iOS simulator since swift build doesn't support cross-compilation
-        if (cd "${PACKAGE_DIR}" && xcodebuild -scheme "${package}" -destination 'generic/platform=iOS Simulator' -quiet build 2>&1); then
+        if (cd "${PACKAGE_DIR}" && xcodebuild -scheme "${package}" -destination 'generic/platform=iOS Simulator' "${LOCAL_SIM_ARGS[@]}" -quiet build 2>&1); then
             print_status 0 "${package} built successfully for iOS simulator"
         else
             print_status 1 "${package} build failed for iOS simulator"

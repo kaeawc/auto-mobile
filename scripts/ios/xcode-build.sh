@@ -30,8 +30,17 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ios/xcodegen_version.sh disable=SC1091
 source "${SCRIPT_DIR}/xcodegen_version.sh"
+# shellcheck source=scripts/ios/local-sim-build-args.sh disable=SC1091
+source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IOS_DIR="${PROJECT_ROOT}/ios"
+
+# On a local arm64 host, build only the arch the simulator runs and skip the
+# index store; empty in CI / on Intel so those keep building universal (#5024).
+LOCAL_SIM_ARGS=()
+while IFS= read -r _arg; do
+    [ -n "${_arg}" ] && LOCAL_SIM_ARGS+=("${_arg}")
+done < <(local_sim_build_args)
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  Xcode Project Build${NC}"
@@ -190,6 +199,7 @@ for xcodeproj in "${XCODEPROJ_ARRAY[@]}"; do
                 CODE_SIGN_IDENTITY="-" \
                 CODE_SIGNING_REQUIRED=NO \
                 CODE_SIGNING_ALLOWED=NO \
+                "${LOCAL_SIM_ARGS[@]}" \
                 build 2>&1)
             XCODE_EXIT=$?
             set -e

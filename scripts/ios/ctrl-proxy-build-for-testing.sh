@@ -39,8 +39,17 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ios/xcodegen_version.sh disable=SC1091
 source "${SCRIPT_DIR}/xcodegen_version.sh"
+# shellcheck source=scripts/ios/local-sim-build-args.sh disable=SC1091
+source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
+
+# On a local arm64 host, build only the arch the simulator runs and skip the
+# index store; empty in CI / on Intel so those keep building universal (#5024).
+LOCAL_SIM_ARGS=()
+while IFS= read -r _arg; do
+    [ -n "${_arg}" ] && LOCAL_SIM_ARGS+=("${_arg}")
+done < <(local_sim_build_args)
 XCODEPROJ="${CTRL_PROXY_IOS_DIR}/CtrlProxy.xcodeproj"
 
 # Default derived data path (matches IOSCtrlProxyBuilder.ts)
@@ -111,7 +120,8 @@ run_xcodebuild() {
         -configuration Debug \
         CODE_SIGN_IDENTITY="-" \
         CODE_SIGNING_REQUIRED=NO \
-        CODE_SIGNING_ALLOWED=NO
+        CODE_SIGNING_ALLOWED=NO \
+        "${LOCAL_SIM_ARGS[@]}"
 }
 
 if command -v xcpretty >/dev/null 2>&1; then

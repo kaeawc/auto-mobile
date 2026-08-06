@@ -28,7 +28,6 @@ import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NetworkFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
 import dev.jasonpearson.automobile.desktop.core.workspace.PerformanceFacet
-import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.Tool
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceAction
@@ -222,7 +221,7 @@ fun AutoMobileDesktopApp(
 
 /**
  * Real docked-facet content for a pane, wired to the per-device facets in desktop-core: Logs
- * (telemetry), Storage (auto-resolved app, Android-only), Network (per-device `getNetworkGraph`
+ * (telemetry), Storage (auto-resolved app, Android + iOS), Network (per-device `getNetworkGraph`
  * tool call), Performance (per-device observation stream, filtered by deviceId), Failures
  * (cross-device aggregate), and Navigation (#4837 Phase C — app-scoped graph pulled by the pane
  * device's foreground app). Test (per-device daemon resource, #4715) falls back to the placeholder
@@ -232,11 +231,9 @@ fun AutoMobileDesktopApp(
 private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
   when (tool) {
     Tool.Logs -> LogsFacet(column)
-    // Storage is Android-only for now: iOS key-value mutations misroute to Android-only daemon
-    // handlers (#4708). iOS panes fall back to the placeholder until that lands.
-    Tool.Storage ->
-      if (column.platform == Platform.Android) StorageFacet(column)
-      else WorkspaceFacetPlaceholder(tool)
+    // Storage works on both platforms now that iOS key-value mutations carry the platform to the
+    // daemon and target the correct iOS device (#4708).
+    Tool.Storage -> StorageFacet(column)
     // Network reads per-device via the getNetworkGraph MCP tool call (deviceId is an argument),
     // not the broadcast observation stream, so panes don't cross-contaminate.
     Tool.Network -> NetworkFacet(column)

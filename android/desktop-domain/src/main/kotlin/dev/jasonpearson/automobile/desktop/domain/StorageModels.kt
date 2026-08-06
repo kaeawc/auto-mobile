@@ -82,9 +82,9 @@ public enum class KeyValueType(public val protocolName: kotlin.String) {
   }
 }
 
-public enum class StoragePlatform {
-  Android,
-  iOS,
+public enum class StoragePlatform(public val protocolName: kotlin.String) {
+  Android("android"),
+  iOS("ios"),
 }
 
 public enum class DatabaseViewMode {

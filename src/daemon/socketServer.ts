@@ -175,6 +175,23 @@ const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
 /**
+ * The narrow key-value mutation surface the `ide/*` handlers need from a
+ * platform CtrlProxy client. Both AndroidCtrlProxyClient and IOSCtrlProxyClient
+ * satisfy it structurally (#4708).
+ */
+interface KeyValueMutationClient {
+  setPreference(
+    packageName: string,
+    fileName: string,
+    key: string,
+    value: string,
+    type: KeyValueType
+  ): Promise<void>;
+  removePreference(packageName: string, fileName: string, key: string): Promise<void>;
+  clearPreferenceStore(packageName: string, fileName: string): Promise<void>;
+}
+
+/**
  * Preserve the normal failed socket envelope while carrying append progress for
  * a client that can safely retry only the unsent suffix.
  */
@@ -1322,6 +1339,7 @@ export class UnixSocketServer {
       }
       case "ide/setKeyValue": {
         const args = request.params as {
+          platform?: string;
           deviceId?: string;
           appId?: string;
           fileName?: string;
@@ -1333,12 +1351,7 @@ export class UnixSocketServer {
           throw new Error("setKeyValue requires deviceId, appId, fileName, key, and type params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "setKeyValue");
-        const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
-        const targetDevice = bootedDevices.find(d => d.deviceId === args.deviceId);
-        if (!targetDevice) {
-          throw new Error(`Device not found: ${args.deviceId}`);
-        }
-        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        const client = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
         if (args.value === null || args.value === undefined) {
           await client.removePreference(args.appId, args.fileName, args.key);
         } else {
@@ -1354,6 +1367,7 @@ export class UnixSocketServer {
       }
       case "ide/removeKeyValue": {
         const args = request.params as {
+          platform?: string;
           deviceId?: string;
           appId?: string;
           fileName?: string;
@@ -1363,17 +1377,13 @@ export class UnixSocketServer {
           throw new Error("removeKeyValue requires deviceId, appId, fileName, and key params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "removeKeyValue");
-        const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
-        const targetDevice = bootedDevices.find(d => d.deviceId === args.deviceId);
-        if (!targetDevice) {
-          throw new Error(`Device not found: ${args.deviceId}`);
-        }
-        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        const client = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
         await client.removePreference(args.appId, args.fileName, args.key);
         return { success: true };
       }
       case "ide/clearKeyValueFile": {
         const args = request.params as {
+          platform?: string;
           deviceId?: string;
           appId?: string;
           fileName?: string;
@@ -1382,18 +1392,37 @@ export class UnixSocketServer {
           throw new Error("clearKeyValueFile requires deviceId, appId, and fileName params");
         }
         await this.assertSocketToolEnabled(args.deviceId, "clearKeyValueFile");
-        const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
-        const targetDevice = bootedDevices.find(d => d.deviceId === args.deviceId);
-        if (!targetDevice) {
-          throw new Error(`Device not found: ${args.deviceId}`);
-        }
-        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        const client = await this.resolveKeyValueMutationClient(args.platform, args.deviceId);
         await client.clearPreferenceStore(args.appId, args.fileName);
         return { success: true };
       }
       default:
         return undefined;
     }
+  }
+
+  /**
+   * Resolve the platform-appropriate storage-mutation client for a key-value
+   * `ide/*` request. iOS Storage-facet edits carry `platform: "ios"` so the pane
+   * targets the iOS simulator + IOSCtrlProxyClient; a missing platform defaults
+   * to Android for backward compatibility with older desktop clients (#4708).
+   */
+  private async resolveKeyValueMutationClient(
+    platformValue: string | undefined,
+    deviceId: string
+  ): Promise<KeyValueMutationClient> {
+    const platform = platformValue ?? "android";
+    if (platform !== "android" && platform !== "ios") {
+      throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
+    }
+    const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices(platform);
+    const targetDevice = bootedDevices.find(d => d.deviceId === deviceId);
+    if (!targetDevice) {
+      throw new Error(`Device not found: ${deviceId}`);
+    }
+    return platform === "ios"
+      ? IOSCtrlProxyClient.getInstance(targetDevice)
+      : AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
   }
 
   private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {

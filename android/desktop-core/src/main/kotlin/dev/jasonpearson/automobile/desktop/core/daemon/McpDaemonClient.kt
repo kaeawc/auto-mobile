@@ -438,12 +438,14 @@ class McpDaemonClient(
     key: String,
     value: String?,
     type: String,
+    platform: String,
   ): SetKeyValueResult {
     val response =
       sendRequest(
         "ide/setKeyValue",
         buildJsonObject {
           put("deviceId", JsonPrimitive(deviceId))
+          put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
           put("key", JsonPrimitive(key))
@@ -464,12 +466,14 @@ class McpDaemonClient(
     appId: String,
     fileName: String,
     key: String,
+    platform: String,
   ): RemoveKeyValueResult {
     val response =
       sendRequest(
         "ide/removeKeyValue",
         buildJsonObject {
           put("deviceId", JsonPrimitive(deviceId))
+          put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
           put("key", JsonPrimitive(key))
@@ -487,12 +491,14 @@ class McpDaemonClient(
     deviceId: String,
     appId: String,
     fileName: String,
+    platform: String,
   ): ClearKeyValueResult {
     val response =
       sendRequest(
         "ide/clearKeyValueFile",
         buildJsonObject {
           put("deviceId", JsonPrimitive(deviceId))
+          put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
         },

@@ -357,7 +357,16 @@ class RealStorageDataSource(
     return try {
       val client = provider()
       withContext(Dispatchers.IO) {
-        val result = client.setKeyValue(device, pkg, fileName, key, value, type.protocolName)
+        val result =
+          client.setKeyValue(
+            device,
+            pkg,
+            fileName,
+            key,
+            value,
+            type.protocolName,
+            platform.protocolName,
+          )
         if (result.success) Result.Success(Unit)
         else Result.Error(RuntimeException(result.message ?: "Failed to set key value"))
       }
@@ -377,7 +386,7 @@ class RealStorageDataSource(
     return try {
       val client = provider()
       withContext(Dispatchers.IO) {
-        val result = client.removeKeyValue(device, pkg, fileName, key)
+        val result = client.removeKeyValue(device, pkg, fileName, key, platform.protocolName)
         if (result.success) Result.Success(Unit)
         else Result.Error(RuntimeException(result.message ?: "Failed to remove key value"))
       }
@@ -397,7 +406,7 @@ class RealStorageDataSource(
     return try {
       val client = provider()
       withContext(Dispatchers.IO) {
-        val result = client.clearKeyValueFile(device, pkg, fileName)
+        val result = client.clearKeyValueFile(device, pkg, fileName, platform.protocolName)
         if (result.success) Result.Success(Unit)
         else Result.Error(RuntimeException(result.message ?: "Failed to clear key value file"))
       }

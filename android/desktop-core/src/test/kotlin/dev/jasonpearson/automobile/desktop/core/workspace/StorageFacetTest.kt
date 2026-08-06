@@ -56,6 +56,22 @@ class StorageFacetTest {
   }
 
   @Test
+  fun `handles an iOS pane without an Android-only gate (#4708)`() = runComposeUiTest {
+    // The facet is no longer gated to Android: an iOS column runs the same resolution path.
+    setContent {
+      MaterialTheme {
+        StorageFacet(
+          column =
+            DeviceColumn(deviceId = "ios-sim-1", name = "iPhone 16", platform = Platform.Ios),
+          loadInstalledApps = { Result.Success(emptyList()) },
+        )
+      }
+    }
+    waitForIdle()
+    onNodeWithText("No app found", substring = true).assertIsDisplayed()
+  }
+
+  @Test
   fun `surfaces a retryable error when the app list fails to load`() = runComposeUiTest {
     setContent {
       MaterialTheme {

@@ -509,6 +509,63 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `setKeyValue carries the platform through to the ide socket request (#4708)`() {
+    TestDaemonSocket(resultJson = """{ "success": true }""").use { server ->
+      McpDaemonClient(socketPathValue = server.socketPath.toString())
+        .setKeyValue(
+          deviceId = "ios-sim-1",
+          appId = "com.example.app",
+          fileName = "prefs",
+          key = "theme",
+          value = "dark",
+          type = "STRING",
+          platform = "ios",
+        )
+
+      val request = server.awaitRequest()
+      assertEquals("ide/setKeyValue", request.method)
+      assertEquals("ios", request.params.getValue("platform").jsonPrimitive.content)
+      assertEquals("ios-sim-1", request.params.getValue("deviceId").jsonPrimitive.content)
+    }
+  }
+
+  @Test
+  fun `removeKeyValue and clearKeyValueFile carry the platform on the wire (#4708)`() {
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(resultJson = """{ "success": true }"""),
+            SocketResponse(resultJson = """{ "success": true }"""),
+          )
+      )
+      .use { server ->
+        McpDaemonClient(socketPathValue = server.socketPath.toString())
+          .removeKeyValue(
+            deviceId = "ios-sim-1",
+            appId = "com.example.app",
+            fileName = "prefs",
+            key = "theme",
+            platform = "ios",
+          )
+        McpDaemonClient(socketPathValue = server.socketPath.toString())
+          .clearKeyValueFile(
+            deviceId = "ios-sim-1",
+            appId = "com.example.app",
+            fileName = "prefs",
+            platform = "ios",
+          )
+
+        val requests = server.awaitRequests()
+        assertEquals(
+          listOf("ide/removeKeyValue", "ide/clearKeyValueFile"),
+          requests.map { it.method },
+        )
+        assertEquals("ios", requests[0].params.getValue("platform").jsonPrimitive.content)
+        assertEquals("ios", requests[1].params.getValue("platform").jsonPrimitive.content)
+      }
+  }
+
+  @Test
   fun `input helpers reject malformed success payloads`() {
     TestDaemonSocket(resultJson = "{}", error = null).use { server ->
       assertFailsWith<SerializationException> {

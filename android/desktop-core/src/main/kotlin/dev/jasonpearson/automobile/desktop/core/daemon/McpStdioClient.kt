@@ -277,13 +277,14 @@ class McpStdioClient(
     key: String,
     value: String?,
     type: String,
+    platform: String,
   ): SetKeyValueResult {
     val response =
       callTool(
         "setKeyValue",
         buildJsonObject {
           put("deviceId", JsonPrimitive(deviceId))
-          put("platform", JsonPrimitive("android"))
+          put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
           put("key", JsonPrimitive(key))
@@ -306,13 +307,14 @@ class McpStdioClient(
     appId: String,
     fileName: String,
     key: String,
+    platform: String,
   ): RemoveKeyValueResult {
     val response =
       callTool(
         "removeKeyValue",
         buildJsonObject {
           put("deviceId", JsonPrimitive(deviceId))
-          put("platform", JsonPrimitive("android"))
+          put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
           put("key", JsonPrimitive(key))
@@ -329,13 +331,14 @@ class McpStdioClient(
     deviceId: String,
     appId: String,
     fileName: String,
+    platform: String,
   ): ClearKeyValueResult {
     val response =
       callTool(
         "clearKeyValueFile",
         buildJsonObject {
           put("deviceId", JsonPrimitive(deviceId))
-          put("platform", JsonPrimitive("android"))
+          put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
         },

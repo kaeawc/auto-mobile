@@ -96,8 +96,9 @@ and `UNKNOWN`.
 Host integrations can register and remove optional descriptors with
 `registerCapability()` and `unregisterCapability()`. Capture and mutation controls are replaced
 atomically through `updateCapturePolicy()`. Header and body capture default to disabled, and
-mutation access is rejected unless the host explicitly registers the `storage.mutation`
-capability. The default descriptors cover navigation and lifecycle events, network capture, and
+mutation access is rejected unless the host explicitly registers the capability for the operation:
+`storage.mutation` for storage providers or `network.control` for network mocks and error
+simulation. The default descriptors cover navigation and lifecycle events, network capture, and
 storage reads; optional UI, control, and storage-mutation capabilities start as unsupported.
 
 ## 2. Initialization and Lifecycle

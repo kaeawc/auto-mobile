@@ -111,7 +111,7 @@ internal class AutoMobileNetworkInterceptor(
           error = "mocked:${mockRule.mockId}",
           requestHeaders = reqHeaders,
           requestBody = reqBody,
-          responseBody = mockRule.responseBody,
+          responseBody = if (bodiesEnabled) mockRule.responseBody else null,
           contentType = mockRule.contentType,
         )
       )

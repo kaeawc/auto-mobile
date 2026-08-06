@@ -8,16 +8,10 @@ describe("parseOutputReductionFlags", () => {
   test("defaults every flag to false when neither CLI nor env is set", () => {
     const flags = parseOutputReductionFlags([], {});
     expect(flags).toEqual({
-      observeResultDropElements: false,
-      observeResultCompact: false,
-      observeResultProjectSkeleton: false,
+      observeResultIncludeElements: false,
       toolResultsNoStructuredContent: false,
       actionsDiffObserve: false,
       actionsNoObserve: false,
-      toolResultsCompactJson: false,
-      observeFocusScope: false,
-      observeOverview: false,
-      observeRegion: false,
     });
   });
 
@@ -63,12 +57,11 @@ describe("parseOutputReductionFlags", () => {
   });
 
   test("resolves flags independently without cross-talk", () => {
-    const flags = parseOutputReductionFlags(["--observe-result-compact"], {
+    const flags = parseOutputReductionFlags(["--observe-result-include-elements"], {
       AUTOMOBILE_ACTIONS_NO_OBSERVE: "1",
     });
-    expect(flags.observeResultCompact).toBe(true);
+    expect(flags.observeResultIncludeElements).toBe(true);
     expect(flags.actionsNoObserve).toBe(true);
-    expect(flags.observeResultDropElements).toBe(false);
     expect(flags.toolResultsNoStructuredContent).toBe(false);
     expect(flags.actionsDiffObserve).toBe(false);
   });

@@ -23,39 +23,37 @@ const boundsObjectSchema = z.object({
   centerY: z.number().optional()
 });
 
-// Compact bounds shape emitted only when the `--observe-result-compact` output-
-// reduction flag (env `AUTOMOBILE_OBSERVE_RESULT_COMPACT`) is set: the object is
+// Compact bounds shape, now emitted unconditionally: every `bounds` object is
 // flattened to the positional tuple `[left, top, right, bottom]` (issue #2990).
 // The tuple carries no centers — a consumer derives them as (left+right)/2,
 // (top+bottom)/2. This is a fixed-length 4-tuple so it round-trips losslessly.
 const compactBoundsTupleSchema = z
   .tuple([z.number(), z.number(), z.number(), z.number()])
   .describe(
-    "Compact bounds tuple [left, top, right, bottom]; emitted in place of the " +
-      "{left, top, right, bottom} object only when the --observe-result-compact " +
-      "flag (env AUTOMOBILE_OBSERVE_RESULT_COMPACT) is set."
+    "Compact bounds tuple [left, top, right, bottom], emitted in place of the " +
+      "{left, top, right, bottom} object."
   );
 
 /**
- * Bounds as advertised on the wire. The default is the `{left, top, right,
- * bottom}` object; under `--observe-result-compact` it is the positional tuple
- * `[left, top, right, bottom]`. Every output schema that carries a `bounds` field
- * (elements, focused/selected elements, …) routes through this union so the
- * advertised `outputSchema` describes — and a strict MCP client validates —
- * whichever shape the server is actually emitting (issue #2990).
+ * Bounds as advertised on the wire. The server emits the positional tuple
+ * `[left, top, right, bottom]` (bounds compaction is an unconditional default);
+ * the `{left, top, right, bottom}` object arm remains schema-valid for backward
+ * compatibility. Every output schema that carries a `bounds` field (elements,
+ * focused/selected elements, …) routes through this union so the advertised
+ * `outputSchema` describes — and a strict MCP client validates — the tuple the
+ * server actually emits (issue #2990).
  *
- * The tuple arm is advertised in `tools/list` only when the flag is on: at
- * generation time `advertiseBoundsForCompact` (`compactBoundsAdvertisement.ts`)
- * collapses this union to its object arm when compaction is off, so the advertised
- * shape stays honest-by-default. The `.describe()` prefix below is the stable
- * marker that helper keys off — keep them in sync.
+ * The union is advertised in `tools/list` as-is: `advertiseBoundsForCompact`
+ * (`compactBoundsAdvertisement.ts`) is now always called in the compaction-on
+ * state, so it passes the union through unchanged. The `.describe()` prefix below
+ * is the stable marker that helper keys off — keep them in sync.
  */
 export const elementBoundsSchema = z
   .union([boundsObjectSchema, compactBoundsTupleSchema])
   .describe(
-    "Element bounds. Default: object {left, top, right, bottom} (+ optional " +
-      "centerX/centerY). Under --observe-result-compact: positional tuple " +
-      "[left, top, right, bottom]."
+    "Element bounds. Default: positional tuple [left, top, right, bottom]; the " +
+      "object {left, top, right, bottom} (+ optional centerX/centerY) is also " +
+      "schema-valid."
   );
 
 export const elementSchema = z.object({
@@ -411,9 +409,9 @@ const observeElementsSchema = z.object({
  * `viewHierarchy`/`elements`/`bounds` sub-schemas. The value it buys is that
  * *every* `bounds` field — hierarchy nodes, window/root/region, `elements`, and
  * the focused/awaited element fields — routes through {@link elementBoundsSchema},
- * so the `--observe-result-compact` tuple is advertised here (via
- * `advertiseBoundsForCompact` in `getToolDefinitions`) exactly as it is on the
- * schema-declaring action tools (`tapOn`, `accessibilityFocus`). Unmodeled fields
+ * so the compact bounds tuple is advertised here (via `advertiseBoundsForCompact`
+ * in `getToolDefinitions`) exactly as it is on the schema-declaring action tools
+ * (`tapOn`, `accessibilityFocus`). Unmodeled fields
  * (perf timing, back stack, wakefulness, user id, errors, …) pass through so the
  * advertisement never rejects a real observation.
  */
@@ -425,29 +423,28 @@ export const deviceLockSchema = z.object({
 });
 
 /**
- * One row of the Interactable Skeleton Projection (issue #4388). Present only
- * when the observe output is projected to `"skeleton"` (per-call `project` arg
- * or the `observe-result-project-skeleton` flag); it then replaces
- * `viewHierarchy` / `elements`. Bounds are always the compact
- * `[left, top, right, bottom]` tuple, so this uses the tuple schema directly
- * rather than the flag-dependent `elementBoundsSchema` union.
+ * One row of the Interactable Skeleton Projection (issue #4388). The observe
+ * output projects to `"skeleton"` by default (a per-call `project: "full"` or
+ * `raw: true` opts out); it then replaces `viewHierarchy` / `elements`. Bounds
+ * are always the compact `[left, top, right, bottom]` tuple, so this uses the
+ * tuple schema directly rather than the `elementBoundsSchema` union.
  */
 export const skeletonElementSchema = z.object({
   id: z.string().optional(),
   label: z.string().optional(),
   bounds: compactBoundsTupleSchema.describe(
     "Bounds as the compact [left, top, right, bottom] tuple — always this shape " +
-      "for skeleton entries, independent of the --observe-result-compact flag."
+      "for skeleton entries."
   ),
   affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
   checked: z.boolean().optional()
 }).passthrough();
 
 /**
- * Progressive-disclosure scoping metadata (issue #4344), present only when an
- * `--observe-focus-scope` / `--observe-overview` / `--observe-region` experiment
- * scoped the payload. `regionPx` routes through {@link elementBoundsSchema} so its
- * bounds advertise the `--observe-result-compact` tuple like every other bounds.
+ * Progressive-disclosure scoping metadata (issue #4344), present only when a
+ * per-call `scope.focus` / `scope.overview` / `scope.region` request scoped the
+ * payload. `regionPx` routes through {@link elementBoundsSchema} so its bounds
+ * advertise the compact tuple like every other bounds.
  */
 export const observeScopeMetadataSchema = z.object({
   applied: z.array(z.enum(["focus", "region", "overview"])),

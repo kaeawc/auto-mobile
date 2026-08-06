@@ -108,9 +108,10 @@ function classifyObservationAction(
 /**
  * Resolve the observe output projection (issue #4388). An explicit per-call
  * `project` arg always wins; otherwise `raw: true` forces `"full"` (the raw tree
- * is the documented disambiguation escape hatch), and absent both the
- * `observe-result-project-skeleton` flag decides. Default is `"full"`, so
- * behavior is unchanged until the flag flips or a caller opts in.
+ * is the documented disambiguation escape hatch). The skeleton projection is now
+ * the unconditional default (it superseded the retired
+ * `observe-result-project-skeleton` flag), so absent an explicit override every
+ * observe payload projects to the actionable-only skeleton.
  */
 function resolveObserveProjection(args?: Record<string, unknown>): "full" | "skeleton" {
   const explicit = args?.project;
@@ -120,7 +121,7 @@ function resolveObserveProjection(args?: Record<string, unknown>): "full" | "ske
   if (args?.raw === true) {
     return "full";
   }
-  return serverConfig.isObserveResultProjectSkeletonEnabled() ? "skeleton" : "full";
+  return "skeleton";
 }
 
 /**
@@ -241,17 +242,21 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   }
 
   const cfg: SanitizeObserveConfig = {
-    dropElements: serverConfig.isObserveResultDropElementsEnabled(),
-    compact: serverConfig.isObserveResultCompactEnabled(),
+    // Elements are dropped by default; `--observe-result-include-elements` opts
+    // back in. Bounds compaction is now an unconditional default.
+    dropElements: !serverConfig.isObserveResultIncludeElementsEnabled(),
+    compact: true,
   };
 
-  // Progressive-disclosure scoping experiments (issue #4344). Agent-facing only:
-  // internal tool-to-tool consumers read the full `.observation.viewHierarchy`, so
-  // scoping (like the diff/strip transforms) is suppressed for `ctx.internal`.
+  // Progressive-disclosure scoping experiments (issue #4344), now always honored:
+  // each dimension is intersected with the per-call `scope` request in
+  // `buildObserveScopeConfig`, so with no `scope` arg this is a no-op. Agent-facing
+  // only: internal tool-to-tool consumers read the full `.observation.viewHierarchy`,
+  // so scoping (like the diff/strip transforms) is suppressed for `ctx.internal`.
   const scopeFlags = {
-    focus: serverConfig.isObserveFocusScopeEnabled(),
-    overview: serverConfig.isObserveOverviewEnabled(),
-    region: serverConfig.isObserveRegionEnabled(),
+    focus: true,
+    overview: true,
+    region: true,
   };
   const scopeConfig = buildObserveScopeConfig(
     scopeFlags,

@@ -12,16 +12,10 @@ export type FeatureFlagKey =
   | "ai-recovery"
   | "mcp-recording"
   | "navigation-screenshots"
-  | "observe-result-drop-elements"
-  | "observe-result-compact"
-  | "observe-result-project-skeleton"
+  | "observe-result-include-elements"
   | "tool-results-no-structured-content"
   | "actions-diff-observe"
-  | "actions-no-observe"
-  | "tool-results-compact-json"
-  | "observe-focus-scope"
-  | "observe-overview"
-  | "observe-region";
+  | "actions-no-observe";
 
 export type FeatureFlagConfig = Record<string, unknown>;
 
@@ -35,12 +29,14 @@ export type FeatureFlagConfig = Record<string, unknown>;
  *
  * - `debug` toggles `debugOnly` tool availability (toolRegistry `isToolAvailable`).
  * - `tool-results-no-structured-content` suppresses `outputSchema` advertisement.
- * - `observe-result-compact` changes the bounds tuple in the advertised `outputSchema`.
+ *
+ * Compact bounds tuples are now advertised unconditionally (the compaction that
+ * once rode `observe-result-compact` is a permanent default), so no flag governs
+ * that arm of the advertised `outputSchema` any longer.
  */
 export const TOOL_DEFINITION_AFFECTING_FLAGS: ReadonlySet<FeatureFlagKey> = new Set<FeatureFlagKey>([
   "debug",
   "tool-results-no-structured-content",
-  "observe-result-compact",
 ]);
 
 export interface FeatureFlagDefinition {
@@ -148,22 +144,9 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     defaultValue: true,
   },
   {
-    key: "observe-result-drop-elements",
-    label: "Observe result: drop elements",
-    description: "Omit the flattened elements array from observe results to reduce output size.",
-    defaultValue: false,
-  },
-  {
-    key: "observe-result-compact",
-    label: "Observe result: compact",
-    description: "Emit observe results in a compact form to reduce output size.",
-    defaultValue: false,
-  },
-  {
-    key: "observe-result-project-skeleton",
-    label: "Observe result: project skeleton",
-    description:
-      "Project observe results to a flat, actionable-only skeleton (id/label/bounds/affordances) in place of the full view hierarchy, to reduce output size.",
+    key: "observe-result-include-elements",
+    label: "Observe result: include elements",
+    description: "Include the flattened elements array in observe results. It is dropped by default to reduce output size; enable this to restore it.",
     defaultValue: false,
   },
   {
@@ -182,30 +165,6 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     key: "actions-no-observe",
     label: "Actions: no observe",
     description: "Skip returning the post-action observation entirely to reduce output size.",
-    defaultValue: false,
-  },
-  {
-    key: "tool-results-compact-json",
-    label: "Tool results: compact JSON",
-    description: "Serialize tool results as compact (non-pretty-printed) JSON — same data, ~35% fewer characters.",
-    defaultValue: false,
-  },
-  {
-    key: "observe-focus-scope",
-    label: "Observe scope: focus",
-    description: "Honor observe `scope.focus` — scope the hierarchy to a subtree (an anchor, else the foreground app), dropping system chrome (issue #4344).",
-    defaultValue: false,
-  },
-  {
-    key: "observe-overview",
-    label: "Observe scope: overview",
-    description: "Honor observe `scope.overview` — collapse the hierarchy to a structural container skeleton, annotating omitted-descendant counts (issue #4344).",
-    defaultValue: false,
-  },
-  {
-    key: "observe-region",
-    label: "Observe scope: region",
-    description: "Honor observe `scope.region` — crop the hierarchy to a per-call normalized (0..1) box, or the inset content rectangle when `true` (issue #4344).",
     defaultValue: false,
   },
 ];

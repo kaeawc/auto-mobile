@@ -18,9 +18,10 @@ const TOOL_REGISTRY_PATH = path.resolve(import.meta.dir, "../../../src/server/to
 // flag that drives it, or `null` when it is NOT a runtime-toggleable feature flag
 // (so a tools/list_changed notification is neither possible nor needed).
 const CONFIG_GETTER_TO_FLAG: Record<string, FeatureFlagKey | null> = {
-  // getToolDefinitions — outputSchema advertisement
+  // getToolDefinitions — outputSchema advertisement. Bounds compaction is now an
+  // unconditional default (no getter, always-advertised tuple), so the only
+  // remaining runtime toggle here is the structuredContent suppression.
   isToolResultsNoStructuredContentEnabled: "tool-results-no-structured-content",
-  isObserveResultCompactEnabled: "observe-result-compact",
   // getToolAvailabilityGateReasons — tool availability
   isDebugModeEnabled: "debug",
   // embedded SDK mode is set outside the feature-flag system (no setFlag path), so

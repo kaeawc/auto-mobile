@@ -1436,10 +1436,11 @@ export class ToolRegistryClass {
     // output schema is expected to return matching `structuredContent`, so keeping
     // both consistent avoids advertising output the finalize step will strip.
     const suppressOutputSchema = serverConfig.isToolResultsNoStructuredContentEnabled();
-    // Advertise the compact bounds tuple only when the server will actually emit it,
-    // so the advertised shape stays in sync with the wire (issue #2990), the same way
-    // `suppressOutputSchema` above keeps the two in sync for the strip flag.
-    const compactBounds = serverConfig.isObserveResultCompactEnabled();
+    // Bounds compaction is now an unconditional default, so the tuple arm is always
+    // emitted and therefore always advertised — keeping the advertised shape in sync
+    // with the wire (issue #2990), the same way `suppressOutputSchema` above keeps the
+    // two in sync for the strip flag.
+    const compactBounds = true;
     return this.getAllTools(options).map(tool => {
       const { inputSchema, outputSchema } = this.getCachedToolDefinitionSchemas(
         tool,

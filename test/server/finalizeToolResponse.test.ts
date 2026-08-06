@@ -88,26 +88,28 @@ class FakeObservationArtifactWriter {
 }
 
 describe("finalizeToolResponse", () => {
-  let originalDropElements: boolean;
-  let originalCompact: boolean;
+  // Bounds compaction and skeleton projection are now unconditional defaults, and
+  // `elements` are dropped by default (opt back in via
+  // `--observe-result-include-elements`). Only the include-elements accessor
+  // survives; save/restore it so a test toggling it can't leak into the singleton.
+  let originalIncludeElements: boolean;
 
   beforeEach(() => {
-    originalDropElements = serverConfig.isObserveResultDropElementsEnabled();
-    originalCompact = serverConfig.isObserveResultCompactEnabled();
-    serverConfig.setObserveResultDropElementsEnabled(false);
-    serverConfig.setObserveResultCompactEnabled(false);
+    originalIncludeElements = serverConfig.isObserveResultIncludeElementsEnabled();
+    serverConfig.setObserveResultIncludeElementsEnabled(false);
   });
 
   afterEach(() => {
-    serverConfig.setObserveResultDropElementsEnabled(originalDropElements);
-    serverConfig.setObserveResultCompactEnabled(originalCompact);
+    serverConfig.setObserveResultIncludeElementsEnabled(originalIncludeElements);
   });
 
   test("EC1: observe response is sanitized in both structuredContent and text", () => {
     const obs = makeObserveResult();
     const response = createStructuredToolResponse(obs);
 
-    const finalized = finalizeToolResponse(response, { name: "observe", sessionUuid: "s1" });
+    // project:"full" opts out of the now-default skeleton so this stays a test of
+    // hierarchy trimming.
+    const finalized = finalizeToolResponse(response, { name: "observe", sessionUuid: "s1", args: { project: "full" } });
 
     const rootSc = (finalized.structuredContent as ObserveResult).viewHierarchy!.hierarchy.node as any;
     // Trimmed: duplicate view-id, empty text, default-false clickable all gone.
@@ -145,13 +147,16 @@ describe("finalizeToolResponse", () => {
     expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
   });
 
-  test("EC4: elements are dropped only when the gate is enabled", () => {
-    serverConfig.setObserveResultDropElementsEnabled(false);
-    const keep = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), { name: "observe" });
+  test("EC4: elements are kept only when the include-elements gate is enabled", () => {
+    // Elements are dropped by default now; `--observe-result-include-elements`
+    // opts back in. project:"full" keeps the headline hierarchy so `elements`
+    // is the field under test rather than the skeleton default.
+    serverConfig.setObserveResultIncludeElementsEnabled(true);
+    const keep = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), { name: "observe", args: { project: "full" } });
     expect((keep.structuredContent as ObserveResult).elements).toBeDefined();
 
-    serverConfig.setObserveResultDropElementsEnabled(true);
-    const drop = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), { name: "observe" });
+    serverConfig.setObserveResultIncludeElementsEnabled(false);
+    const drop = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), { name: "observe", args: { project: "full" } });
     expect((drop.structuredContent as ObserveResult).elements).toBeUndefined();
     expect(JSON.parse(drop.content[0].text).elements).toBeUndefined();
   });
@@ -252,7 +257,7 @@ describe("finalizeToolResponse", () => {
   test("preserves the observe-only awaitedElement extras spread into the payload", () => {
     const obs = makeObserveResult();
     const withExtras = { ...obs, awaitedElement: { text: "Found" }, awaitDuration: 250, awaitTimeout: false };
-    const finalized = finalizeToolResponse(createStructuredToolResponse(withExtras), { name: "observe" });
+    const finalized = finalizeToolResponse(createStructuredToolResponse(withExtras), { name: "observe", args: { project: "full" } });
 
     const sc = finalized.structuredContent as any;
     expect(sc.awaitedElement).toEqual({ text: "Found" });
@@ -261,8 +266,7 @@ describe("finalizeToolResponse", () => {
     expect(sc.viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
   });
 
-  test("drops elements on an action's nested .observation when the gate is enabled", () => {
-    serverConfig.setObserveResultDropElementsEnabled(true);
+  test("drops elements on an action's nested .observation by default", () => {
     const response = createStructuredToolResponse({ success: true, observation: makeObserveResult() });
     const finalized = finalizeToolResponse(response, { name: "tapOn" });
     expect((finalized.structuredContent as any).observation.elements).toBeUndefined();
@@ -275,7 +279,7 @@ describe("finalizeToolResponse", () => {
       { "resource-id": "a", "view-id": "a", "clickable": "false" } as any,
       { "resource-id": "b", "view-id": "b", "focusable": "false" } as any,
     ] as any;
-    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe" });
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe", args: { project: "full" } });
     const roots = (finalized.structuredContent as any).viewHierarchy.hierarchy.node;
     expect(roots[0]["view-id"]).toBeUndefined();
     expect(roots[0].clickable).toBeUndefined();
@@ -286,17 +290,16 @@ describe("finalizeToolResponse", () => {
   test("falls back to content text when structuredContent is absent", () => {
     const obs = makeObserveResult();
     const textOnly: any = { content: [{ type: "text", text: JSON.stringify(obs) }] };
-    const finalized = finalizeToolResponse(textOnly, { name: "observe" });
+    const finalized = finalizeToolResponse(textOnly, { name: "observe", args: { project: "full" } });
     const root = JSON.parse(finalized.content[0].text).viewHierarchy.hierarchy.node;
     expect(root["view-id"]).toBeUndefined();
     expect(root.clickable).toBeUndefined();
   });
 
-  test("EC-C: compact flag flattens node bounds in both structuredContent and text when the gate is on", () => {
-    serverConfig.setObserveResultCompactEnabled(true);
+  test("EC-C: compaction flattens node bounds in both structuredContent and text (permanent default)", () => {
     const finalized = finalizeToolResponse(
       createStructuredToolResponse(makeObserveResultWithBounds()),
-      { name: "observe" }
+      { name: "observe", args: { project: "full" } }
     );
 
     const rootSc = (finalized.structuredContent as any).viewHierarchy.hierarchy.node;
@@ -309,8 +312,7 @@ describe("finalizeToolResponse", () => {
     expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
   });
 
-  test("EC-C: compact flattens bounds on an action's nested .observation (tapOn path)", () => {
-    serverConfig.setObserveResultCompactEnabled(true);
+  test("EC-C: compaction flattens bounds on an action's nested .observation (tapOn path)", () => {
     const response = createStructuredToolResponse({ success: true, observation: makeObserveResultWithBounds() });
     const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
 
@@ -325,33 +327,32 @@ describe("finalizeToolResponse", () => {
     expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
   });
 
-  test("EC-C: compact gate off keeps object-shaped bounds (today's shape)", () => {
-    serverConfig.setObserveResultCompactEnabled(false);
+  test("EC-C: bounds are always compacted to tuples with no opt-out (permanent default)", () => {
+    // Compaction was formerly flag-gated; it is now unconditional, so even with no
+    // explicit opt-in the served bounds are the positional tuple, never the object.
     const finalized = finalizeToolResponse(
       createStructuredToolResponse(makeObserveResultWithBounds()),
-      { name: "observe" }
+      { name: "observe", args: { project: "full" } }
     );
     const rootSc = (finalized.structuredContent as any).viewHierarchy.hierarchy.node;
-    expect(Array.isArray(rootSc.bounds)).toBe(false);
-    expect(rootSc.bounds).toEqual({ left: 0, top: 0, right: 1080, bottom: 1920 });
+    expect(Array.isArray(rootSc.bounds)).toBe(true);
+    expect(rootSc.bounds).toEqual([0, 0, 1080, 1920]);
   });
 
-  test("EC-C: compact is output-only — the caller's in-memory bounds object is untouched", () => {
-    serverConfig.setObserveResultCompactEnabled(true);
+  test("EC-C: compaction is output-only — the caller's in-memory bounds object is untouched", () => {
     const obs = makeObserveResultWithBounds();
     finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe" });
     expect(obs.viewHierarchy!.hierarchy.node).not.toBeInstanceOf(Array);
     expect((obs.viewHierarchy!.hierarchy.node as any).bounds).toEqual({ left: 0, top: 0, right: 1080, bottom: 1920 });
   });
 
-  test("EC-C: compact composes with drop-elements and the wire-strip flag (all three on)", () => {
-    serverConfig.setObserveResultCompactEnabled(true);
-    serverConfig.setObserveResultDropElementsEnabled(true);
+  test("EC-C: compaction composes with the default elements-drop and the wire-strip flag", () => {
+    // compaction (always on) + elements dropped by default + the wire-strip flag.
     const originalStrip = serverConfig.isToolResultsNoStructuredContentEnabled();
     serverConfig.setToolResultsNoStructuredContentEnabled(true);
     try {
       const obs = { ...makeObserveResultWithBounds(), elements: { clickable: [], scrollable: [], text: [], media: [] } };
-      const finalized = finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe" });
+      const finalized = finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe", args: { project: "full" } });
       const sc = finalized.structuredContent as any;
       // finalize keeps structuredContent (the strip is a later wire-boundary concern).
       expect(sc).toBeDefined();
@@ -385,11 +386,11 @@ describe("finalizeToolResponse", () => {
   // `sanitizeObserveResult`/compaction, and only when a `baselineStore` is injected.
   // These two cases pin the compaction invariants that must survive that — note they
   // pass a `sessionUuid` but NO `baselineStore`, so no diff is produced and the full
-  // (compacted) observation is emitted, exactly today's behavior:
-  //   1. Enabling the diff flag never disables (or is a precondition for) compaction —
-  //      compaction is gated solely by `isObserveResultCompactEnabled()`.
-  //   2. When compaction is off, a post-action observation keeps object-shaped bounds,
-  //      so a field-by-field `bounds.left` reader is never handed a tuple.
+  // (compacted) observation is emitted:
+  //   1. Enabling the diff flag never disables compaction — compaction is now an
+  //      unconditional default, independent of the diff flag.
+  //   2. That default holds under the diff flag too: a post-action observation still
+  //      carries tuple bounds.
   // The diff-and-compact interaction (a served diff carrying tuple bounds) is covered
   // by "compact on: the emitted diff carries tuple-shaped bounds" in the diff-emit block.
   describe("compact × actions-diff-observe composition (#2990)", () => {
@@ -403,8 +404,7 @@ describe("finalizeToolResponse", () => {
       serverConfig.setActionsDiffObserveEnabled(originalDiff);
     });
 
-    test("EC-D1: compact still flattens a post-action .observation when the diff flag is also on", () => {
-      serverConfig.setObserveResultCompactEnabled(true);
+    test("EC-D1: compaction still flattens a post-action .observation when the diff flag is also on", () => {
       serverConfig.setActionsDiffObserveEnabled(true);
 
       const response = createStructuredToolResponse({ success: true, observation: makeObserveResultWithBounds() });
@@ -421,19 +421,15 @@ describe("finalizeToolResponse", () => {
       expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
     });
 
-    test("EC-D2: the diff flag alone (compact off) never compacts — bounds stay object-shaped for a field-by-field differ", () => {
-      serverConfig.setObserveResultCompactEnabled(false);
+    test("EC-D2: the diff flag on still compacts — bounds are the tuple (compaction is unconditional)", () => {
       serverConfig.setActionsDiffObserveEnabled(true);
 
       const response = createStructuredToolResponse({ success: true, observation: makeObserveResultWithBounds() });
       const finalized = finalizeToolResponse(response, { name: "tapOn" });
 
       const node = (finalized.structuredContent as any).observation.viewHierarchy.hierarchy.node;
-      expect(Array.isArray(node.bounds)).toBe(false);
-      expect(node.bounds).toEqual({ left: 0, top: 0, right: 1080, bottom: 1920 });
-      // A differ reading `bounds.left`/`bounds.top` field-by-field sees numbers, not undefined.
-      expect(node.bounds.left).toBe(0);
-      expect(node.bounds.bottom).toBe(1920);
+      expect(Array.isArray(node.bounds)).toBe(true);
+      expect(node.bounds).toEqual([0, 0, 1080, 1920]);
     });
   });
 
@@ -571,6 +567,9 @@ describe("finalizeToolResponse", () => {
         name: "observe",
         sessionUuid: "s1",
         baselineStore: store,
+        // project:"full" so the SERVED observe payload keeps its viewHierarchy; the
+        // diff baseline is the full sanitized tree regardless of projection.
+        args: { project: "full" },
       });
 
       // Full observation emitted (not a diff).
@@ -1019,10 +1018,9 @@ describe("finalizeToolResponse", () => {
       expect(JSON.stringify(next)).toBe(before);
     });
 
-    test("compact on: the emitted diff carries tuple-shaped bounds in its node attributes", () => {
-      // The diff runs on the sanitized (already-compacted) observation, so a node
+    test("the emitted diff carries tuple-shaped bounds in its node attributes", () => {
+      // The diff runs on the sanitized (always-compacted) observation, so a node
       // surfaced in the diff carries the tuple bounds, not the object shape.
-      serverConfig.setObserveResultCompactEnabled(true);
       const { store } = makeStore();
       const withBounds = (): ObserveResult => ({
         ...makeObserveResult(),
@@ -1100,7 +1098,9 @@ describe("finalizeToolResponse", () => {
       const writer = new FakeObservationArtifactWriter();
       const finalized = finalizeToolResponse(
         createStructuredToolResponse(makeObserveResult()),
-        { name: "observe", sessionUuid: "s1", artifactWriter: writer } as any
+        // project:"full" so the artifacted observation is the full sanitized tree
+        // (the view-id dedup under test) rather than the default skeleton.
+        { name: "observe", sessionUuid: "s1", artifactWriter: writer, args: { project: "full" } } as any
       );
 
       expect(finalized.structuredContent).toEqual({
@@ -1164,7 +1164,6 @@ describe("finalizeToolResponse", () => {
     });
 
     test("artifact writer receives the compacted diff after existing output transforms", () => {
-      serverConfig.setObserveResultCompactEnabled(true);
       serverConfig.setActionsDiffObserveEnabled(true);
       const { store } = makeStore();
       finalizeToolResponse(
@@ -1577,7 +1576,7 @@ describe("finalizeToolResponse", () => {
 
     test("does not strip the observe tool's own observation", () => {
       serverConfig.setActionsNoObserveEnabled(true);
-      const finalized = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), { name: "observe", sessionUuid: "s1" });
+      const finalized = finalizeToolResponse(createStructuredToolResponse(makeObserveResult()), { name: "observe", sessionUuid: "s1", args: { project: "full" } });
       // observe still returns the full (sanitized) observation.
       expect((finalized.structuredContent as any).viewHierarchy).toBeDefined();
     });
@@ -1739,16 +1738,9 @@ describe("finalizeToolResponse", () => {
   });
 
   describe("skeleton projection (issue #4388)", () => {
-    let originalSkeleton: boolean;
-
-    beforeEach(() => {
-      originalSkeleton = serverConfig.isObserveResultProjectSkeletonEnabled();
-      serverConfig.setObserveResultProjectSkeletonEnabled(false);
-    });
-
-    afterEach(() => {
-      serverConfig.setObserveResultProjectSkeletonEnabled(originalSkeleton);
-    });
+    // Skeleton is now the unconditional default projection for the headline observe
+    // payload; `project:"full"` / `raw:true` opt out. The old project-skeleton flag
+    // is gone, so there is no flag to save/restore here.
 
     /** An observe result whose elements carry bounds so the skeleton is non-empty. */
     function observeWithActionableElements(): ObserveResult {
@@ -1769,19 +1761,7 @@ describe("finalizeToolResponse", () => {
       return obs;
     }
 
-    test("flag off + no project arg: default behavior unchanged (full tree, no skeleton)", () => {
-      const finalized = finalizeToolResponse(
-        createStructuredToolResponse(observeWithActionableElements()),
-        { name: "observe" }
-      );
-      const sc = finalized.structuredContent as ObserveResult;
-      expect(sc.skeleton).toBeUndefined();
-      expect(sc.viewHierarchy?.hierarchy).toBeDefined();
-      expect(sc.elements).toBeDefined();
-    });
-
-    test("flag on: observe returns a skeleton and omits viewHierarchy + elements", () => {
-      serverConfig.setObserveResultProjectSkeletonEnabled(true);
+    test("default (no project arg): observe returns a skeleton and omits viewHierarchy + elements", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse(observeWithActionableElements()),
         { name: "observe" }
@@ -1796,7 +1776,7 @@ describe("finalizeToolResponse", () => {
       expect(parsed.skeleton.length).toBe(sc.skeleton!.length);
     });
 
-    test("per-call project:'skeleton' arg projects even with the flag off", () => {
+    test("per-call project:'skeleton' arg also projects to the skeleton", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse(observeWithActionableElements()),
         { name: "observe", args: { project: "skeleton" } }
@@ -1806,8 +1786,7 @@ describe("finalizeToolResponse", () => {
       expect(sc.viewHierarchy).toBeUndefined();
     });
 
-    test("explicit project:'full' overrides the flag (full tree returned)", () => {
-      serverConfig.setObserveResultProjectSkeletonEnabled(true);
+    test("explicit project:'full' opts out of the skeleton default (full tree returned)", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse(observeWithActionableElements()),
         { name: "observe", args: { project: "full" } }
@@ -1817,8 +1796,7 @@ describe("finalizeToolResponse", () => {
       expect(sc.viewHierarchy?.hierarchy).toBeDefined();
     });
 
-    test("raw:true forces the full tree even when the flag is on", () => {
-      serverConfig.setObserveResultProjectSkeletonEnabled(true);
+    test("raw:true opts out to the full tree", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse(observeWithActionableElements()),
         { name: "observe", args: { raw: true } }
@@ -1829,7 +1807,6 @@ describe("finalizeToolResponse", () => {
     });
 
     test("embedded action observations are never skeletonized (scoped to observe)", () => {
-      serverConfig.setObserveResultProjectSkeletonEnabled(true);
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: observeWithActionableElements() }),
         { name: "tapOn", sessionUuid: "s1" }
@@ -1843,27 +1820,20 @@ describe("finalizeToolResponse", () => {
 
 /**
  * Observe scope experiments (issue #4344). The per-call `scope` request arrives on
- * the observe tool args; a server flag gates each dimension. Scoping is applied to
- * the agent-facing payload only — it must leave the diff baseline (the full
- * sanitized tree) intact and never touch internal tool-to-tool calls.
+ * the observe tool args. The per-dimension server gates are now always on, so a
+ * requested dimension is honored purely from the `scope` arg (nothing is gated
+ * off). Scoping is applied to the agent-facing payload only — it must leave the
+ * diff baseline (the full sanitized tree) intact and never touch internal
+ * tool-to-tool calls. It runs on the FULL projection; the skeleton default
+ * replaces the hierarchy, so these tests opt into `project:"full"` to exercise the
+ * structural scope transforms.
  */
 describe("finalizeToolResponse observe scope experiments (#4344)", () => {
-  let originalSkeleton: boolean;
-
   beforeEach(() => {
-    originalSkeleton = serverConfig.isObserveResultProjectSkeletonEnabled();
-    serverConfig.setObserveResultProjectSkeletonEnabled(false);
-    serverConfig.setObserveFocusScopeEnabled(false);
-    serverConfig.setObserveOverviewEnabled(false);
-    serverConfig.setObserveRegionEnabled(false);
     serverConfig.setActionsDiffObserveEnabled(false);
   });
 
   afterEach(() => {
-    serverConfig.setObserveResultProjectSkeletonEnabled(originalSkeleton);
-    serverConfig.setObserveFocusScopeEnabled(false);
-    serverConfig.setObserveOverviewEnabled(false);
-    serverConfig.setObserveRegionEnabled(false);
     serverConfig.setActionsDiffObserveEnabled(false);
   });
 
@@ -1891,42 +1861,37 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
     } as ObserveResult;
   }
 
-  test("no scope flags: reports requested dimensions gated off", () => {
+  test("requested scope dimensions are no longer gated off (gates are always on)", () => {
     const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
       name: "observe",
-      args: { scope: { focus: true, region: true, overview: true } },
+      args: { project: "full", scope: { focus: true, region: true, overview: true } },
     });
     const out = finalized.structuredContent as ObserveResult;
-    expect(out.observeScope).toMatchObject({
-      applied: [],
-      gatedOff: ["focus", "region", "overview"],
-    });
-    expect(out.observeScope!.nodesAfter).toBe(out.observeScope!.nodesBefore);
+    // Nothing is gated off now, and the scope transforms materially prune the tree.
+    expect(out.observeScope!.gatedOff).toBeUndefined();
+    expect(out.observeScope!.applied).toContain("focus");
+    expect(out.observeScope!.nodesAfter).toBeLessThan(out.observeScope!.nodesBefore);
   });
 
-  test("reports a disabled requested dimension alongside enabled scope transforms", () => {
-    serverConfig.setObserveFocusScopeEnabled(true);
+  test("multiple requested dimensions are all honored (none gated off)", () => {
     const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
       name: "observe",
-      args: { scope: { focus: true, region: true } },
+      args: { project: "full", scope: { focus: true, region: true } },
     });
-    expect((finalized.structuredContent as ObserveResult).observeScope).toMatchObject({
-      applied: ["focus"],
-      gatedOff: ["region"],
-    });
+    const out = finalized.structuredContent as ObserveResult;
+    expect(out.observeScope).toMatchObject({ applied: ["focus"] });
+    expect(out.observeScope!.gatedOff).toBeUndefined();
   });
 
-  test("flag on but no scope in the call: payload is untouched", () => {
-    serverConfig.setObserveFocusScopeEnabled(true);
-    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), { name: "observe", args: {} });
+  test("no scope in the call: payload is untouched (scope is a no-op)", () => {
+    const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), { name: "observe", args: { project: "full" } });
     expect((finalized.structuredContent as ObserveResult).observeScope).toBeUndefined();
   });
 
-  test("scope.focus in the call (flag on) scopes the payload and records observeScope", () => {
-    serverConfig.setObserveFocusScopeEnabled(true);
+  test("scope.focus in the call scopes the payload and records observeScope", () => {
     const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
       name: "observe",
-      args: { scope: { focus: true } },
+      args: { project: "full", scope: { focus: true } },
     });
     const out = finalized.structuredContent as ObserveResult;
     expect(out.observeScope?.applied).toContain("focus");
@@ -1935,7 +1900,7 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
     expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
   });
 
-  test("explicit skeleton projection preserves all-gated scope metadata without a scope transform", () => {
+  test("explicit skeleton projection returns the skeleton; scope transforms cannot run on it", () => {
     const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
       name: "observe",
       args: {
@@ -1948,16 +1913,13 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
     expect(out.skeleton).toEqual([]);
     expect(out.viewHierarchy).toBeUndefined();
     expect(out.elements).toBeUndefined();
-    expect(out.observeScope).toMatchObject({
-      applied: [],
-      gatedOff: ["focus", "region", "overview"],
-    });
+    // Gates are always on, so nothing is gated off; the skeleton replaces the
+    // hierarchy, so no scope transform runs and no observeScope is recorded.
+    expect(out.observeScope).toBeUndefined();
     expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
   });
 
-  test("flag-enabled skeleton preserves gated metadata without applying enabled scope transforms", () => {
-    serverConfig.setObserveResultProjectSkeletonEnabled(true);
-    serverConfig.setObserveFocusScopeEnabled(true);
+  test("default skeleton + scope: skeleton returned, no observeScope (nothing gated off)", () => {
     const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
       name: "observe",
       args: { scope: { focus: true, region: true } },
@@ -1966,34 +1928,28 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
     const out = finalized.structuredContent as ObserveResult;
     expect(out.skeleton).toEqual([]);
     expect(out.viewHierarchy).toBeUndefined();
-    expect(out.observeScope).toMatchObject({
-      applied: [],
-      gatedOff: ["region"],
-    });
+    expect(out.observeScope).toBeUndefined();
     expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
   });
 
-  test("scope.region box in the call (flag on) crops to the normalized rectangle", () => {
-    serverConfig.setObserveRegionEnabled(true);
+  test("scope.region box in the call crops to the normalized rectangle", () => {
     const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
       name: "observe",
-      args: { scope: { region: { x1: 0, y1: 0, x2: 1, y2: 0.5 } } }, // top half only
+      args: { project: "full", scope: { region: { x1: 0, y1: 0, x2: 1, y2: 0.5 } } }, // top half only
     });
     const out = finalized.structuredContent as ObserveResult;
     expect(out.observeScope?.regionPx).toEqual({ left: 0, top: 0, right: 1000, bottom: 1000 });
   });
 
   test("internal observe calls are never scoped", () => {
-    serverConfig.setObserveFocusScopeEnabled(true);
     const finalized = finalizeToolResponse(
       createStructuredToolResponse(chromeObserve()),
-      { name: "observe", internal: true, args: { scope: { focus: true } } }
+      { name: "observe", internal: true, args: { project: "full", scope: { focus: true } } }
     );
     expect((finalized.structuredContent as ObserveResult).observeScope).toBeUndefined();
   });
 
   test("diff baseline is the full sanitized tree, not the scoped copy", () => {
-    serverConfig.setObserveFocusScopeEnabled(true);
     serverConfig.setActionsDiffObserveEnabled(true);
     const map = new Map<string, ObserveResult>();
     const store = { get: (u: string) => map.get(u), set: (u: string, o: ObserveResult) => { map.set(u, o); } };
@@ -2002,7 +1958,7 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
       name: "observe",
       sessionUuid: "s1",
       baselineStore: store,
-      args: { scope: { focus: true } },
+      args: { project: "full", scope: { focus: true } },
     });
 
     // Baseline retains the system-chrome node the served payload dropped.

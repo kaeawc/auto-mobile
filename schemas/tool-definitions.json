@@ -123,35 +123,57 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "number"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "number"
-                },
-                "right": {
-                  "type": "number"
-                },
-                "bottom": {
-                  "type": "number"
-                },
-                "centerX": {
-                  "type": "number"
-                },
-                "centerY": {
-                  "type": "number"
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false,
-              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -3450,10 +3472,10 @@
                   "additionalProperties": false
                 }
               ],
-              "description": "Scope to a subtree: true = foreground app; {resourceId|text} = anchor. Needs --observe-focus-scope."
+              "description": "Scope to a subtree: true = foreground app; {resourceId|text} = anchor."
             },
             "region": {
-              "description": "Crop to a normalized 0..1 box; true = inset content rect. Needs --observe-region.",
+              "description": "Crop to a normalized 0..1 box; true = inset content rect.",
               "anyOf": [
                 {
                   "type": "boolean"
@@ -3493,7 +3515,7 @@
               ]
             },
             "overview": {
-              "description": "Collapse to a container skeleton. Needs --observe-overview.",
+              "description": "Collapse to a container skeleton.",
               "type": "boolean"
             }
           },
@@ -3572,35 +3594,57 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "number"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "number"
-                },
-                "right": {
-                  "type": "number"
-                },
-                "bottom": {
-                  "type": "number"
-                },
-                "centerX": {
-                  "type": "number"
-                },
-                "centerY": {
-                  "type": "number"
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false,
-              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "occlusionState": {
               "type": "string"
@@ -4013,35 +4057,57 @@
                     "type": "string"
                   },
                   "bounds": {
-                    "type": "object",
-                    "properties": {
-                      "left": {
-                        "type": "number"
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "left": {
+                            "type": "number"
+                          },
+                          "top": {
+                            "type": "number"
+                          },
+                          "right": {
+                            "type": "number"
+                          },
+                          "bottom": {
+                            "type": "number"
+                          },
+                          "centerX": {
+                            "type": "number"
+                          },
+                          "centerY": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "left",
+                          "top",
+                          "right",
+                          "bottom"
+                        ],
+                        "additionalProperties": false
                       },
-                      "top": {
-                        "type": "number"
-                      },
-                      "right": {
-                        "type": "number"
-                      },
-                      "bottom": {
-                        "type": "number"
-                      },
-                      "centerX": {
-                        "type": "number"
-                      },
-                      "centerY": {
-                        "type": "number"
+                      {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ],
+                        "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                       }
-                    },
-                    "required": [
-                      "left",
-                      "top",
-                      "right",
-                      "bottom"
                     ],
-                    "additionalProperties": false,
-                    "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                   }
                 },
                 "required": [
@@ -4184,35 +4250,57 @@
                     "type": "object",
                     "properties": {
                       "bounds": {
-                        "type": "object",
-                        "properties": {
-                          "left": {
-                            "type": "number"
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "left": {
+                                "type": "number"
+                              },
+                              "top": {
+                                "type": "number"
+                              },
+                              "right": {
+                                "type": "number"
+                              },
+                              "bottom": {
+                                "type": "number"
+                              },
+                              "centerX": {
+                                "type": "number"
+                              },
+                              "centerY": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "left",
+                              "top",
+                              "right",
+                              "bottom"
+                            ],
+                            "additionalProperties": false
                           },
-                          "top": {
-                            "type": "number"
-                          },
-                          "right": {
-                            "type": "number"
-                          },
-                          "bottom": {
-                            "type": "number"
-                          },
-                          "centerX": {
-                            "type": "number"
-                          },
-                          "centerY": {
-                            "type": "number"
+                          {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ],
+                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                           }
-                        },
-                        "required": [
-                          "left",
-                          "top",
-                          "right",
-                          "bottom"
                         ],
-                        "additionalProperties": false,
-                        "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                       },
                       "hierarchy": {
                         "$ref": "#/$defs/__schema0"
@@ -4234,35 +4322,57 @@
                     "type": "object",
                     "properties": {
                       "bounds": {
-                        "type": "object",
-                        "properties": {
-                          "left": {
-                            "type": "number"
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "left": {
+                                "type": "number"
+                              },
+                              "top": {
+                                "type": "number"
+                              },
+                              "right": {
+                                "type": "number"
+                              },
+                              "bottom": {
+                                "type": "number"
+                              },
+                              "centerX": {
+                                "type": "number"
+                              },
+                              "centerY": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "left",
+                              "top",
+                              "right",
+                              "bottom"
+                            ],
+                            "additionalProperties": false
                           },
-                          "top": {
-                            "type": "number"
-                          },
-                          "right": {
-                            "type": "number"
-                          },
-                          "bottom": {
-                            "type": "number"
-                          },
-                          "centerX": {
-                            "type": "number"
-                          },
-                          "centerY": {
-                            "type": "number"
+                          {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ],
+                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                           }
-                        },
-                        "required": [
-                          "left",
-                          "top",
-                          "right",
-                          "bottom"
                         ],
-                        "additionalProperties": false,
-                        "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                       },
                       "reason": {
                         "type": "string"
@@ -4645,7 +4755,7 @@
                     "type": "number"
                   }
                 ],
-                "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries, independent of the --observe-result-compact flag."
+                "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries."
               },
               "affordances": {
                 "type": "array",
@@ -4789,35 +4899,57 @@
                 "type": "object",
                 "properties": {
                   "bounds": {
-                    "type": "object",
-                    "properties": {
-                      "left": {
-                        "type": "number"
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "left": {
+                            "type": "number"
+                          },
+                          "top": {
+                            "type": "number"
+                          },
+                          "right": {
+                            "type": "number"
+                          },
+                          "bottom": {
+                            "type": "number"
+                          },
+                          "centerX": {
+                            "type": "number"
+                          },
+                          "centerY": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "left",
+                          "top",
+                          "right",
+                          "bottom"
+                        ],
+                        "additionalProperties": false
                       },
-                      "top": {
-                        "type": "number"
-                      },
-                      "right": {
-                        "type": "number"
-                      },
-                      "bottom": {
-                        "type": "number"
-                      },
-                      "centerX": {
-                        "type": "number"
-                      },
-                      "centerY": {
-                        "type": "number"
+                      {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ],
+                        "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                       }
-                    },
-                    "required": [
-                      "left",
-                      "top",
-                      "right",
-                      "bottom"
                     ],
-                    "additionalProperties": false,
-                    "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                   }
                 },
                 "additionalProperties": {}
@@ -4847,35 +4979,57 @@
                 "type": "string"
               },
               "bounds": {
-                "type": "object",
-                "properties": {
-                  "left": {
-                    "type": "number"
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "left": {
+                        "type": "number"
+                      },
+                      "top": {
+                        "type": "number"
+                      },
+                      "right": {
+                        "type": "number"
+                      },
+                      "bottom": {
+                        "type": "number"
+                      },
+                      "centerX": {
+                        "type": "number"
+                      },
+                      "centerY": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "left",
+                      "top",
+                      "right",
+                      "bottom"
+                    ],
+                    "additionalProperties": false
                   },
-                  "top": {
-                    "type": "number"
-                  },
-                  "right": {
-                    "type": "number"
-                  },
-                  "bottom": {
-                    "type": "number"
-                  },
-                  "centerX": {
-                    "type": "number"
-                  },
-                  "centerY": {
-                    "type": "number"
+                  {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                   }
-                },
-                "required": [
-                  "left",
-                  "top",
-                  "right",
-                  "bottom"
                 ],
-                "additionalProperties": false,
-                "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
               },
               "indexInMatches": {
                 "type": "integer",
@@ -4921,35 +5075,57 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "number"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "number"
-                },
-                "right": {
-                  "type": "number"
-                },
-                "bottom": {
-                  "type": "number"
-                },
-                "centerX": {
-                  "type": "number"
-                },
-                "centerY": {
-                  "type": "number"
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false,
-              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -5123,35 +5299,57 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "number"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "number"
-                },
-                "right": {
-                  "type": "number"
-                },
-                "bottom": {
-                  "type": "number"
-                },
-                "centerX": {
-                  "type": "number"
-                },
-                "centerY": {
-                  "type": "number"
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false,
-              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -5325,35 +5523,57 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "number"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "number"
-                },
-                "right": {
-                  "type": "number"
-                },
-                "bottom": {
-                  "type": "number"
-                },
-                "centerX": {
-                  "type": "number"
-                },
-                "centerY": {
-                  "type": "number"
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false,
-              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -5545,35 +5765,57 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "number"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "number"
-                },
-                "right": {
-                  "type": "number"
-                },
-                "bottom": {
-                  "type": "number"
-                },
-                "centerX": {
-                  "type": "number"
-                },
-                "centerY": {
-                  "type": "number"
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false,
-              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -5749,35 +5991,57 @@
             "type": "object",
             "properties": {
               "bounds": {
-                "type": "object",
-                "properties": {
-                  "left": {
-                    "type": "number"
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "left": {
+                        "type": "number"
+                      },
+                      "top": {
+                        "type": "number"
+                      },
+                      "right": {
+                        "type": "number"
+                      },
+                      "bottom": {
+                        "type": "number"
+                      },
+                      "centerX": {
+                        "type": "number"
+                      },
+                      "centerY": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "left",
+                      "top",
+                      "right",
+                      "bottom"
+                    ],
+                    "additionalProperties": false
                   },
-                  "top": {
-                    "type": "number"
-                  },
-                  "right": {
-                    "type": "number"
-                  },
-                  "bottom": {
-                    "type": "number"
-                  },
-                  "centerX": {
-                    "type": "number"
-                  },
-                  "centerY": {
-                    "type": "number"
+                  {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                   }
-                },
-                "required": [
-                  "left",
-                  "top",
-                  "right",
-                  "bottom"
                 ],
-                "additionalProperties": false,
-                "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
               },
               "text": {
                 "type": "string"
@@ -6176,35 +6440,57 @@
               "maximum": 9007199254740991
             },
             "regionPx": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "number"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "number"
-                },
-                "right": {
-                  "type": "number"
-                },
-                "bottom": {
-                  "type": "number"
-                },
-                "centerX": {
-                  "type": "number"
-                },
-                "centerY": {
-                  "type": "number"
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false,
-              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "focus": {
               "type": "object",
@@ -8589,35 +8875,57 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "number"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "number"
-                },
-                "right": {
-                  "type": "number"
-                },
-                "bottom": {
-                  "type": "number"
-                },
-                "centerX": {
-                  "type": "number"
-                },
-                "centerY": {
-                  "type": "number"
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false,
-              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "text": {
               "type": "string"
@@ -8807,35 +9115,57 @@
                         "type": "string"
                       },
                       "bounds": {
-                        "type": "object",
-                        "properties": {
-                          "left": {
-                            "type": "number"
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "left": {
+                                "type": "number"
+                              },
+                              "top": {
+                                "type": "number"
+                              },
+                              "right": {
+                                "type": "number"
+                              },
+                              "bottom": {
+                                "type": "number"
+                              },
+                              "centerX": {
+                                "type": "number"
+                              },
+                              "centerY": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "left",
+                              "top",
+                              "right",
+                              "bottom"
+                            ],
+                            "additionalProperties": false
                           },
-                          "top": {
-                            "type": "number"
-                          },
-                          "right": {
-                            "type": "number"
-                          },
-                          "bottom": {
-                            "type": "number"
-                          },
-                          "centerX": {
-                            "type": "number"
-                          },
-                          "centerY": {
-                            "type": "number"
+                          {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ],
+                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                           }
-                        },
-                        "required": [
-                          "left",
-                          "top",
-                          "right",
-                          "bottom"
                         ],
-                        "additionalProperties": false,
-                        "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                       },
                       "indexInMatches": {
                         "type": "integer",
@@ -8881,35 +9211,57 @@
                   "type": "object",
                   "properties": {
                     "bounds": {
-                      "type": "object",
-                      "properties": {
-                        "left": {
-                          "type": "number"
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "left": {
+                              "type": "number"
+                            },
+                            "top": {
+                              "type": "number"
+                            },
+                            "right": {
+                              "type": "number"
+                            },
+                            "bottom": {
+                              "type": "number"
+                            },
+                            "centerX": {
+                              "type": "number"
+                            },
+                            "centerY": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "left",
+                            "top",
+                            "right",
+                            "bottom"
+                          ],
+                          "additionalProperties": false
                         },
-                        "top": {
-                          "type": "number"
-                        },
-                        "right": {
-                          "type": "number"
-                        },
-                        "bottom": {
-                          "type": "number"
-                        },
-                        "centerX": {
-                          "type": "number"
-                        },
-                        "centerY": {
-                          "type": "number"
+                        {
+                          "type": "array",
+                          "prefixItems": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ],
+                          "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                         }
-                      },
-                      "required": [
-                        "left",
-                        "top",
-                        "right",
-                        "bottom"
                       ],
-                      "additionalProperties": false,
-                      "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                     },
                     "text": {
                       "type": "string"
@@ -9083,35 +9435,57 @@
                   "type": "object",
                   "properties": {
                     "bounds": {
-                      "type": "object",
-                      "properties": {
-                        "left": {
-                          "type": "number"
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "left": {
+                              "type": "number"
+                            },
+                            "top": {
+                              "type": "number"
+                            },
+                            "right": {
+                              "type": "number"
+                            },
+                            "bottom": {
+                              "type": "number"
+                            },
+                            "centerX": {
+                              "type": "number"
+                            },
+                            "centerY": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "left",
+                            "top",
+                            "right",
+                            "bottom"
+                          ],
+                          "additionalProperties": false
                         },
-                        "top": {
-                          "type": "number"
-                        },
-                        "right": {
-                          "type": "number"
-                        },
-                        "bottom": {
-                          "type": "number"
-                        },
-                        "centerX": {
-                          "type": "number"
-                        },
-                        "centerY": {
-                          "type": "number"
+                        {
+                          "type": "array",
+                          "prefixItems": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ],
+                          "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                         }
-                      },
-                      "required": [
-                        "left",
-                        "top",
-                        "right",
-                        "bottom"
                       ],
-                      "additionalProperties": false,
-                      "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                     },
                     "text": {
                       "type": "string"
@@ -9659,35 +10033,57 @@
               "type": "string"
             },
             "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "number"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "number"
+                    },
+                    "top": {
+                      "type": "number"
+                    },
+                    "right": {
+                      "type": "number"
+                    },
+                    "bottom": {
+                      "type": "number"
+                    },
+                    "centerX": {
+                      "type": "number"
+                    },
+                    "centerY": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
                 },
-                "top": {
-                  "type": "number"
-                },
-                "right": {
-                  "type": "number"
-                },
-                "bottom": {
-                  "type": "number"
-                },
-                "centerX": {
-                  "type": "number"
-                },
-                "centerY": {
-                  "type": "number"
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                 }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
               ],
-              "additionalProperties": false,
-              "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
             },
             "indexInMatches": {
               "type": "integer",
@@ -9743,35 +10139,57 @@
                 "type": "string"
               },
               "bounds": {
-                "type": "object",
-                "properties": {
-                  "left": {
-                    "type": "number"
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "left": {
+                        "type": "number"
+                      },
+                      "top": {
+                        "type": "number"
+                      },
+                      "right": {
+                        "type": "number"
+                      },
+                      "bottom": {
+                        "type": "number"
+                      },
+                      "centerX": {
+                        "type": "number"
+                      },
+                      "centerY": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "left",
+                      "top",
+                      "right",
+                      "bottom"
+                    ],
+                    "additionalProperties": false
                   },
-                  "top": {
-                    "type": "number"
-                  },
-                  "right": {
-                    "type": "number"
-                  },
-                  "bottom": {
-                    "type": "number"
-                  },
-                  "centerX": {
-                    "type": "number"
-                  },
-                  "centerY": {
-                    "type": "number"
+                  {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                   }
-                },
-                "required": [
-                  "left",
-                  "top",
-                  "right",
-                  "bottom"
                 ],
-                "additionalProperties": false,
-                "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
               },
               "indexInMatches": {
                 "type": "integer",
@@ -9864,35 +10282,57 @@
                 "type": "object",
                 "properties": {
                   "bounds": {
-                    "type": "object",
-                    "properties": {
-                      "left": {
-                        "type": "number"
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "left": {
+                            "type": "number"
+                          },
+                          "top": {
+                            "type": "number"
+                          },
+                          "right": {
+                            "type": "number"
+                          },
+                          "bottom": {
+                            "type": "number"
+                          },
+                          "centerX": {
+                            "type": "number"
+                          },
+                          "centerY": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "left",
+                          "top",
+                          "right",
+                          "bottom"
+                        ],
+                        "additionalProperties": false
                       },
-                      "top": {
-                        "type": "number"
-                      },
-                      "right": {
-                        "type": "number"
-                      },
-                      "bottom": {
-                        "type": "number"
-                      },
-                      "centerX": {
-                        "type": "number"
-                      },
-                      "centerY": {
-                        "type": "number"
+                      {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ],
+                        "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                       }
-                    },
-                    "required": [
-                      "left",
-                      "top",
-                      "right",
-                      "bottom"
                     ],
-                    "additionalProperties": false,
-                    "description": "Element bounds. Default: object {left, top, right, bottom} (+ optional centerX/centerY). Under --observe-result-compact: positional tuple [left, top, right, bottom]."
+                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                   },
                   "text": {
                     "type": "string"

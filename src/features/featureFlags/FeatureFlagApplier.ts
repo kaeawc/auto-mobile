@@ -54,14 +54,8 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
       case "navigation-screenshots":
         serverConfig.setNavigationScreenshotsEnabled(enabled);
         break;
-      case "observe-result-drop-elements":
-        serverConfig.setObserveResultDropElementsEnabled(enabled);
-        break;
-      case "observe-result-compact":
-        serverConfig.setObserveResultCompactEnabled(enabled);
-        break;
-      case "observe-result-project-skeleton":
-        serverConfig.setObserveResultProjectSkeletonEnabled(enabled);
+      case "observe-result-include-elements":
+        serverConfig.setObserveResultIncludeElementsEnabled(enabled);
         break;
       case "tool-results-no-structured-content":
         serverConfig.setToolResultsNoStructuredContentEnabled(enabled);
@@ -71,18 +65,6 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
         break;
       case "actions-no-observe":
         serverConfig.setActionsNoObserveEnabled(enabled);
-        break;
-      case "tool-results-compact-json":
-        serverConfig.setToolResultsCompactJsonEnabled(enabled);
-        break;
-      case "observe-focus-scope":
-        serverConfig.setObserveFocusScopeEnabled(enabled);
-        break;
-      case "observe-overview":
-        serverConfig.setObserveOverviewEnabled(enabled);
-        break;
-      case "observe-region":
-        serverConfig.setObserveRegionEnabled(enabled);
         break;
     }
   }

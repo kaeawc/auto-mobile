@@ -1222,26 +1222,14 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       options.skipCtrlProxyDownload = true;
     } else if (args[i] === "--mcp-recording") {
       options.mcpRecording = true;
-    } else if (args[i] === "--observe-result-drop-elements") {
-      options.observeResultDropElements = true;
-    } else if (args[i] === "--observe-result-compact") {
-      options.observeResultCompact = true;
-    } else if (args[i] === "--observe-result-project-skeleton") {
-      options.observeResultProjectSkeleton = true;
+    } else if (args[i] === "--observe-result-include-elements") {
+      options.observeResultIncludeElements = true;
     } else if (args[i] === "--tool-results-no-structured-content") {
       options.toolResultsNoStructuredContent = true;
     } else if (args[i] === "--actions-diff-observe") {
       options.actionsDiffObserve = true;
     } else if (args[i] === "--actions-no-observe") {
       options.actionsNoObserve = true;
-    } else if (args[i] === "--tool-results-compact-json") {
-      options.toolResultsCompactJson = true;
-    } else if (args[i] === "--observe-focus-scope") {
-      options.observeFocusScope = true;
-    } else if (args[i] === "--observe-overview") {
-      options.observeOverview = true;
-    } else if (args[i] === "--observe-region") {
-      options.observeRegion = true;
     }
   }
   return options;

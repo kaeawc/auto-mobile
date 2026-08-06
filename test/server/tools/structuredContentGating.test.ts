@@ -171,9 +171,11 @@ describe("structuredContent gating (issue #2759)", () => {
     expect((direct as { structuredContent?: unknown }).structuredContent).toEqual({ success: true, value: "hello" });
   });
 
-  // #2990: the advertised `tapOn` outputSchema bounds shape tracks --observe-result-compact,
-  // so a `tools/list` client is only told to expect the tuple when the server will emit it.
-  test("EC-C1: tapOn outputSchema advertises the bounds tuple arm only when compact is on", async () => {
+  // #2990: bounds compaction is now a permanent default, so the server always emits
+  // the tuple form and a `tools/list` client is always told to expect it. The
+  // advertised `tapOn` outputSchema therefore carries the bounds tuple arm
+  // unconditionally.
+  test("EC-C1: tapOn outputSchema always advertises the bounds tuple arm", async () => {
     const boundsHasTupleArm = async (): Promise<boolean> => {
       const result = await list();
       const tapOn = result.tools.find(t => t.name === "tapOn");
@@ -193,15 +195,6 @@ describe("structuredContent gating (issue #2759)", () => {
       return false;
     };
 
-    const originalCompact = serverConfig.isObserveResultCompactEnabled();
-    try {
-      serverConfig.setObserveResultCompactEnabled(false);
-      expect(await boundsHasTupleArm()).toBe(false);
-
-      serverConfig.setObserveResultCompactEnabled(true);
-      expect(await boundsHasTupleArm()).toBe(true);
-    } finally {
-      serverConfig.setObserveResultCompactEnabled(originalCompact);
-    }
+    expect(await boundsHasTupleArm()).toBe(true);
   });
 });

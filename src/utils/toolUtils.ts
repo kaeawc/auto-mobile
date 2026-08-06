@@ -2,7 +2,6 @@
  * Utility functions for tool handlers
  */
 import { OPERATION_CANCELLED_MESSAGE } from "./constants";
-import { serverConfig } from "./ServerConfig";
 import { deviceLostErrorFromAbortSignal } from "../server/deviceLossOutcome";
 
 const stripAccessibilityExtras = (key: string, value: unknown): unknown => {
@@ -13,11 +12,11 @@ const stripAccessibilityExtras = (key: string, value: unknown): unknown => {
 };
 
 export const stringifyToolResponse = (content: unknown): string => {
-  // Pretty-printing (indent=2) is ~35% of the serialized size on element-heavy
-  // observations and carries no meaning for the model — drop it when the compact
-  // flag is set. Same data, fewer tokens; no effect on tapOn/text matching.
-  const indent = serverConfig.isToolResultsCompactJsonEnabled() ? undefined : 2;
-  return JSON.stringify(content, stripAccessibilityExtras, indent);
+  // Compact (non-pretty) JSON is now the unconditional default. Pretty-printing
+  // (indent=2) was ~35% of the serialized size on element-heavy observations and
+  // carries no meaning for the model. Same data, fewer tokens; no effect on
+  // tapOn/text matching.
+  return JSON.stringify(content, stripAccessibilityExtras);
 };
 
 /**

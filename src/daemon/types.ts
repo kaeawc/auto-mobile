@@ -240,26 +240,18 @@ export interface DaemonOptions {
   noA11yRetrieveInteractiveWindows?: boolean;
   /** Disable the observe occlusion pass (occlusionState/occludedBy/occludedByViewId) */
   noOcclusion?: boolean;
-  /** Output reduction: drop the flattened elements array from observe results (issue #2756) */
-  observeResultDropElements?: boolean;
-  /** Output reduction: emit observe results in compact form (issue #2756) */
-  observeResultCompact?: boolean;
-  /** Output reduction: project observe results to an actionable-only skeleton (issue #4388) */
-  observeResultProjectSkeleton?: boolean;
+  /**
+   * Output reduction: opt back in to the flattened elements array on observe
+   * results, dropped by default (issue #2756). Inverse of the retired
+   * `observeResultDropElements`.
+   */
+  observeResultIncludeElements?: boolean;
   /** Output reduction: omit structuredContent from tool results (issue #2756) */
   toolResultsNoStructuredContent?: boolean;
   /** Output reduction: return only the observation diff after an action (issue #2756) */
   actionsDiffObserve?: boolean;
   /** Output reduction: skip the post-action observation entirely (issue #2756) */
   actionsNoObserve?: boolean;
-  /** Output reduction: serialize tool results as compact (non-pretty) JSON (issue #2756) */
-  toolResultsCompactJson?: boolean;
-  /** Observe scope experiment: focus the hierarchy to a subtree / foreground app (issue #4344) */
-  observeFocusScope?: boolean;
-  /** Observe scope experiment: collapse the hierarchy to a container skeleton (issue #4344) */
-  observeOverview?: boolean;
-  /** Observe scope experiment: crop the hierarchy to a normalized region (issue #4344) */
-  observeRegion?: boolean;
 }
 
 /**

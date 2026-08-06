@@ -9,7 +9,6 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-import { serverConfig } from "../../src/utils/ServerConfig";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import type { ScrollPosition } from "../../src/utils/interfaces/NavigationGraph";
 
@@ -28,7 +27,6 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
   let daemonSessionManager: SessionManager | undefined;
-  let originalDropElements: boolean;
   let spiedSessionIds: string[];
 
   /**
@@ -74,8 +72,6 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
-    originalDropElements = serverConfig.isObserveResultDropElementsEnabled();
-    serverConfig.setObserveResultDropElementsEnabled(false);
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     spiedSessionIds = [];
   });
@@ -85,7 +81,6 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();
-    serverConfig.setObserveResultDropElementsEnabled(originalDropElements);
     for (const sessionId of spiedSessionIds) {
       NavigationGraphManager.releaseSession(sessionId);
     }

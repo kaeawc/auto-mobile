@@ -6,23 +6,27 @@ import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinit
  * Each flag parses from a CLI flag OR an `AUTOMOBILE_*` env var. The CLI flag
  * wins via `||`: if it is present the flag is enabled regardless of the env var.
  * All flags default off. Env vars enable only on the exact string `"1"`.
+ *
+ * Historical note: compact bounds tuples, the skeleton projection, compact
+ * (non-pretty) JSON, and the focus/overview/region observe-scope gates were once
+ * opt-in flags here. They are now unconditional defaults, so their old flags
+ * (`--observe-result-compact`, `--observe-result-project-skeleton`,
+ * `--tool-results-compact-json`, `--observe-focus-scope`, `--observe-overview`,
+ * `--observe-region`, and the matching `AUTOMOBILE_*` env vars) are silently
+ * ignored — passing them is a harmless no-op, no error or migration warning.
+ * `observe-result-drop-elements` inverted the same way: dropping the flattened
+ * `elements` array is the default, and `--observe-result-include-elements`
+ * (below) is the opt-in that restores it.
  */
 export interface OutputReductionFlags {
-  observeResultDropElements: boolean;
-  observeResultCompact: boolean;
-  observeResultProjectSkeleton: boolean;
+  /**
+   * Opt back in to the flattened `elements` array on observe results, which is
+   * dropped by default. Inverse of the retired `--observe-result-drop-elements`.
+   */
+  observeResultIncludeElements: boolean;
   toolResultsNoStructuredContent: boolean;
   actionsDiffObserve: boolean;
   actionsNoObserve: boolean;
-  toolResultsCompactJson: boolean;
-  /**
-   * Progressive-disclosure scoping experiments for the `observe` payload
-   * (issue #4344). Independent transforms — see
-   * `features/observe/output/ObserveScopeExperiments.ts`.
-   */
-  observeFocusScope: boolean;
-  observeOverview: boolean;
-  observeRegion: boolean;
 }
 
 export type OutputReductionFlagField = keyof OutputReductionFlags;
@@ -42,25 +46,11 @@ export interface OutputReductionFlagSpec {
 
 export const OUTPUT_REDUCTION_FLAG_SPECS: OutputReductionFlagSpec[] = [
   {
-    field: "observeResultDropElements",
-    cli: "--observe-result-drop-elements",
-    env: "AUTOMOBILE_OBSERVE_RESULT_DROP_ELEMENTS",
-    featureFlagKey: "observe-result-drop-elements",
-    label: "--observe-result-drop-elements",
-  },
-  {
-    field: "observeResultCompact",
-    cli: "--observe-result-compact",
-    env: "AUTOMOBILE_OBSERVE_RESULT_COMPACT",
-    featureFlagKey: "observe-result-compact",
-    label: "--observe-result-compact",
-  },
-  {
-    field: "observeResultProjectSkeleton",
-    cli: "--observe-result-project-skeleton",
-    env: "AUTOMOBILE_OBSERVE_RESULT_PROJECT_SKELETON",
-    featureFlagKey: "observe-result-project-skeleton",
-    label: "--observe-result-project-skeleton",
+    field: "observeResultIncludeElements",
+    cli: "--observe-result-include-elements",
+    env: "AUTOMOBILE_OBSERVE_RESULT_INCLUDE_ELEMENTS",
+    featureFlagKey: "observe-result-include-elements",
+    label: "--observe-result-include-elements",
   },
   {
     field: "toolResultsNoStructuredContent",
@@ -83,34 +73,6 @@ export const OUTPUT_REDUCTION_FLAG_SPECS: OutputReductionFlagSpec[] = [
     featureFlagKey: "actions-no-observe",
     label: "--actions-no-observe",
   },
-  {
-    field: "toolResultsCompactJson",
-    cli: "--tool-results-compact-json",
-    env: "AUTOMOBILE_TOOL_RESULTS_COMPACT_JSON",
-    featureFlagKey: "tool-results-compact-json",
-    label: "--tool-results-compact-json",
-  },
-  {
-    field: "observeFocusScope",
-    cli: "--observe-focus-scope",
-    env: "AUTOMOBILE_OBSERVE_FOCUS_SCOPE",
-    featureFlagKey: "observe-focus-scope",
-    label: "--observe-focus-scope",
-  },
-  {
-    field: "observeOverview",
-    cli: "--observe-overview",
-    env: "AUTOMOBILE_OBSERVE_OVERVIEW",
-    featureFlagKey: "observe-overview",
-    label: "--observe-overview",
-  },
-  {
-    field: "observeRegion",
-    cli: "--observe-region",
-    env: "AUTOMOBILE_OBSERVE_REGION",
-    featureFlagKey: "observe-region",
-    label: "--observe-region",
-  },
 ];
 
 /**
@@ -128,16 +90,10 @@ export function parseOutputReductionFlags(
   // result off the spec list (rather than positional SPECS[0..4] access) means
   // reordering or extending the list can never silently mis-map a field.
   const flags: OutputReductionFlags = {
-    observeResultDropElements: false,
-    observeResultCompact: false,
-    observeResultProjectSkeleton: false,
+    observeResultIncludeElements: false,
     toolResultsNoStructuredContent: false,
     actionsDiffObserve: false,
     actionsNoObserve: false,
-    toolResultsCompactJson: false,
-    observeFocusScope: false,
-    observeOverview: false,
-    observeRegion: false,
   };
   for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
     flags[spec.field] = resolve(spec);

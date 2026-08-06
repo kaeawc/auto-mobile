@@ -12,9 +12,7 @@ import { serverConfig } from "../../../src/utils/ServerConfig";
  * EC4: FEATURE_FLAG_DEFINITIONS registers each key, default false.
  */
 const CASES: Array<{ key: FeatureFlagKey; read: () => boolean }> = [
-  { key: "observe-result-drop-elements", read: () => serverConfig.isObserveResultDropElementsEnabled() },
-  { key: "observe-result-compact", read: () => serverConfig.isObserveResultCompactEnabled() },
-  { key: "observe-result-project-skeleton", read: () => serverConfig.isObserveResultProjectSkeletonEnabled() },
+  { key: "observe-result-include-elements", read: () => serverConfig.isObserveResultIncludeElementsEnabled() },
   { key: "tool-results-no-structured-content", read: () => serverConfig.isToolResultsNoStructuredContentEnabled() },
   { key: "actions-diff-observe", read: () => serverConfig.isActionsDiffObserveEnabled() },
   { key: "actions-no-observe", read: () => serverConfig.isActionsNoObserveEnabled() },

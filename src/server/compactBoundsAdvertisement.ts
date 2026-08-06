@@ -3,18 +3,19 @@
  *
  * `elementBoundsSchema` (`src/server/toolOutputSchemas.ts`) is a
  * `bounds-object | [left, top, right, bottom]` union so that runtime never carries
- * a shape the schema can't describe. But the tuple arm is only ever *emitted* when
- * `--observe-result-compact` is set (`finalizeToolResponse` → `sanitizeObserveResult`),
- * which is off by default. Advertising the tuple arm unconditionally would tell a
- * client generating decoders from `tools/list` to handle a shape the server will
- * never send in its default configuration.
+ * a shape the schema can't describe. Bounds compaction is now an unconditional
+ * default (`finalizeToolResponse` → `sanitizeObserveResult` always emits tuples),
+ * so the server always calls {@link advertiseBoundsForCompact} in the
+ * compaction-on state and the union is advertised intact — the object|tuple union
+ * is a safe superset a compact client can decode.
  *
- * This mirrors the sibling `suppressOutputSchema` precedent in `toolRegistry.ts`
- * (issue #2899), which keeps the advertised shape in sync with the emitted shape by
- * dropping an `outputSchema` the finalize step would strip. Here, when compaction is
- * off, we collapse every bounds union in the already-generated JSON Schema down to
- * its object arm; when on, the union is left intact (the server emits tuples, and
- * the object|tuple union is a safe superset a compact client can decode).
+ * The compaction-off collapse path below is retained for the union-honesty
+ * invariant (and is exercised directly by its unit test): were compaction ever
+ * gated off again, advertising the tuple arm unconditionally would tell a client
+ * generating decoders from `tools/list` to handle a shape the server would never
+ * send. It mirrors the sibling `suppressOutputSchema` precedent in
+ * `toolRegistry.ts` (issue #2899), which keeps the advertised shape in sync with
+ * the emitted shape by dropping an `outputSchema` the finalize step would strip.
  */
 
 /**

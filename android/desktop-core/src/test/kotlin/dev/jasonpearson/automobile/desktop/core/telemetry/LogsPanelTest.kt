@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
@@ -23,11 +25,14 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryPushClient
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
@@ -140,6 +145,27 @@ class LogsPanelTest {
     // On the iOS scale level 3 = Warn and level 5 = Error (fault).
     assertEquals(listOf(logs[0]), filterLogs(logs, setOf(LogLevel.Warn), "", LogPlatform.Ios))
     assertEquals(listOf(logs[1]), filterLogs(logs, setOf(LogLevel.Error), "", LogPlatform.Ios))
+  }
+
+  // -- Tail-follow clear-decision tests (pure) --
+
+  @Test
+  fun `a user upward scroll clears tail-follow intent`() {
+    // Positive y = content moving down = scrolling toward older rows (away from the tail).
+    assertTrue(clearsTailFollow(Offset(0f, 12f), NestedScrollSource.UserInput))
+  }
+
+  @Test
+  fun `a user downward scroll does not clear tail-follow intent`() {
+    // Scrolling toward the tail must not clear the intent; reaching the bottom re-arms it instead.
+    assertFalse(clearsTailFollow(Offset(0f, -12f), NestedScrollSource.UserInput))
+  }
+
+  @Test
+  fun `a programmatic scroll never clears tail-follow intent`() {
+    // The panel's own re-anchor scrolls (e.g. the upward scrollToItem after a filter narrows the
+    // list) dispatch as SideEffect and must be ignored, or they would defeat tail-follow.
+    assertFalse(clearsTailFollow(Offset(0f, 12f), NestedScrollSource.SideEffect))
   }
 
   // -- Compose UI tests --
@@ -303,6 +329,93 @@ class LogsPanelTest {
       onAllNodesWithText("row 10").fetchSemanticsNodes().isNotEmpty()
     }
     onNodeWithText("row 10").assertIsDisplayed()
+  }
+
+  @Test
+  fun `starting an upward drag clears follow intent before the scroll settles`() =
+    runComposeUiTest {
+      val fake = FakeTelemetryPushClient()
+      val followStates = mutableListOf<Boolean>()
+      setContent {
+        MaterialTheme {
+          Box(Modifier.height(120.dp)) {
+            LogsPanel(
+              telemetryPushClient = fake,
+              activeDeviceId = "dev-1",
+              onFollowTailChange = { followStates.add(it) },
+            )
+          }
+        }
+      }
+      waitForIdle()
+      for (i in 0 until 30) {
+        fake.emitEvent(log(4, "T", "row $i", i.toLong()))
+      }
+      // Following the tail: the newest row is visible and follow intent is set.
+      waitUntil(timeoutMillis = 2_000) {
+        onAllNodesWithText("row 29").fetchSemanticsNodes().isNotEmpty()
+      }
+      followStates.clear()
+
+      // Begin a user upward scroll and hold it: finger down, then dragged down (content moves down,
+      // i.e. scrolling toward older rows) with no release, so the gesture stays in progress and
+      // never settles. The intent must clear from this first delta, not from a settle that never
+      // comes.
+      onNode(hasScrollToIndexAction()).performTouchInput {
+        down(center)
+        moveBy(Offset(0f, 250f))
+      }
+      waitForIdle()
+
+      assertTrue(
+        "user upward scroll should clear follow intent mid-gesture",
+        followStates.contains(false),
+      )
+    }
+
+  @Test
+  fun `reaching the bottom re-arms follow intent`() = runComposeUiTest {
+    val fake = FakeTelemetryPushClient()
+    setContent {
+      MaterialTheme {
+        Box(Modifier.height(120.dp)) {
+          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1")
+        }
+      }
+    }
+    waitForIdle()
+    for (i in 0 until 30) {
+      fake.emitEvent(log(4, "T", "row $i", i.toLong()))
+    }
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("row 29").fetchSemanticsNodes().isNotEmpty()
+    }
+
+    // Scroll the user away from the tail (drag content down), so follow intent clears and a new row
+    // is no longer chased — it stays below the fold, uncomposed.
+    onNode(hasScrollToIndexAction()).performTouchInput {
+      down(center)
+      moveBy(Offset(0f, 250f))
+      up()
+    }
+    waitForIdle()
+    fake.emitEvent(log(4, "T", "row 30", 30L))
+    waitForIdle()
+    onNodeWithText("row 30").assertDoesNotExist()
+
+    // Return to the bottom (drag content up, overscrolling to clamp at the tail): reaching it
+    // re-arms follow, so the next live row is chased again.
+    onNode(hasScrollToIndexAction()).performTouchInput {
+      down(center)
+      moveBy(Offset(0f, -3000f))
+      up()
+    }
+    waitForIdle()
+    fake.emitEvent(log(4, "T", "row 31", 31L))
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("row 31").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("row 31").assertIsDisplayed()
   }
 
   @Test

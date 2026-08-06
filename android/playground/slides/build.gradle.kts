@@ -1,4 +1,5 @@
 plugins {
+  id("automobile.kotlin-common")
   alias(libs.plugins.android.library)
   alias(libs.plugins.compose.compiler)
 }
@@ -33,30 +34,6 @@ android {
     // Disable UnsafeOptInUsageError since we've already configured the Kotlin compiler
     // to opt-in to Media3's UnstableApi via freeCompilerArgs
     disable += "UnsafeOptInUsageError"
-  }
-}
-
-tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-  compilerOptions {
-    jvmTarget.set(
-      org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(libs.versions.build.java.target.get())
-    )
-    languageVersion.set(
-      org.jetbrains.kotlin.gradle.dsl.KotlinVersion.fromVersion(
-        libs.versions.build.kotlin.language.get()
-      )
-    )
-    freeCompilerArgs =
-      listOf(
-        "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
-        "-opt-in=androidx.media3.common.util.UnstableApi",
-        "-opt-in=kotlin.time.ExperimentalTime,kotlin.RequiresOptIn",
-        "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-        "-opt-in=kotlin.ExperimentalUnsignedTypes",
-        "-opt-in=kotlin.time.ExperimentalTime",
-        "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-        "-opt-in=kotlinx.coroutines.FlowPreview",
-      )
   }
 }
 

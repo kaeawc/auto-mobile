@@ -1,4 +1,5 @@
 plugins {
+  id("automobile.kotlin-common")
   kotlin("jvm")
   kotlin("plugin.serialization")
 }

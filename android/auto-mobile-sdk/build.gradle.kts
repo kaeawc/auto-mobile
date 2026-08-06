@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
+  id("automobile.kotlin-common")
   alias(libs.plugins.android.library)
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)

@@ -10,6 +10,9 @@ dependencyResolutionManagement {
 }
 
 pluginManagement {
+  // Convention plugins (e.g. automobile.kotlin-common) live in the build-logic
+  // included build.
+  includeBuild("build-logic")
   repositories {
     google {
       content {

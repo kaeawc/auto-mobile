@@ -609,8 +609,59 @@ export function applyObserveScopeExperiments(
   // Every stage returns a fresh clone, so `run.current` is never the input here;
   // guard the theoretically-unreachable no-op case anyway.
   const out = run.current === input ? clone(input) : run.current;
+  scopeLayoutWarnings(out);
   out.observeScope = buildScopeMetadata({ ...run, current: out }, nodesBefore, gatedOff);
   return out;
+}
+
+/**
+ * Co-scope `layoutWarnings` with the pruned hierarchy (issue #5074). The audit
+ * runs on the full tree in `ObserveScreen`, before these transforms drop nodes,
+ * so a scoped response could otherwise list a warning for an element no longer
+ * in the returned `viewHierarchy`. A warning is kept only when a surviving node
+ * sits at its element's bounds — `OVERVIEW_KEPT_ATTRS` retains `bounds`, and
+ * REGION/FOCUS leave kept nodes' bounds intact, so this holds for all three
+ * dimensions. `readBounds` normalizes both the object and the compact tuple
+ * shape, so it is correct whether or not `--observe-result-compact` ran first.
+ *
+ * When scoping drops warnings, `layoutWarningsTruncated` (the pre-cap total of
+ * the *un-scoped* population) no longer describes what is shown, so it is
+ * cleared to keep the pair consistent.
+ */
+function scopeLayoutWarnings(out: ObserveResult): void {
+  const warnings = out.layoutWarnings;
+  if (!warnings || warnings.length === 0) {
+    return;
+  }
+  const visibleBounds = new Set<string>();
+  collectBoundsKeys(rootNodes(out), visibleBounds);
+  const kept = warnings.filter(warning => {
+    const bounds = readBounds(warning.element?.bounds);
+    return bounds !== null && visibleBounds.has(boundsKey(bounds));
+  });
+  if (kept.length === warnings.length) {
+    return;
+  }
+  out.layoutWarnings = kept;
+  if (out.layoutWarningsTruncated !== undefined) {
+    delete out.layoutWarningsTruncated;
+  }
+}
+
+/** Collect the bounds key of every node in the (already-scoped) hierarchy. */
+function collectBoundsKeys(nodes: NodeRecord[], into: Set<string>): void {
+  for (const node of nodes) {
+    const bounds = readBounds(attr(node, "bounds"));
+    if (bounds !== null) {
+      into.add(boundsKey(bounds));
+    }
+    collectBoundsKeys(childrenOf(node), into);
+  }
+}
+
+/** Canonical bounds identity, shape-independent (object and tuple map to the same key). */
+function boundsKey(bounds: ElementBounds): string {
+  return `${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}`;
 }
 
 /** The server experiment gates; each honors its `scope` dimension only when on. */

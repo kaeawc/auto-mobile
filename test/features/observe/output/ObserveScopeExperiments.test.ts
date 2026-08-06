@@ -487,3 +487,106 @@ describe("applyObserveScopeExperiments", () => {
     expect(JSON.stringify(obs)).toBe(before);
   });
 });
+
+describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074)", () => {
+  type Bounds = { left: number; top: number; right: number; bottom: number };
+  type Warning = NonNullable<ObserveResult["layoutWarnings"]>[number];
+
+  // A warning anchored to a node's bounds. Only `element.bounds` matters here —
+  // co-scoping keys on the element's location surviving in the pruned tree.
+  function warningAt(bounds: Bounds | number[]): Warning {
+    return {
+      type: "important-content-under-inset",
+      severity: "warning",
+      element: { bounds: bounds as Bounds },
+      categories: ["text"],
+      insetTypes: ["systemBars"],
+      sides: ["top"],
+      overflowPx: { top: 10 },
+      insetPx: { top: 80 },
+      overlapPercent: 100,
+      confidence: "medium",
+    };
+  }
+
+  const STATUS_BAR_BOUNDS: Bounds = { left: 0, top: 0, right: 1080, bottom: 80 };
+  const HEADER_BOUNDS: Bounds = { left: 0, top: 80, right: 1080, bottom: 200 };
+  const ITEM2_BOUNDS: Bounds = { left: 0, top: 400, right: 1080, bottom: 600 };
+  const NAV_BAR_BOUNDS: Bounds = { left: 0, top: 2300, right: 1080, bottom: 2400 };
+
+  test("REGION drops a warning whose element falls outside the crop", () => {
+    const obs = androidFixture();
+    obs.layoutWarnings = [warningAt(HEADER_BOUNDS), warningAt(NAV_BAR_BOUNDS)];
+    // Top-half crop keeps HEADER (top:80), prunes NAV_BAR (top:2300 > 1200).
+    const result = applyObserveScopeExperiments(obs, {
+      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
+    });
+    expect(result.layoutWarnings).toHaveLength(1);
+    expect(result.layoutWarnings![0].element.bounds).toEqual(HEADER_BOUNDS);
+  });
+
+  test("FOCUS drops a warning for pruned foreign chrome", () => {
+    const obs = androidFixture();
+    obs.layoutWarnings = [warningAt(STATUS_BAR_BOUNDS), warningAt(HEADER_BOUNDS)];
+    // Foreground-app focus prunes com.android.systemui chrome (status/nav bars).
+    const result = applyObserveScopeExperiments(obs, { focus: true, overview: false, region: false });
+    const boundsList = (result.layoutWarnings ?? []).map(w => w.element.bounds);
+    expect(boundsList).toContainEqual(HEADER_BOUNDS);
+    expect(boundsList).not.toContainEqual(STATUS_BAR_BOUNDS);
+  });
+
+  test("OVERVIEW drops a warning for a collapsed anonymous leaf", () => {
+    const obs = androidFixture();
+    // HEADER is addressable (kept in the skeleton); Item 2 is an anonymous leaf (dropped).
+    obs.layoutWarnings = [warningAt(HEADER_BOUNDS), warningAt(ITEM2_BOUNDS)];
+    const result = applyObserveScopeExperiments(obs, { focus: false, overview: true, region: false });
+    const boundsList = (result.layoutWarnings ?? []).map(w => w.element.bounds);
+    expect(boundsList).toContainEqual(HEADER_BOUNDS);
+    expect(boundsList).not.toContainEqual(ITEM2_BOUNDS);
+  });
+
+  test("matches against compacted-tuple node bounds", () => {
+    const obs = androidFixture();
+    // NAV_BAR node in compact tuple form; the warning element also compacted.
+    roots(obs)[0].node![2].bounds = [0, 2300, 1080, 2400];
+    obs.layoutWarnings = [warningAt([0, 2300, 1080, 2400])];
+    // Full-screen region keeps everything, so the tuple-bounds warning survives.
+    const result = applyObserveScopeExperiments(obs, {
+      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 1 },
+    });
+    expect(result.layoutWarnings).toHaveLength(1);
+  });
+
+  test("clears layoutWarningsTruncated when scoping drops warnings", () => {
+    const obs = androidFixture();
+    obs.layoutWarnings = [warningAt(HEADER_BOUNDS), warningAt(NAV_BAR_BOUNDS)];
+    obs.layoutWarningsTruncated = 137;
+    const result = applyObserveScopeExperiments(obs, {
+      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
+    });
+    expect(result.layoutWarnings).toHaveLength(1);
+    expect(result.layoutWarningsTruncated).toBeUndefined();
+  });
+
+  test("leaves warnings and the truncation count untouched when all survive", () => {
+    const obs = androidFixture();
+    obs.layoutWarnings = [warningAt(HEADER_BOUNDS)];
+    obs.layoutWarningsTruncated = 137;
+    // Full-screen region prunes nothing at HEADER, so the warning survives.
+    const result = applyObserveScopeExperiments(obs, {
+      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 1 },
+    });
+    expect(result.layoutWarnings).toHaveLength(1);
+    expect(result.layoutWarningsTruncated).toBe(137);
+  });
+
+  test("is pure — does not mutate the caller's layoutWarnings", () => {
+    const obs = androidFixture();
+    obs.layoutWarnings = [warningAt(HEADER_BOUNDS), warningAt(NAV_BAR_BOUNDS)];
+    const before = JSON.stringify(obs);
+    applyObserveScopeExperiments(obs, {
+      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
+    });
+    expect(JSON.stringify(obs)).toBe(before);
+  });
+});

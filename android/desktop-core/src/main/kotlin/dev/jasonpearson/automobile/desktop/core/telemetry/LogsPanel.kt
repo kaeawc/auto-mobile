@@ -30,7 +30,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.semantics.Role
@@ -120,6 +124,19 @@ fun filterLogs(
 }
 
 /**
+ * Whether a scroll delta should clear the panel's tail-follow intent. True only for a **user**
+ * scroll ([NestedScrollSource.UserInput] — touch drag or mouse wheel) moving toward older rows
+ * (positive `y`, i.e. content moving down / away from the tail).
+ *
+ * Deliberately excludes the panel's own programmatic re-anchor scrolls, which dispatch as
+ * [NestedScrollSource.SideEffect]: the upward `scrollToItem` after a filter narrows the list must
+ * not be mistaken for the user scrolling away, or tail-follow would defeat itself. Kept pure so the
+ * discrimination is unit-testable without Compose.
+ */
+fun clearsTailFollow(available: Offset, source: NestedScrollSource): Boolean =
+  source == NestedScrollSource.UserInput && available.y > 0f
+
+/**
  * Upper bound on retained live log rows. A high-volume device can stream logs indefinitely; without
  * a cap the buffer — and the per-append [filterLogs] cost over it — would grow until the UI stalls.
  */
@@ -169,6 +186,10 @@ fun connectionStatusText(state: ConnectionState): String? =
  * message becomes reachable. Selection is held here in composition and keyed on [activeDeviceId],
  * so it is inherently pane-local (each pane composes its own [LogsPanel]) and clears on a device
  * switch.
+ *
+ * [onFollowTailChange] observes tail-follow intent transitions (true = chasing the newest row). It
+ * is an observation seam — tests assert the intent clears on the first user upward-scroll delta
+ * rather than only when the scroll settles — and stays a no-op for real callers.
  */
 @Composable
 fun LogsPanel(
@@ -177,6 +198,7 @@ fun LogsPanel(
   platform: LogPlatform = LogPlatform.Android,
   maxRows: Int = MAX_LOG_ROWS,
   modifier: Modifier = Modifier,
+  onFollowTailChange: (Boolean) -> Unit = {},
 ) {
   val colors = SharedTheme.globalColors
   val logs = remember(activeDeviceId) { mutableStateListOf<TelemetryDisplayEvent.Log>() }
@@ -208,6 +230,19 @@ fun LogsPanel(
   // carry its scroll offset (and suppress auto-follow) into the next device.
   val listState = remember(activeDeviceId) { LazyListState() }
 
+  // Clear follow intent on the first user upward-scroll delta (see [clearsTailFollow]), so a row
+  // arriving mid-fling no longer yanks the viewport back to the tail. The settle observer below
+  // re-arms it once the user returns to the bottom. Remembered per device, like [listState].
+  val tailFollowScrollConnection =
+    remember(activeDeviceId) {
+      object : NestedScrollConnection {
+        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+          if (clearsTailFollow(available, source)) followTail = false
+          return Offset.Zero
+        }
+      }
+    }
+
   LaunchedEffect(telemetryPushClient, activeDeviceId, maxRows) {
     val client = telemetryPushClient ?: return@LaunchedEffect
     client.telemetryEvents.collect { event ->
@@ -235,14 +270,17 @@ fun LogsPanel(
     client.connectionState.collect { connectionState = it }
   }
 
-  // Re-derive follow intent whenever a scroll settles: we follow iff the viewport rests at the
-  // bottom. A user drag that stops mid-list clears it; reaching the bottom (or a programmatic
-  // tail scroll) re-arms it. Filter changes do not scroll, so they never clear the intent. Keyed
-  // on activeDeviceId so a device switch restarts the observer against the reset follow state.
+  // Re-arm follow intent whenever a scroll settles: we follow iff the viewport now rests at the
+  // bottom. Immediate clearing on a user upward scroll is handled by [tailFollowScrollConnection];
+  // this settle pass re-arms once the user returns to the bottom. Filter changes do not scroll, so
+  // they never clear the intent. Keyed on activeDeviceId so a device switch restarts the observer.
   LaunchedEffect(listState, activeDeviceId) {
     snapshotFlow { listState.isScrollInProgress }
       .collect { inProgress -> if (!inProgress) followTail = !listState.canScrollForward }
   }
+
+  // Surface follow-intent transitions to the caller (observation seam; see [onFollowTailChange]).
+  LaunchedEffect(followTail) { onFollowTailChange(followTail) }
 
   // Follow the tail when following: fires on every appended row (via appendCount, which advances
   // even at the buffer cap) and on filter/platform changes (which re-anchor the list), so the
@@ -289,7 +327,10 @@ fun LogsPanel(
         Text(message, fontSize = 12.sp, color = colors.text.normal.copy(alpha = 0.4f))
       }
     } else {
-      LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+      LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize().nestedScroll(tailFollowScrollConnection),
+      ) {
         items(
           count = filtered.size,
           key = { index ->

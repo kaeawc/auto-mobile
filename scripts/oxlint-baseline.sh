@@ -87,7 +87,10 @@ extract_counts() {
       const counts = new Map();
       for (const d of (report.diagnostics || [])) {
         if (!codes.has(d.code)) { continue; }
-        const key = d.filename + "\t" + d.code;
+        // Normalize path separators so the committed baseline (forward slashes)
+        // matches regardless of the OS oxlint ran on (Windows emits backslashes).
+        const file = String(d.filename).replace(/\\/g, "/");
+        const key = file + "\t" + d.code;
         counts.set(key, (counts.get(key) || 0) + 1);
       }
       const lines = [...counts.entries()].map(([k, n]) => n + "\t" + k).sort();
@@ -98,31 +101,44 @@ extract_counts() {
 
 # Compare current counts against a baseline PER (file, rule). Emits one
 # "<delta> new in <file>  <code>" line for every key whose current count exceeds
-# the baseline (or that the baseline lacks). Both inputs are the
-# "<count>\t<file>\t<code>" text produced by extract_counts. This is the single
-# source of truth for "did anything get worse" -- used by BOTH the update
-# grow-guard and the check gate, so a count-neutral SWAP (fix one key, add a
-# different one) is rejected, not just an increase in the aggregate total.
+# the baseline (or that the baseline lacks). This is the single source of truth
+# for "did anything get worse" -- used by BOTH the update grow-guard and the
+# check gate, so a count-neutral SWAP (fix one key, add a different one) is
+# rejected, not just an increase in the aggregate total.
+#
+# Both blobs arrive on STDIN, baseline first, separated by a sentinel line, NOT
+# as argv: the combined text is tens of KB and passing it as command-line
+# arguments overflows the OS argument-length limit on Windows ("Argument list too
+# long"). Blank and "#"-comment lines are ignored, so a raw baseline file works.
 new_or_increased() {
   bun -e '
-    const parse = s => {
-      const m = new Map();
-      for (const line of s.split("\n")) {
-        if (!line.trim()) { continue; }
-        const [count, file, code] = line.split("\t");
-        m.set(file + "\t" + code, Number(count));
+    let raw = "";
+    process.stdin.on("data", c => raw += c).on("end", () => {
+      const [baseText, curText = ""] = raw.split("\n@@@OXLINT_SEP@@@\n");
+      const parse = s => {
+        const m = new Map();
+        for (const line of s.split("\n")) {
+          if (!line.trim() || line[0] === "#") { continue; }
+          const [count, file, code] = line.split("\t");
+          m.set(file + "\t" + code, Number(count));
+        }
+        return m;
+      };
+      const base = parse(baseText);
+      const cur = parse(curText);
+      const news = [];
+      for (const [key, n] of cur) {
+        const allowed = base.get(key) || 0;
+        if (n > allowed) { news.push((n - allowed) + " new in " + key.replace("\t", "  ")); }
       }
-      return m;
-    };
-    const base = parse(process.argv[1]);
-    const cur = parse(process.argv[2]);
-    const news = [];
-    for (const [key, n] of cur) {
-      const allowed = base.get(key) || 0;
-      if (n > allowed) { news.push((n - allowed) + " new in " + key.replace("\t", "  ")); }
-    }
-    process.stdout.write(news.join("\n"));
-  ' "$1" "$2"
+      process.stdout.write(news.join("\n"));
+    });
+  '
+}
+
+# Feed two count blobs to new_or_increased over stdin with the sentinel between.
+compare_counts() {
+  printf '%s\n@@@OXLINT_SEP@@@\n%s' "$1" "$2" | new_or_increased
 }
 
 report_json="$(run_oxlint_json)"
@@ -135,7 +151,7 @@ if [[ "$MODE" == "update" ]]; then
     # count-neutral swap (fix one key, add a different one) would rewrite the
     # baseline and the subsequent check would then accept the new defect.
     prev_counts="$(grep -vE '^#|^$' "$BASELINE" || true)"
-    grew="$(new_or_increased "$prev_counts" "$current")"
+    grew="$(compare_counts "$prev_counts" "$current")"
     if [[ -n "$grew" ]]; then
       echo "refusing to grow the baseline: a (file, rule) count increased or a new pair appeared:" >&2
       printf '%s\n' "$grew" >&2
@@ -163,7 +179,7 @@ fi
 # The baseline is authoritative for what is tolerated; a lower current count is
 # fine (and should be pruned with --update).
 baseline_counts="$(grep -vE '^#|^$' "$BASELINE" || true)"
-new_violations="$(new_or_increased "$baseline_counts" "$current")"
+new_violations="$(compare_counts "$baseline_counts" "$current")"
 
 if [[ -n "$new_violations" ]]; then
   echo "oxlint ratchet: NEW violation(s) of a gated rule -- fix them or (rarely) record with --update:" >&2

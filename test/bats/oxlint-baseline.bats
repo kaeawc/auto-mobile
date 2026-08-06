@@ -116,6 +116,20 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "path separators are normalized so a Windows (backslash) report matches a forward-slash baseline" {
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  # Same violations, but reported with Windows backslash paths (as oxlint may emit
+  # on windows-latest). Without normalization every key would read as NEW.
+  local win='printf "%s" "{\"diagnostics\":[
+    {\"code\":\"eslint(complexity)\",\"filename\":\"src\\\\a.ts\"},
+    {\"code\":\"eslint(max-depth)\",\"filename\":\"src\\\\a.ts\"},
+    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src\\\\b.ts\"}
+  ]}"'
+  OXLINT_JSON_CMD="$win" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new violations"* ]]
+}
+
 @test "check fails closed when the baseline is missing" {
   OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
   [ "$status" -eq 1 ]

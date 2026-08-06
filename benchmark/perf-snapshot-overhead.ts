@@ -44,8 +44,20 @@ const WINDOW_ENV = "AUTOMOBILE_OBSERVE_PERF_WINDOW_MS";
 const deviceId = process.env.BENCH_DEVICE_ID ?? "emulator-5554";
 const iterations = Number(process.env.BENCH_ITERS ?? 30);
 const warmup = Number(process.env.BENCH_WARMUP ?? 8);
+// Paired OFF/ON trials repeated this many times, ON windows alternating
+// direction each pass, to counterbalance execution-order drift.
+const repeats = Math.max(1, Number(process.env.BENCH_REPEATS ?? 1));
+// Only the supported window range (matching observePerfSnapshotConfig's clamp),
+// so a cell label can't advertise a window the production config would reject.
+const WINDOW_MIN = 1000;
+const WINDOW_MAX = 30000;
 const windows = (process.env.BENCH_WINDOWS ?? "1000,2000,5000,10000,30000")
-  .split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n));
+  .split(",")
+  .map(s => Number(s.trim()))
+  .filter(n => Number.isInteger(n) && n >= WINDOW_MIN && n <= WINDOW_MAX);
+if (windows.length === 0) {
+  throw new Error(`BENCH_WINDOWS must list integers in [${WINDOW_MIN}, ${WINDOW_MAX}]ms`);
+}
 
 const device: BootedDevice = { deviceId, name: deviceId, platform: "android" };
 const adb = defaultAdbClientFactory.create(device);
@@ -112,6 +124,8 @@ async function navigateStep(): Promise<void> {
 // ---- one matrix cell ----------------------------------------------------
 
 interface CellResult {
+  /** 0-based execution order across the whole run (records the counterbalancing). */
+  order: number;
   label: string;
   enabled: boolean;
   windowMs: number | null;
@@ -131,6 +145,7 @@ function applyEnv(enabled: boolean, windowMs: number | null): void {
 }
 
 async function runCell(
+  order: number,
   label: string,
   enabled: boolean,
   windowMs: number | null,
@@ -173,7 +188,7 @@ async function runCell(
     }
   }
   process.stdout.write(`done (median ${r1(median(observeMs))}ms)`);
-  return { label, enabled, windowMs, observeMs, fpsP50Samples, lastSnapshot };
+  return { order, label, enabled, windowMs, observeMs, fpsP50Samples, lastSnapshot };
 }
 
 // ---- pure snapshot() micro-benchmark ------------------------------------
@@ -211,36 +226,38 @@ function microBenchSnapshot(): MicroResult[] {
 // ---- reporting ----------------------------------------------------------
 
 function report(cells: CellResult[], micro: MicroResult[]): void {
-  const baseline = cells.find(c => !c.enabled)!;
-  const baseMedian = median(baseline.observeMs);
+  const byOrder = new Map(cells.map(c => [c.order, c]));
+  const offMedians = cells.filter(c => !c.enabled).map(c => median(c.observeMs));
+  const offMedian = offMedians.length ? median(offMedians) : 0;
 
-  console.log("\n\n=== observe wall-clock: OFF vs ON across windows ===");
-  console.log("iterations/cell:", iterations, " warmup:", warmup, " device:", deviceId);
+  console.log("\n\n=== observe wall-clock: paired OFF/ON, per-window (drift-counterbalanced) ===");
+  console.log("iterations/cell:", iterations, " warmup:", warmup, " repeats:", repeats, " device:", deviceId);
+  console.log(`OFF baseline median across ${offMedians.length} cell(s): ${r1(offMedian)}ms`);
   console.log("─".repeat(92));
   console.log(
-    "cell".padEnd(16), "median(ms)".padStart(11), "p95(ms)".padStart(9),
-    "Δmedian".padStart(9), "Δ%".padStart(7), "fps p50/p95/p99".padStart(20),
-    "samples".padStart(8), "fpsP50 σ".padStart(9)
+    "window".padEnd(10), "ON median(ms)".padStart(13), "paired Δ".padStart(10), "Δ%".padStart(7),
+    "fps p50/p95/p99".padStart(20), "samples".padStart(8), "fpsP50 σ".padStart(9)
   );
   console.log("─".repeat(92));
-  for (const c of cells) {
-    const med = median(c.observeMs);
-    const p95 = percentile(sortedCopy(c.observeMs), 95);
-    const dMed = med - baseMedian;
-    const dPct = baseMedian > 0 ? (dMed / baseMedian) * 100 : 0;
-    const snap = c.lastSnapshot as { fps?: { p50: number; p90: number; p95: number; p99: number }; sampleCount?: number } | null;
-    const fpsStr = snap?.fps ? `${r1(snap.fps.p50)}/${r1(snap.fps.p95)}/${r1(snap.fps.p99)}` : "—";
-    const samples = snap?.sampleCount ?? 0;
-    const sigma = c.enabled ? r2(stdev(c.fpsP50Samples)) : 0;
+  for (const w of windows) {
+    const on = cells.filter(c => c.enabled && c.windowMs === w);
+    if (on.length === 0) { continue; }
+    // Each ON cell's paired OFF is the cell run immediately before it.
+    const pairedDeltas = on.map(c => median(c.observeMs) - median((byOrder.get(c.order - 1) ?? c).observeMs));
+    const dMed = median(pairedDeltas);
+    const onMed = median(on.flatMap(c => c.observeMs));
+    const dPct = offMedian > 0 ? (dMed / offMedian) * 100 : 0;
+    const last = on[on.length - 1].lastSnapshot as { fps?: { p50: number; p95: number; p99: number }; sampleCount?: number } | null;
+    const fpsStr = last?.fps ? `${r1(last.fps.p50)}/${r1(last.fps.p95)}/${r1(last.fps.p99)}` : "—";
+    const sigma = r2(stdev(on.flatMap(c => c.fpsP50Samples)));
     console.log(
-      c.label.padEnd(16),
-      r1(med).toString().padStart(11),
-      r1(p95).toString().padStart(9),
-      (c.enabled ? r1(dMed).toString() : "—").padStart(9),
-      (c.enabled ? r1(dPct).toString() : "—").padStart(7),
+      String(w).padEnd(10),
+      r1(onMed).toString().padStart(13),
+      r1(dMed).toString().padStart(10),
+      r1(dPct).toString().padStart(7),
       fpsStr.padStart(20),
-      (c.enabled ? samples.toString() : "—").padStart(8),
-      (c.enabled ? sigma.toString() : "—").padStart(9)
+      (last?.sampleCount ?? 0).toString().padStart(8),
+      sigma.toString().padStart(9)
     );
   }
   console.log("─".repeat(92));
@@ -266,10 +283,29 @@ async function main(): Promise<void> {
   // only for the ON cells (see runCell), monitoring the foreground package.
   const sampler = new PerformanceMonitor(undefined, defaultAdbClientFactory, () => new NoOpPusher());
 
+  // Global warm-up so the very first paired OFF baseline isn't measured cold
+  // (cold-start observe latency would otherwise skew that pair's delta).
+  process.stdout.write("warming up … ");
+  for (let i = 0; i < warmup; i += 1) {
+    await navigateStep();
+    await new RealObserveScreen(device).execute();
+  }
+  process.stdout.write("done");
+
+  // Counterbalanced matrix: each ON window is measured against a FRESH OFF
+  // baseline run immediately before it (paired), so slow drift — thermal state,
+  // caches, navCounter — largely cancels in the per-window delta rather than
+  // masquerading as a window-size effect. The whole matrix repeats `repeats`
+  // times with the ON windows alternating direction each pass, and every cell's
+  // execution `order` is recorded so the raw output shows the interleaving.
   const cells: CellResult[] = [];
-  cells.push(await runCell("OFF", false, null, sampler));
-  for (const w of windows) {
-    cells.push(await runCell(`ON@${w}`, true, w, sampler));
+  let order = 0;
+  for (let rep = 0; rep < repeats; rep += 1) {
+    const pass = rep % 2 === 0 ? windows : [...windows].reverse();
+    for (const w of pass) {
+      cells.push(await runCell(order++, "OFF", false, null, sampler));
+      cells.push(await runCell(order++, `ON@${w}`, true, w, sampler));
+    }
   }
   sampler.stop();
 
@@ -278,7 +314,7 @@ async function main(): Promise<void> {
 
   const outPath = process.env.BENCH_OUT ?? "scratch/perf-snapshot-benchmark.json";
   try {
-    writeFileSync(outPath, JSON.stringify({ deviceId, iterations, warmup, windows, cells, micro }, null, 2));
+    writeFileSync(outPath, JSON.stringify({ deviceId, iterations, warmup, repeats, windows, cells, micro }, null, 2));
     console.log(`\nRaw results → ${outPath}`);
   } catch {
     // scratch/ may not exist in every checkout; the console table is the primary output.

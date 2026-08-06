@@ -253,6 +253,18 @@ export class PerformanceMonitor {
   }
 
   /**
+   * True if an in-flight sample still belongs to the currently-monitored app:
+   * the same `MonitoredDevice` object is registered for its id AND its package
+   * has not switched since sampling began. Async collection can outlive a
+   * package switch or `stopMonitoring()`, and such a stale sample must not touch
+   * the current device's caches, stream, or buffer.
+   */
+  private isSampleCurrent(device: MonitoredDevice, samplingPackage: string): boolean {
+    return this.monitoredDevices.get(device.deviceId) === device &&
+      device.packageName === samplingPackage;
+  }
+
+  /**
    * Get the number of devices currently being monitored.
    */
   getMonitoredDeviceCount(): number {
@@ -325,23 +337,22 @@ export class PerformanceMonitor {
     server: PerformancePushSocketServer
   ): Promise<void> {
     // Identity captured before any await: if the monitored package switches (or
-    // monitoring stops) while these adb calls are in flight, the buffer was
-    // already cleared and this sample must NOT repopulate it with the old app.
+    // monitoring stops) while these adb calls are in flight, this whole sample
+    // belongs to the old app and must not touch the current device's caches,
+    // stream, or buffer.
     const samplingPackage = device.packageName;
 
     // Always collect fast metrics (gfxinfo)
     const gfxPromise = this.collectGfxMetrics(device);
 
-    // Collect medium metrics (CPU) if interval elapsed or first collection
+    // Collect medium metrics (CPU) if interval elapsed or first collection. The
+    // collect calls do NOT mutate `device` — caches/timestamps are updated only
+    // after the post-await identity check below.
     const shouldCollectCpu =
       device.lastMediumTick === 0 ||
       now - device.lastMediumTick >= PerformanceMonitor.MEDIUM_INTERVAL_MS;
     const cpuPromise = shouldCollectCpu
-      ? this.collectCpuMetrics(device).then(cpu => {
-        device.lastMediumTick = now;
-        device.cachedCpu = cpu;
-        return cpu;
-      })
+      ? this.collectCpuMetrics(device)
       : Promise.resolve(device.cachedCpu);
 
     // Collect slow metrics (memory) if interval elapsed or first collection
@@ -349,16 +360,25 @@ export class PerformanceMonitor {
       device.lastSlowTick === 0 ||
       now - device.lastSlowTick >= PerformanceMonitor.SLOW_INTERVAL_MS;
     const memoryPromise = shouldCollectMemory
-      ? this.collectMemoryMetrics(device).then(mem => {
-        device.lastSlowTick = now;
-        device.cachedMemory = mem;
-        return mem;
-      })
+      ? this.collectMemoryMetrics(device)
       : Promise.resolve(device.cachedMemory);
 
     const [gfx, cpu, memory] = await Promise.all([gfxPromise, cpuPromise, memoryPromise]);
 
+    // Drop the whole sample if monitoring changed apps or stopped mid-collection.
+    if (!this.isSampleCurrent(device, samplingPackage)) {
+      return;
+    }
+
     device.lastFastTick = now;
+    if (shouldCollectCpu) {
+      device.lastMediumTick = now;
+      device.cachedCpu = cpu;
+    }
+    if (shouldCollectMemory) {
+      device.lastSlowTick = now;
+      device.cachedMemory = memory;
+    }
 
     // Update cached FPS/frame time when we have valid data from actual frames
     // When app is idle (no frames rendered), use cached values instead of showing 0
@@ -412,7 +432,6 @@ export class PerformanceMonitor {
       fps: gfx.fps,
       frameTimeMs: gfx.frameTimeMs,
       touchLatencyMs: rawTouchLatencyMs,
-      samplingPackage,
     });
   }
 
@@ -453,16 +472,13 @@ export class PerformanceMonitor {
     // Identity captured before any await (see sampleAndroidDevice).
     const samplingPackage = device.packageName;
 
-    // Collect medium metrics (CPU) if interval elapsed or first collection
+    // Collect metrics without mutating `device`; caches update only after the
+    // post-await identity check (see sampleAndroidDevice).
     const shouldCollectCpu =
       device.lastMediumTick === 0 ||
       now - device.lastMediumTick >= PerformanceMonitor.MEDIUM_INTERVAL_MS;
     const cpuPromise = shouldCollectCpu
-      ? this.collectIOSCpuMetrics(device).then(cpu => {
-        device.lastMediumTick = now;
-        device.cachedCpu = cpu;
-        return cpu;
-      })
+      ? this.collectIOSCpuMetrics(device)
       : Promise.resolve(device.cachedCpu);
 
     // Collect slow metrics (memory) if interval elapsed or first collection
@@ -470,16 +486,24 @@ export class PerformanceMonitor {
       device.lastSlowTick === 0 ||
       now - device.lastSlowTick >= PerformanceMonitor.SLOW_INTERVAL_MS;
     const memoryPromise = shouldCollectMemory
-      ? this.collectIOSMemoryMetrics(device).then(mem => {
-        device.lastSlowTick = now;
-        device.cachedMemory = mem;
-        return mem;
-      })
+      ? this.collectIOSMemoryMetrics(device)
       : Promise.resolve(device.cachedMemory);
 
     const [cpu, memory] = await Promise.all([cpuPromise, memoryPromise]);
 
+    if (!this.isSampleCurrent(device, samplingPackage)) {
+      return;
+    }
+
     device.lastFastTick = now;
+    if (shouldCollectCpu) {
+      device.lastMediumTick = now;
+      device.cachedCpu = cpu;
+    }
+    if (shouldCollectMemory) {
+      device.lastSlowTick = now;
+      device.cachedMemory = memory;
+    }
 
     // iOS doesn't provide FPS/frame time metrics without in-app SDK
     // We report null to indicate "not available" rather than assuming values
@@ -507,7 +531,6 @@ export class PerformanceMonitor {
       fps,
       frameTimeMs,
       touchLatencyMs: null,
-      samplingPackage,
     });
   }
 
@@ -530,13 +553,13 @@ export class PerformanceMonitor {
     jankFrames: number | null,
     server: PerformancePushSocketServer,
     // Raw per-interval readings for the windowed buffer only (null on an idle
-    // no-frame tick), kept separate from the cached/fabricated stream values
-    // above, plus the monitored package captured before sampling began.
+    // no-frame tick), kept separate from the cached/fabricated stream values.
+    // Callers guarantee (via isSampleCurrent) that the sample still belongs to
+    // the currently-monitored app before calling.
     raw: {
       fps: number | null;
       frameTimeMs: number | null;
       touchLatencyMs: number | null;
-      samplingPackage: string;
     }
   ): void {
     const data: LivePerformanceData = {
@@ -555,24 +578,16 @@ export class PerformanceMonitor {
     // Feed the windowed buffer at this single fan-out point so both Android
     // (dumpsys) and iOS (host CPU/mem) samples land in the observe snapshot.
     // Frame/touch fields use the RAW per-interval readings so idle no-frame
-    // ticks stay null and don't pin a stale reading in the window. Guard against
-    // the async race: only record if this device is still monitored under the
-    // same package we started sampling for (a mid-sample switch/stop already
-    // cleared the buffer and must not be repopulated with the old app's data).
-    const stillCurrent =
-      this.monitoredDevices.get(device.deviceId) === device &&
-      device.packageName === raw.samplingPackage;
-    if (stillCurrent) {
-      this.perfWindowBuffer.record(device.deviceId, {
-        t: now,
-        fps: raw.fps,
-        frameTimeMs: raw.frameTimeMs,
-        jankFrames: metrics.jankFrames,
-        touchLatencyMs: raw.touchLatencyMs,
-        cpuUsagePercent: metrics.cpuUsagePercent,
-        memoryUsageMb: metrics.memoryUsageMb,
-      });
-    }
+    // ticks stay null and don't pin a stale reading in the window.
+    this.perfWindowBuffer.record(device.deviceId, {
+      t: now,
+      fps: raw.fps,
+      frameTimeMs: raw.frameTimeMs,
+      jankFrames: metrics.jankFrames,
+      touchLatencyMs: raw.touchLatencyMs,
+      cpuUsagePercent: metrics.cpuUsagePercent,
+      memoryUsageMb: metrics.memoryUsageMb,
+    });
 
     // Emit telemetry events when metric health status changes
     this.emitPerformanceTelemetry(device, now, metrics, data.health);

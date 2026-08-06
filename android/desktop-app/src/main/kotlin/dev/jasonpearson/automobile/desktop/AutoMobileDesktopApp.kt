@@ -231,8 +231,7 @@ fun AutoMobileDesktopApp(
 private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
   when (tool) {
     Tool.Logs -> LogsFacet(column)
-    // Storage works on both platforms: iOS key-value mutations now carry the platform through to
-    // the
+    // Storage works on both platforms now that iOS key-value mutations carry the platform to the
     // daemon and target the correct iOS device (#4708).
     Tool.Storage -> StorageFacet(column)
     // Network reads per-device via the getNetworkGraph MCP tool call (deviceId is an argument),

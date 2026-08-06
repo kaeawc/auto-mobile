@@ -12,12 +12,9 @@ class DeviceLockStatePollTest {
     // and must be OMITTED, not coerced to false — otherwise a transient probe gap force-unlocks it.
     val payload =
       """
-      {"totalCount":2,"androidCount":2,"iosCount":0,"virtualCount":2,"physicalCount":0,
-       "lastUpdated":"x","devices":[
-         {"name":"Pixel 8","platform":"android","deviceId":"emulator-5554",
-          "source":"local","isVirtual":true,"status":"booted","locked":true},
-         {"name":"Pixel 7","platform":"android","deviceId":"emulator-5556",
-          "source":"local","isVirtual":true,"status":"booted"}]}
+      {"lastUpdated":"x","lockStates":[
+         {"deviceId":"emulator-5554","locked":true},
+         {"deviceId":"emulator-5556"}]}
       """
         .trimIndent()
     assertEquals(mapOf("emulator-5554" to true), parseDeviceLockStates(payload))
@@ -27,10 +24,7 @@ class DeviceLockStatePollTest {
   fun `maps an explicit locked false so a known-unlocked device unlocks its pane`() {
     val payload =
       """
-      {"totalCount":1,"androidCount":1,"iosCount":0,"virtualCount":1,"physicalCount":0,
-       "lastUpdated":"x","devices":[
-         {"name":"Pixel 8","platform":"android","deviceId":"emulator-5554",
-          "source":"local","isVirtual":true,"status":"booted","locked":false}]}
+      {"lastUpdated":"x","lockStates":[{"deviceId":"emulator-5554","locked":false}]}
       """
         .trimIndent()
     assertEquals(mapOf("emulator-5554" to false), parseDeviceLockStates(payload))

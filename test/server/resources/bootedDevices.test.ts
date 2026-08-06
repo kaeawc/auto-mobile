@@ -3,7 +3,7 @@ import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { setDeviceManager, setDeviceLockProbe, BootedDevicesResourceContent } from "../../../src/server/bootedDeviceResources";
+import { setDeviceManager, setDeviceLockProbe, BootedDevicesResourceContent, DeviceLockStatesResourceContent } from "../../../src/server/bootedDeviceResources";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
@@ -374,6 +374,66 @@ describe("MCP Booted Device Resources", () => {
 
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
       expect(data.devices[0].locked).toBeUndefined();
+    });
+
+    test("lock-states resource surfaces per-device lock from the probe", async function() {
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
+      // Only the first device is locked; the probe reports the rest unlocked.
+      setDeviceLockProbe(async device => device.deviceId === mockAndroidDevice1.deviceId);
+
+      const { client } = fixture.getContext();
+
+      const readResourceResponseSchema = z.object({
+        contents: z.array(z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+          blob: z.string().optional()
+        }))
+      });
+
+      const result = await client.request({
+        method: "resources/read",
+        params: {
+          uri: "automobile:devices/lockStates"
+        }
+      }, readResourceResponseSchema);
+
+      const data: DeviceLockStatesResourceContent = JSON.parse(result.contents[0].text!);
+      const locked = data.lockStates.find(s => s.deviceId === mockAndroidDevice1.deviceId);
+      const unlocked = data.lockStates.find(s => s.deviceId === mockAndroidDevice2.deviceId);
+      expect(locked?.locked).toBe(true);
+      expect(unlocked?.locked).toBe(false);
+      // A valid ISO 8601 timestamp is stamped.
+      expect(() => new Date(data.lastUpdated)).not.toThrow();
+    });
+
+    test("lock-states resource omits lock for a device the probe cannot read", async function() {
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
+      setDeviceLockProbe(async () => undefined);
+
+      const { client } = fixture.getContext();
+
+      const readResourceResponseSchema = z.object({
+        contents: z.array(z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+          blob: z.string().optional()
+        }))
+      });
+
+      const result = await client.request({
+        method: "resources/read",
+        params: {
+          uri: "automobile:devices/lockStates"
+        }
+      }, readResourceResponseSchema);
+
+      const data: DeviceLockStatesResourceContent = JSON.parse(result.contents[0].text!);
+      expect(data.lockStates).toHaveLength(1);
+      expect(data.lockStates[0].deviceId).toBe(mockIosDevice1.deviceId);
+      expect(data.lockStates[0].locked).toBeUndefined();
     });
 
     test("should include pool status when daemon is initialized", async function() {

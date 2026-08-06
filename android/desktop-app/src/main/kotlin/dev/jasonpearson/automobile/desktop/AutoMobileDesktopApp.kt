@@ -23,8 +23,8 @@ import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
-import dev.jasonpearson.automobile.desktop.core.workspace.BOOTED_DEVICES_RESOURCE_URI
 import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
+import dev.jasonpearson.automobile.desktop.core.workspace.DEVICE_LOCK_STATES_RESOURCE_URI
 import dev.jasonpearson.automobile.desktop.core.workspace.DaemonEmulatorControlExecutor
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
@@ -274,7 +274,7 @@ fun AutoMobileDesktopApp(
             when (
               val result =
                 withContext(Dispatchers.IO) {
-                  resourceClient.readResource(BOOTED_DEVICES_RESOURCE_URI)
+                  resourceClient.readResource(DEVICE_LOCK_STATES_RESOURCE_URI)
                 }
             ) {
               is ResourceReadResult.Success -> parseDeviceLockStates(result.content)

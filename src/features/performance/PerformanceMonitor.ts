@@ -80,6 +80,12 @@ interface RawJankCounters {
 interface MonitoredDevice {
   deviceId: string;
   packageName: string;
+  /**
+   * Monotonically increasing token bumped on every package switch. Lets an
+   * in-flight sample detect an A→B→A sequence that a package-name comparison
+   * alone would miss (the name is back to A, but it's a different session).
+   */
+  monitoringGeneration: number;
   platform: "android" | "ios";
   lastFastTick: number;
   lastMediumTick: number;
@@ -211,6 +217,9 @@ export class PerformanceMonitor {
         existing.lastMediumTick = 0;
         existing.lastSlowTick = 0;
         existing.prevJankCounters = null;
+        // Bump the generation so any A→B→A in-flight sample is rejected even
+        // though the package name matches again.
+        existing.monitoringGeneration += 1;
         // Drop the previous app's windowed samples so the next observe snapshot
         // cannot attribute app A's fps/cpu/memory to app B (buffer is keyed by
         // deviceId, so a package switch must reset it).
@@ -223,6 +232,7 @@ export class PerformanceMonitor {
     this.monitoredDevices.set(deviceId, {
       deviceId,
       packageName,
+      monitoringGeneration: 0,
       platform,
       lastFastTick: 0,
       lastMediumTick: 0,
@@ -265,9 +275,10 @@ export class PerformanceMonitor {
    * package switch or `stopMonitoring()`, and such a stale sample must not touch
    * the current device's caches, stream, or buffer.
    */
-  private isSampleCurrent(device: MonitoredDevice, samplingPackage: string): boolean {
+  private isSampleCurrent(device: MonitoredDevice, samplingPackage: string, samplingGeneration: number): boolean {
     return this.monitoredDevices.get(device.deviceId) === device &&
-      device.packageName === samplingPackage;
+      device.packageName === samplingPackage &&
+      device.monitoringGeneration === samplingGeneration;
   }
 
   /**
@@ -347,6 +358,7 @@ export class PerformanceMonitor {
     // belongs to the old app and must not touch the current device's caches,
     // stream, or buffer.
     const samplingPackage = device.packageName;
+    const samplingGeneration = device.monitoringGeneration;
 
     // Always collect fast metrics (gfxinfo)
     const gfxPromise = this.collectGfxMetrics(device);
@@ -372,7 +384,7 @@ export class PerformanceMonitor {
     const [gfx, cpu, memory] = await Promise.all([gfxPromise, cpuPromise, memoryPromise]);
 
     // Drop the whole sample if monitoring changed apps or stopped mid-collection.
-    if (!this.isSampleCurrent(device, samplingPackage)) {
+    if (!this.isSampleCurrent(device, samplingPackage, samplingGeneration)) {
       return;
     }
 
@@ -484,6 +496,7 @@ export class PerformanceMonitor {
   ): Promise<void> {
     // Identity captured before any await (see sampleAndroidDevice).
     const samplingPackage = device.packageName;
+    const samplingGeneration = device.monitoringGeneration;
 
     // Collect metrics without mutating `device`; caches update only after the
     // post-await identity check (see sampleAndroidDevice).
@@ -504,7 +517,7 @@ export class PerformanceMonitor {
 
     const [cpu, memory] = await Promise.all([cpuPromise, memoryPromise]);
 
-    if (!this.isSampleCurrent(device, samplingPackage)) {
+    if (!this.isSampleCurrent(device, samplingPackage, samplingGeneration)) {
       return;
     }
 

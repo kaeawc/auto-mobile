@@ -25,7 +25,7 @@ import { defaultAdbClientFactory } from "../src/utils/android-cmdline-tools/AdbC
 import { getPerfWindowBuffer, PerfWindowBuffer, PerfSample } from "../src/features/performance/PerfWindowBuffer";
 import { PerformanceMonitor, PerformanceDataPusher } from "../src/features/performance/PerformanceMonitor";
 import type { LivePerformanceData } from "../src/daemon/performancePushSocketServer";
-import type { BootedDevice } from "../src/models";
+import type { BootedDevice, PerfSnapshot } from "../src/models";
 import { writeFileSync } from "fs";
 
 /**
@@ -46,11 +46,23 @@ const ENABLE_ALIAS = "AUTO_MOBILE_OBSERVE_PERF_SNAPSHOT";
 const WINDOW_ALIAS = "AUTO_MOBILE_OBSERVE_PERF_WINDOW_MS";
 
 const deviceId = process.env.BENCH_DEVICE_ID ?? "emulator-5554";
-const iterations = Number(process.env.BENCH_ITERS ?? 30);
-const warmup = Number(process.env.BENCH_WARMUP ?? 8);
+
+/** Parse an integer env var with a default, rejecting NaN/fractional/out-of-range. */
+function intEnv(name: string, def: number, min: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") { return def; }
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min) {
+    throw new Error(`${name} must be an integer >= ${min} (got ${JSON.stringify(raw)})`);
+  }
+  return n;
+}
+
+const iterations = intEnv("BENCH_ITERS", 30, 1);
+const warmup = intEnv("BENCH_WARMUP", 8, 0);
 // Paired OFF/ON trials repeated this many times, ON windows alternating
 // direction each pass, to counterbalance execution-order drift.
-const repeats = Math.max(1, Number(process.env.BENCH_REPEATS ?? 1));
+const repeats = intEnv("BENCH_REPEATS", 1, 1);
 // Only the supported window range (matching observePerfSnapshotConfig's clamp),
 // so a cell label can't advertise a window the production config would reject.
 const WINDOW_MIN = 1000;
@@ -137,7 +149,7 @@ interface CellResult {
   windowMs: number | null;
   observeMs: number[];
   fpsP50Samples: number[];
-  lastSnapshot: unknown | null;
+  lastSnapshot: PerfSnapshot | null;
 }
 
 function applyEnv(enabled: boolean, windowMs: number | null): void {
@@ -196,6 +208,11 @@ async function runCell(
     await new RealObserveScreen(device).execute();
     if (i + 1 >= warmup && performance.now() - fillStart >= minFillMs) { break; }
   }
+  // Never measure a partially-filled window: if the cap was hit first, the
+  // labeled window would misrepresent the sampled window, so fail loudly.
+  if (minFillMs > 0 && performance.now() - fillStart < minFillMs) {
+    throw new Error(`Warm-up hit its cap before filling the ${windowMs}ms window (raise BENCH_WARMUP or slow the nav)`);
+  }
 
   // Reset the nav sequence so every cell's MEASURED iterations replay identically,
   // independent of how many (variable) warm-up iterations just ran.
@@ -203,7 +220,7 @@ async function runCell(
 
   const observeMs: number[] = [];
   const fpsP50Samples: number[] = [];
-  let lastSnapshot: unknown | null = null;
+  let lastSnapshot: PerfSnapshot | null = null;
 
   for (let i = 0; i < iterations; i += 1) {
     await navigateStep();
@@ -275,7 +292,7 @@ function report(cells: CellResult[], micro: MicroResult[]): void {
     const dMed = median(pairedDeltas);
     const onMed = median(on.flatMap(c => c.observeMs));
     const dPct = offMedian > 0 ? (dMed / offMedian) * 100 : 0;
-    const last = on[on.length - 1].lastSnapshot as { fps?: { p50: number; p95: number; p99: number }; sampleCount?: number } | null;
+    const last = on[on.length - 1].lastSnapshot;
     const fpsStr = last?.fps ? `${r1(last.fps.p50)}/${r1(last.fps.p95)}/${r1(last.fps.p99)}` : "—";
     const sigma = r2(stdev(on.flatMap(c => c.fpsP50Samples)));
     console.log(

@@ -20,7 +20,7 @@ on iOS.
 
 | Role | Hex | Source in the icon |
 |---|---|---|
-| primary / onPrimary | `#DF3028` / `#FFFFFF` | marker-red truck outline |
+| primary / onPrimary | `#D62A22` / `#FFFFFF` | marker-red truck outline (`#DF3028`, darkened slightly so it also meets AA as link/accent text on the background) |
 | secondary / onSecondary | `#1F6FC2` / `#FFFFFF` | swing/sky blue (deepened for AA text) |
 | tertiary / onTertiary | `#FFD23F` / `#3A2E00` | sun yellow |
 | background / onBackground | `#FFF7EC` / `#241E18` | warm crayon paper |

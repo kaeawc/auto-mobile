@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +38,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +48,9 @@ import dev.jasonpearson.automobile.desktop.core.components.SearchBar
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * A log severity bucket surfaced as an always-on filter chip. Android's raw priority ints
@@ -158,6 +163,12 @@ fun connectionStatusText(state: ConnectionState): String? =
  * The client is owned by the caller (the facet connects/disposes it per device). Streamed rows are
  * kept per [activeDeviceId] (capped at [maxRows]); switching devices clears the buffer. [platform]
  * selects the numeric log-level scale used to bucket rows into filter chips (see [logLevelOf]).
+ *
+ * Clicking a row selects it (highlight) and expands an inline detail surface directly beneath it —
+ * the docked facet has no separate inspector pane, so this is where the full, single-line-truncated
+ * message becomes reachable. Selection is held here in composition and keyed on [activeDeviceId],
+ * so it is inherently pane-local (each pane composes its own [LogsPanel]) and clears on a device
+ * switch.
  */
 @Composable
 fun LogsPanel(
@@ -169,6 +180,11 @@ fun LogsPanel(
 ) {
   val colors = SharedTheme.globalColors
   val logs = remember(activeDeviceId) { mutableStateListOf<TelemetryDisplayEvent.Log>() }
+  val timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
+  // Pane-local selected row; cleared on device switch (a switch also swaps the buffer for a fresh
+  // list, so a stale selection could never re-match anyway). Holds the row instance for referential
+  // identity — filterLogs preserves instances, so `===` stays valid across recompositions.
+  var selectedEvent by remember(activeDeviceId) { mutableStateOf<TelemetryDisplayEvent.Log?>(null) }
   var query by remember { mutableStateOf("") }
   var enabledLevels by remember { mutableStateOf(LogLevel.entries.toSet()) }
   var connectionState by remember(activeDeviceId) { mutableStateOf<ConnectionState?>(null) }
@@ -272,7 +288,20 @@ fun LogsPanel(
             "${event.timestamp}_${System.identityHashCode(event)}"
           },
         ) { index ->
-          LogRow(filtered[index], colors.text.normal, platform)
+          val event = filtered[index]
+          val isSelected = event === selectedEvent
+          Column {
+            LogRow(
+              event = event,
+              textColor = colors.text.normal,
+              platform = platform,
+              isSelected = isSelected,
+              onClick = { selectedEvent = if (isSelected) null else event },
+            )
+            if (isSelected) {
+              LogEventDetail(event, colors.text.normal, platform, timeFormat)
+            }
+          }
         }
       }
     }
@@ -351,12 +380,28 @@ private fun LevelChip(level: LogLevel, isEnabled: Boolean, onToggle: () -> Unit)
   }
 }
 
-/** Single log row: level letter, tag, and message, matching the dashboard's compact styling. */
+/**
+ * Single log row: level letter, tag, and message, matching the dashboard's compact styling. The
+ * whole row is a clickable, selectable node — clicking it toggles selection; [isSelected] adds a
+ * highlight background and the `selected` semantics that assistive tech (and tests) read.
+ */
 @Composable
-private fun LogRow(event: TelemetryDisplayEvent.Log, textColor: Color, platform: LogPlatform) {
+private fun LogRow(
+  event: TelemetryDisplayEvent.Log,
+  textColor: Color,
+  platform: LogPlatform,
+  isSelected: Boolean,
+  onClick: () -> Unit,
+) {
   val level = logLevelOf(event.level, platform)
   Row(
-    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+    modifier =
+      Modifier.fillMaxWidth()
+        .then(if (isSelected) Modifier.background(textColor.copy(alpha = 0.08f)) else Modifier)
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .semantics { selected = isSelected }
+        .padding(horizontal = 8.dp, vertical = 2.dp),
     verticalAlignment = Alignment.Top,
   ) {
     Text(
@@ -388,5 +433,45 @@ private fun LogRow(event: TelemetryDisplayEvent.Log, textColor: Color, platform:
       maxLines = 1,
       modifier = Modifier.weight(1f),
     )
+  }
+}
+
+/**
+ * Inline detail surface for the selected log row, rendered directly beneath it. The compact
+ * single-line [LogRow] truncates the message and the docked facet has no separate inspector pane,
+ * so this is where the row's full content becomes reachable: the timestamp/level/tag header plus
+ * the complete, wrapping message in a [SelectionContainer] so it can be selected and copied.
+ */
+@Composable
+private fun LogEventDetail(
+  event: TelemetryDisplayEvent.Log,
+  textColor: Color,
+  platform: LogPlatform,
+  timeFormat: SimpleDateFormat,
+) {
+  val level = logLevelOf(event.level, platform)
+  val formattedTime = remember(event.timestamp) { timeFormat.format(Date(event.timestamp)) }
+  Column(
+    modifier =
+      Modifier.fillMaxWidth()
+        .background(textColor.copy(alpha = 0.04f))
+        .padding(horizontal = 12.dp, vertical = 8.dp)
+        .semantics { contentDescription = "Log event detail" },
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    Text(
+      "$formattedTime  ${level.label}  ${event.tag}",
+      fontSize = 10.sp,
+      fontFamily = FontFamily.Monospace,
+      color = textColor.copy(alpha = 0.6f),
+    )
+    SelectionContainer {
+      Text(
+        event.message,
+        fontSize = 11.sp,
+        fontFamily = FontFamily.Monospace,
+        color = textColor.copy(alpha = 0.9f),
+      )
+    }
   }
 }

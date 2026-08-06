@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.telemetry
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
@@ -9,8 +10,10 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -396,4 +399,85 @@ class LogsPanelTest {
       }
       onNodeWithText("b-row 29").assertIsDisplayed()
     }
+
+  // -- Selection + detail (issue #4705) --
+
+  @Test
+  fun `clicking a log row selects and highlights it, clicking again clears it`() =
+    runComposeUiTest {
+      val fake = FakeTelemetryPushClient()
+      setContent {
+        MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") }
+      }
+      waitForIdle()
+      fake.emitEvent(log(4, "Net", "selectable row", 10))
+      waitUntil(timeoutMillis = 2_000) {
+        onAllNodesWithText("selectable row").fetchSemanticsNodes().isNotEmpty()
+      }
+
+      // The row is the clickable node carrying the message text. It starts unselected.
+      val row = onNode(hasText("selectable row") and hasClickAction())
+      row.assertIsNotSelected()
+
+      // Clicking selects it (row highlights via the `selected` semantics).
+      row.performClick()
+      onNode(hasText("selectable row") and hasClickAction()).assertIsSelected()
+
+      // Clicking the selected row again clears the selection.
+      onNode(hasText("selectable row") and hasClickAction()).performClick()
+      onNode(hasText("selectable row") and hasClickAction()).assertIsNotSelected()
+    }
+
+  @Test
+  fun `selecting a log row reveals a detail surface with the full content`() = runComposeUiTest {
+    val fake = FakeTelemetryPushClient()
+    setContent { MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") } }
+    waitForIdle()
+    fake.emitEvent(log(6, "Crash", "the full message body reachable only via detail", 10))
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("the full message body reachable only via detail", substring = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
+
+    // No detail surface before a row is selected.
+    onNodeWithContentDescription("Log event detail").assertDoesNotExist()
+
+    // Selecting the row opens an inline detail surface inside the docked facet.
+    onNode(hasText("the full message body reachable only via detail") and hasClickAction())
+      .performClick()
+    onNodeWithContentDescription("Log event detail").assertIsDisplayed()
+  }
+
+  @Test
+  fun `selection is pane-local — two panels do not share selection`() = runComposeUiTest {
+    val fakeA = FakeTelemetryPushClient()
+    val fakeB = FakeTelemetryPushClient()
+    setContent {
+      MaterialTheme {
+        Column {
+          Box(Modifier.height(200.dp)) {
+            LogsPanel(telemetryPushClient = fakeA, activeDeviceId = "dev-A")
+          }
+          Box(Modifier.height(200.dp)) {
+            LogsPanel(telemetryPushClient = fakeB, activeDeviceId = "dev-B")
+          }
+        }
+      }
+    }
+    waitForIdle()
+    fakeA.emitEvent(log(4, "T", "pane A row", 1))
+    fakeB.emitEvent(log(4, "T", "pane B row", 2))
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("pane A row").fetchSemanticsNodes().isNotEmpty() &&
+        onAllNodesWithText("pane B row").fetchSemanticsNodes().isNotEmpty()
+    }
+
+    // Select pane A's row.
+    onNode(hasText("pane A row") and hasClickAction()).performClick()
+    onNode(hasText("pane A row") and hasClickAction()).assertIsSelected()
+
+    // Pane B's row must remain unselected — selection did not leak across panes.
+    onNode(hasText("pane B row") and hasClickAction()).assertIsNotSelected()
+  }
 }

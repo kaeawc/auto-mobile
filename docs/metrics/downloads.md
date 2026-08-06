@@ -1,23 +1,27 @@
 # Release Downloads
 
 Daily download counts for every AutoMobile release — GitHub release assets (APK, IPA, video jar,
-screen-capture helper, desktop `deb`/`dmg`/`msi`) **and** the npm package.
+desktop `deb`/`dmg`/`msi`, screen-capture helper) **and** the npm package.
 
 The data is snapshotted daily by the
 [`release-downloads-metrics`](https://github.com/kaeawc/auto-mobile/blob/main/.github/workflows/release-downloads-metrics.yml)
 workflow into
 [`docs/metrics/data/downloads.jsonl`](https://github.com/kaeawc/auto-mobile/blob/main/docs/metrics/data/downloads.jsonl)
 on `main`, and this page fetches that file live at view time — so it is always current regardless of
-when the docs site was last rebuilt.
+when the docs site was last rebuilt. The three charts below are all re-derived from that one raw
+snapshot file at view time, so adding, changing, or re-slicing a chart never requires migrating data.
 
 !!! note "How the daily numbers are derived"
     GitHub's API reports only the **cumulative** `download_count` per asset — there is no per-day
     history. Daily figures are recovered by snapshotting the cumulative count each day and diffing
     consecutive snapshots. **History before the first snapshot is unrecoverable**: the first run
     seeds day-0 with each release's current cumulative total, and true daily deltas begin the day
-    *after* the first snapshot. npm is different — its API returns true daily counts directly, so its
-    chart is exact from the start. npm daily totals include *all* package downloads (CI, mirrors) and
-    dwarf the asset counts, so npm is charted in its own section on its own axis.
+    *after* the first snapshot. A day whose delta is unknowable — the day-0 seed, a missing
+    intermediate snapshot, or a counter reset (asset re-published) — is never invented as a zero;
+    it is excluded from the daily total and the affected stacked segment is drawn faded, so the bar
+    reads as an honest lower bound. npm is different — its API returns true daily counts directly, so
+    its chart is exact from the start. npm daily totals include *all* package downloads (CI, mirrors)
+    and dwarf the asset counts, so npm is charted in its own section on its own axis.
 
 <div id="dl-metrics" markdown="0">
   <p id="dl-status">Loading download metrics…</p>
@@ -35,7 +39,7 @@ when the docs site was last rebuilt.
   #dl-metrics .dl-chart-line { fill: none; stroke-width: 2; }
   #dl-metrics .dl-axis { stroke: currentColor; opacity: 0.35; stroke-width: 1; }
   #dl-metrics .dl-tick-text { font-size: 10px; fill: currentColor; opacity: 0.7; }
-  #dl-metrics .dl-bar { opacity: 0.85; }
+  #dl-metrics .dl-bar { opacity: 0.9; }
 </style>
 
 <script>
@@ -51,11 +55,43 @@ when the docs site was last rebuilt.
     "#76b7b2", "#edc948", "#ff9da7", "#9c755f", "#bab0ac"
   ];
 
+  // Asset families for the headline "downloads by type" chart. Order is the
+  // bottom-to-top stacking order and the legend order. Colors are fixed per
+  // family (not palette-indexed) so a family keeps its color as releases come
+  // and go. Mirrors src/metrics/downloadSnapshots.ts (unit-tested there); this
+  // copy is standalone because the page's script is fetched on its own.
+  var ASSET_TYPE_ORDER = [
+    "android-apk", "ios-ipa", "desktop-installer", "video-jar",
+    "screen-capture-helper", "other"
+  ];
+  var ASSET_TYPE_LABELS = {
+    "android-apk": "Android APK",
+    "ios-ipa": "iOS IPA",
+    "desktop-installer": "Desktop installers",
+    "video-jar": "Video jar",
+    "screen-capture-helper": "Screen-capture helper",
+    "other": "Other"
+  };
+  var ASSET_TYPE_COLORS = {
+    "android-apk": "#4e79a7",
+    "ios-ipa": "#f28e2b",
+    "desktop-installer": "#b07aa1",
+    "video-jar": "#76b7b2",
+    "screen-capture-helper": "#9c755f",
+    "other": "#bab0ac"
+  };
+  var MAX_ADOPTION_TAGS = 8;
+  var NPM_AVERAGE_WINDOW = 7;
+
   function el(tag, attrs, text) {
     var node = document.createElementNS(SVG_NS, tag);
     if (attrs) { Object.keys(attrs).forEach(function (k) { node.setAttribute(k, attrs[k]); }); }
     if (text != null) { node.textContent = text; }
     return node;
+  }
+
+  function endsWith(str, suffix) {
+    return str.slice(str.length - suffix.length) === suffix;
   }
 
   function parseJsonl(text) {
@@ -83,6 +119,21 @@ when the docs site was last rebuilt.
       }
     }
     return 0;
+  }
+
+  // Map an asset file name to its family (see src/metrics/downloadSnapshots.ts).
+  function classifyAssetType(asset) {
+    var name = String(asset).toLowerCase();
+    if (endsWith(name, ".apk")) { return "android-apk"; }
+    if (endsWith(name, ".ipa")) { return "ios-ipa"; }
+    if (endsWith(name, ".deb") || endsWith(name, ".dmg") || endsWith(name, ".msi")) {
+      return "desktop-installer";
+    }
+    if (endsWith(name, ".jar")) { return "video-jar"; }
+    if (name.indexOf("screen-capture-helper") === 0 || endsWith(name, ".zip")) {
+      return "screen-capture-helper";
+    }
+    return "other";
   }
 
   // Whole-day difference between two YYYY-MM-DD UTC dates (later - earlier).
@@ -129,6 +180,81 @@ when the docs site was last rebuilt.
     return { dates: dates, series: series };
   }
 
+  // Collapse per-asset daily deltas into one aligned series per asset FAMILY,
+  // summed across all releases. Null deltas are excluded from the sum and flag
+  // the day partial (a lower bound), never invented as zero.
+  function summarizeDailyByType(built) {
+    var dates = built.dates;
+    var indexByDate = {};
+    dates.forEach(function (d, i) { indexByDate[d] = i; });
+    var acc = {}; // type -> array aligned to dates of { downloads, partial, observed }
+    ASSET_TYPE_ORDER.forEach(function (t) {
+      acc[t] = dates.map(function () { return { downloads: 0, partial: false, observed: false }; });
+    });
+    Object.keys(built.series).forEach(function (k) {
+      var s = built.series[k];
+      var type = classifyAssetType(s.asset);
+      s.delta.forEach(function (p) {
+        var cell = acc[type][indexByDate[p.date]];
+        cell.observed = true;
+        if (p.value == null) { cell.partial = true; } else { cell.downloads += p.value; }
+      });
+    });
+    var out = [];
+    ASSET_TYPE_ORDER.forEach(function (t) {
+      var pts = acc[t];
+      var observed = false, total = 0;
+      pts.forEach(function (p) { if (p.observed) { observed = true; } total += p.downloads; });
+      if (!observed) { return; }
+      out.push({
+        type: t, label: ASSET_TYPE_LABELS[t], color: ASSET_TYPE_COLORS[t],
+        points: pts, total: total
+      });
+    });
+    return { dates: dates, series: out };
+  }
+
+  // One line per release tag: total cumulative across the tag's assets. A tag
+  // absent from a snapshot gets a null point so the line breaks rather than
+  // dropping to zero. Newest releases first, capped to maxTags.
+  function summarizeCumulativeByTag(snapshots, maxTags) {
+    var ordered = snapshots.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    var dates = ordered.map(function (s) { return s.date; });
+    var acc = {}; // tag -> { date -> sum }
+    ordered.forEach(function (snap) {
+      (snap.github || []).forEach(function (g) {
+        if (!acc[g.tag]) { acc[g.tag] = {}; }
+        acc[g.tag][snap.date] = (acc[g.tag][snap.date] || 0) + g.cumulative;
+      });
+    });
+    var tags = Object.keys(acc).sort(cmpTagDesc);
+    if (maxTags && tags.length > maxTags) { tags = tags.slice(0, maxTags); }
+    var series = tags.map(function (tag) {
+      var byDate = acc[tag];
+      var latest = 0;
+      var points = dates.map(function (d) {
+        var has = Object.prototype.hasOwnProperty.call(byDate, d);
+        var value = has ? byDate[d] : null;
+        if (value !== null) { latest = value; }
+        return { date: d, value: value };
+      });
+      return { tag: tag, points: points, latest: latest };
+    });
+    return { dates: dates, series: series };
+  }
+
+  // Trailing simple moving average, min-periods 1 (see downloadSnapshots.ts).
+  function rollingAverage(values, window) {
+    var size = Math.max(1, Math.floor(window));
+    var out = [], q = [], sum = 0;
+    values.forEach(function (v) {
+      q.push(v); sum += v;
+      if (q.length > size) { sum -= q.shift(); }
+      out.push(sum / q.length);
+    });
+    return out;
+  }
+
   // Merge npm arrays across snapshots, latest snapshot wins per day.
   function buildNpmSeries(snapshots) {
     var byDay = {};
@@ -166,7 +292,7 @@ when the docs site was last rebuilt.
     return MT + (1 - v / max) * (H - MT - MB);
   }
 
-  function axes(svg, max, dates) {
+  function axes(svg, max, labels) {
     svg.appendChild(el("line", { x1: ML, y1: MT, x2: ML, y2: H - MB, class: "dl-axis" }));
     svg.appendChild(el("line", { x1: ML, y1: H - MB, x2: W - MR, y2: H - MB, class: "dl-axis" }));
     [0, 0.5, 1].forEach(function (f) {
@@ -174,11 +300,11 @@ when the docs site was last rebuilt.
       var y = scaleY(v, max);
       svg.appendChild(el("text", { x: ML - 6, y: y + 3, "text-anchor": "end", class: "dl-tick-text" }, String(v)));
     });
-    var step = Math.max(1, Math.ceil(dates.length / 6));
-    dates.forEach(function (d, i) {
-      if (i % step !== 0 && i !== dates.length - 1) { return; }
-      var x = scaleX(i, dates.length);
-      svg.appendChild(el("text", { x: x, y: H - MB + 14, "text-anchor": "middle", class: "dl-tick-text" }, d.slice(5)));
+    var step = Math.max(1, Math.ceil(labels.length / 6));
+    labels.forEach(function (d, i) {
+      if (i % step !== 0 && i !== labels.length - 1) { return; }
+      var x = scaleX(i, labels.length);
+      svg.appendChild(el("text", { x: x, y: H - MB + 14, "text-anchor": "middle", class: "dl-tick-text" }, String(d).slice(5)));
     });
   }
 
@@ -219,19 +345,65 @@ when the docs site was last rebuilt.
     return svg;
   }
 
-  function barChart(title, labels, values, color) {
+  // Stacked daily bars: one bar per date, segments stacked in seriesList order.
+  // A segment whose day is `partial` (some contributing delta unknown) is drawn
+  // faded with a dashed outline, signalling the value is a lower bound.
+  function stackedBarChart(title, dates, seriesList) {
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": title });
+    svg.appendChild(el("title", {}, title));
+    var n = dates.length;
+    var max = 1;
+    for (var i = 0; i < n; i++) {
+      var sum = 0;
+      seriesList.forEach(function (s) { sum += s.points[i].downloads; });
+      if (sum > max) { max = sum; }
+    }
+    axes(svg, max, dates);
+    var bw = Math.max(1, (W - ML - MR) / Math.max(1, n) * 0.7);
+    for (var j = 0; j < n; j++) {
+      var yBase = H - MB;
+      var x = scaleX(j, n) - bw / 2;
+      // Capture j for the forEach closure.
+      (function (idx, baseX) {
+        seriesList.forEach(function (s) {
+          var pt = s.points[idx];
+          if (pt.downloads <= 0) { return; }
+          var h = (pt.downloads / max) * (H - MT - MB);
+          var y = yBase - h;
+          var attrs = { x: baseX, y: y, width: bw, height: h, fill: s.color, class: "dl-bar" };
+          if (pt.partial) {
+            attrs["fill-opacity"] = "0.4";
+            attrs.stroke = s.color;
+            attrs["stroke-dasharray"] = "2 2";
+          }
+          svg.appendChild(el("rect", attrs));
+          yBase = y;
+        });
+      })(j, x);
+    }
+    return svg;
+  }
+
+  // npm daily bars with a rolling-average line overlaid on the same axis.
+  function barsWithAverage(title, labels, values, average, barColor, lineColor) {
     var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": title });
     svg.appendChild(el("title", {}, title));
     var max = 1;
     values.forEach(function (v) { if (v > max) { max = v; } });
+    average.forEach(function (v) { if (v > max) { max = v; } });
     axes(svg, max, labels);
     var n = values.length;
     var bw = Math.max(1, (W - ML - MR) / Math.max(1, n) * 0.7);
     values.forEach(function (v, i) {
       var x = scaleX(i, n) - bw / 2;
       var y = scaleY(v, max);
-      svg.appendChild(el("rect", { x: x, y: y, width: bw, height: (H - MB - y), fill: color, class: "dl-bar" }));
+      svg.appendChild(el("rect", { x: x, y: y, width: bw, height: (H - MB - y), fill: barColor, class: "dl-bar" }));
     });
+    var d = "";
+    average.forEach(function (v, i) {
+      d += (i === 0 ? "M" : "L") + scaleX(i, n).toFixed(1) + " " + scaleY(v, max).toFixed(1) + " ";
+    });
+    if (d) { svg.appendChild(el("path", { d: d, class: "dl-chart-line", stroke: lineColor })); }
     return svg;
   }
 
@@ -264,45 +436,47 @@ when the docs site was last rebuilt.
     root.appendChild(intro);
 
     var built = buildAssetSeries(snapshots);
-    var keys = Object.keys(built.series).sort();
-    var colorFor = {};
-    keys.forEach(function (k, i) { colorFor[k] = PALETTE[i % PALETTE.length]; });
 
-    // Group by release tag.
-    var tags = [];
-    keys.forEach(function (k) { var t = built.series[k].tag; if (tags.indexOf(t) < 0) { tags.push(t); } });
-    tags.sort(cmpTagDesc); // newest release first, version-aware (0.0.100 > 0.0.47)
+    // Chart 1 — the headline: total artifact downloads over time, by asset type,
+    // with the per-release dimension collapsed away.
+    var byType = summarizeDailyByType(built);
+    var c1 = section(root, "Artifact downloads over time",
+      "Daily GitHub-asset downloads across all releases, stacked by artifact type. Faded, dashed " +
+      "segments are partial (a day-0 seed, a snapshot gap, or a counter reset left some counts " +
+      "unknown) — read them as a lower bound.");
+    legend(c1, byType.series.map(function (s) {
+      return { label: s.label + " (" + s.total.toLocaleString() + ")", color: s.color };
+    }));
+    c1.appendChild(stackedBarChart("Daily artifact downloads by type", byType.dates, byType.series));
 
-    tags.forEach(function (tag) {
-      var tagKeys = keys.filter(function (k) { return built.series[k].tag === tag; });
-      var legendEntries = tagKeys.map(function (k) {
-        return { label: built.series[k].asset, color: colorFor[k] };
-      });
+    // Chart 2 — version adoption: one line per release, not a chart per release.
+    var byTag = summarizeCumulativeByTag(snapshots, MAX_ADOPTION_TAGS);
+    var tagColors = {};
+    byTag.series.forEach(function (s, i) { tagColors[s.tag] = PALETTE[i % PALETTE.length]; });
+    var c2 = section(root, "Version adoption — cumulative downloads per release",
+      "One line per release (newest " + MAX_ADOPTION_TAGS + "). Total downloads across each " +
+      "release's assets; watch newer releases climb and overtake older ones.");
+    legend(c2, byTag.series.map(function (s) {
+      return { label: s.tag + " (" + s.latest.toLocaleString() + ")", color: tagColors[s.tag] };
+    }));
+    c2.appendChild(lineChart("Cumulative downloads per release", byTag.dates,
+      byTag.series.map(function (s) { return { color: tagColors[s.tag], points: s.points }; }),
+      function (p) { return p.value; }));
 
-      var cumWrap = section(root, "Release " + tag + " — cumulative downloads", null);
-      legend(cumWrap, legendEntries);
-      cumWrap.appendChild(lineChart("Release " + tag + " cumulative downloads per asset",
-        built.dates, tagKeys.map(function (k) {
-          return { color: colorFor[k], points: built.series[k].cumulative };
-        }), function (p) { return p.value; }));
-
-      var deltaWrap = section(root, "Release " + tag + " — daily downloads", "First snapshot is a day-0 seed (no delta shown).");
-      legend(deltaWrap, legendEntries);
-      deltaWrap.appendChild(lineChart("Release " + tag + " daily downloads per asset",
-        built.dates, tagKeys.map(function (k) {
-          return { color: colorFor[k], points: built.series[k].delta };
-        }), function (p) { return p.value; }));
-    });
-
+    // Chart 3 — npm daily downloads with a 7-day trailing average.
     var npm = buildNpmSeries(snapshots);
-    var npmWrap = section(root, "npm — @kaeawc/auto-mobile daily downloads",
-      "True daily counts from the npm registry (own axis — npm dwarfs asset counts).");
-    npmWrap.appendChild(barChart(
-      "npm @kaeawc/auto-mobile daily downloads",
+    var npmAvg = rollingAverage(npm.map(function (n) { return n.downloads; }), NPM_AVERAGE_WINDOW);
+    var c3 = section(root, "npm — @kaeawc/auto-mobile daily downloads",
+      "True daily counts from the npm registry (own axis — npm dwarfs asset counts). " +
+      "The line is a " + NPM_AVERAGE_WINDOW + "-day trailing average.");
+    legend(c3, [
+      { label: "Daily downloads", color: "#59a14f" },
+      { label: NPM_AVERAGE_WINDOW + "-day average", color: "#e15759" }
+    ]);
+    c3.appendChild(barsWithAverage("npm @kaeawc/auto-mobile daily downloads with average",
       npm.map(function (n) { return n.day; }),
       npm.map(function (n) { return n.downloads; }),
-      "#59a14f"
-    ));
+      npmAvg, "#59a14f", "#e15759"));
   }
 
   function run() {

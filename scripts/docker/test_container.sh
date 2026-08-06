@@ -13,6 +13,12 @@ IMAGE_NAME="${IMAGE_NAME:-auto-mobile:latest}"
 CONTAINER_NAME="auto-mobile-test-$$"
 STDIO_CONTAINER_NAME="${CONTAINER_NAME}-stdio"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+EXPECTED_BUN_VERSION="$(PACKAGE_JSON="${PROJECT_ROOT}/package.json" node -e '
+  const fs = require("node:fs");
+  const packageJson = JSON.parse(fs.readFileSync(process.env.PACKAGE_JSON, "utf8"));
+  process.stdout.write(packageJson.packageManager.replace(/^bun@/, ""));
+')"
 
 # Cleanup function
 cleanup() {
@@ -45,10 +51,10 @@ fi
 # Test 3: Bun is installed with correct version
 echo -e "\n${YELLOW}Test 3: Checking Bun version...${NC}"
 BUN_VERSION=$(docker exec "${CONTAINER_NAME}" bun --version)
-if [[ "${BUN_VERSION}" =~ ^1\.3\. ]]; then
+if [[ "${BUN_VERSION}" == "${EXPECTED_BUN_VERSION}" ]]; then
   echo -e "${GREEN}✓ Bun ${BUN_VERSION} is installed${NC}"
 else
-  echo -e "${RED}✗ Expected Bun 1.3.x, got ${BUN_VERSION}${NC}"
+  echo -e "${RED}✗ Expected Bun ${EXPECTED_BUN_VERSION}, got ${BUN_VERSION}${NC}"
   exit 1
 fi
 

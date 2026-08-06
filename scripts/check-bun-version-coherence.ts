@@ -17,11 +17,21 @@ if (!packageManagerVersion || !engineVersion || packageManagerVersion !== engine
   throw new Error("package.json Bun packageManager and engines.bun must pin the same version");
 }
 
+function findYamlFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true })
+    .flatMap(entry => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        return findYamlFiles(path);
+      }
+      return /\.(?:yml|yaml)$/.test(entry.name) ? [path] : [];
+    })
+    .sort();
+}
+
 const workflowPaths = [
-  join(root, ".github", "actions", "setup-auto-mobile-npm-package", "action.yml"),
-  ...readdirSync(join(root, ".github", "workflows"))
-    .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
-    .map((name) => join(root, ".github", "workflows", name)),
+  ...findYamlFiles(join(root, ".github", "actions")),
+  ...findYamlFiles(join(root, ".github", "workflows")),
 ];
 
 interface WorkflowNode {
@@ -32,24 +42,30 @@ interface WorkflowNode {
   [key: string]: unknown;
 }
 
-function findBunSetupSteps(value: unknown): WorkflowNode[] {
-  if (Array.isArray(value)) {
-    return value.flatMap(findBunSetupSteps);
-  }
+function findBunSetupSteps(value: unknown, visited = new WeakSet<object>()): WorkflowNode[] {
   if (value === null || typeof value !== "object") {
     return [];
   }
+  if (visited.has(value)) {
+    return [];
+  }
+  visited.add(value);
+
+  if (Array.isArray(value)) {
+    return value.flatMap(item => findBunSetupSteps(item, visited));
+  }
 
   const node = value as WorkflowNode;
-  const steps = typeof node.uses === "string" && node.uses.startsWith("oven-sh/setup-bun@") ? [node] : [];
-  return steps.concat(Object.values(node).flatMap(findBunSetupSteps));
+  const steps =
+    typeof node.uses === "string" && node.uses.startsWith("oven-sh/setup-bun@") ? [node] : [];
+  return steps.concat(Object.values(node).flatMap(item => findBunSetupSteps(item, visited)));
 }
 
 function lineForBunSetup(content: string, occurrence: number): number {
   const lines = content.split("\n");
   let seen = 0;
   for (let index = 0; index < lines.length; index += 1) {
-    if (/^\s*uses:\s*["']?oven-sh\/setup-bun@/.test(lines[index])) {
+    if (/^\s*(?:-\s*)?["']?uses["']?:\s*["']?oven-sh\/setup-bun@/.test(lines[index])) {
       if (seen === occurrence) {
         return index + 1;
       }
@@ -61,7 +77,7 @@ function lineForBunSetup(content: string, occurrence: number): number {
 
 const mismatches = workflowPaths.flatMap((path) => {
   const content = readFileSync(path, "utf8");
-  const document = load(content);
+  const document = load(content, { filename: path });
   return findBunSetupSteps(document).flatMap((step, index) => {
     const version = step.with?.["bun-version"];
     const normalizedVersion = version === undefined || version === null ? "<missing>" : String(version);

@@ -8,9 +8,15 @@
 # guarded.
 
 SCRIPT="scripts/all_fast_validate_checks.sh"
+COHERENCE_SCRIPT="scripts/check-bun-version-coherence.ts"
+COHERENCE_FIXTURE=".github/actions/bun-version-coherence-fixture/action.yml"
 
 setup() {
   ABS_SCRIPT="$(cd "$(dirname "$SCRIPT")" && pwd)/$(basename "$SCRIPT")"
+}
+
+teardown() {
+  rm -rf "$(dirname "$COHERENCE_FIXTURE")"
 }
 
 @test "prune_finished_jobs handles an empty job list under set -u" {
@@ -39,4 +45,22 @@ setup() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"bun-version-coherence"* ]]
+}
+
+@test "Bun coherence scans every composite action" {
+  mkdir -p "$(dirname "$COHERENCE_FIXTURE")"
+  printf '%s\n' \
+    'name: Bun coherence fixture' \
+    'runs:' \
+    '  using: composite' \
+    '  steps:' \
+    '    - uses: oven-sh/setup-bun@v2' \
+    '      with:' \
+    '        bun-version: 0.1.0' > "$COHERENCE_FIXTURE"
+
+  run bun "$COHERENCE_SCRIPT"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"bun-version-coherence-fixture/action.yml"* ]]
+  [[ "$output" == *"0.1.0"* ]]
 }

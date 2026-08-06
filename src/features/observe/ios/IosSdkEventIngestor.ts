@@ -248,6 +248,19 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
               details: { durationMs: String((p.durationMs as number) ?? 0) },
             });
             break;
+          case "webview":
+            await recorder.recordOsEvent({
+              timestamp: ts, applicationId,
+              category: "webview", kind: (p.name as string) ?? "unknown",
+              details: {
+                webViewId: (p.webViewId as string) ?? "",
+                url: (p.url as string) ?? "",
+                frameId: (p.frameId as string) ?? "",
+                requestId: (p.requestId as string) ?? "",
+                ...(p.metadata as Record<string, string> ?? {}),
+              },
+            });
+            break;
           case "storage_changed": {
             // The iOS SDK's SdkStorageChangedEvent serializes as suiteName/key/newValue/
             // valueType/changeType/sequenceNumber (ios/auto-mobile-sdk/.../SdkEvent.swift).

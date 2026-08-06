@@ -23,6 +23,7 @@ public enum SdkEventType: String, Codable, Sendable {
     case interaction
     case storageChanged = "storage_changed"
     case viewHierarchy = "view_hierarchy"
+    case webView = "webview"
 }
 
 // MARK: - Event Types

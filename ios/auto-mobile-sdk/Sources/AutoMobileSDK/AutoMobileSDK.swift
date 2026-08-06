@@ -232,6 +232,11 @@ public final class AutoMobileSDK: @unchecked Sendable {
         eventBuffer?.flush()
     }
 
+    public func recordWebViewEvent(_ event: SdkWebViewEvent) {
+        guard isEnabled else { return }
+        eventBuffer?.add(event)
+    }
+
     /// Number of registered listeners.
     public var listenerCount: Int {
         lock.lock()

@@ -212,6 +212,7 @@ nav:
               - 'Writing Tests': design-docs/plat/ios/xctestrunner/writing-tests.md
               - 'CI Integration': design-docs/plat/ios/xctestrunner/ci-integration.md
             - 'AutoMobile SDK': design-docs/plat/ios/auto-mobile-sdk.md
+            - 'Real App Performance (spike)': design-docs/plat/ios/real-app-performance.md
             - 'testmanagerd': design-docs/plat/ios/testmanagerd.md
   - 'Contributing':
       - 'Overview': contributing.md

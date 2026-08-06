@@ -10,7 +10,9 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -447,7 +449,48 @@ class LogsPanelTest {
     onNode(hasText("the full message body reachable only via detail") and hasClickAction())
       .performClick()
     onNodeWithContentDescription("Log event detail").assertIsDisplayed()
+
+    // The full message is present *inside* the detail surface — not just that the container exists.
+    // The compact row also exposes the whole string in semantics despite `maxLines = 1`, so we pin
+    // the message to a node whose ancestor is the detail container; truncating/emptying the detail
+    // message would break this even though the row lookup stays green.
+    onNode(
+        hasText("the full message body reachable only via detail") and
+          hasAnyAncestor(hasContentDescription("Log event detail"))
+      )
+      .assertIsDisplayed()
   }
+
+  @Test
+  fun `evicting the selected row from the bounded buffer clears the selection`() =
+    runComposeUiTest {
+      val fake = FakeTelemetryPushClient()
+      setContent {
+        MaterialTheme {
+          // Cap of 1 so the very next row evicts the selected one from the front of the buffer.
+          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1", maxRows = 1)
+        }
+      }
+      waitForIdle()
+      fake.emitEvent(log(4, "T", "row A", 1))
+      waitUntil(timeoutMillis = 2_000) {
+        onAllNodesWithText("row A").fetchSemanticsNodes().isNotEmpty()
+      }
+
+      // Select row A — it highlights and opens its detail.
+      onNode(hasText("row A") and hasClickAction()).performClick()
+      onNode(hasText("row A") and hasClickAction()).assertIsSelected()
+      onNodeWithContentDescription("Log event detail").assertIsDisplayed()
+
+      // Emitting row B evicts row A from the cap-1 buffer. The stale selection must clear, so no
+      // detail surface lingers and the new row is not spuriously selected.
+      fake.emitEvent(log(4, "T", "row B", 2))
+      waitUntil(timeoutMillis = 2_000) {
+        onAllNodesWithText("row A").fetchSemanticsNodes().isEmpty()
+      }
+      onNodeWithContentDescription("Log event detail").assertDoesNotExist()
+      onNode(hasText("row B") and hasClickAction()).assertIsNotSelected()
+    }
 
   @Test
   fun `selection is pane-local — two panels do not share selection`() = runComposeUiTest {

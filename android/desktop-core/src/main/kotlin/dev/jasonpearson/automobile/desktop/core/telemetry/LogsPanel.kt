@@ -212,8 +212,17 @@ fun LogsPanel(
     val client = telemetryPushClient ?: return@LaunchedEffect
     client.telemetryEvents.collect { event ->
       if (event is TelemetryDisplayEvent.Log) {
+        // The append can drop the oldest row (front) once the buffer is at its cap. If that
+        // dropped row is the current selection, clear it — otherwise its highlight/detail vanish
+        // from view while `selectedEvent` keeps a stale, now-invisible reference the user can no
+        // longer toggle off. Steady-state eviction is a single front row (maxRows is fixed per
+        // panel), so this O(1) identity check is enough.
+        val evicted = if (logs.size >= maxRows) logs.firstOrNull() else null
         appendBounded(logs, event, maxRows)
         appendCount++
+        if (evicted != null && evicted === selectedEvent) {
+          selectedEvent = null
+        }
       }
     }
   }
@@ -400,7 +409,13 @@ private fun LogRow(
         .then(if (isSelected) Modifier.background(textColor.copy(alpha = 0.08f)) else Modifier)
         .clickable(onClick = onClick)
         .pointerHoverIcon(PointerIcon.Hand)
-        .semantics { selected = isSelected }
+        .semantics {
+          // Announce the row as an activatable target whose on/off selection state is spoken,
+          // rather than a bare unlabeled node — a step up from the legacy selectable row, which
+          // emitted no `selected` semantics at all.
+          selected = isSelected
+          role = Role.Button
+        }
         .padding(horizontal = 8.dp, vertical = 2.dp),
     verticalAlignment = Alignment.Top,
   ) {

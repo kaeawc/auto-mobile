@@ -14,9 +14,8 @@ CONTAINER_NAME="auto-mobile-test-$$"
 STDIO_CONTAINER_NAME="${CONTAINER_NAME}-stdio"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-EXPECTED_BUN_VERSION="$(PACKAGE_JSON="${PROJECT_ROOT}/package.json" node -e '
-  const fs = require("node:fs");
-  const packageJson = JSON.parse(fs.readFileSync(process.env.PACKAGE_JSON, "utf8"));
+EXPECTED_BUN_VERSION="$(PACKAGE_JSON="${PROJECT_ROOT}/package.json" bun -e '
+  const packageJson = await Bun.file(process.env.PACKAGE_JSON).json();
   process.stdout.write(packageJson.packageManager.replace(/^bun@/, ""));
 ')"
 

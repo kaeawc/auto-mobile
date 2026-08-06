@@ -110,6 +110,7 @@ Side-by-side comparison of every public API symbol on Android and iOS.
 | `interceptor` | `interceptor()` (OkHttp) | -- | Android-only: OkHttp interceptor |
 | `protocolClass` | -- | `protocolClass()` (URLProtocol) | iOS-only: URLSession protocol |
 | `recordRequest` | -- | `recordRequest(...)` | iOS manual recording; Android uses interceptor |
+| `captureRecorder` | -- | `captureRecorder()` | iOS transport-neutral lifecycle recorder for custom HTTP, WebSocket, and Network.framework adapters |
 | `recordWebSocketFrame` | -- | `recordWebSocketFrame(...)` | iOS manual; Android wraps listener |
 | `wrapWebSocketListener` | `wrapWebSocketListener(...)` | -- | Android-only |
 | `setCaptureHeaders` | -- | `setCaptureHeaders(Bool)` | iOS-only config |

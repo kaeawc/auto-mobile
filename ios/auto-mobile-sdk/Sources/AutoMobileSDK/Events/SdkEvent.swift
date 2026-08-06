@@ -163,6 +163,12 @@ public struct SdkNetworkRequestEvent: SdkEvent {
     public let timestamp: Int64
     public let url: String
     public let method: String
+    public let requestId: String?
+    public let connectionId: String?
+    public let direction: NetworkCaptureDirection?
+    public let protocolName: String?
+    public let metadata: [String: String]?
+    public let sequenceNumber: UInt64?
     public let requestHeaders: [String: String]?
     public let requestBodySize: Int?
     public let statusCode: Int?
@@ -180,6 +186,12 @@ public struct SdkNetworkRequestEvent: SdkEvent {
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         url: String,
         method: String,
+        requestId: String? = nil,
+        connectionId: String? = nil,
+        direction: NetworkCaptureDirection? = nil,
+        protocolName: String? = nil,
+        metadata: [String: String]? = nil,
+        sequenceNumber: UInt64? = nil,
         requestHeaders: [String: String]? = nil,
         requestBodySize: Int? = nil,
         statusCode: Int? = nil,
@@ -196,6 +208,12 @@ public struct SdkNetworkRequestEvent: SdkEvent {
         self.timestamp = timestamp
         self.url = url
         self.method = method
+        self.requestId = requestId
+        self.connectionId = connectionId
+        self.direction = direction
+        self.protocolName = protocolName
+        self.metadata = metadata
+        self.sequenceNumber = sequenceNumber
         self.requestHeaders = requestHeaders
         self.requestBodySize = requestBodySize
         self.statusCode = statusCode

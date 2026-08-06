@@ -135,6 +135,12 @@ public struct SdkNetworkRequestEvent: SdkEvent
   public let timestamp: Int64
   public let url: String
   public let method: String
+  public let requestId: String?
+  public let connectionId: String?
+  public let direction: NetworkCaptureDirection?
+  public let protocolName: String?
+  public let metadata: [String: String]?
+  public let sequenceNumber: UInt64?
   public let requestHeaders: [String: String]?
   public let requestBodySize: Int?
   public let statusCode: Int?
@@ -147,7 +153,7 @@ public struct SdkNetworkRequestEvent: SdkEvent
   public let requestBody: String?
   public let responseBody: String?
   public let contentType: String?
-  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, host: String? = nil, path: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), url: String, method: String, requestId: String? = nil, connectionId: String? = nil, direction: NetworkCaptureDirection? = nil, protocolName: String? = nil, metadata: [String: String]? = nil, sequenceNumber: UInt64? = nil, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, host: String? = nil, path: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
 public struct SdkWebSocketFrameEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .webSocketFrame
   public let timestamp: Int64
@@ -334,6 +340,12 @@ public enum NavigationSource: String, Sendable, CaseIterable
 
 // Network/AutoMobileNetwork.swift
 public struct NetworkRequestRecord: Sendable
+  public var requestId: String?
+  public var connectionId: String?
+  public var direction: NetworkCaptureDirection?
+  public var protocolName: String?
+  public var metadata: [String: String]?
+  public var sequenceNumber: UInt64?
   public let url: String
   public let method: String
   public var requestHeaders: [String: String]?
@@ -346,7 +358,7 @@ public struct NetworkRequestRecord: Sendable
   public var requestBody: String?
   public var responseBody: String?
   public var contentType: String?
-  public init( url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
+  public init( url: String, method: String, requestId: String? = nil, connectionId: String? = nil, direction: NetworkCaptureDirection? = nil, protocolName: String? = nil, metadata: [String: String]? = nil, sequenceNumber: UInt64? = nil, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
 public final class AutoMobileNetwork: @unchecked Sendable
   public static let shared = AutoMobileNetwork()
   public static func isTextContentType(_ contentType: String?) -> Bool
@@ -356,6 +368,7 @@ public final class AutoMobileNetwork: @unchecked Sendable
   public func setCaptureBodies(_ capture: Bool)
   public func setMaxBodyBytes(_ bytes: Int)
   public func protocolClass() -> AnyClass
+  public func captureRecorder() -> NetworkCaptureRecorder
   public func recordRequest(_ record: NetworkRequestRecord)
   public func recordRequest( url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
   public func recordFromTask( _ task: URLSessionTask, startTime: Date, receivedData: Data?, error: Error? )
@@ -368,6 +381,47 @@ public class AutoMobileURLProtocol: URLProtocol
   public func urlSession( _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void )
   public func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data)
   public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?)
+
+// Network/NetworkCaptureRecorder.swift
+public enum NetworkCaptureDirection: String, Codable, Sendable
+public final class NetworkCaptureRecorder: @unchecked Sendable
+  public typealias Emit = @Sendable (NetworkRequestRecord) -> Void
+  public typealias IDGenerator = @Sendable () -> String
+  public init( emit: @escaping Emit, maxBodyBytes: Int = 32 * 1024, idGenerator: @escaping IDGenerator = { UUID().uuidString }, isEnabled: @escaping @Sendable () -> Bool = { true }, isBodyCaptureEnabled: @escaping @Sendable () -> Bool = { true }, samplingRate: Double = 1, sampler: @escaping @Sendable () -> Double = { Double.random(in: 0..<1) }, headerRedactor: @escaping @Sendable ([String: String]) -> [String: String] = { NetworkCaptureRecorder.redactHeaders($0) } )
+  public func beginRequest( url: String, method: String = "GET", connectionId: String? = nil, protocolName: String = "http", requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, requestBody: String? = nil ) -> String
+  public func recordRequestHeaders( requestId: String, headers: [String: String] )
+  public func recordResponseHeaders( requestId: String, headers: [String: String] )
+  public func recordMetadata(requestId: String, key: String, value: String)
+  public func recordRequestBodyChunk( requestId: String, bytes: Int, text: String? = nil )
+  public func recordResponseBodyChunk( requestId: String, bytes: Int, text: String? = nil )
+  public func recordCompletion( requestId: String, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil )
+  public func recordFailure(requestId: String, error: Error)
+  public func recordFailure(requestId: String, error: String)
+  public func recordWebSocketFrame( url: String, connectionId: String?, direction: NetworkCaptureDirection, frameType: WebSocketFrameType, payloadSize: Int? )
+  public static func redactHeaders(_ headers: [String: String]) -> [String: String]
+public final class URLSessionNetworkCaptureAdapter: @unchecked Sendable
+  public init(recorder: NetworkCaptureRecorder)
+  public func begin( url: String, method: String = "GET", connectionId: String? = nil, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil ) -> String
+  public func begin( task: URLSessionTask, connectionId: String? = nil ) -> String
+  public func didReceiveResponseHeaders(requestId: String, headers: [String: String])
+  public func didReceiveBody(requestId: String, bytes: Int, text: String? = nil)
+  public func didReceiveMetrics(requestId: String, durationMs: Double)
+  public func didRedirect(requestId: String, url: String)
+  public func didAuthenticate(requestId: String, method: String)
+  public func didComplete(requestId: String, statusCode: Int? = nil)
+  public func didFail(requestId: String, error: Error)
+public final class WebSocketNetworkCaptureAdapter: @unchecked Sendable
+  public init(recorder: NetworkCaptureRecorder)
+  public func recordFrame( url: String, connectionId: String?, direction: NetworkCaptureDirection, frameType: WebSocketFrameType, payloadSize: Int? )
+public final class NWConnectionNetworkCaptureAdapter: @unchecked Sendable
+  public init(recorder: NetworkCaptureRecorder)
+  public func begin( endpoint: String, connectionId: String ) -> String
+  public func didSend(requestId: String, bytes: Int)
+  public func didUpdateState(requestId: String, state: String)
+  public func didReceive(requestId: String, bytes: Int, text: String? = nil)
+  public func didComplete(requestId: String)
+  public func didFail(requestId: String, error: NWError)
+  public func didCancel(requestId: String)
 
 // Network/RetryPolicy.swift
 public struct RetryPolicy: Sendable
@@ -417,6 +471,7 @@ public protocol AutoMobileNetworkAPI: AnyObject, Sendable
 public final class DefaultAutoMobileNetworkAPI: AutoMobileNetworkAPI, @unchecked Sendable
   public init()
   public func recordRequest(_ record: NetworkRequestRecord)
+  public func captureRecorder() -> NetworkCaptureRecorder
   public func setCaptureHeaders(_ enabled: Bool)
   public func setCaptureBodies(_ enabled: Bool)
 

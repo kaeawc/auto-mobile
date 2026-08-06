@@ -432,6 +432,10 @@ export class PerformanceMonitor {
       fps: gfx.fps,
       frameTimeMs: gfx.frameTimeMs,
       touchLatencyMs: rawTouchLatencyMs,
+      // CPU/memory only when actually collected this tick (null otherwise), so
+      // the window never averages a reading acquired outside it.
+      cpuUsagePercent: shouldCollectCpu ? cpu : null,
+      memoryUsageMb: shouldCollectMemory ? memory : null,
     });
   }
 
@@ -531,6 +535,8 @@ export class PerformanceMonitor {
       fps,
       frameTimeMs,
       touchLatencyMs: null,
+      cpuUsagePercent: shouldCollectCpu ? cpu : null,
+      memoryUsageMb: shouldCollectMemory ? memory : null,
     });
   }
 
@@ -560,6 +566,8 @@ export class PerformanceMonitor {
       fps: number | null;
       frameTimeMs: number | null;
       touchLatencyMs: number | null;
+      cpuUsagePercent: number | null;
+      memoryUsageMb: number | null;
     }
   ): void {
     const data: LivePerformanceData = {
@@ -585,8 +593,8 @@ export class PerformanceMonitor {
       frameTimeMs: raw.frameTimeMs,
       jankFrames: metrics.jankFrames,
       touchLatencyMs: raw.touchLatencyMs,
-      cpuUsagePercent: metrics.cpuUsagePercent,
-      memoryUsageMb: metrics.memoryUsageMb,
+      cpuUsagePercent: raw.cpuUsagePercent,
+      memoryUsageMb: raw.memoryUsageMb,
     });
 
     // Emit telemetry events when metric health status changes

@@ -644,6 +644,10 @@ describe("PerformanceMonitor", () => {
       // Idle ticks fabricate 16ms touch latency for the stream, but the buffer
       // records raw null so the fabricated value can't dominate the window.
       expect(idleOnly.touchLatencyMs).toBeNull();
+      // Memory is collected every 10s; none is re-collected within this short
+      // trailing window, so the buffer holds only raw-null memory there (a stale
+      // cached value must not be recorded as an in-window sample).
+      expect(idleOnly.memoryMb).toBeNull();
     });
   });
 });

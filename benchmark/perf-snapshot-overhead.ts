@@ -40,6 +40,10 @@ class NoOpPusher implements PerformanceDataPusher {
 
 const ENABLE_ENV = "AUTOMOBILE_OBSERVE_PERF_SNAPSHOT";
 const WINDOW_ENV = "AUTOMOBILE_OBSERVE_PERF_WINDOW_MS";
+// The config also honors legacy AUTO_MOBILE_* aliases, so the benchmark must
+// clear those too or an OFF cell inherited from the environment stays enabled.
+const ENABLE_ALIAS = "AUTO_MOBILE_OBSERVE_PERF_SNAPSHOT";
+const WINDOW_ALIAS = "AUTO_MOBILE_OBSERVE_PERF_WINDOW_MS";
 
 const deviceId = process.env.BENCH_DEVICE_ID ?? "emulator-5554";
 const iterations = Number(process.env.BENCH_ITERS ?? 30);
@@ -126,6 +130,8 @@ async function navigateStep(): Promise<void> {
 interface CellResult {
   /** 0-based execution order across the whole run (records the counterbalancing). */
   order: number;
+  /** 0-based repeat pass this cell belongs to (BENCH_REPEATS). */
+  repetition: number;
   label: string;
   enabled: boolean;
   windowMs: number | null;
@@ -135,6 +141,10 @@ interface CellResult {
 }
 
 function applyEnv(enabled: boolean, windowMs: number | null): void {
+  // Always clear the aliases so an inherited AUTO_MOBILE_* value can't enable an
+  // OFF cell (or override the window) via the config's legacy fallback.
+  delete process.env[ENABLE_ALIAS];
+  delete process.env[WINDOW_ALIAS];
   if (enabled) {
     process.env[ENABLE_ENV] = "1";
     if (windowMs !== null) { process.env[WINDOW_ENV] = String(windowMs); }
@@ -146,12 +156,18 @@ function applyEnv(enabled: boolean, windowMs: number | null): void {
 
 async function runCell(
   order: number,
+  repetition: number,
   label: string,
   enabled: boolean,
   windowMs: number | null,
   sampler: PerformanceMonitor
 ): Promise<CellResult> {
   applyEnv(enabled, windowMs);
+  // Replay an identical navigation workload in every cell: reset the global
+  // step counter so each cell starts at the same panel/scroll phase, otherwise
+  // OFF and ON cells would run different launch/scroll mixes and the delta would
+  // conflate the feature with the workload.
+  navCounter = 0;
   // Reset retained samples so a cell's window reflects only its own run — every
   // ON cell re-registers the same device/package, so startMonitoring() would not
   // clear on its own and later cells would inherit earlier cells' samples.
@@ -188,7 +204,7 @@ async function runCell(
     }
   }
   process.stdout.write(`done (median ${r1(median(observeMs))}ms)`);
-  return { order, label, enabled, windowMs, observeMs, fpsP50Samples, lastSnapshot };
+  return { order, repetition, label, enabled, windowMs, observeMs, fpsP50Samples, lastSnapshot };
 }
 
 // ---- pure snapshot() micro-benchmark ------------------------------------
@@ -303,8 +319,8 @@ async function main(): Promise<void> {
   for (let rep = 0; rep < repeats; rep += 1) {
     const pass = rep % 2 === 0 ? windows : [...windows].reverse();
     for (const w of pass) {
-      cells.push(await runCell(order++, "OFF", false, null, sampler));
-      cells.push(await runCell(order++, `ON@${w}`, true, w, sampler));
+      cells.push(await runCell(order++, rep, "OFF", false, null, sampler));
+      cells.push(await runCell(order++, rep, `ON@${w}`, true, w, sampler));
     }
   }
   sampler.stop();

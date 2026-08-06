@@ -77,8 +77,10 @@ EOF
   grep -q "local_sim_build_args" "$REPO_ROOT/scripts/ios/xcode-test.sh"
 }
 
-@test "swift-build.sh consults local_sim_build_args" {
-  grep -q "local_sim_build_args" "$REPO_ROOT/scripts/ios/swift-build.sh"
+# swift-build.sh's only xcodebuild call was the phantom iOS-only package loop,
+# removed in #5080; with no simulator build left it no longer consults the helper.
+@test "swift-build.sh does NOT consult local_sim_build_args (no xcodebuild left)" {
+  ! grep -q "local_sim_build_args" "$REPO_ROOT/scripts/ios/swift-build.sh"
 }
 
 # --- The release IPA path must stay universal: it must NOT consult the helper. ---

@@ -15,17 +15,8 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ios/local-sim-build-args.sh disable=SC1091
-source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IOS_DIR="${PROJECT_ROOT}/ios"
-
-# On a local arm64 host, build only the arch the simulator runs and skip the
-# index store; empty in CI / on Intel so those keep building universal (#5024).
-LOCAL_SIM_ARGS=()
-while IFS= read -r _arg; do
-    [ -n "${_arg}" ] && LOCAL_SIM_ARGS+=("${_arg}")
-done < <(local_sim_build_args)
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  Swift Package Build${NC}"
@@ -74,11 +65,6 @@ IOS_MACOS_PACKAGES=(
     "XCTestRunner"
 )
 
-# iOS-only packages (need to be built for iOS simulator)
-IOS_ONLY_PACKAGES=(
-    "AccessibilityService"
-)
-
 # Build macOS packages
 echo -e "${BLUE}Building macOS packages...${NC}"
 for package in "${MACOS_PACKAGES[@]}"; do
@@ -119,25 +105,6 @@ for package in "${IOS_MACOS_PACKAGES[@]}"; do
             print_status 0 "${package} built successfully"
         else
             print_status 1 "${package} build failed"
-            FAILED_PACKAGES+=("${package}")
-        fi
-    else
-        print_info "Skipping ${package} (no Package.swift)"
-    fi
-done
-echo ""
-
-# Build iOS-only packages for iOS simulator
-echo -e "${BLUE}Building iOS-only packages for simulator...${NC}"
-for package in "${IOS_ONLY_PACKAGES[@]}"; do
-    PACKAGE_DIR="${IOS_DIR}/${package}"
-    if [ -f "${PACKAGE_DIR}/Package.swift" ]; then
-        echo -e "  Building ${package} for iOS simulator..."
-        # Use xcodebuild to build for iOS simulator since swift build doesn't support cross-compilation
-        if (cd "${PACKAGE_DIR}" && xcodebuild -scheme "${package}" -destination 'generic/platform=iOS Simulator' "${LOCAL_SIM_ARGS[@]}" -quiet build 2>&1); then
-            print_status 0 "${package} built successfully for iOS simulator"
-        else
-            print_status 1 "${package} build failed for iOS simulator"
             FAILED_PACKAGES+=("${package}")
         fi
     else

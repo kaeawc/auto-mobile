@@ -64,7 +64,6 @@ print_info "Swift version: ${SWIFT_VERSION}"
 echo ""
 
 # Packages that can be tested on macOS (either macOS-only or cross-platform)
-# Note: iOS-only packages cannot run tests on macOS without a simulator
 # control-proxy has unit tests that can run on macOS
 # XCTestRunner unit tests run on macOS (integration tests are handled by xctestrunner-integration-tests.sh)
 TESTABLE_PACKAGES=(
@@ -72,11 +71,6 @@ TESTABLE_PACKAGES=(
     "control-proxy"
     "XCTestRunner"
     "screen-capture"
-)
-
-# iOS-only packages (tests require iOS simulator - skip in basic test run)
-IOS_ONLY_PACKAGES=(
-    "AccessibilityService"
 )
 
 # Total tests executed in a `swift test` transcript.
@@ -130,14 +124,6 @@ for package in "${TESTABLE_PACKAGES[@]}"; do
         print_info "Skipping ${package} (no Package.swift)"
         SKIPPED_PACKAGES+=("${package} (no Package.swift)")
     fi
-done
-echo ""
-
-# Note about iOS-only packages
-echo -e "${BLUE}iOS-only packages (tests skipped - require simulator):${NC}"
-for package in "${IOS_ONLY_PACKAGES[@]}"; do
-    print_warning "${package} - tests require iOS simulator"
-    SKIPPED_PACKAGES+=("${package} (iOS-only)")
 done
 echo ""
 

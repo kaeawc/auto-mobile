@@ -1,5 +1,4 @@
 import com.vanniktech.maven.publish.MavenPublishBaseExtension
-import org.gradle.api.publish.PublishingExtension
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 buildscript {
@@ -23,14 +22,12 @@ plugins {
   alias(libs.plugins.detekt) apply false
 }
 
-// Read version from gradle.properties
-val versionName: String = property("VERSION_NAME") as String
-val groupName: String = property("GROUP") as String
+// Read version from gradle.properties. Modules get their group/version from the
+// automobile.kotlin-common convention; the root project sets its own here (the
+// former `allprojects {}` block was an Isolated Projects blocker).
+group = property("GROUP") as String
 
-allprojects {
-  group = groupName
-  version = versionName
-}
+version = property("VERSION_NAME") as String
 
 plugins.withId(libs.plugins.mavenPublish.get().pluginId) {
   if (project.path != ":compiler") {
@@ -49,28 +46,6 @@ plugins.withId(libs.plugins.mavenPublish.get().pluginId) {
   }
 }
 
-// Local file repository used only by the Maven publication manifest preflight
-// (issue #4853). Publishing to it stages the exact set of files a release would
-// upload to Maven Central -- primary artifacts, POM, Gradle module metadata,
-// sources and javadoc jars, PGP signatures, and checksums -- into one directory
-// so the preflight can enumerate them deterministically, without Maven Central
-// credentials or a remote publish. It never uploads anywhere and has no effect on
-// the real Central publication path (publishAllPublicationsToMavenCentral...).
-allprojects {
-  plugins.withId("com.vanniktech.maven.publish") {
-    // Register only when the preflight asks for it (-PmavenManifestStaging). The
-    // production `publish` lifecycle task depends on the publish task of EVERY
-    // configured repository, so registering this unconditionally would make the
-    // real release also write to the local repo. Gating keeps it off that path.
-    if (providers.gradleProperty("mavenManifestStaging").isPresent) {
-      configure<PublishingExtension> {
-        repositories {
-          maven {
-            name = "centralManifest"
-            url = rootProject.layout.buildDirectory.dir("central-manifest").get().asFile.toURI()
-          }
-        }
-      }
-    }
-  }
-}
+// The Maven publication manifest preflight's local `centralManifest` repository
+// (issue #4853) moved to the automobile.maven-central-manifest convention so no
+// cross-project `allprojects {}` configuration remains here.

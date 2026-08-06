@@ -4,7 +4,7 @@
   "jsPlugins": ["./oxlint-plugins/auto-mobile.mjs"],
   "ignorePatterns": [
     "ios/**", "android/**", "scratch/**", "dist/**", "node_modules/**",
-    "**/*.generated.ts", "**/generated/**", "**/*.d.ts",
+    "**/*.generated.ts", "**/generated/**",
     "**/*.js", "**/*.mjs", "**/*.cjs", "**/*.jsx"
   ],
   "categories": { "correctness": "off" },

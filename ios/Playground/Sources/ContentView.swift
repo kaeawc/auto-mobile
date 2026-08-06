@@ -44,7 +44,8 @@ struct ContentView: View {
                 }
                 .tag(Tab.settings)
         }
-        .tint(.autoMobileRed)
+        // Tab bar accent flows from the design-system theme (marker red) applied
+        // by `.autoMobileTheme()` at the app root — no hard-coded override here.
         .onAppear {
             trackTab(selectedTab)
         }

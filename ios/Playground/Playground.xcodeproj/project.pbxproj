@@ -9,12 +9,16 @@
 /* Begin PBXBuildFile section */
 		007B2120C2735B42A20C510B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2F4747AC5700DF138836D5F /* Theme.swift */; };
 		15B37A3EDBAFD6BD0FC98BFC /* DemosTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */; };
+		327A28D4620038BBA8D02656 /* Shapes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5122FF517804CD75B0F75CBA /* Shapes.swift */; };
 		5339DAC5909A688059ABBA80 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01BCE22E951887741F32904 /* ContentView.swift */; };
 		54C16E199D10E281E1E316CF /* SettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64FD18EC8D1B9A665615C374 /* SettingsTab.swift */; };
 		553F94B4D033BCA44B07AC4E /* PlaygroundApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6EA6F80147865B6F32DD526 /* PlaygroundApp.swift */; };
+		619CDEE3F264DBB3415041D0 /* ShantellSans.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E1B25FBAC5217DE05EA701CF /* ShantellSans.ttf */; };
 		72CDA6DB361FDC97490C3C2C /* AutoMobileSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 3137B15D8D485C363DB78A3E /* AutoMobileSDK */; };
+		7C8CF515031B975C05FA2AD2 /* PlaygroundThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */; };
 		97CA6F2DE628A139094EF72D /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B46870C2DDF4A2F73A5778B /* Colors.swift */; };
 		B3B613858665E331B7E7EB99 /* SdkHighlightOverlayE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */; };
+		B73660170723595B44749E9F /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51580F5FC5ADCD5576885563 /* Typography.swift */; };
 		C437D38FD2B064F815AE6F33 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CAC67DC1CDDC454A7BB7870A /* Assets.xcassets */; };
 		E46744897A309BECE20573D9 /* AutoMobileSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 5B1F96DAE2D3DE50DD89C21C /* AutoMobileSDK */; };
 		EA349DF37933D70B410F7135 /* DiscoverTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF86B8E1368C9B39424F13C0 /* DiscoverTab.swift */; };
@@ -35,6 +39,8 @@
 		0C5B41C44C18F0045A6B61C2 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemosTab.swift; sourceTree = "<group>"; };
 		2B46870C2DDF4A2F73A5778B /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Colors.swift; sourceTree = "<group>"; };
+		5122FF517804CD75B0F75CBA /* Shapes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shapes.swift; sourceTree = "<group>"; };
+		51580F5FC5ADCD5576885563 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
 		64FD18EC8D1B9A665615C374 /* SettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTab.swift; sourceTree = "<group>"; };
 		8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHighlightOverlayE2ETests.swift; sourceTree = "<group>"; };
 		AA0EB8290A6E5436B2C8CE6F /* auto-mobile-sdk */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "auto-mobile-sdk"; path = "../auto-mobile-sdk"; sourceTree = SOURCE_ROOT; };
@@ -46,7 +52,9 @@
 		CBBA4475C2A7A68AE3987086 /* PlaygroundTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlaygroundTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D01BCE22E951887741F32904 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D61225B3155981050B6A59A6 /* AccessibilityRotorDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityRotorDemo.swift; sourceTree = "<group>"; };
+		E1B25FBAC5217DE05EA701CF /* ShantellSans.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = ShantellSans.ttf; sourceTree = "<group>"; };
 		E40DD68F934F5F0D2981ACA1 /* Playground.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Playground.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundThemeTests.swift; sourceTree = "<group>"; };
 		FF86B8E1368C9B39424F13C0 /* DiscoverTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverTab.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -83,7 +91,9 @@
 			isa = PBXGroup;
 			children = (
 				2B46870C2DDF4A2F73A5778B /* Colors.swift */,
+				5122FF517804CD75B0F75CBA /* Shapes.swift */,
 				C2F4747AC5700DF138836D5F /* Theme.swift */,
+				51580F5FC5ADCD5576885563 /* Typography.swift */,
 			);
 			path = Theme;
 			sourceTree = "<group>";
@@ -96,21 +106,39 @@
 			name = Packages;
 			sourceTree = "<group>";
 		};
+		83925D121AF0F0A28F781607 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				B44CF1DC2EC377D466AE8285 /* Fonts */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		AABC9BE64A1302199D5D2AF8 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
 				D01BCE22E951887741F32904 /* ContentView.swift */,
 				BDA9169E926B14087F3B1BA2 /* Info.plist */,
 				C6EA6F80147865B6F32DD526 /* PlaygroundApp.swift */,
+				83925D121AF0F0A28F781607 /* Resources */,
 				EAF2D62F55B68E2361617BFC /* Tabs */,
 				6BB7FE49E94ED3C6DF5E9D08 /* Theme */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		B44CF1DC2EC377D466AE8285 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				E1B25FBAC5217DE05EA701CF /* ShantellSans.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
 		B500CE1A6941BEA33903C091 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */,
 				8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */,
 			);
 			path = Tests;
@@ -237,6 +265,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C437D38FD2B064F815AE6F33 /* Assets.xcassets in Resources */,
+				619CDEE3F264DBB3415041D0 /* ShantellSans.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -254,7 +283,9 @@
 				EA349DF37933D70B410F7135 /* DiscoverTab.swift in Sources */,
 				553F94B4D033BCA44B07AC4E /* PlaygroundApp.swift in Sources */,
 				54C16E199D10E281E1E316CF /* SettingsTab.swift in Sources */,
+				327A28D4620038BBA8D02656 /* Shapes.swift in Sources */,
 				007B2120C2735B42A20C510B /* Theme.swift in Sources */,
+				B73660170723595B44749E9F /* Typography.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -262,6 +293,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7C8CF515031B975C05FA2AD2 /* PlaygroundThemeTests.swift in Sources */,
 				B3B613858665E331B7E7EB99 /* SdkHighlightOverlayE2ETests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

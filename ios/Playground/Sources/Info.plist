@@ -30,6 +30,10 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
+    <key>UIAppFonts</key>
+    <array>
+        <string>ShantellSans.ttf</string>
+    </array>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIRequiredDeviceCapabilities</key>

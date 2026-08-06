@@ -439,7 +439,7 @@ export interface DiffObserveConfig {
  * `updatedAt` (churns every capture) and object/array fields (`viewHierarchy`
  * is covered by the node diff; `elements` mirrors the hierarchy). Advisory
  * `layoutWarnings` is the intentional exception: it has no hierarchy-diff
- * representation and must survive action observations when enabled.
+ * representation and must survive action observations.
  *
  * `awaitDuration` (#3052) is a scalar with no hierarchy equivalent — it is the
  * wait outcome for an `observe waitFor` surfaced through a non-observe action —

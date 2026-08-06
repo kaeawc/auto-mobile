@@ -19,6 +19,13 @@ type WarningCandidate = {
  * backgrounds and scrolling content are often meant to draw edge-to-edge.
  */
 export class SafeAreaAuditor {
+  /**
+   * Per-`inspect` memo for {@link SafeAreaAuditor.hasOverlappingContentDescendant},
+   * keyed by raw-node identity. Reset at the start of every `inspect` so it never
+   * carries across calls.
+   */
+  private contentOverlapMemo = new WeakMap<Node, boolean>();
+
   inspect(result: ObserveResult): LayoutWarning[] {
     const insets = result.insets;
     if (!insets?.available || !result.viewHierarchy?.hierarchy?.node) {
@@ -33,6 +40,7 @@ export class SafeAreaAuditor {
     const contentInsets = this.contentInsets(insets);
     const foregroundPackage = result.activeWindow?.appId ?? result.viewHierarchy.packageName;
     const warnings: WarningCandidate[] = [];
+    this.contentOverlapMemo = new WeakMap();
     for (const root of asNodes(result.viewHierarchy.hierarchy.node)) {
       this.inspectNode(root, screen, contentInsets, insets.systemGestures, insets.mandatorySystemGestures, foregroundPackage, [], warnings);
     }
@@ -80,9 +88,14 @@ export class SafeAreaAuditor {
         warnings
       );
     }
+    // `ancestors` is a mutable stack shared across the traversal: push self, recurse,
+    // pop. A warning candidate snapshots it (`[...ancestors]`) at creation, so only
+    // the few warning sites pay the copy — not every node, which would be O(n·depth).
+    ancestors.push(node);
     for (const child of asNodes(node.node)) {
-      this.inspectNode(child, screen, content, systemGestures, mandatorySystemGestures, foregroundPackage, [...ancestors, node], warnings);
+      this.inspectNode(child, screen, content, systemGestures, mandatorySystemGestures, foregroundPackage, ancestors, warnings);
     }
+    ancestors.pop();
   }
 
   private inspectElement(
@@ -126,12 +139,12 @@ export class SafeAreaAuditor {
         content.typesForSides(sides),
         sides,
         "important-content-under-inset",
-        this.contentSeverity(node, bounds, screen, content.edges, foregroundPackage),
+        this.contentSeverity(sourceNode, bounds, screen, content.edges, foregroundPackage),
         screen,
         content.edges
       ),
       node: sourceNode,
-      ancestors,
+      ancestors: [...ancestors],
     });
   }
 
@@ -143,10 +156,39 @@ export class SafeAreaAuditor {
     foregroundPackage: string | undefined
   ): LayoutWarning["severity"] {
     const overlap = overlapPercent(bounds, screen, insets);
-    if (isLargeContainer(node, bounds, screen) && !hasOverlappingContentDescendant(node, screen, insets, foregroundPackage)) {
+    if (isLargeContainer(node, bounds, screen) && !this.hasOverlappingContentDescendant(node, screen, insets, foregroundPackage)) {
       return "info";
     }
     return overlap >= 50 ? "warning" : "info";
+  }
+
+  /**
+   * Whether any content-bearing descendant of `node` overlaps a content inset.
+   * Memoized per `inspect` call by raw-node identity ({@link contentOverlapMemo}):
+   * `screen`, `insets` (the `content.edges`), and `foregroundPackage` are constant
+   * within a call, so a node's answer is stable. Without the memo, a chain of
+   * nested large containers rescans overlapping subtrees — O(n^2) on deep trees;
+   * the memo makes it a single pass. Behavior matches the prior recursive walk:
+   * each strict descendant is attribute-merged before the overlap test, and the
+   * `node` argument itself is never tested.
+   */
+  private hasOverlappingContentDescendant(
+    node: Node,
+    screen: { width: number; height: number },
+    insets: ObservationEdgeInsets,
+    foregroundPackage: string | undefined
+  ): boolean {
+    const cached = this.contentOverlapMemo.get(node);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const result = asNodes(node.node).some(child => {
+      const inspectedChild = withHierarchyAttributes(child);
+      return overlapsContentInset(inspectedChild, screen, insets, foregroundPackage)
+        || this.hasOverlappingContentDescendant(child, screen, insets, foregroundPackage);
+    });
+    this.contentOverlapMemo.set(node, result);
+    return result;
   }
 
   private inspectGestureRegion(node: Node, sourceNode: Node, ancestors: Node[], bounds: ObservationEdgeInsets, categories: LayoutWarning["categories"], screen: { width: number; height: number }, systemGestures: ObservationEdgeInsets | undefined, mandatorySystemGestures: ObservationEdgeInsets | undefined, warnings: WarningCandidate[]): void {
@@ -158,7 +200,7 @@ export class SafeAreaAuditor {
       warnings.push({
         warning: this.warning(node, bounds, ["interaction"], insetTypes(systemGestures, mandatorySystemGestures, "systemGestures", "mandatorySystemGestures", sides), sides, "interaction-in-system-gesture-region", "info", screen, gesture),
         node: sourceNode,
-        ancestors,
+        ancestors: [...ancestors],
       });
     }
   }
@@ -273,19 +315,16 @@ function isLargeContainer(node: Node, bounds: ObservationEdgeInsets, screen: { w
     && (bounds.right - bounds.left) * (bounds.bottom - bounds.top) >= screen.width * screen.height * 0.2;
 }
 
-function hasOverlappingContentDescendant(node: Node, screen: { width: number; height: number }, insets: ObservationEdgeInsets, foregroundPackage: string | undefined): boolean {
-  return descendants(node).some(descendant => {
-    if (isForeignNode(descendant, foregroundPackage) || categoriesFor(descendant).length === 0) {return false;}
-    const bounds = readBounds(descendant);
-    return bounds !== null && intersectingSides(bounds, screen, insets).length > 0;
-  });
-}
-
-function descendants(node: Node): Node[] {
-  return asNodes(node.node).flatMap(child => {
-    const inspectedChild = withHierarchyAttributes(child);
-    return [inspectedChild, ...descendants(child)];
-  });
+/** A node whose content (text/interaction) overlaps a content inset side. */
+function overlapsContentInset(
+  node: Node,
+  screen: { width: number; height: number },
+  insets: ObservationEdgeInsets,
+  foregroundPackage: string | undefined
+): boolean {
+  if (isForeignNode(node, foregroundPackage) || categoriesFor(node).length === 0) {return false;}
+  const bounds = readBounds(node);
+  return bounds !== null && intersectingSides(bounds, screen, insets).length > 0;
 }
 
 function intersectingSides(bounds: ObservationEdgeInsets, screen: { width: number; height: number }, insets: ObservationEdgeInsets): Side[] {

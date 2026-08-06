@@ -22,7 +22,8 @@ constructing MCP tool payloads directly.
 - Support USB-connected physical devices and emulators/simulators
 - Include audio streaming for complete mirroring
 - Integrate with existing observation architecture
-- Single device streaming at a time (no multi-device simultaneous streams)
+- Concurrent per-device streams: one shared capture per device, fanned out to multiple
+  subscribers, so the desktop workspace can mirror many device panes at once
 
 ## Architecture
 
@@ -91,16 +92,38 @@ New Unix socket: `~/.auto-mobile/video-stream.sock`
 
 ### Connection Handshake
 
+One JSON line each way; everything after the acknowledgement is binary framing.
+
+```text
+Client → Server: { "action": "subscribe", "id": "<uuid>", "sessionUuid": "<daemon session>",
+                   "deviceId": "<optional>", "quality": "low|medium|high", "fps": 30,
+                   "bitrateKbps": 2000, "size": { "width": 720, "height": 1280 } }
+Server → Client: { "type": "video_stream_response", "success": true, "action": "subscribe",
+                   "deviceId": "...", "framing": "h264" }
 ```
-Client → Server: { "command": "subscribe", "deviceId": "<optional>" }
-Server → Client: { "type": "stream_started", "deviceId": "...", "platform": "android|ios" }
-```
+
+All hint fields are optional and validated server-side (an unknown `quality`, an `fps` outside
+the capture backends' shared 5–60 range, or a non-positive/oversized `bitrateKbps` refuses the
+subscribe). Captures are shared per device: the first subscriber's hints fix the encode and a
+late joiner's differing hints are ignored. `quality` selects the on-device preset
+(low=540p/2Mbps, medium=720p/4Mbps, high=1080p/8Mbps); on iOS only the preset's bitrate applies
+(resolution self-scales to Level 4.2). `fps` is honored by the Android persistent encoder
+(`--fps`) and the iOS Simulator (`--simulator-fps`) — farm clients should send it on both — but
+**not** by the Android `screenrecord` fallback (native display rate) or physical iOS (its own
+AVFoundation rate). `sessionUuid` authenticates against the daemon session registry (#4751); when
+auth is on (the default) a subscribe without a live session is refused. The desktop workspace
+client authenticates by binding a `DesktopDaemonSession` to its focused device (#4977) and passing
+that session UUID to every pane, so it works against a default (auth-on) daemon;
+`AUTOMOBILE_DAEMON_STREAM_AUTH=0` remains only an operator fallback for setups whose clients cannot
+supply a session.
 
 ### Frame Data
 
-Binary frames with platform-specific headers:
+The **relay wire is always H.264** (`framing: "h264"`) regardless of platform — a subscriber
+parses the same framing for Android and iOS. iOS captures raw BGRA internally and the daemon
+re-encodes it to H.264 before it reaches the relay, so relay clients never see raw frames:
 
-**Android (H.264):**
+**Relay wire (both platforms, H.264):**
 ```
 ┌─────────────────┬─────────────────┬─────────────────┐
 │ codec_id (4)    │ width (4)       │ height (4)      │
@@ -108,7 +131,7 @@ Binary frames with platform-specific headers:
 Then per-packet: pts_flags (8) + size (4) + H.264 data
 ```
 
-**iOS (Raw BGRA):**
+**Internal only — iOS capture-helper → daemon (raw BGRA, NOT the relay wire):**
 ```
 ┌──────────┬─────────────┬──────────┬───────────┬─────────────┬───────────┐
 │ magic(4) │ checksum(4) │ width(4) │ height(4) │ bytesPerRow │ timestamp │
@@ -116,15 +139,14 @@ Then per-packet: pts_flags (8) + size (4) + H.264 data
 Then: height * bytesPerRow bytes of BGRA pixel data
 ```
 `magic` ("AMF1") + CRC-32 `checksum` over the field bytes make frame boundaries
-self-describing, so corruption recovery is deterministic (issue #4270).
+self-describing, so corruption recovery is deterministic (issue #4270). This format is consumed
+by the daemon's iOS H.264 encoder and is never sent to relay subscribers.
 
 ### Stream Control
 
-```
-Client → Server: { "command": "set_quality", "quality": "low|medium|high" }
-Client → Server: { "command": "unsubscribe" }
-Server → Client: { "type": "stream_stopped", "reason": "..." }
-```
+There is no mid-stream control channel: quality is fixed at subscribe time (first subscriber
+wins for a shared capture) and a client stops by closing its connection. The capture stops
+when the last subscriber for a device disconnects.
 
 ## Quality Presets
 
@@ -151,7 +173,7 @@ When video streaming is unavailable:
 | Audio streaming | Include audio for complete mirroring |
 | Touch input | Plan for it, implement later |
 | Quality auto-adjustment | Automatically lower quality on frame drops |
-| Multiple devices | Single device streaming at a time |
+| Multiple devices | Concurrent per-device streams — one shared capture per device, fanned out to its subscribers, so the desktop workspace mirrors many device panes at once |
 | Android decoder | `org.bytedeco:ffmpeg` (in-process JNI), host-platform classifier only. Klarity was the original choice but cannot consume a live stream — its API takes file paths only. No FFmpeg *subprocess* fallback. |
 | iOS Swift integration | Swift-to-Node bridge |
 | macOS permissions | User handles permission prompts |

@@ -157,7 +157,6 @@ import dev.jasonpearson.automobile.desktop.core.video.LiveVideoFrame
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
-import dev.jasonpearson.automobile.desktop.core.video.toImageBitmap
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
@@ -167,6 +166,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -202,31 +202,32 @@ internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String
  * into that policy, which decides on frame *provenance* rather than on dimensions.
  */
 
+/** Reconnect backoff bounds for [rememberLiveVideoFrame] when [autoReconnect] is on. */
+internal const val LIVE_RECONNECT_INITIAL_MS = 1_000L
+internal const val LIVE_RECONNECT_MAX_MS = 15_000L
+
 /**
- * Connects a live-mirroring source for this composition and exposes only its newest decoded frame.
+ * Connects a live-mirroring source for this composition and exposes only its newest frame.
  *
- * The source already drops old decoded frames; conflation here also prevents Compose conversion
- * from accumulating work when the relay runs faster than the UI can draw. A refused or unavailable
+ * Frames arrive ready to draw — the client converts, sequences, and timestamps them on its reader
+ * thread (issues #3348/#4786) — so this only conflates to the newest and gates on the stream state:
+ * a frame that raced the relay's death must not restore a dead mirror. A refused or unavailable
  * relay clears the frame, allowing [DeviceScreenView] to continue rendering screenshot updates.
+ *
+ * With [autoReconnect] on, an `Unavailable` state (relay dropped, "Live mirroring stopped", or a
+ * transient subscribe rejection while the daemon session re-registers) triggers a bounded
+ * exponential-backoff [VideoStreamSource.connect] retry rather than staying dead until the pane is
+ * torn down and rebuilt. Off (the default) preserves the original clear-and-stop behavior for the
+ * IDE-plugin/`AutoMobileContent` path, which blends in screenshot updates instead.
  */
 @Composable
 internal fun rememberLiveVideoFrame(
   source: VideoStreamSource?,
   deviceId: String?,
-  nowMs: () -> Long = MONOTONIC_NOW_MS,
-  frameConverter:
-    suspend (
-      dev.jasonpearson.automobile.desktop.core.video.DecodedFrame
-    ) -> androidx.compose.ui.graphics.ImageBitmap =
-    { frame ->
-      withContext(Dispatchers.Default) { frame.toImageBitmap() }
-    },
+  autoReconnect: Boolean = false,
+  reconnectInitialMs: Long = LIVE_RECONNECT_INITIAL_MS,
 ): LiveVideoFrame? {
   var liveFrame by remember(source, deviceId) { mutableStateOf<LiveVideoFrame?>(null) }
-  // Monotonic per (source, deviceId): identifies which decoded frame is on screen so a stalled
-  // relay — which keeps its socket, its Streaming state and its last bitmap — is distinguishable
-  // from a live one (issue #3348).
-  val frameSequence = remember(source, deviceId) { java.util.concurrent.atomic.AtomicLong(0L) }
 
   DisposableEffect(source, deviceId) {
     if (source != null && deviceId != null) source.connect(deviceId)
@@ -239,25 +240,34 @@ internal fun rememberLiveVideoFrame(
   LaunchedEffect(source) {
     source?.frames?.conflate()?.collect { frame ->
       if (source.state.value is VideoStreamState.Streaming) {
-        val decodedFrame = frameConverter(frame)
-        if (source.state.value is VideoStreamState.Streaming) {
-          liveFrame =
-            LiveVideoFrame(
-              bitmap = decodedFrame,
-              sequence = frameSequence.incrementAndGet(),
-              receivedAtMs = nowMs(),
-              // The stream's config packets attest the display rotation; carrying it here lets
-              // DeviceControlSession re-prove orientation from the live frame alone (issue #4786).
-              rotation = frame.rotation,
-            )
-        }
+        liveFrame = frame
       }
     }
   }
 
-  LaunchedEffect(source) {
-    source?.state?.collect { state ->
-      if (state is VideoStreamState.Unavailable) liveFrame = null
+  LaunchedEffect(source, deviceId, autoReconnect) {
+    if (source == null) return@LaunchedEffect
+    // collectLatest (not collect) is load-bearing for the retry: when the socket is absent,
+    // connect() re-assigns the SAME Unavailable value, which MutableStateFlow suppresses — so a
+    // plain collector would receive no further event and retry only once. Under collectLatest the
+    // per-state block below is cancelled only by a genuine transition (Connecting/Streaming after
+    // a successful connect, or disposal), so a stuck-Unavailable stream keeps retrying on its own
+    // timer while a recovered one stops cleanly.
+    source.state.collectLatest { state ->
+      if (state is VideoStreamState.Unavailable) {
+        liveFrame = null
+        if (autoReconnect && deviceId != null) {
+          var backoffMs = reconnectInitialMs
+          while (isActive) {
+            // Cancelled by composition disposal or a real state change, so a torn-down or
+            // recovered pane stops. connect() no-ops while a reader is already active, so a
+            // spurious retry cannot double-subscribe.
+            delay(backoffMs)
+            backoffMs = (backoffMs * 2).coerceAtMost(LIVE_RECONNECT_MAX_MS)
+            source.connect(deviceId)
+          }
+        }
+      }
     }
   }
 
@@ -810,7 +820,7 @@ fun AutoMobileContent(
         null
       }
     }
-  val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId, MONOTONIC_NOW_MS)
+  val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId)
   // Forces the control-availability decision to be re-evaluated on a timer, not only when an
   // observation source produces an update (issue #3348). A stalled observation stream produces
   // nothing at all — its staleness is visible only as time passing — so without this a frozen

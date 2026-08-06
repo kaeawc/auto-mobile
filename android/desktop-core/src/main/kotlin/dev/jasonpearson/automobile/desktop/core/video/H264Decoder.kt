@@ -63,6 +63,10 @@ class H264Decoder : AutoCloseable {
   private var scaledHeight = 0
   private var closed = false
 
+  // Reused across frames (reallocated only on a size change) so a long-running stream
+  // allocates nothing per frame — this is why DecodedFrame is only valid during onFrame.
+  private var out = ByteArray(0)
+
   init {
     if (avcodec.avcodec_open2(context, codec, null as PointerPointer<*>?) < 0) {
       close()
@@ -189,7 +193,9 @@ class H264Decoder : AutoCloseable {
 
     val stride = bgraFrame.linesize(0)
     val rowBytes = width * 4
-    val out = ByteArray(rowBytes * height)
+    if (out.size != rowBytes * height) {
+      out = ByteArray(rowBytes * height)
+    }
     val plane = bgraFrame.data(0)
     if (stride == rowBytes) {
       plane.position(0).get(out, 0, out.size)

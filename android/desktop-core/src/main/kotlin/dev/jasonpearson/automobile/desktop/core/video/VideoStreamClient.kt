@@ -14,9 +14,9 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,9 +50,24 @@ sealed class VideoStreamState {
   data class Unavailable(val reason: String) : VideoStreamState()
 }
 
+/**
+ * Resolution/bitrate preset for a subscription, matching the daemon relay's `quality` hint (and,
+ * transitively, the on-device `QualityPreset`): on Android the capture's LONGER dimension is capped
+ * at 540/720/1080 with the other side scaled proportionally; iOS honors the preset's bitrate but
+ * self-scales resolution to Level 4.2. Lower presets shrink decode cost quadratically, which is
+ * what makes dozens of concurrent farm panes affordable. Captures are shared per device on the
+ * daemon: the FIRST subscriber's hints fix the encode, and a late joiner's differing preset is
+ * ignored.
+ */
+enum class VideoStreamQuality(internal val wire: String) {
+  Low("low"),
+  Medium("medium"),
+  High("high"),
+}
+
 /** A live view of a device's screen. */
 interface VideoStreamSource {
-  val frames: SharedFlow<DecodedFrame>
+  val frames: SharedFlow<LiveVideoFrame>
   val state: StateFlow<VideoStreamState>
 
   fun connect(deviceId: String?)
@@ -79,11 +94,17 @@ fun DecodedFrame.toImageBitmap(): ImageBitmap =
  * Streams a device's screen from `~/.auto-mobile/video-stream.sock` and decodes it to frames.
  *
  * The handshake is one JSON line each way; everything after is the binary framing handled by
- * [VideoStreamParser]. Decoding happens on the reader thread, which is deliberate: it applies
- * backpressure to the socket rather than letting undecoded packets pile up in memory.
+ * [VideoStreamParser]. Decoding AND bitmap conversion happen on the reader thread, which is
+ * deliberate: it applies backpressure to the socket rather than letting undecoded packets pile up
+ * in memory, and it keeps the per-frame work off the UI's dispatchers entirely. The reader is a
+ * dedicated per-client thread rather than a `Dispatchers.IO` slot so a farm of dozens of streams
+ * cannot exhaust the shared 64-thread IO pool for every other IO consumer in the process.
  *
- * [frames] drops the oldest frame when a collector falls behind. For live video a stale frame is
- * worthless, and an unbounded buffer would trade latency for memory and lose on both.
+ * [frames] carries ready-to-draw [LiveVideoFrame]s (immutable Skia rasters — no tearing, no
+ * consumer-side conversion) and drops the oldest when a collector falls behind. For live video a
+ * stale frame is worthless, and an unbounded buffer would trade latency for memory and lose on
+ * both. Steady-state the pipeline allocates no JVM-heap frame buffers: the decoder reuses its BGRA
+ * buffer and the only per-frame cost is the native raster copy inside [toImageBitmap].
  */
 class VideoStreamClient(
   private val socketPathValue: String = AutoMobileSocketPaths.socketPath(VIDEO_STREAM_SOCKET_FILE),
@@ -104,17 +125,37 @@ class VideoStreamClient(
    * `DesktopDaemonSession` for Unix-daemon connections.
    */
   private val sessionUuidProvider: () -> String? = { null },
+  /** Resolution/bitrate preset hint sent on subscribe; null keeps the capture's default. */
+  private val quality: VideoStreamQuality? = null,
+  /** Capture frame-rate hint sent on subscribe; null keeps the relay's pinned default. */
+  private val fps: Int? = null,
+  /** Encoder bitrate hint (kbps) sent on subscribe; null keeps the preset's default. */
+  private val bitrateKbps: Int? = null,
+  /**
+   * Monotonic clock stamping [LiveVideoFrame.receivedAtMs]. Must share a time base with the
+   * consumer-side freshness checks (`MONOTONIC_NOW_MS`, issue #3348), hence the same
+   * `System.nanoTime()` source by default; injectable for deterministic tests.
+   */
+  private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) : VideoStreamSource {
 
-  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  // One dedicated reader thread per client (see the class doc for why not Dispatchers.IO).
+  private val readerDispatcher =
+    java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "video-stream-reader").apply { isDaemon = true }
+      }
+      .asCoroutineDispatcher()
+  private val scope = CoroutineScope(SupervisorJob() + readerDispatcher)
+
+  private val frameSequence = java.util.concurrent.atomic.AtomicLong(0L)
 
   private val _frames =
-    MutableSharedFlow<DecodedFrame>(
+    MutableSharedFlow<LiveVideoFrame>(
       replay = 1,
       extraBufferCapacity = 2,
       onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-  override val frames: SharedFlow<DecodedFrame> = _frames.asSharedFlow()
+  override val frames: SharedFlow<LiveVideoFrame> = _frames.asSharedFlow()
 
   private val _state = MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
   override val state: StateFlow<VideoStreamState> = _state.asStateFlow()
@@ -132,7 +173,12 @@ class VideoStreamClient(
     }
 
     _state.value = VideoStreamState.Connecting
-    readerJob = scope.launch { runSession(deviceId) }
+    readerJob = scope.launch {
+      // Name the dedicated thread per target so a farm's dozens of readers are tellable
+      // apart in a thread dump.
+      Thread.currentThread().name = "video-stream-reader-${deviceId ?: "default"}"
+      runSession(deviceId)
+    }
   }
 
   override fun disconnect() {
@@ -146,6 +192,7 @@ class VideoStreamClient(
   override fun dispose() {
     disconnect()
     scope.coroutineContext[Job]?.cancel()
+    readerDispatcher.close()
   }
 
   private fun runSession(deviceId: String?) {
@@ -174,6 +221,9 @@ class VideoStreamClient(
               id = UUID.randomUUID().toString(),
               sessionUuid = sessionUuidProvider(),
               deviceId = deviceId,
+              quality = quality?.wire,
+              fps = fps,
+              bitrateKbps = bitrateKbps,
             ),
           )
         )
@@ -253,9 +303,20 @@ class VideoStreamClient(
               // device rotation.
               _state.value = VideoStreamState.Streaming(frame.width, frame.height)
             }
-            // The decoder reuses its buffer, so the frame must be copied before it leaves here.
+            // Present here, on the reader thread, while the decoder's reused buffer is valid:
+            // the immutable raster produced by toImageBitmap is the only per-frame copy, and
+            // consumers receive a ready-to-draw frame with no conversion (or allocation) of
+            // their own.
             _frames.tryEmit(
-              DecodedFrame(frame.width, frame.height, frame.bgra.copyOf(), currentRotation)
+              LiveVideoFrame(
+                bitmap = frame.toImageBitmap(),
+                sequence = frameSequence.incrementAndGet(),
+                receivedAtMs = nowMs(),
+                // The stream's config packets attest the display rotation; carrying it here
+                // lets DeviceControlSession re-prove orientation from the live frame alone
+                // (issue #4786).
+                rotation = currentRotation,
+              )
             )
           }
         },
@@ -284,6 +345,12 @@ internal data class VideoStreamRequest(
    */
   val sessionUuid: String? = null,
   val deviceId: String? = null,
+  /** Resolution/bitrate preset hint (`low`/`medium`/`high`); see [VideoStreamQuality]. */
+  val quality: String? = null,
+  /** Capture frame-rate hint; the relay pins its own default when omitted. */
+  val fps: Int? = null,
+  /** Encoder bitrate hint in kbps; the preset's default applies when omitted. */
+  val bitrateKbps: Int? = null,
 )
 
 @Serializable
@@ -300,14 +367,17 @@ internal data class VideoStreamResponse(
 class FakeVideoStreamSource(
   private val available: Boolean = true,
   private val refuseWith: String? = null,
+  private val nowMs: () -> Long = { 0L },
 ) : VideoStreamSource {
+  private val fakeSequence = java.util.concurrent.atomic.AtomicLong(0L)
+
   private val _frames =
-    MutableSharedFlow<DecodedFrame>(
+    MutableSharedFlow<LiveVideoFrame>(
       replay = 1,
       extraBufferCapacity = 2,
       onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-  override val frames: SharedFlow<DecodedFrame> = _frames.asSharedFlow()
+  override val frames: SharedFlow<LiveVideoFrame> = _frames.asSharedFlow()
 
   private val _state = MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
   override val state: StateFlow<VideoStreamState> = _state.asStateFlow()
@@ -341,8 +411,15 @@ class FakeVideoStreamSource(
     _state.value = VideoStreamState.Unavailable(reason)
   }
 
-  /** Publishes a frame to collectors, as the real client would. */
+  /** Publishes a ready-to-draw frame to collectors, as the real client would. */
   fun emitFrame(width: Int = 1080, height: Int = 2400, rotation: Int? = null) {
-    _frames.tryEmit(DecodedFrame(width, height, ByteArray(width * height * 4), rotation))
+    _frames.tryEmit(
+      LiveVideoFrame(
+        bitmap = ImageBitmap(width, height),
+        sequence = fakeSequence.incrementAndGet(),
+        receivedAtMs = nowMs(),
+        rotation = rotation,
+      )
+    )
   }
 }

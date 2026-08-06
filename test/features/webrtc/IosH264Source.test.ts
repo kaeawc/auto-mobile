@@ -1184,6 +1184,18 @@ describe("IosH264Source", () => {
     );
   });
 
+  test("the quality preset supplies the bitrate when no explicit override is set", async () => {
+    // iOS cannot honor the preset's resolution cap (Level 4.2 self-scaling), so the preset's
+    // bitrate is the half of the contract this source keeps.
+    const { source, helper, encoderSpawns } = createHarnessWithOverrides({ quality: "low" });
+
+    await startWithFrame(source, helper, frame(750, 1334, 0x11));
+
+    const rateIndex = encoderSpawns[0].args.indexOf("-b:v");
+    expect(rateIndex).toBeGreaterThanOrEqual(0);
+    expect(encoderSpawns[0].args[rateIndex + 1]).toBe("2000000");
+  });
+
   test("does not apply the resolution-derived default bitrate to a physical device (#4375)", async () => {
     // #4349 justified the 0.1 bpp default entirely from Simulator screen-content
     // measurements, so a physical iPhone must not inherit it — with no operator

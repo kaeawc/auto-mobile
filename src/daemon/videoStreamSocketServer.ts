@@ -32,6 +32,8 @@ export type CaptureSourceFactory = (options: {
   onRotation?: (rotation: number) => void;
   bitrateBps?: number;
   size?: { width: number; height: number };
+  /** Aspect-preserving resolution/bitrate preset; see `VideoStreamSocketRequest.quality`. */
+  quality?: "low" | "medium" | "high";
   /** Capture rate for iOS Simulator sources; see the call site for why it is pinned. */
   fps?: number;
 }) => Promise<H264CaptureSource>;
@@ -66,6 +68,80 @@ interface DeviceCapture {
 }
 
 const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
+
+const SUPPORTED_QUALITIES = new Set(["low", "medium", "high"]);
+// The relay resolves the device only after this validation, so it bounds fps to the range every
+// capture backend can honor rather than a per-platform limit. The iOS Simulator helper is the
+// tightest at [5, 60] (SIMULATOR_FPS_MIN/MAX); the Android video-server accepts any positive
+// rate, so [5, 60] is the safe universal window — a hint outside it would pass here and then throw
+// at iOS capture startup.
+const MIN_FPS_HINT = 5;
+const MAX_FPS_HINT = 60;
+// A generous encoder ceiling (~1 Gbps) that still leaves headroom below Number.MAX_SAFE_INTEGER
+// after the kbps→bps ×1000 conversion at the capture-options boundary, so a huge-but-finite hint
+// cannot silently lose integer precision downstream.
+const MAX_BITRATE_KBPS = 1_000_000;
+
+/**
+ * Captures are shared per device and the FIRST subscriber's hints fixed the encode; a late
+ * joiner's differing quality/fps/bitrate hints are silently ignored, so leave a trace for the
+ * viewer wondering why its preset didn't apply.
+ */
+function logIgnoredLateHints(deviceId: string, request: VideoStreamSocketRequest): void {
+  if (request.quality || request.fps || request.bitrateKbps) {
+    logger.debug(
+      `[VideoStream] ${deviceId} already captured; ignoring late subscriber hints ` +
+        `(quality=${request.quality}, fps=${request.fps}, bitrateKbps=${request.bitrateKbps})`
+    );
+  }
+}
+
+function isIntegerInRange(value: number, min: number, max: number): boolean {
+  return Number.isInteger(value) && value >= min && value <= max;
+}
+
+function validateQuality(quality: VideoStreamSocketRequest["quality"]): string | null {
+  return quality === undefined || SUPPORTED_QUALITIES.has(quality)
+    ? null
+    : `Unsupported quality "${quality}"; expected low, medium, or high.`;
+}
+
+function validateFps(fps: VideoStreamSocketRequest["fps"]): string | null {
+  return fps === undefined || isIntegerInRange(fps, MIN_FPS_HINT, MAX_FPS_HINT)
+    ? null
+    : `Invalid fps ${fps}; expected an integer between ${MIN_FPS_HINT} and ${MAX_FPS_HINT}.`;
+}
+
+function validateBitrate(bitrateKbps: VideoStreamSocketRequest["bitrateKbps"]): string | null {
+  return bitrateKbps === undefined || isIntegerInRange(bitrateKbps, 1, MAX_BITRATE_KBPS)
+    ? null
+    : `Invalid bitrateKbps ${bitrateKbps}; expected an integer between 1 and ${MAX_BITRATE_KBPS}.`;
+}
+
+function validateSize(size: VideoStreamSocketRequest["size"]): string | null {
+  if (size === undefined) {
+    return null;
+  }
+  const { width, height } = size ?? {};
+  return isIntegerInRange(width, 2, Number.MAX_SAFE_INTEGER) &&
+    isIntegerInRange(height, 2, Number.MAX_SAFE_INTEGER)
+    ? null
+    : `Invalid size ${JSON.stringify(size)}; expected integer width/height >= 2.`;
+}
+
+/**
+ * Validate the optional capture hints on a subscribe request, returning an error message for the
+ * first invalid field or null when all hints are usable. TypeScript's wire types are erased at
+ * runtime, so this is the only thing standing between a malformed hint and the encoder argv.
+ */
+export function validateCaptureHints(request: VideoStreamSocketRequest): string | null {
+  return (
+    validateQuality(request.quality) ??
+    validateFps(request.fps) ??
+    validateBitrate(request.bitrateKbps) ??
+    validateSize(request.size)
+  );
+}
 
 /**
  * Relays a device's live H.264 stream to local clients over `~/.auto-mobile/video-stream.sock`.
@@ -149,6 +225,22 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       return;
     }
 
+    // parseJson is a cast, not a validator: a hostile or skewed client can put anything in the
+    // hint fields. An unknown quality would NaN out capToQualityPreset into `--size 0xundefined`
+    // (dead capture, confusing error) and a non-positive fps/bitrate would reach the encoders
+    // verbatim, so refuse the subscribe up front with a message naming the bad field.
+    const hintError = validateCaptureHints(request);
+    if (hintError) {
+      this.sendJson(socket, {
+        id: request.id,
+        type: "video_stream_response",
+        success: false,
+        error: hintError,
+      } satisfies VideoStreamSocketResponse);
+      socket.end();
+      return;
+    }
+
     try {
       // Authenticate before starting or attaching to any capture (issue #4751):
       // an unauthenticated or cross-session subscribe is rejected here so it can
@@ -199,6 +291,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     const deviceId = device.deviceId;
     const existing = this.captures.get(deviceId);
     if (existing) {
+      logIgnoredLateHints(deviceId, request);
       existing.subscribers.add(socket);
       // A client that joins part way through a GOP must not consume inter frames before an IDR.
       existing.waitingForKeyFrame.add(socket);
@@ -239,11 +332,13 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         },
         bitrateBps: request.bitrateKbps ? request.bitrateKbps * 1000 : undefined,
         size: request.size,
-        // Pin the observation rate explicitly. This relay borrows the WebRTC
-        // capture sources, so without this it would silently inherit whatever
-        // the *WebRTC* iOS Simulator default happens to be — a knob that is
-        // tuned for an interactive WHEP feed and is not configurable here.
-        fps: SIMULATOR_FPS_DEFAULT,
+        quality: request.quality,
+        // Pin the observation rate explicitly when the client sent no hint. This
+        // relay borrows the WebRTC capture sources, so without this it would
+        // silently inherit whatever the *WebRTC* iOS Simulator default happens
+        // to be — a knob that is tuned for an interactive WHEP feed. A client
+        // hint wins so farm viewers can lower the rate across many streams.
+        fps: request.fps ?? SIMULATOR_FPS_DEFAULT,
       });
       // The final subscriber may disconnect while source construction is in
       // flight. Do not attach an unreachable capture process to a removed entry.
@@ -453,6 +548,7 @@ function defaultDependencies(): VideoStreamSocketServerDependencies {
           onRotation: options.onRotation,
           bitrateBps: options.bitrateBps,
           size: options.size,
+          quality: options.quality,
           fps: options.fps,
         },
         jarPath

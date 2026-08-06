@@ -30,6 +30,24 @@ export interface VideoStreamSocketRequest {
   bitrateKbps?: number;
   /** Capture size hint. Decoders read true dimensions from the in-band SPS regardless. */
   size?: { width: number; height: number };
+  /**
+   * Capture quality preset, passed through to the capture source. Selects an
+   * aspect-preserving resolution cap and default bitrate (see the device
+   * `QualityPreset`: low=540p/2Mbps, medium=720p/4Mbps, high=1080p/8Mbps). The
+   * right knob for many-stream farm viewers, which want lower decode cost per
+   * pane; an explicit `size` wins over the preset's cap. Captures are shared
+   * per device: the first subscriber's hints fix the encode, and a late
+   * joiner's differing hints are ignored (logged at debug). Android-only for
+   * resolution today; iOS honors the preset's bitrate but self-scales
+   * resolution to Level 4.2.
+   */
+  quality?: "low" | "medium" | "high";
+  /**
+   * Capture frame-rate hint, passed through to the capture source. When omitted
+   * the relay pins its existing per-platform default; farm viewers can lower it
+   * to shed encode + decode load across dozens of streams.
+   */
+  fps?: number;
 }
 
 export interface VideoStreamSocketResponse {

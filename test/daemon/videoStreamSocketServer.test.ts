@@ -44,7 +44,7 @@ interface Harness {
   server: VideoStreamSocketServer;
   socketPath: string;
   sources: FakeCaptureSource[];
-  captureOptions: Array<{ fps?: number }>;
+  captureOptions: Array<{ fps?: number; quality?: string }>;
   emit: (chunk: Buffer) => void;
   /** Simulates the source attesting a display rotation (issue #4786). */
   emitRotation: (rotation: number) => void;
@@ -68,7 +68,7 @@ async function startHarness(
   const sources: FakeCaptureSource[] = [];
   let onData: ((chunk: Buffer) => void) | null = null;
   let onRotation: ((rotation: number) => void) | null = null;
-  const captureOptions: Array<{ fps?: number }> = [];
+  const captureOptions: Array<{ fps?: number; quality?: string }> = [];
 
   const server = new VideoStreamSocketServer(
     {
@@ -190,6 +190,104 @@ describe("VideoStreamSocketServer", () => {
     // silently adopt whatever the interactive WHEP default happens to be.
     expect(h.captureOptions[0].fps).toBe(SIMULATOR_FPS_DEFAULT);
     expect(SIMULATOR_FPS_DEFAULT).not.toBe(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT);
+  });
+
+  test("forwards client quality and fps hints to the capture source", async () => {
+    const h = await startHarness();
+
+    // A farm viewer lowers per-stream decode cost by requesting a preset and
+    // rate; the client hint must win over the pinned observation default.
+    await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      quality: "low",
+      fps: 15,
+    });
+
+    expect(h.captureOptions[0].quality).toBe("low");
+    expect(h.captureOptions[0].fps).toBe(15);
+  });
+
+  test("refuses a subscribe carrying an unknown quality instead of NaN-ing the capture", async () => {
+    const h = await startHarness();
+
+    const { ack } = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      quality: "ultra",
+    });
+
+    expect(ack.success).toBe(false);
+    expect(String(ack.error)).toContain('Unsupported quality "ultra"');
+    expect(h.captureOptions).toHaveLength(0);
+  });
+
+  test("refuses non-positive or absurd fps and bitrate hints", async () => {
+    const h = await startHarness();
+
+    const zeroFps = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      fps: 0,
+    });
+    expect(zeroFps.ack.success).toBe(false);
+    expect(String(zeroFps.ack.error)).toContain("Invalid fps");
+
+    const negativeBitrate = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      bitrateKbps: -5,
+    });
+    expect(negativeBitrate.ack.success).toBe(false);
+    expect(String(negativeBitrate.ack.error)).toContain("Invalid bitrateKbps");
+
+    expect(h.captureOptions).toHaveLength(0);
+  });
+
+  test("refuses a malformed size hint", async () => {
+    const h = await startHarness();
+
+    const { ack } = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      size: { width: 0, height: "tall" },
+    });
+
+    expect(ack.success).toBe(false);
+    expect(String(ack.error)).toContain("Invalid size");
+    expect(h.captureOptions).toHaveLength(0);
+  });
+
+  test("refuses an fps outside the backends' shared 5-60 range", async () => {
+    const h = await startHarness();
+
+    // 2 fps passes a naive positivity check but throws at iOS Simulator capture
+    // (the helper enforces [5, 60]); 90 fps exceeds every backend.
+    for (const fps of [2, 90]) {
+      const { ack } = await subscribe(h.socketPath, {
+        action: "subscribe",
+        deviceId: DEVICE.deviceId,
+        fps,
+      });
+      expect(ack.success).toBe(false);
+      expect(String(ack.error)).toContain("Invalid fps");
+    }
+    expect(h.captureOptions).toHaveLength(0);
+  });
+
+  test("refuses a bitrate that would lose integer precision after the kbps->bps conversion", async () => {
+    const h = await startHarness();
+
+    // A huge-but-finite kbps passes Number.isInteger yet overflows past
+    // MAX_SAFE_INTEGER once multiplied by 1000 downstream.
+    const { ack } = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      bitrateKbps: 9_000_000_000_000,
+    });
+    expect(ack.success).toBe(false);
+    expect(String(ack.error)).toContain("Invalid bitrateKbps");
+    expect(h.captureOptions).toHaveLength(0);
   });
 
   test("sends the stream header immediately after the ack", async () => {

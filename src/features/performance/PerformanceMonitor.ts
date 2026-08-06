@@ -174,6 +174,10 @@ export class PerformanceMonitor {
       this.intervalHandle = null;
     }
     this.pending = null;
+    // Discard every device's retained samples along with the monitored set.
+    for (const deviceId of this.monitoredDevices.keys()) {
+      this.perfWindowBuffer.clear(deviceId);
+    }
     this.monitoredDevices.clear();
     logger.info("[PerformanceMonitor] Stopped background monitoring");
   }
@@ -201,6 +205,10 @@ export class PerformanceMonitor {
         existing.lastMediumTick = 0;
         existing.lastSlowTick = 0;
         existing.prevJankCounters = null;
+        // Drop the previous app's windowed samples so the next observe snapshot
+        // cannot attribute app A's fps/cpu/memory to app B (buffer is keyed by
+        // deviceId, so a package switch must reset it).
+        this.perfWindowBuffer.clear(deviceId);
         logger.info(`[PerformanceMonitor] Updated monitoring to ${packageName} on ${deviceId} (${platform})`);
       }
       return;
@@ -230,6 +238,9 @@ export class PerformanceMonitor {
    */
   stopMonitoring(deviceId: string): void {
     if (this.monitoredDevices.delete(deviceId)) {
+      // Discard retained samples so a later reconnect of the same deviceId
+      // cannot surface stale metrics from the prior session.
+      this.perfWindowBuffer.clear(deviceId);
       logger.info(`[PerformanceMonitor] Stopped monitoring ${deviceId}`);
     }
   }
@@ -404,7 +415,11 @@ export class PerformanceMonitor {
       memoryUsageMb: memory,
     };
 
-    this.pushMetrics(device, now, metrics, jankFrames, server);
+    // Raw per-interval frame readings (null when no frames rendered this tick)
+    // for the windowed buffer. The stream uses the cached fps/frameTime to avoid
+    // flicker to 0, but the buffer must NOT re-record a stale reading every idle
+    // tick — that would keep an old fps dominating the percentiles.
+    this.pushMetrics(device, now, metrics, jankFrames, server, gfx.fps, gfx.frameTimeMs);
   }
 
   /**
@@ -467,7 +482,8 @@ export class PerformanceMonitor {
       memoryUsageMb: memory,
     };
 
-    this.pushMetrics(device, now, metrics, jankFrames, server);
+    // iOS has no on-device frame source here, so raw frame readings are null.
+    this.pushMetrics(device, now, metrics, jankFrames, server, fps, frameTimeMs);
   }
 
   /**
@@ -487,7 +503,11 @@ export class PerformanceMonitor {
       memoryUsageMb: number | null;
     },
     jankFrames: number | null,
-    server: PerformancePushSocketServer
+    server: PerformancePushSocketServer,
+    // Raw per-interval frame readings for the windowed buffer only (null on an
+    // idle no-frame tick), kept separate from the cached stream values above.
+    rawFps: number | null,
+    rawFrameTimeMs: number | null
   ): void {
     const data: LivePerformanceData = {
       deviceId: device.deviceId,
@@ -504,10 +524,12 @@ export class PerformanceMonitor {
 
     // Feed the windowed buffer at this single fan-out point so both Android
     // (dumpsys) and iOS (host CPU/mem) samples land in the observe snapshot.
+    // Frame fields use the RAW per-interval readings so idle no-frame ticks
+    // stay null and don't pin a stale fps in the window.
     this.perfWindowBuffer.record(device.deviceId, {
       t: now,
-      fps: metrics.fps,
-      frameTimeMs: metrics.frameTimeMs,
+      fps: rawFps,
+      frameTimeMs: rawFrameTimeMs,
       jankFrames: metrics.jankFrames,
       touchLatencyMs: metrics.touchLatencyMs,
       cpuUsagePercent: metrics.cpuUsagePercent,

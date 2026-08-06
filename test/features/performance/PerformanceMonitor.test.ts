@@ -581,6 +581,67 @@ describe("PerformanceMonitor", () => {
       expect(snap.fps).not.toBeNull();
       expect(snap.memoryMb).not.toBeNull();
     });
+
+    it("clears the buffer when the monitored package changes", async () => {
+      const buffer = new PerfWindowBuffer();
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBeGreaterThanOrEqual(1);
+
+      // Switching the monitored package must drop app A's samples so the next
+      // snapshot cannot attribute them to app B.
+      monitor.startMonitoring("device-1", "com.other.app");
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBe(0);
+    });
+
+    it("clears the buffer when monitoring stops", async () => {
+      const buffer = new PerfWindowBuffer();
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBeGreaterThanOrEqual(1);
+
+      monitor.stopMonitoring("device-1");
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBe(0);
+    });
+
+    it("records raw null fps for idle intervals, not the cached stream value", async () => {
+      const buffer = new PerfWindowBuffer();
+      // Tick 1 renders frames (fps derived); later ticks are idle (no frames).
+      // The IDE stream keeps the cached fps, but the buffer must record the raw
+      // null so an idle app does not keep an old fps pinned in the window.
+      fakeAdbClient.setCommandResultSequence("shell dumpsys gfxinfo com.example.app reset", [
+        {
+          stdout: `
+            Total frames rendered: 100
+            50th percentile: 8.5ms
+            90th percentile: 12.3ms
+            95th percentile: 15.7ms
+            99th percentile: 22.1ms
+            Missed Vsync: 0
+          `,
+        },
+        { stdout: "Total frames rendered: 0\n" },
+        { stdout: "Total frames rendered: 0\n" },
+        { stdout: "Total frames rendered: 0\n" },
+        { stdout: "Total frames rendered: 0\n" },
+      ]);
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 5);
+
+      // A short window that excludes the single real-frame tick sees only idle
+      // samples: with the fix their fps is null → the window's fps is null.
+      // (Under the old cached-fps behavior it would still report the stale fps.)
+      const now = fakeTimer.now();
+      const idleOnly = buffer.snapshot("device-1", now, PerformanceMonitor.TICK_INTERVAL_MS * 2);
+      expect(idleOnly.sampleCount).toBeGreaterThanOrEqual(2);
+      expect(idleOnly.fps).toBeNull();
+    });
   });
 });
 

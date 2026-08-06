@@ -462,6 +462,20 @@ export const observeScopeMetadataSchema = z.object({
   }).passthrough().optional()
 }).passthrough();
 
+/** Windowed perf snapshot (opt-in via AUTOMOBILE_OBSERVE_PERF_SNAPSHOT). */
+const perfSnapshotSchema = z.object({
+  windowMs: z.number(),
+  sampleCount: z.number().int().nonnegative(),
+  oldestSampleAgeMs: z.number().nullable(),
+  fps: z.object({
+    p50: z.number(), p90: z.number(), p95: z.number(), p99: z.number()
+  }).nullable(),
+  jank: z.object({ total: z.number(), perSecond: z.number() }).nullable(),
+  touchLatencyMs: z.object({ p50: z.number(), p95: z.number(), latest: z.number() }).nullable(),
+  cpu: z.object({ avg: z.number(), latest: z.number() }).nullable(),
+  memoryMb: z.object({ avg: z.number(), latest: z.number() }).nullable()
+});
+
 export const observeResultSchema = z.object({
   screenSize: screenSizeSchema.optional(),
   systemInsets: systemInsetsSchema.optional(),
@@ -487,6 +501,7 @@ export const observeResultSchema = z.object({
   predictions: predictionsSchema.optional(),
   accessibilityState: accessibilityStateSchema.optional(),
   deviceLock: deviceLockSchema.optional(),
+  perfSnapshot: perfSnapshotSchema.optional(),
   observeScope: observeScopeMetadataSchema.optional()
 }).passthrough();
 

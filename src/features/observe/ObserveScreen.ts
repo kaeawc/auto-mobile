@@ -382,8 +382,13 @@ export class RealObserveScreen implements ObserveScreen {
     try {
       // Ensure continuous sampling is active for this device/package. The first
       // observe warms the window; subsequent observes see a fuller snapshot.
+      // start() schedules the sampling interval (idempotent); startMonitoring()
+      // alone only registers the device and would never accumulate samples if
+      // the daemon had not already started the monitor.
       const { getPerformanceMonitor } = await import("../performance/PerformanceMonitor");
-      getPerformanceMonitor().startMonitoring(this.device.deviceId, appId, this.device.platform);
+      const monitor = getPerformanceMonitor();
+      monitor.start();
+      monitor.startMonitoring(this.device.deviceId, appId, this.device.platform);
 
       result.perfSnapshot = getPerfWindowBuffer().snapshot(
         this.device.deviceId,

@@ -128,7 +128,19 @@ describe("PerfWindowBuffer", () => {
 
       const snap = buffer.snapshot("device-1", 3000, 5000);
       expect(snap.jank!.total).toBe(10);
-      // span = now(3000) - oldest jank sample(1000) = 2000ms → 10/2s = 5/s
+      // 3 samples span 1000ms across 2 gaps → coverage = 1000 * 3/2 = 1500ms
+      // (includes the oldest sample's own interval) → 10 / 1.5s = 6.67/s.
+      expect(snap.jank!.perSecond).toBeCloseTo(6.67, 2);
+    });
+
+    it("counts the oldest sample's interval in the rate (no off-by-one)", () => {
+      const buffer = new PerfWindowBuffer();
+      // Two 500ms samples totaling 5 janks → 1s of coverage → 5/s, not 10/s.
+      buffer.record("device-1", sample({ t: 1000, jankFrames: 2 }));
+      buffer.record("device-1", sample({ t: 1500, jankFrames: 3 }));
+
+      const snap = buffer.snapshot("device-1", 2000, 5000);
+      expect(snap.jank!.total).toBe(5);
       expect(snap.jank!.perSecond).toBe(5);
     });
 

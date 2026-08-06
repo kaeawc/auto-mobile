@@ -6137,6 +6137,167 @@
           ],
           "additionalProperties": false
         },
+        "perfSnapshot": {
+          "type": "object",
+          "properties": {
+            "windowMs": {
+              "type": "number"
+            },
+            "sampleCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "oldestSampleAgeMs": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fps": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "p50": {
+                      "type": "number"
+                    },
+                    "p90": {
+                      "type": "number"
+                    },
+                    "p95": {
+                      "type": "number"
+                    },
+                    "p99": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "p50",
+                    "p90",
+                    "p95",
+                    "p99"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "jank": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "total": {
+                      "type": "number"
+                    },
+                    "perSecond": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "total",
+                    "perSecond"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "touchLatencyMs": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "p50": {
+                      "type": "number"
+                    },
+                    "p95": {
+                      "type": "number"
+                    },
+                    "latest": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "p50",
+                    "p95",
+                    "latest"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cpu": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "avg": {
+                      "type": "number"
+                    },
+                    "latest": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "avg",
+                    "latest"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "memoryMb": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "avg": {
+                      "type": "number"
+                    },
+                    "latest": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "avg",
+                    "latest"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "windowMs",
+            "sampleCount",
+            "oldestSampleAgeMs",
+            "fps",
+            "jank",
+            "touchLatencyMs",
+            "cpu",
+            "memoryMb"
+          ],
+          "additionalProperties": false
+        },
         "observeScope": {
           "type": "object",
           "properties": {

@@ -100,7 +100,7 @@ export class PerfWindowBuffer {
       sampleCount: inWindow.length,
       oldestSampleAgeMs: oldest !== null ? now - oldest.t : null,
       fps: percentileSummary(collect(inWindow, s => s.fps)),
-      jank: jankSummary(inWindow, now),
+      jank: jankSummary(inWindow),
       touchLatencyMs: touchLatencySummary(inWindow),
       cpu: averageLatestSummary(collect(inWindow, s => s.cpuUsagePercent)),
       memoryMb: averageLatestSummary(collect(inWindow, s => s.memoryUsageMb)),
@@ -135,7 +135,7 @@ function percentileSummary(values: number[]): PercentileSummary | null {
 }
 
 /** Sum of janky frames plus a per-second rate over the covered span. */
-function jankSummary(samples: PerfSample[], now: number): JankSummary | null {
+function jankSummary(samples: PerfSample[]): JankSummary | null {
   const withJank = samples.filter(s => s.jankFrames !== null && Number.isFinite(s.jankFrames));
   if (withJank.length === 0) {
     return null;
@@ -144,11 +144,16 @@ function jankSummary(samples: PerfSample[], now: number): JankSummary | null {
   for (const s of withJank) {
     total += s.jankFrames as number;
   }
-  // Normalize by the span the jank samples actually cover. Use the elapsed time
-  // from the oldest jank sample to `now`; guard the single-sample / zero-span
-  // case by falling back to `total` (treated as a 1s span).
-  const spanMs = now - (withJank[0].t);
-  const perSecond = spanMs > 0 ? round2((total / spanMs) * 1000) : total;
+  // Each jank sample is a count for ONE sampling interval. The `n` samples span
+  // `newest - oldest` across `n - 1` gaps, so the time they actually cover is
+  // `n` intervals = span * n/(n-1). Dividing by a bare `newest - oldest` (or
+  // `now - oldest`) drops the oldest sample's own interval and inflates the
+  // rate (e.g. two 500ms samples totaling 5 → 10/s instead of 5/s). Guard the
+  // single-sample / zero-span case by treating `total` as a 1s rate.
+  const n = withJank.length;
+  const spanMs = withJank[n - 1].t - withJank[0].t;
+  const coverageMs = n >= 2 && spanMs > 0 ? (spanMs * n) / (n - 1) : 0;
+  const perSecond = coverageMs > 0 ? round2((total / coverageMs) * 1000) : total;
   return { total, perSecond };
 }
 

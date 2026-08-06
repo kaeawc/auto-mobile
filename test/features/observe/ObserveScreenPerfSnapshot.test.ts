@@ -14,7 +14,7 @@ import type { PerformanceAuditor } from "../../../src/features/observe/audits/Pe
 import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import { getPerfWindowBuffer } from "../../../src/features/performance/PerfWindowBuffer";
-import { _resetPerformanceMonitor } from "../../../src/features/performance/PerformanceMonitor";
+import { _resetPerformanceMonitor, getPerformanceMonitor } from "../../../src/features/performance/PerformanceMonitor";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 
@@ -97,6 +97,7 @@ describe("ObserveScreen perf snapshot", () => {
       process.env[ENABLE_ENV] = savedEnable;
     }
     getPerfWindowBuffer().clear(DEVICE_ID);
+    getPerformanceMonitor().stop(); // stop the real sampling interval an enabled observe started
     _resetPerformanceMonitor();
     resetObserveCacheStore();
     resetScreenshotStateStore();
@@ -129,5 +130,16 @@ describe("ObserveScreen perf snapshot", () => {
     const result = await createObserveScreen().execute();
 
     expect(result.perfSnapshot).toBeUndefined();
+  });
+
+  test("first enabled observe registers the device for sampling", async () => {
+    process.env[ENABLE_ENV] = "1";
+    // Fresh monitor, empty buffer: the observe itself must set up future
+    // sampling (start + startMonitoring), or the window would never fill.
+    expect(getPerformanceMonitor().isMonitoring(DEVICE_ID)).toBe(false);
+
+    await createObserveScreen().execute();
+
+    expect(getPerformanceMonitor().isMonitoring(DEVICE_ID)).toBe(true);
   });
 });

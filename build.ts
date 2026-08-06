@@ -7,7 +7,6 @@
 
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
-import { spawnSync } from "child_process";
 import { copyDatabaseRuntimeFiles } from "./scripts/build/copy-db-runtime-files";
 
 // Clean dist directory
@@ -101,17 +100,6 @@ if (existsSync(schemasSource)) {
   console.log("✓ Copied validation schemas");
 } else {
   console.warn(`Validation schemas not found at ${schemasSource}`);
-}
-
-// Build iOS assets using the same bun executable that's running this script
-console.log("Building iOS assets...");
-const proc = spawnSync(Bun.which("bun") || process.execPath, ["scripts/build-ios-assets.js"], {
-  stdio: "inherit",
-});
-
-if (proc.status !== 0) {
-  console.error("iOS assets build failed");
-  process.exit(1);
 }
 
 console.log("Build completed successfully!");

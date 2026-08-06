@@ -1,4 +1,7 @@
-plugins { alias(libs.plugins.android.library) }
+plugins {
+  id("automobile.kotlin-common")
+  alias(libs.plugins.android.library)
+}
 
 android {
   namespace = "dev.jasonpearson.automobile.design.assets"

@@ -1,6 +1,7 @@
 import org.jetbrains.intellij.platform.gradle.extensions.intellijPlatform
 
 plugins {
+  id("automobile.kotlin-common")
   kotlin("jvm")
   alias(libs.plugins.kotlin.serialization)
   kotlin("plugin.compose")

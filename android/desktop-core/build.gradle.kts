@@ -1,6 +1,7 @@
 import groovy.json.JsonSlurper
 
 plugins {
+  id("automobile.kotlin-common")
   kotlin("jvm")
   alias(libs.plugins.kotlin.serialization)
   kotlin("plugin.compose")

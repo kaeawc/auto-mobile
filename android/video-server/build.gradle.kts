@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
+  id("automobile.kotlin-common")
   kotlin("jvm")
   `java-library`
 }

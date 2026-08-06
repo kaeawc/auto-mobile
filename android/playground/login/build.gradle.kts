@@ -1,4 +1,5 @@
 plugins {
+  id("automobile.kotlin-common")
   alias(libs.plugins.android.library)
   alias(libs.plugins.compose.compiler)
 }
@@ -25,19 +26,6 @@ android {
     targetCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
   }
   buildFeatures { compose = true }
-}
-
-tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-  compilerOptions {
-    jvmTarget.set(
-      org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(libs.versions.build.java.target.get())
-    )
-    languageVersion.set(
-      org.jetbrains.kotlin.gradle.dsl.KotlinVersion.fromVersion(
-        libs.versions.build.kotlin.language.get()
-      )
-    )
-  }
 }
 
 dependencies {

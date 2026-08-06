@@ -1,11 +1,6 @@
 import com.vanniktech.maven.publish.MavenPublishBaseExtension
 import dev.detekt.gradle.extensions.DetektExtension
-import org.gradle.api.plugins.JavaBasePlugin
-import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.publish.PublishingExtension
-import org.gradle.jvm.toolchain.JavaLanguageVersion
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 buildscript {
@@ -129,41 +124,6 @@ subprojects {
   plugins.withId("com.android.library") {
     configure<com.android.build.api.dsl.LibraryExtension> {
       buildTypes { getByName("debug") { enableUnitTestCoverage = true } }
-    }
-  }
-
-  tasks.withType<KotlinCompile>().configureEach {
-    compilerOptions {
-      languageVersion.set(
-        KotlinVersion.valueOf(
-          "KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}"
-        )
-      )
-      jvmTarget.set(JvmTarget.valueOf("JVM_${libs.versions.build.java.target.get()}"))
-      freeCompilerArgs.addAll(
-        listOf(
-          "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
-          "-opt-in=androidx.media3.common.util.UnstableApi",
-          "-opt-in=kotlin.time.ExperimentalTime,kotlin.RequiresOptIn",
-          "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-          "-opt-in=kotlin.ExperimentalUnsignedTypes",
-          "-opt-in=kotlin.time.ExperimentalTime",
-          "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-          "-opt-in=kotlinx.coroutines.FlowPreview",
-        )
-      )
-    }
-  }
-
-  // Pin compilation and unit tests to the Java toolchain (the java.target catalog value, 21) so
-  // `./gradlew` works regardless of the developer's default JDK. Robolectric cannot instrument
-  // newer JDK bytecode (e.g. JDK 26), so without this a newer default JDK breaks the Android unit
-  // tests. CI already runs on JDK 21; the foojay resolver (settings.gradle.kts) supplies the JDK.
-  plugins.withType<JavaBasePlugin>().configureEach {
-    extensions.configure<JavaPluginExtension> {
-      toolchain {
-        languageVersion.set(JavaLanguageVersion.of(libs.versions.build.java.target.get().toInt()))
-      }
     }
   }
 }

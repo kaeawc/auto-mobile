@@ -289,9 +289,6 @@ export class Daemon {
     if (options.noOcclusion) {
       serverConfig.setOcclusionEnabled(false);
     }
-    if (options.safeAreaWarnings) {
-      serverConfig.setSafeAreaWarningsEnabled(true);
-    }
     if (options.observeResultDropElements) {
       serverConfig.setObserveResultDropElementsEnabled(true);
     }

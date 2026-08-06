@@ -47,10 +47,3 @@ describe("parseDaemonArgs --no-occlusion (daemon-side of the MCP-process -> daem
     expect(parseDaemonArgs(["--no-occlusion"]).noOcclusion).toBe(true);
   });
 });
-
-describe("safe-area warning aliases", () => {
-  test("both spellings enable the same daemon option", () => {
-    expect(parseDaemonArgs(["--safe-area-warnings"]).safeAreaWarnings).toBe(true);
-    expect(parseDaemonArgs(["--edge-to-edge-warnings"]).safeAreaWarnings).toBe(true);
-  });
-});

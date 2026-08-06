@@ -236,7 +236,6 @@ export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "debug",
   "embeddedSdk",
   "networkMockable",
-  "safeAreaWarnings",
   ...OUTPUT_REDUCTION_FLAG_SPECS.map(spec => spec.field),
 ];
 

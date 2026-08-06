@@ -240,8 +240,6 @@ export interface DaemonOptions {
   noA11yRetrieveInteractiveWindows?: boolean;
   /** Disable the observe occlusion pass (occlusionState/occludedBy/occludedByViewId) */
   noOcclusion?: boolean;
-  /** Enable safe-area / edge-to-edge layout warnings (both CLI spellings are aliases). */
-  safeAreaWarnings?: boolean;
   /** Output reduction: drop the flattened elements array from observe results (issue #2756) */
   observeResultDropElements?: boolean;
   /** Output reduction: emit observe results in compact form (issue #2756) */

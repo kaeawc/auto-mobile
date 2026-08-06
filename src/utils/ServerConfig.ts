@@ -47,7 +47,6 @@ class ServerConfig {
   private _observeFocusScope: boolean = false;
   private _observeOverview: boolean = false;
   private _observeRegion: boolean = false;
-  private _safeAreaWarningsEnabled: boolean = false;
   private _toolOutputsDir: string | undefined;
 
   private constructor() {}
@@ -273,15 +272,6 @@ class ServerConfig {
 
   isObserveResultProjectSkeletonEnabled(): boolean {
     return this._observeResultProjectSkeleton;
-  }
-
-  /** `--safe-area-warnings` and `--edge-to-edge-warnings` are exact aliases. */
-  setSafeAreaWarningsEnabled(enabled: boolean): void {
-    this._safeAreaWarningsEnabled = enabled;
-  }
-
-  isSafeAreaWarningsEnabled(): boolean {
-    return this._safeAreaWarningsEnabled;
   }
 
   setToolResultsNoStructuredContentEnabled(enabled: boolean): void {

@@ -39,7 +39,7 @@ import {
   RealHierarchyPlatformValidator
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
-import { SafeAreaAuditor } from "./audits/SafeAreaAuditor";
+import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -269,8 +269,10 @@ export class RealObserveScreen implements ObserveScreen {
       // navigation-graph recorder) ever observes the other platform's data.
       enforceHierarchyPlatform(result, this.device.platform, this.device.deviceId, this.platformValidator);
 
-      if (serverConfig.isSafeAreaWarningsEnabled()) {
-        result.layoutWarnings = this.safeAreaAuditor.inspect(result);
+      const { warnings: layoutWarnings, total: layoutWarningsTotal } = capLayoutWarnings(this.safeAreaAuditor.inspect(result));
+      result.layoutWarnings = layoutWarnings;
+      if (layoutWarningsTotal > layoutWarnings.length) {
+        result.layoutWarningsTruncated = layoutWarningsTotal;
       }
 
       if (result.viewHierarchy) {

@@ -39,7 +39,6 @@ describe("runCliCommand daemon-option threading (issue #4247)", () => {
     });
 
     await runCliCommand(["listApps", "--platform", "android"], {
-      safeAreaWarnings: false,
       embeddedSdk: true,
       networkMockable: true,
     });

@@ -50,7 +50,6 @@ const PROPAGATING_BOOLEAN_FLAGS: (keyof DaemonOptions)[] = [
   "predictiveUi",
   "rawElementSearch",
   "mcpRecording",
-  "safeAreaWarnings",
   "memPerfAudit",
   "noOcclusion",
 ];

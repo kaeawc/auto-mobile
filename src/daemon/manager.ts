@@ -718,9 +718,6 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.noA11yRetrieveInteractiveWindows) {
       args.push("--no-retrieve-interactive-windows");
     }
-    if (options.safeAreaWarnings) {
-      args.push("--safe-area-warnings");
-    }
     if (options.memPerfAudit) {
       args.push("--mem-perf-audit");
     }
@@ -1202,8 +1199,6 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       options.noA11yReportViewIds = true;
     } else if (args[i] === "--no-retrieve-interactive-windows") {
       options.noA11yRetrieveInteractiveWindows = true;
-    } else if (args[i] === "--safe-area-warnings" || args[i] === "--edge-to-edge-warnings") {
-      options.safeAreaWarnings = true;
     } else if (args[i] === "--mem-perf-audit") {
       options.memPerfAudit = true;
     } else if (args[i] === "--accessibility-audit") {

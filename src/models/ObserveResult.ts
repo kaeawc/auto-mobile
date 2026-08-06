@@ -128,8 +128,15 @@ export interface ObserveResult {
   /** Typed inset metadata. Present even when a platform cannot measure it. */
   insets?: ObservationInsets;
 
-  /** Potential edge-to-edge layout problems, emitted only when explicitly enabled. */
+  /** Potential edge-to-edge / safe-area layout problems flagged by the report-only auditor. */
   layoutWarnings?: LayoutWarning[];
+
+  /**
+   * Total warnings found when `layoutWarnings` was capped (shown =
+   * `layoutWarnings.length`, dropped = this minus shown). Absent when nothing
+   * was dropped. See `MAX_LAYOUT_WARNINGS`.
+   */
+  layoutWarningsTruncated?: number;
 
   /** Screen rotation (0: portrait, 1: landscape 90°, 2: reverse portrait 180°, 3: reverse landscape 270°) */
   rotation?: number;

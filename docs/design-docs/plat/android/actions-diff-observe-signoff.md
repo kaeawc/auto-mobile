@@ -225,7 +225,9 @@ three attributes. `SafeAreaAuditor` derives a warning's `confidence` from
 change as unchanged; any material warning change remains emitted.
 
 **Android emulator sign-off (2026-07-25):** with a branch daemon running
-`--actions-diff-observe --safe-area-warnings` and occlusion enabled, two
+`--actions-diff-observe` (safe-area layout warnings were an opt-in
+`--safe-area-warnings` flag at the time; they are now always emitted) and
+occlusion enabled, two
 consecutive real Android emulator captures were fed through the same
 `sanitizeObserveResult → diffObserveResult` path used by
 `finalizeToolResponse`. The output had `added=0`, `removed=0`, `changed=0`, and

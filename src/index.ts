@@ -173,7 +173,6 @@ async function main() {
       noA11yReportViewIds,
       noA11yRetrieveInteractiveWindows,
       noOcclusion,
-      safeAreaWarnings,
       outputReduction,
       toolOutputsDir,
     } = parseArgs(process.argv.slice(2), logger);
@@ -330,10 +329,6 @@ async function main() {
       serverConfig.setWaitForPollingOverheadEnabled(false);
       logger.info("WaitFor polling overhead disabled (--no-waitfor-polling-overhead): screenshots and back stack skipped during observe waitFor polling");
     }
-    if (safeAreaWarnings) {
-      serverConfig.setSafeAreaWarningsEnabled(true);
-      logger.info("Safe-area layout warnings enabled (--safe-area-warnings/--edge-to-edge-warnings)");
-    }
 
     // Log-only echoes for daemon CLI flags whose side effects are applied
     // downstream via startDaemon(). Surfacing them at startup makes CI logs
@@ -398,7 +393,6 @@ async function main() {
         noA11yReportViewIds,
         noA11yRetrieveInteractiveWindows,
         noOcclusion,
-        safeAreaWarnings,
         // OutputReductionFlags field names match these DaemonOptions fields 1:1.
         ...outputReduction,
       });
@@ -416,7 +410,7 @@ async function main() {
     // Single source of truth for the startup options handed to the daemon,
     // shared by BOTH transports (issue #4344 propagation audit). Threading the
     // full set into the `--cli` path too — not just
-    // `{safeAreaWarnings, embeddedSdk, networkMockable}` — closes a gap where
+    // `{embeddedSdk, networkMockable}` — closes a gap where
     // output-reduction / observe-scope / a11y-audit / predictive flags requested
     // on the CLI transport never reached (or restarted) the daemon, while the
     // stdio proxy path relayed them. One object also means the two transports can
@@ -453,7 +447,6 @@ async function main() {
       noA11yReportViewIds,
       noA11yRetrieveInteractiveWindows,
       noOcclusion,
-      safeAreaWarnings,
       // OutputReductionFlags field names match these DaemonOptions fields 1:1.
       ...outputReduction,
     };

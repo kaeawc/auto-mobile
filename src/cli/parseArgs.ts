@@ -18,7 +18,7 @@ const booleanOptions = Object.fromEntries(
     "predictive-ui", "raw-element-search", "embedded-sdk", "network-mockable",
     "dismiss-keyboard-after-input", "mcp-recording", "no-navigation-screenshots",
     "no-waitfor-polling-overhead", "no-include-not-important-views", "no-report-view-ids",
-    "no-retrieve-interactive-windows", "no-occlusion", "safe-area-warnings", "edge-to-edge-warnings",
+    "no-retrieve-interactive-windows", "no-occlusion",
   ].map(name => [name, { type: "boolean" as const }])
 );
 
@@ -70,7 +70,6 @@ export function parseArgs(args: string[], log: ParseLogger) {
   const noA11yReportViewIds = hasFlag("no-report-view-ids");
   const noA11yRetrieveInteractiveWindows = hasFlag("no-retrieve-interactive-windows");
   const noOcclusion = hasFlag("no-occlusion");
-  const safeAreaWarnings = hasFlag("safe-area-warnings") || hasFlag("edge-to-edge-warnings");
   const outputReduction = parseOutputReductionFlags(args, process.env);
   const toolOutputsDir = parseToolOutputsDirConfig(args, process.env, resolveDaemonLaunchWorkingDirectory());
   let planExecutionLockScope: PlanExecutionLockScope = "session";
@@ -157,5 +156,5 @@ export function parseArgs(args: string[], log: ParseLogger) {
       const value = parsePositiveNumber(args[++i], "video max archive size", true); if (value !== undefined) {videoRecordingDefaults.maxArchiveSizeMb = value;}
     }
   }
-  return { cliMode, cliArgs, daemonPort, daemonHost, initialSessionUuid, debugPerf, debug, uiPerfMode, memPerfAuditMode, a11yAuditMode, a11yLevel, a11yFailureMode, a11yMinSeverity, a11yUseBaseline, predictiveUi, rawElementSearch, planExecutionLockScope, videoRecordingDefaults, daemonMode, daemonCommand, daemonArgs, skipCtrlProxyDownload, embeddedSdk, networkMockable, dismissKeyboardAfterInput, eventAllMarkers, eventAllMarkersCliOverride, mcpRecording, navigationScreenshots, noWaitForPollingOverhead, noProxy, noDaemon, noA11yIncludeNotImportantViews, noA11yReportViewIds, noA11yRetrieveInteractiveWindows, noOcclusion, safeAreaWarnings, outputReduction, toolOutputsDir };
+  return { cliMode, cliArgs, daemonPort, daemonHost, initialSessionUuid, debugPerf, debug, uiPerfMode, memPerfAuditMode, a11yAuditMode, a11yLevel, a11yFailureMode, a11yMinSeverity, a11yUseBaseline, predictiveUi, rawElementSearch, planExecutionLockScope, videoRecordingDefaults, daemonMode, daemonCommand, daemonArgs, skipCtrlProxyDownload, embeddedSdk, networkMockable, dismissKeyboardAfterInput, eventAllMarkers, eventAllMarkersCliOverride, mcpRecording, navigationScreenshots, noWaitForPollingOverhead, noProxy, noDaemon, noA11yIncludeNotImportantViews, noA11yReportViewIds, noA11yRetrieveInteractiveWindows, noOcclusion, outputReduction, toolOutputsDir };
 }

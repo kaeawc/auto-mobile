@@ -473,6 +473,15 @@ export class DevicePool {
       // disconnect for this incarnation arrives.
       return true;
     }
+    // Re-validate identity after the discovery await: a same-serial incarnation
+    // may have replaced `device` while we awaited (removeDisconnectedDevice does
+    // not hold assignmentMutex, cf. the sibling check below). Only the captured
+    // incarnation — or an already-empty slot — may be consumed here; a fresh
+    // replacement carries its own marker and disconnect lifecycle.
+    const current = this.devices.get(deviceId);
+    if (device && current && current !== device) {
+      return true;
+    }
     this.intentionalShutdowns.delete(deviceId);
     await this.removeDevice(deviceId);
     return true;

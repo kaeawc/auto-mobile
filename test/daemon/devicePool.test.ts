@@ -737,6 +737,55 @@ describe("DevicePool", () => {
       });
     });
 
+    test("does not remove a same-serial replacement that swaps in during the rediscovery await", async () => {
+      await withRebootOnDeath(async () => {
+        const deferred = new DeferredDiscoveryFakeDeviceManager();
+        fakeDeviceManager = deferred;
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          deferred,
+          new DefaultRetryExecutor(fakeTimer),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { onLoss: true, maxAttempts: 2 },
+        );
+        await devicePool.addDevice(createBootedDevice("emulator-5554", "android", "Pixel 8"), androidImage);
+        devicePool.markIntentionalShutdown("emulator-5554");
+        // Discovery will find nothing, so without a post-await identity re-check
+        // the disconnect would fall through to consume + remove.
+        deferred.bootedDevices = [];
+
+        // Start the disconnect; it blocks inside the rediscovery discovery await.
+        const disconnect = devicePool.removeDisconnectedDevice("emulator-5554", true);
+        await deferred.waitForDiscoveryStart();
+
+        // While the await is in flight, the marked incarnation leaves and a fresh
+        // same-serial incarnation (with its own marker) takes its place.
+        await devicePool.removeDevice("emulator-5554");
+        await devicePool.addDevice(createBootedDevice("emulator-5554", "android", "Pixel 8"), androidImage);
+        devicePool.markIntentionalShutdown("emulator-5554");
+        const replacement = devicePool.getDevice("emulator-5554");
+        if (!replacement) {
+          throw new Error("expected replacement device");
+        }
+
+        deferred.releaseDiscovery();
+        await disconnect;
+
+        // The stale disconnect for the prior incarnation must not delete the live
+        // replacement (nor consume its newly set marker).
+        const afterDisconnect = devicePool.getDevice("emulator-5554");
+        expect(afterDisconnect).not.toBeNull();
+        expect(afterDisconnect!.incarnation).toBe(replacement.incarnation);
+      });
+    });
+
     test("assigns a fresh incarnation per pooled connection and keeps it across a reusing refresh", async () => {
       await initializeLiveDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
       const first = devicePool.getDevice("emulator-5554");

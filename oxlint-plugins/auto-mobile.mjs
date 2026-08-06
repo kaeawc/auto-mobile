@@ -464,6 +464,20 @@ const namingConventionRule = {
 		},
 	},
 	create(context) {
+		// Class names appear on both ClassDeclaration (`class Foo {}`) and named
+		// ClassExpression (`const X = class FooImpl {}`); the old
+		// @typescript-eslint `class` selector covered both, so check both here. A
+		// class expression may be anonymous (`node.id === null`), in which case
+		// there is no name to check.
+		function checkClassName(node) {
+			const name = node.id?.name;
+			if (typeof name !== "string") {
+				return;
+			}
+			if (!PASCAL_CASE.test(name) || name.endsWith("Impl")) {
+				context.report({ node: node.id, messageId: "className" });
+			}
+		}
 		return {
 			TSInterfaceDeclaration(node) {
 				const name = node.id?.name;
@@ -474,15 +488,8 @@ const namingConventionRule = {
 					context.report({ node: node.id, messageId: "interfaceName" });
 				}
 			},
-			ClassDeclaration(node) {
-				const name = node.id?.name;
-				if (typeof name !== "string") {
-					return;
-				}
-				if (!PASCAL_CASE.test(name) || name.endsWith("Impl")) {
-					context.report({ node: node.id, messageId: "className" });
-				}
-			},
+			ClassDeclaration: checkClassName,
+			ClassExpression: checkClassName,
 		};
 	},
 };

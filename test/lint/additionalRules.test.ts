@@ -71,4 +71,12 @@ describe("auto-mobile/naming-convention", () => {
   test("does not flag a plain PascalCase class", () => {
     expect(fires("naming-convention", "class Bar { }")).toBe(false);
   });
+  test("flags a named class EXPRESSION with an 'Impl' suffix", () => {
+    // `const X = class DeviceImpl {}` — the old @typescript-eslint class selector
+    // covered class expressions too, so the port must not bypass this syntax.
+    expect(fires("naming-convention", "const Adapter = class DeviceImpl { };")).toBe(true);
+  });
+  test("does not flag a well-named class expression", () => {
+    expect(fires("naming-convention", "const Adapter = class Device { };")).toBe(false);
+  });
 });

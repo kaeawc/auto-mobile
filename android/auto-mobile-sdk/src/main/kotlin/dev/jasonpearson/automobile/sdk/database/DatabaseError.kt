@@ -16,4 +16,7 @@ sealed class DatabaseError(message: String) : Exception(message) {
 
   /** Database path is outside the app's data directory. */
   class InvalidPath(path: String) : DatabaseError("Invalid database path: $path")
+
+  /** A mutating statement was rejected by the SDK capture policy. */
+  class MutationNotAllowed : DatabaseError("Database mutations are disabled by SDK policy")
 }

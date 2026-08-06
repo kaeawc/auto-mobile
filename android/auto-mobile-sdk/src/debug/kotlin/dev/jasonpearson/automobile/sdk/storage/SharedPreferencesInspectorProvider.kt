@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.protocol.StorageChangeEvent
 import dev.jasonpearson.automobile.protocol.StorageEntry
 import dev.jasonpearson.automobile.protocol.StorageFileInfo
@@ -65,9 +66,18 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
           "listFiles" -> handleListFiles(driver)
           "getPreferences" -> handleGetPreferences(driver, extras)
           "getPreference" -> handleGetPreference(driver, extras)
-          "setValue" -> handleSetValue(driver, extras)
-          "removeValue" -> handleRemoveValue(driver, extras)
-          "clearFile" -> handleClearFile(driver, extras)
+          "setValue" -> {
+            requireMutationsAllowed()
+            handleSetValue(driver, extras)
+          }
+          "removeValue" -> {
+            requireMutationsAllowed()
+            handleRemoveValue(driver, extras)
+          }
+          "clearFile" -> {
+            requireMutationsAllowed()
+            handleClearFile(driver, extras)
+          }
           "subscribeToFile" -> handleSubscribeToFile(driver, extras)
           "unsubscribeFromFile" -> handleUnsubscribeFromFile(driver, extras)
           "getChanges" -> handleGetChanges(driver, extras)
@@ -91,6 +101,12 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
     }
 
     return result
+  }
+
+  private fun requireMutationsAllowed() {
+    if (!AutoMobileSDK.capabilities.policy.allowMutations) {
+      throw SharedPreferencesError.MutationNotAllowed()
+    }
   }
 
   private fun handleListFiles(driver: SharedPreferencesDriver): String {

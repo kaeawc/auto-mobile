@@ -695,6 +695,11 @@ public final class dev.jasonpearson.automobile.sdk.database.DatabaseError$Invali
   public dev.jasonpearson.automobile.sdk.database.DatabaseError$InvalidPath(java.lang.String);
 }
 Compiled from "DatabaseError.kt"
+public final class dev.jasonpearson.automobile.sdk.database.DatabaseError$MutationNotAllowed extends dev.jasonpearson.automobile.sdk.database.DatabaseError {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.database.DatabaseError$MutationNotAllowed();
+}
+Compiled from "DatabaseError.kt"
 public final class dev.jasonpearson.automobile.sdk.database.DatabaseError$NotFound extends dev.jasonpearson.automobile.sdk.database.DatabaseError {
   public static final int $stable;
   public dev.jasonpearson.automobile.sdk.database.DatabaseError$NotFound(java.lang.String);
@@ -770,6 +775,7 @@ public final class dev.jasonpearson.automobile.sdk.database.SQLiteDatabaseDriver
   public dev.jasonpearson.automobile.sdk.database.TableDataResult getTableData(java.lang.String, java.lang.String, int, int);
   public dev.jasonpearson.automobile.sdk.database.TableStructureResult getTableStructure(java.lang.String, java.lang.String);
   public dev.jasonpearson.automobile.sdk.database.SQLExecutionResult executeSQL(java.lang.String, java.lang.String);
+  public final boolean isMutationQuery$auto_mobile_sdk(java.lang.String);
   public final void closeAll();
 }
 Compiled from "DatabaseDriver.kt"
@@ -1580,6 +1586,11 @@ Compiled from "SharedPreferencesError.kt"
 public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$InvalidType extends dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError {
   public static final int $stable;
   public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$InvalidType(java.lang.String, java.lang.String);
+}
+Compiled from "SharedPreferencesError.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$MutationNotAllowed extends dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$MutationNotAllowed();
 }
 Compiled from "SharedPreferencesError.kt"
 public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$NotInitialized extends dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError {

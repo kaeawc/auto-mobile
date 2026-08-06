@@ -39,6 +39,10 @@ class SdkCapabilityRegistryTest {
       SdkCapabilityState.UNSUPPORTED,
       registry.snapshot().capabilities.first { it.id == "ui.observe" }.state,
     )
+    assertEquals(
+      SdkCapabilityState.UNSUPPORTED,
+      registry.snapshot().capabilities.first { it.id == "storage.read" }.state,
+    )
   }
 
   @Test

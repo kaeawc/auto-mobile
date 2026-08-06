@@ -183,7 +183,11 @@ internal class SdkCapabilityRegistry {
         "network.capture" to
           SdkCapabilityDescriptor("network.capture", SdkCapabilityState.SUPPORTED),
         "storage.read" to
-          SdkCapabilityDescriptor("storage.read", SdkCapabilityState.SUPPORTED),
+          SdkCapabilityDescriptor(
+            "storage.read",
+            SdkCapabilityState.UNSUPPORTED,
+            "No application-provided storage driver is registered",
+          ),
         "storage.mutation" to
           SdkCapabilityDescriptor(
             "storage.mutation",

@@ -35,11 +35,16 @@ beforeAll(() => {
   config = JSON.parse(result.stdout.toString()) as ResolvedConfig;
 });
 
+// Return the `files` of the SINGLE override that gates `rule`, asserting the
+// rule resolves through exactly one override. Using the first match alone would
+// miss a later, broader override that also enables the rule (widening its
+// scope), so uniqueness is part of the guarantee.
 function filesScopingRule(rule: string): string[] | undefined {
-  const override = config.overrides.find(o =>
+  const matches = config.overrides.filter(o =>
     o.rules ? Object.prototype.hasOwnProperty.call(o.rules, rule) : false
   );
-  return override?.files;
+  expect(matches.length, `${rule} must be gated by exactly one override`).toBe(1);
+  return matches[0]?.files;
 }
 
 describe(".oxlintrc.json rule scoping (via oxlint --print-config)", () => {

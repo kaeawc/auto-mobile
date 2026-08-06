@@ -48,6 +48,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEff
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootController
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,6 +57,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 private val LOG = LoggerFactory.getLogger("AutoMobileDesktopApp")
@@ -180,18 +183,31 @@ fun AutoMobileDesktopApp(
     (workspaceState as? WorkspaceUiState.Content)?.let { content ->
       content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
     }
+  // A focus change cancels this effect, but the cancellation cannot interrupt an in-flight
+  // synchronous setActiveDevice on Dispatchers.IO. Serialize binds through a mutex and gate each on
+  // a generation token so a stale bind that finishes after its replacement cannot leave the session
+  // pinned to the previously-focused device (mirrors AutoMobileContent's binding path).
+  val bindingMutex = remember(desktopDaemonSession) { Mutex() }
+  val bindingGeneration = remember(desktopDaemonSession) { AtomicLong(0L) }
   LaunchedEffect(desktopDaemonSession, focusedColumn?.deviceId, focusedColumn?.platform) {
     val session = desktopDaemonSession ?: return@LaunchedEffect
     val column = focusedColumn ?: return@LaunchedEffect
     val platform = if (column.platform == Platform.Ios) "ios" else "android"
+    val generation = bindingGeneration.incrementAndGet()
     while (isActive) {
       val registered = runCatching {
-        withContext(Dispatchers.IO) { session.client.setActiveDevice(column.deviceId, platform) }
+        bindingMutex.withLock {
+          // A newer focus superseded us while we waited for the lock — abandon quietly.
+          if (bindingGeneration.get() != generation) return@LaunchedEffect
+          withContext(Dispatchers.IO) { session.client.setActiveDevice(column.deviceId, platform) }
+        }
       }
         .onFailure {
           LOG.warn("Failed to bind desktop session to ${column.deviceId}: ${it.message}")
         }
         .isSuccess
+      // Do not keep or heartbeat a binding a newer focus already replaced.
+      if (bindingGeneration.get() != generation) return@LaunchedEffect
       if (!registered) {
         delay(DESKTOP_SESSION_HEARTBEAT_MS)
         continue

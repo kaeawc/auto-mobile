@@ -166,6 +166,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -246,21 +247,26 @@ internal fun rememberLiveVideoFrame(
 
   LaunchedEffect(source, deviceId, autoReconnect) {
     if (source == null) return@LaunchedEffect
-    var backoffMs = reconnectInitialMs
-    source.state.collect { state ->
-      when (state) {
-        is VideoStreamState.Streaming -> backoffMs = LIVE_RECONNECT_INITIAL_MS
-        is VideoStreamState.Unavailable -> {
-          liveFrame = null
-          if (autoReconnect && deviceId != null) {
-            // Cancelled by composition disposal, so a torn-down pane never reconnects. connect()
-            // no-ops while a reader is already active, so a spurious retry cannot double-subscribe.
+    // collectLatest (not collect) is load-bearing for the retry: when the socket is absent,
+    // connect() re-assigns the SAME Unavailable value, which MutableStateFlow suppresses — so a
+    // plain collector would receive no further event and retry only once. Under collectLatest the
+    // per-state block below is cancelled only by a genuine transition (Connecting/Streaming after
+    // a successful connect, or disposal), so a stuck-Unavailable stream keeps retrying on its own
+    // timer while a recovered one stops cleanly.
+    source.state.collectLatest { state ->
+      if (state is VideoStreamState.Unavailable) {
+        liveFrame = null
+        if (autoReconnect && deviceId != null) {
+          var backoffMs = reconnectInitialMs
+          while (isActive) {
+            // Cancelled by composition disposal or a real state change, so a torn-down or
+            // recovered pane stops. connect() no-ops while a reader is already active, so a
+            // spurious retry cannot double-subscribe.
             delay(backoffMs)
             backoffMs = (backoffMs * 2).coerceAtMost(LIVE_RECONNECT_MAX_MS)
             source.connect(deviceId)
           }
         }
-        else -> {}
       }
     }
   }

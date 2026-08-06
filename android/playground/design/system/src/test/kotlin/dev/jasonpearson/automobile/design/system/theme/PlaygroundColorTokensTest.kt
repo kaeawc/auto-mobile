@@ -13,7 +13,7 @@ class PlaygroundColorTokensTest {
 
   @Test
   fun lightRoleTokens_matchIconDerivedPalette() {
-    assertEquals(Color(0xFFDF3028), PgLightPrimary) // marker red (truck outline)
+    assertEquals(Color(0xFFD62A22), PgLightPrimary) // marker red (truck outline), AA-tuned for text
     assertEquals(Color(0xFFFFFFFF), PgLightOnPrimary)
     assertEquals(Color(0xFF1F6FC2), PgLightSecondary) // swing / sky blue (AA-tuned)
     assertEquals(Color(0xFFFFFFFF), PgLightOnSecondary)

@@ -46,6 +46,27 @@ class PlaygroundContrastTest {
     assertAA("light onError/error", PgLightOnError, PgLightError)
   }
 
+  /**
+   * Accent roles that consumers legitimately use as foreground *text* (links, status labels) must
+   * be readable on the background and surface. tertiary is intentionally excluded — it is a
+   * fill-only role (yellow) and must be paired with onTertiary, never used as text.
+   */
+  @Test
+  fun lightAccentRoles_readableAsTextOnBackgroundAndSurface() {
+    assertAA("light primary-as-text/background", PgLightPrimary, PgLightBackground)
+    assertAA("light primary-as-text/surface", PgLightPrimary, PgLightSurface)
+    assertAA("light secondary-as-text/background", PgLightSecondary, PgLightBackground)
+    assertAA("light error-as-text/background", PgLightError, PgLightBackground)
+  }
+
+  @Test
+  fun darkAccentRoles_readableAsTextOnBackgroundAndSurface() {
+    assertAA("dark primary-as-text/background", PgDarkPrimary, PgDarkBackground)
+    assertAA("dark primary-as-text/surface", PgDarkPrimary, PgDarkSurface)
+    assertAA("dark secondary-as-text/background", PgDarkSecondary, PgDarkBackground)
+    assertAA("dark error-as-text/background", PgDarkError, PgDarkBackground)
+  }
+
   @Test
   fun darkScheme_textRolesMeetAA() {
     assertAA("dark onBackground/background", PgDarkOnBackground, PgDarkBackground)

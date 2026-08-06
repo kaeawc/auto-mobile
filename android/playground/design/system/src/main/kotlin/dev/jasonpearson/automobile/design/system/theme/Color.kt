@@ -32,7 +32,10 @@ val AutoMobileInfo = PromoBlue
 // ---------------------------------------------------------------------------
 
 // Light scheme role tokens
-val PgLightPrimary = Color(0xFFDF3028) // marker red — the truck outline
+// Marker red from the truck outline (#DF3028), nudged a touch darker to #D62A22
+// so it also meets AA (>= 4.5:1) as foreground text on the light background —
+// primary is used as link/accent text, not just as a fill.
+val PgLightPrimary = Color(0xFFD62A22)
 val PgLightOnPrimary = Color(0xFFFFFFFF)
 val PgLightSecondary = Color(0xFF1F6FC2) // swing / sky blue (deepened for AA text)
 val PgLightOnSecondary = Color(0xFFFFFFFF)

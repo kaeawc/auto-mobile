@@ -29,6 +29,8 @@ All collected data is assembled into an object containing (fields may be omitted
 
 Every observation includes report-only `layoutWarnings`. These flag text or interactive elements that may overlap safe areas, system bars, display cutouts, or Android gesture regions. Each warning includes `overflowPx` (how far the element extends into the unsafe region) and `insetPx` (the effective inset on that side), both in the observation's coordinate units. When a flagged descendant is fully contained by a flagged ancestor on the same unsafe side, the output keeps the descendant finding. Intentional edge-to-edge backgrounds and scrollable content remain advisory rather than failures.
 
+`layoutWarnings` is capped at 100 entries (`MAX_LAYOUT_WARNINGS`); real screens flag only a handful, since only elements physically inside the thin inset strips are reported, so the cap trims only pathological hierarchies. When it does trim, the highest-severity, largest-overflow findings are kept and `layoutWarningsTruncated` is set to the **total number of warnings found before capping** — so the shown count is `layoutWarnings.length` and the number omitted is `layoutWarningsTruncated - layoutWarnings.length`. The field is absent when nothing was dropped.
+
 When available, `insets.systemChrome` provides the system-chrome state that explains a
 safe-area warning's screen context. Android reports the current visibility of the status
 and navigation bars from `WindowInsets`; hidden bars do not become additional unsafe

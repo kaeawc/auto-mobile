@@ -172,7 +172,6 @@ src/server/observeTools.ts: error TS2322: Type 'TimingData' is not assignable to
 src/server/observeTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'IdentifyInteractionsOptions'.
 src/server/observeTools.ts: error TS2339: Property 'sessionUuid' does not exist on type 'IdentifyInteractionsOptions'.
 src/server/observeTools.ts: error TS2488: Type 'TimingData' must have a '[Symbol.iterator]()' method that returns an iterator.
-src/server/testRunResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"latestOnly" | "limit" | "lookbackDays" | "orderDirection" | "testClass" | "testMethod"'.
 src/server/testTimingResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"appVersion" | "deviceId" | "deviceName" | "devicePlatform" | "deviceType" | "gitCommit" | "gradleVersion" | "isCi" | "jdkVersion" | "jvmTarget" | "limit" | "lookbackDays" | ... 6 more ... | "testMethod"'.
 src/utils/Backoff.ts: error TS2322: Type 'BackoffPolicy | readonly number[]' is not assignable to type 'BackoffPolicy'.
 src/utils/DeepLinkManager.ts: error TS2339: Property 'toString' does not exist on type 'never'.
@@ -307,7 +306,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 74,75,76,77,77 :: src/features/action/SetUIState.ts: error TS2554: Expected 0-1 arguments, but got 5.
 # swap-fp: 8,8 :: src/db/migrations/2026_01_30_000_performance_live_metrics.ts: error TS2339: Property 'raw' does not exist on type 'Kysely<unknown>'.
 # swap-fp: 85 :: src/daemon/socketServer.ts: error TS2554: Expected 1-2 arguments, but got 3.
-# swap-fp: 88 :: src/server/testRunResources.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type '"latestOnly" | "limit" | "lookbackDays" | "orderDirection" | "testClass" | "testMethod"'.
 # swap-fp: 9 :: src/daemon/manager.ts: error TS18048: 'signal' is possibly 'undefined'.
 # swap-fp: 9 :: src/features/action/LaunchApp.ts: error TS2322: Type 'boolean | null' is not assignable to type 'boolean'.
 # swap-fp: 9 :: src/features/navigation/NavigationGraphManager.ts: error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.

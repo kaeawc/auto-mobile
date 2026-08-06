@@ -158,6 +158,41 @@ class ReconnectingObservationStreamTest {
     }
 
   @Test
+  fun `resets the backoff after a healthy reconnect`() = runComposeUiTest {
+    val fake = FakeObservationStream()
+    val backoff = GatedBackoff()
+    setContent {
+      rememberReconnectingObservationStream(
+        deviceId = "dev-1",
+        streamFactory = { fake },
+        backoffDelay = backoff.seam,
+        socketAvailable = { true },
+      )
+    }
+    waitForIdle()
+    assertEquals(1, fake.connectCallCount)
+
+    // First drop → backoff attempt 1 → reconnect succeeds.
+    runOnIdle { fake.emitConnectionState(ConnectionState.Disconnected("drop 1")) }
+    waitForIdle()
+    runOnIdle { backoff.release(1) }
+    waitForIdle()
+    assertEquals(2, fake.connectCallCount)
+    assertEquals(listOf(1), backoff.attempts.toList())
+
+    // Second drop must restart the backoff at attempt 1, not continue to 2, because the reconnect
+    // in between was healthy (Connected). A non-resetting counter would record attempt 2 here.
+    runOnIdle { fake.emitConnectionState(ConnectionState.Disconnected("drop 2")) }
+    waitForIdle()
+    assertEquals(
+      "backoff must reset to attempt 1 after a healthy reconnect",
+      listOf(1, 1),
+      backoff.attempts.toList(),
+    )
+    assertEquals(3, fake.connectCallCount)
+  }
+
+  @Test
   fun `backoff grows exponentially and caps`() {
     assertEquals(RECONNECT_INITIAL_DELAY_MS, reconnectBackoffMs(1))
     assertEquals(RECONNECT_INITIAL_DELAY_MS * 2, reconnectBackoffMs(2))

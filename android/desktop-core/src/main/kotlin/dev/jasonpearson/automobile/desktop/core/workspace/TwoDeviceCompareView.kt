@@ -173,7 +173,9 @@ private fun CompareSide(
       socketAvailable = socketAvailable,
     )
   val activeStream = stream ?: return
-  // Reset per stream instance; a reconnect creates a fresh stream and thus a fresh token.
+  // Fresh token per stream instance (i.e. per mount / device change). A reconnect reuses the same
+  // instance, so the token and these collectors deliberately persist across it; correctness only
+  // needs the token bumped on every clearHierarchy(), which still holds.
   val generation = remember(activeStream) { AtomicInteger(0) }
   val clearHierarchy = {
     generation.incrementAndGet()

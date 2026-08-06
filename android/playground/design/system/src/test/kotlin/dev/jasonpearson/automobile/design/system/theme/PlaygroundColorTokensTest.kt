@@ -6,8 +6,8 @@ import org.junit.Test
 
 /**
  * Pins the icon-derived Playground palette (AC1). The colours are sampled from
- * `docs/img/playground-launch-icon-concept.png`; changing a value here is a
- * deliberate design decision, not an incidental edit.
+ * `docs/img/playground-launch-icon-concept.png`; changing a value here is a deliberate design
+ * decision, not an incidental edit.
  */
 class PlaygroundColorTokensTest {
 

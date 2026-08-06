@@ -28,10 +28,9 @@ class PlaygroundShapesTest {
 }
 
 /**
- * Pins that the Shantell Sans font and its SIL Open Font License are vendored
- * into the repo (AC2), so a build/checkout can never render the branded type
- * from a missing asset. Searches upward from the test working directory to stay
- * robust to how Gradle sets it.
+ * Pins that the Shantell Sans font and its SIL Open Font License are vendored into the repo (AC2),
+ * so a build/checkout can never render the branded type from a missing asset. Searches upward from
+ * the test working directory to stay robust to how Gradle sets it.
  */
 class PlaygroundFontAssetTest {
 
@@ -48,7 +47,10 @@ class PlaygroundFontAssetTest {
   @Test
   fun shantellSansFont_isVendored() {
     val font = findRepoFile("android/playground/design/assets/src/main/res/font/shantell_sans.ttf")
-    assertTrue("Shantell Sans font must be committed under design/assets res/font", font != null && font.length() > 0)
+    assertTrue(
+      "Shantell Sans font must be committed under design/assets res/font",
+      font != null && font.length() > 0,
+    )
   }
 
   @Test
@@ -56,6 +58,9 @@ class PlaygroundFontAssetTest {
     // res/font/ only accepts font files, so the SIL OFL lives in the module's
     // licenses/ directory.
     val license = findRepoFile("android/playground/design/assets/licenses/ShantellSans-OFL.txt")
-    assertTrue("Shantell Sans OFL licence must be committed", license != null && license.length() > 0)
+    assertTrue(
+      "Shantell Sans OFL licence must be committed",
+      license != null && license.length() > 0,
+    )
   }
 }

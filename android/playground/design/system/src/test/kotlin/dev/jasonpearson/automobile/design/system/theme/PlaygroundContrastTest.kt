@@ -6,9 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pins WCAG AA contrast (AC1) for every foreground/background role pair the
- * theme relies on, computed directly from the palette tokens so a future
- * palette tweak that breaks legibility fails here rather than in the field.
+ * Pins WCAG AA contrast (AC1) for every foreground/background role pair the theme relies on,
+ * computed directly from the palette tokens so a future palette tweak that breaks legibility fails
+ * here rather than in the field.
  */
 class PlaygroundContrastTest {
 

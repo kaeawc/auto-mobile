@@ -6,9 +6,9 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /**
- * Pins that every type role uses the branded (hand-drawn Shantell Sans) family
- * rather than the platform default (AC2). Does not load the font file — that is
- * lazy — so this stays a fast host test.
+ * Pins that every type role uses the branded (hand-drawn Shantell Sans) family rather than the
+ * platform default (AC2). Does not load the font file — that is lazy — so this stays a fast host
+ * test.
  */
 class PlaygroundTypographyTest {
 
@@ -37,7 +37,11 @@ class PlaygroundTypographyTest {
   fun everyTypeRole_usesBrandedFontFamily() {
     assertNotEquals("AutoMobileTypography should not be empty", Typography(), AutoMobileTypography)
     roles.forEach { (name, style) ->
-      assertNotEquals("$name must use the branded font family, not FontFamily.Default", FontFamily.Default, style.fontFamily)
+      assertNotEquals(
+        "$name must use the branded font family, not FontFamily.Default",
+        FontFamily.Default,
+        style.fontFamily,
+      )
     }
   }
 }

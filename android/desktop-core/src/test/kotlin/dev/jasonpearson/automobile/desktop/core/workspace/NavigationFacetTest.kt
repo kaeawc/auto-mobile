@@ -20,6 +20,7 @@ import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoaderRegistry
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.SharedFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -932,4 +934,29 @@ class NavigationFacetTest {
     )
     assertSame("the loader (and its LRU cache) must survive the toggle", used[0], used[1])
   }
+
+  @Test
+  fun `default provider resolves through the session registry so real users get a surviving cache`() =
+    runComposeUiTest {
+      // Exercises the PRODUCTION default (no injected provider). A unique deviceId keeps the
+      // process-lifetime registry from colliding with other tests. Guards against a regression that
+      // reverts the default to a fresh-per-mount loader (which every provider-injecting test
+      // misses).
+      val deviceId = "default-wiring-probe-dev-4832"
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(deviceId),
+              observationStreamFactory = { FakeObservationStream() },
+            )
+          }
+        }
+      }
+      waitForIdle()
+      assertNotNull(
+        "the default provider must populate the session registry",
+        DefaultNavigationScreenshotLoaderRegistry.peek(deviceId),
+      )
+    }
 }

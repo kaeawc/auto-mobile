@@ -81,6 +81,9 @@ class NavigationScreenshotLoaderRegistry {
     clientProvider: () -> AutoMobileClient,
   ): NavigationScreenshotLoader =
     byDevice.getOrPut(deviceId) { NavigationScreenshotLoader(clientProvider = clientProvider) }
+
+  /** The loader already created for [deviceId], or null if none — lets a test assert wiring. */
+  internal fun peek(deviceId: String): NavigationScreenshotLoader? = byDevice[deviceId]
 }
 
 /**

@@ -6,10 +6,27 @@ enum class Platform(val emoji: String) {
   Ios("🍎"), // 🍎
 }
 
+/** The `platform` string the daemon/MCP tools expect ("android"/"ios"). */
+fun Platform.wireName(): String = if (this == Platform.Ios) "ios" else "android"
+
 /** Per-column interaction mode. The header toggle flips between the two (forgiving both ways). */
 enum class InteractionMode {
   Input,
   Inspect,
+}
+
+/**
+ * Per-column device orientation. The workspace tracks this because the `rotate` MCP tool requires
+ * an explicit target orientation (∈ {portrait, landscape}) rather than a relative "rotate" verb;
+ * the Rotate control toggles this and passes the new value. [toolValue] is the exact string the
+ * tool expects.
+ */
+enum class Orientation(val toolValue: String) {
+  Portrait("portrait"),
+  Landscape("landscape");
+
+  /** The other orientation — what a single Rotate tap flips to. */
+  fun toggled(): Orientation = if (this == Portrait) Landscape else Portrait
 }
 
 /**
@@ -60,4 +77,6 @@ data class DeviceColumn(
   val activeTool: Tool? = null,
   val shrunk: Boolean = false,
   val locked: Boolean = false,
+  /** Current orientation; the Rotate control toggles it and drives the `rotate` tool value. */
+  val orientation: Orientation = Orientation.Portrait,
 )

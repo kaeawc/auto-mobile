@@ -36,22 +36,39 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.diagnostics.DiagnosticsDashboard
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
+import java.util.Base64
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val StatusGreen = Color(0xFF40C057)
 private val StatusYellow = Color(0xFFF0C000)
 private val StatusRed = Color(0xFFFA5252)
 private val Accent = Color(0xFF4DABF7)
 
+private val LOG = LoggerFactory.getLogger("WorkspaceShell")
+
 // How often the open health sheet re-scans for the daemon process (read-only).
 private const val HEALTH_SHEET_REFRESH_MS = 5_000L
+
+// How long a Screenshot capture waits for the observation stream to deliver a frame before giving
+// up, so a gone/unresponsive device can't leave the capture coroutine hanging.
+private const val SCREENSHOT_CAPTURE_TIMEOUT_MS = 10_000L
+
+// How long the "saved to …" confirmation stays on the pane after a Screenshot capture.
+private const val SCREENSHOT_NOTICE_MS = 4_000L
 
 /**
  * Root of the device-tab workspace. Device identity lives in each column header (no top tab bar); a
@@ -81,6 +98,12 @@ fun WorkspaceShell(
   // and defaulting to the inert placeholder for the same reason — so composing the shell in a unit
   // test or preview never opens a relay socket. The host passes the real [DeviceStreamView].
   streamContent: @Composable (DeviceColumn) -> Unit = { WorkspaceStreamPlaceholder() },
+  // Per-device observation stream + saver used by the Screenshot control to capture a frame on
+  // demand and write it to disk (#4694 AC3). Hoisted (defaulting to the real per-device
+  // [ObservationStreamClient] / [RealScreenshotSaver]) so a test can drive the capture with a
+  // [dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream] and a fake saver.
+  observationStreamFactory: (String) -> ObservationStream = { ObservationStreamClient() },
+  screenshotSaver: ScreenshotSaver = RealScreenshotSaver(),
   // Body of the health sheet opened by clicking the status dot. Hoisted like [facetContent] so the
   // host (or a test) can substitute content; defaults to the live [DiagnosticsDashboard].
   healthSheetContent: @Composable () -> Unit = { DefaultHealthSheetBody() },
@@ -139,6 +162,8 @@ fun WorkspaceShell(
                   facetContent = facetContent,
                   inspectContent = inspectContent,
                   streamContent = streamContent,
+                  observationStreamFactory = observationStreamFactory,
+                  screenshotSaver = screenshotSaver,
                   canDiff = canDiff,
                   modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
@@ -523,6 +548,8 @@ private fun DeviceColumnView(
   facetContent: @Composable (DeviceColumn, Tool) -> Unit,
   inspectContent: @Composable (DeviceColumn) -> Unit,
   streamContent: @Composable (DeviceColumn) -> Unit,
+  observationStreamFactory: (String) -> ObservationStream,
+  screenshotSaver: ScreenshotSaver,
   canDiff: Boolean,
   modifier: Modifier,
 ) {
@@ -536,7 +563,15 @@ private fun DeviceColumnView(
     DeviceColumnHeader(column, onAction)
     val tool = column.activeTool
     if (tool == null) {
-      PaneMainContent(column, onAction, inspectContent, streamContent, Modifier.weight(1f))
+      PaneMainContent(
+        column,
+        onAction,
+        inspectContent,
+        streamContent,
+        observationStreamFactory,
+        screenshotSaver,
+        Modifier.weight(1f),
+      )
     } else {
       // With a tool active the pane splits main content + docked facet; ⤡ shrink flips the split so
       // the main content collapses to grow the facet.
@@ -546,6 +581,8 @@ private fun DeviceColumnView(
         onAction,
         inspectContent,
         streamContent,
+        observationStreamFactory,
+        screenshotSaver,
         Modifier.weight(1f - facetFraction),
       )
       DockedFacet(column, tool, onAction, facetContent, canDiff, Modifier.weight(facetFraction))
@@ -564,26 +601,91 @@ private fun PaneMainContent(
   onAction: (WorkspaceAction) -> Unit,
   inspectContent: @Composable (DeviceColumn) -> Unit,
   streamContent: @Composable (DeviceColumn) -> Unit,
+  observationStreamFactory: (String) -> ObservationStream,
+  screenshotSaver: ScreenshotSaver,
   modifier: Modifier,
 ) {
   if (column.mode == InteractionMode.Inspect) {
     Box(modifier.fillMaxWidth()) { inspectContent(column) }
   } else {
-    StreamArea(column, onAction, streamContent, modifier)
+    StreamArea(column, onAction, streamContent, observationStreamFactory, screenshotSaver, modifier)
   }
 }
 
 /**
- * The pane's device stream area: the hoisted [streamContent] body (the host's [DeviceStreamView],
- * or the placeholder default) with the emulator controls floating on it.
+ * The pane's device stream area: the hoisted [streamContent] body (the host's live
+ * [DeviceStreamView], or the placeholder default) with the emulator controls floating on it. The
+ * Screenshot control captures the current frame off the observation stream and writes it to disk
+ * via [screenshotSaver] — the pane already shows the device live, so Screenshot persists a still
+ * rather than previewing one (#4694 AC3) — then flashes a transient "saved to …" confirmation.
  */
 @Composable
 private fun StreamArea(
   column: DeviceColumn,
   onAction: (WorkspaceAction) -> Unit,
   streamContent: @Composable (DeviceColumn) -> Unit,
+  observationStreamFactory: (String) -> ObservationStream,
+  screenshotSaver: ScreenshotSaver,
   modifier: Modifier,
 ) {
+  // Result of the latest capture + a monotonically increasing request token. Keyed on deviceId so a
+  // pane reused for a different device (panes are keyed by id, so this is defensive) starts clean.
+  var savedNotice by remember(column.deviceId) { mutableStateOf<String?>(null) }
+  var captureRequest by remember(column.deviceId) { mutableStateOf(0) }
+
+  // Each Screenshot tap bumps captureRequest, re-running this effect: open a fresh per-device
+  // stream,
+  // ask for an observation, take the first screenshot frame the subscription delivers, write its
+  // PNG
+  // bytes to disk, and report where. Bounded by a timeout so a gone device can't hang the
+  // coroutine,
+  // and the stream is always disposed — including on cancellation when the pane closes or a newer
+  // tap
+  // supersedes it.
+  LaunchedEffect(column.deviceId, captureRequest) {
+    if (captureRequest == 0) return@LaunchedEffect
+    val stream = observationStreamFactory(column.deviceId)
+    try {
+      val base64 =
+        withContext(Dispatchers.IO) {
+          // Connect/subscribe are blocking socket writes — keep them off the UI thread.
+          stream.connect(column.deviceId)
+          stream.requestObservation(column.deviceId)
+          withTimeoutOrNull(SCREENSHOT_CAPTURE_TIMEOUT_MS) {
+            stream.screenshotUpdates.first { !it.screenshotBase64.isNullOrEmpty() }.screenshotBase64
+          }
+        }
+      savedNotice =
+        if (base64 != null) {
+          val path =
+            withContext(Dispatchers.IO) {
+              screenshotSaver.save(column.name, Base64.getDecoder().decode(base64))
+            }
+          "Saved $path"
+        } else {
+          LOG.warn("Screenshot capture timed out for ${column.deviceId}")
+          "Screenshot timed out"
+        }
+    } catch (cancellation: CancellationException) {
+      throw cancellation
+    } catch (error: Exception) {
+      LOG.warn("Screenshot save failed for ${column.deviceId}: ${error.message}", error)
+      savedNotice = "Screenshot failed"
+    } finally {
+      // NonCancellable so the socket is still closed when this coroutine is cancelled (pane close /
+      // superseded capture); IO so the unsubscribe write + close don't run on the UI thread.
+      withContext(NonCancellable + Dispatchers.IO) { stream.dispose() }
+    }
+  }
+
+  // Auto-dismiss the confirmation after a short while.
+  LaunchedEffect(savedNotice) {
+    if (savedNotice != null) {
+      delay(SCREENSHOT_NOTICE_MS)
+      savedNotice = null
+    }
+  }
+
   Box(
     modifier = modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant),
     contentAlignment = Alignment.Center,
@@ -592,8 +694,25 @@ private fun StreamArea(
     EmulatorControls(
       column = column,
       onAction = onAction,
+      onCaptureScreenshot = { captureRequest++ },
       modifier = Modifier.align(Alignment.TopCenter).padding(6.dp),
     )
+    val notice = savedNotice
+    if (notice != null) {
+      Text(
+        notice,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurface,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier =
+          Modifier.align(Alignment.BottomCenter)
+            .padding(6.dp)
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 3.dp)
+            .semantics { contentDescription = "Screenshot status ${column.name}" },
+      )
+    }
   }
 }
 
@@ -674,18 +793,20 @@ fun WorkspaceStreamPlaceholder() {
 
 /**
  * Emulator controls floating on a device stream: rotate · screenshot · snapshot, plus a contextual
- * 🔓 Unlock shown only when the device is locked. Each is a one-shot [WorkspaceAction.RunControl].
+ * 🔓 Unlock shown only when the device is locked (fed by the host's lock-state poll, #4694 AC0).
+ * Rotate/Snapshot/Unlock are one-shot [WorkspaceAction.RunControl] device calls; Screenshot instead
+ * triggers [onCaptureScreenshot], because it captures the current frame to disk (surfaced in the
+ * pane as a confirmation) rather than being a fire-and-forget device mutation.
  */
 @Composable
 private fun EmulatorControls(
   column: DeviceColumn,
   onAction: (WorkspaceAction) -> Unit,
+  onCaptureScreenshot: () -> Unit,
   modifier: Modifier,
 ) {
   Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-    // Unlock is gated on the pane's lock state; rotate/screenshot/snapshot always show. Production
-    // does not yet feed DeviceColumn.locked (that needs device-state plumbing), so Unlock only
-    // becomes reachable once #4694 wires the observed lock state in.
+    // Unlock is gated on the pane's lock state; rotate/screenshot/snapshot always show.
     EmulatorControl.entries
       .filter { it != EmulatorControl.Unlock || column.locked }
       .forEach { control ->
@@ -693,7 +814,13 @@ private fun EmulatorControls(
           text = control.icon,
           description = "${control.label} ${column.name}",
           active = false,
-          onClick = { onAction(WorkspaceAction.RunControl(column.deviceId, control)) },
+          onClick = {
+            if (control == EmulatorControl.Screenshot) {
+              onCaptureScreenshot()
+            } else {
+              onAction(WorkspaceAction.RunControl(column.deviceId, control))
+            }
+          },
         )
       }
   }

@@ -2,7 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace.picker
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
-import dev.jasonpearson.automobile.desktop.core.workspace.Platform
+import dev.jasonpearson.automobile.desktop.core.workspace.wireName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -25,8 +25,6 @@ interface DeviceBootController {
 }
 
 private val LOG = LoggerFactory.getLogger("DeviceBootController")
-
-private fun Platform.wireName(): String = if (this == Platform.Ios) "ios" else "android"
 
 /**
  * Real boot controller backed by the daemon [AutoMobileClient]. The picker's device id is the AVD

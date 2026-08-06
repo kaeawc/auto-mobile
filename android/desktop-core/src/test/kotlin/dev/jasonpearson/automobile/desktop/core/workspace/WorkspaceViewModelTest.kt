@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
-import app.cash.turbine.test
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -109,20 +108,54 @@ class WorkspaceViewModelTest {
   }
 
   @Test
-  fun `RunControl emits an effect carrying the target device platform`() = testScope.runTest {
-    val vm = WorkspaceViewModel(this)
-    vm.onAction(WorkspaceAction.ObserveDevice(column("a", Platform.Ios)))
-    vm.effect.test {
-      vm.onAction(WorkspaceAction.RunControl("a", EmulatorControl.Rotate))
-      val effect = awaitItem()
-      assertTrue("Expected RunControl but was $effect", effect is WorkspaceEffect.RunControl)
-      effect as WorkspaceEffect.RunControl
-      assertEquals("a", effect.deviceId)
-      assertEquals(Platform.Ios, effect.platform)
-      assertEquals(EmulatorControl.Rotate, effect.control)
-      cancelAndIgnoreRemainingEvents()
+  fun `RunControl runs the control against the targeted device with its platform`() =
+    testScope.runTest {
+      val exec = FakeEmulatorControlExecutor()
+      val vm = WorkspaceViewModel(this, exec)
+      vm.onAction(WorkspaceAction.ObserveDevice(column("a", Platform.Ios)))
+      vm.onAction(WorkspaceAction.RunControl("a", EmulatorControl.Snapshot))
+      assertEquals(
+        listOf(
+          FakeEmulatorControlExecutor.Request(
+            "a",
+            Platform.Ios,
+            EmulatorControl.Snapshot,
+            Orientation.Portrait,
+          )
+        ),
+        exec.requests,
+      )
     }
-  }
+
+  @Test
+  fun `RunControl Rotate toggles the tracked orientation and passes the new value`() =
+    testScope.runTest {
+      val exec = FakeEmulatorControlExecutor()
+      val vm = WorkspaceViewModel(this, exec)
+      vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+
+      vm.onAction(WorkspaceAction.RunControl("a", EmulatorControl.Rotate))
+      var col = (vm.state.value as WorkspaceUiState.Content).columns.first { it.deviceId == "a" }
+      assertEquals(Orientation.Landscape, col.orientation)
+      assertEquals(Orientation.Landscape, exec.requests.last().orientation)
+
+      // A second Rotate flips back to Portrait — and passes that new value on.
+      vm.onAction(WorkspaceAction.RunControl("a", EmulatorControl.Rotate))
+      col = (vm.state.value as WorkspaceUiState.Content).columns.first { it.deviceId == "a" }
+      assertEquals(Orientation.Portrait, col.orientation)
+      assertEquals(Orientation.Portrait, exec.requests.last().orientation)
+    }
+
+  @Test
+  fun `RunControl swallows an executor failure without crashing the workspace`() =
+    testScope.runTest {
+      val exec = FakeEmulatorControlExecutor().apply { error = RuntimeException("boom") }
+      val vm = WorkspaceViewModel(this, exec)
+      vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+      vm.onAction(WorkspaceAction.RunControl("a", EmulatorControl.Unlock))
+      // The failure is caught + logged, not propagated: state stays intact.
+      assertTrue(vm.state.value is WorkspaceUiState.Content)
+    }
 
   @Test
   fun `DiffTool opens the tool on every observed column`() = testScope.runTest {
@@ -139,13 +172,37 @@ class WorkspaceViewModelTest {
   }
 
   @Test
-  fun `RunControl for an unknown device emits nothing`() = testScope.runTest {
-    val vm = WorkspaceViewModel(this)
+  fun `RunControl for an unknown device runs nothing`() = testScope.runTest {
+    val exec = FakeEmulatorControlExecutor()
+    val vm = WorkspaceViewModel(this, exec)
     vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
-    vm.effect.test {
-      vm.onAction(WorkspaceAction.RunControl("nope", EmulatorControl.Screenshot))
-      expectNoEvents()
-      cancelAndIgnoreRemainingEvents()
-    }
+    vm.onAction(WorkspaceAction.RunControl("nope", EmulatorControl.Snapshot))
+    assertTrue(exec.requests.isEmpty())
   }
+
+  @Test
+  fun `SetLockStates updates matched columns and leaves absent devices unchanged`() =
+    testScope.runTest {
+      val vm = WorkspaceViewModel(this)
+      vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+      vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
+
+      // "a" is reported locked; "b" is absent from the snapshot and must keep its current state.
+      vm.onAction(WorkspaceAction.SetLockStates(mapOf("a" to true)))
+      var state = vm.state.value as WorkspaceUiState.Content
+      assertTrue("a should be locked", state.columns.first { it.deviceId == "a" }.locked)
+      assertTrue("b should stay unlocked", !state.columns.first { it.deviceId == "b" }.locked)
+
+      // A later snapshot flips both — an explicit false unlocks, an explicit true locks.
+      vm.onAction(WorkspaceAction.SetLockStates(mapOf("a" to false, "b" to true)))
+      state = vm.state.value as WorkspaceUiState.Content
+      assertTrue("a should unlock", !state.columns.first { it.deviceId == "a" }.locked)
+      assertTrue("b should lock", state.columns.first { it.deviceId == "b" }.locked)
+
+      // An empty snapshot (e.g. a transient read gap) leaves every column unchanged.
+      vm.onAction(WorkspaceAction.SetLockStates(emptyMap()))
+      state = vm.state.value as WorkspaceUiState.Content
+      assertTrue("a still unlocked", !state.columns.first { it.deviceId == "a" }.locked)
+      assertTrue("b still locked", state.columns.first { it.deviceId == "b" }.locked)
+    }
 }

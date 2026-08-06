@@ -21,6 +21,16 @@ pluginManager.apply("automobile.detekt")
 
 pluginManager.apply("automobile.test-defaults")
 
+pluginManager.apply("automobile.maven-central-manifest")
+
+// Project coordinates for every module, sourced from the root gradle.properties.
+// Publishable modules read `project.version` in their mavenPublishing coordinates,
+// and sibling POM dependency GAVs use each module's group/version -- so these must
+// be set on all modules. Previously done by the root `allprojects {}` block.
+group = providers.gradleProperty("GROUP").get()
+
+version = providers.gradleProperty("VERSION_NAME").get()
+
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
 val kotlinLanguageVersion = libs.findVersion("build-kotlin-language").get().requiredVersion
 val javaTarget = libs.findVersion("build-java-target").get().requiredVersion

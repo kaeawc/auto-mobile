@@ -54,10 +54,16 @@ if grep -qE '^subprojects \{' android/build.gradle.kts; then
   fail "android/build.gradle.kts still has a subprojects {} block (blocks Isolated Projects)"
 fi
 
-# 6. The detekt and test-defaults conventions exist.
-for conv in automobile.detekt automobile.test-defaults; do
+# 6. The detekt, test-defaults, and central-manifest conventions exist.
+for conv in automobile.detekt automobile.test-defaults automobile.maven-central-manifest; do
   [ -f "android/build-logic/src/main/kotlin/$conv.gradle.kts" ] ||
     fail "missing convention plugin: android/build-logic/src/main/kotlin/$conv.gradle.kts"
 done
+
+# 7. The root build no longer uses `allprojects {}` cross-project configuration
+#    (group/version + the centralManifest repo moved into conventions).
+if grep -qE '^allprojects \{' android/build.gradle.kts; then
+  fail "android/build.gradle.kts still has an allprojects {} block (blocks Isolated Projects)"
+fi
 
 echo "OK: Kotlin-compile convention is centralized in $CONVENTION"

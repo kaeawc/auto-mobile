@@ -1,8 +1,8 @@
 package dev.jasonpearson.automobile.sdk.network
 
 import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
-import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
+import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException

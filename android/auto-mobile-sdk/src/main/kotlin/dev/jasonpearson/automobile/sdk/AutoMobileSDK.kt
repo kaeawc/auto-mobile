@@ -479,5 +479,4 @@ object AutoMobileSDK {
 
   /** Returns the current configuration, or null if not initialized. */
   internal fun getConfiguration(): AutoMobileConfiguration? = configuration
-
 }

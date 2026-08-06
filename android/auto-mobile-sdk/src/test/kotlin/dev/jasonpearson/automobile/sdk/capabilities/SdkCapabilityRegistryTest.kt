@@ -1,10 +1,10 @@
 package dev.jasonpearson.automobile.sdk.capabilities
 
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import org.junit.Test
 
 class SdkCapabilityRegistryTest {
@@ -90,7 +90,8 @@ class SdkCapabilityRegistryTest {
 
   @Test
   fun `default serialization includes the schema version and false policy values`() {
-    val json = Json.encodeToString(SdkCapabilityDocument.serializer(), SdkCapabilityRegistry().snapshot())
+    val json =
+      Json.encodeToString(SdkCapabilityDocument.serializer(), SdkCapabilityRegistry().snapshot())
 
     assertTrue(json.contains("\"schemaVersion\":1"))
     assertTrue(json.contains("\"captureHeaders\":false"))

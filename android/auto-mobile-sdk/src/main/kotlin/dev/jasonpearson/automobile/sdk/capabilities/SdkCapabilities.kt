@@ -1,8 +1,8 @@
 package dev.jasonpearson.automobile.sdk.capabilities
 
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.EncodeDefault
 import java.util.LinkedHashMap
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.Serializable
 
 /** The lifecycle or availability state of an SDK capability. */
 @Serializable
@@ -26,19 +26,15 @@ data class SdkCapabilityDescriptor(
 /** Explicit controls for potentially sensitive capture and mutation behavior. */
 @Serializable
 data class SdkCapturePolicy(
-  @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-  val captureHeaders: Boolean = false,
-  @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-  val captureBodies: Boolean = false,
-  @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-  val allowMutations: Boolean = false,
+  @EncodeDefault(EncodeDefault.Mode.ALWAYS) val captureHeaders: Boolean = false,
+  @EncodeDefault(EncodeDefault.Mode.ALWAYS) val captureBodies: Boolean = false,
+  @EncodeDefault(EncodeDefault.Mode.ALWAYS) val allowMutations: Boolean = false,
 )
 
 /** Versioned machine-readable description of the SDK integration. */
 @Serializable
 data class SdkCapabilityDocument(
-  @EncodeDefault(EncodeDefault.Mode.ALWAYS)
-  val schemaVersion: Int = 1,
+  @EncodeDefault(EncodeDefault.Mode.ALWAYS) val schemaVersion: Int = 1,
   val capabilities: List<SdkCapabilityDescriptor>,
   val policy: SdkCapturePolicy,
 )
@@ -161,9 +157,9 @@ internal class SdkCapabilityRegistry {
   private fun revokePolicyFor(id: String) {
     policy =
       when (id) {
-        "network.capture" ->
-          policy.copy(captureHeaders = false, captureBodies = false)
-        "storage.mutation", "network.control" ->
+        "network.capture" -> policy.copy(captureHeaders = false, captureBodies = false)
+        "storage.mutation",
+        "network.control" ->
           if (isSupported("storage.mutation") || isSupported("network.control")) policy
           else policy.copy(allowMutations = false)
         else -> policy

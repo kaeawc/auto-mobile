@@ -5,12 +5,12 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
-import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.protocol.StorageChangeEvent
 import dev.jasonpearson.automobile.protocol.StorageEntry
 import dev.jasonpearson.automobile.protocol.StorageFileInfo
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -104,8 +104,10 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
   }
 
   private fun requireMutationsAllowed() {
-    if (!AutoMobileSDK.capabilities.policy.allowMutations ||
-        !AutoMobileSDK.isCapabilitySupported("storage.mutation")) {
+    if (
+      !AutoMobileSDK.capabilities.policy.allowMutations ||
+        !AutoMobileSDK.isCapabilitySupported("storage.mutation")
+    ) {
       throw SharedPreferencesError.MutationNotAllowed()
     }
   }

@@ -35,7 +35,7 @@ teardown() {
   # 3 ratcheted diagnostics captured; the non-ratcheted no-debugger is dropped.
   run bash -c "grep -vE '^#|^$' '$OXLINT_BASELINE' | wc -l | tr -d ' '"
   [ "$output" -eq 3 ]
-  grep -q 'eslint(no-debugger)' "$OXLINT_BASELINE" && false || true
+  ! grep -q 'eslint(no-debugger)' "$OXLINT_BASELINE"
 }
 
 @test "check passes when current matches the baseline" {

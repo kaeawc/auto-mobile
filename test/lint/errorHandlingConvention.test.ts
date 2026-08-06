@@ -5,8 +5,8 @@ import { runRule } from "./oxlintRuleHarness";
 // This backstop exercises only the syntactic catch-convention rule on in-memory
 // snippets. The no-unknown-cast / type-aware rules are covered by the src lint
 // run, not here.
-function lintSnippet(code: string): string[] {
-  return runRule(plugin.rules["catch-convention"], code);
+function lintSnippet(code: string, filename?: string): string[] {
+  return runRule(plugin.rules["catch-convention"], code, filename);
 }
 
 describe("error-handling convention lint backstop", () => {

@@ -3,7 +3,10 @@
 Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities through MCP tool calls for device automation.
 
 ## Key Rules
-- TypeScript only (no JavaScript)
+- TypeScript only (no JavaScript) for application code. The one exception is
+  lint tooling: `oxlint-plugins/auto-mobile.mjs` (oxlint's plugin API is
+  JS-first), as `eslint.config.mjs` was before it. Every rule in it is covered by
+  the fast unit tests under `test/lint/`.
 - Write GitHub issue and pull request references as clickable Markdown links only
   in AI-authored prose a human reads directly — issue and PR bodies, review
   comments, commit messages, and assistant chat responses — where a clickable
@@ -119,7 +122,7 @@ oxlint's `--type-aware` rules).
 
 Bun's bundler skips type-checking, so `build`/`test` do NOT catch type errors.
 A scoped gate (issue #3001) runs `tsgo --noEmit` and fails CI only on errors NOT
-already in the committed baseline (`scripts/typecheck-baseline.txt`, ~187
+already in the committed baseline (`scripts/typecheck-baseline.txt`, ~185
 tolerated errors):
 
 ```bash
@@ -166,9 +169,11 @@ ratchet rule as its own rule (the custom plugin already does) rather than foldin
 selectors into a shared one, so a baselined violation cannot be silently traded
 for a genuinely-dangerous one.
 
-Current ratchet rules and thresholds: `complexity` 12, `max-depth` 3,
+Rules with a numeric threshold: `complexity` 12, `max-depth` 3,
 `max-nested-callbacks` 3 (0 baselined), `auto-mobile/no-accumulator-foreach`
-(src/ only, 0 baselined).
+(src/ only, 0 baselined). The full set the ratchet gates (per the section above)
+also includes `auto-mobile/catch-convention`, `auto-mobile/no-unknown-cast`,
+`typescript/no-floating-promises`, and `typescript/no-misused-promises`.
 
 Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form

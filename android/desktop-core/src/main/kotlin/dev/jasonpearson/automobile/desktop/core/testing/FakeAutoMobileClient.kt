@@ -113,6 +113,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     val key: String,
     val value: String?,
     val type: String,
+    val platform: String = "android",
   )
 
   data class RemoveKeyValueCall(
@@ -120,12 +121,14 @@ class FakeAutoMobileClient : AutoMobileClient {
     val appId: String,
     val fileName: String,
     val key: String,
+    val platform: String = "android",
   )
 
   data class ClearKeyValueFileCall(
     val deviceId: String,
     val appId: String,
     val fileName: String,
+    val platform: String = "android",
   )
 
   data class InputTapCall(
@@ -374,9 +377,10 @@ class FakeAutoMobileClient : AutoMobileClient {
     key: String,
     value: String?,
     type: String,
+    platform: String,
   ): SetKeyValueResult {
     calls.add("setKeyValue")
-    setKeyValueCalls.add(SetKeyValueCall(deviceId, appId, fileName, key, value, type))
+    setKeyValueCalls.add(SetKeyValueCall(deviceId, appId, fileName, key, value, type, platform))
     return setKeyValueResult
   }
 
@@ -385,9 +389,10 @@ class FakeAutoMobileClient : AutoMobileClient {
     appId: String,
     fileName: String,
     key: String,
+    platform: String,
   ): RemoveKeyValueResult {
     calls.add("removeKeyValue")
-    removeKeyValueCalls.add(RemoveKeyValueCall(deviceId, appId, fileName, key))
+    removeKeyValueCalls.add(RemoveKeyValueCall(deviceId, appId, fileName, key, platform))
     return removeKeyValueResult
   }
 
@@ -395,9 +400,10 @@ class FakeAutoMobileClient : AutoMobileClient {
     deviceId: String,
     appId: String,
     fileName: String,
+    platform: String,
   ): ClearKeyValueResult {
     calls.add("clearKeyValueFile")
-    clearKeyValueFileCalls.add(ClearKeyValueFileCall(deviceId, appId, fileName))
+    clearKeyValueFileCalls.add(ClearKeyValueFileCall(deviceId, appId, fileName, platform))
     return clearKeyValueFileResult
   }
 

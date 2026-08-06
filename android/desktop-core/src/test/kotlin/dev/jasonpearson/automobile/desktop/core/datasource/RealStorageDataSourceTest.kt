@@ -468,6 +468,59 @@ class RealStorageDataSourceTest {
     assertEquals("theme", call.key)
     assertEquals("dark", call.value)
     assertEquals("STRING", call.type)
+    // Defaults to Android when the pane platform is unspecified.
+    assertEquals("android", call.platform)
+  }
+
+  @Test
+  fun `setKeyValue carries the iOS platform through to the client (#4708)`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    val dataSource =
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "ios-sim-1",
+        packageName = "com.example.app",
+        platform = StoragePlatform.iOS,
+      )
+
+    val result = dataSource.setKeyValue("app_prefs", "theme", "dark", KeyValueType.String)
+
+    assertTrue(result is Result.Success)
+    assertEquals("ios", client.setKeyValueCalls.single().platform)
+  }
+
+  @Test
+  fun `removeKeyValue carries the iOS platform through to the client (#4708)`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    val dataSource =
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "ios-sim-1",
+        packageName = "com.example.app",
+        platform = StoragePlatform.iOS,
+      )
+
+    val result = dataSource.removeKeyValue("app_prefs", "theme")
+
+    assertTrue(result is Result.Success)
+    assertEquals("ios", client.removeKeyValueCalls.single().platform)
+  }
+
+  @Test
+  fun `clearKeyValueFile carries the iOS platform through to the client (#4708)`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    val dataSource =
+      RealStorageDataSource(
+        clientProvider = { client },
+        deviceId = "ios-sim-1",
+        packageName = "com.example.app",
+        platform = StoragePlatform.iOS,
+      )
+
+    val result = dataSource.clearKeyValueFile("app_prefs")
+
+    assertTrue(result is Result.Success)
+    assertEquals("ios", client.clearKeyValueFileCalls.single().platform)
   }
 
   @Test

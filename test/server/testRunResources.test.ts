@@ -1,11 +1,13 @@
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from "bun:test";
-import { convertToResponseEntry } from "../../src/server/testRunResources";
-import type { TestRun } from "../../src/db/testExecutionRepository";
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
+import { convertToResponseEntry, buildTestRunResponse, parseTestRunParams, buildTestRunUri } from "../../src/server/testRunResources";
+import { TestExecutionRepository, type TestRun } from "../../src/db/testExecutionRepository";
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import type { Database as DatabaseSchema, NewTestExecution, NewTestExecutionStep, NewTestExecutionScreen } from "../../src/db/types";
 import { runMigrations } from "../../src/db/migrator";
+import { createTestDatabase } from "../db/testDbHelper";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("testRunResources", () => {
   test("exposes step details in test run resource entries", () => {
@@ -48,6 +50,75 @@ describe("testRunResources", () => {
       trackIndex: 0,
       optional: true,
     });
+  });
+});
+
+describe("testRunResources deviceId scoping", () => {
+  let db: Kysely<DatabaseSchema>;
+  let repo: TestExecutionRepository;
+
+  beforeEach(async () => {
+    db = await createTestDatabase();
+    repo = new TestExecutionRepository(new FakeTimer(), db);
+  });
+
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  test("buildTestRunResponse filters runs to the requested deviceId", async () => {
+    await repo.recordExecution({
+      testClass: "com.example.LoginTest",
+      testMethod: "testLogin",
+      durationMs: 100,
+      status: "passed",
+      timestamp: 1000,
+      deviceId: "device-a",
+    });
+    await repo.recordExecution({
+      testClass: "com.example.HomeTest",
+      testMethod: "testHome",
+      durationMs: 100,
+      status: "passed",
+      timestamp: 2000,
+      deviceId: "device-b",
+    });
+
+    const response = await buildTestRunResponse({ deviceId: "device-a" }, repo);
+
+    expect(response.testRuns).toHaveLength(1);
+    expect(response.testRuns[0].deviceId).toBe("device-a");
+    expect(response.filters.deviceId).toBe("device-a");
+  });
+
+  test("buildTestRunResponse returns all devices when deviceId is omitted", async () => {
+    await repo.recordExecution({
+      testClass: "com.example.LoginTest",
+      testMethod: "testLogin",
+      durationMs: 100,
+      status: "passed",
+      timestamp: 1000,
+      deviceId: "device-a",
+    });
+    await repo.recordExecution({
+      testClass: "com.example.HomeTest",
+      testMethod: "testHome",
+      durationMs: 100,
+      status: "passed",
+      timestamp: 2000,
+      deviceId: "device-b",
+    });
+
+    const response = await buildTestRunResponse({}, repo);
+
+    expect(response.testRuns).toHaveLength(2);
+    expect(response.filters.deviceId).toBeUndefined();
+  });
+
+  test("parseTestRunParams accepts deviceId and buildTestRunUri round-trips it", () => {
+    const args = parseTestRunParams({ deviceId: "emulator-5554" });
+    expect(args.deviceId).toBe("emulator-5554");
+    expect(buildTestRunUri(args)).toContain("deviceId=emulator-5554");
   });
 });
 

@@ -12,20 +12,22 @@ const TEST_RUN_LIMIT_MAX = 500;
 const TEST_RUN_LOOKBACK_DAYS_DEFAULT = 30;
 
 const TEST_RUN_QUERY_TEMPLATE = `${TEST_RUN_RESOURCE_URIS.BASE}?{params}`;
-const TEST_RUN_QUERY_PARAM_KEYS = new Set([
+const TEST_RUN_QUERY_PARAM_KEYS = new Set<string>([
   "lookbackDays",
   "limit",
   "testClass",
   "testMethod",
+  "deviceId",
   "orderDirection",
   "latestOnly",
-] as const);
+]);
 
 interface TestRunQueryArgs {
   lookbackDays?: number;
   limit?: number;
   testClass?: string;
   testMethod?: string;
+  deviceId?: string;
   orderDirection?: "asc" | "desc";
   latestOnly?: boolean;
 }
@@ -74,7 +76,7 @@ interface TestRunResponse {
   filters: Record<string, unknown>;
 }
 
-function parseTestRunParams(params: Record<string, string>): TestRunQueryArgs {
+export function parseTestRunParams(params: Record<string, string>): TestRunQueryArgs {
   const unknownKeys = Object.keys(params).filter(key => !TEST_RUN_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
@@ -85,12 +87,13 @@ function parseTestRunParams(params: Record<string, string>): TestRunQueryArgs {
     limit: optionalInteger(params.limit, "limit", { min: 1, max: TEST_RUN_LIMIT_MAX }),
     testClass: optionalString(params.testClass),
     testMethod: optionalString(params.testMethod),
+    deviceId: optionalString(params.deviceId),
     orderDirection: optionalEnum(params.orderDirection, "orderDirection", ["asc", "desc"]),
     latestOnly: optionalBoolean(params.latestOnly, "latestOnly"),
   };
 }
 
-function buildTestRunUri(options: TestRunQueryArgs): string {
+export function buildTestRunUri(options: TestRunQueryArgs): string {
   const query = new URLSearchParams();
   if (options.lookbackDays !== undefined) {
     query.set("lookbackDays", options.lookbackDays.toString());
@@ -103,6 +106,9 @@ function buildTestRunUri(options: TestRunQueryArgs): string {
   }
   if (options.testMethod) {
     query.set("testMethod", options.testMethod);
+  }
+  if (options.deviceId) {
+    query.set("deviceId", options.deviceId);
   }
   if (options.orderDirection) {
     query.set("orderDirection", options.orderDirection);
@@ -150,9 +156,25 @@ export function convertToResponseEntry(run: TestRun, sampleSize: number): TestRu
   };
 }
 
-async function buildTestRunResponse(args: TestRunQueryArgs): Promise<TestRunResponse> {
-  const repository = new TestExecutionRepository();
+/** Echo the active filters back to the client, omitting unset dimensions. */
+function buildTestRunFilters(args: TestRunQueryArgs): Record<string, unknown> {
+  const filters: Record<string, unknown> = {};
+  if (args.testClass) {
+    filters.testClass = args.testClass;
+  }
+  if (args.testMethod) {
+    filters.testMethod = args.testMethod;
+  }
+  if (args.deviceId) {
+    filters.deviceId = args.deviceId;
+  }
+  return filters;
+}
 
+export async function buildTestRunResponse(
+  args: TestRunQueryArgs,
+  repository: TestExecutionRepository = new TestExecutionRepository()
+): Promise<TestRunResponse> {
   const lookbackDays = args.lookbackDays ?? TEST_RUN_LOOKBACK_DAYS_DEFAULT;
   const limit = args.limit ?? TEST_RUN_LIMIT_DEFAULT;
   const orderDirection = args.orderDirection ?? "desc";
@@ -164,6 +186,7 @@ async function buildTestRunResponse(args: TestRunQueryArgs): Promise<TestRunResp
     limit: latestOnly ? limit * 5 : limit,
     testClass: args.testClass,
     testMethod: args.testMethod,
+    deviceId: args.deviceId,
     orderDirection,
   };
 
@@ -198,13 +221,7 @@ async function buildTestRunResponse(args: TestRunQueryArgs): Promise<TestRunResp
     return convertToResponseEntry(run, sampleSize);
   });
 
-  const filters: Record<string, unknown> = {};
-  if (args.testClass) {
-    filters.testClass = args.testClass;
-  }
-  if (args.testMethod) {
-    filters.testMethod = args.testMethod;
-  }
+  const filters = buildTestRunFilters(args);
 
   return {
     testRuns,

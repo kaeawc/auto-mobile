@@ -50,8 +50,8 @@ describe("advertiseBoundsForCompact (#2990)", () => {
     expect(bounds.type).toBe("object");
     expect((bounds.properties as Record<string, unknown>).left).toBeDefined();
     expect((bounds.properties as Record<string, unknown>).bottom).toBeDefined();
-    // Description is preserved so the prose still notes the tuple exists under the flag.
-    expect(bounds.description).toContain("observe-result-compact");
+    // Description is preserved so the prose still documents the positional tuple order.
+    expect(bounds.description).toContain("left, top, right, bottom");
   });
 
   test("compact OFF advertises no positional tuple anywhere in the schema", () => {

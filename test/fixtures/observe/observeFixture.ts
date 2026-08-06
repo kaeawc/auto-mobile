@@ -115,12 +115,11 @@ export function loadDiffFixture(name: string): ObserveResult {
 }
 
 /** UTF-8 byte length and cl100k_base token count of a value serialized exactly
- *  the way the observe tool emits it: `stringifyToolResponse` — pretty-printed
- *  (2-space) with `extras` keys stripped, the production formatter used by
- *  `createStructuredToolResponse` in src/utils/toolUtils.ts. Measuring the real
- *  formatter (not a compact `JSON.stringify`) is what makes a reduction test's
- *  "does this fit under the cap?" check trustworthy — compact undercounts the
- *  actual tool-response text by ~40%. */
+ *  the way the observe tool emits it: `stringifyToolResponse` — compact
+ *  (non-pretty) JSON with `extras` keys stripped, the production formatter used by
+ *  `createStructuredToolResponse` in src/utils/toolUtils.ts (compact serialization
+ *  is now an unconditional default). Measuring the real formatter is what makes a
+ *  reduction test's "does this fit under the cap?" check trustworthy. */
 export function measureValue(value: unknown): { bytes: number; tokens: number } {
   const serialized = stringifyToolResponse(value) ?? "";
   return {

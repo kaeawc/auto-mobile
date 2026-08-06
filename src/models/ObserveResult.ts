@@ -146,10 +146,9 @@ export interface ObserveResult {
 
   /**
    * Interactable Skeleton Projection (issue #4388): a flat, actionable-only
-   * summary emitted in place of `viewHierarchy` / `elements` when the observe
-   * output is projected to `"skeleton"` (per-call `project` arg or the
-   * `observe-result-project-skeleton` flag). Absent in the default `"full"`
-   * projection.
+   * summary emitted in place of `viewHierarchy` / `elements`. The `"skeleton"`
+   * projection is now the default; it is absent only when a caller opts out with
+   * a per-call `project: "full"` arg (or `raw: true`).
    */
   skeleton?: SkeletonElement[];
 
@@ -335,9 +334,9 @@ export interface ObserveResult {
   rawViewHierarchy?: RawViewHierarchyResult;
 
   /**
-   * Progressive-disclosure scoping metadata (issue #4344), present only when an
-   * `--observe-focus-scope` / `--observe-overview` / `--observe-region`
-   * experiment scoped this observe payload, or withheld a requested dimension.
+   * Progressive-disclosure scoping metadata (issue #4344), present only when a
+   * per-call `scope.focus` / `scope.overview` / `scope.region` request scoped
+   * this observe payload, or withheld a requested dimension.
    * Records which transforms ran and the node-count reduction so the experiment
    * is measurable on the wire. See
    * `features/observe/output/ObserveScopeExperiments.ts`.

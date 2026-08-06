@@ -45,10 +45,11 @@ describe("elementBoundsSchema: object + compact tuple (#2990)", () => {
 
   test("the advertised JSON schema documents the tuple order (machine-readable)", () => {
     const json = JSON.stringify(toJSONSchema(tapOnResultSchema));
-    // The union carries a description naming the positional tuple order and the flag,
-    // so an external client can decode [l,t,r,b] from the wire schema alone.
+    // The union carries a description naming the positional tuple order, so an
+    // external client can decode [l,t,r,b] from the wire schema alone. Bounds
+    // compaction is now a permanent default, so the tuple is the advertised
+    // default form rather than a flag-gated arm.
     expect(json).toContain("left, top, right, bottom");
-    expect(json.toLowerCase()).toContain("observe-result-compact");
   });
 });
 

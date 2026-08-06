@@ -276,9 +276,11 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     timer.setCurrentTime(25);
     serverConfig.setToolOutputsDir("/tmp/artifacts");
 
+    // Skeleton is the default observe projection now; this test inspects the
+    // written full view hierarchy, so request the full projection per-call.
     const result = await handler.handle({
       name: "observe",
-      args: {},
+      args: { project: "full" },
       device: undefined,
       internalCall: false,
       response: createStructuredToolResponse(makeObservePayload()),
@@ -306,8 +308,6 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   });
 
   test("oversized occlusion-heavy observe auto-spills to an artifact when no directory is configured", async () => {
-    const originalObserveCompact = serverConfig.isObserveResultCompactEnabled();
-    const originalCompactJson = serverConfig.isToolResultsCompactJsonEnabled();
     const originalNoStructuredContent = serverConfig.isToolResultsNoStructuredContentEnabled();
     const writer = new FakeObservationArtifactWriter();
     const requestedDirectories: string[] = [];
@@ -320,14 +320,16 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(25);
     serverConfig.setToolOutputsDir(undefined);
-    serverConfig.setObserveResultCompactEnabled(true);
-    serverConfig.setToolResultsCompactJsonEnabled(true);
+    // Bounds compaction and compact single-line JSON are now unconditional
+    // defaults; only no-structured-content remains an opt-in flag.
     serverConfig.setToolResultsNoStructuredContentEnabled(true);
 
     try {
       const result = await handler.handle({
         name: "observe",
-        args: {},
+        // Skeleton is the default projection; this test inspects the written full
+        // view hierarchy, so request the full projection per-call.
+        args: { project: "full" },
         device: undefined,
         internalCall: false,
         response: createStructuredToolResponse(makeLargeOcclusionHeavyObservePayload()),
@@ -367,8 +369,6 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       });
       expect(wireResult.content[0].text).not.toContain("\n");
     } finally {
-      serverConfig.setObserveResultCompactEnabled(originalObserveCompact);
-      serverConfig.setToolResultsCompactJsonEnabled(originalCompactJson);
       serverConfig.setToolResultsNoStructuredContentEnabled(originalNoStructuredContent);
     }
   });
@@ -380,7 +380,9 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
     const result = await handler.handle({
       name: "observe",
-      args: {},
+      // Skeleton is the default projection; this test asserts the served full
+      // view hierarchy stays inline, so request the full projection per-call.
+      args: { project: "full" },
       device: undefined,
       internalCall: false,
       response: createStructuredToolResponse(makeObservePayload()),
@@ -407,7 +409,9 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
     const result = await handler.handle({
       name: "observe",
-      args: {},
+      // Skeleton is the default projection; this test asserts the full view
+      // hierarchy is preserved for internal callers, so request it per-call.
+      args: { project: "full" },
       device: undefined,
       internalCall: true,
       response: createStructuredToolResponse(makeObservePayload()),

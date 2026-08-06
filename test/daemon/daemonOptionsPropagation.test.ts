@@ -31,17 +31,12 @@ function serialize(options: DaemonOptions): string[] {
  * boolean flag should be added here; if it is not serialized+parsed, this fails.
  */
 const PROPAGATING_BOOLEAN_FLAGS: (keyof DaemonOptions)[] = [
-  // Observe-scope experiments (issue #4344) — via outputReductionFlagsToArgs.
-  "observeFocusScope",
-  "observeOverview",
-  "observeRegion",
-  // The rest of the output-reduction family.
-  "observeResultDropElements",
-  "observeResultCompact",
+  // The surviving output-reduction family — the always-on defaults (compact,
+  // skeleton, compact-json, observe-scope gates) no longer carry a flag.
+  "observeResultIncludeElements",
   "toolResultsNoStructuredContent",
   "actionsDiffObserve",
   "actionsNoObserve",
-  "toolResultsCompactJson",
   // Accessibility-service view filters — the flags the audit found dropped.
   "noA11yIncludeNotImportantViews",
   "noA11yReportViewIds",

@@ -9,7 +9,6 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
-import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 
 /**
@@ -26,7 +25,6 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
   let daemonSessionManager: SessionManager | undefined;
-  let originalDropElements: boolean;
 
   function makeObserveResult(): ObserveResult {
     return {
@@ -74,8 +72,6 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
-    originalDropElements = serverConfig.isObserveResultDropElementsEnabled();
-    serverConfig.setObserveResultDropElementsEnabled(false);
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   });
 
@@ -84,7 +80,6 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();
-    serverConfig.setObserveResultDropElementsEnabled(originalDropElements);
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
   });
@@ -110,8 +105,11 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     );
     const tool = ToolRegistry.getTool("observe")!;
 
+    // Skeleton is the default observe projection now; this test asserts the served
+    // full view hierarchy is sanitized, so opt into the full projection per-call.
     const response = await tool.handler({
       platform: "android",
+      project: "full",
       __mcpSessionId: "mcp-session-1",
     });
 

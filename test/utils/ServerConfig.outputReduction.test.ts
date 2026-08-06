@@ -7,25 +7,17 @@ import { serverConfig } from "../../src/utils/ServerConfig";
  */
 describe("ServerConfig output-reduction flags", () => {
   afterEach(() => {
-    serverConfig.setObserveResultDropElementsEnabled(false);
-    serverConfig.setObserveResultCompactEnabled(false);
+    serverConfig.setObserveResultIncludeElementsEnabled(false);
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
     serverConfig.setActionsDiffObserveEnabled(false);
     serverConfig.setActionsNoObserveEnabled(false);
-    serverConfig.setToolResultsCompactJsonEnabled(false);
     serverConfig.setToolOutputsDir(undefined);
   });
 
-  test("observe-result-drop-elements defaults off and toggles", () => {
-    expect(serverConfig.isObserveResultDropElementsEnabled()).toBe(false);
-    serverConfig.setObserveResultDropElementsEnabled(true);
-    expect(serverConfig.isObserveResultDropElementsEnabled()).toBe(true);
-  });
-
-  test("observe-result-compact defaults off and toggles", () => {
-    expect(serverConfig.isObserveResultCompactEnabled()).toBe(false);
-    serverConfig.setObserveResultCompactEnabled(true);
-    expect(serverConfig.isObserveResultCompactEnabled()).toBe(true);
+  test("observe-result-include-elements defaults off and toggles", () => {
+    expect(serverConfig.isObserveResultIncludeElementsEnabled()).toBe(false);
+    serverConfig.setObserveResultIncludeElementsEnabled(true);
+    expect(serverConfig.isObserveResultIncludeElementsEnabled()).toBe(true);
   });
 
   test("tool-results-no-structured-content defaults off and toggles", () => {
@@ -44,12 +36,6 @@ describe("ServerConfig output-reduction flags", () => {
     expect(serverConfig.isActionsNoObserveEnabled()).toBe(false);
     serverConfig.setActionsNoObserveEnabled(true);
     expect(serverConfig.isActionsNoObserveEnabled()).toBe(true);
-  });
-
-  test("tool-results-compact-json defaults off and toggles", () => {
-    expect(serverConfig.isToolResultsCompactJsonEnabled()).toBe(false);
-    serverConfig.setToolResultsCompactJsonEnabled(true);
-    expect(serverConfig.isToolResultsCompactJsonEnabled()).toBe(true);
   });
 
   test("tool-output artifact directory defaults off and toggles", () => {

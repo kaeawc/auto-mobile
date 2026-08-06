@@ -30,19 +30,19 @@ export type {
  * Three independent transforms — the "spatial axis" complementing the existing
  * "temporal axis" (`--actions-diff-observe`). The agent picks where to zoom on
  * each screen, so the parameters ride in the `observe` tool's `scope` input
- * ({@link ObserveScopeInput}), NOT the environment. A server flag gates each
- * dimension as a dark-launch switch; {@link buildObserveScopeConfig} intersects
- * the two (call-requested AND flag-enabled):
+ * ({@link ObserveScopeInput}), NOT the environment. Scoping is always available:
+ * {@link buildObserveScopeConfig} applies a dimension whenever the call requests
+ * it (the per-dimension server gates that once dark-launched this are now always
+ * on, so the intersection reduces to "call-requested"):
  *
- *  1. FOCUS  (`scope.focus`, `--observe-focus-scope`)  — scope to a subtree: an
- *     anchor object (`resource-id` / text) when given, else `true` for the
- *     foreground app, dropping system chrome (status/nav bars, IME, other pkgs).
- *  2. OVERVIEW (`scope.overview`, `--observe-overview`) — collapse to a container
- *     skeleton: keep structural/addressable nodes, drop anonymous leaves, annotate
- *     the count of omitted descendants so nothing is *silently* dropped.
- *  3. REGION (`scope.region`, `--observe-region`) — crop to a normalized (0..1)
- *     box (the crop cookbook's signature ergonomic); `true` uses the inset content
- *     rectangle.
+ *  1. FOCUS  (`scope.focus`)  — scope to a subtree: an anchor object
+ *     (`resource-id` / text) when given, else `true` for the foreground app,
+ *     dropping system chrome (status/nav bars, IME, other pkgs).
+ *  2. OVERVIEW (`scope.overview`) — collapse to a container skeleton: keep
+ *     structural/addressable nodes, drop anonymous leaves, annotate the count of
+ *     omitted descendants so nothing is *silently* dropped.
+ *  3. REGION (`scope.region`) — crop to a normalized (0..1) box (the crop
+ *     cookbook's signature ergonomic); `true` uses the inset content rectangle.
  *
  * GUIDING PRINCIPLE — OUTPUT-ONLY, like `sanitizeObserveResult`: every function
  * here returns a deep copy and never mutates the caller's `ObserveResult`.

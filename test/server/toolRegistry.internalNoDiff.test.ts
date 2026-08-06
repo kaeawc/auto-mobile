@@ -41,8 +41,6 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
   let daemonSessionManager: SessionManager | undefined;
-  let originalDrop: boolean;
-  let originalCompact: boolean;
   let originalDiff: boolean;
   let originalNoObserve: boolean;
 
@@ -157,12 +155,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
-    originalDrop = serverConfig.isObserveResultDropElementsEnabled();
-    originalCompact = serverConfig.isObserveResultCompactEnabled();
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     originalNoObserve = serverConfig.isActionsNoObserveEnabled();
-    serverConfig.setObserveResultDropElementsEnabled(false);
-    serverConfig.setObserveResultCompactEnabled(false);
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   });
 
@@ -171,8 +165,6 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();
-    serverConfig.setObserveResultDropElementsEnabled(originalDrop);
-    serverConfig.setObserveResultCompactEnabled(originalCompact);
     serverConfig.setActionsDiffObserveEnabled(originalDiff);
     serverConfig.setActionsNoObserveEnabled(originalNoObserve);
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;

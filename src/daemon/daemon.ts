@@ -289,14 +289,8 @@ export class Daemon {
     if (options.noOcclusion) {
       serverConfig.setOcclusionEnabled(false);
     }
-    if (options.observeResultDropElements) {
-      serverConfig.setObserveResultDropElementsEnabled(true);
-    }
-    if (options.observeResultCompact) {
-      serverConfig.setObserveResultCompactEnabled(true);
-    }
-    if (options.observeResultProjectSkeleton) {
-      serverConfig.setObserveResultProjectSkeletonEnabled(true);
+    if (options.observeResultIncludeElements) {
+      serverConfig.setObserveResultIncludeElementsEnabled(true);
     }
     if (options.toolResultsNoStructuredContent) {
       serverConfig.setToolResultsNoStructuredContentEnabled(true);
@@ -306,18 +300,6 @@ export class Daemon {
     }
     if (options.actionsNoObserve) {
       serverConfig.setActionsNoObserveEnabled(true);
-    }
-    if (options.toolResultsCompactJson) {
-      serverConfig.setToolResultsCompactJsonEnabled(true);
-    }
-    if (options.observeFocusScope) {
-      serverConfig.setObserveFocusScopeEnabled(true);
-    }
-    if (options.observeOverview) {
-      serverConfig.setObserveOverviewEnabled(true);
-    }
-    if (options.observeRegion) {
-      serverConfig.setObserveRegionEnabled(true);
     }
     if (options.toolOutputsDir) {
       serverConfig.setToolOutputsDir(options.toolOutputsDir);

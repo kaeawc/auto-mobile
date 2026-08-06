@@ -316,15 +316,16 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
 
 // Progressive-disclosure scoping of the returned hierarchy (issue #4344). The
 // agent picks where to zoom on THIS screen, so region/anchor are per-call inputs
-// (not env). Each dimension is honored only when its server experiment flag is
-// enabled: --observe-focus-scope, --observe-region, --observe-overview.
+// (not env). Every dimension is always honored when requested — the focus /
+// region / overview scoping is on by default and applies only when a call sets
+// the matching `scope` field.
 const observeScopeFocusSchema = z.union([
   z.boolean(),
   z.object({
     resourceId: z.string().optional().describe("Anchor by exact resource-id"),
     text: z.string().optional().describe("Anchor by substring text match")
   })
-]).describe("Scope to a subtree: true = foreground app; {resourceId|text} = anchor. Needs --observe-focus-scope.");
+]).describe("Scope to a subtree: true = foreground app; {resourceId|text} = anchor.");
 
 const observeScopeRegionBoxSchema = z.object({
   x1: z.number().min(0).max(1),
@@ -339,8 +340,8 @@ const observeScopeSchema = z.object({
   focus: observeScopeFocusSchema.optional(),
   region: z.union([z.boolean(), observeScopeRegionBoxSchema])
     .optional()
-    .describe("Crop to a normalized 0..1 box; true = inset content rect. Needs --observe-region."),
-  overview: z.boolean().optional().describe("Collapse to a container skeleton. Needs --observe-overview.")
+    .describe("Crop to a normalized 0..1 box; true = inset content rect."),
+  overview: z.boolean().optional().describe("Collapse to a container skeleton.")
 }).describe("Experimental progressive-disclosure scoping of the returned hierarchy (issue #4344)");
 
 // Cross-field validation shared by `observe` and `openLink` (both carry
@@ -1144,7 +1145,7 @@ export function registerObserveTools() {
   // Advertise a machine-readable `ObserveResult` outputSchema (issue #3025) so
   // observe's hierarchy/window/element bounds — the bulk of compacted bounds —
   // are described on the wire, and so its `bounds` fields route through
-  // `elementBoundsSchema` (the `--observe-result-compact` tuple is flag-advertised
+  // `elementBoundsSchema` (the compact bounds tuple is advertised unconditionally
   // via `advertiseBoundsForCompact` in `getToolDefinitions`). Composes with
   // `--tool-results-no-structured-content`, which suppresses the advertisement.
   ToolRegistry.registerDeviceAware(

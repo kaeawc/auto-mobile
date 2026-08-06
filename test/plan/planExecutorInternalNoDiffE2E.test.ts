@@ -31,8 +31,6 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   let originalDeviceSessionManager: unknown;
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
-  let originalDrop: boolean;
-  let originalCompact: boolean;
 
   function sameScreenObserve(): ObserveResult {
     return {
@@ -73,10 +71,6 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
-    originalDrop = serverConfig.isObserveResultDropElementsEnabled();
-    originalCompact = serverConfig.isObserveResultCompactEnabled();
-    serverConfig.setObserveResultDropElementsEnabled(false);
-    serverConfig.setObserveResultCompactEnabled(false);
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   });
 
@@ -86,8 +80,6 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();
     serverConfig.setActionsDiffObserveEnabled(originalDiff);
-    serverConfig.setObserveResultDropElementsEnabled(originalDrop);
-    serverConfig.setObserveResultCompactEnabled(originalCompact);
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
     registerInteractionTools();

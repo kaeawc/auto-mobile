@@ -5,18 +5,15 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 
 describe("ToolRegistry.getToolDefinitions", () => {
   const originalStructuredContentSuppressed = serverConfig.isToolResultsNoStructuredContentEnabled();
-  const originalCompactBounds = serverConfig.isObserveResultCompactEnabled();
 
   beforeEach(() => {
     ToolRegistry.clearTools();
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
-    serverConfig.setObserveResultCompactEnabled(false);
   });
 
   afterEach(() => {
     ToolRegistry.clearTools();
     serverConfig.setToolResultsNoStructuredContentEnabled(originalStructuredContentSuppressed);
-    serverConfig.setObserveResultCompactEnabled(originalCompactBounds);
   });
 
   test("reuses converted input and output schemas across steady-state listings", () => {
@@ -148,12 +145,12 @@ describe("ToolRegistry.getToolDefinitions", () => {
     expect(JSON.stringify(added!.inputSchema)).toContain("added");
   });
 
-  test("caches output schema variants per structured-content and compact-bounds flags", () => {
+  test("caches output schema variants per structured-content flag (bounds tuple always advertised)", () => {
     const boundsSchema = z.object({
       bounds: z.union([
         z.object({ left: z.number(), top: z.number(), width: z.number(), height: z.number() }),
         z.tuple([z.number(), z.number(), z.number(), z.number()]),
-      ]).describe("Element bounds. Default: object; compact: [left, top, right, bottom]."),
+      ]).describe("Element bounds. Default: positional tuple [left, top, right, bottom]."),
     });
 
     ToolRegistry.register(
@@ -164,16 +161,11 @@ describe("ToolRegistry.getToolDefinitions", () => {
       { outputSchema: boundsSchema }
     );
 
+    // Bounds compaction is now an unconditional default, so the positional tuple
+    // arm (a JSON-Schema `prefixItems`) is always advertised.
     const defaultOutput = ToolRegistry.getToolDefinitions()[0].outputSchema;
-    expect(JSON.stringify(defaultOutput)).not.toContain("prefixItems");
+    expect(JSON.stringify(defaultOutput)).toContain("prefixItems");
     expect(ToolRegistry.getToolDefinitions()[0].outputSchema).toBe(defaultOutput);
-
-    serverConfig.setObserveResultCompactEnabled(true);
-    ToolRegistry.notifyToolListChanged();
-    const compactOutput = ToolRegistry.getToolDefinitions()[0].outputSchema;
-    expect(JSON.stringify(compactOutput)).toContain("prefixItems");
-    expect(compactOutput).not.toBe(defaultOutput);
-    expect(ToolRegistry.getToolDefinitions()[0].outputSchema).toBe(compactOutput);
 
     serverConfig.setToolResultsNoStructuredContentEnabled(true);
     ToolRegistry.notifyToolListChanged();

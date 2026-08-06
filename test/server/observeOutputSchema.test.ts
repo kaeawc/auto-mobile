@@ -338,8 +338,9 @@ describe("observeResultSchema: every bounds site is the advertised union (#3025)
 
   test("the advertised schema documents the tuple order machine-readably", () => {
     const json = JSON.stringify(observeJson());
+    // Bounds compaction is a permanent default now; the tuple order is documented
+    // as the default form so a client can decode [l,t,r,b] from the schema alone.
     expect(json).toContain("left, top, right, bottom");
-    expect(json.toLowerCase()).toContain("observe-result-compact");
   });
 
   test("carries at least one bounds union (routed through elementBoundsSchema)", () => {
@@ -363,8 +364,9 @@ describe("observeResultSchema: every bounds site is the advertised union (#3025)
     }
     const json = JSON.stringify(out);
     expect(json).not.toContain("prefixItems");
-    // Prose still documents the tuple exists under the flag.
-    expect(json.toLowerCase()).toContain("observe-result-compact");
+    // The collapsed object arm preserves the union's description, so the prose
+    // still documents the positional tuple order.
+    expect(json).toContain("left, top, right, bottom");
   });
 });
 
@@ -423,34 +425,21 @@ describe("observe tool registration advertises the schema (#3025)", () => {
     }
   });
 
-  test("tracks --observe-result-compact through getToolDefinitions (object arm off, tuple on)", () => {
-    const original = serverConfig.isObserveResultCompactEnabled();
+  test("advertises the bounds tuple through getToolDefinitions (compaction is a permanent default)", () => {
     const observeSchemaJson = (): string => {
       const observe = ToolRegistry.getToolDefinitions().find(t => t.name === "observe");
       return JSON.stringify((observe as Record<string, unknown>).outputSchema);
     };
-    // Count JSON-Schema tuple sites (`prefixItems`). The `skeleton` bounds tuple
-    // (#4388) is deliberately always a tuple — it is emitted only under
-    // project:"skeleton" and its bounds never depend on --observe-result-compact —
-    // so it contributes a fixed tuple site regardless of the flag. The invariant
-    // is therefore relative: flipping compact ON must advertise strictly MORE
-    // tuple sites (every bounds *union* collapses to its object arm when off).
+    // Count JSON-Schema tuple sites (`prefixItems`). Bounds compaction is now
+    // unconditional, so the object|tuple union is advertised for every bounds
+    // field — plus the always-tuple `skeleton` bounds (#4388). A client can
+    // therefore always decode the emitted [l,t,r,b] tuple. There is no flag to
+    // flip: the advertised schema carries multiple tuple sites unconditionally.
     const countTupleSites = (json: string): number => json.split("prefixItems").length - 1;
-    try {
-      withFreshRegistry(() => {
-        serverConfig.setObserveResultCompactEnabled(false);
-        const offSites = countTupleSites(observeSchemaJson());
-
-        serverConfig.setObserveResultCompactEnabled(true);
-        // Compact on: the object|tuple union (a JSON-Schema tuple → prefixItems)
-        // is advertised for every bounds field, so a client decodes the emitted
-        // [l,t,r,b] tuple.
-        const onSites = countTupleSites(observeSchemaJson());
-        expect(onSites).toBeGreaterThan(offSites);
-      });
-    } finally {
-      serverConfig.setObserveResultCompactEnabled(original);
-    }
+    withFreshRegistry(() => {
+      const sites = countTupleSites(observeSchemaJson());
+      expect(sites).toBeGreaterThan(1);
+    });
   });
 
   test("advertises the skeleton projection field with an always-tuple bounds (#4388)", () => {

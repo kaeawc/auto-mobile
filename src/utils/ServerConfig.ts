@@ -37,16 +37,10 @@ class ServerConfig {
   private _a11yRetrieveInteractiveWindows: boolean = true;
   private _occlusionEnabled: boolean = true;
   private _planExecutionActive: boolean = false;
-  private _observeResultDropElements: boolean = false;
-  private _observeResultCompact: boolean = false;
-  private _observeResultProjectSkeleton: boolean = false;
+  private _observeResultIncludeElements: boolean = false;
   private _toolResultsNoStructuredContent: boolean = false;
   private _actionsDiffObserve: boolean = false;
   private _actionsNoObserve: boolean = false;
-  private _toolResultsCompactJson: boolean = false;
-  private _observeFocusScope: boolean = false;
-  private _observeOverview: boolean = false;
-  private _observeRegion: boolean = false;
   private _toolOutputsDir: string | undefined;
 
   private constructor() {}
@@ -249,29 +243,19 @@ class ServerConfig {
   }
 
   // --- Output-size reduction flags (issue #2756) ---
+  //
+  // Compact bounds tuples, the skeleton projection, compact JSON, and the
+  // focus/overview/region observe-scope gates are now unconditional defaults, so
+  // they no longer carry a toggle here. `observe-result-include-elements` is the
+  // sole survivor of the observe-shape flags: the flattened `elements` array is
+  // dropped by default, and this opt-in restores it.
 
-  setObserveResultDropElementsEnabled(enabled: boolean): void {
-    this._observeResultDropElements = enabled;
+  setObserveResultIncludeElementsEnabled(enabled: boolean): void {
+    this._observeResultIncludeElements = enabled;
   }
 
-  isObserveResultDropElementsEnabled(): boolean {
-    return this._observeResultDropElements;
-  }
-
-  setObserveResultCompactEnabled(enabled: boolean): void {
-    this._observeResultCompact = enabled;
-  }
-
-  isObserveResultCompactEnabled(): boolean {
-    return this._observeResultCompact;
-  }
-
-  setObserveResultProjectSkeletonEnabled(enabled: boolean): void {
-    this._observeResultProjectSkeleton = enabled;
-  }
-
-  isObserveResultProjectSkeletonEnabled(): boolean {
-    return this._observeResultProjectSkeleton;
+  isObserveResultIncludeElementsEnabled(): boolean {
+    return this._observeResultIncludeElements;
   }
 
   setToolResultsNoStructuredContentEnabled(enabled: boolean): void {
@@ -296,38 +280,6 @@ class ServerConfig {
 
   isActionsNoObserveEnabled(): boolean {
     return this._actionsNoObserve;
-  }
-
-  setToolResultsCompactJsonEnabled(enabled: boolean): void {
-    this._toolResultsCompactJson = enabled;
-  }
-
-  isToolResultsCompactJsonEnabled(): boolean {
-    return this._toolResultsCompactJson;
-  }
-
-  setObserveFocusScopeEnabled(enabled: boolean): void {
-    this._observeFocusScope = enabled;
-  }
-
-  isObserveFocusScopeEnabled(): boolean {
-    return this._observeFocusScope;
-  }
-
-  setObserveOverviewEnabled(enabled: boolean): void {
-    this._observeOverview = enabled;
-  }
-
-  isObserveOverviewEnabled(): boolean {
-    return this._observeOverview;
-  }
-
-  setObserveRegionEnabled(enabled: boolean): void {
-    this._observeRegion = enabled;
-  }
-
-  isObserveRegionEnabled(): boolean {
-    return this._observeRegion;
   }
 
 }

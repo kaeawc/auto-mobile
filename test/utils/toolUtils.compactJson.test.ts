@@ -1,40 +1,29 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { serverConfig } from "../../src/utils/ServerConfig";
+import { describe, expect, test } from "bun:test";
 import { stringifyToolResponse } from "../../src/utils/toolUtils";
 
 /**
- * --tool-results-compact-json drops the 2-space pretty-printing from serialized
- * tool results. Same data (parses back identically), fewer characters — pretty-
- * printing is ~35% of an element-heavy observe payload and carries no meaning for
- * the model. Default off, so behavior is unchanged unless the flag is set.
+ * Compact (non-pretty) JSON is now the unconditional default for serialized tool
+ * results: no 2-space pretty-printing. Same data (parses back identically), fewer
+ * characters — pretty-printing was ~35% of an element-heavy observe payload and
+ * carries no meaning for the model. The former `--tool-results-compact-json`
+ * toggle is retired; this is always on.
  */
-describe("stringifyToolResponse compact-json flag", () => {
+describe("stringifyToolResponse compact-json default", () => {
   const sample = {
     screenSize: { width: 1080, height: 2400 },
     elements: { clickable: [{ "view-id": "a", "bounds": { left: 0, top: 0, right: 1, bottom: 1 } }] },
   };
 
-  afterEach(() => {
-    serverConfig.setToolResultsCompactJsonEnabled(false);
-  });
-
-  test("default: pretty-printed (indented, multi-line)", () => {
-    const out = stringifyToolResponse(sample);
-    expect(out).toContain("\n");
-    expect(out).toContain("  ");
-  });
-
-  test("compact: single line, no indentation, but same data", () => {
-    serverConfig.setToolResultsCompactJsonEnabled(true);
+  test("single line, no indentation, but same data", () => {
     const out = stringifyToolResponse(sample);
     expect(out).not.toContain("\n");
+    expect(out).not.toContain("  ");
     expect(JSON.parse(out)).toEqual(sample);
   });
 
-  test("compact form is strictly smaller than pretty for element-heavy content", () => {
-    const pretty = stringifyToolResponse(sample);
-    serverConfig.setToolResultsCompactJsonEnabled(true);
+  test("compact form is smaller than an equivalent pretty-print of the same data", () => {
     const compact = stringifyToolResponse(sample);
+    const pretty = JSON.stringify(sample, null, 2);
     expect(compact.length).toBeLessThan(pretty.length);
   });
 });

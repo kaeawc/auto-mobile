@@ -49,10 +49,11 @@ const DEFAULT_FALSE_BOOLEAN_ATTRS: ReadonlySet<string> = new Set([
 
 export interface SanitizeObserveConfig {
   /**
-   * Gate for elements-drop. Maps to the `observeResultDropElements` output-
-   * reduction flag (`--observe-result-drop-elements`); the wiring layer (#2758)
-   * supplies it from `ServerConfig.isObserveResultDropElementsEnabled()`. When
-   * true the flattened `elements` block is omitted from the output copy.
+   * Gate for elements-drop. The wiring layer (#2758) supplies it from the
+   * inverse of `ServerConfig.isObserveResultIncludeElementsEnabled()`: the
+   * flattened `elements` block is dropped by default and only retained when the
+   * `--observe-result-include-elements` opt-in is set. When true the `elements`
+   * block is omitted from the output copy.
    */
   dropElements: boolean;
   /**
@@ -61,10 +62,9 @@ export interface SanitizeObserveConfig {
    */
   trimNodes?: boolean;
   /**
-   * Gate for compact-form output. Maps to the `observeResultCompact` output-
-   * reduction flag (`--observe-result-compact`); the wiring layer supplies it
-   * from `ServerConfig.isObserveResultCompactEnabled()` (issues #2951, #2978).
-   * When true, EVERY `bounds` object in the served payload is flattened from
+   * Gate for compact-form output. The wiring layer supplies this as `true`
+   * unconditionally — bounds compaction is a permanent default (issues #2951,
+   * #2978). When true, EVERY `bounds` object in the served payload is flattened from
    * `{left, top, right, bottom}` to the positional tuple `[left, top, right,
    * bottom]` — view-hierarchy nodes, the `elements` arrays, window/root/region
    * bounds, and the focused/awaited element fields. The four key strings repeat
@@ -82,8 +82,8 @@ export interface SanitizeObserveConfig {
    * `elements` with the flat, actionable-only `skeleton` (a projection of the
    * already-computed `elements`); its bounds are always the compact tuple form
    * regardless of `compact`. The wiring layer (`finalizeToolResponse`) supplies
-   * it from the per-call `project` arg or the `observe-result-project-skeleton`
-   * flag, and only for the headline `observe` payload — embedded action
+   * it as `"skeleton"` by default (a per-call `project: "full"` or `raw: true`
+   * opts out), and only for the headline `observe` payload — embedded action
    * observations stay `"full"` so `--actions-diff-observe` can still diff a tree.
    */
   project?: "full" | "skeleton";

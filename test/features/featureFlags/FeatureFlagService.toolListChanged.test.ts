@@ -6,9 +6,13 @@ import { FakeFeatureFlagApplier } from "../../fakes/FakeFeatureFlagApplier";
 import { FakeToolListChangedNotifier } from "../../fakes/FakeToolListChangedNotifier";
 import type { ToolListChangedNotifier } from "../../../src/features/featureFlags/ToolListChangedNotifier";
 
-// Covers the three flags that change what `tools/list` returns (outputSchema
-// advertisement or tool availability) plus one unrelated flag, so we can assert
+// Covers the flags that change what `tools/list` returns (outputSchema
+// advertisement or tool availability) plus unrelated flags, so we can assert
 // notifications fire only for tool-definition-affecting toggles (issue #2963).
+// The full set of tool-definition-affecting flags is now exactly
+// {debug, tool-results-no-structured-content}; `observe-result-include-elements`
+// is an example of a flag that is NOT in that set (dropping/restoring the
+// flattened elements array does not change the advertised tool definitions).
 const TEST_DEFINITIONS: FeatureFlagDefinition[] = [
   { key: "debug", label: "Debug", description: "debug", defaultValue: false },
   {
@@ -18,9 +22,9 @@ const TEST_DEFINITIONS: FeatureFlagDefinition[] = [
     defaultValue: false,
   },
   {
-    key: "observe-result-compact",
-    label: "Compact observe",
-    description: "compact",
+    key: "observe-result-include-elements",
+    label: "Include elements",
+    description: "include elements",
     defaultValue: false,
   },
   { key: "ui-perf-mode", label: "UI perf", description: "ui perf", defaultValue: false },
@@ -37,7 +41,6 @@ const makeService = (notifier: FakeToolListChangedNotifier) =>
 describe("FeatureFlagService tools/list_changed notifications", () => {
   test.each([
     "tool-results-no-structured-content",
-    "observe-result-compact",
     "debug",
   ] as const)("toggling %s at runtime emits exactly one notification", async key => {
     const notifier = new FakeToolListChangedNotifier();
@@ -55,6 +58,19 @@ describe("FeatureFlagService tools/list_changed notifications", () => {
     await service.listFlags();
 
     await service.setFlag("ui-perf-mode", true);
+
+    expect(notifier.count).toBe(0);
+  });
+
+  test("toggling observe-result-include-elements (not tool-defn-affecting) emits no notification", async () => {
+    // Dropping/restoring the flattened elements array changes only the payload
+    // shape, not the advertised tool definitions, so it is not in
+    // TOOL_DEFINITION_AFFECTING_FLAGS and must not trigger a list_changed storm.
+    const notifier = new FakeToolListChangedNotifier();
+    const service = makeService(notifier);
+    await service.listFlags();
+
+    await service.setFlag("observe-result-include-elements", true);
 
     expect(notifier.count).toBe(0);
   });

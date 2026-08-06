@@ -13,19 +13,14 @@ import {
 describe("parseDaemonArgs output-reduction flags", () => {
   test("defaults are undefined when no flag is passed", () => {
     const options = parseDaemonArgs([]);
-    expect(options.observeResultDropElements).toBeUndefined();
-    expect(options.observeResultCompact).toBeUndefined();
+    expect(options.observeResultIncludeElements).toBeUndefined();
     expect(options.toolResultsNoStructuredContent).toBeUndefined();
     expect(options.actionsDiffObserve).toBeUndefined();
     expect(options.actionsNoObserve).toBeUndefined();
   });
 
-  test("--observe-result-drop-elements sets observeResultDropElements", () => {
-    expect(parseDaemonArgs(["--observe-result-drop-elements"]).observeResultDropElements).toBe(true);
-  });
-
-  test("--observe-result-compact sets observeResultCompact", () => {
-    expect(parseDaemonArgs(["--observe-result-compact"]).observeResultCompact).toBe(true);
+  test("--observe-result-include-elements sets observeResultIncludeElements", () => {
+    expect(parseDaemonArgs(["--observe-result-include-elements"]).observeResultIncludeElements).toBe(true);
   });
 
   test("--tool-results-no-structured-content sets toolResultsNoStructuredContent", () => {
@@ -42,17 +37,34 @@ describe("parseDaemonArgs output-reduction flags", () => {
 
   test("all output-reduction flags parse together", () => {
     const options = parseDaemonArgs([
-      "--observe-result-drop-elements",
-      "--observe-result-compact",
+      "--observe-result-include-elements",
       "--tool-results-no-structured-content",
       "--actions-diff-observe",
       "--actions-no-observe",
     ]);
-    expect(options.observeResultDropElements).toBe(true);
-    expect(options.observeResultCompact).toBe(true);
+    expect(options.observeResultIncludeElements).toBe(true);
     expect(options.toolResultsNoStructuredContent).toBe(true);
     expect(options.actionsDiffObserve).toBe(true);
     expect(options.actionsNoObserve).toBe(true);
+  });
+
+  test("retired output-reduction flags are silently ignored (no throw, no option set)", () => {
+    // These behaviors are now unconditional defaults; the old opt-in flags are
+    // dead no-ops with no migration error or warning.
+    const retired = [
+      "--observe-result-drop-elements",
+      "--observe-result-compact",
+      "--observe-result-project-skeleton",
+      "--tool-results-compact-json",
+      "--observe-focus-scope",
+      "--observe-overview",
+      "--observe-region",
+    ];
+    const options = parseDaemonArgs(retired) as Record<string, unknown>;
+    for (const flag of retired) {
+      const field = flag.replace(/^--/, "").replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      expect(options[field]).toBeUndefined();
+    }
   });
 });
 

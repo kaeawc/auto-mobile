@@ -323,13 +323,19 @@ fun NavigationFacet(
   val clientProvider = remember { { graph.autoMobileClient } }
   // Resolve the loader from a scope that outlives this facet's composition (a session-scoped
   // registry by default) so its LRU cache survives facet open/close toggles — a body-scoped
-  // `remember` here would drop the cache every time the facet leaves composition.
+  // `remember` here would drop the cache every time the facet leaves composition. The default
+  // provider is itself remembered so its identity is stable across recompositions, letting the
+  // loader `remember` key on it (re-resolving only on an actual provider swap or device change)
+  // without re-invoking it on every recomposition.
   val loaderProvider =
     screenshotLoaderProvider
-      ?: { deviceId ->
-        DefaultNavigationScreenshotLoaderRegistry.forDevice(deviceId, clientProvider)
+      ?: remember(clientProvider) {
+        { deviceId: String ->
+          DefaultNavigationScreenshotLoaderRegistry.forDevice(deviceId, clientProvider)
+        }
       }
-  val screenshotLoader = remember(column.deviceId) { loaderProvider(column.deviceId) }
+  val screenshotLoader =
+    remember(column.deviceId, loaderProvider) { loaderProvider(column.deviceId) }
 
   when (val current = state) {
     NavigationFacetState.Loading -> NavigationFacetNote("Resolving navigation graph…")

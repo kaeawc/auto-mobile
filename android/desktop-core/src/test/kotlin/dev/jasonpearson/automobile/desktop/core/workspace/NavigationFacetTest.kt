@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -959,4 +960,38 @@ class NavigationFacetTest {
         DefaultNavigationScreenshotLoaderRegistry.peek(deviceId),
       )
     }
+
+  @Test
+  fun `swapping the injected loader provider re-resolves the loader`() = runComposeUiTest {
+    // Two registries hand out distinct loaders for the same device, so a provider swap must be
+    // observable. Guards that the loader `remember` keys on the provider, not just the deviceId.
+    val fromReg1 = NavigationScreenshotLoaderRegistry()
+    val fromReg2 = NavigationScreenshotLoaderRegistry()
+    val used = mutableListOf<ScreenshotLoader>()
+    val provider =
+      mutableStateOf<(String) -> ScreenshotLoader>({ id ->
+        fromReg1.forDevice(id) { FakeAutoMobileClient() }.also { used += it }
+      })
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+        MaterialTheme {
+          NavigationFacet(
+            column = column(),
+            observationStreamFactory = { FakeObservationStream() },
+            screenshotLoaderProvider = provider.value,
+          )
+        }
+      }
+    }
+    waitForIdle()
+    runOnIdle {
+      provider.value = { id ->
+        fromReg2.forDevice(id) { FakeAutoMobileClient() }.also { used += it }
+      }
+    }
+    waitForIdle()
+
+    assertEquals("a provider swap must re-resolve the loader", 2, used.size)
+    assertNotSame("the loader must come from the new provider after a swap", used[0], used[1])
+  }
 }

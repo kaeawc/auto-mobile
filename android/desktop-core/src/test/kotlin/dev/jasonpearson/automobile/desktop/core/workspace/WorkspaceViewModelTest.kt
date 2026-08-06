@@ -181,6 +181,42 @@ class WorkspaceViewModelTest {
   }
 
   @Test
+  fun `PressDeviceButton invokes the executor with the button and target platform`() =
+    testScope.runTest {
+      val exec = FakeEmulatorControlExecutor()
+      val vm = WorkspaceViewModel(this, exec)
+      vm.onAction(WorkspaceAction.ObserveDevice(column("a", Platform.Android)))
+      vm.onAction(WorkspaceAction.PressDeviceButton("a", DeviceButton.Home))
+      assertEquals(
+        listOf(FakeEmulatorControlExecutor.ButtonRequest("a", Platform.Android, DeviceButton.Home)),
+        exec.buttonRequests,
+      )
+    }
+
+  @Test
+  fun `SetLocale invokes the executor with the locale tag and target platform`() =
+    testScope.runTest {
+      val exec = FakeEmulatorControlExecutor()
+      val vm = WorkspaceViewModel(this, exec)
+      vm.onAction(WorkspaceAction.ObserveDevice(column("a", Platform.Ios)))
+      vm.onAction(WorkspaceAction.SetLocale("a", "ja-JP"))
+      assertEquals(
+        listOf(FakeEmulatorControlExecutor.LocaleRequest("a", Platform.Ios, "ja-JP")),
+        exec.localeRequests,
+      )
+    }
+
+  @Test
+  fun `PressDeviceButton and SetLocale for an unknown device run nothing`() = testScope.runTest {
+    val exec = FakeEmulatorControlExecutor()
+    val vm = WorkspaceViewModel(this, exec)
+    vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+    vm.onAction(WorkspaceAction.PressDeviceButton("nope", DeviceButton.Back))
+    vm.onAction(WorkspaceAction.SetLocale("nope", "de-DE"))
+    assertTrue(exec.buttonRequests.isEmpty() && exec.localeRequests.isEmpty())
+  }
+
+  @Test
   fun `SetLockStates updates matched columns and leaves absent devices unchanged`() =
     testScope.runTest {
       val vm = WorkspaceViewModel(this)

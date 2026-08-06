@@ -54,8 +54,42 @@ enum class EmulatorControl(val icon: String, val label: String) {
   Rotate("🔄", "Rotate"), // 🔄
   Screenshot("📸", "Screenshot"), // 📸
   Snapshot("🗂", "Snapshot"), // 🗂
+  Locale("🌐", "Locale"), // 🌐 — opens a locale picker rather than a one-shot device call
+  More("⋯", "More"), // ⋯ — opens an overflow menu of device system actions
   Unlock("🔓", "Unlock"), // 🔓
 }
+
+/**
+ * Device system buttons offered by the [EmulatorControl.More] overflow menu. Each maps to a value
+ * of the `pressButton` MCP tool. [toolValue] is the exact string the tool expects.
+ */
+enum class DeviceButton(val icon: String, val label: String, val toolValue: String) {
+  Home("🏠", "Home", "home"),
+  Back("◀", "Back", "back"),
+  Recent("▤", "Recent apps", "recent"),
+  Power("⏻", "Power", "power"),
+}
+
+/** A locale offered by the [EmulatorControl.Locale] picker: a BCP-47 [tag] and a human [label]. */
+data class LocaleOption(val tag: String, val label: String)
+
+/**
+ * Curated locales the Locale picker offers — a small cross-section covering LTR/RTL and a few
+ * scripts, enough to exercise localization without an exhaustive list.
+ */
+val COMMON_LOCALES: List<LocaleOption> =
+  listOf(
+    LocaleOption("en-US", "English (US)"),
+    LocaleOption("es-ES", "Spanish"),
+    LocaleOption("fr-FR", "French"),
+    LocaleOption("de-DE", "German"),
+    LocaleOption("pt-BR", "Portuguese (Brazil)"),
+    LocaleOption("ja-JP", "Japanese"),
+    LocaleOption("ko-KR", "Korean"),
+    LocaleOption("zh-CN", "Chinese (Simplified)"),
+    LocaleOption("hi-IN", "Hindi"),
+    LocaleOption("ar-SA", "Arabic"),
+  )
 
 /** High-level health rollup shown as the single status dot in the top bar. */
 enum class WorkspaceStatus {

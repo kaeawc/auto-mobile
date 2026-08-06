@@ -41,6 +41,12 @@ sealed interface WorkspaceAction {
   /** Run an emulator control against a device pane (rotate, screenshot, snapshot, unlock). */
   data class RunControl(val deviceId: String, val control: EmulatorControl) : WorkspaceAction
 
+  /** Press a device system button on a pane (the `more` overflow menu items). */
+  data class PressDeviceButton(val deviceId: String, val button: DeviceButton) : WorkspaceAction
+
+  /** Apply a locale to a pane's device (the `locale` picker selection). */
+  data class SetLocale(val deviceId: String, val locale: String) : WorkspaceAction
+
   /**
    * Update panes' lock state from an observed snapshot (deviceId -> locked). A device absent from
    * [locked] keeps its current state, so a transient empty read never spuriously unlocks a pane.
@@ -86,10 +92,43 @@ class WorkspaceViewModel(
       is WorkspaceAction.ToggleShrink -> mutate(action.deviceId) { it.copy(shrunk = !it.shrunk) }
       is WorkspaceAction.SelectTool -> mutate(action.deviceId) { it.copy(activeTool = action.tool) }
       is WorkspaceAction.RunControl -> runControl(action.deviceId, action.control)
+      is WorkspaceAction.PressDeviceButton -> pressDeviceButton(action.deviceId, action.button)
+      is WorkspaceAction.SetLocale -> setLocale(action.deviceId, action.locale)
       is WorkspaceAction.SetLockStates -> setLockStates(action.locked)
       is WorkspaceAction.DiffTool -> diffTool(action.tool)
     }
   }
+
+  /** Press a device system [button] on the targeted column off the UI thread; failures are logged. */
+  private fun pressDeviceButton(deviceId: String, button: DeviceButton) {
+    val column = columnFor(deviceId) ?: return
+    scope.launch {
+      try {
+        controlExecutor.pressButton(deviceId, column.platform, button)
+      } catch (cancellation: CancellationException) {
+        throw cancellation
+      } catch (error: Exception) {
+        LOG.warn("Device button $button failed for $deviceId: ${error.message}", error)
+      }
+    }
+  }
+
+  /** Apply [locale] to the targeted column's device off the UI thread; failures are logged. */
+  private fun setLocale(deviceId: String, locale: String) {
+    val column = columnFor(deviceId) ?: return
+    scope.launch {
+      try {
+        controlExecutor.setLocale(deviceId, column.platform, locale)
+      } catch (cancellation: CancellationException) {
+        throw cancellation
+      } catch (error: Exception) {
+        LOG.warn("Set locale $locale failed for $deviceId: ${error.message}", error)
+      }
+    }
+  }
+
+  private fun columnFor(deviceId: String): DeviceColumn? =
+    (_state.value as? WorkspaceUiState.Content)?.columns?.firstOrNull { it.deviceId == deviceId }
 
   /** Reflect an observed lock-state snapshot onto the columns; absent devices keep their state. */
   private fun setLockStates(locked: Map<String, Boolean>) {

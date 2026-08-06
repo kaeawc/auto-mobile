@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -806,23 +808,68 @@ private fun EmulatorControls(
   modifier: Modifier,
 ) {
   Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-    // Unlock is gated on the pane's lock state; rotate/screenshot/snapshot always show.
+    // Unlock is gated on the pane's lock state; the rest always show. Rotate/Snapshot/Unlock are
+    // one-shot device calls; Screenshot captures to disk; Locale/More open menus.
     EmulatorControl.entries
       .filter { it != EmulatorControl.Unlock || column.locked }
       .forEach { control ->
-        Glyph(
-          text = control.icon,
-          description = "${control.label} ${column.name}",
-          active = false,
-          onClick = {
-            if (control == EmulatorControl.Screenshot) {
-              onCaptureScreenshot()
-            } else {
+        when (control) {
+          EmulatorControl.Screenshot ->
+            Glyph(control.icon, "${control.label} ${column.name}", false, onCaptureScreenshot)
+          EmulatorControl.Locale -> LocaleControl(column, onAction)
+          EmulatorControl.More -> MoreControl(column, onAction)
+          else ->
+            Glyph(control.icon, "${control.label} ${column.name}", false) {
               onAction(WorkspaceAction.RunControl(column.deviceId, control))
             }
+        }
+      }
+  }
+}
+
+/** 🌐 Locale control: a glyph that opens a dropdown of [COMMON_LOCALES]; a pick sets that locale. */
+@Composable
+private fun LocaleControl(column: DeviceColumn, onAction: (WorkspaceAction) -> Unit) {
+  var open by remember { mutableStateOf(false) }
+  Box {
+    Glyph(EmulatorControl.Locale.icon, "${EmulatorControl.Locale.label} ${column.name}", open) {
+      open = true
+    }
+    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+      COMMON_LOCALES.forEach { locale ->
+        DropdownMenuItem(
+          text = { Text("${locale.label} (${locale.tag})") },
+          modifier = Modifier.semantics { contentDescription = "Locale ${locale.label} ${column.name}" },
+          onClick = {
+            open = false
+            onAction(WorkspaceAction.SetLocale(column.deviceId, locale.tag))
           },
         )
       }
+    }
+  }
+}
+
+/** ⋯ More control: a glyph that opens a dropdown of [DeviceButton]s; a pick presses that button. */
+@Composable
+private fun MoreControl(column: DeviceColumn, onAction: (WorkspaceAction) -> Unit) {
+  var open by remember { mutableStateOf(false) }
+  Box {
+    Glyph(EmulatorControl.More.icon, "${EmulatorControl.More.label} ${column.name}", open) {
+      open = true
+    }
+    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+      DeviceButton.entries.forEach { button ->
+        DropdownMenuItem(
+          text = { Text("${button.icon}  ${button.label}") },
+          modifier = Modifier.semantics { contentDescription = "${button.label} ${column.name}" },
+          onClick = {
+            open = false
+            onAction(WorkspaceAction.PressDeviceButton(column.deviceId, button))
+          },
+        )
+      }
+    }
   }
 }
 

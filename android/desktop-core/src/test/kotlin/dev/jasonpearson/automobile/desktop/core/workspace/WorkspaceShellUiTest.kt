@@ -192,6 +192,38 @@ class WorkspaceShellUiTest {
     }
 
   @Test
+  fun `Locale control opens a picker and selecting a locale dispatches SetLocale`() =
+    runComposeUiTest {
+      var action: WorkspaceAction? = null
+      val state =
+        WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {})
+        }
+      }
+      onNodeWithContentDescription("Locale Pixel 8").performClick()
+      onNodeWithContentDescription("Locale Spanish Pixel 8").performClick()
+      assertEquals(WorkspaceAction.SetLocale("a", "es-ES"), action)
+    }
+
+  @Test
+  fun `More control opens a menu and selecting a button dispatches PressDeviceButton`() =
+    runComposeUiTest {
+      var action: WorkspaceAction? = null
+      val state =
+        WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {})
+        }
+      }
+      onNodeWithContentDescription("More Pixel 8").performClick()
+      onNodeWithContentDescription("Home Pixel 8").performClick()
+      assertEquals(WorkspaceAction.PressDeviceButton("a", DeviceButton.Home), action)
+    }
+
+  @Test
   fun `active tool renders a docked facet with a close control`() = runComposeUiTest {
     val state =
       WorkspaceUiState.Content(

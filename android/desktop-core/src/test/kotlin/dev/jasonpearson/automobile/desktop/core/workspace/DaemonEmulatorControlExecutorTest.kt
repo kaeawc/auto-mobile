@@ -18,8 +18,10 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class DaemonEmulatorControlExecutorTest {
 
-  private fun executor(client: FakeAutoMobileClient) =
-    DaemonEmulatorControlExecutor(client, UnconfinedTestDispatcher())
+  private fun executor(
+    client: FakeAutoMobileClient,
+    resolver: ForegroundAppResolver = FakeForegroundAppResolver(appId = null),
+  ) = DaemonEmulatorControlExecutor(client, resolver, UnconfinedTestDispatcher())
 
   @Test
   fun `rotate sets the active device then calls rotate with the target orientation`() = runTest {
@@ -99,5 +101,79 @@ class DaemonEmulatorControlExecutorTest {
             }
       }
     )
+  }
+
+  @Test
+  fun `pressButton sets the active device then calls pressButton`() = runTest {
+    val client = FakeAutoMobileClient()
+    executor(client).pressButton("emulator-5554", Platform.Android, DeviceButton.Home)
+
+    assertEquals("setActiveDevice", client.calls.first())
+    assertTrue(
+      client.toolCalls.any {
+        it.name == "pressButton" &&
+          it.arguments ==
+            buildJsonObject {
+              put("button", "home")
+              put("platform", "android")
+              put("deviceId", "emulator-5554")
+            }
+      }
+    )
+  }
+
+  @Test
+  fun `setLocale on iOS enables device-settings and changes locale device-wide`() = runTest {
+    val client = FakeAutoMobileClient()
+    executor(client).setLocale("booted-ipad", Platform.Ios, "ja-JP")
+
+    assertTrue(
+      client.toolCalls.any {
+        it.name == "setToolCapability" &&
+          it.arguments == buildJsonObject { put("capability", "device-settings"); put("enabled", true) }
+      }
+    )
+    assertTrue(
+      "iOS locale is device-wide — no appId",
+      client.toolCalls.any {
+        it.name == "changeLocalization" &&
+          it.arguments ==
+            buildJsonObject {
+              put("locale", "ja-JP")
+              put("platform", "ios")
+              put("deviceId", "booted-ipad")
+            }
+      },
+    )
+  }
+
+  @Test
+  fun `setLocale on Android targets the resolved foreground app`() = runTest {
+    val client = FakeAutoMobileClient()
+    val resolver = FakeForegroundAppResolver(appId = "com.example.app")
+    executor(client, resolver).setLocale("emulator-5554", Platform.Android, "de-DE")
+
+    assertEquals(listOf("emulator-5554"), resolver.requestedDeviceIds)
+    assertTrue(
+      client.toolCalls.any {
+        it.name == "changeLocalization" &&
+          it.arguments ==
+            buildJsonObject {
+              put("locale", "de-DE")
+              put("platform", "android")
+              put("deviceId", "emulator-5554")
+              put("appId", "com.example.app")
+            }
+      }
+    )
+  }
+
+  @Test
+  fun `setLocale on Android with no foreground app does not change locale`() = runTest {
+    val client = FakeAutoMobileClient()
+    executor(client, FakeForegroundAppResolver(appId = null))
+      .setLocale("emulator-5554", Platform.Android, "de-DE")
+
+    assertTrue(client.toolCalls.none { it.name == "changeLocalization" })
   }
 }

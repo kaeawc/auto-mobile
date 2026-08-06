@@ -74,7 +74,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$WhenMappings {
   public static final int[] $EnumSwitchMapping$0;
 }
 Compiled from "AutoMobileSDK.kt"
-public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$initialize$4$observer$1 implements androidx.lifecycle.DefaultLifecycleObserver {
+public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$initialize$5$observer$1 implements androidx.lifecycle.DefaultLifecycleObserver {
   public void onStart(androidx.lifecycle.LifecycleOwner);
   public void onStop(androidx.lifecycle.LifecycleOwner);
   public void onCreate(androidx.lifecycle.LifecycleOwner);
@@ -106,6 +106,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK {
   public final void setEnabled(boolean);
   public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument getCapabilities();
   public final void registerCapability(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor);
+  public final boolean isCapabilitySupported$auto_mobile_sdk(java.lang.String);
   public final void unregisterCapability(java.lang.String);
   public final void updateCapturePolicy(dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy);
   public final boolean isTrackingEnabled();
@@ -528,6 +529,7 @@ public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityReg
   public final void updatePolicy(dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy);
   public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument snapshot();
   public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy currentPolicy();
+  public final boolean isCapabilitySupported(java.lang.String);
   public static final java.util.Set access$getHostManagedCapabilities$cp();
   public static final java.util.LinkedHashMap access$getDefaultDescriptors$cp();
   public static final java.util.Set access$getReservedCapabilities$cp();
@@ -1106,6 +1108,7 @@ public final class dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork {
   public final void initialize$auto_mobile_sdk(java.lang.String, dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher);
   public static void initialize$auto_mobile_sdk$default(dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork, java.lang.String, dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher, int, java.lang.Object);
   public final void setCapturePolicyProvider$auto_mobile_sdk(kotlin.jvm.functions.Function0<dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy>);
+  public final void setNetworkControlProvider$auto_mobile_sdk(kotlin.jvm.functions.Function0<java.lang.Boolean>);
   public final okhttp3.Interceptor interceptor(boolean, boolean);
   public static okhttp3.Interceptor interceptor$default(dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork, boolean, boolean, int, java.lang.Object);
   public final void recordRequest(dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord, boolean, boolean);
@@ -1123,8 +1126,8 @@ public final class dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInte
   public static final dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInterceptor$Companion Companion;
   public static final int $stable;
   public static final long MAX_BODY_BYTES;
-  public dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInterceptor(dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, java.lang.String, boolean, boolean, long, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher, kotlin.jvm.functions.Function0<dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy>);
-  public dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInterceptor(dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, java.lang.String, boolean, boolean, long, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInterceptor(dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, java.lang.String, boolean, boolean, long, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher, kotlin.jvm.functions.Function0<dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy>, kotlin.jvm.functions.Function0<java.lang.Boolean>);
+  public dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInterceptor(dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, java.lang.String, boolean, boolean, long, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public okhttp3.Response intercept(okhttp3.Interceptor$Chain);
   public static final java.util.Set access$getTEXT_CONTENT_TYPES$cp();
 }

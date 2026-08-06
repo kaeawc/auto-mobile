@@ -90,8 +90,8 @@ All builder parameters are validated with `require(value > 0)` at build time.
 
 `AutoMobileSDK.capabilities` returns a versioned, machine-readable snapshot of the integration.
 Each descriptor has a stable identifier, an availability state, and an optional reason. The
-states distinguish `NOT_INITIALIZED`, `DISABLED`, `UNSUPPORTED`, `PERMISSION_DENIED`, and
-`SUPPORTED`.
+states distinguish `NOT_INITIALIZED`, `DISABLED`, `UNSUPPORTED`, `PERMISSION_DENIED`, `SUPPORTED`,
+and `UNKNOWN`.
 
 Host integrations can register and remove optional descriptors with
 `registerCapability()` and `unregisterCapability()`. Capture and mutation controls are replaced

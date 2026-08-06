@@ -175,7 +175,8 @@ class DatabaseInspectorProvider : ContentProvider() {
     val query = extras.getString("query") ?: throw IllegalArgumentException("query required")
     if (driver is SQLiteDatabaseDriver &&
         driver.isMutationQuery(query) &&
-        !AutoMobileSDK.capabilities.policy.allowMutations) {
+        !AutoMobileSDK.capabilities.policy.allowMutations ||
+        !AutoMobileSDK.isCapabilitySupported("storage.mutation")) {
       throw DatabaseError.MutationNotAllowed()
     }
 

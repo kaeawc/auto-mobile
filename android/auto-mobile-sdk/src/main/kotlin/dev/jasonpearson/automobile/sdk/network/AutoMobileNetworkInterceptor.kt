@@ -40,6 +40,7 @@ internal class AutoMobileNetworkInterceptor(
   /** Optional rule store for mock enforcement and error simulation */
   private val ruleStore: NetworkMockRuleStore.RuleMatcher? = null,
   private val policyProvider: (() -> SdkCapturePolicy)? = null,
+  private val networkControlProvider: (() -> Boolean)? = null,
 ) : Interceptor {
 
   companion object {
@@ -70,6 +71,8 @@ internal class AutoMobileNetworkInterceptor(
     val headersEnabled = captureHeaders && (policy?.captureHeaders ?: true)
     val bodiesEnabled = captureBodies && (policy?.captureBodies ?: true)
     val mutationsEnabled = policy?.allowMutations ?: true
+    val networkControlEnabled =
+      if (policy == null) true else networkControlProvider?.invoke() == true
 
     // Capture request headers — include OkHttp defaults that will be added later
     val reqHeaders =
@@ -88,7 +91,7 @@ internal class AutoMobileNetworkInterceptor(
 
     // --- Mock rule enforcement ---
     val mockRule =
-      if (mutationsEnabled) {
+      if (mutationsEnabled && networkControlEnabled) {
         ruleStore?.findMatchingRule(request.url.host, request.url.encodedPath, request.method)
       } else null
     if (mockRule != null) {
@@ -116,7 +119,8 @@ internal class AutoMobileNetworkInterceptor(
     }
 
     // --- Error simulation enforcement ---
-    val errorSim = if (mutationsEnabled) ruleStore?.getErrorSimulation() else null
+    val errorSim =
+      if (mutationsEnabled && networkControlEnabled) ruleStore?.getErrorSimulation() else null
     if (errorSim != null) {
       val durationMs = System.currentTimeMillis() - startMs
       return handleErrorSimulation(request, errorSim, startMs, durationMs, reqHeaders, reqBody)

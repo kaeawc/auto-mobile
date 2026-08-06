@@ -226,7 +226,7 @@ AutoMobileSDK.updateCapturePolicy(
 ```
 
 Capability snapshots are versioned and distinguish `NOT_INITIALIZED`, `DISABLED`, `UNSUPPORTED`,
-`PERMISSION_DENIED`, and `SUPPORTED`. Removing an optional capability restores its unsupported
+`PERMISSION_DENIED`, `SUPPORTED`, and `UNKNOWN`. Removing an optional capability restores its unsupported
 descriptor and revokes any policy field that depends on it. Older clients should ignore unknown
 capability fields and use the schema version to select compatible behavior.
 

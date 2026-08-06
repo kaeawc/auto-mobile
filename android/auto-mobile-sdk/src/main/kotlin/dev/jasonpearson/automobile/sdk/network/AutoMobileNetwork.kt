@@ -64,6 +64,7 @@ object AutoMobileNetwork {
   @Volatile private var applicationId: String? = null
   @Volatile private var ruleStore: NetworkMockRuleStore.RuleMatcher? = null
   @Volatile private var capturePolicyProvider: (() -> SdkCapturePolicy)? = null
+  @Volatile private var networkControlProvider: (() -> Boolean)? = null
 
   /**
    * Initialize the network module with a shared event buffer.
@@ -84,6 +85,10 @@ object AutoMobileNetwork {
 
   internal fun setCapturePolicyProvider(provider: (() -> SdkCapturePolicy)?) {
     capturePolicyProvider = provider
+  }
+
+  internal fun setNetworkControlProvider(provider: (() -> Boolean)?) {
+    networkControlProvider = provider
   }
 
   /**
@@ -109,6 +114,7 @@ object AutoMobileNetwork {
       captureBodies,
       ruleStore = ruleStore,
       policyProvider = capturePolicyProvider,
+      networkControlProvider = networkControlProvider,
     )
   }
 
@@ -181,5 +187,6 @@ object AutoMobileNetwork {
     applicationId = null
     ruleStore = null
     capturePolicyProvider = null
+    networkControlProvider = null
   }
 }

@@ -129,6 +129,9 @@ object AutoMobileSDK {
     this.configuration = configuration
     capabilityRegistry.markInitialized()
     AutoMobileNetwork.setCapturePolicyProvider { capabilityRegistry.currentPolicy() }
+    AutoMobileNetwork.setNetworkControlProvider {
+      capabilityRegistry.isCapabilitySupported("network.control")
+    }
     val appContext = this.context!!
 
     // Create disk persistence for events
@@ -324,6 +327,10 @@ object AutoMobileSDK {
     capabilityRegistry.register(descriptor)
   }
 
+  /** Returns whether a capability is currently supported and usable. */
+  internal fun isCapabilitySupported(id: String): Boolean =
+    capabilityRegistry.isCapabilitySupported(id)
+
   /** Removes an optional host-provided capability. */
   fun unregisterCapability(id: String) {
     capabilityRegistry.unregister(id)
@@ -463,6 +470,8 @@ object AutoMobileSDK {
     listeners.clear()
     _isEnabled = true
     AutoMobileNetwork.setCapturePolicyProvider(null)
+    AutoMobileNetwork.setNetworkControlProvider(null)
+    AutoMobileNetwork.reset()
     capabilityRegistry.markShutdown()
     configuration = null
     context = null

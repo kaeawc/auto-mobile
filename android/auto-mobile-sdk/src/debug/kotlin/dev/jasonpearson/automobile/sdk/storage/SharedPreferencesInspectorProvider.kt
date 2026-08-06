@@ -104,7 +104,8 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
   }
 
   private fun requireMutationsAllowed() {
-    if (!AutoMobileSDK.capabilities.policy.allowMutations) {
+    if (!AutoMobileSDK.capabilities.policy.allowMutations ||
+        !AutoMobileSDK.isCapabilitySupported("storage.mutation")) {
       throw SharedPreferencesError.MutationNotAllowed()
     }
   }

@@ -120,6 +120,17 @@ class SdkCapabilityRegistryTest {
   }
 
   @Test
+  fun `network control can authorize mutation policy independently`() {
+    val registry = SdkCapabilityRegistry()
+    registry.markInitialized()
+    registry.register(SdkCapabilityDescriptor("network.control", SdkCapabilityState.SUPPORTED))
+
+    registry.updatePolicy(SdkCapturePolicy(allowMutations = true))
+
+    assertTrue(registry.snapshot().policy.allowMutations)
+  }
+
+  @Test
   fun `registered permission denial is preserved`() {
     val registry = SdkCapabilityRegistry()
     registry.markInitialized()

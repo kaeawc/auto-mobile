@@ -110,8 +110,8 @@ internal class SdkCapabilityRegistry {
   fun updatePolicy(next: SdkCapturePolicy) {
     synchronized(lock) {
       if (next.allowMutations) {
-        require(isSupported("storage.mutation")) {
-          "Mutation access requires the storage.mutation capability"
+        require(isSupported("storage.mutation") || isSupported("network.control")) {
+          "Mutation access requires a storage.mutation or network.control capability"
         }
       }
       if (next.captureHeaders || next.captureBodies) {
@@ -152,6 +152,8 @@ internal class SdkCapabilityRegistry {
     return initialized && enabled && descriptor?.state == SdkCapabilityState.SUPPORTED
   }
 
+  fun isCapabilitySupported(id: String): Boolean = synchronized(lock) { isSupported(id) }
+
   private fun registerDefaults() {
     defaultDescriptors.forEach { (id, descriptor) -> descriptors[id] = descriptor }
   }
@@ -162,7 +164,8 @@ internal class SdkCapabilityRegistry {
         "network.capture" ->
           policy.copy(captureHeaders = false, captureBodies = false)
         "storage.mutation", "network.control" ->
-          policy.copy(allowMutations = false)
+          if (isSupported("storage.mutation") || isSupported("network.control")) policy
+          else policy.copy(allowMutations = false)
         else -> policy
       }
   }

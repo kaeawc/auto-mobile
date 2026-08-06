@@ -58,7 +58,6 @@ import { TrackedScreenGeometry } from "../TrackedScreenGeometry";
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../../daemon/deviceDataStreamSocketServer";
 import { COORDINATE_SPACE_PX, type CoordinateSpace } from "../../../daemon/canonicalPixels";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
-import { getPerfWindowBuffer } from "../../performance/PerfWindowBuffer";
 import {
   ScreenshotBackoffScheduler,
   DefaultScreenshotBackoffScheduler,
@@ -1621,19 +1620,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       recompositionRate: null,
     };
 
-    // Feed the windowed observe-snapshot buffer with the on-device iOS fps/frame/jank.
-    // Real app CPU/memory for iOS arrive separately via PerformanceMonitor's host-side
-    // sampler; here we preserve nulls so idle frames don't skew percentiles.
-    getPerfWindowBuffer().record(this.device.deviceId, {
-      t: this.timer.now(),
-      fps: nullWhenAbsent(snapshot.fps),
-      frameTimeMs: nullWhenAbsent(snapshot.frameTimeMs),
-      jankFrames: nullWhenAbsent(snapshot.jankFrames),
-      touchLatencyMs: nullWhenAbsent(snapshot.touchLatencyMs),
-      cpuUsagePercent: nullWhenAbsent(snapshot.cpuUsagePercent),
-      memoryUsageMb: nullWhenAbsent(snapshot.memoryUsageMb),
-    });
-
+    // NOTE: this CtrlProxy snapshot is intentionally NOT fed into the observe
+    // `perfSnapshot` buffer. Its CADisplayLink fps/frame/jank measure the
+    // XCUITest *runner* process's own main-thread cadence, and its cpu/memory
+    // (task_info on the runner) describe the runner — none of it is the app
+    // under test. The app's real CPU/memory reach the buffer via
+    // PerformanceMonitor's host-side sampler (ps/simctl by bundle id). Feeding
+    // runner-cadence numbers here would present runner health as app perf.
+    // A real per-app iOS source is tracked in #5078; it still flows to the IDE
+    // stream below (unchanged existing behavior).
     try {
       server.pushPerformanceUpdate(this.device.deviceId, streamData);
       // Log occasionally to avoid spam

@@ -27,11 +27,16 @@ export interface PerfSample {
  * Per-device sliding-window buffer of performance samples.
  *
  * The buffer is source-agnostic: it is fed at the single fan-out point every
- * live sample flows through (`PerformanceMonitor.pushMetrics`, plus the iOS
- * CtrlProxy performance-update path). `observe` then asks for a windowed
- * `snapshot()` to attach to its result. Because it taps that one chokepoint, a
- * future denser source (e.g. an on-device SDK FrameMetrics feed) improves the
+ * live sample flows through (`PerformanceMonitor.pushMetrics`). `observe` then
+ * asks for a windowed `snapshot()` to attach to its result. Because it taps
+ * that one chokepoint, a future denser source (e.g. an on-device SDK
+ * FrameMetrics feed, #5076, or a real per-app iOS source, #5078) improves the
  * snapshot with no changes here.
+ *
+ * On iOS today only the host-side CPU/memory (by bundle id) flow through, so an
+ * iOS snapshot has real cpu/memory and null fps/jank — the CtrlProxy's on-device
+ * CADisplayLink measures the test-runner process, not the app, so it is
+ * deliberately not fed here (see IOSCtrlProxyClient.handlePerformanceUpdate).
  *
  * Time is always passed in (`now`) rather than read from a clock, so unit tests
  * stay deterministic without a FakeTimer.

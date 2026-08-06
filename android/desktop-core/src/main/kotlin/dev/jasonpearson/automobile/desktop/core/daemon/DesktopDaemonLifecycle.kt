@@ -126,7 +126,6 @@ internal class JsonDaemonPidFileReader(
     booleanOption("noA11yReportViewIds", "--no-report-view-ids")
     booleanOption("noA11yRetrieveInteractiveWindows", "--no-retrieve-interactive-windows")
     booleanOption("noOcclusion", "--no-occlusion")
-    booleanOption("safeAreaWarnings", "--safe-area-warnings")
     booleanOption("observeResultDropElements", "--observe-result-drop-elements")
     booleanOption("observeResultCompact", "--observe-result-compact")
     booleanOption("observeResultProjectSkeleton", "--observe-result-project-skeleton")

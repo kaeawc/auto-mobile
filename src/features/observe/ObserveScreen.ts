@@ -269,9 +269,7 @@ export class RealObserveScreen implements ObserveScreen {
       // navigation-graph recorder) ever observes the other platform's data.
       enforceHierarchyPlatform(result, this.device.platform, this.device.deviceId, this.platformValidator);
 
-      if (serverConfig.isSafeAreaWarningsEnabled()) {
-        result.layoutWarnings = this.safeAreaAuditor.inspect(result);
-      }
+      result.layoutWarnings = this.safeAreaAuditor.inspect(result);
 
       if (result.viewHierarchy) {
         result.elements = this.elementsBuilder.build(result.viewHierarchy, this.device.platform);

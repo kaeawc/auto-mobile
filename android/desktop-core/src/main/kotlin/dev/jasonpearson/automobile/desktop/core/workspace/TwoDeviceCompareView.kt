@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +45,7 @@ import dev.jasonpearson.automobile.desktop.core.layout.diffHierarchies
 import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 
@@ -78,6 +78,8 @@ fun TwoDeviceCompareView(
   columnB: DeviceColumn,
   modifier: Modifier = Modifier,
   observationStreamFactory: () -> ObservationStream = { ObservationStreamClient() },
+  backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
+  socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
   sideContent: @Composable (DeviceColumn, ObservationStream) -> Unit = { column, stream ->
     LayoutInspectorDashboard(
       dataSourceMode = DataSourceMode.Real,
@@ -106,6 +108,8 @@ fun TwoDeviceCompareView(
       CompareSide(
         column = columnA,
         observationStreamFactory = observationStreamFactory,
+        backoffDelay = backoffDelay,
+        socketAvailable = socketAvailable,
         sideContent = sideContent,
         parseHierarchy = parseHierarchy,
         onHierarchy = { hierarchyA = it },
@@ -114,6 +118,8 @@ fun TwoDeviceCompareView(
       CompareSide(
         column = columnB,
         observationStreamFactory = observationStreamFactory,
+        backoffDelay = backoffDelay,
+        socketAvailable = socketAvailable,
         sideContent = sideContent,
         parseHierarchy = parseHierarchy,
         onHierarchy = { hierarchyB = it },
@@ -150,20 +156,22 @@ fun TwoDeviceCompareView(
 private fun CompareSide(
   column: DeviceColumn,
   observationStreamFactory: () -> ObservationStream,
+  backoffDelay: suspend (attempt: Int) -> Unit,
+  socketAvailable: () -> Boolean,
   sideContent: @Composable (DeviceColumn, ObservationStream) -> Unit,
   parseHierarchy: suspend (JsonElement) -> ParsedHierarchy?,
   onHierarchy: (ParsedHierarchy?) -> Unit,
   modifier: Modifier,
 ) {
-  var stream by remember(column.deviceId) { mutableStateOf<ObservationStream?>(null) }
-  DisposableEffect(column.deviceId) {
-    val connected = observationStreamFactory().also { it.connect(deviceId = column.deviceId) }
-    stream = connected
-    onDispose {
-      connected.dispose()
-      stream = null
-    }
-  }
+  // Shared reconnect lifecycle: a side that drops (daemon restart / EOF while the overlay is open)
+  // reconnects instead of staying in "waiting" until the user closes and reopens compare.
+  val stream =
+    rememberReconnectingObservationStream(
+      deviceId = column.deviceId,
+      streamFactory = observationStreamFactory,
+      backoffDelay = backoffDelay,
+      socketAvailable = socketAvailable,
+    )
   val activeStream = stream ?: return
   // Reset per stream instance; a reconnect creates a fresh stream and thus a fresh token.
   val generation = remember(activeStream) { AtomicInteger(0) }

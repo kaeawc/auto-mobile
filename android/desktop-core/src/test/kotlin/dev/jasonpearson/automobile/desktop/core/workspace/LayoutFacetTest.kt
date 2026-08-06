@@ -5,8 +5,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -99,5 +101,32 @@ class LayoutFacetTest {
     assertEquals(2, factory.created.size)
     assertEquals(setOf("dev-1", "dev-2"), factory.created.map { it.lastConnectedDeviceId }.toSet())
     assertTrue(factory.created.all { it.connectCallCount == 1 })
+  }
+
+  @Test
+  fun `reconnects the pane stream after a mid-session drop`() = runComposeUiTest {
+    val fake = FakeObservationStream()
+    // A gate the test releases to let the single reconnect attempt proceed with zero wall time.
+    val backoff = CompletableDeferred<Unit>()
+    setContent {
+      MaterialTheme {
+        LayoutFacet(
+          column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+          observationStreamFactory = { fake },
+          backoffDelay = { backoff.await() },
+          socketAvailable = { true },
+        )
+      }
+    }
+    waitForIdle()
+    assertEquals(1, fake.connectCallCount)
+
+    // A daemon restart / EOF surfaces as a Disconnected state; the facet must reconnect instead of
+    // staying dead until the user exits and re-enters Inspect.
+    runOnIdle { fake.emitConnectionState(ConnectionState.Disconnected("Stream ended")) }
+    waitForIdle()
+    runOnIdle { backoff.complete(Unit) }
+    waitForIdle()
+    assertEquals("expected the facet to reconnect after a drop", 2, fake.connectCallCount)
   }
 }

@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.HierarchyStreamUpdate
@@ -83,6 +84,36 @@ class TwoDeviceCompareViewTest {
     assertEquals(1, fakeA.connectCallCount)
     assertEquals(1, fakeB.connectCallCount)
   }
+
+  @Test
+  fun `a side reconnects after a mid-session drop instead of staying disconnected`() =
+    runComposeUiTest {
+      val fakeA = FakeObservationStream()
+      val fakeB = FakeObservationStream()
+      // Only side A drops; side B stays healthy and never touches the shared backoff gate.
+      val backoff = CompletableDeferred<Unit>()
+      setContent {
+        MaterialTheme {
+          TwoDeviceCompareView(
+            columnA = columnA(),
+            columnB = columnB(),
+            observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
+            backoffDelay = { backoff.await() },
+            socketAvailable = { true },
+            sideContent = { column, _ -> Text(column.name) },
+          )
+        }
+      }
+      waitForIdle()
+      assertEquals(1, fakeA.connectCallCount)
+
+      runOnIdle { fakeA.emitConnectionState(ConnectionState.Disconnected("Stream ended")) }
+      waitForIdle()
+      runOnIdle { backoff.complete(Unit) }
+      waitForIdle()
+      assertEquals("expected side A to reconnect after a drop", 2, fakeA.connectCallCount)
+      assertEquals("side B must not reconnect", 1, fakeB.connectCallCount)
+    }
 
   @Test
   fun `waits for both hierarchies before showing a diff`() = runComposeUiTest {

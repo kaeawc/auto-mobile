@@ -182,11 +182,21 @@ async function runCell(
   }
   process.stdout.write(`\n▶ ${label} … `);
 
-  // Warm-up: navigate + observe so the device settles and (when enabled) the
-  // sampler window fills before we measure.
-  for (let i = 0; i < warmup; i += 1) {
+  // Warm-up: at least `warmup` iterations to let the device settle, then — for
+  // ON cells — keep going until the window is actually FULL
+  // (`oldestSampleAgeMs >= windowMs`). Otherwise a large window would begin
+  // measuring while still filling, so a "30s" cell would characterize a
+  // succession of shorter windows instead of the configured steady state. A
+  // generous cap bounds the wait on a pathologically slow device.
+  const maxWarm = warmup + Math.ceil((windowMs ?? 0) / 400) + 20;
+  for (let i = 0; i < maxWarm; i += 1) {
     await navigateStep();
-    await new RealObserveScreen(device).execute();
+    const result = await new RealObserveScreen(device).execute();
+    const oldestAge = result.perfSnapshot?.oldestSampleAgeMs;
+    const windowFull =
+      !enabled || windowMs === null ||
+      (typeof oldestAge === "number" && oldestAge >= windowMs);
+    if (i + 1 >= warmup && windowFull) { break; }
   }
 
   const observeMs: number[] = [];
@@ -252,7 +262,7 @@ function report(cells: CellResult[], micro: MicroResult[]): void {
   console.log("─".repeat(92));
   console.log(
     "window".padEnd(10), "ON median(ms)".padStart(13), "paired Δ".padStart(10), "Δ%".padStart(7),
-    "fps p50/p95/p99".padStart(20), "samples".padStart(8), "fpsP50 σ".padStart(9)
+    "fps p50/p95/p99".padStart(20), "samples".padStart(8), "wrun σ".padStart(9)
   );
   console.log("─".repeat(92));
   for (const w of windows) {
@@ -277,6 +287,10 @@ function report(cells: CellResult[], micro: MicroResult[]): void {
     );
   }
   console.log("─".repeat(92));
+  console.log("wrun σ = stdev of fps.p50 across THIS run's overlapping snapshots (within-run");
+  console.log("output variability, not cross-run repeatability). The window choice rests on the");
+  console.log("device-independent sample arithmetic below, not on this σ. Use BENCH_REPEATS≥2 for");
+  console.log("cross-run comparison.");
 
   console.log("\n=== pure PerfWindowBuffer.snapshot() cost (device-independent) ===");
   console.log("window(ms)".padStart(11), "samples".padStart(9), "ns/call".padStart(10));

@@ -32,7 +32,10 @@ and does not grow with window size — while `snapshot()` compute stays µs-scal
 | 30000       | drift-tracking | stable, over-smoothed   | ~44 | 0–2    |
 
 (Ranges span a clean-host run and a load-contended run; the sign of the paired Δ flips with host
-state, confirming it is not window-driven.)
+state, confirming it is not window-driven.) The **fps p50 σ** column is *within-run* output
+variability across one run's overlapping snapshots — illustrative, not cross-run repeatability
+(use `BENCH_REPEATS≥2` for that). The window decision below rests on device-independent sample
+arithmetic, not on this σ.
 
 Pure `PerfWindowBuffer.snapshot()` compute (device-independent):
 

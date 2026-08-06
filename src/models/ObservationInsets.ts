@@ -64,3 +64,26 @@ export interface LayoutWarning {
   overlapPercent: number;
   confidence: "high" | "medium";
 }
+
+/**
+ * Completeness of an observation's {@link LayoutWarnings.warnings} list:
+ * - `full` — every warning the audit found is present.
+ * - `truncated` — the audit found more than `MAX_LAYOUT_WARNINGS`; `warnings`
+ *   holds the highest-priority cap and `total` is the pre-cap count.
+ * - `scoped` — the observe-scope transforms (`--observe-region`/`-focus`/
+ *   `-overview`) narrowed the list to elements still in the returned hierarchy.
+ */
+export type LayoutWarningsScope = "full" | "truncated" | "scoped";
+
+/**
+ * Report-only edge-to-edge / safe-area findings for an observation, always
+ * emitted under the single `layoutWarnings` key. `scope` records how the list
+ * relates to what the audit found; `total` is present only when `scope` is
+ * `truncated`.
+ */
+export interface LayoutWarnings {
+  scope: LayoutWarningsScope;
+  /** Pre-cap count of warnings found. Present only when `scope` is `truncated`. */
+  total?: number;
+  warnings: LayoutWarning[];
+}

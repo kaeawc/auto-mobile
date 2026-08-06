@@ -27,9 +27,13 @@ All collected data is assembled into an object containing (fields may be omitted
 - `gfxMetrics`: emitted in sanitized output for action UI-stability summaries; frame timing fields may be trimmed when `performanceAudit.metrics` already carries non-null computed replacements
 - `error`: error messages encountered during observation
 
-Every observation includes report-only `layoutWarnings`. These flag text or interactive elements that may overlap safe areas, system bars, display cutouts, or Android gesture regions. Each warning includes `overflowPx` (how far the element extends into the unsafe region) and `insetPx` (the effective inset on that side), both in the observation's coordinate units. When a flagged descendant is fully contained by a flagged ancestor on the same unsafe side, the output keeps the descendant finding. Intentional edge-to-edge backgrounds and scrollable content remain advisory rather than failures.
+Every observation includes report-only `layoutWarnings`, always under that single key as an object `{ scope, total?, warnings }`. `warnings` flags text or interactive elements that may overlap safe areas, system bars, display cutouts, or Android gesture regions. Each warning includes `overflowPx` (how far the element extends into the unsafe region) and `insetPx` (the effective inset on that side), both in the observation's coordinate units. When a flagged descendant is fully contained by a flagged ancestor on the same unsafe side, the output keeps the descendant finding. Intentional edge-to-edge backgrounds and scrollable content remain advisory rather than failures.
 
-`layoutWarnings` is capped at 100 entries (`MAX_LAYOUT_WARNINGS`); real screens flag only a handful, since only elements physically inside the thin inset strips are reported, so the cap trims only pathological hierarchies. When it does trim, the highest-severity, largest-overflow findings are kept and `layoutWarningsTruncated` is set to the **total number of warnings found before capping** — so the shown count is `layoutWarnings.length` and the number omitted is `layoutWarningsTruncated - layoutWarnings.length`. The field is absent when nothing was dropped.
+`scope` records how the list relates to what the audit found:
+
+- **`full`** — every warning found is present.
+- **`truncated`** — the audit found more than 100 warnings (`MAX_LAYOUT_WARNINGS`); `warnings` holds the highest-severity, largest-overflow 100 and `total` is the pre-cap count (omitted count is `total - warnings.length`). Real screens flag only a handful — only elements physically inside the thin inset strips are reported — so this only ever trims pathological hierarchies.
+- **`scoped`** — the observe-scope transforms (`--observe-region` / `--observe-focus` / `--observe-overview`) narrowed the list to elements still present in the returned hierarchy, so no warning references a pruned element. `total` is dropped when this happens.
 
 When available, `insets.systemChrome` provides the system-chrome state that explains a
 safe-area warning's screen context. Android reports the current visibility of the status

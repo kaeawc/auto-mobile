@@ -342,16 +342,18 @@ describe("capLayoutWarnings", () => {
     confidence: "medium",
   });
 
-  test("returns the original array unchanged when at or under the cap", () => {
+  test("scope is 'full' with the original array unchanged when at or under the cap", () => {
     const warnings = Array.from({ length: MAX_LAYOUT_WARNINGS }, () => makeWarning("info", 1));
     const result = capLayoutWarnings(warnings);
+    expect(result.scope).toBe("full");
     expect(result.warnings).toBe(warnings);
-    expect(result.total).toBe(MAX_LAYOUT_WARNINGS);
+    expect(result.total).toBeUndefined();
   });
 
-  test("caps to MAX_LAYOUT_WARNINGS and reports the pre-cap total when over", () => {
+  test("scope is 'truncated' with the pre-cap total when over the cap", () => {
     const warnings = Array.from({ length: MAX_LAYOUT_WARNINGS + 25 }, () => makeWarning("info", 1));
     const result = capLayoutWarnings(warnings);
+    expect(result.scope).toBe("truncated");
     expect(result.warnings).toHaveLength(MAX_LAYOUT_WARNINGS);
     expect(result.total).toBe(MAX_LAYOUT_WARNINGS + 25);
   });

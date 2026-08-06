@@ -456,7 +456,6 @@ export const DIFF_SCALAR_FIELDS: readonly string[] = [
   "awaitTimeout",
   "awaitDuration",
   "layoutWarnings",
-  "layoutWarningsTruncated",
   "error",
 ];
 
@@ -751,18 +750,26 @@ function diffAttributes(
  * warning change is emitted.
  */
 function layoutWarningsEqual(a: unknown, b: unknown): boolean {
+  const stripWarningConfidence = (warning: unknown): unknown => {
+    if (!warning || typeof warning !== "object" || Array.isArray(warning)) {
+      return warning;
+    }
+    const copy = { ...(warning as Record<string, unknown>) };
+    delete copy.confidence;
+    return copy;
+  };
+  // `layoutWarnings` is the `{ scope, total?, warnings }` envelope; compare scope
+  // and total directly and the nested `warnings` list confidence-stripped, so
+  // occlusion-only confidence churn on a warning still reads as unchanged.
   const withoutDerivedConfidence = (value: unknown): unknown => {
-    if (!Array.isArray(value)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
       return value;
     }
-    return value.map(warning => {
-      if (!warning || typeof warning !== "object" || Array.isArray(warning)) {
-        return warning;
-      }
-      const copy = { ...(warning as Record<string, unknown>) };
-      delete copy.confidence;
-      return copy;
-    });
+    const record = value as Record<string, unknown>;
+    const warnings = Array.isArray(record.warnings)
+      ? record.warnings.map(stripWarningConfidence)
+      : record.warnings;
+    return { ...record, warnings };
   };
   return valuesEqual(withoutDerivedConfidence(a), withoutDerivedConfidence(b));
 }

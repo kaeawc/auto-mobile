@@ -15,7 +15,7 @@ import { SelectedElement } from "../utils/interfaces/NavigationGraph";
 import { RawViewHierarchyResult } from "./RawViewHierarchyResult";
 import type { MediaView } from "../features/observe/IdentifyMediaViews";
 import type { ObserveError } from "../features/observe/ObserveError";
-import type { LayoutWarning, ObservationInsets } from "./ObservationInsets";
+import type { LayoutWarnings, ObservationInsets } from "./ObservationInsets";
 import type { ObserveScopeMetadata } from "./ObserveScope";
 
 export interface PredictionTarget {
@@ -128,15 +128,13 @@ export interface ObserveResult {
   /** Typed inset metadata. Present even when a platform cannot measure it. */
   insets?: ObservationInsets;
 
-  /** Potential edge-to-edge / safe-area layout problems flagged by the report-only auditor. */
-  layoutWarnings?: LayoutWarning[];
-
   /**
-   * Total warnings found when `layoutWarnings` was capped (shown =
-   * `layoutWarnings.length`, dropped = this minus shown). Absent when nothing
-   * was dropped. See `MAX_LAYOUT_WARNINGS`.
+   * Potential edge-to-edge / safe-area layout problems flagged by the
+   * report-only auditor. Always the single `layoutWarnings` key: an object whose
+   * `scope` records whether the `warnings` list is `full`, `truncated` (capped,
+   * with a `total`), or `scoped` (narrowed to the returned hierarchy).
    */
-  layoutWarningsTruncated?: number;
+  layoutWarnings?: LayoutWarnings;
 
   /** Screen rotation (0: portrait, 1: landscape 90°, 2: reverse portrait 180°, 3: reverse landscape 270°) */
   rotation?: number;

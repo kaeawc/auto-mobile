@@ -1,4 +1,4 @@
-import type { LayoutWarning, ObservationEdgeInsets, ObserveResult } from "../../../models";
+import type { LayoutWarning, LayoutWarnings, ObservationEdgeInsets, ObserveResult } from "../../../models";
 import { isTruthy } from "../../../models/Element";
 
 type Node = Record<string, unknown>;
@@ -14,31 +14,31 @@ type WarningCandidate = {
 };
 
 /**
- * Upper bound on emitted `layoutWarnings`. The audit now runs on every
+ * Upper bound on emitted `layoutWarnings.warnings`. The audit now runs on every
  * observation, so an unbounded array would bloat every result — and, under
  * `--actions-diff-observe`, the scalar diff that copies both the before and
  * after arrays into `{from, to}`. Real screens self-limit to a handful (only
  * nodes physically inside the thin inset strips are flagged), so this cap only
  * ever trims pathological inputs; when it does, the truncation is surfaced via
- * `ObserveResult.layoutWarningsTruncated` rather than dropped silently.
+ * `scope: "truncated"` + `total` rather than dropped silently.
  */
 export const MAX_LAYOUT_WARNINGS = 100;
 
 /**
- * Cap the advisory list at {@link MAX_LAYOUT_WARNINGS}. Returns the (possibly
- * trimmed) warnings plus the pre-cap `total`. When trimming, the
- * highest-severity, largest-overflow warnings are kept; when not, the original
- * array is returned unchanged (identical order), so realistic screens are never
- * reordered or altered.
+ * Wrap the advisory list in the `LayoutWarnings` envelope, capping at
+ * {@link MAX_LAYOUT_WARNINGS}. At or under the cap the original array is kept
+ * unchanged (identical order) with `scope: "full"`; over it, the
+ * highest-severity, largest-overflow warnings are kept and `scope: "truncated"`
+ * carries the pre-cap `total`.
  */
-export function capLayoutWarnings(warnings: LayoutWarning[]): { warnings: LayoutWarning[]; total: number } {
+export function capLayoutWarnings(warnings: LayoutWarning[]): LayoutWarnings {
   if (warnings.length <= MAX_LAYOUT_WARNINGS) {
-    return { warnings, total: warnings.length };
+    return { scope: "full", warnings };
   }
   const kept = [...warnings]
     .sort((a, b) => layoutWarningPriority(b) - layoutWarningPriority(a))
     .slice(0, MAX_LAYOUT_WARNINGS);
-  return { warnings: kept, total: warnings.length };
+  return { scope: "truncated", total: warnings.length, warnings: kept };
 }
 
 /** Higher = kept first when capping: `warning` severity outranks `info`, then larger total overflow. */

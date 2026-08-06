@@ -4023,199 +4023,217 @@
           "additionalProperties": false
         },
         "layoutWarnings": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "important-content-under-inset",
-                  "interaction-in-system-gesture-region"
-                ]
-              },
-              "severity": {
-                "type": "string",
-                "enum": [
-                  "warning",
-                  "info"
-                ]
-              },
-              "element": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "enum": [
+                "full",
+                "truncated",
+                "scoped"
+              ]
+            },
+            "total": {
+              "type": "number"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
                 "type": "object",
                 "properties": {
-                  "viewId": {
-                    "type": "string"
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "important-content-under-inset",
+                      "interaction-in-system-gesture-region"
+                    ]
                   },
-                  "resourceId": {
-                    "type": "string"
+                  "severity": {
+                    "type": "string",
+                    "enum": [
+                      "warning",
+                      "info"
+                    ]
                   },
-                  "text": {
-                    "type": "string"
-                  },
-                  "contentDesc": {
-                    "type": "string"
-                  },
-                  "bounds": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "left": {
-                            "type": "number"
-                          },
-                          "top": {
-                            "type": "number"
-                          },
-                          "right": {
-                            "type": "number"
-                          },
-                          "bottom": {
-                            "type": "number"
-                          },
-                          "centerX": {
-                            "type": "number"
-                          },
-                          "centerY": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "left",
-                          "top",
-                          "right",
-                          "bottom"
-                        ],
-                        "additionalProperties": false
+                  "element": {
+                    "type": "object",
+                    "properties": {
+                      "viewId": {
+                        "type": "string"
                       },
-                      {
-                        "type": "array",
-                        "prefixItems": [
+                      "resourceId": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "contentDesc": {
+                        "type": "string"
+                      },
+                      "bounds": {
+                        "anyOf": [
                           {
-                            "type": "number"
+                            "type": "object",
+                            "properties": {
+                              "left": {
+                                "type": "number"
+                              },
+                              "top": {
+                                "type": "number"
+                              },
+                              "right": {
+                                "type": "number"
+                              },
+                              "bottom": {
+                                "type": "number"
+                              },
+                              "centerX": {
+                                "type": "number"
+                              },
+                              "centerY": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "left",
+                              "top",
+                              "right",
+                              "bottom"
+                            ],
+                            "additionalProperties": false
                           },
                           {
-                            "type": "number"
-                          },
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "number"
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ],
+                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
                           }
                         ],
-                        "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object."
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
                       }
+                    },
+                    "required": [
+                      "bounds"
                     ],
-                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid."
+                    "additionalProperties": false
+                  },
+                  "categories": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "interaction"
+                      ]
+                    }
+                  },
+                  "insetTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "systemBars",
+                        "displayCutout",
+                        "safeArea",
+                        "systemGestures",
+                        "mandatorySystemGestures"
+                      ]
+                    }
+                  },
+                  "sides": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ]
+                    }
+                  },
+                  "overflowPx": {
+                    "type": "object",
+                    "properties": {
+                      "top": {
+                        "type": "number"
+                      },
+                      "right": {
+                        "type": "number"
+                      },
+                      "bottom": {
+                        "type": "number"
+                      },
+                      "left": {
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "insetPx": {
+                    "type": "object",
+                    "properties": {
+                      "top": {
+                        "type": "number"
+                      },
+                      "right": {
+                        "type": "number"
+                      },
+                      "bottom": {
+                        "type": "number"
+                      },
+                      "left": {
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "overlapPercent": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "confidence": {
+                    "type": "string",
+                    "enum": [
+                      "high",
+                      "medium"
+                    ]
                   }
                 },
                 "required": [
-                  "bounds"
+                  "type",
+                  "severity",
+                  "element",
+                  "categories",
+                  "insetTypes",
+                  "sides",
+                  "overflowPx",
+                  "insetPx",
+                  "overlapPercent",
+                  "confidence"
                 ],
                 "additionalProperties": false
-              },
-              "categories": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "text",
-                    "interaction"
-                  ]
-                }
-              },
-              "insetTypes": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "systemBars",
-                    "displayCutout",
-                    "safeArea",
-                    "systemGestures",
-                    "mandatorySystemGestures"
-                  ]
-                }
-              },
-              "sides": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "top",
-                    "right",
-                    "bottom",
-                    "left"
-                  ]
-                }
-              },
-              "overflowPx": {
-                "type": "object",
-                "properties": {
-                  "top": {
-                    "type": "number"
-                  },
-                  "right": {
-                    "type": "number"
-                  },
-                  "bottom": {
-                    "type": "number"
-                  },
-                  "left": {
-                    "type": "number"
-                  }
-                },
-                "additionalProperties": false
-              },
-              "insetPx": {
-                "type": "object",
-                "properties": {
-                  "top": {
-                    "type": "number"
-                  },
-                  "right": {
-                    "type": "number"
-                  },
-                  "bottom": {
-                    "type": "number"
-                  },
-                  "left": {
-                    "type": "number"
-                  }
-                },
-                "additionalProperties": false
-              },
-              "overlapPercent": {
-                "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991
-              },
-              "confidence": {
-                "type": "string",
-                "enum": [
-                  "high",
-                  "medium"
-                ]
               }
-            },
-            "required": [
-              "type",
-              "severity",
-              "element",
-              "categories",
-              "insetTypes",
-              "sides",
-              "overflowPx",
-              "insetPx",
-              "overlapPercent",
-              "confidence"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "layoutWarningsTruncated": {
-          "type": "number"
+            }
+          },
+          "required": [
+            "scope",
+            "warnings"
+          ],
+          "additionalProperties": false
         },
         "viewHierarchy": {
           "type": "object",

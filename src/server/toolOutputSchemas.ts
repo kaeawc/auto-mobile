@@ -463,8 +463,11 @@ export const observeResultSchema = z.object({
   screenSize: screenSizeSchema.optional(),
   systemInsets: systemInsetsSchema.optional(),
   insets: observationInsetsSchema.optional(),
-  layoutWarnings: z.array(layoutWarningSchema).optional(),
-  layoutWarningsTruncated: z.number().optional(),
+  layoutWarnings: z.object({
+    scope: z.enum(["full", "truncated", "scoped"]),
+    total: z.number().optional(),
+    warnings: z.array(layoutWarningSchema),
+  }).optional(),
   viewHierarchy: viewHierarchyResultSchema.optional(),
   skeleton: z.array(skeletonElementSchema).optional(),
   activeWindow: activeWindowSchema.optional(),

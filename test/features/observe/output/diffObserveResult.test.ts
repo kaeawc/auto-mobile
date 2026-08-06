@@ -436,8 +436,9 @@ describe("diffObserveResult", () => {
       confidence: "high",
     } as const;
 
-    const diff = diffObserveResult(obs({ ...node }), obs({ ...node }, { layoutWarnings: [warning] }));
-    expect(diff.fields!.layoutWarnings).toEqual({ from: undefined, to: [warning] });
+    const layoutWarnings = { scope: "full", warnings: [warning] } as const;
+    const diff = diffObserveResult(obs({ ...node }), obs({ ...node }, { layoutWarnings }));
+    expect(diff.fields!.layoutWarnings).toEqual({ from: undefined, to: layoutWarnings });
     expect(DIFF_SCALAR_FIELDS).toContain("layoutWarnings");
   });
 
@@ -1403,16 +1404,16 @@ describe("diffObserveResult — volatile occlusion exclusion (#4399)", () => {
   });
 
   test("layout-warning confidence churn caused by occlusion is not reported", () => {
-    const baseline = obs(node(), { layoutWarnings: [warning("high")] });
-    const next = obs(node(), { layoutWarnings: [warning("medium")] });
+    const baseline = obs(node(), { layoutWarnings: { scope: "full", warnings: [warning("high")] } });
+    const next = obs(node(), { layoutWarnings: { scope: "full", warnings: [warning("medium")] } });
 
     expect(diffObserveResult(baseline, next).fields).toBeUndefined();
   });
 
   test("a substantive layout-warning change remains visible", () => {
-    const baseline = obs(node(), { layoutWarnings: [warning("high")] });
+    const baseline = obs(node(), { layoutWarnings: { scope: "full", warnings: [warning("high")] } });
     const next = obs(node(), {
-      layoutWarnings: [{ ...warning("medium"), severity: "info" }],
+      layoutWarnings: { scope: "full", warnings: [{ ...warning("medium"), severity: "info" }] },
     });
 
     expect(diffObserveResult(baseline, next).fields!.layoutWarnings).toBeDefined();
@@ -1564,8 +1565,7 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
     },
     awaitTimeout: { from: false, to: true },
     awaitDuration: { from: undefined, to: 250 },
-    layoutWarnings: { from: undefined, to: [warning] },
-    layoutWarningsTruncated: { from: undefined, to: 150 },
+    layoutWarnings: { from: undefined, to: { scope: "full", warnings: [warning] } },
     error: { from: undefined, to: "capture failed" },
   };
 
@@ -1579,7 +1579,6 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
     "error",
     "intentChooserDetected",
     "layoutWarnings",
-    "layoutWarningsTruncated",
     "notificationPermissionDetected",
     "rotation",
     "userId",

@@ -97,6 +97,25 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "update refuses a count-neutral SWAP (fix one key, add another) without --allow-grow" {
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  # Same aggregate total (3), but src/a.ts complexity is fixed and a NEW
+  # src/c.ts complexity appears. An aggregate-only guard would accept this and
+  # let the subsequent check pass over the new defect.
+  local swap='printf "%s" "{\"diagnostics\":[
+    {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"},
+    {\"code\":\"eslint(complexity)\",\"filename\":\"src/c.ts\"}
+  ]}"'
+  OXLINT_JSON_CMD="$swap" run bash "$SCRIPT" --update
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refusing to grow"* ]]
+  [[ "$output" == *"src/c.ts"* ]]
+
+  OXLINT_JSON_CMD="$swap" run bash "$SCRIPT" --update --allow-grow
+  [ "$status" -eq 0 ]
+}
+
 @test "check fails closed when the baseline is missing" {
   OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
   [ "$status" -eq 1 ]

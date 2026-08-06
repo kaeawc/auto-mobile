@@ -63,7 +63,7 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
     // directly rather than via getStructuredField() — that helper is the #2907
     // production dead-read guard, but here inspecting the pre-strip wire shape is
     // the whole point of the test.
-    // eslint-disable-next-line no-restricted-syntax -- intentional raw-wire assertion
+    // oxlint-disable-next-line auto-mobile/no-structured-content-read -- intentional raw-wire assertion
     expect(res.structuredContent.marker).toBe("probe");
   });
 

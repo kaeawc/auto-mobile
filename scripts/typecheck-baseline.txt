@@ -146,7 +146,6 @@ src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable
 src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
 src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
 src/index.ts: error TS2322: Type 'number | string | undefined' is not assignable to type 'number | undefined'.
-src/index.ts: error TS2578: Unused '@ts-expect-error' directive.
 src/server/appFileService.ts: error TS2345: Argument of type 'PutAppFileRequest' is not assignable to parameter of type 'PutAppFileArgs'.
 src/server/appFileService.ts: error TS2430: Interface 'PutAppFileRequest' incorrectly extends interface 'PutAppFileArgs'.
 src/server/appResources.ts: error TS2345: Argument of type 'string[]' is not assignable to parameter of type 'readonly ("deviceId" | "platform" | "profile" | "search" | "type")[]'.
@@ -186,7 +185,6 @@ src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<
 src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
 src/utils/image/backend/JimpBackend.ts: error TS2322: Type 'JimpInstanceMethods<{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefine...' is not assignable to type '{ bitmap: Bitmap; background: number; formats: Format<any, undefined, undefined>[]; mime?: string | undefined; inspect(): string; toString(): string; readonly width: number; ... 11 more ...; scanIterator(x?: number | undefined, y?: number | undefined, w?: number | undefined, h?: number | undefined): Generator<...>; ...'.
 src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string | undefined>' is not assignable to type 'Promise<void>'.
-# swap-fp: 1 :: src/index.ts: error TS2578: Unused '@ts-expect-error' directive.
 # swap-fp: 10 :: src/server/interactionTools.ts: error TS18048: 'freshness.actualTimestamp' is possibly 'undefined'.
 # swap-fp: 10,13,19,25,66 :: src/db/migrator.ts: error TS7006: Parameter 'row' implicitly has an 'any' type.
 # swap-fp: 11 :: src/daemon/SocketServerRegistry.ts: error TS2345: Argument of type 'Promise<BaseSocketServer | void>' is not assignable to parameter of type 'Promise<void>'.

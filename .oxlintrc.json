@@ -37,14 +37,14 @@
     "require-yield": "error",
     "typescript/no-unused-vars": ["error", { "args": "none", "caughtErrors": "none" }],
     "auto-mobile/no-extension-import": "error",
-    "auto-mobile/naming-convention": "error"
+    "auto-mobile/naming-convention": "error",
+    "auto-mobile/no-raw-timer": "error",
+    "auto-mobile/no-structured-content-read": "error"
   },
   "overrides": [
     {
       "files": ["src/**/*.ts"],
       "rules": {
-        "auto-mobile/no-raw-timer": "error",
-        "auto-mobile/no-structured-content-read": "error",
         "no-restricted-properties": ["error", {
           "object": "Math",
           "property": "random",

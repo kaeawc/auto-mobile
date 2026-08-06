@@ -73,10 +73,11 @@ run_oxlint_json() {
 }
 
 # Reduce the JSON report to sorted "<count>\t<filename>\t<code>" lines, counting
-# only the ratcheted codes. JSON is parsed with a real parser (node), never line
-# regexes -- diagnostic messages contain arbitrary text.
+# only the ratcheted codes. JSON is parsed with a real parser (bun -- the repo's
+# only guaranteed runtime; Node is optional here), never line regexes, since
+# diagnostic messages contain arbitrary text.
 extract_counts() {
-  node -e '
+  bun -e '
     const codes = new Set(process.argv[1].split(" "));
     let raw = "";
     process.stdin.on("data", c => raw += c).on("end", () => {
@@ -95,15 +96,49 @@ extract_counts() {
   ' "$RATCHET_CODES"
 }
 
+# Compare current counts against a baseline PER (file, rule). Emits one
+# "<delta> new in <file>  <code>" line for every key whose current count exceeds
+# the baseline (or that the baseline lacks). Both inputs are the
+# "<count>\t<file>\t<code>" text produced by extract_counts. This is the single
+# source of truth for "did anything get worse" -- used by BOTH the update
+# grow-guard and the check gate, so a count-neutral SWAP (fix one key, add a
+# different one) is rejected, not just an increase in the aggregate total.
+new_or_increased() {
+  bun -e '
+    const parse = s => {
+      const m = new Map();
+      for (const line of s.split("\n")) {
+        if (!line.trim()) { continue; }
+        const [count, file, code] = line.split("\t");
+        m.set(file + "\t" + code, Number(count));
+      }
+      return m;
+    };
+    const base = parse(process.argv[1]);
+    const cur = parse(process.argv[2]);
+    const news = [];
+    for (const [key, n] of cur) {
+      const allowed = base.get(key) || 0;
+      if (n > allowed) { news.push((n - allowed) + " new in " + key.replace("\t", "  ")); }
+    }
+    process.stdout.write(news.join("\n"));
+  ' "$1" "$2"
+}
+
 report_json="$(run_oxlint_json)"
 current="$(printf '%s' "$report_json" | extract_counts)"
 current_total="$(printf '%s' "$current" | awk -F'\t' 'NF{s+=$1} END{print s+0}')"
 
 if [[ "$MODE" == "update" ]]; then
   if [[ -f "$BASELINE" && "$ALLOW_GROW" != "true" ]]; then
-    prev_total="$(grep -vE '^#|^$' "$BASELINE" | awk -F'\t' 'NF{s+=$1} END{print s+0}')"
-    if [[ "$current_total" -gt "$prev_total" ]]; then
-      echo "refusing to grow the baseline: $prev_total -> $current_total violation(s)." >&2
+    # Refuse to grow ANY (file, rule) key, not just the aggregate total -- else a
+    # count-neutral swap (fix one key, add a different one) would rewrite the
+    # baseline and the subsequent check would then accept the new defect.
+    prev_counts="$(grep -vE '^#|^$' "$BASELINE" || true)"
+    grew="$(new_or_increased "$prev_counts" "$current")"
+    if [[ -n "$grew" ]]; then
+      echo "refusing to grow the baseline: a (file, rule) count increased or a new pair appeared:" >&2
+      printf '%s\n' "$grew" >&2
       echo "The oxlint ratchet is a one-way ratchet. If this growth is truly" >&2
       echo "intended, re-run with:  bun run lint:prune -- --allow-grow" >&2
       exit 1
@@ -128,27 +163,7 @@ fi
 # The baseline is authoritative for what is tolerated; a lower current count is
 # fine (and should be pruned with --update).
 baseline_counts="$(grep -vE '^#|^$' "$BASELINE" || true)"
-new_violations="$(
-  node -e '
-    const parse = s => {
-      const m = new Map();
-      for (const line of s.split("\n")) {
-        if (!line.trim()) { continue; }
-        const [count, file, code] = line.split("\t");
-        m.set(file + "\t" + code, Number(count));
-      }
-      return m;
-    };
-    const base = parse(process.argv[1]);
-    const cur = parse(process.argv[2]);
-    const news = [];
-    for (const [key, n] of cur) {
-      const allowed = base.get(key) || 0;
-      if (n > allowed) { news.push((n - allowed) + " new in " + key.replace("\t", "  ")); }
-    }
-    process.stdout.write(news.join("\n"));
-  ' "$baseline_counts" "$current"
-)"
+new_violations="$(new_or_increased "$baseline_counts" "$current")"
 
 if [[ -n "$new_violations" ]]; then
   echo "oxlint ratchet: NEW violation(s) of a gated rule -- fix them or (rarely) record with --update:" >&2

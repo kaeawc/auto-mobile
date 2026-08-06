@@ -2,8 +2,9 @@
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { load } from "js-yaml";
 
-const root = process.cwd();
+const root = join(import.meta.dir, "..");
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   packageManager?: string;
   engines?: { bun?: string };
@@ -23,12 +24,51 @@ const workflowPaths = [
     .map((name) => join(root, ".github", "workflows", name)),
 ];
 
-const workflowPinPattern = /^\s*bun-version:\s*(\S+)\s*$/gm;
+interface WorkflowNode {
+  uses?: unknown;
+  with?: {
+    "bun-version"?: unknown;
+  };
+  [key: string]: unknown;
+}
+
+function findBunSetupSteps(value: unknown): WorkflowNode[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(findBunSetupSteps);
+  }
+  if (value === null || typeof value !== "object") {
+    return [];
+  }
+
+  const node = value as WorkflowNode;
+  const steps = typeof node.uses === "string" && node.uses.startsWith("oven-sh/setup-bun@") ? [node] : [];
+  return steps.concat(Object.values(node).flatMap(findBunSetupSteps));
+}
+
+function lineForBunSetup(content: string, occurrence: number): number {
+  const lines = content.split("\n");
+  let seen = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/^\s*uses:\s*["']?oven-sh\/setup-bun@/.test(lines[index])) {
+      if (seen === occurrence) {
+        return index + 1;
+      }
+      seen += 1;
+    }
+  }
+  return 1;
+}
+
 const mismatches = workflowPaths.flatMap((path) => {
   const content = readFileSync(path, "utf8");
-  return [...content.matchAll(workflowPinPattern)]
-    .filter((match) => match[1] !== packageManagerVersion)
-    .map((match) => `${path}:${content.slice(0, match.index).split("\n").length}: ${match[1]}`);
+  const document = load(content);
+  return findBunSetupSteps(document).flatMap((step, index) => {
+    const version = step.with?.["bun-version"];
+    const normalizedVersion = version === undefined || version === null ? "<missing>" : String(version);
+    return normalizedVersion === packageManagerVersion
+      ? []
+      : `${path}:${lineForBunSetup(content, index)}: ${normalizedVersion}`;
+  });
 });
 
 const dockerfile = readFileSync(join(root, "Dockerfile"), "utf8");

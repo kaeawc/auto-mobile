@@ -33,3 +33,10 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"DONE"* ]]
 }
+
+@test "fast validation lists the Bun version coherence check" {
+  run "$ABS_SCRIPT" --list
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bun-version-coherence"* ]]
+}

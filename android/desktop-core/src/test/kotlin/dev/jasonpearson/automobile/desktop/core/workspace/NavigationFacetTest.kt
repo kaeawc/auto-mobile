@@ -20,7 +20,10 @@ import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
+import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoaderRegistry
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
+import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import java.util.concurrent.atomic.AtomicInteger
@@ -29,6 +32,9 @@ import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.SharedFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -891,5 +897,101 @@ class NavigationFacetTest {
     assertTrue(streams.getValue("dev-1").disconnectCallCount >= 1)
     assertEquals(1, streams.getValue("dev-2").connectCallCount)
     assertEquals("dev-2", streams.getValue("dev-2").lastConnectedDeviceId)
+  }
+
+  @Test
+  fun `reuses the same screenshot loader across facet open-close toggles`() = runComposeUiTest {
+    // A registry held above the facet's composition; the facet must resolve its loader from it each
+    // mount so the LRU cache survives the facet leaving and re-entering composition.
+    val registry = NavigationScreenshotLoaderRegistry()
+    val used = mutableListOf<ScreenshotLoader>()
+    val visible = mutableStateOf(true)
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+        MaterialTheme {
+          if (visible.value) {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { FakeObservationStream() },
+              screenshotLoaderProvider = { deviceId ->
+                registry.forDevice(deviceId) { FakeAutoMobileClient() }.also { used += it }
+              },
+            )
+          }
+        }
+      }
+    }
+    waitForIdle()
+    // Toggle the facet out of composition (tool switched off) and back on.
+    runOnIdle { visible.value = false }
+    waitForIdle()
+    runOnIdle { visible.value = true }
+    waitForIdle()
+
+    assertEquals(
+      "the facet must resolve its loader from the hoisted provider on each mount",
+      2,
+      used.size,
+    )
+    assertSame("the loader (and its LRU cache) must survive the toggle", used[0], used[1])
+  }
+
+  @Test
+  fun `default provider resolves through the session registry so real users get a surviving cache`() =
+    runComposeUiTest {
+      // Exercises the PRODUCTION default (no injected provider). A unique deviceId keeps the
+      // process-lifetime registry from colliding with other tests. Guards against a regression that
+      // reverts the default to a fresh-per-mount loader (which every provider-injecting test
+      // misses).
+      val deviceId = "default-wiring-probe-dev-4832"
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(deviceId),
+              observationStreamFactory = { FakeObservationStream() },
+            )
+          }
+        }
+      }
+      waitForIdle()
+      assertNotNull(
+        "the default provider must populate the session registry",
+        DefaultNavigationScreenshotLoaderRegistry.peek(deviceId),
+      )
+    }
+
+  @Test
+  fun `swapping the injected loader provider re-resolves the loader`() = runComposeUiTest {
+    // Two registries hand out distinct loaders for the same device, so a provider swap must be
+    // observable. Guards that the loader `remember` keys on the provider, not just the deviceId.
+    val fromReg1 = NavigationScreenshotLoaderRegistry()
+    val fromReg2 = NavigationScreenshotLoaderRegistry()
+    val used = mutableListOf<ScreenshotLoader>()
+    val provider =
+      mutableStateOf<(String) -> ScreenshotLoader>({ id ->
+        fromReg1.forDevice(id) { FakeAutoMobileClient() }.also { used += it }
+      })
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+        MaterialTheme {
+          NavigationFacet(
+            column = column(),
+            observationStreamFactory = { FakeObservationStream() },
+            screenshotLoaderProvider = provider.value,
+          )
+        }
+      }
+    }
+    waitForIdle()
+    runOnIdle {
+      provider.value = { id ->
+        fromReg2.forDevice(id) { FakeAutoMobileClient() }.also { used += it }
+      }
+    }
+    waitForIdle()
+
+    assertEquals("a provider swap must re-resolve the loader", 2, used.size)
+    assertNotSame("the loader must come from the new provider after a swap", used[0], used[1])
   }
 }

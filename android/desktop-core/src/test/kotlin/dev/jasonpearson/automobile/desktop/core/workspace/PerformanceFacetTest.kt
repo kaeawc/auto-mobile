@@ -7,6 +7,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFactory
@@ -14,6 +15,7 @@ import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -105,6 +107,35 @@ class PerformanceFacetTest {
     assertEquals("dev-2", fake.lastConnectedDeviceId)
     assertEquals(2, fake.connectCallCount)
     assertTrue(fake.disconnectCallCount >= 1)
+  }
+
+  @Test
+  fun `reconnects the pane stream after a mid-session drop`() = runComposeUiTest {
+    val fake = FakeObservationStream()
+    // A gate the test releases to let the single reconnect attempt proceed with zero wall time.
+    val backoff = CompletableDeferred<Unit>()
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides fakeGraph()) {
+        MaterialTheme {
+          PerformanceFacet(
+            column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+            observationStreamFactory = { fake },
+            backoffDelay = { backoff.await() },
+            socketAvailable = { true },
+          )
+        }
+      }
+    }
+    waitForIdle()
+    assertEquals(1, fake.connectCallCount)
+
+    // A daemon restart / EOF surfaces as a Disconnected state; the facet must reconnect instead of
+    // staying blank (Performance had no recovery path before).
+    runOnIdle { fake.emitConnectionState(ConnectionState.Disconnected("Stream ended")) }
+    waitForIdle()
+    runOnIdle { backoff.complete(Unit) }
+    waitForIdle()
+    assertEquals("expected the perf facet to reconnect after a drop", 2, fake.connectCallCount)
   }
 
   @Test

@@ -1,16 +1,12 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboard
+import kotlinx.coroutines.delay
 
 /**
  * Docked-facet body for [Tool.Performance]: the performance dashboard scoped to a single pane's
@@ -22,7 +18,10 @@ import dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboard
  *
  * [observationStreamFactory] is injected (defaulting to a real per-device
  * [ObservationStreamClient]) so the per-device connect/dispose lifecycle can be verified with a
- * [FakeObservationStream] instead of real socket I/O.
+ * [FakeObservationStream] instead of real socket I/O. The stream reconnects automatically if it
+ * drops while the facet is open (see [rememberReconnectingObservationStream]); [backoffDelay] and
+ * [socketAvailable] are the injected timer/daemon-availability seams that let that recovery be
+ * tested with virtual time.
  *
  * Note: only the LIVE metrics here are per-device (the stream carries a deviceId). The dashboard's
  * audit-history fallback still reads via the DI graph's active-device client — device-scoping that
@@ -33,18 +32,17 @@ import dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboard
 fun PerformanceFacet(
   column: DeviceColumn,
   observationStreamFactory: (String) -> ObservationStream = { ObservationStreamClient() },
+  backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
+  socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
 ) {
   val graph = LocalAutoMobileGraph.current
-  var stream by remember(column.deviceId) { mutableStateOf<ObservationStream?>(null) }
-  DisposableEffect(column.deviceId) {
-    val connected =
-      observationStreamFactory(column.deviceId).also { it.connect(deviceId = column.deviceId) }
-    stream = connected
-    onDispose {
-      connected.dispose()
-      stream = null
-    }
-  }
+  val stream =
+    rememberReconnectingObservationStream(
+      deviceId = column.deviceId,
+      streamFactory = { observationStreamFactory(column.deviceId) },
+      backoffDelay = backoffDelay,
+      socketAvailable = socketAvailable,
+    )
   PerformanceDashboard(
     dataSourceMode = DataSourceMode.Real,
     clientProvider = { graph.autoMobileClient },

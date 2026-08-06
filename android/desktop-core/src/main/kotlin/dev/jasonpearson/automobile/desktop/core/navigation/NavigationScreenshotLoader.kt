@@ -66,6 +66,34 @@ class FakeScreenshotLoader : ScreenshotLoader {
 }
 
 /**
+ * Session-scoped registry of per-device [NavigationScreenshotLoader]s, held above any facet's
+ * composition so a loader's LRU cache survives the facet leaving and re-entering composition (its
+ * tool toggled off/on, or Inspect/Input mode swapping the facet out). A body-scoped `remember`
+ * would drop the cache on every toggle. Keyed by deviceId so panes for different devices stay
+ * isolated.
+ */
+class NavigationScreenshotLoaderRegistry {
+  private val byDevice = ConcurrentHashMap<String, NavigationScreenshotLoader>()
+
+  /** The loader for [deviceId], created once (with [clientProvider]) and reused thereafter. */
+  fun forDevice(
+    deviceId: String,
+    clientProvider: () -> AutoMobileClient,
+  ): NavigationScreenshotLoader =
+    byDevice.getOrPut(deviceId) { NavigationScreenshotLoader(clientProvider = clientProvider) }
+
+  /** The loader already created for [deviceId], or null if none — lets a test assert wiring. */
+  internal fun peek(deviceId: String): NavigationScreenshotLoader? = byDevice[deviceId]
+}
+
+/**
+ * Process-lifetime default registry backing [NavigationScreenshotLoader] resolution when a facet is
+ * not given an explicit provider, so the per-device cache persists for the app session across facet
+ * toggles. Tests inject their own registry/provider instead of touching this.
+ */
+internal val DefaultNavigationScreenshotLoaderRegistry = NavigationScreenshotLoaderRegistry()
+
+/**
  * Loads and caches screenshot thumbnails for navigation graph nodes. Uses an in-memory LRU cache to
  * avoid repeated MCP requests.
  */

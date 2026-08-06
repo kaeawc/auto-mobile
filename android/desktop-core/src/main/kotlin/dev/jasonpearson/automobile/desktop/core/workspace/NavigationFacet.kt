@@ -29,8 +29,9 @@ import dev.jasonpearson.automobile.desktop.core.datasource.RealNavigationDataSou
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
-import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoader
+import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -108,6 +109,10 @@ fun NavigationFacet(
   // deterministically (e.g. awaiting a CompletableDeferred) with zero wall time instead of a real
   // 10s delay under a real-clock test dispatcher. Production uses the real delay.
   resolveTimeout: suspend () -> Unit = { delay(RESOLVE_TIMEOUT_MS) },
+  // Resolves the per-device screenshot loader from a scope that outlives this facet's composition,
+  // so its LRU cache survives facet open/close toggles. Injectable for tests; defaults to a
+  // session-scoped registry.
+  screenshotLoaderProvider: ((String) -> ScreenshotLoader)? = null,
 ) {
   val graph = LocalAutoMobileGraph.current
 
@@ -316,9 +321,21 @@ fun NavigationFacet(
   }
 
   val clientProvider = remember { { graph.autoMobileClient } }
-  // Remembered per device so its LRU cache survives facet toggles.
+  // Resolve the loader from a scope that outlives this facet's composition (a session-scoped
+  // registry by default) so its LRU cache survives facet open/close toggles — a body-scoped
+  // `remember` here would drop the cache every time the facet leaves composition. The default
+  // provider is itself remembered so its identity is stable across recompositions, letting the
+  // loader `remember` key on it (re-resolving only on an actual provider swap or device change)
+  // without re-invoking it on every recomposition.
+  val loaderProvider =
+    screenshotLoaderProvider
+      ?: remember(clientProvider) {
+        { deviceId: String ->
+          DefaultNavigationScreenshotLoaderRegistry.forDevice(deviceId, clientProvider)
+        }
+      }
   val screenshotLoader =
-    remember(column.deviceId) { NavigationScreenshotLoader(clientProvider = clientProvider) }
+    remember(column.deviceId, loaderProvider) { loaderProvider(column.deviceId) }
 
   when (val current = state) {
     NavigationFacetState.Loading -> NavigationFacetNote("Resolving navigation graph…")

@@ -74,7 +74,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$WhenMappings {
   public static final int[] $EnumSwitchMapping$0;
 }
 Compiled from "AutoMobileSDK.kt"
-public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$initialize$3$observer$1 implements androidx.lifecycle.DefaultLifecycleObserver {
+public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$initialize$5$observer$1 implements androidx.lifecycle.DefaultLifecycleObserver {
   public void onStart(androidx.lifecycle.LifecycleOwner);
   public void onStop(androidx.lifecycle.LifecycleOwner);
   public void onCreate(androidx.lifecycle.LifecycleOwner);
@@ -104,6 +104,11 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK {
   public final void clearNavigationListeners();
   public final void notifyNavigationEvent(dev.jasonpearson.automobile.sdk.NavigationEvent);
   public final void setEnabled(boolean);
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument getCapabilities();
+  public final void registerCapability(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor);
+  public final boolean isCapabilitySupported$auto_mobile_sdk(java.lang.String);
+  public final void unregisterCapability(java.lang.String);
+  public final void updateCapturePolicy(dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy);
   public final boolean isTrackingEnabled();
   public final int getListenerCount();
   public final java.lang.String currentSessionId();
@@ -173,22 +178,23 @@ public interface dev.jasonpearson.automobile.sdk.NavigationListener {
   public abstract void onNavigationEvent(dev.jasonpearson.automobile.sdk.NavigationEvent);
 }
 Compiled from "NavigationEvent.kt"
+public final class dev.jasonpearson.automobile.sdk.NavigationSource$Companion {
+  public final dev.jasonpearson.automobile.sdk.NavigationSource fromWireValue(java.lang.String);
+  public dev.jasonpearson.automobile.sdk.NavigationSource$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "NavigationEvent.kt"
 public final class dev.jasonpearson.automobile.sdk.NavigationSource extends java.lang.Enum<dev.jasonpearson.automobile.sdk.NavigationSource> {
+  public static final dev.jasonpearson.automobile.sdk.NavigationSource$Companion Companion;
   public static final dev.jasonpearson.automobile.sdk.NavigationSource NAVIGATION_COMPONENT;
   public static final dev.jasonpearson.automobile.sdk.NavigationSource COMPOSE_NAVIGATION;
   public static final dev.jasonpearson.automobile.sdk.NavigationSource CIRCUIT;
   public static final dev.jasonpearson.automobile.sdk.NavigationSource CUSTOM;
   public static final dev.jasonpearson.automobile.sdk.NavigationSource DEEP_LINK;
   public static final dev.jasonpearson.automobile.sdk.NavigationSource ACTIVITY;
-  public static final dev.jasonpearson.automobile.sdk.NavigationSource$Companion Companion;
   public final java.lang.String getWireValue();
   public static dev.jasonpearson.automobile.sdk.NavigationSource[] values();
   public static dev.jasonpearson.automobile.sdk.NavigationSource valueOf(java.lang.String);
   public static kotlin.enums.EnumEntries<dev.jasonpearson.automobile.sdk.NavigationSource> getEntries();
-}
-Compiled from "NavigationEvent.kt"
-public final class dev.jasonpearson.automobile.sdk.NavigationSource$Companion {
-  public final dev.jasonpearson.automobile.sdk.NavigationSource fromWireValue(java.lang.String);
 }
 Compiled from "AutoMobileNotifications.kt"
 public final class dev.jasonpearson.automobile.sdk.NotificationAction {
@@ -232,9 +238,11 @@ Compiled from "RecompositionTracker.kt"
 final class dev.jasonpearson.automobile.sdk.RecompositionTracker$Entry {
   public dev.jasonpearson.automobile.sdk.RecompositionTracker$Entry(java.lang.String);
   public final java.lang.String getId();
+  public final long getLastTouch();
+  public final void setLastTouch(long);
   public final synchronized void record(java.lang.String, java.lang.String, java.lang.String, java.util.List<java.lang.String>, java.lang.Boolean, java.lang.Integer, java.lang.String);
   public final synchronized void recordDuration(double);
-  public final org.json.JSONObject toJson();
+  public final synchronized org.json.JSONObject toJson();
 }
 Compiled from "RecompositionTracker.kt"
 final class dev.jasonpearson.automobile.sdk.RecompositionTracker$RollingAverage {
@@ -261,9 +269,11 @@ public final class dev.jasonpearson.automobile.sdk.RecompositionTracker {
   public final void recordDuration(java.lang.String, double);
   public final boolean isEnabled$auto_mobile_sdk();
   public final void setEnabled$auto_mobile_sdk(boolean);
+  public final java.lang.String buildSnapshotJson$auto_mobile_sdk(java.lang.String);
   public static final java.util.concurrent.atomic.AtomicBoolean access$getEnabled$p();
   public static final void access$broadcastSnapshot(dev.jasonpearson.automobile.sdk.RecompositionTracker);
   public static final android.os.Handler access$getHandler$p();
+  public static final java.util.concurrent.atomic.AtomicLong access$getTouchSequence$p();
 }
 Compiled from "SdkConstants.kt"
 public final class dev.jasonpearson.automobile.sdk.SdkConstants {
@@ -271,6 +281,17 @@ public final class dev.jasonpearson.automobile.sdk.SdkConstants {
   public static final java.lang.String CTRL_PROXY_PACKAGE;
   public static final java.lang.String PERMISSION_NETWORK_CONTROL;
   public static final int $stable;
+}
+Compiled from "CircuitAdapter.kt"
+final class dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter$CircuitNavigationEventListener implements com.slack.circuitx.navigation.intercepting.NavigationEventListener {
+  public dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter$CircuitNavigationEventListener(androidx.compose.runtime.State<? extends kotlin.jvm.functions.Function1<? super com.slack.circuit.runtime.screen.Screen, ? extends java.util.Map<java.lang.String, ? extends java.lang.Object>>>, androidx.compose.runtime.State<? extends kotlin.jvm.functions.Function1<? super com.slack.circuit.runtime.screen.Screen, ? extends java.util.Map<java.lang.String, java.lang.String>>>);
+  public void onNavStackChanged(com.slack.circuit.runtime.navigation.NavStackList<com.slack.circuit.runtime.screen.Screen>, com.slack.circuitx.navigation.intercepting.NavigationContext);
+  public void onBackStackChanged(java.util.List<? extends com.slack.circuit.runtime.screen.Screen>, com.slack.circuitx.navigation.intercepting.NavigationContext);
+  public void goTo(com.slack.circuit.runtime.screen.Screen, com.slack.circuitx.navigation.intercepting.NavigationContext);
+  public void pop(com.slack.circuit.runtime.screen.PopResult, com.slack.circuitx.navigation.intercepting.NavigationContext);
+  public void forward(com.slack.circuitx.navigation.intercepting.NavigationContext);
+  public void backward(com.slack.circuitx.navigation.intercepting.NavigationContext);
+  public void resetRoot(com.slack.circuit.runtime.screen.Screen, com.slack.circuit.runtime.Navigator$StateOptions, com.slack.circuitx.navigation.intercepting.NavigationContext);
 }
 Compiled from "CircuitAdapter.kt"
 public final class dev.jasonpearson.automobile.sdk.adapters.CircuitAdapter implements dev.jasonpearson.automobile.sdk.adapters.NavigationFrameworkAdapter {
@@ -350,6 +371,7 @@ public final class dev.jasonpearson.automobile.sdk.biometrics.AutoMobileBiometri
   public final boolean getHasOverride();
   public final void clearOverride();
   public final dev.jasonpearson.automobile.sdk.biometrics.BiometricResult consumeOverride();
+  public final synchronized void shutdown();
   public final void handleBroadcastIntent$auto_mobile_sdk(android.content.Intent);
 }
 Compiled from "BiometricResult.kt"
@@ -433,6 +455,132 @@ public final class dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbTrail i
   public java.util.List<dev.jasonpearson.automobile.sdk.breadcrumbs.Breadcrumb> snapshot();
   public void clear();
   public dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbTrail();
+}
+Compiled from "SdkCapabilities.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor$Companion {
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor> serializer();
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "SdkCapabilities.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor {
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor$Companion Companion;
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor(java.lang.String, dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState, java.lang.String);
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor(java.lang.String, dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.String getId();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState getState();
+  public final java.lang.String getReason();
+  public final java.lang.String component1();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState component2();
+  public final java.lang.String component3();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor copy(java.lang.String, dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState, java.lang.String);
+  public static dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor copy$default(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor, java.lang.String, dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState, java.lang.String, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+  public static final void write$Self$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor, kotlinx.serialization.encoding.CompositeEncoder, kotlinx.serialization.descriptors.SerialDescriptor);
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor(int, java.lang.String, dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState, java.lang.String, kotlinx.serialization.internal.SerializationConstructorMarker);
+  public static final kotlin.Lazy[] access$get$childSerializers$cp();
+}
+Compiled from "SdkCapabilities.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument$Companion {
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument> serializer();
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "SdkCapabilities.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument {
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument$Companion Companion;
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument(int, java.util.List<dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor>, dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy);
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument(int, java.util.List, dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final int getSchemaVersion();
+  public static void getSchemaVersion$annotations();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor> getCapabilities();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy getPolicy();
+  public final int component1();
+  public final java.util.List<dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor> component2();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy component3();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument copy(int, java.util.List<dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor>, dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy);
+  public static dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument copy$default(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument, int, java.util.List, dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+  public static final void write$Self$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument, kotlinx.serialization.encoding.CompositeEncoder, kotlinx.serialization.descriptors.SerialDescriptor);
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument(int, int, java.util.List, dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy, kotlinx.serialization.internal.SerializationConstructorMarker);
+  public static final kotlin.Lazy[] access$get$childSerializers$cp();
+}
+Compiled from "SdkCapabilities.kt"
+final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityRegistry$Companion {
+  public final java.util.Set<java.lang.String> getHostManagedCapabilities();
+  public final java.util.LinkedHashMap<java.lang.String, dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor> getDefaultDescriptors();
+  public final java.util.Set<java.lang.String> getReservedCapabilities();
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityRegistry$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "SdkCapabilities.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityRegistry {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityRegistry();
+  public final void markInitialized();
+  public final void markLifecycleReady();
+  public final void markShutdown();
+  public final void setEnabled(boolean);
+  public final void register(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor);
+  public final void unregister(java.lang.String);
+  public final void updatePolicy(dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy);
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument snapshot();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy currentPolicy();
+  public final boolean isCapabilitySupported(java.lang.String);
+  public static final java.util.Set access$getHostManagedCapabilities$cp();
+  public static final java.util.LinkedHashMap access$getDefaultDescriptors$cp();
+  public static final java.util.Set access$getReservedCapabilities$cp();
+}
+Compiled from "SdkCapabilities.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState$Companion {
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState> serializer();
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "SdkCapabilities.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState extends java.lang.Enum<dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState> {
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState$Companion Companion;
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState SUPPORTED;
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState DISABLED;
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState UNSUPPORTED;
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState PERMISSION_DENIED;
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState NOT_INITIALIZED;
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState UNKNOWN;
+  public static dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState[] values();
+  public static dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState> getEntries();
+  public static final kotlin.Lazy access$get$cachedSerializer$delegate$cp();
+}
+Compiled from "SdkCapabilities.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy$Companion {
+  public final kotlinx.serialization.KSerializer<dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy> serializer();
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "SdkCapabilities.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy {
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy$Companion Companion;
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy(boolean, boolean, boolean);
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy(boolean, boolean, boolean, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final boolean getCaptureHeaders();
+  public static void getCaptureHeaders$annotations();
+  public final boolean getCaptureBodies();
+  public static void getCaptureBodies$annotations();
+  public final boolean getAllowMutations();
+  public static void getAllowMutations$annotations();
+  public final boolean component1();
+  public final boolean component2();
+  public final boolean component3();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy copy(boolean, boolean, boolean);
+  public static dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy copy$default(dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy, boolean, boolean, boolean, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+  public static final void write$Self$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy, kotlinx.serialization.encoding.CompositeEncoder, kotlinx.serialization.descriptors.SerialDescriptor);
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy(int, boolean, boolean, boolean, kotlinx.serialization.internal.SerializationConstructorMarker);
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy();
 }
 Compiled from "SdkContext.kt"
 public final class dev.jasonpearson.automobile.sdk.context.SdkContext {
@@ -549,6 +697,11 @@ public final class dev.jasonpearson.automobile.sdk.database.DatabaseError$Invali
   public dev.jasonpearson.automobile.sdk.database.DatabaseError$InvalidPath(java.lang.String);
 }
 Compiled from "DatabaseError.kt"
+public final class dev.jasonpearson.automobile.sdk.database.DatabaseError$MutationNotAllowed extends dev.jasonpearson.automobile.sdk.database.DatabaseError {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.database.DatabaseError$MutationNotAllowed();
+}
+Compiled from "DatabaseError.kt"
 public final class dev.jasonpearson.automobile.sdk.database.DatabaseError$NotFound extends dev.jasonpearson.automobile.sdk.database.DatabaseError {
   public static final int $stable;
   public dev.jasonpearson.automobile.sdk.database.DatabaseError$NotFound(java.lang.String);
@@ -624,6 +777,7 @@ public final class dev.jasonpearson.automobile.sdk.database.SQLiteDatabaseDriver
   public dev.jasonpearson.automobile.sdk.database.TableDataResult getTableData(java.lang.String, java.lang.String, int, int);
   public dev.jasonpearson.automobile.sdk.database.TableStructureResult getTableStructure(java.lang.String, java.lang.String);
   public dev.jasonpearson.automobile.sdk.database.SQLExecutionResult executeSQL(java.lang.String, java.lang.String);
+  public final boolean isMutationQuery$auto_mobile_sdk(java.lang.String);
   public final void closeAll();
 }
 Compiled from "DatabaseDriver.kt"
@@ -878,6 +1032,10 @@ public final class dev.jasonpearson.automobile.sdk.logging.AutoMobileLog {
   public static final dev.jasonpearson.automobile.sdk.logging.AutoMobileLog INSTANCE;
   public static final int $stable;
   public final void initialize$auto_mobile_sdk();
+  public final void addFilter(java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int);
+  public static void addFilter$default(dev.jasonpearson.automobile.sdk.logging.AutoMobileLog, java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int, int, java.lang.Object);
+  public final void removeFilter(java.lang.String);
+  public final void clearFilters();
   public final int v(java.lang.String, java.lang.String);
   public final int v(java.lang.String, java.lang.String, java.lang.Throwable);
   public final int d(java.lang.String, java.lang.String);
@@ -890,6 +1048,26 @@ public final class dev.jasonpearson.automobile.sdk.logging.AutoMobileLog {
   public final int e(java.lang.String, java.lang.String, java.lang.Throwable);
   public final int wtf(java.lang.String, java.lang.String);
   public final int wtf(java.lang.String, java.lang.String, java.lang.Throwable);
+}
+Compiled from "CompiledLogFilter.kt"
+public final class dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter(java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int);
+  public dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter(java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.String getName();
+  public final kotlin.text.Regex getTagPattern();
+  public final kotlin.text.Regex getMessagePattern();
+  public final int getMinLevel();
+  public final boolean matches(java.lang.String, java.lang.String, int);
+  public final java.lang.String component1();
+  public final kotlin.text.Regex component2();
+  public final kotlin.text.Regex component3();
+  public final int component4();
+  public final dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter copy(java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int);
+  public static dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter copy$default(dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter, java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
 }
 Compiled from "SdkLogger.kt"
 public final class dev.jasonpearson.automobile.sdk.logging.DefaultSdkLogger implements dev.jasonpearson.automobile.sdk.logging.SdkLogger {
@@ -929,9 +1107,14 @@ public final class dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork {
   public static final int $stable;
   public final void initialize$auto_mobile_sdk(java.lang.String, dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher);
   public static void initialize$auto_mobile_sdk$default(dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork, java.lang.String, dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher, int, java.lang.Object);
+  public final void setCapturePolicyProvider$auto_mobile_sdk(kotlin.jvm.functions.Function0<dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy>);
+  public final void setNetworkControlProvider$auto_mobile_sdk(kotlin.jvm.functions.Function0<java.lang.Boolean>);
   public final okhttp3.Interceptor interceptor(boolean, boolean);
   public static okhttp3.Interceptor interceptor$default(dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork, boolean, boolean, int, java.lang.Object);
+  public final void recordRequest(dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord, boolean, boolean);
+  public static void recordRequest$default(dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork, dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord, boolean, boolean, int, java.lang.Object);
   public final okhttp3.WebSocketListener wrapWebSocketListener(okhttp3.WebSocketListener, java.lang.String);
+  public final void reset$auto_mobile_sdk();
 }
 Compiled from "AutoMobileNetworkInterceptor.kt"
 public final class dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInterceptor$Companion {
@@ -943,8 +1126,8 @@ public final class dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInte
   public static final dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInterceptor$Companion Companion;
   public static final int $stable;
   public static final long MAX_BODY_BYTES;
-  public dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInterceptor(dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, java.lang.String, boolean, boolean, long, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher);
-  public dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInterceptor(dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, java.lang.String, boolean, boolean, long, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInterceptor(dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, java.lang.String, boolean, boolean, long, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher, kotlin.jvm.functions.Function0<dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy>, kotlin.jvm.functions.Function0<java.lang.Boolean>);
+  public dev.jasonpearson.automobile.sdk.network.AutoMobileNetworkInterceptor(dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, java.lang.String, boolean, boolean, long, dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public okhttp3.Response intercept(okhttp3.Interceptor$Chain);
   public static final java.util.Set access$getTEXT_CONTENT_TYPES$cp();
 }
@@ -964,6 +1147,7 @@ Compiled from "NetworkMockRuleStore.kt"
 public final class dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$Companion {
   public final dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore getInstance();
   public final void initialize(android.content.Context);
+  public final void shutdown(android.content.Context);
   public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
 }
 Compiled from "NetworkMockRuleStore.kt"
@@ -1068,12 +1252,51 @@ public final class dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore 
   public final dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig getActiveErrorSimulation();
   public final void clear();
   public final int getRuleCount();
-  public final void registerReceiver(android.content.Context);
-  public final void unregisterReceiver(android.content.Context);
+  public final synchronized void registerReceiver(android.content.Context);
+  public final synchronized void unregisterReceiver(android.content.Context);
   public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore();
   public static final dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore access$getInstance$cp();
   public static final void access$setInstance$cp(dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore);
   public static final kotlinx.serialization.json.Json access$getJson$p(dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore);
+}
+Compiled from "AutoMobileNetwork.kt"
+public final class dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord(java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, long, int, java.util.Map<java.lang.String, java.lang.String>, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String);
+  public dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord(java.lang.String, java.lang.String, java.util.Map, long, int, java.util.Map, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.String getUrl();
+  public final java.lang.String getMethod();
+  public final java.util.Map<java.lang.String, java.lang.String> getRequestHeaders();
+  public final long getRequestBodySize();
+  public final int getStatusCode();
+  public final java.util.Map<java.lang.String, java.lang.String> getResponseHeaders();
+  public final long getResponseBodySize();
+  public final long getDurationMs();
+  public final java.lang.String getError();
+  public final java.lang.String getHost();
+  public final java.lang.String getPath();
+  public final java.lang.String getRequestBody();
+  public final java.lang.String getResponseBody();
+  public final java.lang.String getContentType();
+  public final java.lang.String component1();
+  public final java.lang.String component2();
+  public final java.util.Map<java.lang.String, java.lang.String> component3();
+  public final long component4();
+  public final int component5();
+  public final java.util.Map<java.lang.String, java.lang.String> component6();
+  public final long component7();
+  public final long component8();
+  public final java.lang.String component9();
+  public final java.lang.String component10();
+  public final java.lang.String component11();
+  public final java.lang.String component12();
+  public final java.lang.String component13();
+  public final java.lang.String component14();
+  public final dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord copy(java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, long, int, java.util.Map<java.lang.String, java.lang.String>, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String);
+  public static dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord copy$default(dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord, java.lang.String, java.lang.String, java.util.Map, long, int, java.util.Map, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
 }
 Compiled from "NoOpDropCounter.kt"
 public final class dev.jasonpearson.automobile.sdk.noop.NoOpDropCounter implements dev.jasonpearson.automobile.sdk.events.DropCounter {
@@ -1113,6 +1336,7 @@ public final class dev.jasonpearson.automobile.sdk.os.AutoMobileBroadcastInterce
   public static final dev.jasonpearson.automobile.sdk.os.AutoMobileBroadcastInterceptor INSTANCE;
   public static final int $stable;
   public final void initialize$auto_mobile_sdk(android.content.Context, dev.jasonpearson.automobile.sdk.events.SdkEventBuffer);
+  public final java.util.List<android.content.IntentFilter> buildFilters$auto_mobile_sdk();
   public final void shutdown(android.content.Context);
   public static final java.lang.String access$getApplicationId$p();
 }
@@ -1365,6 +1589,11 @@ Compiled from "SharedPreferencesError.kt"
 public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$InvalidType extends dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError {
   public static final int $stable;
   public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$InvalidType(java.lang.String, java.lang.String);
+}
+Compiled from "SharedPreferencesError.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$MutationNotAllowed extends dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$MutationNotAllowed();
 }
 Compiled from "SharedPreferencesError.kt"
 public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$NotInitialized extends dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError {

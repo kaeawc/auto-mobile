@@ -18,4 +18,8 @@ sealed class SharedPreferencesError(message: String) : Exception(message) {
   /** Invalid type for value. */
   class InvalidType(type: String, reason: String) :
     SharedPreferencesError("Invalid type $type: $reason")
+
+  /** A mutating operation was rejected by the SDK capture policy. */
+  class MutationNotAllowed :
+    SharedPreferencesError("SharedPreferences mutations are disabled by SDK policy")
 }

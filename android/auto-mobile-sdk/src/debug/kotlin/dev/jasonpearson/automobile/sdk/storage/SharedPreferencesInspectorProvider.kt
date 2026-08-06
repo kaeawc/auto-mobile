@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.protocol.StorageEntry
 import dev.jasonpearson.automobile.protocol.StorageFileInfo
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -65,9 +66,18 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
           "listFiles" -> handleListFiles(driver)
           "getPreferences" -> handleGetPreferences(driver, extras)
           "getPreference" -> handleGetPreference(driver, extras)
-          "setValue" -> handleSetValue(driver, extras)
-          "removeValue" -> handleRemoveValue(driver, extras)
-          "clearFile" -> handleClearFile(driver, extras)
+          "setValue" -> {
+            requireMutationsAllowed()
+            handleSetValue(driver, extras)
+          }
+          "removeValue" -> {
+            requireMutationsAllowed()
+            handleRemoveValue(driver, extras)
+          }
+          "clearFile" -> {
+            requireMutationsAllowed()
+            handleClearFile(driver, extras)
+          }
           "subscribeToFile" -> handleSubscribeToFile(driver, extras)
           "unsubscribeFromFile" -> handleUnsubscribeFromFile(driver, extras)
           "getChanges" -> handleGetChanges(driver, extras)
@@ -91,6 +101,15 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
     }
 
     return result
+  }
+
+  private fun requireMutationsAllowed() {
+    if (
+      !AutoMobileSDK.capabilities.policy.allowMutations ||
+        !AutoMobileSDK.isCapabilitySupported("storage.mutation")
+    ) {
+      throw SharedPreferencesError.MutationNotAllowed()
+    }
   }
 
   private fun handleListFiles(driver: SharedPreferencesDriver): String {

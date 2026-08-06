@@ -16,6 +16,10 @@ import dev.jasonpearson.automobile.sdk.biometrics.AutoMobileBiometrics
 import dev.jasonpearson.automobile.sdk.breadcrumbs.Breadcrumb
 import dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbCategory
 import dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbTrail
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityRegistry
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.context.SdkContext
 import dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
@@ -90,6 +94,7 @@ object AutoMobileSDK {
   @Volatile private var sdkContext: SdkContext? = null
   @Volatile private var breadcrumbTrail: BreadcrumbTrail? = null
   @Volatile private var dropCounter: DropCounter? = null
+  private val capabilityRegistry = SdkCapabilityRegistry()
 
   const val ACTION_NAVIGATION_EVENT = "dev.jasonpearson.automobile.sdk.NAVIGATION_EVENT"
   const val EXTRA_DESTINATION = "destination"
@@ -122,6 +127,11 @@ object AutoMobileSDK {
   fun initialize(context: Context, configuration: AutoMobileConfiguration) {
     this.context = context.applicationContext
     this.configuration = configuration
+    capabilityRegistry.markInitialized()
+    AutoMobileNetwork.setCapturePolicyProvider { capabilityRegistry.currentPolicy() }
+    AutoMobileNetwork.setNetworkControlProvider {
+      capabilityRegistry.isCapabilitySupported("network.control")
+    }
     val appContext = this.context!!
 
     // Create disk persistence for events
@@ -208,6 +218,7 @@ object AutoMobileSDK {
         }
       sessionLifecycleObserver = observer
       ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
+      capabilityRegistry.markLifecycleReady()
       RecompositionTracker.initialize(appContext)
       RecompositionTracker.setEnabled(_isEnabled)
       AutoMobileNotifications.initialize(appContext)
@@ -304,6 +315,30 @@ object AutoMobileSDK {
     _isEnabled = enabled
     eventBuffer?.isEnabled = enabled
     RecompositionTracker.setEnabled(enabled)
+    capabilityRegistry.setEnabled(enabled)
+  }
+
+  /** Returns the versioned capability and policy snapshot for this SDK integration. */
+  val capabilities: SdkCapabilityDocument
+    get() = capabilityRegistry.snapshot()
+
+  /** Registers or replaces an optional host-provided capability. */
+  fun registerCapability(descriptor: SdkCapabilityDescriptor) {
+    capabilityRegistry.register(descriptor)
+  }
+
+  /** Returns whether a capability is currently supported and usable. */
+  internal fun isCapabilitySupported(id: String): Boolean =
+    capabilityRegistry.isCapabilitySupported(id)
+
+  /** Removes an optional host-provided capability. */
+  fun unregisterCapability(id: String) {
+    capabilityRegistry.unregister(id)
+  }
+
+  /** Atomically replaces the capture and mutation policy after capability validation. */
+  fun updateCapturePolicy(policy: SdkCapturePolicy) {
+    capabilityRegistry.updatePolicy(policy)
   }
 
   /** Whether navigation tracking is currently enabled. */
@@ -434,6 +469,10 @@ object AutoMobileSDK {
     RecompositionTracker.reset()
     listeners.clear()
     _isEnabled = true
+    AutoMobileNetwork.setCapturePolicyProvider(null)
+    AutoMobileNetwork.setNetworkControlProvider(null)
+    AutoMobileNetwork.reset()
+    capabilityRegistry.markShutdown()
     configuration = null
     context = null
   }

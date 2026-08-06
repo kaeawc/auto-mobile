@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -172,6 +173,14 @@ class DatabaseInspectorProvider : ContentProvider() {
     val databasePath =
       extras?.getString("databasePath") ?: throw IllegalArgumentException("databasePath required")
     val query = extras.getString("query") ?: throw IllegalArgumentException("query required")
+    if (
+      driver is SQLiteDatabaseDriver &&
+        driver.isMutationQuery(query) &&
+        !AutoMobileSDK.capabilities.policy.allowMutations ||
+        !AutoMobileSDK.isCapabilitySupported("storage.mutation")
+    ) {
+      throw DatabaseError.MutationNotAllowed()
+    }
 
     return when (val result = driver.executeSQL(databasePath, query)) {
       is SQLExecutionResult.Query -> {

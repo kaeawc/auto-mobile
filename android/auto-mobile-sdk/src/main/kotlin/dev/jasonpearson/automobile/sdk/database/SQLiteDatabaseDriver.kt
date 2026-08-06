@@ -161,6 +161,12 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     }
   }
 
+  /** Returns whether executing this statement can mutate the database. */
+  internal fun isMutationQuery(query: String): Boolean {
+    val (returnsRows, readOnly) = classifySQL(query.trim())
+    return !returnsRows && !readOnly
+  }
+
   private fun classifySQL(query: String): Pair<Boolean, Boolean> {
     val statement = findTopLevelStatement(query)
     val keyword = statement?.first ?: return Pair(false, false)

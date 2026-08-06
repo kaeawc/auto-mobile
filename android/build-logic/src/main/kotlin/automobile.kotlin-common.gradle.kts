@@ -14,6 +14,13 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 // opt-in list, and the Java toolchain -- previously duplicated in the root
 // `subprojects {}` block and re-declared in individual module build files.
 
+// Apply the sibling module-default conventions so every Kotlin module gets the
+// same detekt, test, Jacoco, and coverage configuration -- without the root
+// cross-project `subprojects {}` wiring that blocks Isolated Projects.
+pluginManager.apply("automobile.detekt")
+
+pluginManager.apply("automobile.test-defaults")
+
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
 val kotlinLanguageVersion = libs.findVersion("build-kotlin-language").get().requiredVersion
 val javaTarget = libs.findVersion("build-java-target").get().requiredVersion

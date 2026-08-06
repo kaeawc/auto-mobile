@@ -1,5 +1,4 @@
 import com.vanniktech.maven.publish.MavenPublishBaseExtension
-import dev.detekt.gradle.extensions.DetektExtension
 import org.gradle.api.publish.PublishingExtension
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -72,58 +71,6 @@ allprojects {
           }
         }
       }
-    }
-  }
-}
-
-val gradleWorkerJvmArgs = providers.gradleProperty("org.gradle.testWorker.jvmargs").get()
-
-subprojects {
-  pluginManager.withPlugin("org.jetbrains.kotlin.jvm") { apply(plugin = "dev.detekt") }
-  pluginManager.withPlugin("org.jetbrains.kotlin.android") { apply(plugin = "dev.detekt") }
-  pluginManager.withPlugin("com.android.application") { apply(plugin = "dev.detekt") }
-  pluginManager.withPlugin("com.android.library") { apply(plugin = "dev.detekt") }
-  pluginManager.withPlugin("dev.detekt") {
-    extensions.configure<DetektExtension> {
-      config.setFrom(rootProject.files("config/detekt/detekt.yml"))
-      buildUponDefaultConfig = true
-      // Analyze files across threads within a single detekt task. Gradle's
-      // org.gradle.parallel only parallelizes across projects, so without this a
-      // large module analyzes single-threaded.
-      parallel = true
-      // On Android modules `detektMain` fans out to one task per build type, so
-      // `release` re-analyzes the exact same `main` sources `debug` already
-      // covered -- no module has a `src/release` source set, and the only
-      // build-type source set in the project is `auto-mobile-sdk/src/debug`.
-      // Skipping release halves the Android analysis and, more importantly,
-      // avoids compiling the release variant classpath purely to feed detekt.
-      ignoredBuildTypes = listOf("release")
-    }
-  }
-
-  tasks.withType<Test>().configureEach {
-    jvmArgs(gradleWorkerJvmArgs.split(" ").filter { it.isNotBlank() })
-  }
-
-  plugins.withId("java") {
-    apply(plugin = "jacoco")
-    tasks.withType<JacocoReport> {
-      reports {
-        xml.required.set(true)
-        html.required.set(false)
-      }
-    }
-  }
-
-  plugins.withId("com.android.application") {
-    configure<com.android.build.api.dsl.ApplicationExtension> {
-      buildTypes { getByName("debug") { enableUnitTestCoverage = true } }
-    }
-  }
-
-  plugins.withId("com.android.library") {
-    configure<com.android.build.api.dsl.LibraryExtension> {
-      buildTypes { getByName("debug") { enableUnitTestCoverage = true } }
     }
   }
 }

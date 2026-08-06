@@ -1135,9 +1135,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
     sdkEventIngestor?: AndroidSdkEventIngestor,
     loggerInstance?: Logger,
-    certificateFileSystem?: CertificateFileSystem
+    certificateFileSystem?: CertificateFileSystem,
+    screenshotBackoffScheduler?: ScreenshotBackoffScheduler
   ): AndroidCtrlProxyClient {
-    return new AndroidCtrlProxyClient(
+    const client = new AndroidCtrlProxyClient(
       device,
       adb,
       webSocketFactory,
@@ -1150,6 +1151,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       loggerInstance,
       certificateFileSystem
     );
+    // Test-only seam: pre-seed the lazily-built scheduler so tests can assert shared floor
+    // accounting (noteCaptureStarted) without the live device-data-stream server. Not exposed on
+    // the production getInstance path.
+    if (screenshotBackoffScheduler) {
+      client.screenshotBackoffScheduler = screenshotBackoffScheduler;
+    }
+    return client;
   }
 
   // ===========================================================================
@@ -2050,6 +2058,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           throw new Error("WebSocket not connected");
         }
         const message = serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId: sentRequestId }));
+        // Shared rate-limit floor accounting (issue #4927): a one-shot screenshot (observe /
+        // junit-runner) and the observation-stream scheduler both hit the same rate-limited
+        // accessibility takeScreenshot(). Advancing the shared clock here (non-blocking) makes the
+        // stream scheduler coalesce around a one-shot instead of the two engines rate-limiting each
+        // other while a live viewer is attached. requestScreenshot always issues a real a11y capture
+        // (it has no ADB path), so the stamp is unconditionally correct.
+        this.getScreenshotBackoffScheduler().noteCaptureStarted();
         this.ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent screenshot request (requestId: ${sentRequestId})`);
       });

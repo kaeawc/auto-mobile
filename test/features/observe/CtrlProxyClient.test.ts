@@ -26,6 +26,7 @@ import {
   stopDeviceDataStreamSocketServer,
 } from "../../../src/daemon/deviceDataStreamSocketServer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
+import { FakeScreenshotBackoffScheduler } from "../../../src/features/observe/ScreenshotBackoffScheduler";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -3351,6 +3352,61 @@ describe("AndroidCtrlProxyClient", function() {
         pixelHeight: null,
       });
       expect(accessibilityServiceClient.getScreenScaleMetadata()).toBeNull();
+    });
+  });
+
+  describe("shared rate-limit floor accounting (issue #4927)", function() {
+    test("one-shot requestScreenshot advances the shared floor clock so the stream scheduler coalesces around it", async function() {
+      const localTimer = new FakeTimer();
+      localTimer.enableAutoAdvance();
+      const fakeScheduler = new FakeScreenshotBackoffScheduler();
+      const { factory, getSocket } = createCapturingWebSocketFactory(localTimer);
+      // Inject the fake scheduler via the test-only createForTesting seam (positional optionals).
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        localTimer,
+        undefined, // installedAppsRepository
+        undefined, // retryExecutor
+        undefined, // crashEventSink
+        undefined, // deviceConnectionLostNotifier
+        undefined, // sdkEventIngestor
+        undefined, // loggerInstance
+        undefined, // certificateFileSystem
+        fakeScheduler
+      );
+      client.invalidateCache();
+      await client.ensureConnected();
+      const socket = await waitForSocket(getSocket) as CapturingWebSocket | null;
+      await waitForSocketOpen(socket);
+      if (!socket) {
+        throw new Error("Expected capturing CtrlProxy socket");
+      }
+
+      // A one-shot capture (the observe / junit-runner path) must stamp the shared clock even
+      // though it never runs the backoff scheduler itself. The stamp happens synchronously at the
+      // moment the a11y request is sent, before any await, so it is observable as soon as the
+      // request frame lands on the socket.
+      expect(fakeScheduler.noteCaptureStartedCalls).toBe(0);
+      const before = socket.sentMessages.length;
+      const capture = client.requestScreenshot(500);
+      await waitForSentMessages(socket, before + 1);
+
+      const req = socket.sentMessages
+        .map(raw => { try { return JSON.parse(raw); } catch { return null; } })
+        .reverse()
+        .find(m => m && m.type === "request_screenshot");
+      expect(req).toBeTruthy();
+      expect(fakeScheduler.noteCaptureStartedCalls).toBe(1);
+
+      // Resolve the request so the pending promise settles; the assertion above is the contract.
+      socket.emit("message", JSON.stringify({
+        type: "screenshot", requestId: req.requestId, data: "jpeg-base64", format: "jpeg", timestamp: 1,
+      }));
+      await capture.catch(() => undefined);
+
+      await client.close();
     });
   });
 });

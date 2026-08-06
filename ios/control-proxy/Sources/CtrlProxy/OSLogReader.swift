@@ -98,7 +98,7 @@ public final class OSLogReader {
                 guard entry.date > lastEntryDate else { continue }
 
                 if let logEntry = entry as? OSLogEntryLog {
-                    let level = mapLevel(logEntry.level)
+                    let level = Self.mapLevel(logEntry.level)
                     let tag = logEntry.subsystem.isEmpty ? nil : logEntry.subsystem
                     let message: String
                     if logEntry.category.isEmpty {
@@ -137,28 +137,35 @@ public final class OSLogReader {
         }
     }
 
-    /// Map OSLogEntryLog.Level to Android-compatible log level integers.
-    /// - `.debug` -> 3 (D)
-    /// - `.info` -> 4 (I)
-    /// - `.notice` -> 4 (I)
-    /// - `.error` -> 6 (E)
-    /// - `.fault` -> 7 (F)
-    private func mapLevel(_ level: OSLogEntryLog.Level) -> Int {
+    /// Map `OSLogEntryLog.Level` to the AutoMobile SDK's `LogLevel` scale
+    /// (`verbose=0, debug=1, info=2, warning=3, error=4, fault=5`), the same scale
+    /// `SdkLogEvent.level` uses. OSLog entries are served on the SDK-events endpoint
+    /// alongside SDK log events and share one numeric scale downstream, so they must
+    /// use the SDK scale — not an Android-style one — or the desktop Logs facet
+    /// mis-buckets them (issue #4847). OSLog has no "warning" severity, so `.notice`
+    /// (its default level) folds into `info`.
+    /// - `.debug`  -> 1 (debug)
+    /// - `.info`   -> 2 (info)
+    /// - `.notice` -> 2 (info)
+    /// - `.error`  -> 4 (error)
+    /// - `.fault`  -> 5 (fault)
+    /// - `.undefined` / unknown -> 2 (info)
+    static func mapLevel(_ level: OSLogEntryLog.Level) -> Int {
         switch level {
         case .undefined:
-            return 4
+            return 2
         case .debug:
-            return 3
+            return 1
         case .info:
-            return 4
+            return 2
         case .notice:
-            return 4
+            return 2
         case .error:
-            return 6
-        case .fault:
-            return 7
-        @unknown default:
             return 4
+        case .fault:
+            return 5
+        @unknown default:
+            return 2
         }
     }
 }

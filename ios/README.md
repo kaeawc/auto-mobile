@@ -93,10 +93,10 @@ swift test
 
 ```bash
 # Build a specific component
-./scripts/local/build-ios-component.sh AccessibilityService
+./scripts/local/build-ios-component.sh XCTestRunner
 
 # Test a specific component
-./scripts/local/test-ios-component.sh AccessibilityService
+./scripts/local/test-ios-component.sh XCTestRunner
 ```
 
 ### Manual Build
@@ -124,7 +124,7 @@ bun install && bun run build
 ./scripts/local/validate-ios.sh
 
 # Work on specific component
-cd ios/AccessibilityService
+cd ios/XCTestRunner
 swift build
 swift test
 ```
@@ -135,7 +135,7 @@ swift test
 # Boot iOS simulator
 xcrun simctl boot "iPhone 15 Pro"
 
-# Install and launch AccessibilityService on simulator
+# Install and launch CtrlProxy on simulator
 # (requires Xcode project setup)
 ```
 

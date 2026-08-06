@@ -70,8 +70,6 @@ echo "========================================="
 echo ""
 
 SWIFT_COMPONENTS=(
-  "ios/AccessibilityService"
-  "ios/AXeAutomation"
   "ios/XCTestRunner"
 )
 

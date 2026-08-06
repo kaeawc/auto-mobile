@@ -43,8 +43,6 @@ echo ""
 
 # Component directories
 COMPONENTS=(
-  "ios/AccessibilityService"
-  "ios/AXeAutomation"
   "ios/XCTestRunner"
 )
 

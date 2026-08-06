@@ -183,21 +183,23 @@ async function runCell(
   process.stdout.write(`\n▶ ${label} … `);
 
   // Warm-up: at least `warmup` iterations to let the device settle, then — for
-  // ON cells — keep going until the window is actually FULL
-  // (`oldestSampleAgeMs >= windowMs`). Otherwise a large window would begin
-  // measuring while still filling, so a "30s" cell would characterize a
-  // succession of shorter windows instead of the configured steady state. A
-  // generous cap bounds the wait on a pathologically slow device.
-  const maxWarm = warmup + Math.ceil((windowMs ?? 0) / 400) + 20;
+  // ON cells — keep going until at least `windowMs` + one sampling tick of
+  // WALL-CLOCK has elapsed since the sampler began, so the buffer holds a
+  // genuinely full window before we measure. (We can't gate on
+  // `oldestSampleAgeMs`: `snapshot()` prunes everything older than the window,
+  // so that age never exceeds `windowMs`.) A generous cap bounds a slow device.
+  const fillStart = performance.now();
+  const minFillMs = enabled && windowMs !== null ? windowMs + PerformanceMonitor.TICK_INTERVAL_MS : 0;
+  const maxWarm = warmup + Math.ceil((windowMs ?? 0) / 400) + 40;
   for (let i = 0; i < maxWarm; i += 1) {
     await navigateStep();
-    const result = await new RealObserveScreen(device).execute();
-    const oldestAge = result.perfSnapshot?.oldestSampleAgeMs;
-    const windowFull =
-      !enabled || windowMs === null ||
-      (typeof oldestAge === "number" && oldestAge >= windowMs);
-    if (i + 1 >= warmup && windowFull) { break; }
+    await new RealObserveScreen(device).execute();
+    if (i + 1 >= warmup && performance.now() - fillStart >= minFillMs) { break; }
   }
+
+  // Reset the nav sequence so every cell's MEASURED iterations replay identically,
+  // independent of how many (variable) warm-up iterations just ran.
+  navCounter = 0;
 
   const observeMs: number[] = [];
   const fpsP50Samples: number[] = [];

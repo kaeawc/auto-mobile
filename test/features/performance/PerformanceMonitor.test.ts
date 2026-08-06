@@ -582,6 +582,38 @@ describe("PerformanceMonitor", () => {
       expect(snap.memoryMb).not.toBeNull();
     });
 
+    it("prefers gfxinfo's aggregate Janky frames over summing overlapping causes", async () => {
+      // Causes sum to 6 (2+1+3) but overlap; the aggregate "Janky frames: 4" is
+      // the deduplicated truth and must win.
+      fakeAdbClient.setCommandResult(
+        "shell dumpsys gfxinfo com.example.app reset",
+        `
+          Total frames rendered: 100
+          50th percentile: 8.5ms
+          Janky frames: 4 (4.00%)
+          Missed Vsync: 2
+          Slow UI thread: 1
+          Frame deadline missed: 3
+        `
+      );
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      expect(fakePusher.getLastPushedData()?.metrics.jankFrames).toBe(4);
+    });
+
+    it("falls back to summing causes when no aggregate Janky frames line exists", async () => {
+      // Default fixture has the three cause counters (2+1+3) and no aggregate.
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      expect(fakePusher.getLastPushedData()?.metrics.jankFrames).toBe(6);
+    });
+
     it("clears the buffer when the monitored package changes", async () => {
       const buffer = new PerfWindowBuffer();
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);

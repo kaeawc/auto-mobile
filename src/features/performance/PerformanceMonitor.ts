@@ -69,6 +69,12 @@ interface RawJankCounters {
   missedVsync: number;
   slowUi: number;
   deadlineMissed: number;
+  /**
+   * gfxinfo's aggregate "Janky frames" count for the interval, or null when the
+   * output has no such line (older Android). Preferred over summing the cause
+   * counters above, which overlap (one frame can trip several).
+   */
+  jankyFrames: number | null;
 }
 
 interface MonitoredDevice {
@@ -400,8 +406,11 @@ export class PerformanceMonitor {
     let jankFrames: number | null = null;
     if (gfx.rawJankCounters) {
       const curr = gfx.rawJankCounters;
-      // Sum all jank indicators for this interval
-      jankFrames = curr.missedVsync + curr.slowUi + curr.deadlineMissed;
+      // Prefer gfxinfo's aggregate "Janky frames" count. The individual cause
+      // counters overlap (one frame can trip several), so summing them
+      // double-counts; fall back to the sum only when the aggregate is absent
+      // (older Android output).
+      jankFrames = curr.jankyFrames ?? (curr.missedVsync + curr.slowUi + curr.deadlineMissed);
     }
 
     // Estimate touch latency. `streamMs` is the value sent to the live stream
@@ -736,6 +745,9 @@ export class PerformanceMonitor {
       const missedVsync = parseInt(stdout.match(/Missed Vsync:\s+(\d+)/)?.[1] || "0", 10);
       const slowUi = parseInt(stdout.match(/Slow UI thread:\s+(\d+)/)?.[1] || "0", 10);
       const deadlineMissed = parseInt(stdout.match(/Frame deadline missed:\s+(\d+)/)?.[1] || "0", 10);
+      // Aggregate janky-frame count (deduplicated across causes) when present.
+      const jankyMatch = stdout.match(/Janky frames:\s+(\d+)/);
+      const jankyFrames = jankyMatch ? parseInt(jankyMatch[1], 10) : null;
 
       // Parse high input latency frame count
       const highInputLatencyMatch = stdout.match(/Number High input latency:\s+(\d+)/);
@@ -750,7 +762,7 @@ export class PerformanceMonitor {
         jankFrames: null, // Computed as delta in sampleDevice
         highInputLatencyFrames,
         totalFrames,
-        rawJankCounters: { missedVsync, slowUi, deadlineMissed },
+        rawJankCounters: { missedVsync, slowUi, deadlineMissed, jankyFrames },
       };
     } catch (error) {
       logger.debug(`[PerformanceMonitor] gfxinfo failed for ${device.deviceId}: ${error}`);

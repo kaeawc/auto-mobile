@@ -23,6 +23,7 @@ public final class AutoMobileSDK: @unchecked Sendable
   public func removeNavigationListener(_ listener: NavigationListener)
   public func clearNavigationListeners()
   public func notifyNavigationEvent(_ event: NavigationEvent)
+  public func recordWebViewEvent(_ event: SdkWebViewEvent)
   public var listenerCount: Int
   public func currentSessionId() -> String?
   public func addBreadcrumb( message: String, category: BreadcrumbCategory = .custom, metadata: [String: String] = [:] )
@@ -652,3 +653,58 @@ public final class ViewHierarchyTracker: @unchecked Sendable
 public enum ViewHierarchyWalker
   public static func walk(bundleId: String? = nil) -> SdkViewHierarchy
   public static func computeHash(_ hierarchy: SdkViewHierarchy) -> Int
+
+// WebKit/AutoMobileWebViewBridge.swift
+public struct AutoMobileWebElement: Codable, Sendable, Equatable
+  public let id: String
+  public let role: String?
+  public let label: String?
+  public let value: String?
+  public let bounds: [Double]
+  public let enabled: Bool
+  public let visible: Bool
+  public let focused: Bool
+  public init( id: String, role: String? = nil, label: String? = nil, value: String? = nil, bounds: [Double] = [], enabled: Bool = true, visible: Bool = true, focused: Bool = false )
+public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable
+  public let snapshotId: String
+  public let url: String?
+  public let title: String?
+  public let elements: [AutoMobileWebElement]
+  public init( snapshotId: String = UUID().uuidString, url: String? = nil, title: String? = nil, elements: [AutoMobileWebElement] = [] )
+public struct AutoMobileWebViewConfiguration: Sendable
+  public let allowedOrigins: Set<String>
+  public let allowedFrames: Set<String>
+  public let maxElements: Int
+  public let maxMessageBytes: Int
+  public let contentWorldName: String
+  public let redactText: Bool
+  public init( allowedOrigins: Set<String> = [], allowedFrames: Set<String> = [], maxElements: Int = 500, maxMessageBytes: Int = 256 * 1024, contentWorldName: String = "AutoMobile", redactText: Bool = true )
+public enum AutoMobileWebAction: Codable, Sendable, Equatable
+public struct SdkWebViewEvent: SdkEvent
+  public private(set) var eventType: SdkEventType = .webView
+  public let timestamp: Int64
+  public let webViewId: String
+  public let name: String
+  public let url: String?
+  public let frameId: String?
+  public let requestId: String?
+  public let metadata: [String: String]
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), webViewId: String, name: String, url: String? = nil, frameId: String? = nil, requestId: String? = nil, metadata: [String: String] = [:] )
+public final class AutoMobileWebViewPolicy: @unchecked Sendable
+  public init(configuration: AutoMobileWebViewConfiguration = .init())
+  public func allows(url: URL?, frameId: String?) -> Bool
+  public func accept(_ snapshot: AutoMobileWebSnapshot) -> AutoMobileWebSnapshot
+  public func validates(_ action: AutoMobileWebAction) -> Bool
+public final class AutoMobileWebViewBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, @unchecked Sendable
+  public let webViewId: String
+  public let configuration: AutoMobileWebViewConfiguration
+  public let policy: AutoMobileWebViewPolicy
+  public init( webViewId: String = UUID().uuidString, configuration: AutoMobileWebViewConfiguration = .init(), recorder: NetworkCaptureRecorder? = nil, emitEvent: @escaping @Sendable (SdkWebViewEvent) -> Void = { event in AutoMobileSDK.shared.recordWebViewEvent(event) } )
+  public func attach(to webView: WKWebView)
+  public func detach()
+  public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage)
+  public func perform(_ action: AutoMobileWebAction, completion: @escaping (Result<Void, Error>) -> Void)
+  public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!)
+  public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error)
+  public func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!)
+  public func webViewWebContentProcessDidTerminate(_ webView: WKWebView)

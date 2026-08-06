@@ -59,6 +59,10 @@ AutoMobileSDK.shared.initialize(configuration: config)
 
 - ``AutoMobileNetwork``
 - ``AutoMobileURLProtocol``
+- ``AutoMobileWebViewBridge``
+- ``AutoMobileWebViewConfiguration``
+- ``AutoMobileWebSnapshot``
+- ``AutoMobileWebAction``
 - ``RetryPolicy``
 - ``WebSocketFrameDirection``
 - ``WebSocketFrameType``

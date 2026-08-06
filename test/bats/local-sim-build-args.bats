@@ -58,7 +58,9 @@ EOF
   stub_uname arm64
   run bash -c "source '$HELPER'; echo sourced-ok"
   [ "$status" -eq 0 ]
-  [ "${lines[-1]}" = "sourced-ok" ]
+  # Negative array subscripts (${lines[-1]}) need bash 4.3+; the macOS CI runner
+  # rejects them, so index the last line explicitly to stay bash-3.2 portable.
+  [ "${lines[$((${#lines[@]} - 1))]}" = "sourced-ok" ]
 }
 
 # --- Wiring: the four local build/test scripts must consult the helper. ---

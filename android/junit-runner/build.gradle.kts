@@ -26,11 +26,19 @@ java {
 // release, scripts/ci/verify-release-integrity.sh asserts the SNAPSHOT-stripped
 // base version here matches package.json and the git tag.
 val npmPackageVersion =
-  providers.fileContents(rootProject.layout.projectDirectory.file("../package.json")).asText.map {
+  providers.fileContents(layout.projectDirectory.file("../../package.json")).asText.map {
     packageJson ->
     val parsed = JsonSlurper().parseText(packageJson) as Map<*, *>
     parsed["version"].toString()
   }
+
+// Sibling control-proxy debug APK and the repo root, resolved from this module's
+// own layout so no other project's model is read (Isolated Projects safe). The
+// `:control-proxy:assembleDebug` task dependency below still guarantees the APK
+// exists before the tests run.
+val ctrlProxyDebugApk =
+  layout.projectDirectory.file("../control-proxy/build/outputs/apk/debug/control-proxy-debug.apk")
+val repoRootPath = layout.projectDirectory.dir("../..").asFile.absolutePath
 
 dependencies {
   // Shared validation module
@@ -121,19 +129,12 @@ tasks.withType<Test> {
   // Enable parallel test execution across multiple devices
   maxParallelForks = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
   dependsOn(":control-proxy:assembleDebug")
-  val accessibilityApk =
-    project(":control-proxy")
-      .layout
-      .buildDirectory
-      .file("outputs/apk/debug/control-proxy-debug.apk")
-  environment("AUTOMOBILE_CTRL_PROXY_APK_PATH", accessibilityApk.get().asFile.absolutePath)
-  systemProperty("automobile.ctrl.proxy.apk.path", accessibilityApk.get().asFile.absolutePath)
+  val apkPath = ctrlProxyDebugApk.asFile.absolutePath
+  environment("AUTOMOBILE_CTRL_PROXY_APK_PATH", apkPath)
+  systemProperty("automobile.ctrl.proxy.apk.path", apkPath)
   systemProperty("automobile.daemon.package.version", npmPackageVersion.get())
   systemProperty("automobile.daemon.force.restart", "true")
-  systemProperty(
-    "automobile.daemon.local.project.path",
-    rootProject.rootDir.parentFile.absolutePath,
-  )
+  systemProperty("automobile.daemon.local.project.path", repoRootPath)
 
   testLogging {
     // Show standard output and error for tests

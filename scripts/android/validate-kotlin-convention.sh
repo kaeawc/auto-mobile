@@ -66,4 +66,13 @@ if grep -qE '^allprojects \{' android/build.gradle.kts; then
   fail "android/build.gradle.kts still has an allprojects {} block (blocks Isolated Projects)"
 fi
 
+# 8. No module reads another project's layout model. Cross-project model access
+#    (rootProject.layout, project(":x").layout) breaks Isolated Projects; siblings
+#    must be resolved from the module's own layout. Task deps like
+#    `project(":test-plan-validation")` and `dependsOn(":control-proxy:...")` are fine.
+if grep -rnE 'rootProject\.layout|project\(":[^"]+"\)\.layout' android --include=build.gradle.kts |
+  grep -v '/build-logic/'; then
+  fail "a module accesses another project's layout model (breaks Isolated Projects)"
+fi
+
 echo "OK: Kotlin-compile convention is centralized in $CONVENTION"

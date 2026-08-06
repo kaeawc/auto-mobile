@@ -280,6 +280,7 @@ jobs:
               - 'android/gradle.properties'
               - 'android/gradle/libs.versions.toml'
               - 'android/gradle/wrapper/**'
+              - 'android/gradle/gradle-daemon-jvm.properties'
               - 'android/config/detekt/**'
               - '.github/actions/gradle-task-run/**'
 

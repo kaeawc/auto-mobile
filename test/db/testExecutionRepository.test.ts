@@ -384,6 +384,23 @@ describe("TestExecutionRepository", () => {
       expect(runs[0].testClass).toBe("LoginTest");
       expect(runs[0].testMethod).toBe("testLogin");
     });
+
+    test("filters by deviceId", async () => {
+      await repo.recordExecution(makeExecution({ deviceId: "device-a" }));
+      await repo.recordExecution(makeExecution({ deviceId: "device-b" }));
+
+      const runs = await repo.getTestRuns({ deviceId: "device-a" });
+      expect(runs).toHaveLength(1);
+      expect(runs[0].deviceId).toBe("device-a");
+    });
+
+    test("returns runs across all devices when deviceId is omitted", async () => {
+      await repo.recordExecution(makeExecution({ deviceId: "device-a" }));
+      await repo.recordExecution(makeExecution({ deviceId: "device-b" }));
+
+      const runs = await repo.getTestRuns();
+      expect(runs).toHaveLength(2);
+    });
   });
 
   describe("getTestRuns with lookbackDays", () => {

@@ -120,6 +120,7 @@ export interface TestRun {
 export interface TestRunQueryOptions {
   testClass?: string;
   testMethod?: string;
+  deviceId?: string;
   lookbackDays?: number;
   limit?: number;
   orderDirection?: "asc" | "desc";
@@ -255,6 +256,10 @@ export class TestExecutionRepository {
 
     if (options.testMethod) {
       query = query.where("test_method", "=", options.testMethod);
+    }
+
+    if (options.deviceId) {
+      query = query.where("device_id", "=", options.deviceId);
     }
 
     const orderDirection = options.orderDirection ?? "desc";

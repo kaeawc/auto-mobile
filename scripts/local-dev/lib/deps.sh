@@ -30,7 +30,7 @@ parse_required_versions() {
     return 1
   fi
 
-  # Extract bun version from packageManager field (e.g., "bun@1.3.6")
+  # Extract bun version from packageManager field (e.g., "bun@1.3.14")
   REQUIRED_BUN_VERSION=$(grep -o '"packageManager":[[:space:]]*"bun@[^"]*"' "${package_json}" | \
     sed 's/.*bun@\([^"]*\).*/\1/' || true)
 
@@ -46,7 +46,7 @@ parse_required_versions() {
 
   if [[ -z "${REQUIRED_BUN_VERSION}" ]]; then
     log_warn "Could not determine required bun version from package.json"
-    REQUIRED_BUN_VERSION="1.3.6"  # fallback
+    REQUIRED_BUN_VERSION="1.3.14"  # fallback
   fi
 
   # Node.js version extraction is optional — project uses Bun exclusively

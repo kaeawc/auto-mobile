@@ -32,6 +32,7 @@ add_check() {
 
 add_check "ktfmt" "ONLY_TOUCHED_FILES=${KTFMT_ONLY_TOUCHED_FILES:-true} \"$PROJECT_ROOT/scripts/ktfmt/validate_ktfmt.sh\"" "format,kotlin" "Validate Kotlin formatting"
 add_check "yaml" "bun \"$PROJECT_ROOT/scripts/validate-yaml.ts\"" "config,yaml" "Validate test plan YAML files"
+add_check "bun-version-coherence" "bun \"$PROJECT_ROOT/scripts/check-bun-version-coherence.ts\"" "config,dependencies" "Keep Bun versions aligned across package, workflows, Docker, and local development"
 add_check "xml" "\"$PROJECT_ROOT/scripts/xml/validate_xml.sh\"" "config,xml" "Validate XML files"
 add_check "shellcheck" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_scripts.sh\"" "lint,shell" "Validate shell scripts with shellcheck"
 add_check "shell-portability" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_portability.sh\"" "lint,shell" "Lint shell scripts for portability footguns"

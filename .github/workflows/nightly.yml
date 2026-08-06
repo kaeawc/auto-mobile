@@ -46,7 +46,7 @@ jobs:
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.9
+          bun-version: 1.3.14
 
       - name: "Download APK artifact"
         uses: actions/download-artifact@v7
@@ -522,7 +522,7 @@ jobs:
 
       # Hoisted above the build so its ~1-2 minutes overlap the backgrounded
       # install. No standalone "Setup Bun" step is needed -- this composite
-      # already runs oven-sh/setup-bun@v2 at the same pinned 1.3.9.
+      # already runs oven-sh/setup-bun@v2 at the same pinned 1.3.14.
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - wait: install-xcpretty

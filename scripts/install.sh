@@ -352,7 +352,7 @@ parse_required_versions() {
         return 0
     fi
 
-    # Extract bun version from packageManager field (e.g., "bun@1.3.6")
+    # Extract bun version from packageManager field (e.g., "bun@1.3.14")
     REQUIRED_BUN_VERSION=$(grep -o '"packageManager":[[:space:]]*"bun@[^"]*"' "${package_json}" | \
         sed 's/.*bun@\([^"]*\).*/\1/' || true)
 

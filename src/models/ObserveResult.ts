@@ -6,6 +6,7 @@ import { ActiveWindowInfo } from "./ActiveWindowInfo";
 import { ViewHierarchyResult } from "./ViewHierarchyResult";
 import { TimingData } from "../utils/PerformanceTracker";
 import { GfxMetrics } from "./GfxMetrics";
+import { PerfSnapshot } from "./PerfSnapshot";
 import { BackStackInfo } from "./BackStack";
 import { PerformanceAuditResult } from "../features/performance/PerformanceAudit";
 import { AccessibilityAuditResult } from "./AccessibilityAudit";
@@ -269,6 +270,15 @@ export interface ObserveResult {
 
   /** Android "Displayed" metrics captured during launch (when ui-perf-mode is enabled). */
   displayedTimeMetrics?: DisplayedTimeMetric[];
+
+  /**
+   * Windowed performance snapshot (fps percentiles, jank, touch latency, CPU,
+   * memory) rolled up from the live performance stream. Present only when the
+   * `AUTOMOBILE_OBSERVE_PERF_SNAPSHOT` opt-in is enabled. Independent of
+   * `--debug-perf`, and intentionally kept outside the debug-perf wire strip so
+   * it survives to the client — see `ObserveResultOutput.ts`.
+   */
+  perfSnapshot?: PerfSnapshot;
 
   /**
    * Performance audit results (only present when --debug-perf/--ui-perf-debug is enabled)

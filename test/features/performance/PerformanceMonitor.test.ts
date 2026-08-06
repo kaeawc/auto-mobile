@@ -9,6 +9,7 @@ import {
   ExecFileAsyncFn,
 } from "../../../src/features/performance/PerformanceMonitor";
 import { LivePerformanceData } from "../../../src/daemon/performancePushSocketServer";
+import { PerfWindowBuffer } from "../../../src/features/performance/PerfWindowBuffer";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -553,6 +554,32 @@ describe("PerformanceMonitor", () => {
       expect(device2Data).toBeDefined();
       expect(device1Data!.packageName).toBe("com.app1");
       expect(device2Data!.packageName).toBe("com.app2");
+    });
+  });
+
+  describe("windowed buffer tap", () => {
+    it("records each Android sample into the injected PerfWindowBuffer", async () => {
+      const buffer = new PerfWindowBuffer();
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer
+      );
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      // The tick pushed metrics, so the buffer holds at least one sample and the
+      // snapshot exposes the gfxinfo-derived fps and dumpsys-derived cpu/memory.
+      const snap = buffer.snapshot("device-1", fakeTimer.now(), 60000);
+      expect(snap.sampleCount).toBeGreaterThanOrEqual(1);
+      expect(snap.fps).not.toBeNull();
+      expect(snap.memoryMb).not.toBeNull();
     });
   });
 });

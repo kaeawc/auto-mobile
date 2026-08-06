@@ -58,6 +58,7 @@ import { TrackedScreenGeometry } from "../TrackedScreenGeometry";
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../../daemon/deviceDataStreamSocketServer";
 import { COORDINATE_SPACE_PX, type CoordinateSpace } from "../../../daemon/canonicalPixels";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
+import { getPerfWindowBuffer } from "../../performance/PerfWindowBuffer";
 import {
   ScreenshotBackoffScheduler,
   DefaultScreenshotBackoffScheduler,
@@ -1619,6 +1620,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       recompositionCount: null,
       recompositionRate: null,
     };
+
+    // Feed the windowed observe-snapshot buffer with the on-device iOS fps/frame/jank.
+    // Real app CPU/memory for iOS arrive separately via PerformanceMonitor's host-side
+    // sampler; here we preserve nulls so idle frames don't skew percentiles.
+    getPerfWindowBuffer().record(this.device.deviceId, {
+      t: this.timer.now(),
+      fps: nullWhenAbsent(snapshot.fps),
+      frameTimeMs: nullWhenAbsent(snapshot.frameTimeMs),
+      jankFrames: nullWhenAbsent(snapshot.jankFrames),
+      touchLatencyMs: nullWhenAbsent(snapshot.touchLatencyMs),
+      cpuUsagePercent: nullWhenAbsent(snapshot.cpuUsagePercent),
+      memoryUsageMb: nullWhenAbsent(snapshot.memoryUsageMb),
+    });
 
     try {
       server.pushPerformanceUpdate(this.device.deviceId, streamData);

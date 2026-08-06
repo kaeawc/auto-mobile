@@ -10,6 +10,8 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { NoOpPerformanceTracker, PerformanceTracker, processTimingData } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { RecompositionTracker } from "../performance/RecompositionTracker";
+import { getPerfWindowBuffer } from "../performance/PerfWindowBuffer";
+import { getObservePerfWindowMs, isObservePerfSnapshotEnabled } from "../performance/observePerfSnapshotConfig";
 import { PredictiveUIState } from "./PredictiveUIState";
 import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -323,6 +325,9 @@ export class RealObserveScreen implements ObserveScreen {
         : undefined;
       result.freshness = { requestedAfter, actualTimestamp, isFresh, staleDurationMs };
 
+      // Attach the windowed performance snapshot when opted in (independent of --debug-perf).
+      await this.attachPerfSnapshot(result);
+
       // Attach performance timing if enabled (with filtering and truncation)
       const timings = perf.getTimings();
       const processedTimings = processTimingData(timings);
@@ -352,6 +357,42 @@ export class RealObserveScreen implements ObserveScreen {
         cause: errorMessage
       });
       return fallback;
+    }
+  }
+
+  /**
+   * Attach a windowed performance snapshot to the result when the
+   * `AUTOMOBILE_OBSERVE_PERF_SNAPSHOT` opt-in is enabled. Ensures per-device
+   * sampling is running (so the window fills across successive observes) and
+   * rolls the live stream up over the configured window. A no-op when disabled,
+   * or when there is no active app to attribute the metrics to. Never throws:
+   * a snapshot failure must not fail the observation.
+   */
+  private async attachPerfSnapshot(result: ObserveResult): Promise<void> {
+    if (!isObservePerfSnapshotEnabled()) {
+      return;
+    }
+
+    const appId = result.activeWindow?.appId;
+    if (!appId) {
+      logger.debug("[PerfSnapshot] Skipping snapshot, no active app");
+      return;
+    }
+
+    try {
+      // Ensure continuous sampling is active for this device/package. The first
+      // observe warms the window; subsequent observes see a fuller snapshot.
+      const { getPerformanceMonitor } = await import("../performance/PerformanceMonitor");
+      getPerformanceMonitor().startMonitoring(this.device.deviceId, appId, this.device.platform);
+
+      result.perfSnapshot = getPerfWindowBuffer().snapshot(
+        this.device.deviceId,
+        this.timer.now(),
+        getObservePerfWindowMs()
+      );
+    } catch (error) {
+      // Best-effort: an audit/snapshot failure should not pollute observation.
+      logger.warn(`[PerfSnapshot] Failed to attach performance snapshot: ${error}`);
     }
   }
 

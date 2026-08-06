@@ -8,6 +8,7 @@ import {
 } from "../../daemon/performancePushSocketServer";
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../daemon/deviceDataStreamSocketServer";
 import { RecompositionTracker } from "./RecompositionTracker";
+import { getPerfWindowBuffer, PerfWindowBuffer } from "./PerfWindowBuffer";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
 import { defaultAdbClientFactory, AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -127,6 +128,7 @@ export class PerformanceMonitor {
   private readonly getServer: ServerGetter;
   private readonly execFileAsync: ExecFileAsyncFn;
   private readonly getTelemetryEmitter: () => PerformanceTelemetryEmitter;
+  private readonly perfWindowBuffer: PerfWindowBuffer;
   private monitoredDevices = new Map<string, MonitoredDevice>();
 
   constructor(
@@ -136,6 +138,7 @@ export class PerformanceMonitor {
     simCtlClientFactory: SimCtlClientFactory = defaultSimCtlClientFactory,
     execFileAsync: ExecFileAsyncFn = defaultExecFileAsync,
     getTelemetryEmitter: () => PerformanceTelemetryEmitter = () => TelemetryRecorder.getInstance(),
+    perfWindowBuffer: PerfWindowBuffer = getPerfWindowBuffer(),
   ) {
     this.timer = timer;
     this.adbClientFactory = adbClientFactory;
@@ -143,6 +146,7 @@ export class PerformanceMonitor {
     this.getServer = serverGetter;
     this.execFileAsync = execFileAsync;
     this.getTelemetryEmitter = getTelemetryEmitter;
+    this.perfWindowBuffer = perfWindowBuffer;
   }
 
   /**
@@ -497,6 +501,18 @@ export class PerformanceMonitor {
     };
 
     server.pushPerformanceData(data);
+
+    // Feed the windowed buffer at this single fan-out point so both Android
+    // (dumpsys) and iOS (host CPU/mem) samples land in the observe snapshot.
+    this.perfWindowBuffer.record(device.deviceId, {
+      t: now,
+      fps: metrics.fps,
+      frameTimeMs: metrics.frameTimeMs,
+      jankFrames: metrics.jankFrames,
+      touchLatencyMs: metrics.touchLatencyMs,
+      cpuUsagePercent: metrics.cpuUsagePercent,
+      memoryUsageMb: metrics.memoryUsageMb,
+    });
 
     // Emit telemetry events when metric health status changes
     this.emitPerformanceTelemetry(device, now, metrics, data.health);

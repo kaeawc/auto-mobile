@@ -47,4 +47,17 @@ if [ -n "$module_dups" ]; then
   fail "module build files still declare a KotlinCompile block:"$'\n'"$module_dups"
 fi
 
+# 5. The root build no longer uses `subprojects {}` cross-project configuration
+#    (its detekt/test/jacoco/coverage wiring moved into convention plugins). The
+#    remaining `allprojects {}` blocks are removed by a later item.
+if grep -qE '^subprojects \{' android/build.gradle.kts; then
+  fail "android/build.gradle.kts still has a subprojects {} block (blocks Isolated Projects)"
+fi
+
+# 6. The detekt and test-defaults conventions exist.
+for conv in automobile.detekt automobile.test-defaults; do
+  [ -f "android/build-logic/src/main/kotlin/$conv.gradle.kts" ] ||
+    fail "missing convention plugin: android/build-logic/src/main/kotlin/$conv.gradle.kts"
+done
+
 echo "OK: Kotlin-compile convention is centralized in $CONVENTION"

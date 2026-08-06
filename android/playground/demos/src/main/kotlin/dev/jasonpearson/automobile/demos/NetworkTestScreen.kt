@@ -256,21 +256,30 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
           }
 
           items(results) { result ->
-            val color =
+            // Card tint colour-codes the status; the text uses a readable
+            // foreground so a bright status role (e.g. the yellow tertiary) does
+            // not become unreadable over its own 10% tint.
+            val tint =
               when {
                 result.error != null || result.statusCode == 0 -> MaterialTheme.colorScheme.error
                 result.statusCode in 200..299 -> MaterialTheme.colorScheme.primary
                 else -> MaterialTheme.colorScheme.tertiary
               }
+            val textColor =
+              when {
+                result.error != null || result.statusCode == 0 -> MaterialTheme.colorScheme.error
+                result.statusCode in 200..299 -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurface
+              }
             Card(
               modifier = Modifier.fillMaxWidth(),
-              colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f)),
+              colors = CardDefaults.cardColors(containerColor = tint.copy(alpha = 0.1f)),
             ) {
               Column(modifier = Modifier.padding(12.dp)) {
                 Text(
                   "${result.label}: ${if (result.statusCode > 0) result.statusCode else "FAILED"} (${result.durationMs}ms)",
                   style = MaterialTheme.typography.bodyMedium,
-                  color = color,
+                  color = textColor,
                 )
                 if (result.error != null) {
                   Text(

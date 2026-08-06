@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { SafeAreaAuditor } from "../../../../src/features/observe/audits/SafeAreaAuditor";
-import type { ObserveResult } from "../../../../../src/models";
+import { SafeAreaAuditor, capLayoutWarnings, MAX_LAYOUT_WARNINGS } from "../../../../src/features/observe/audits/SafeAreaAuditor";
+import type { LayoutWarning, ObserveResult } from "../../../../../src/models";
 
 function observation(): ObserveResult {
   return {
@@ -325,5 +325,43 @@ describe("SafeAreaAuditor", () => {
     expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
       { element: { viewId: "sdk-only-target" }, categories: ["interaction"], insetTypes: ["safeArea"] },
     ]);
+  });
+});
+
+describe("capLayoutWarnings", () => {
+  const makeWarning = (severity: LayoutWarning["severity"], topOverflow: number): LayoutWarning => ({
+    type: "important-content-under-inset",
+    severity,
+    element: { text: "x", bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
+    categories: ["text"],
+    insetTypes: ["systemBars"],
+    sides: ["top"],
+    overflowPx: { top: topOverflow },
+    insetPx: { top: 20 },
+    overlapPercent: 100,
+    confidence: "medium",
+  });
+
+  test("returns the original array unchanged when at or under the cap", () => {
+    const warnings = Array.from({ length: MAX_LAYOUT_WARNINGS }, () => makeWarning("info", 1));
+    const result = capLayoutWarnings(warnings);
+    expect(result.warnings).toBe(warnings);
+    expect(result.total).toBe(MAX_LAYOUT_WARNINGS);
+  });
+
+  test("caps to MAX_LAYOUT_WARNINGS and reports the pre-cap total when over", () => {
+    const warnings = Array.from({ length: MAX_LAYOUT_WARNINGS + 25 }, () => makeWarning("info", 1));
+    const result = capLayoutWarnings(warnings);
+    expect(result.warnings).toHaveLength(MAX_LAYOUT_WARNINGS);
+    expect(result.total).toBe(MAX_LAYOUT_WARNINGS + 25);
+  });
+
+  test("keeps the highest-severity, largest-overflow warnings when trimming", () => {
+    // One high-priority (warning severity, large overflow) among many low ones.
+    const low = Array.from({ length: MAX_LAYOUT_WARNINGS + 10 }, () => makeWarning("info", 1));
+    const high = makeWarning("warning", 999);
+    const result = capLayoutWarnings([...low, high]);
+    expect(result.warnings).toHaveLength(MAX_LAYOUT_WARNINGS);
+    expect(result.warnings).toContain(high);
   });
 });

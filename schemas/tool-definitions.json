@@ -4148,6 +4148,9 @@
             "additionalProperties": false
           }
         },
+        "layoutWarningsTruncated": {
+          "type": "number"
+        },
         "viewHierarchy": {
           "type": "object",
           "properties": {

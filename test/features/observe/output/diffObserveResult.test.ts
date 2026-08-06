@@ -1565,6 +1565,7 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
     awaitTimeout: { from: false, to: true },
     awaitDuration: { from: undefined, to: 250 },
     layoutWarnings: { from: undefined, to: [warning] },
+    layoutWarningsTruncated: { from: undefined, to: 150 },
     error: { from: undefined, to: "capture failed" },
   };
 
@@ -1578,6 +1579,7 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
     "error",
     "intentChooserDetected",
     "layoutWarnings",
+    "layoutWarningsTruncated",
     "notificationPermissionDetected",
     "rotation",
     "userId",

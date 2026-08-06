@@ -456,6 +456,7 @@ export const DIFF_SCALAR_FIELDS: readonly string[] = [
   "awaitTimeout",
   "awaitDuration",
   "layoutWarnings",
+  "layoutWarningsTruncated",
   "error",
 ];
 

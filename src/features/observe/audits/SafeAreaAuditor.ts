@@ -14,6 +14,44 @@ type WarningCandidate = {
 };
 
 /**
+ * Upper bound on emitted `layoutWarnings`. The audit now runs on every
+ * observation, so an unbounded array would bloat every result — and, under
+ * `--actions-diff-observe`, the scalar diff that copies both the before and
+ * after arrays into `{from, to}`. Real screens self-limit to a handful (only
+ * nodes physically inside the thin inset strips are flagged), so this cap only
+ * ever trims pathological inputs; when it does, the truncation is surfaced via
+ * `ObserveResult.layoutWarningsTruncated` rather than dropped silently.
+ */
+export const MAX_LAYOUT_WARNINGS = 100;
+
+/**
+ * Cap the advisory list at {@link MAX_LAYOUT_WARNINGS}. Returns the (possibly
+ * trimmed) warnings plus the pre-cap `total`. When trimming, the
+ * highest-severity, largest-overflow warnings are kept; when not, the original
+ * array is returned unchanged (identical order), so realistic screens are never
+ * reordered or altered.
+ */
+export function capLayoutWarnings(warnings: LayoutWarning[]): { warnings: LayoutWarning[]; total: number } {
+  if (warnings.length <= MAX_LAYOUT_WARNINGS) {
+    return { warnings, total: warnings.length };
+  }
+  const kept = [...warnings]
+    .sort((a, b) => layoutWarningPriority(b) - layoutWarningPriority(a))
+    .slice(0, MAX_LAYOUT_WARNINGS);
+  return { warnings: kept, total: warnings.length };
+}
+
+/** Higher = kept first when capping: `warning` severity outranks `info`, then larger total overflow. */
+function layoutWarningPriority(warning: LayoutWarning): number {
+  const severityRank = warning.severity === "warning" ? 1_000_000 : 0;
+  let overflow = 0;
+  for (const value of Object.values(warning.overflowPx ?? {})) {
+    overflow += value ?? 0;
+  }
+  return severityRank + overflow;
+}
+
+/**
  * Report-only edge-to-edge inspection. It intentionally warns about potential
  * important-content overlap rather than declaring a screen non-compliant:
  * backgrounds and scrolling content are often meant to draw edge-to-edge.

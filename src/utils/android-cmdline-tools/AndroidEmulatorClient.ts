@@ -64,7 +64,7 @@ export interface AndroidEmulator {
    * @param avdName - The AVD name to check
    * @returns Promise with boolean indicating if the AVD is running
    */
-  isAvdRunning(avdName: string): Promise<boolean>;
+  isAvdRunning(avdName: string, options?: { bypassDeviceListCache?: boolean }): Promise<boolean>;
 
   /**
    * Check if a specific AVD is currently starting (booting up)
@@ -77,7 +77,10 @@ export interface AndroidEmulator {
    * Check if any emulator is currently running
    * @returns Promise with array of running emulator info
    */
-  getBootedDevices(onlyEmulators?: boolean): Promise<BootedDevice[]>;
+  getBootedDevices(
+    onlyEmulators?: boolean,
+    options?: { bypassDeviceListCache?: boolean }
+  ): Promise<BootedDevice[]>;
 
   /**
    * Start an emulator with the specified AVD
@@ -775,8 +778,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param avdName - The AVD name to check
    * @returns Promise with boolean indicating if the AVD is running
    */
-  async isAvdRunning(avdName: string): Promise<boolean> {
-    const runningEmulators = await this.getBootedDevices();
+  async isAvdRunning(
+    avdName: string,
+    options: { bypassDeviceListCache?: boolean } = {}
+  ): Promise<boolean> {
+    const runningEmulators = await this.getBootedDevices(false, options);
     return runningEmulators.some(emulator => emulator.name === avdName);
   }
 
@@ -841,9 +847,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * Check if any emulator is currently running
    * @returns Promise with array of running emulator info
    */
-  async getBootedDevices(onlyEmulators: boolean = false): Promise<BootedDevice[]> {
+  async getBootedDevices(
+    onlyEmulators: boolean = false,
+    options: { bypassDeviceListCache?: boolean } = {}
+  ): Promise<BootedDevice[]> {
     try {
-      return await this.getBootedDevicesChecked(onlyEmulators);
+      return await this.getBootedDevicesChecked(onlyEmulators, options);
     } catch (error) {
       logger.debug(`[DeviceListTimeout] Failed to get running emulators: ${error}`);
       return [];
@@ -864,7 +873,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     {
       const adb = this.adbFactory.create(null);
       perf.startOperation("adbDeviceScan");
-      const devices = await adb.getBootedAndroidDevices({ bypassCache: options.bypassDeviceListCache });
+      const devices = await adb.getBootedAndroidDevices({
+        bypassCache: options.bypassDeviceListCache,
+        throwOnMissingAdb: true,
+      });
       perf.endOperation("adbDeviceScan");
       const runningDevices: BootedDevice[] = [];
 
@@ -1050,7 +1062,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     // Check if already running or starting
     perf.startOperation("checkAlreadyRunning");
-    const alreadyRunning = await this.isAvdRunning(avdName);
+    const alreadyRunning = await this.isAvdRunning(avdName, { bypassDeviceListCache: true });
     const alreadyStarting = !alreadyRunning && await this.isAvdStarting(avdName);
     perf.endOperation("checkAlreadyRunning");
 
@@ -1346,7 +1358,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @returns Promise that resolves when emulator is stopped
    */
   async killDevice(device: BootedDevice): Promise<void> {
-    const runningEmulators = await this.getBootedDevices();
+    const runningEmulators = await this.getBootedDevicesChecked(false, { bypassDeviceListCache: true });
     const emulator = runningEmulators.find(emu => emu.deviceId === device.deviceId);
 
     if (!emulator || !emulator.deviceId) {
@@ -1536,7 +1548,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
           // For local emulators, check for running devices
           logger.debug(`Checking for running local emulators...`);
-          const runningEmulators = await this.getBootedDevices();
+          const runningEmulators = await this.getBootedDevices(false, { bypassDeviceListCache: true });
           logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);
 
           if (runningEmulators.length > 0) {

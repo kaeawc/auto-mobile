@@ -587,6 +587,44 @@ describe("criticalSection tool", () => {
     expect(executionLog).toEqual(["step1", "failure"]);
   });
 
+  test("fails when a nested tool returns a structured MCP error envelope", async () => {
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
+    expect(tool).toBeDefined();
+
+    const fakeDevice: BootedDevice = {
+      platform: "android",
+      deviceId: "test-device-structured-failure",
+      name: "Test Device Structured Failure",
+    };
+
+    ToolRegistry.register("mockStructuredFailure", "structured failure", z.object({}), async () => ({
+      isError: true,
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          success: false,
+          message: "Failed to kill android device: Emulator is not running",
+          error: {
+            code: "device_already_stopped",
+            message: "Failed to kill android device: Emulator is not running",
+          },
+        }),
+      }],
+    }));
+
+    CriticalSectionCoordinator.getInstance().registerExpectedDevices("structured-failure-lock", 1);
+
+    await expect(
+      tool!.deviceAwareHandler!(fakeDevice, {
+        lock: "structured-failure-lock",
+        deviceCount: 1,
+        steps: [{ tool: "mockStructuredFailure", params: {} }],
+      }, undefined, undefined)
+    ).rejects.toThrow(
+      /device_already_stopped: Failed to kill android device: Emulator is not running/
+    );
+  });
+
   test("wraps a step failure with the documented device + step context", async () => {
     const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();

@@ -24,7 +24,26 @@ object ToolResultParser {
       element as? JsonObject ?: throw SerializationException("Tool result is not a JSON object")
 
     val success = inferSuccess(objectElement)
-    val error = objectElement["error"]?.jsonPrimitive?.content
+    val error =
+      objectElement["error"]?.let { errorElement ->
+        when (errorElement) {
+          // A structured `{ code, message }` error (e.g. the killDevice
+          // `device_already_stopped` envelope) is flattened to `code: message`,
+          // matching how the TypeScript plan/critical-section paths render it, so
+          // Kotlin consumers keep the machine-readable code without reparsing the
+          // raw payload.
+          is JsonObject -> {
+            val code = errorElement["code"]?.jsonPrimitive?.content
+            val message = errorElement["message"]?.jsonPrimitive?.content
+            when {
+              code != null && message != null -> "$code: $message"
+              message != null -> message
+              else -> errorElement.toString()
+            }
+          }
+          else -> errorElement.jsonPrimitive.content
+        }
+      }
 
     val response =
       when (toolName) {

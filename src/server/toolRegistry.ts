@@ -23,6 +23,7 @@ import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { getMcpRecorder } from "./mcpRecordingManager";
 import { formatToolResultLog } from "./toolResultLog";
+import { formatStructuredToolError } from "../utils/formatStructuredToolError";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
 import { finalizeToolResponse, type ObservationArtifactWriter, type ObservationBaselineStore } from "./finalizeToolResponse";
@@ -685,13 +686,13 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       ? unwrapped.success !== false
       : true;
     const toolError = unwrapped && typeof unwrapped === "object" && "error" in unwrapped
-      ? String(unwrapped.error || "")
+      ? formatStructuredToolError(unwrapped.error) ?? String(unwrapped.error ?? "")
       : null;
     if (unwrapped && typeof unwrapped === "object" && "success" in unwrapped) {
       const resultLog = formatToolResultLog({
         toolName: name,
         success: unwrapped.success !== false,
-        error: unwrapped.error,
+        error: toolError ?? unwrapped.error,
         callerTimedOut: signal?.aborted ?? false,
       });
       logger[resultLog.level](resultLog.message);

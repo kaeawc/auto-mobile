@@ -24,6 +24,7 @@ import { DaemonState } from "../daemon/daemonState";
 import { DeviceBootService } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
+import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -79,6 +80,63 @@ export const killDeviceSchema = z.object({
     platform: platformSchema
   })
 });
+
+export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
+
+function isAlreadyStoppedDeviceError(
+  platform: SomePlatform,
+  deviceId: string,
+  error: unknown,
+): boolean {
+  const message = String(error instanceof Error ? error.message : error).toLowerCase();
+  if (platform === "android") {
+    return (
+      (message.includes("not running") && message.includes("emulator")) ||
+      isAdbMissingDeviceError(error, deviceId)
+    );
+  }
+  if (platform === "ios") {
+    return (
+      message.includes("already shut down") ||
+      message.includes("already shutdown") ||
+      message.includes("not booted") ||
+      message.includes("invalid device state") ||
+      message.includes("current state: shutdown")
+    );
+  }
+  return false;
+}
+
+function createToolErrorResponse(code: string, message: string) {
+  return {
+    isError: true,
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({ success: false, message, error: { code, message } }),
+    }],
+  };
+}
+
+function createKillDeviceResponse(
+  args: KillDeviceArgs,
+  timing: unknown,
+  alreadyStoppedMessage?: string,
+) {
+  if (alreadyStoppedMessage !== undefined) {
+    return createToolErrorResponse(
+      DEVICE_ALREADY_STOPPED_ERROR_CODE,
+      alreadyStoppedMessage,
+    );
+  }
+
+  return createJSONToolResponse({
+    message: `${args.device.platform} '${args.device.name}' shutdown successfully`,
+    udid: args.device.deviceId,
+    name: args.device.name,
+    timing,
+    platform: args.device.platform
+  });
+}
 
 // Export interfaces for type safety
 export interface StartDeviceArgs {
@@ -472,11 +530,16 @@ export function registerDeviceTools() {
       if (args.device.platform === "android") {
         devicePool?.markIntentionalShutdown(args.device.deviceId);
       }
+      let alreadyStoppedMessage: string | undefined;
       try {
         await deviceUtils.killDevice(args.device);
       } catch (error) {
-        devicePool?.clearIntentionalShutdown(args.device.deviceId);
-        throw error;
+        if (isAlreadyStoppedDeviceError(args.device.platform, args.device.deviceId, error)) {
+          alreadyStoppedMessage = `Failed to kill ${args.device.platform} device: ${error}`;
+        } else {
+          devicePool?.clearIntentionalShutdown(args.device.deviceId);
+          throw error;
+        }
       }
       perf.endOperation("killProcess");
 
@@ -491,13 +554,7 @@ export function registerDeviceTools() {
       perf.end();
       const timing = perf.getTimings();
 
-      return createJSONToolResponse({
-        message: `${args.device.platform} '${args.device.name}' shutdown successfully`,
-        udid: args.device.deviceId,
-        name: args.device.name,
-        timing,
-        platform: args.device.platform
-      });
+      return createKillDeviceResponse(args, timing, alreadyStoppedMessage);
     } catch (error) {
       throw new ActionableError(`Failed to kill ${args.device.platform} device: ${error}`);
     }

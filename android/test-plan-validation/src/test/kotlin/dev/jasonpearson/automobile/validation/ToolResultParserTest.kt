@@ -124,6 +124,53 @@ class ToolResultParserTest {
   }
 
   @Test
+  fun `parse structured error object preserves the code and message`() {
+    val result =
+      ToolResultParser.parseToolResult(
+        0,
+        "killDevice",
+        """
+        {
+          "success": false,
+          "message": "Failed to kill android device: device already stopped",
+          "error": {
+            "code": "device_already_stopped",
+            "message": "Failed to kill android device: device already stopped"
+          }
+        }
+        """
+          .trimIndent(),
+      )
+
+    assertTrue(!result.success)
+    // The machine-readable code is retained as a `code: message` prefix so
+    // consumers can distinguish idempotent shutdown from other kill failures.
+    assertEquals(
+      "device_already_stopped: Failed to kill android device: device already stopped",
+      result.error,
+    )
+  }
+
+  @Test
+  fun `parse structured error object without a code falls back to the message`() {
+    val result =
+      ToolResultParser.parseToolResult(
+        0,
+        "killDevice",
+        """
+        {
+          "success": false,
+          "error": { "message": "Some other failure" }
+        }
+        """
+          .trimIndent(),
+      )
+
+    assertTrue(!result.success)
+    assertEquals("Some other failure", result.error)
+  }
+
+  @Test
   fun `parse MCP response wrapper`() {
     val payload =
       """

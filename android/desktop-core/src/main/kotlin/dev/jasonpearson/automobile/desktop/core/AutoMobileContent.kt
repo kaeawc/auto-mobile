@@ -2118,7 +2118,10 @@ fun AutoMobileContent(
                           LOG.info(
                             "Killing device ${device.name} (${device.id}) via ${client?.transportName}"
                           )
-                          client?.killDevice(device.name, device.id, platform)
+                          val result = client?.killDevice(device.name, device.id, platform)
+                          if (result?.success == false) {
+                            LOG.info("Failed to kill device: ${result.message}")
+                          }
                         } catch (e: Exception) {
                           LOG.info("Failed to kill device: ${e.message}")
                         }

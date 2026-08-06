@@ -458,4 +458,56 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       (TelemetryRecorder as any).getInstance = originalGetInstance;
     }
   });
+
+  test("records a structured tool error as its code:message, not [object Object]", async () => {
+    const telemetryEvents: Array<{ success: boolean; error: unknown }> = [];
+    const originalGetInstance = (TelemetryRecorder as any).getInstance;
+    (TelemetryRecorder as any).getInstance = () => ({
+      recordToolCallEvent(event: { success: boolean; error: unknown }) {
+        telemetryEvents.push(event);
+      },
+    });
+    const timer = new FakeTimer();
+    timer.setCurrentTime(25);
+
+    try {
+      const handler = new DefaultAfterToolCallHandler();
+      // The already-stopped killDevice envelope (issue #1678): the failure code
+      // and message live inside a nested `error` object.
+      const response = {
+        isError: true,
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            success: false,
+            message: "Failed to kill android device: Emulator is not running",
+            error: {
+              code: "device_already_stopped",
+              message: "Failed to kill android device: Emulator is not running",
+            },
+          }),
+        }],
+      };
+
+      await handler.handle({
+        name: "killDevice",
+        args: {},
+        device: undefined,
+        internalCall: false,
+        response,
+        sessionUuid: "session-1",
+        shouldResolveDevice: false,
+        timer,
+        toolStartMs: 20,
+      });
+
+      expect(telemetryEvents).toHaveLength(1);
+      expect(telemetryEvents[0].success).toBe(false);
+      expect(telemetryEvents[0].error).toBe(
+        "device_already_stopped: Failed to kill android device: Emulator is not running"
+      );
+    } finally {
+      (TelemetryRecorder as any).getInstance = originalGetInstance;
+    }
+  });
 });

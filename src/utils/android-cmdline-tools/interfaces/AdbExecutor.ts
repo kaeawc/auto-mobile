@@ -94,7 +94,10 @@ export interface AdbExecutor {
    * Get the list of booted Android devices
    * @returns Promise with array of booted devices
    */
-  getBootedAndroidDevices(options?: { bypassCache?: boolean }): Promise<BootedDevice[]>;
+  getBootedAndroidDevices(options?: {
+    bypassCache?: boolean;
+    throwOnMissingAdb?: boolean;
+  }): Promise<BootedDevice[]>;
 
   /** Return raw ADB device states, including `offline` and `unauthorized` rows. */
   getDeviceStates?(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<AdbDeviceState[]>;

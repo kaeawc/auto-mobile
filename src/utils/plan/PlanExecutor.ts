@@ -23,10 +23,15 @@ import { Timer, defaultTimer } from "../SystemTimer";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
 import { isDeviceLostError } from "../../server/deviceLossOutcome";
+import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
   summarizeObserveResultForFailure,
   trimObservationForStepCapture,
 } from "./summarizeFailureObservation";
+
+function formatToolError(error: unknown): string {
+  return formatStructuredToolError(error) ?? String(error);
+}
 
 type StepExecutionStatus = "completed" | "failed" | "skipped";
 
@@ -421,7 +426,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         "success" in checkResult &&
         checkResult.success === false
       ) {
-        const error = "error" in checkResult ? String(checkResult.error) : "Tool execution failed";
+        const error = "error" in checkResult ? formatToolError(checkResult.error) : "Tool execution failed";
         if (step.optional) {
           return {
             status: "skipped",

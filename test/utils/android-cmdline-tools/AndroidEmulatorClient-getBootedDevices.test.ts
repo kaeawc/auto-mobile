@@ -5,6 +5,23 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
+class FailingDiscoveryAdbExecutor extends FakeAdbExecutor {
+  override async getBootedAndroidDevices(): Promise<BootedDevice[]> {
+    throw new Error("adb server unavailable");
+  }
+}
+
+class RecordingAdbExecutor extends FakeAdbExecutor {
+  lastDiscoveryOptions: { bypassCache?: boolean; throwOnMissingAdb?: boolean } | undefined;
+
+  override async getBootedAndroidDevices(
+    options?: { bypassCache?: boolean; throwOnMissingAdb?: boolean }
+  ): Promise<BootedDevice[]> {
+    this.lastDiscoveryOptions = options;
+    return super.getBootedAndroidDevices();
+  }
+}
+
 describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
   test("preserves transport identity when AVD-name lookup fails", async () => {
     const adb = new FakeAdbExecutor();
@@ -24,5 +41,40 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       transportId: "42",
       source: "local",
     }]);
+  });
+
+  test("bypasses the device-list cache only when terminating", async () => {
+    const adb = new RecordingAdbExecutor();
+    adb.setDevices([{
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+    } satisfies BootedDevice]);
+    const client = new AndroidEmulatorClient(null, null, new FakeTimer(), new FakeAdbClientFactory(adb));
+
+    await client.getBootedDevices();
+    expect(adb.lastDiscoveryOptions).toMatchObject({ throwOnMissingAdb: true });
+    expect(adb.lastDiscoveryOptions?.bypassCache).toBeFalsy();
+
+    await client.killDevice({
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+    });
+    expect(adb.lastDiscoveryOptions).toMatchObject({
+      bypassCache: true,
+      throwOnMissingAdb: true,
+    });
+  });
+
+  test("propagates discovery failures during shutdown", async () => {
+    const adb = new FailingDiscoveryAdbExecutor();
+    const client = new AndroidEmulatorClient(null, null, new FakeTimer(), new FakeAdbClientFactory(adb));
+
+    await expect(client.killDevice({
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+    })).rejects.toThrow("adb server unavailable");
   });
 });

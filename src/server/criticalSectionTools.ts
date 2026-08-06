@@ -6,6 +6,7 @@ import { createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { formatStructuredToolError } from "../utils/formatStructuredToolError";
 
 // Schema for steps inside critical section.
 // Every sub-step MUST declare a target `device` — there is no routing
@@ -73,6 +74,39 @@ const criticalSectionSchema = addDeviceTargetingToSchema(z.object({
 }));
 
 type CriticalSectionParams = z.infer<typeof criticalSectionSchema>;
+
+function unwrapCriticalSectionResult(result: unknown): Record<string, unknown> | undefined {
+  if (!result || typeof result !== "object") {
+    return undefined;
+  }
+  const directResult = result as Record<string, unknown>;
+  if ("success" in directResult) {
+    return directResult;
+  }
+  const content = directResult.content;
+  const firstContent = Array.isArray(content) ? content[0] : undefined;
+  if (!firstContent || typeof firstContent !== "object") {
+    return undefined;
+  }
+  const text = (firstContent as Record<string, unknown>).text;
+  if (typeof text !== "string") {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : undefined;
+  } catch (error) {
+    logger.debug(`Failed to parse nested critical-section tool response: ${error}`);
+    return undefined;
+  }
+}
+
+function formatCriticalSectionError(result: Record<string, unknown>, tool: string): string {
+  return formatStructuredToolError(result.error)
+    ?? (typeof result.message === "string"
+      ? result.message
+      : `Tool "${tool}" returned failure status`);
+}
 
 /**
  * Critical section tool handler.
@@ -159,10 +193,11 @@ const criticalSectionHandler = async (
           { forPlan: true, targetDevice: device },
         );
 
-        // Check if tool returned failure
-        if (result?.success === false) {
-          const errorMsg =
-						result.error || `Tool "${step.tool}" returned failure status`;
+        // Internal tool calls can return an MCP envelope whose JSON payload
+        // contains the actual success/error fields.
+        const toolResult = unwrapCriticalSectionResult(result);
+        if (toolResult?.success === false) {
+          const errorMsg = formatCriticalSectionError(toolResult, step.tool);
           throw new ActionableError(errorMsg);
         }
 

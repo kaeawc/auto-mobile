@@ -46,6 +46,22 @@ final class PlaygroundThemeTests: XCTestCase {
         assertAA("dark onError/error", .pgDarkOnError, .pgDarkError)
     }
 
+    /// Accent roles used as foreground text (links, status labels) must be readable on
+    /// the background/surface. tertiary is excluded — it is a fill-only role.
+    func testLightAccentRolesReadableAsForeground() {
+        assertAA("light primary-as-text/background", .pgLightPrimary, .pgLightBackground)
+        assertAA("light primary-as-text/surface", .pgLightPrimary, .pgLightSurface)
+        assertAA("light secondary-as-text/background", .pgLightSecondary, .pgLightBackground)
+        assertAA("light error-as-text/background", .pgLightError, .pgLightBackground)
+    }
+
+    func testDarkAccentRolesReadableAsForeground() {
+        assertAA("dark primary-as-text/background", .pgDarkPrimary, .pgDarkBackground)
+        assertAA("dark primary-as-text/surface", .pgDarkPrimary, .pgDarkSurface)
+        assertAA("dark secondary-as-text/background", .pgDarkSecondary, .pgDarkBackground)
+        assertAA("dark error-as-text/background", .pgDarkError, .pgDarkBackground)
+    }
+
     func testShantellSansIsRegistered() {
         let families = UIFont.familyNames
         XCTAssertTrue(

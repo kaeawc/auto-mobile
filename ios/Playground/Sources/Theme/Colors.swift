@@ -29,7 +29,9 @@ extension Color {
     // by PlaygroundContrastTests. Spec: docs/design-docs/playground-design-system.md
 
     // Light role tokens
-    static let pgLightPrimary = Color(hex: 0xDF3028) // marker red — truck outline
+    // Marker red from the truck outline (#DF3028), darkened slightly to #D62A22
+    // so it also meets AA as foreground text on the light background.
+    static let pgLightPrimary = Color(hex: 0xD62A22)
     static let pgLightOnPrimary = Color(hex: 0xFFFFFF)
     static let pgLightSecondary = Color(hex: 0x1F6FC2) // swing / sky blue (AA-tuned)
     static let pgLightOnSecondary = Color(hex: 0xFFFFFF)

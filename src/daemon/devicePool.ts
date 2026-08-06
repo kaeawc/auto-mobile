@@ -82,6 +82,14 @@ export interface PooledDevice {
   avdName?: string;
   /** Source image metadata used to evaluate allocation criteria during recovery. */
   androidImage?: DeviceInfo;
+  /**
+   * Monotonic id for this pooled connection incarnation, assigned when the
+   * device is first added to the pool. A serial (`id`) can be reused across
+   * boots, so this distinguishes "the device we intentionally stopped" from a
+   * later same-serial replacement — see `intentionalShutdowns` (issue: DevicePool
+   * shutdown-marker same-serial-reuse race, follow-up to PR #5015).
+   */
+  incarnation: number;
 }
 
 interface IosLivenessSnapshot {
@@ -103,6 +111,14 @@ interface DeviceDisconnectSessionReleaser {
 interface DeviceReadyListener {
   (deviceId: string): void;
 }
+
+/**
+ * Marker incarnation used when an intentional shutdown is recorded while no
+ * pooled device is present (only an in-flight recovery). Such a marker applies
+ * to whatever incarnation the recovery produces, matching the pre-existing
+ * serial-scoped recovery-cancellation behavior (issue #4915).
+ */
+const INCARNATION_ANY = -1;
 
 /**
  * Device Pool
@@ -139,7 +155,16 @@ export class DevicePool {
   private readonly recoveringAndroidImages: Map<string, DeviceInfo> = new Map();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
-  private readonly intentionallyStoppedDeviceIds: Set<string> = new Set();
+  /**
+   * Serials the user intentionally stopped, mapped to the pooled-device
+   * incarnation that was present at mark time (or {@link INCARNATION_ANY} when
+   * only a recovery was in flight). Consuming this on a disconnect is gated on
+   * incarnation so a stale disconnect for a prior incarnation cannot remove a
+   * same-serial replacement, nor can a later crash of a replacement consume a
+   * marker that belonged to a device that is already gone.
+   */
+  private readonly intentionalShutdowns: Map<string, number> = new Map();
+  private deviceIncarnationCounter = 0;
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
@@ -217,6 +242,7 @@ export class DevicePool {
         errorCount: 0,
         iosVersion: device.iosVersion,
         simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
+        incarnation: this.nextDeviceIncarnation(),
       });
       this.deviceSessionStarts.set(device.deviceId, now);
       await this.setDeviceSessionTracking(device.deviceId, now);
@@ -283,6 +309,7 @@ export class DevicePool {
             errorCount: 0,
             iosVersion: device.iosVersion,
             simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
+            incarnation: this.nextDeviceIncarnation(),
           });
           this.deviceSessionStarts.set(device.deviceId, now);
           this.refreshMissingDeviceMisses.delete(device.deviceId);
@@ -336,7 +363,7 @@ export class DevicePool {
   async addDevice(device: BootedDevice, sourceImage?: DeviceInfo): Promise<void> {
     this.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
     if (sourceImage) {
-      this.intentionallyStoppedDeviceIds.delete(device.deviceId);
+      this.intentionalShutdowns.delete(device.deviceId);
     }
     const existing = this.devices.get(device.deviceId);
     if (existing) {
@@ -366,6 +393,7 @@ export class DevicePool {
         errorCount: 0,
         iosVersion: device.iosVersion,
         simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
+        incarnation: this.nextDeviceIncarnation(),
       });
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
       this.deviceSessionStarts.set(device.deviceId, now);
@@ -411,10 +439,48 @@ export class DevicePool {
     logger.info(`Removed device ${deviceId} from pool and cleared cached data`);
   }
 
+  /**
+   * Apply any intentional-shutdown marker to a disconnect, gated on the device
+   * incarnation. Returns `true` when the disconnect is fully handled here — the
+   * marked device was removed, or the signal was stale and the live device kept —
+   * and `false` when no marker applied and the caller should handle the
+   * disconnect normally.
+   */
+  private async applyIntentionalShutdownOnDisconnect(
+    deviceId: string,
+    device: PooledDevice | undefined,
+    mayBeStaleSignal: boolean,
+  ): Promise<boolean> {
+    const markerIncarnation = this.intentionalShutdowns.get(deviceId);
+    if (markerIncarnation === undefined) {
+      return false;
+    }
+    const appliesToCurrent =
+      !device ||
+      markerIncarnation === INCARNATION_ANY ||
+      markerIncarnation === device.incarnation;
+    if (!appliesToCurrent) {
+      // A different incarnation now holds this serial, so the mark belonged to a
+      // device that is already gone. Drop the stale marker instead of removing
+      // the live replacement (or suppressing its recovery), and let the caller
+      // handle this disconnect on its own merits.
+      this.intentionalShutdowns.delete(deviceId);
+      return false;
+    }
+    if (mayBeStaleSignal && device && await this.wasRebootedAndroidDeviceRediscovered(device)) {
+      // The intentionally-stopped serial is still (or again) booted, so this
+      // disconnect is stale — keep the live device and the marker until a real
+      // disconnect for this incarnation arrives.
+      return true;
+    }
+    this.intentionalShutdowns.delete(deviceId);
+    await this.removeDevice(deviceId);
+    return true;
+  }
+
   async removeDisconnectedDevice(deviceId: string, mayBeStaleSignal: boolean = true): Promise<void> {
     const device = this.devices.get(deviceId);
-    if (this.intentionallyStoppedDeviceIds.delete(deviceId)) {
-      await this.removeDevice(deviceId);
+    if (await this.applyIntentionalShutdownOnDisconnect(deviceId, device, mayBeStaleSignal)) {
       return;
     }
     if (!device || device.sessionId) {
@@ -471,14 +537,26 @@ export class DevicePool {
     return this.devices.get(device.id) === device && !rediscovered;
   }
 
+  /** Assign the next monotonic incarnation id for a newly pooled connection. */
+  private nextDeviceIncarnation(): number {
+    return ++this.deviceIncarnationCounter;
+  }
+
   markIntentionalShutdown(deviceId: string): void {
-    if (this.devices.has(deviceId) || this.recoveringAndroidDeviceIds.has(deviceId)) {
-      this.intentionallyStoppedDeviceIds.add(deviceId);
+    const device = this.devices.get(deviceId);
+    if (device) {
+      // Tie the marker to the incarnation present now, so a later same-serial
+      // replacement is not treated as intentionally stopped.
+      this.intentionalShutdowns.set(deviceId, device.incarnation);
+    } else if (this.recoveringAndroidDeviceIds.has(deviceId)) {
+      // No pooled device yet (an in-flight recovery owns the serial); the mark
+      // applies to whatever incarnation the recovery produces.
+      this.intentionalShutdowns.set(deviceId, INCARNATION_ANY);
     }
   }
 
   clearIntentionalShutdown(deviceId: string): void {
-    this.intentionallyStoppedDeviceIds.delete(deviceId);
+    this.intentionalShutdowns.delete(deviceId);
   }
 
   private async removeDevicesMissingFrom(
@@ -1215,9 +1293,13 @@ export class DevicePool {
   }
 
   private consumeIntentionalShutdown(deviceIds: ReadonlySet<string>): boolean {
+    // Recovery cancellation is deliberately serial-scoped: a user's kill of a
+    // serial cancels a pool reboot of that same serial regardless of incarnation
+    // (issue #4915). Incarnation gating applies only to the disconnect path in
+    // removeDisconnectedDevice.
     let consumed = false;
     for (const deviceId of deviceIds) {
-      consumed = this.intentionallyStoppedDeviceIds.delete(deviceId) || consumed;
+      consumed = this.intentionalShutdowns.delete(deviceId) || consumed;
     }
     return consumed;
   }

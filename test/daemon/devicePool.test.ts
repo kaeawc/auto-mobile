@@ -680,6 +680,87 @@ describe("DevicePool", () => {
     });
   });
 
+  describe("intentional-shutdown marker incarnation scoping", () => {
+    const androidImage = {
+      name: "Pixel 8",
+      platform: "android" as const,
+      isRunning: false,
+      source: "local" as const,
+    };
+
+    const withRebootOnDeath = async (run: () => Promise<void>): Promise<void> => {
+      const original = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      try {
+        await run();
+      } finally {
+        if (original === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = original;
+        }
+      }
+    };
+
+    test("a stale disconnect does not remove an intentionally-stopped device that is still booted", async () => {
+      await withRebootOnDeath(async () => {
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          fakeDeviceManager,
+          new DefaultRetryExecutor(fakeTimer),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { onLoss: true, maxAttempts: 2 },
+        );
+        await devicePool.addDevice(createBootedDevice("emulator-5554", "android", "Pixel 8"), androidImage);
+        devicePool.markIntentionalShutdown("emulator-5554");
+        // The serial is still booted — the kill has not taken effect yet, or a
+        // same-serial device is already back. The disconnect signal is stale.
+        fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
+
+        await devicePool.removeDisconnectedDevice("emulator-5554", true);
+
+        // Before the fix the marker was consumed before the rediscovery check, so
+        // this live device would be removed.
+        expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
+
+        // A genuine disconnect (the serial is truly gone) still honors the mark.
+        fakeDeviceManager.bootedDevices = [];
+        await devicePool.removeDisconnectedDevice("emulator-5554", true);
+        expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      });
+    });
+
+    test("assigns a fresh incarnation per pooled connection and keeps it across a reusing refresh", async () => {
+      await initializeLiveDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
+      const first = devicePool.getDevice("emulator-5554");
+      if (!first) {
+        throw new Error("expected pooled device");
+      }
+      const firstIncarnation = first.incarnation;
+
+      // A refresh that rediscovers the same serial reuses the entry — same
+      // incarnation, so an existing mark for it still applies.
+      await devicePool.refreshDevices();
+      expect(devicePool.getDevice("emulator-5554")?.incarnation).toBe(firstIncarnation);
+
+      // Once the serial leaves and re-appears, it is a new connection and gets a
+      // fresh incarnation, so a mark from the prior incarnation cannot match it.
+      await devicePool.removeDevice("emulator-5554");
+      fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
+      await devicePool.refreshDevices();
+      const second = devicePool.getDevice("emulator-5554");
+      expect(second).not.toBeNull();
+      expect(second!.incarnation).toBeGreaterThan(firstIncarnation);
+    });
+  });
+
   describe("device-ready notifications", () => {
     test("notifies when a boot-ready device reuses an existing serial", async () => {
       const connectedDeviceIds: string[] = [];

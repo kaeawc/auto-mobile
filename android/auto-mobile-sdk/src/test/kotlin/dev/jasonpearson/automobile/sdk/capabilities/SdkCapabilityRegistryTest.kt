@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.sdk.capabilities
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Test
 
 class SdkCapabilityRegistryTest {
@@ -50,6 +52,46 @@ class SdkCapabilityRegistryTest {
     registry.unregister("navigation.compose")
 
     assertFalse(registry.snapshot().capabilities.any { it.id == "navigation.compose" })
+  }
+
+  @Test
+  fun `removing a capability revokes its policy`() {
+    val registry = SdkCapabilityRegistry()
+    registry.markInitialized()
+    registry.register(SdkCapabilityDescriptor("storage.mutation", SdkCapabilityState.SUPPORTED))
+    registry.updatePolicy(SdkCapturePolicy(allowMutations = true))
+
+    registry.unregister("storage.mutation")
+
+    assertFalse(registry.snapshot().policy.allowMutations)
+  }
+
+  @Test
+  fun `lifecycle remains unavailable until its hook is installed`() {
+    val registry = SdkCapabilityRegistry()
+    registry.markInitialized()
+
+    assertEquals(
+      SdkCapabilityState.UNSUPPORTED,
+      registry.snapshot().capabilities.first { it.id == "events.lifecycle" }.state,
+    )
+
+    registry.markLifecycleReady()
+
+    assertEquals(
+      SdkCapabilityState.SUPPORTED,
+      registry.snapshot().capabilities.first { it.id == "events.lifecycle" }.state,
+    )
+  }
+
+  @Test
+  fun `default serialization includes the schema version and false policy values`() {
+    val json = Json.encodeToString(SdkCapabilityDocument.serializer(), SdkCapabilityRegistry().snapshot())
+
+    assertTrue(json.contains("\"schemaVersion\":1"))
+    assertTrue(json.contains("\"captureHeaders\":false"))
+    assertTrue(json.contains("\"captureBodies\":false"))
+    assertTrue(json.contains("\"allowMutations\":false"))
   }
 
   @Test

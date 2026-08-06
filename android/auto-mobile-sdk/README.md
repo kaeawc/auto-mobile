@@ -187,7 +187,8 @@ Notes:
 
 ### AutoMobileSDK
 
-Main SDK class for registering navigation listeners.
+Main SDK class for registering navigation listeners and discovering the host integration's
+capabilities and policy.
 
 ```kotlin
 // Add a navigation listener
@@ -209,7 +210,25 @@ val isEnabled = AutoMobileSDK.isTrackingEnabled
 
 // Get listener count
 val count = AutoMobileSDK.listenerCount
+
+// Discover available SDK capabilities and their reasons when unavailable.
+val capabilities = AutoMobileSDK.capabilities
+
+// Register an optional host hook, such as a storage mutation driver.
+AutoMobileSDK.registerCapability(
+    SdkCapabilityDescriptor("storage.mutation", SdkCapabilityState.SUPPORTED)
+)
+
+// Sensitive capture and mutation access is opt-in and validated atomically.
+AutoMobileSDK.updateCapturePolicy(
+    SdkCapturePolicy(captureHeaders = true, captureBodies = true)
+)
 ```
+
+Capability snapshots are versioned and distinguish `NOT_INITIALIZED`, `DISABLED`, `UNSUPPORTED`,
+`PERMISSION_DENIED`, and `SUPPORTED`. Removing an optional capability restores its unsupported
+descriptor and revokes any policy field that depends on it. Older clients should ignore unknown
+capability fields and use the schema version to select compatible behavior.
 
 ### NavigationEvent
 

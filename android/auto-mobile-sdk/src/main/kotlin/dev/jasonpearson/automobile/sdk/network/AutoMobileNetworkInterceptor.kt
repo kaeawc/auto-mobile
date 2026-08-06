@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.sdk.network
 
 import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -38,6 +39,7 @@ internal class AutoMobileNetworkInterceptor(
   private val maxBodyBytes: Long = MAX_BODY_BYTES,
   /** Optional rule store for mock enforcement and error simulation */
   private val ruleStore: NetworkMockRuleStore.RuleMatcher? = null,
+  private val policyProvider: (() -> SdkCapturePolicy)? = null,
 ) : Interceptor {
 
   companion object {
@@ -64,10 +66,14 @@ internal class AutoMobileNetworkInterceptor(
   override fun intercept(chain: Interceptor.Chain): Response {
     val request = chain.request()
     val startMs = System.currentTimeMillis()
+    val policy = policyProvider?.invoke()
+    val headersEnabled = captureHeaders && (policy?.captureHeaders ?: true)
+    val bodiesEnabled = captureBodies && (policy?.captureBodies ?: true)
+    val mutationsEnabled = policy?.allowMutations ?: true
 
     // Capture request headers — include OkHttp defaults that will be added later
     val reqHeaders =
-      if (captureHeaders) {
+      if (headersEnabled) {
         val headers = request.headers.toHeaderMap().toMutableMap()
         if ("Host" !in headers) headers["Host"] = request.url.host
         if ("User-Agent" !in headers) headers["User-Agent"] = "okhttp/${okhttp3.OkHttp.VERSION}"
@@ -76,13 +82,15 @@ internal class AutoMobileNetworkInterceptor(
 
     // Capture request body
     val reqBody =
-      if (captureBodies && request.body != null) {
+      if (bodiesEnabled && request.body != null) {
         captureRequestBody(request)
       } else null
 
     // --- Mock rule enforcement ---
     val mockRule =
-      ruleStore?.findMatchingRule(request.url.host, request.url.encodedPath, request.method)
+      if (mutationsEnabled) {
+        ruleStore?.findMatchingRule(request.url.host, request.url.encodedPath, request.method)
+      } else null
     if (mockRule != null) {
       val durationMs = System.currentTimeMillis() - startMs
       buffer.add(
@@ -108,7 +116,7 @@ internal class AutoMobileNetworkInterceptor(
     }
 
     // --- Error simulation enforcement ---
-    val errorSim = ruleStore?.getErrorSimulation()
+    val errorSim = if (mutationsEnabled) ruleStore?.getErrorSimulation() else null
     if (errorSim != null) {
       val durationMs = System.currentTimeMillis() - startMs
       return handleErrorSimulation(request, errorSim, startMs, durationMs, reqHeaders, reqBody)
@@ -144,17 +152,17 @@ internal class AutoMobileNetworkInterceptor(
     val responseContentType = response.header("Content-Type")
 
     val finalReqHeaders =
-      if (captureHeaders) {
+      if (headersEnabled) {
         response.request.headers.toHeaderMap()
       } else reqHeaders
 
     val respHeaders =
-      if (captureHeaders) {
+      if (headersEnabled) {
         response.headers.toHeaderMap()
       } else null
 
     val respBody =
-      if (captureBodies && isTextContentType(responseContentType)) {
+      if (bodiesEnabled && isTextContentType(responseContentType)) {
         try {
           response.peekBody(maxBodyBytes).string()
         } catch (_: Exception) {

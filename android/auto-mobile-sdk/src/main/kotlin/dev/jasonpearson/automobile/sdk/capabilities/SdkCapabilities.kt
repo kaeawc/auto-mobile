@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.capabilities
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
 import java.util.LinkedHashMap
 
 /** The lifecycle or availability state of an SDK capability. */
@@ -11,6 +12,7 @@ enum class SdkCapabilityState {
   UNSUPPORTED,
   PERMISSION_DENIED,
   NOT_INITIALIZED,
+  UNKNOWN,
 }
 
 /** A stable identifier and current availability state for one SDK capability. */
@@ -24,14 +26,18 @@ data class SdkCapabilityDescriptor(
 /** Explicit controls for potentially sensitive capture and mutation behavior. */
 @Serializable
 data class SdkCapturePolicy(
+  @EncodeDefault(EncodeDefault.Mode.ALWAYS)
   val captureHeaders: Boolean = false,
+  @EncodeDefault(EncodeDefault.Mode.ALWAYS)
   val captureBodies: Boolean = false,
+  @EncodeDefault(EncodeDefault.Mode.ALWAYS)
   val allowMutations: Boolean = false,
 )
 
 /** Versioned machine-readable description of the SDK integration. */
 @Serializable
 data class SdkCapabilityDocument(
+  @EncodeDefault(EncodeDefault.Mode.ALWAYS)
   val schemaVersion: Int = 1,
   val capabilities: List<SdkCapabilityDescriptor>,
   val policy: SdkCapturePolicy,
@@ -59,6 +65,13 @@ internal class SdkCapabilityRegistry {
     synchronized(lock) { initialized = true }
   }
 
+  fun markLifecycleReady() {
+    synchronized(lock) {
+      descriptors["events.lifecycle"] =
+        SdkCapabilityDescriptor("events.lifecycle", SdkCapabilityState.SUPPORTED)
+    }
+  }
+
   fun markShutdown() {
     synchronized(lock) {
       initialized = false
@@ -75,11 +88,23 @@ internal class SdkCapabilityRegistry {
 
   fun register(descriptor: SdkCapabilityDescriptor) {
     require(descriptor.id.isNotBlank()) { "Capability id must not be blank" }
-    synchronized(lock) { descriptors[descriptor.id] = descriptor }
+    synchronized(lock) {
+      require(descriptor.id !in reservedCapabilities || descriptor.id in hostManagedCapabilities) {
+        "Capability ${descriptor.id} is managed by the SDK"
+      }
+      descriptors[descriptor.id] = descriptor
+    }
   }
 
   fun unregister(id: String) {
-    synchronized(lock) { descriptors.remove(id) }
+    synchronized(lock) {
+      if (id in defaultDescriptors) {
+        descriptors[id] = defaultDescriptors.getValue(id)
+        revokePolicyFor(id)
+      } else {
+        descriptors.remove(id)
+      }
+    }
   }
 
   fun updatePolicy(next: SdkCapturePolicy) {
@@ -120,43 +145,70 @@ internal class SdkCapabilityRegistry {
     }
   }
 
+  fun currentPolicy(): SdkCapturePolicy = synchronized(lock) { policy }
+
   private fun isSupported(id: String): Boolean {
     val descriptor = descriptors[id]
     return initialized && enabled && descriptor?.state == SdkCapabilityState.SUPPORTED
   }
 
   private fun registerDefaults() {
-    descriptors["events.navigation"] =
-      SdkCapabilityDescriptor("events.navigation", SdkCapabilityState.SUPPORTED)
-    descriptors["events.lifecycle"] =
-      SdkCapabilityDescriptor("events.lifecycle", SdkCapabilityState.SUPPORTED)
-    descriptors["network.capture"] =
-      SdkCapabilityDescriptor("network.capture", SdkCapabilityState.SUPPORTED)
-    descriptors["storage.read"] =
-      SdkCapabilityDescriptor("storage.read", SdkCapabilityState.SUPPORTED)
-    descriptors["storage.mutation"] =
-      SdkCapabilityDescriptor(
-        "storage.mutation",
-        SdkCapabilityState.UNSUPPORTED,
-        "No application-provided storage driver is registered",
+    defaultDescriptors.forEach { (id, descriptor) -> descriptors[id] = descriptor }
+  }
+
+  private fun revokePolicyFor(id: String) {
+    policy =
+      when (id) {
+        "network.capture" ->
+          policy.copy(captureHeaders = false, captureBodies = false)
+        "storage.mutation", "network.control" ->
+          policy.copy(allowMutations = false)
+        else -> policy
+      }
+  }
+
+  private companion object {
+    val hostManagedCapabilities =
+      setOf("storage.mutation", "ui.observe", "ui.control", "network.control")
+    val defaultDescriptors =
+      linkedMapOf(
+        "events.navigation" to
+          SdkCapabilityDescriptor("events.navigation", SdkCapabilityState.SUPPORTED),
+        "events.lifecycle" to
+          SdkCapabilityDescriptor(
+            "events.lifecycle",
+            SdkCapabilityState.UNSUPPORTED,
+            "Lifecycle hook has not been installed",
+          ),
+        "network.capture" to
+          SdkCapabilityDescriptor("network.capture", SdkCapabilityState.SUPPORTED),
+        "storage.read" to
+          SdkCapabilityDescriptor("storage.read", SdkCapabilityState.SUPPORTED),
+        "storage.mutation" to
+          SdkCapabilityDescriptor(
+            "storage.mutation",
+            SdkCapabilityState.UNSUPPORTED,
+            "No application-provided storage driver is registered",
+          ),
+        "ui.observe" to
+          SdkCapabilityDescriptor(
+            "ui.observe",
+            SdkCapabilityState.UNSUPPORTED,
+            "No UI observation hook is registered",
+          ),
+        "ui.control" to
+          SdkCapabilityDescriptor(
+            "ui.control",
+            SdkCapabilityState.UNSUPPORTED,
+            "No UI control hook is registered",
+          ),
+        "network.control" to
+          SdkCapabilityDescriptor(
+            "network.control",
+            SdkCapabilityState.UNSUPPORTED,
+            "No network control hook is registered",
+          ),
       )
-    descriptors["ui.observe"] =
-      SdkCapabilityDescriptor(
-        "ui.observe",
-        SdkCapabilityState.UNSUPPORTED,
-        "No UI observation hook is registered",
-      )
-    descriptors["ui.control"] =
-      SdkCapabilityDescriptor(
-        "ui.control",
-        SdkCapabilityState.UNSUPPORTED,
-        "No UI control hook is registered",
-      )
-    descriptors["network.control"] =
-      SdkCapabilityDescriptor(
-        "network.control",
-        SdkCapabilityState.UNSUPPORTED,
-        "No network control hook is registered",
-      )
+    val reservedCapabilities = defaultDescriptors.keys
   }
 }

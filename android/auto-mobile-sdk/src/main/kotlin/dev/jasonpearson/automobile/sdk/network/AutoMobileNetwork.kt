@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.sdk.network
 
 import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import okhttp3.Interceptor
 import okhttp3.WebSocketListener
 
@@ -62,6 +63,7 @@ object AutoMobileNetwork {
   @Volatile private var buffer: SdkEventBuffer? = null
   @Volatile private var applicationId: String? = null
   @Volatile private var ruleStore: NetworkMockRuleStore.RuleMatcher? = null
+  @Volatile private var capturePolicyProvider: (() -> SdkCapturePolicy)? = null
 
   /**
    * Initialize the network module with a shared event buffer.
@@ -78,6 +80,10 @@ object AutoMobileNetwork {
     this.applicationId = applicationId
     this.buffer = buffer
     this.ruleStore = ruleStore
+  }
+
+  internal fun setCapturePolicyProvider(provider: (() -> SdkCapturePolicy)?) {
+    capturePolicyProvider = provider
   }
 
   /**
@@ -102,6 +108,7 @@ object AutoMobileNetwork {
       captureHeaders,
       captureBodies,
       ruleStore = ruleStore,
+      policyProvider = capturePolicyProvider,
     )
   }
 
@@ -121,6 +128,9 @@ object AutoMobileNetwork {
     captureBodies: Boolean = false,
   ) {
     val buf = buffer ?: return
+    val policy = capturePolicyProvider?.invoke()
+    val headersEnabled = captureHeaders && (policy?.captureHeaders ?: true)
+    val bodiesEnabled = captureBodies && (policy?.captureBodies ?: true)
     val parsedUrl =
       if (record.host == null || record.path == null) {
         try {
@@ -144,10 +154,10 @@ object AutoMobileNetwork {
         host = host,
         path = path,
         error = record.error,
-        requestHeaders = if (captureHeaders) record.requestHeaders else null,
-        responseHeaders = if (captureHeaders) record.responseHeaders else null,
-        requestBody = if (captureBodies) record.requestBody else null,
-        responseBody = if (captureBodies) record.responseBody else null,
+        requestHeaders = if (headersEnabled) record.requestHeaders else null,
+        responseHeaders = if (headersEnabled) record.responseHeaders else null,
+        requestBody = if (bodiesEnabled) record.requestBody else null,
+        responseBody = if (bodiesEnabled) record.responseBody else null,
         contentType = record.contentType,
       )
     )
@@ -170,5 +180,6 @@ object AutoMobileNetwork {
     buffer = null
     applicationId = null
     ruleStore = null
+    capturePolicyProvider = null
   }
 }

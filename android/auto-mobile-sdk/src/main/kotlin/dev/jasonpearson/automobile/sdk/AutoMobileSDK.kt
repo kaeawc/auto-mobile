@@ -128,6 +128,7 @@ object AutoMobileSDK {
     this.context = context.applicationContext
     this.configuration = configuration
     capabilityRegistry.markInitialized()
+    AutoMobileNetwork.setCapturePolicyProvider { capabilityRegistry.currentPolicy() }
     val appContext = this.context!!
 
     // Create disk persistence for events
@@ -214,6 +215,7 @@ object AutoMobileSDK {
         }
       sessionLifecycleObserver = observer
       ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
+      capabilityRegistry.markLifecycleReady()
       RecompositionTracker.initialize(appContext)
       RecompositionTracker.setEnabled(_isEnabled)
       AutoMobileNotifications.initialize(appContext)
@@ -460,6 +462,7 @@ object AutoMobileSDK {
     RecompositionTracker.reset()
     listeners.clear()
     _isEnabled = true
+    AutoMobileNetwork.setCapturePolicyProvider(null)
     capabilityRegistry.markShutdown()
     configuration = null
     context = null

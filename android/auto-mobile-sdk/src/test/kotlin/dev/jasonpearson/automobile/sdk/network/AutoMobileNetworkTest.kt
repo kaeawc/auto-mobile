@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.network
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import java.util.concurrent.Executors
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -137,6 +138,29 @@ class AutoMobileNetworkTest {
     assertEquals(mapOf("X-Request-Id" to "abc"), event.responseHeaders)
     assertEquals("{\"name\":\"test\"}", event.requestBody)
     assertEquals("{\"id\":1}", event.responseBody)
+  }
+
+  @Test
+  fun `registered capture policy overrides per-call capture flags`() {
+    val (buffer, flushed) = collectingBuffer()
+    AutoMobileNetwork.initialize("com.example", buffer)
+    AutoMobileNetwork.setCapturePolicyProvider { SdkCapturePolicy() }
+
+    AutoMobileNetwork.recordRequest(
+      NetworkRequestRecord(
+        url = "https://api.example.com/users",
+        method = "POST",
+        requestHeaders = mapOf("Authorization" to "Bearer token"),
+        requestBody = "{\"name\":\"test\"}",
+      ),
+      captureHeaders = true,
+      captureBodies = true,
+    )
+    buffer.flush()
+
+    val event = flushed[0][0] as SdkNetworkRequestEvent
+    assertNull(event.requestHeaders)
+    assertNull(event.requestBody)
   }
 
   @Test

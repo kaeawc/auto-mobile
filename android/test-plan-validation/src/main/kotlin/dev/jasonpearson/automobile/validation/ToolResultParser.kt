@@ -27,8 +27,20 @@ object ToolResultParser {
     val error =
       objectElement["error"]?.let { errorElement ->
         when (errorElement) {
-          is JsonObject ->
-            errorElement["message"]?.jsonPrimitive?.content ?: errorElement.toString()
+          // A structured `{ code, message }` error (e.g. the killDevice
+          // `device_already_stopped` envelope) is flattened to `code: message`,
+          // matching how the TypeScript plan/critical-section paths render it, so
+          // Kotlin consumers keep the machine-readable code without reparsing the
+          // raw payload.
+          is JsonObject -> {
+            val code = errorElement["code"]?.jsonPrimitive?.content
+            val message = errorElement["message"]?.jsonPrimitive?.content
+            when {
+              code != null && message != null -> "$code: $message"
+              message != null -> message
+              else -> errorElement.toString()
+            }
+          }
           else -> errorElement.jsonPrimitive.content
         }
       }

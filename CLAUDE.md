@@ -100,11 +100,26 @@ bun test --bail        # Stop on first failure (no cache)
 bun test <file>        # Run specific test file (no cache)
 ```
 
+## Toolchain: TypeScript 7 (tsgo) + oxlint + oxfmt
+
+Linting/type-checking/formatting run on the Oxc/TypeScript-7 toolchain, not
+ESLint or `tsc`:
+
+- **Type-check**: `tsgo` (`@typescript/native-preview`, the TS7 native compiler).
+- **Lint**: `oxlint` with a custom JS plugin (`oxlint-plugins/auto-mobile.mjs`)
+  for the repo's rules. Config in `.oxlintrc.json`.
+- **Format**: `oxfmt` (`bun run format` to write, `bun run format:check` to gate).
+
+`tsconfig.json` uses `module: ESNext` + `moduleResolution: bundler` (TS7 removed
+the legacy `node10` that `"node"` aliased to; bundler also matches how bun
+resolves this repo's extensionless imports and is the config `tsgolint` reads for
+oxlint's `--type-aware` rules).
+
 ## Typecheck baseline gate
 
-Bun's bundler skips type-checking, so `build`/`test` do NOT catch `tsc` errors.
-A scoped gate (issue #3001) runs `tsc --noEmit` and fails CI only on errors NOT
-already in the committed baseline (`scripts/typecheck-baseline.txt`, ~550
+Bun's bundler skips type-checking, so `build`/`test` do NOT catch type errors.
+A scoped gate (issue #3001) runs `tsgo --noEmit` and fails CI only on errors NOT
+already in the committed baseline (`scripts/typecheck-baseline.txt`, ~187
 tolerated errors):
 
 ```bash
@@ -116,39 +131,44 @@ When you FIX type errors, run `bun run typecheck:update` and commit the smaller
 baseline — it is a one-way ratchet (`--update` refuses to grow it without
 `-- --allow-grow`). When you INTRODUCE a new error the gate prints it; fix it, or
 (rarely) record it with `typecheck:update`. The baseline is version-sensitive:
-regenerate it in the same PR that bumps the `typescript` dependency.
+`@typescript/native-preview` is a dated preview build, so regenerate the baseline
+in the same PR that bumps it (the `# generated-with:` header records the version
+and the gate warns on drift).
 
-## Lint suppressions baseline
+## oxlint ratchet baseline
 
-`eslint-suppressions.json` is ESLint's native bulk-suppressions file. It records
-the pre-existing violations of rules that were added after the code was written,
-so CI gates NEW code without requiring a big-bang rewrite. It is the lint
-equivalent of the typecheck baseline above.
+oxlint has no equivalent of ESLint's native bulk-suppressions file — only inline
+`oxlint-disable` directives and whole-rule `--allow`. So the count-based ratchet
+that gates NEW violations of rules the code predates is an external gate,
+`scripts/oxlint-baseline.sh` (the lint equivalent of the typecheck baseline), with
+its counts in `scripts/oxlint-baseline.txt`.
 
 ```bash
-bun run lint            # gate: fail on NEW violations (CI runs this)
+bun run lint            # oxlint --fix, then the ratchet gate (CI runs this)
 bun run lint:prune      # after FIXING violations: shrink the baseline
-bun run lint:baseline   # after ADDING a ratchet rule: record existing violations
+bun run lint:baseline   # alias of lint:prune (regenerate the baseline)
 ```
 
-Suppressions are keyed per file + per rule and store only a **count**. Two
-consequences worth knowing:
+Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (a
+non-zero exit). The ratchet only gates the rules set to `warn` because they carry
+pre-existing violations: `complexity`, `max-depth`, `auto-mobile/catch-convention`,
+`auto-mobile/no-unknown-cast`, and the two type-aware promise rules
+(`typescript/no-floating-promises`, `typescript/no-misused-promises`). The baseline
+is keyed per file + per rule with only a **count**, so it does not churn on line
+shifts. Because the type-aware rules need type info, the ratchet script runs
+`oxlint --type-aware` (tsgolint) — which is why the main `oxlint --fix` does not,
+and CI type-checks only once. When you FIX violations, run `bun run lint:prune` and
+commit the smaller file; the ratchet refuses to grow without `-- --allow-grow`.
 
-- When you fix a violation the baseline is momentarily larger than reality.
-  `bun run lint` passes `--pass-on-unpruned-suppressions` so improving code never
-  breaks the build; run `bun run lint:prune` and commit the smaller file to lock
-  the gain in. Without that flag ESLint exits **2** on any over-count.
-- Because the entry is only a count, a rule with budget in a file can absorb a
-  different violation *of that same rule*. Keep a ratchet rule's selectors in
-  their own rule (see `auto-mobile/no-accumulator-foreach`) rather than folding
-  them into a shared rule like `no-restricted-syntax`, or a baselined violation
-  can be silently traded for a genuinely-dangerous one.
-
-Only add **non-auto-fixable** rules to this ratchet: `lint` runs `--fix`, so an
-auto-fixable rule would rewrite `src/` on every CI run.
+`bun run lint` runs `oxlint --fix`, so only **non-auto-fixable** rules belong to
+the ratchet — an auto-fixable one would rewrite `src/` on every CI run. Keep each
+ratchet rule as its own rule (the custom plugin already does) rather than folding
+selectors into a shared one, so a baselined violation cannot be silently traded
+for a genuinely-dangerous one.
 
 Current ratchet rules and thresholds: `complexity` 12, `max-depth` 3,
-`max-nested-callbacks` 3, `auto-mobile/no-accumulator-foreach` (src/ only).
+`max-nested-callbacks` 3 (0 baselined), `auto-mobile/no-accumulator-foreach`
+(src/ only, 0 baselined).
 
 Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form

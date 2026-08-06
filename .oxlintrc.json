@@ -1,0 +1,102 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript"],
+  "jsPlugins": ["./oxlint-plugins/auto-mobile.mjs"],
+  "ignorePatterns": [
+    "ios/**", "android/**", "scratch/**", "dist/**", "node_modules/**",
+    "**/*.generated.ts", "**/generated/**", "**/*.d.ts",
+    "**/*.js", "**/*.mjs", "**/*.cjs", "**/*.jsx"
+  ],
+  "categories": { "correctness": "off" },
+  "rules": {
+    "eqeqeq": "error",
+    "accessor-pairs": ["error", { "getWithoutSet": false, "setWithoutGet": false }],
+    "curly": ["error", "all"],
+    "prefer-const": "error",
+    "no-var": "error",
+    "no-with": "error",
+    "no-multi-str": "error",
+    "no-caller": "error",
+    "no-implied-eval": "error",
+    "no-labels": "error",
+    "no-self-compare": "error",
+    "no-shadow-restricted-names": "error",
+    "no-cond-assign": "error",
+    "no-debugger": "error",
+    "no-dupe-keys": "error",
+    "no-duplicate-case": "error",
+    "no-empty-character-class": "error",
+    "no-unreachable": "error",
+    "no-unsafe-negation": "error",
+    "radix": "error",
+    "valid-typeof": "error",
+    "no-implicit-globals": "error",
+    "no-unused-expressions": ["error", { "allowShortCircuit": true, "allowTernary": true, "allowTaggedTemplates": true }],
+    "no-empty": ["error", { "allowEmptyCatch": false }],
+    "no-proto": "error",
+    "require-yield": "error",
+    "typescript/no-unused-vars": ["error", { "args": "none", "caughtErrors": "none" }],
+    "auto-mobile/no-extension-import": "error",
+    "auto-mobile/naming-convention": "error"
+  },
+  "overrides": [
+    {
+      "files": ["src/**/*.ts"],
+      "rules": {
+        "auto-mobile/no-raw-timer": "error",
+        "auto-mobile/no-structured-content-read": "error",
+        "no-restricted-properties": ["error", {
+          "object": "Math",
+          "property": "random",
+          "message": "Use an injected Random or IdGenerator. Math.random() makes production behavior non-deterministic and bypasses the project's test seams."
+        }],
+        "no-restricted-imports": ["error", {
+          "patterns": [{
+            "group": ["lodash", "lodash/*"],
+            "message": "Prefer the JavaScript/Node standard library or an existing AutoMobile helper. Do not add a direct lodash dependency."
+          }]
+        }],
+        "max-nested-callbacks": ["error", 3],
+        "auto-mobile/no-accumulator-foreach": "error",
+
+        // Ratcheted rules with pre-existing baselined violations. oxlint has no
+        // count-based bulk-suppressions file (ESLint's eslint-suppressions.json),
+        // so these are WARN and gated by scripts/oxlint-baseline.sh (CLAUDE.md).
+        // The two type-aware promise rules require `--type-aware` (tsgolint), so
+        // the ratchet script runs oxlint in that mode; the main `oxlint --fix`
+        // stays fast and CI type-checks only once.
+        "complexity": ["warn", 12],
+        "max-depth": ["warn", 3],
+        "auto-mobile/catch-convention": "warn",
+        "auto-mobile/no-unknown-cast": "warn",
+        "typescript/no-floating-promises": "warn",
+        "typescript/no-misused-promises": "warn"
+      }
+    },
+    {
+      "files": ["src/features/navigation/ScreenFingerprint.ts", "src/features/navigation/ExploreElementExtraction.ts"],
+      "rules": {
+        "typescript/no-explicit-any": "error"
+      }
+    },
+    {
+      "files": ["test/**/*.ts"],
+      "rules": {
+        "no-unused-expressions": "off",
+        "auto-mobile/no-bare-expect": "error"
+      }
+    },
+    {
+      "files": ["test/stress/**/*.ts"],
+      "rules": {
+        "auto-mobile/stress-explicit-timeout": "error"
+      }
+    },
+    {
+      "files": ["**/SystemTimer.ts"],
+      "rules": {
+        "auto-mobile/no-raw-timer": "off"
+      }
+    }
+  ]
+}

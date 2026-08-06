@@ -1,26 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { ESLint } from "eslint";
+import plugin from "../../oxlint-plugins/auto-mobile.mjs";
+import { runRule } from "./oxlintRuleHarness";
 
 const BARE_EXPECT = "`expect(...)` with no matcher chained";
 
-async function lintSnippet(code: string, filePath = "test/bareExpectFixture.test.ts"): Promise<string[]> {
-  const eslint = new ESLint({
-    cwd: process.cwd(),
-    overrideConfigFile: "eslint.config.mjs",
-    // Same rationale as accumulatorForEachRule.test.ts: these snippets live at
-    // paths that do not exist on disk, so opt out of the type-aware config that
-    // would make projectService reject them.
-    overrideConfig: {
-      languageOptions: { parserOptions: { projectService: false, project: null } },
-      rules: {
-        "@typescript-eslint/no-floating-promises": "off",
-        "@typescript-eslint/no-misused-promises": "off",
-      },
-    },
-    fix: false,
-  });
-  const [result] = await eslint.lintText(code, { filePath });
-  return result.messages.map(message => message.message);
+function lintSnippet(code: string): string[] {
+  return runRule(plugin.rules["no-bare-expect"], code);
 }
 
 function matches(messages: string[], fragment: string): boolean {

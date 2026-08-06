@@ -165,7 +165,7 @@ import type {
  * Interface for CtrlProxy providing iOS UI hierarchy and interaction capabilities
  * via WebSocket connection to iOS CtrlProxy
  */
-// eslint-disable-next-line @typescript-eslint/naming-convention -- IOS is an acronym, not a Hungarian-notation interface prefix
+// oxlint-disable-next-line auto-mobile/naming-convention -- IOS is an acronym, not a Hungarian-notation interface prefix
 export interface IOSCtrlProxy extends CtrlProxyClient {
   getLatestHierarchy(
     waitForFresh?: boolean,

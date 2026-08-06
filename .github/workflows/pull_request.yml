@@ -385,7 +385,9 @@ jobs:
               - 'tsconfig.json'
               - 'build.ts'
               - 'knip.json'
-              - 'eslint.config.mjs'
+              - '.oxlintrc.json'
+              - '.oxfmtrc.json'
+              - 'oxlint-plugins/**'
 
       - name: "Decide if Android jobs should run"
         id: android_should_run

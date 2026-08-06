@@ -1,11 +1,11 @@
 #!/usr/bin/env bats
 #
-# Tests for scripts/typecheck-baseline.sh -- the scoped `tsc --noEmit` gate
-# (issue #3001). The gate snapshots the existing ~550 type errors into a
-# committed baseline and fails only on NEW errors, so the core logic under test
-# is the multiset diff between fresh tsc output and the baseline.
+# Tests for scripts/typecheck-baseline.sh -- the scoped `tsgo --noEmit` gate
+# (issue #3001). The gate snapshots the existing type errors into a committed
+# baseline and fails only on NEW errors, so the core logic under test is the
+# multiset diff between fresh tsgo output and the baseline.
 #
-# tsc is stubbed via TYPECHECK_TSC_CMD so the tests are fast and deterministic --
+# tsgo is stubbed via TYPECHECK_TSC_CMD so the tests are fast and deterministic --
 # they never invoke a real compiler. The baseline is redirected to a temp file
 # via TYPECHECK_BASELINE so the committed baseline is never touched.
 
@@ -40,7 +40,7 @@ teardown() {
   [ "$output" -eq 3 ]
 
   # A provenance header is written so version drift can be detected later.
-  grep -q '^# generated-with: tsc' "$TYPECHECK_BASELINE"
+  grep -q '^# generated-with: tsgo' "$TYPECHECK_BASELINE"
 
   # (line,col) is stripped so line shifts do not churn the baseline.
   run grep -c '(10,5)' "$TYPECHECK_BASELINE"
@@ -67,12 +67,12 @@ teardown() {
   [ "$output" -eq 4 ]
 }
 
-@test "check warns (non-fatal) when tsc version differs from the baseline" {
+@test "check warns (non-fatal) when tsgo version differs from the baseline" {
   TYPECHECK_TSC_VERSION="6.0.3" TYPECHECK_TSC_CMD="$FIXTURE_TSC" bash "$SCRIPT" --update
 
   TYPECHECK_TSC_VERSION="9.9.9" TYPECHECK_TSC_CMD="$FIXTURE_TSC" run bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"generated with tsc 6.0.3 but tsc 9.9.9"* ]]
+  [[ "$output" == *"generated with tsgo 6.0.3 but tsgo 9.9.9"* ]]
   [[ "$output" == *"no new type errors"* ]]
 }
 
@@ -308,7 +308,7 @@ teardown() {
   # baseline holds them.
   cat > "$TYPECHECK_BASELINE" <<EOF
 # AutoMobile typecheck baseline (issue #3001) -- see scripts/typecheck-baseline.sh
-# generated-with: tsc 6.0.3
+# generated-with: tsgo 6.0.3
 src/legacy.ts: error TS2339: Property (s) does not exist on type { k: "zebra" | "apple" | "mango"; }.
 EOF
 

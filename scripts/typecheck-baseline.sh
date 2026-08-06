@@ -29,13 +29,15 @@
 # in `# swap-fp:` comment lines and emit a NON-FATAL advisory when a count-stable
 # signature's column set moves. See `swap_fingerprints()` below.
 #
-# Determinism: `tsc` output (message text + which errors fire) is stable only for
-# a FIXED TypeScript version. `typescript` is pinned to an EXACT version in
-# package.json (no caret) precisely so a lockfile patch bump cannot silently flip
-# the gate; the bump PR must pair the version change with `bun run typecheck:update`
-# and commit the regenerated baseline. As defense in depth the baseline still
-# records the tsc version it was generated with (`# generated-with:` header) and
-# this gate warns loudly if the running tsc ever differs.
+# Determinism: `tsgo` output (message text + which errors fire) is stable only for
+# a FIXED compiler version. `@typescript/native-preview` is pinned to an EXACT
+# version in package.json (no caret) precisely so a lockfile patch bump cannot
+# silently flip the gate; the bump PR must pair the version change with
+# `bun run typecheck:update` and commit the regenerated baseline. This matters
+# more, not less, on a preview build: dev snapshots change diagnostics between
+# dated releases. As defense in depth the baseline still records the compiler
+# version it was generated with (`# generated-with:` header) and this gate warns
+# loudly if the running tsgo ever differs.
 #
 # Base drift: the gate diffs against the committed baseline, so if `main` advances
 # with a NEW error (or a second instance of an existing signature) after your
@@ -82,29 +84,37 @@ if [[ "$ALLOW_GROW" == "true" && "$MODE" != "update" ]]; then
   exit 2
 fi
 
-# Prefer the repo-local, pinned tsc. `bunx` resolves node_modules/.bin first when
-# dependencies are installed (always true in CI); it only falls back to fetching
-# when the repo has no local copy. TYPECHECK_TSC_CMD overrides the invocation --
-# used by the BATS tests to inject canned output. It is `eval`ed, so treat it as
-# TRUSTED input only (never wire it from an untrusted source).
+# Prefer the repo-local, pinned tsgo (TypeScript 7 native compiler). `bunx`
+# resolves node_modules/.bin first when dependencies are installed (always true in
+# CI); it only falls back to fetching when the repo has no local copy.
+# TYPECHECK_TSC_CMD overrides the invocation -- used by the BATS tests to inject
+# canned output. It is `eval`ed, so treat it as TRUSTED input only (never wire it
+# from an untrusted source).
+#
+# TypeScript 7 removed the legacy `moduleResolution: node10` (which the old
+# `"node"` value aliased to), so tsconfig.json was migrated to
+# `module: ESNext` + `moduleResolution: bundler` -- the mode that matches how bun
+# actually resolves this repo's extensionless imports, and the same config
+# tsgolint reads for oxlint's `--type-aware` rules.
 run_tsc() {
   if [[ -n "${TYPECHECK_TSC_CMD:-}" ]]; then
     eval "$TYPECHECK_TSC_CMD" 2>&1
   else
-    bunx tsc --noEmit --ignoreDeprecations 6.0 2>&1
+    bunx tsgo --noEmit -p tsconfig.json 2>&1
   fi
 }
 
-# Resolve the running tsc version ("6.0.3"), or "" when it cannot be determined
-# (e.g. the BATS stub, which has no --version). TYPECHECK_TSC_VERSION overrides it
-# for tests. An empty result disables the version-mismatch check (never blocks).
+# Resolve the running tsgo version ("7.0.0-dev.20260707.2"), or "" when it cannot
+# be determined (e.g. the BATS stub, which has no --version). TYPECHECK_TSC_VERSION
+# overrides it for tests. An empty result disables the version-mismatch check
+# (never blocks).
 detect_tsc_version() {
   if [[ -n "${TYPECHECK_TSC_VERSION:-}" ]]; then
     printf '%s' "$TYPECHECK_TSC_VERSION"
   elif [[ -n "${TYPECHECK_TSC_CMD:-}" ]]; then
     printf ''
   else
-    bunx tsc --version 2>/dev/null | awk '{print $NF}' || true
+    bunx tsgo --version 2>/dev/null | awk '{print $NF}' || true
   fi
 }
 
@@ -339,13 +349,13 @@ if [[ "$MODE" == "update" ]]; then
   swap_fp="$(printf '%s\n' "$raw_tsc" | swap_fingerprints)"
   {
     echo "# AutoMobile typecheck baseline (issue #3001) -- see scripts/typecheck-baseline.sh"
-    echo "# generated-with: tsc ${tsc_version:-unknown}"
+    echo "# generated-with: tsgo ${tsc_version:-unknown}"
     printf '%s\n' "$current"
     # Swap-guard fingerprints (issue #3196): `#`-comment lines, ignored by the
     # fatal multiset diff, used only by the non-fatal swap advisory in check mode.
     printf '%s\n' "$swap_fp"
   } > "$BASELINE"
-  echo "Updated $BASELINE ($current_count baseline error(s), tsc ${tsc_version:-unknown})."
+  echo "Updated $BASELINE ($current_count baseline error(s), tsgo ${tsc_version:-unknown})."
   exit 0
 fi
 
@@ -355,11 +365,11 @@ if [[ ! -f "$BASELINE" ]]; then
   exit 1
 fi
 
-# Warn (never fail) when the baseline was generated with a different tsc version:
+# Warn (never fail) when the baseline was generated with a different tsgo version:
 # message text can shift between versions and produce spurious new/fixed diffs.
-baseline_version="$(sed -n 's/^# generated-with: tsc //p' "$BASELINE" | head -1)"
+baseline_version="$(sed -n 's/^# generated-with: tsgo //p' "$BASELINE" | head -1)"
 if [[ -n "$tsc_version" && -n "$baseline_version" && "$tsc_version" != "$baseline_version" ]]; then
-  echo "⚠️  typecheck baseline was generated with tsc $baseline_version but tsc $tsc_version is running." >&2
+  echo "⚠️  typecheck baseline was generated with tsgo $baseline_version but tsgo $tsc_version is running." >&2
   echo "    Diagnostic text can differ between versions; regenerate in the TS-bump PR:" >&2
   echo "    bun run typecheck:update" >&2
 fi

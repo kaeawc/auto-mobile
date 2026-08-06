@@ -24,13 +24,15 @@
       "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
     },
     "lint": {
-      "description": "Run ESLint with auto-fix on source and test files",
+      "description": "Run oxlint with auto-fix on source and test files, then the oxlint ratchet gate",
       "inputs": [
         "src/**",
         "test/**",
         "scripts/**/*.ts",
-        "eslint.config.mjs",
-        "eslint-suppressions.json",
+        "scripts/oxlint-baseline.sh",
+        "scripts/oxlint-baseline.txt",
+        ".oxlintrc.json",
+        "oxlint-plugins/**",
         "tsconfig.json"
       ],
       "outputs": [],

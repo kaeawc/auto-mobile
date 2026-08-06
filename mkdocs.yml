@@ -221,6 +221,10 @@ nav:
       - 'Maven Publication Manifest': release/maven-publication-manifest.md
       - 'Dependency Decisions':
           - 'fast-check': decisions/fast-check.md
+          - 'TypeScript 7 (tsgo)': decisions/typescript-native-preview.md
+          - 'oxlint': decisions/oxlint.md
+          - 'oxlint-tsgolint': decisions/oxlint-tsgolint.md
+          - 'oxfmt': decisions/oxfmt.md
       - 'Codex Automation Thread Report': codex-automation-thread-spam-report.md
   - 'GitHub Discussions': https://github.com/kaeawc/auto-mobile/discussions
   - 'FAQ': faq.md

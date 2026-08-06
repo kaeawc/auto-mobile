@@ -12,9 +12,11 @@
     "test:integration:webrtc-mediamtx": "bash scripts/webrtc/run-mediamtx-publisher-integration.sh",
     "test:integration:webrtc-device": "bash scripts/webrtc/run-mediamtx-device-integration.sh",
     "gate:android-video-baseline": "bun scripts/webrtc/android-video-baseline-gate.ts",
-    "lint": "eslint . --fix --pass-on-unpruned-suppressions && bun scripts/check-host-shell-boundary.ts && bash scripts/check-no-new-direct-simctl.sh && bun scripts/check-no-direct-plutil.ts && bash scripts/check-no-new-direct-xcodebuild.sh && bash scripts/check-no-new-direct-security.sh && bash scripts/check-no-new-direct-git-metadata.sh && bash scripts/check-no-local-shell-quote.sh && bash scripts/check-app-bundle-metadata-boundary.sh && bash scripts/check-ffmpeg-execution-boundary.sh && bash scripts/check-simulator-tcc-sqlite-boundary.sh && bash scripts/check-daemon-launcher-boundary.sh",
-    "lint:prune": "eslint . --prune-suppressions",
-    "lint:baseline": "eslint . --suppress-rule max-depth --suppress-rule complexity --suppress-rule max-nested-callbacks --suppress-rule auto-mobile/no-accumulator-foreach",
+    "lint": "oxlint --fix && bash scripts/oxlint-baseline.sh && bun scripts/check-host-shell-boundary.ts && bash scripts/check-no-new-direct-simctl.sh && bun scripts/check-no-direct-plutil.ts && bash scripts/check-no-new-direct-xcodebuild.sh && bash scripts/check-no-new-direct-security.sh && bash scripts/check-no-new-direct-git-metadata.sh && bash scripts/check-no-local-shell-quote.sh && bash scripts/check-app-bundle-metadata-boundary.sh && bash scripts/check-ffmpeg-execution-boundary.sh && bash scripts/check-simulator-tcc-sqlite-boundary.sh && bash scripts/check-daemon-launcher-boundary.sh",
+    "lint:prune": "bash scripts/oxlint-baseline.sh --update",
+    "lint:baseline": "bash scripts/oxlint-baseline.sh --update",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "typecheck": "bash scripts/typecheck-baseline.sh",
     "typecheck:update": "bash scripts/typecheck-baseline.sh --update",
     "watch": "bun --watch src/index.ts",
@@ -131,9 +133,6 @@
     "qs": "^6.14.2",
     "@ts-morph/common": {
       "minimatch": "3.1.5"
-    },
-    "eslint-plugin-import": {
-      "minimatch": "3.1.5"
     }
   },
   "optionalDependencies": {
@@ -163,19 +162,19 @@
   },
   "devDependencies": {
     "@faker-js/faker": "^10.2.0",
-    "@stylistic/eslint-plugin": "^5.7.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.0.0",
     "@types/pixelmatch": "^5.2.6",
     "@types/pngjs": "^6.0.5",
     "@types/ws": "^8.18.1",
     "@types/xml2js": "^0.4.14",
-    "@typescript-eslint/eslint-plugin": "^8.53.0",
-    "@typescript-eslint/parser": "^8.53.0",
-    "eslint": "^10.0.0",
-    "eslint-plugin-import": "^2.31.0",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "fast-check": "^4.9.0",
     "knip": "^6.0.0",
+    "oxc-parser": "0.140.0",
+    "oxfmt": "0.62.0",
+    "oxlint": "1.77.0",
+    "oxlint-tsgolint": "7.0.2001",
     "ts-prune": "^0.10.3",
     "tsx": "^4.21.0",
     "turbo": "^2.8.10",

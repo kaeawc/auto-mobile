@@ -1,26 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { ESLint } from "eslint";
+import plugin from "../../oxlint-plugins/auto-mobile.mjs";
+import { runRule } from "./oxlintRuleHarness";
 
 const ACCUMULATION = "This .forEach() only builds a collection by mutation";
 
-async function lintSnippet(code: string, filePath = "src/accumulatorForEachFixture.ts"): Promise<string[]> {
-  const eslint = new ESLint({
-    cwd: process.cwd(),
-    overrideConfigFile: "eslint.config.mjs",
-    // Same rationale as errorHandlingConvention.test.ts: these snippets live at
-    // src/ paths that do not exist on disk, so opt out of the type-aware config
-    // that would make projectService reject them.
-    overrideConfig: {
-      languageOptions: { parserOptions: { projectService: false, project: null } },
-      rules: {
-        "@typescript-eslint/no-floating-promises": "off",
-        "@typescript-eslint/no-misused-promises": "off",
-      },
-    },
-    fix: false,
-  });
-  const [result] = await eslint.lintText(code, { filePath });
-  return result.messages.map(message => message.message);
+function lintSnippet(code: string): string[] {
+  return runRule(plugin.rules["no-accumulator-foreach"], code);
 }
 
 function matches(messages: string[], fragment: string): boolean {
@@ -100,17 +85,9 @@ describe("auto-mobile/no-accumulator-foreach", () => {
     expect(messages).toEqual([]);
   });
 
-  test("does not apply outside src/", async () => {
-    const messages = await lintSnippet(`export function probe(xs: string[]): string[] {
-  const out: string[] = [];
-  xs.forEach(x => {
-    out.push(x);
-  });
-  return out;
-}
-`, "test/accumulatorForEachFixture.test.ts");
-    expect(matches(messages, ACCUMULATION)).toBe(false);
-  });
+  // NOTE: "does not apply outside src/" moved to oxlintConfigScoping.test.ts.
+  // Scoping is now a property of .oxlintrc.json's `files` overrides, not the
+  // rule, so it is asserted against the config rather than the rule in isolation.
 
   // Regression guard for the suppression-budget leak this rule exists to avoid:
   // the forEach ban must NOT live in no-restricted-syntax, whose per-file

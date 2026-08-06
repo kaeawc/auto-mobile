@@ -548,8 +548,8 @@ async function main() {
   }
 }
 
-// TypeScript's configured CommonJS module target does not model Bun's ESM entrypoint flag.
-// @ts-expect-error Bun provides import.meta.main at runtime.
+// Bun sets import.meta.main on the entrypoint module; under `module: ESNext`
+// this type-checks without a suppression.
 if (import.meta.main) {
   main().catch(async err => {
     console.error("Fatal error in main():", err);

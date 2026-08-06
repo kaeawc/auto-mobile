@@ -1,31 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { ESLint } from "eslint";
+import plugin from "../../oxlint-plugins/auto-mobile.mjs";
+import { runRule } from "./oxlintRuleHarness";
 
 const MISSING_TIMEOUT = "declares no explicit timeout";
 const TIMEOUT_TOO_SMALL = "is not enough headroom";
 
-// The rule is scoped to `test/stress/**`, so snippets must lint under a path in
-// that directory or the rule never runs.
-const STRESS_FIXTURE = "test/stress/fixture.stress.test.ts";
-
-async function lintSnippet(code: string, filePath = STRESS_FIXTURE): Promise<string[]> {
-  const eslint = new ESLint({
-    cwd: process.cwd(),
-    overrideConfigFile: "eslint.config.mjs",
-    // Same rationale as bareExpectRule.test.ts: these snippets live at paths that
-    // do not exist on disk, so opt out of the type-aware config that would make
-    // projectService reject them.
-    overrideConfig: {
-      languageOptions: { parserOptions: { projectService: false, project: null } },
-      rules: {
-        "@typescript-eslint/no-floating-promises": "off",
-        "@typescript-eslint/no-misused-promises": "off",
-      },
-    },
-    fix: false,
-  });
-  const [result] = await eslint.lintText(code, { filePath });
-  return result.messages.map(message => message.message);
+function lintSnippet(code: string): string[] {
+  return runRule(plugin.rules["stress-explicit-timeout"], code);
 }
 
 function matches(messages: string[], fragment: string): boolean {
@@ -145,14 +126,7 @@ test.concurrent.each([1, 2])("load %i", async () => {
 
   // AC4 is scoped: the rest of the suite is thousands of sub-100ms unit tests
   // where a mandatory timeout literal would be noise. Only stress tests, whose
-  // runtime is inherently unbounded, carry the requirement.
-  test("does not flag tests outside test/stress", async () => {
-    const messages = await lintSnippet(`import { test } from "bun:test";
-test("ordinary unit test", () => {
-  const x = 1;
-  if (x !== 1) { throw new Error("unreachable"); }
-});
-`, "test/features/ordinary.test.ts");
-    expect(matches(messages, MISSING_TIMEOUT)).toBe(false);
-  });
+  // runtime is inherently unbounded, carry the requirement. That scoping now
+  // lives in .oxlintrc.json's `test/stress/**` override and is asserted in
+  // oxlintConfigScoping.test.ts rather than against the rule in isolation.
 });

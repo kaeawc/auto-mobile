@@ -1,29 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { ESLint } from "eslint";
+import plugin from "../../oxlint-plugins/auto-mobile.mjs";
+import { runRule } from "./oxlintRuleHarness";
 
-async function lintSnippet(code: string, filePath = "src/errorHandlingConventionFixture.ts"): Promise<string[]> {
-  const eslint = new ESLint({
-    cwd: process.cwd(),
-    overrideConfigFile: "eslint.config.mjs",
-    // This backstop exercises only syntactic rules (catch-convention,
-    // no-unknown-cast) on in-memory snippets whose src/ file paths do not exist
-    // on disk. The src-scoped type-aware config would make projectService reject
-    // those virtual paths, so opt this instance out of type-aware parsing and
-    // its rules — they are covered by the src lint run, not here.
-    overrideConfig: {
-      languageOptions: { parserOptions: { projectService: false, project: null } },
-      rules: {
-        "@typescript-eslint/no-floating-promises": "off",
-        "@typescript-eslint/no-misused-promises": "off",
-        "@typescript-eslint/no-unnecessary-type-assertion": "off",
-      },
-    },
-    fix: false,
-  });
-  const [result] = await eslint.lintText(code, {
-    filePath,
-  });
-  return result.messages.map(message => message.message);
+// This backstop exercises only the syntactic catch-convention rule on in-memory
+// snippets. The no-unknown-cast / type-aware rules are covered by the src lint
+// run, not here.
+function lintSnippet(code: string, filename?: string): string[] {
+  return runRule(plugin.rules["catch-convention"], code, filename);
 }
 
 describe("error-handling convention lint backstop", () => {
@@ -50,7 +33,11 @@ export function cleanup(): void {
 }
 `);
 
-    expect(messages).toContain("Empty block statement.");
+    // An empty catch has no binding, never logs, and never throws, so
+    // catch-convention flags it as a traceless swallow. (oxlint's built-in
+    // `no-empty` with allowEmptyCatch:false also fires at the config level; this
+    // rule-unit test asserts the convention rule's own diagnostic.)
+    expect(messages.some(m => m.startsWith("Catch block swallows the error with no trace"))).toBe(true);
   });
 
   test("rejects return-only catch bodies without logging", async () => {

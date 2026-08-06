@@ -36,6 +36,12 @@ data class BootedDeviceInfo(
   val serviceStatus: DeviceServiceStatus? = null,
   val batteryLevel: Int? = null, // 0-100, null if unknown
   val connectionType: String? = null, // "usb", "wifi", or null if unknown
+  // Whether the device's keyguard/lock screen is currently obscuring the app. Android-only (from
+  // `dumpsys window policy`). The daemon deliberately OMITS this when it can't read it — a
+  // transient
+  // probe timeout, or iOS — so `null` means "unknown, keep the pane's current state" rather than
+  // "unlocked". A non-null value gates the pane Unlock control.
+  val locked: Boolean? = null,
 )
 
 @Serializable

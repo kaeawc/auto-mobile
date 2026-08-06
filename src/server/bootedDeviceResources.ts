@@ -10,6 +10,7 @@ import type {
   DeviceRecoveryEligibility,
   DeviceRecoveryPolicy,
 } from "../daemon/devicePool";
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
@@ -56,6 +57,12 @@ interface BootedDeviceInfo {
   recoveryEligibility?: DeviceRecoveryEligibility;
   session?: DeviceSessionInfo;
   serviceStatus?: DeviceServiceStatus;
+  /**
+   * Whether the device's keyguard/lock screen currently obscures the app. Android only (from
+   * `dumpsys window policy`); omitted when unread or on iOS, where no lock-state probe exists yet.
+   * Consumed by the desktop workspace to gate the contextual Unlock control (issue #4694).
+   */
+  locked?: boolean;
 }
 
 // Resource content schema
@@ -112,6 +119,32 @@ export function setDeviceManager(manager: PlatformDeviceManager | null): void {
 // Controls whether service status is queried for each device.
 // Disabled automatically when a test device manager is injected.
 let serviceStatusEnabled = true;
+
+/** Probes a device's lock state; returns `undefined` when it can't be determined. */
+export type DeviceLockProbe = (device: BootedDevice) => Promise<boolean | undefined>;
+
+// Injected only by tests, which need a deterministic lock state without real adb. When null, the
+// real adb-backed probe runs — but only while `serviceStatusEnabled` (i.e. no fake manager), so a
+// test that injects a fake device manager never triggers a real `dumpsys` unless it opts in here.
+let injectedLockProbe: DeviceLockProbe | null = null;
+
+/** Inject a fake lock probe for tests (or null to restore the real adb-backed probe). */
+export function setDeviceLockProbe(probe: DeviceLockProbe | null): void {
+  injectedLockProbe = probe;
+}
+
+/**
+ * Real lock-state probe: reads the Android keyguard via `dumpsys window policy` (issue #4235). iOS
+ * has no lock-state probe yet, so it returns `undefined` (the field is then omitted). A failed read
+ * also yields `undefined` — lock state is advisory, never fatal to the resource.
+ */
+async function realDeviceLockProbe(device: BootedDevice): Promise<boolean | undefined> {
+  if (device.platform !== "android") {
+    return undefined;
+  }
+  const lock = await defaultAdbClientFactory.create(device).getDeviceLock();
+  return lock?.locked;
+}
 
 // Convert BootedDevice to BootedDeviceInfo
 function toBootedDeviceInfo(
@@ -376,6 +409,54 @@ async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<Boot
       const result = serviceStatusResults[i];
       if (result.status === "fulfilled" && result.value) {
         devices[i] = { ...devices[i], serviceStatus: result.value };
+      }
+    }
+  }
+
+  // Query per-device lock state so the desktop can gate its contextual Unlock control (#4694). Runs
+  // only with an injected probe (tests) or a real device manager (production), never against a fake
+  // manager's mock devices. Best-effort with a per-device timeout: a slow/failed read leaves `locked`
+  // unset rather than stalling the whole resource.
+  const lockProbe = injectedLockProbe ?? (serviceStatusEnabled ? realDeviceLockProbe : null);
+  if (lockProbe) {
+    const LOCK_STATE_TIMEOUT_MS = 3000;
+    const lockResults = await Promise.allSettled(
+      devices.map(async device => {
+        // The adb lock probe only needs the device identity; `source` (whose BootedDeviceInfo type
+        // is wider than BootedDevice's) is irrelevant, so omit it rather than force a cast.
+        const bootedDevice: BootedDevice = {
+          name: device.name,
+          platform: device.platform,
+          deviceId: device.deviceId,
+        };
+        // Clear the timeout when the probe wins so the losing timer never fires — otherwise, on the
+        // desktop's periodic poll, a fast successful probe still logs a spurious "timeout" every cycle.
+        let timeoutHandle: NodeJS.Timeout | undefined;
+        try {
+          return await Promise.race([
+            lockProbe(bootedDevice),
+            new Promise<undefined>(resolve => {
+              timeoutHandle = defaultTimer.setTimeout(() => {
+                logger.warn(`[BootedDeviceResources] Lock-state timeout for ${device.deviceId}`);
+                resolve(undefined);
+              }, LOCK_STATE_TIMEOUT_MS);
+            }),
+          ]);
+        } catch (error) {
+          logger.warn(`[BootedDeviceResources] Failed to query lock state for ${device.deviceId}: ${error}`);
+          return undefined;
+        } finally {
+          if (timeoutHandle) {
+            defaultTimer.clearTimeout(timeoutHandle);
+          }
+        }
+      })
+    );
+
+    for (let i = 0; i < devices.length; i++) {
+      const result = lockResults[i];
+      if (result.status === "fulfilled" && result.value !== undefined) {
+        devices[i] = { ...devices[i], locked: result.value };
       }
     }
   }

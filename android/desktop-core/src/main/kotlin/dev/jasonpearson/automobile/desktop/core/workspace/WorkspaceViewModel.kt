@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +41,13 @@ sealed interface WorkspaceAction {
   /** Run an emulator control against a device pane (rotate, screenshot, snapshot, unlock). */
   data class RunControl(val deviceId: String, val control: EmulatorControl) : WorkspaceAction
 
+  /**
+   * Update panes' lock state from an observed snapshot (deviceId -> locked). A device absent from
+   * [locked] keeps its current state, so a transient empty read never spuriously unlocks a pane.
+   * Fed by the host's periodic lock-state poll; gates the contextual Unlock control.
+   */
+  data class SetLockStates(val locked: Map<String, Boolean>) : WorkspaceAction
+
   /** Open [tool] on every observed pane for like-for-like comparison (the facet ⧉ Diff control). */
   data class DiffTool(val tool: Tool) : WorkspaceAction
 }
@@ -48,24 +56,21 @@ sealed interface WorkspaceAction {
 sealed interface WorkspaceEffect {
   /** Open the device picker. Wired to a real screen in a later PR. */
   data object OpenPicker : WorkspaceEffect
-
-  /**
-   * Run an emulator [control] against the device. Carries the resolved [platform] so the host can
-   * dispatch the right device call without re-reading workspace state.
-   */
-  data class RunControl(
-    val deviceId: String,
-    val platform: Platform,
-    val control: EmulatorControl,
-  ) : WorkspaceEffect
 }
 
 /**
  * ViewModel for the device-tab workspace. Owns the set of observed device columns and which one is
  * focused, independent of Compose. Mirrors the repo's sealed [WorkspaceUiState]/[WorkspaceAction]/
  * [WorkspaceEffect] + [StateFlow]/[Channel] convention (cf. `NavigationViewModel`).
+ *
+ * [controlExecutor] runs emulator controls against the real device — injected like the picker's
+ * `McpResourceClient`, so behavior is pinned here with a fake while the real socket call stays
+ * untested (#4694).
  */
-class WorkspaceViewModel(private val scope: CoroutineScope) {
+class WorkspaceViewModel(
+  private val scope: CoroutineScope,
+  private val controlExecutor: EmulatorControlExecutor = NoOpEmulatorControlExecutor,
+) {
   private val _state = MutableStateFlow<WorkspaceUiState>(WorkspaceUiState.Empty)
   val state: StateFlow<WorkspaceUiState> = _state.asStateFlow()
 
@@ -81,7 +86,23 @@ class WorkspaceViewModel(private val scope: CoroutineScope) {
       is WorkspaceAction.ToggleShrink -> mutate(action.deviceId) { it.copy(shrunk = !it.shrunk) }
       is WorkspaceAction.SelectTool -> mutate(action.deviceId) { it.copy(activeTool = action.tool) }
       is WorkspaceAction.RunControl -> runControl(action.deviceId, action.control)
+      is WorkspaceAction.SetLockStates -> setLockStates(action.locked)
       is WorkspaceAction.DiffTool -> diffTool(action.tool)
+    }
+  }
+
+  /** Reflect an observed lock-state snapshot onto the columns; absent devices keep their state. */
+  private fun setLockStates(locked: Map<String, Boolean>) {
+    if (locked.isEmpty()) return
+    _state.update { current ->
+      val content = current as? WorkspaceUiState.Content ?: return@update current
+      content.copy(
+        columns =
+          content.columns.map { column ->
+            val next = locked[column.deviceId] ?: return@map column
+            if (next == column.locked) column else column.copy(locked = next)
+          }
+      )
     }
   }
 
@@ -125,11 +146,30 @@ class WorkspaceViewModel(private val scope: CoroutineScope) {
     }
   }
 
-  /** Emit a [WorkspaceEffect.RunControl] for the targeted column; unknown ids are a no-op. */
+  /**
+   * Run an emulator [control] against the targeted column off the UI thread; unknown ids are a
+   * no-op. Rotate first toggles the tracked per-column orientation and drives the tool with the new
+   * value. Failures are logged, not swallowed — a device call that throws must not crash the
+   * workspace or leave the effect path wedged (repo error-handling convention: log-and-continue for
+   * best-effort UI actions).
+   */
   private fun runControl(deviceId: String, control: EmulatorControl) {
     val content = _state.value as? WorkspaceUiState.Content ?: return
     val column = content.columns.firstOrNull { it.deviceId == deviceId } ?: return
-    scope.launch { _effect.send(WorkspaceEffect.RunControl(deviceId, column.platform, control)) }
+    val orientation =
+      if (control == EmulatorControl.Rotate) column.orientation.toggled() else column.orientation
+    if (control == EmulatorControl.Rotate) {
+      mutate(deviceId) { it.copy(orientation = orientation) }
+    }
+    scope.launch {
+      try {
+        controlExecutor.run(deviceId, column.platform, control, orientation)
+      } catch (cancellation: CancellationException) {
+        throw cancellation
+      } catch (error: Exception) {
+        LOG.warn("Emulator control $control failed for $deviceId: ${error.message}", error)
+      }
+    }
   }
 
   private fun focus(deviceId: String) {

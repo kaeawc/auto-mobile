@@ -62,6 +62,12 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   var lastNavigationAppId: String? = null
     private set
 
+  var observationRequestCount = 0
+    private set
+
+  var lastObservationDeviceId: String? = null
+    private set
+
   override fun connect(deviceId: String?) {
     connectCallCount++
     lastConnectedDeviceId = deviceId
@@ -100,9 +106,14 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
     lastNavigationAppId = appId
   }
 
-  override fun requestObservation(deviceId: String?) = Unit
+  override fun requestObservation(deviceId: String?) {
+    observationRequestCount++
+    lastObservationDeviceId = deviceId
+  }
 
   // -- Test helpers: push updates onto the flows --
+  fun emitScreenshot(update: ScreenshotStreamUpdate): Boolean = _screenshotUpdates.tryEmit(update)
+
   fun emitNavigation(update: NavigationGraphStreamUpdate): Boolean =
     _navigationUpdates.tryEmit(update)
 

@@ -28,6 +28,8 @@ data class PickerDevice(
   val osLabel: String? = null,
   /** CPU architecture ("arm64"/"x86_64"); only iOS images currently carry it. */
   val architecture: String? = null,
+  /** Whether the booted device's keyguard is up (from the booted resource). Shutdown -> false. */
+  val locked: Boolean = false,
 )
 
 private val ANDROID_TARGET = Regex("android-(\\d+)")
@@ -91,6 +93,8 @@ fun buildPickerDevices(
       osKey = api,
       osLabel = api?.let { "API $it" },
       architecture = null,
+      // Seed value only; an unknown (null) lock state seeds unlocked and the host poll refines it.
+      locked = device.locked == true,
     )
   }
 

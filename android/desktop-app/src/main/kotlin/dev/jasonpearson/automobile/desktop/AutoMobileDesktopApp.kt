@@ -20,9 +20,12 @@ import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
+import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
+import dev.jasonpearson.automobile.desktop.core.workspace.BOOTED_DEVICES_RESOURCE_URI
 import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
+import dev.jasonpearson.automobile.desktop.core.workspace.DaemonEmulatorControlExecutor
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
 import dev.jasonpearson.automobile.desktop.core.workspace.FailuresFacet
@@ -42,6 +45,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
 import dev.jasonpearson.automobile.desktop.core.workspace.deriveWorkspaceStatus
+import dev.jasonpearson.automobile.desktop.core.workspace.parseDeviceLockStates
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAction
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
@@ -70,6 +74,13 @@ private const val DESKTOP_SESSION_HEARTBEAT_MS = 2_000L
 // How often the top-bar status dot re-probes daemon connectivity. Matches the health sheet's
 // read-only refresh cadence (WorkspaceShell.HEALTH_SHEET_REFRESH_MS).
 private const val DAEMON_STATUS_POLL_MS = 5_000L
+
+// How often each observed pane's lock state is re-read so the contextual Unlock control appears or
+// disappears as the device locks/unlocks. Runs only while at least one device is observed. NOTE:
+// it re-reads the whole booted-devices resource, which recomputes service status AND the keyguard
+// probe for every booted device — not a free read. A lighter dedicated lock-state feed is a
+// follow-up (see #4694); until then this cadence trades adb load for Unlock responsiveness.
+private const val LOCK_STATE_POLL_MS = 4_000L
 
 /**
  * Live daemon connectivity as a [ConnectionState], polled from [AutoMobileClient.getDaemonStatus].
@@ -125,7 +136,9 @@ fun AutoMobileDesktopApp(
   val graph = LocalAutoMobileGraph.current
   val settings = remember(graph) { ObservableSettingsProvider(graph.settingsProvider) }
   val scope = rememberCoroutineScope()
-  val workspaceViewModel = remember(scope) { WorkspaceViewModel(scope) }
+  val controlExecutor = remember(graph) { DaemonEmulatorControlExecutor(graph.autoMobileClient) }
+  val workspaceViewModel =
+    remember(scope, controlExecutor) { WorkspaceViewModel(scope, controlExecutor) }
   val workspaceState by workspaceViewModel.state.collectAsState()
 
   val resourceClient = remember(graph) { DaemonMcpResourceClient(graph.autoMobileClient) }
@@ -242,14 +255,42 @@ fun AutoMobileDesktopApp(
           pickerViewModel.onAction(DevicePickerAction.Refresh)
           pickerOpen = true
         }
-        // Emulator-control execution is deferred to #4694; drain + log the intent for now so the
-        // effect channel doesn't back up. The control UI + intent contract ships in this PR.
-        is WorkspaceEffect.RunControl ->
-          LOG.info(
-            "Emulator control ${effect.control} requested for ${effect.deviceId} " +
-              "(${effect.platform}); execution deferred to #4694"
-          )
       }
+    }
+  }
+
+  // Keep each pane's lock state fresh so the contextual Unlock control appears/disappears as the
+  // device locks/unlocks. Untested IO poll (mirrors rememberDaemonConnectionState); the VM's
+  // SetLockStates handler is the pinned behavior. Gated on observed columns so an idle workspace
+  // is silent; while panes are open it re-reads the (non-trivial) booted-devices resource — see
+  // LOCK_STATE_POLL_MS.
+  LaunchedEffect(workspaceViewModel, resourceClient) {
+    while (true) {
+      val hasColumns =
+        (workspaceViewModel.state.value as? WorkspaceUiState.Content)?.columns?.isNotEmpty() == true
+      if (hasColumns) {
+        val states =
+          try {
+            when (
+              val result =
+                withContext(Dispatchers.IO) {
+                  resourceClient.readResource(BOOTED_DEVICES_RESOURCE_URI)
+                }
+            ) {
+              is ResourceReadResult.Success -> parseDeviceLockStates(result.content)
+              is ResourceReadResult.Error -> emptyMap()
+            }
+          } catch (cancellation: CancellationException) {
+            throw cancellation
+          } catch (error: Exception) {
+            LOG.warn("Lock-state poll failed: ${error.message}", error)
+            emptyMap()
+          }
+        if (states.isNotEmpty()) {
+          workspaceViewModel.onAction(WorkspaceAction.SetLockStates(states))
+        }
+      }
+      delay(LOCK_STATE_POLL_MS)
     }
   }
   LaunchedEffect(pickerViewModel) {

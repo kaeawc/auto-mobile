@@ -9,6 +9,9 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
+import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -130,16 +133,63 @@ class WorkspaceShellUiTest {
   }
 
   @Test
-  fun `clicking a control dispatches RunControl for that column`() = runComposeUiTest {
-    var action: WorkspaceAction? = null
-    val state =
-      WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
-    setContent {
-      MaterialTheme { WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {}) }
+  fun `clicking a device-mutating control dispatches RunControl for that column`() =
+    runComposeUiTest {
+      var action: WorkspaceAction? = null
+      val state =
+        WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {})
+        }
+      }
+      onNodeWithContentDescription("Snapshot Pixel 8").performClick()
+      assertEquals(WorkspaceAction.RunControl("a", EmulatorControl.Snapshot), action)
     }
-    onNodeWithContentDescription("Screenshot Pixel 8").performClick()
-    assertEquals(WorkspaceAction.RunControl("a", EmulatorControl.Screenshot), action)
-  }
+
+  @Test
+  fun `clicking Screenshot captures a frame, saves it, and confirms in the pane`() =
+    runComposeUiTest {
+      val onePxPng =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+      val fake = FakeObservationStream()
+      var savedDeviceName: String? = null
+      var savedBytes: ByteArray? = null
+      var dispatched: WorkspaceAction? = null
+      val state =
+        WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(
+            state = state,
+            onAction = { dispatched = it },
+            onOpenPicker = {},
+            observationStreamFactory = { fake },
+            screenshotSaver =
+              ScreenshotSaver { name, bytes ->
+                savedDeviceName = name
+                savedBytes = bytes
+                "/tmp/shots/$name.png"
+              },
+          )
+        }
+      }
+
+      onNodeWithContentDescription("Screenshot Pixel 8").performClick()
+
+      // Screenshot is NOT a RunControl device mutation — it requests an observation on the stream.
+      waitUntil(timeoutMillis = 5_000L) { fake.observationRequestCount == 1 }
+      assertEquals(null, dispatched)
+      assertEquals("a", fake.lastConnectedDeviceId)
+      assertEquals("a", fake.lastObservationDeviceId)
+
+      // The returned frame's PNG bytes are written via the saver, and the pane confirms where.
+      fake.emitScreenshot(ScreenshotStreamUpdate("a", 0L, onePxPng, 1, 1))
+      waitUntil(timeoutMillis = 5_000L) { savedBytes != null }
+      assertEquals("Pixel 8", savedDeviceName)
+      assertEquals(Base64.getDecoder().decode(onePxPng).toList(), savedBytes!!.toList())
+      onNodeWithContentDescription("Screenshot status Pixel 8").assertIsDisplayed()
+    }
 
   @Test
   fun `active tool renders a docked facet with a close control`() = runComposeUiTest {

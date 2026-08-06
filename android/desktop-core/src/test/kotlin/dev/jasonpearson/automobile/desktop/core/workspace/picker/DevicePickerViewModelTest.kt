@@ -101,6 +101,31 @@ class DevicePickerViewModelTest {
   }
 
   @Test
+  fun `observe selected seeds the column lock state from the booted snapshot`() =
+    testScope.runTest {
+      val locked =
+        fake().apply {
+          bootedDevicesResponse =
+            """
+            {"totalCount":1,"androidCount":1,"iosCount":0,"virtualCount":1,"physicalCount":0,
+             "lastUpdated":"x","devices":[
+               {"name":"Pixel 8 API 35","platform":"android","deviceId":"emulator-5554",
+                "source":"local","isVirtual":true,"status":"booted","locked":true}]}
+            """
+              .trimIndent()
+        }
+      val vm =
+        DevicePickerViewModel(locked, FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+      vm.effect.test {
+        vm.onAction(DevicePickerAction.ToggleSelect("emulator-5554"))
+        vm.onAction(DevicePickerAction.ObserveSelected)
+        val columns = (awaitItem() as DevicePickerEffect.Observe).columns
+        assertTrue("column should be seeded locked", columns.single().locked)
+        cancelAndIgnoreRemainingEvents()
+      }
+    }
+
+  @Test
   fun `clear filter resets that dimension`() = testScope.runTest {
     val vm =
       DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())

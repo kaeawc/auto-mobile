@@ -343,7 +343,10 @@ class DevicePickerViewModel(
     val columns =
       content.devices
         .filter { it.id in selectedIds && it.state == DeviceState.Booted }
-        .map { DeviceColumn(deviceId = it.id, name = it.name, platform = it.platform) }
+        .map {
+          // Seed the pane's lock state from the booted snapshot; the host's poll keeps it fresh.
+          DeviceColumn(deviceId = it.id, name = it.name, platform = it.platform, locked = it.locked)
+        }
     if (columns.isNotEmpty()) {
       scope.launch { _effect.send(DevicePickerEffect.Observe(columns)) }
     }

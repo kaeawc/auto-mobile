@@ -3,6 +3,7 @@ import Foundation
 /// Fine-grained DI surface for the SDK's network subsystem.
 public protocol AutoMobileNetworkAPI: AnyObject, Sendable {
     func recordRequest(_ record: NetworkRequestRecord)
+    func captureRecorder() -> NetworkCaptureRecorder
     func setCaptureHeaders(_ enabled: Bool)
     func setCaptureBodies(_ enabled: Bool)
 }
@@ -15,6 +16,10 @@ public final class DefaultAutoMobileNetworkAPI: AutoMobileNetworkAPI, @unchecked
 
     public func recordRequest(_ record: NetworkRequestRecord) {
         network.recordRequest(record)
+    }
+
+    public func captureRecorder() -> NetworkCaptureRecorder {
+        network.captureRecorder()
     }
 
     public func setCaptureHeaders(_ enabled: Bool) {

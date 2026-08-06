@@ -11,6 +11,23 @@ private final class EventCollector: @unchecked Sendable {
     func collect(_ events: [any SdkEvent]) { lock.lock(); _events = events; lock.unlock() }
 }
 
+private final class NetworkRecordCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _records: [NetworkRequestRecord] = []
+
+    var records: [NetworkRequestRecord] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _records
+    }
+
+    func append(_ record: NetworkRequestRecord) {
+        lock.lock()
+        _records.append(record)
+        lock.unlock()
+    }
+}
+
 final class AutoMobileNetworkTests: XCTestCase {
     override func tearDown() {
         AutoMobileNetwork.shared.reset()
@@ -604,4 +621,159 @@ final class AutoMobileNetworkTests: XCTestCase {
         }
     }
     #endif
+}
+
+final class NetworkCaptureRecorderTests: XCTestCase {
+    func testRecorderEmitsOneCompletedRequestWithStableIdentityAndBoundedBody() {
+        let collector = NetworkRecordCollector()
+        let recorder = NetworkCaptureRecorder(
+            emit: { collector.append($0) },
+            maxBodyBytes: 6,
+            idGenerator: { "request-1" },
+        )
+
+        let requestId = recorder.beginRequest(
+            url: "https://api.example.com/items",
+            method: "POST",
+            connectionId: "connection-1",
+            requestHeaders: ["Authorization": "Bearer secret"],
+            requestBodySize: 32,
+            requestBody: "{\"item\":\"created\"}"
+        )
+        recorder.recordResponseHeaders(
+            requestId: requestId,
+            headers: ["Content-Type": "application/json"]
+        )
+        recorder.recordResponseBodyChunk(
+            requestId: requestId,
+            bytes: 6,
+            text: "{\"ok\":true}"
+        )
+        recorder.recordCompletion(requestId: requestId, statusCode: 201)
+        recorder.recordCompletion(requestId: requestId, statusCode: 500)
+
+        XCTAssertEqual(collector.records.count, 1)
+        XCTAssertEqual(collector.records[0].requestId, "request-1")
+        XCTAssertEqual(collector.records[0].connectionId, "connection-1")
+        XCTAssertEqual(collector.records[0].statusCode, 201)
+        XCTAssertEqual(collector.records[0].requestHeaders?["Authorization"], "<redacted>")
+        XCTAssertEqual(collector.records[0].responseHeaders?["Content-Type"], "application/json")
+        XCTAssertEqual(collector.records[0].responseBodySize, 6)
+        XCTAssertEqual(collector.records[0].responseBody, "{\"ok\":")
+    }
+
+    func testRecorderRejectsEventsAfterCompletionAndSupportsConcurrentRequests() {
+        let collector = NetworkRecordCollector()
+        let recorder = NetworkCaptureRecorder(
+            emit: { collector.append($0) },
+            idGenerator: { UUID().uuidString }
+        )
+        let group = DispatchGroup()
+        let queue = DispatchQueue(label: "network-recorder-test", attributes: .concurrent)
+
+        for index in 0..<20 {
+            group.enter()
+            queue.async {
+                let requestId = recorder.beginRequest(
+                    url: "https://api.example.com/\(index)",
+                    connectionId: "connection-\(index)"
+                )
+                recorder.recordResponseBodyChunk(requestId: requestId, bytes: 1)
+                recorder.recordCompletion(requestId: requestId, statusCode: 200)
+                recorder.recordFailure(requestId: requestId, error: "late failure")
+                group.leave()
+            }
+        }
+        group.wait()
+
+        XCTAssertEqual(collector.records.count, 20)
+        XCTAssertEqual(Set(collector.records.map(\.requestId)).count, 20)
+        XCTAssertTrue(collector.records.allSatisfy { $0.statusCode == 200 && $0.error == nil })
+    }
+
+    func testAdaptersForwardTaskAndWebSocketLifecycleToRecorder() {
+        let collector = NetworkRecordCollector()
+        let recorder = NetworkCaptureRecorder(
+            emit: { collector.append($0) },
+            idGenerator: { "adapter-request" }
+        )
+        let taskAdapter = URLSessionNetworkCaptureAdapter(recorder: recorder)
+        let requestId = taskAdapter.begin(
+            url: "https://api.example.com/task",
+            method: "GET",
+            connectionId: "session-1"
+        )
+        taskAdapter.didReceiveResponseHeaders(requestId: requestId, headers: ["x-test": "true"])
+        taskAdapter.didReceiveMetrics(requestId: requestId, durationMs: 12.5)
+        taskAdapter.didRedirect(requestId: requestId, url: "https://api.example.com/redirected")
+        taskAdapter.didAuthenticate(requestId: requestId, method: "server-trust")
+        taskAdapter.didComplete(requestId: requestId, statusCode: 204)
+
+        let socketAdapter = WebSocketNetworkCaptureAdapter(recorder: recorder)
+        socketAdapter.recordFrame(
+            url: "wss://api.example.com/socket",
+            connectionId: "socket-1",
+            direction: .sent,
+            frameType: .text,
+            payloadSize: 4
+        )
+
+        XCTAssertEqual(collector.records.count, 2)
+        XCTAssertEqual(collector.records[0].statusCode, 204)
+        XCTAssertEqual(collector.records[0].sequenceNumber, 1)
+        XCTAssertEqual(collector.records[0].metadata?["duration_ms"], "12.5")
+        XCTAssertEqual(collector.records[0].metadata?["redirect_url"], "https://api.example.com/redirected")
+        XCTAssertEqual(collector.records[0].metadata?["authentication_method"], "server-trust")
+        XCTAssertEqual(collector.records[1].connectionId, "socket-1")
+        XCTAssertEqual(collector.records[1].sequenceNumber, 2)
+        XCTAssertEqual(collector.records[1].direction, .sent)
+        XCTAssertEqual(collector.records[1].protocolName, "websocket")
+    }
+
+    func testRecorderDoesNotEmitWhenDisabledOrSampledOut() {
+        let collector = NetworkRecordCollector()
+        let disabled = NetworkCaptureRecorder(
+            emit: { collector.append($0) },
+            isEnabled: { false },
+            sampler: { 0 }
+        )
+        let disabledId = disabled.beginRequest(url: "https://example.com/disabled")
+        disabled.recordCompletion(requestId: disabledId, statusCode: 200)
+
+        let sampledOut = NetworkCaptureRecorder(
+            emit: { collector.append($0) },
+            samplingRate: 0,
+            sampler: { 0 }
+        )
+        let sampledId = sampledOut.beginRequest(url: "https://example.com/sampled")
+        sampledOut.recordCompletion(requestId: sampledId, statusCode: 200)
+
+        XCTAssertTrue(collector.records.isEmpty)
+    }
+
+    func testRecorderDoesNotRetainBodyWhenPayloadCaptureIsDisabled() {
+        let collector = NetworkRecordCollector()
+        let recorder = NetworkCaptureRecorder(
+            emit: { collector.append($0) },
+            maxBodyBytes: 32,
+            isBodyCaptureEnabled: { false }
+        )
+
+        let requestId = recorder.beginRequest(
+            url: "https://example.com/no-body",
+            requestBody: "secret request"
+        )
+        recorder.recordResponseBodyChunk(
+            requestId: requestId,
+            bytes: 13,
+            text: "secret response"
+        )
+        recorder.recordCompletion(requestId: requestId, statusCode: 200)
+
+        XCTAssertEqual(collector.records.count, 1)
+        XCTAssertNil(collector.records.first?.requestBody)
+        XCTAssertNil(collector.records.first?.responseBody)
+        XCTAssertNil(collector.records.first?.requestBodySize)
+        XCTAssertEqual(collector.records.first?.responseBodySize, 13)
+    }
 }

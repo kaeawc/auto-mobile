@@ -5,6 +5,18 @@ import Foundation
 /// Use this struct with ``AutoMobileNetwork/recordRequest(_:)`` instead of
 /// passing individual parameters.
 public struct NetworkRequestRecord: Sendable {
+    /// Stable identifier for this request lifecycle.
+    public var requestId: String?
+    /// Identifier shared by requests on the same transport connection.
+    public var connectionId: String?
+    /// Direction or lifecycle protocol represented by this record.
+    public var direction: NetworkCaptureDirection?
+    /// Transport name, such as `http`, `websocket`, or `nwconnection`.
+    public var protocolName: String?
+    /// Adapter-supplied lifecycle metadata such as redirect and auth details.
+    public var metadata: [String: String]?
+    /// Monotonic recorder order assigned when the event is emitted.
+    public var sequenceNumber: UInt64?
     /// The full request URL (e.g. "https://api.example.com/users?page=1").
     public let url: String
     /// HTTP method (e.g. "GET", "POST").
@@ -33,6 +45,12 @@ public struct NetworkRequestRecord: Sendable {
     public init(
         url: String,
         method: String,
+        requestId: String? = nil,
+        connectionId: String? = nil,
+        direction: NetworkCaptureDirection? = nil,
+        protocolName: String? = nil,
+        metadata: [String: String]? = nil,
+        sequenceNumber: UInt64? = nil,
         requestHeaders: [String: String]? = nil,
         requestBodySize: Int? = nil,
         statusCode: Int? = nil,
@@ -44,6 +62,12 @@ public struct NetworkRequestRecord: Sendable {
         responseBody: String? = nil,
         contentType: String? = nil
     ) {
+        self.requestId = requestId
+        self.connectionId = connectionId
+        self.direction = direction
+        self.protocolName = protocolName
+        self.metadata = metadata
+        self.sequenceNumber = sequenceNumber
         self.url = url
         self.method = method
         self.requestHeaders = requestHeaders
@@ -174,6 +198,22 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         return AutoMobileURLProtocol.self
     }
 
+    /// Creates a recorder for custom transports that cannot install a URLProtocol.
+    public func captureRecorder() -> NetworkCaptureRecorder {
+        NetworkCaptureRecorder(
+            emit: { [weak self] record in
+                self?.recordRequest(record)
+            },
+            maxBodyBytes: maxBodyBytes,
+            isEnabled: { [weak self] in
+                self?.isEnabled ?? false
+            },
+            isBodyCaptureEnabled: { [weak self] in
+                self?.requestBodyCaptureLimit != nil
+            }
+        )
+    }
+
     /// Record a network request/response manually using a ``NetworkRequestRecord``.
     ///
     /// Use this when you cannot use the ``protocolClass()`` approach (e.g. custom
@@ -204,6 +244,12 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         let event = SdkNetworkRequestEvent(
             url: record.url,
             method: record.method,
+            requestId: record.requestId,
+            connectionId: record.connectionId,
+            direction: record.direction,
+            protocolName: record.protocolName,
+            metadata: record.metadata,
+            sequenceNumber: record.sequenceNumber,
             requestHeaders: captureHeaders ? record.requestHeaders : nil,
             requestBodySize: record.requestBodySize,
             statusCode: record.statusCode,

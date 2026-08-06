@@ -247,6 +247,18 @@ Records non-fatal handled exceptions via `recordHandledException(_:message:curre
 
 2. **Manual recording** -- `recordRequest(url:method:...)` for cases where URLProtocol cannot be used. `recordWebSocketFrame(url:direction:frameType:payloadSize:)` for WebSocket tracking.
 
+3. **Transport-neutral lifecycle recording** -- `AutoMobileNetwork.shared.captureRecorder()` provides
+   thread-safe `beginRequest`, header/body chunk, completion, and failure methods for custom
+   `URLSession` delegates, `URLSessionWebSocketTask`, `NWConnection`, and third-party clients.
+   `URLSessionNetworkCaptureAdapter`, `WebSocketNetworkCaptureAdapter`, and
+   `NWConnectionNetworkCaptureAdapter` are explicit integrations; they do not swizzle global
+   networking behavior or install a proxy. Each completed request has a stable request ID and
+   optional connection ID. Completion is idempotent, payload text is bounded, and common
+   credential headers are redacted before emission. Set `samplingRate` or `isEnabled` on a
+   recorder when the host needs bounded collection. Apps must still provide any transport
+   metadata that the system does not expose to the adapter, and unsupported third-party
+   transports require the manual adapter.
+
 Body capture is always disabled in release builds to prevent leaking credentials or PII.
 
 ## Logging

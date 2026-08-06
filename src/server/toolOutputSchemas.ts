@@ -470,7 +470,7 @@ const perfSnapshotSchema = z.object({
   fps: z.object({
     p50: z.number(), p90: z.number(), p95: z.number(), p99: z.number()
   }).nullable(),
-  jank: z.object({ total: z.number(), perSecond: z.number() }).nullable(),
+  jank: z.object({ total: z.number(), perSecond: z.number().nullable() }).nullable(),
   touchLatencyMs: z.object({ p50: z.number(), p95: z.number(), latest: z.number() }).nullable(),
   cpu: z.object({ avg: z.number(), latest: z.number() }).nullable(),
   memoryMb: z.object({ avg: z.number(), latest: z.number() }).nullable()

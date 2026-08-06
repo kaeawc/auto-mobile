@@ -324,6 +324,11 @@ export class PerformanceMonitor {
     now: number,
     server: PerformancePushSocketServer
   ): Promise<void> {
+    // Identity captured before any await: if the monitored package switches (or
+    // monitoring stops) while these adb calls are in flight, the buffer was
+    // already cleared and this sample must NOT repopulate it with the old app.
+    const samplingPackage = device.packageName;
+
     // Always collect fast metrics (gfxinfo)
     const gfxPromise = this.collectGfxMetrics(device);
 
@@ -379,27 +384,11 @@ export class PerformanceMonitor {
       jankFrames = curr.missedVsync + curr.slowUi + curr.deadlineMissed;
     }
 
-    // Estimate touch latency from high input latency frame count
-    // Android flags "high input latency" when input-to-draw exceeds ~16ms
-    // If we have high latency frames, estimate actual latency as 2-3x frame time
-    let touchLatencyMs: number | null = null;
-    if (gfx.totalFrames !== null && gfx.totalFrames > 0 && frameTimeMs !== null) {
-      if (gfx.highInputLatencyFrames !== null && gfx.highInputLatencyFrames > 0) {
-        // High latency frames detected - estimate latency based on ratio
-        const latencyRatio = gfx.highInputLatencyFrames / gfx.totalFrames;
-        // Scale from 2x frame time (few high latency) to 4x (many high latency)
-        const multiplier = 2 + latencyRatio * 2;
-        touchLatencyMs = Math.round(frameTimeMs * multiplier);
-      } else {
-        // No high latency frames - estimate as 1x frame time (responsive)
-        touchLatencyMs = Math.round(frameTimeMs);
-      }
-      // Update cache when we have actual data
-      device.cachedTouchLatency = touchLatencyMs;
-    } else {
-      // No frames this interval - assume optimal latency (idle app is responsive)
-      touchLatencyMs = 16;
-    }
+    // Estimate touch latency. `streamMs` is the value sent to the live stream
+    // (fabricated 16ms for an idle app); `rawMs` is null on idle so the buffer
+    // never records the fabricated fallback as a measurement.
+    const { streamMs: touchLatencyMs, rawMs: rawTouchLatencyMs } =
+      this.estimateTouchLatency(gfx, frameTimeMs, device);
 
     // Get TTI from the global store if available
     const ttiMs = getLastTtiMs(device.packageName);
@@ -419,7 +408,35 @@ export class PerformanceMonitor {
     // for the windowed buffer. The stream uses the cached fps/frameTime to avoid
     // flicker to 0, but the buffer must NOT re-record a stale reading every idle
     // tick — that would keep an old fps dominating the percentiles.
-    this.pushMetrics(device, now, metrics, jankFrames, server, gfx.fps, gfx.frameTimeMs);
+    this.pushMetrics(device, now, metrics, jankFrames, server, {
+      fps: gfx.fps,
+      frameTimeMs: gfx.frameTimeMs,
+      touchLatencyMs: rawTouchLatencyMs,
+      samplingPackage,
+    });
+  }
+
+  /**
+   * Estimate Android touch latency from the interval's frame stats. Returns the
+   * stream value (a fabricated 16ms when the app is idle so the live gauge stays
+   * responsive) and the raw value (null when idle, so the windowed buffer records
+   * only genuine measurements). "High input latency" frames scale the estimate
+   * from ~2x frame time (a few) to ~4x (many).
+   */
+  private estimateTouchLatency(
+    gfx: { totalFrames: number | null; highInputLatencyFrames: number | null },
+    frameTimeMs: number | null,
+    device: MonitoredDevice
+  ): { streamMs: number; rawMs: number | null } {
+    if (gfx.totalFrames === null || gfx.totalFrames <= 0 || frameTimeMs === null) {
+      // No frames this interval - assume optimal latency (idle app is responsive).
+      return { streamMs: 16, rawMs: null };
+    }
+    const highLatency = gfx.highInputLatencyFrames !== null && gfx.highInputLatencyFrames > 0;
+    const multiplier = highLatency ? 2 + (gfx.highInputLatencyFrames! / gfx.totalFrames) * 2 : 1;
+    const ms = Math.round(frameTimeMs * multiplier);
+    device.cachedTouchLatency = ms;
+    return { streamMs: ms, rawMs: ms };
   }
 
   /**
@@ -433,6 +450,9 @@ export class PerformanceMonitor {
     now: number,
     server: PerformancePushSocketServer
   ): Promise<void> {
+    // Identity captured before any await (see sampleAndroidDevice).
+    const samplingPackage = device.packageName;
+
     // Collect medium metrics (CPU) if interval elapsed or first collection
     const shouldCollectCpu =
       device.lastMediumTick === 0 ||
@@ -482,8 +502,13 @@ export class PerformanceMonitor {
       memoryUsageMb: memory,
     };
 
-    // iOS has no on-device frame source here, so raw frame readings are null.
-    this.pushMetrics(device, now, metrics, jankFrames, server, fps, frameTimeMs);
+    // iOS has no on-device frame/touch source here, so raw readings are null.
+    this.pushMetrics(device, now, metrics, jankFrames, server, {
+      fps,
+      frameTimeMs,
+      touchLatencyMs: null,
+      samplingPackage,
+    });
   }
 
   /**
@@ -504,10 +529,15 @@ export class PerformanceMonitor {
     },
     jankFrames: number | null,
     server: PerformancePushSocketServer,
-    // Raw per-interval frame readings for the windowed buffer only (null on an
-    // idle no-frame tick), kept separate from the cached stream values above.
-    rawFps: number | null,
-    rawFrameTimeMs: number | null
+    // Raw per-interval readings for the windowed buffer only (null on an idle
+    // no-frame tick), kept separate from the cached/fabricated stream values
+    // above, plus the monitored package captured before sampling began.
+    raw: {
+      fps: number | null;
+      frameTimeMs: number | null;
+      touchLatencyMs: number | null;
+      samplingPackage: string;
+    }
   ): void {
     const data: LivePerformanceData = {
       deviceId: device.deviceId,
@@ -524,17 +554,25 @@ export class PerformanceMonitor {
 
     // Feed the windowed buffer at this single fan-out point so both Android
     // (dumpsys) and iOS (host CPU/mem) samples land in the observe snapshot.
-    // Frame fields use the RAW per-interval readings so idle no-frame ticks
-    // stay null and don't pin a stale fps in the window.
-    this.perfWindowBuffer.record(device.deviceId, {
-      t: now,
-      fps: rawFps,
-      frameTimeMs: rawFrameTimeMs,
-      jankFrames: metrics.jankFrames,
-      touchLatencyMs: metrics.touchLatencyMs,
-      cpuUsagePercent: metrics.cpuUsagePercent,
-      memoryUsageMb: metrics.memoryUsageMb,
-    });
+    // Frame/touch fields use the RAW per-interval readings so idle no-frame
+    // ticks stay null and don't pin a stale reading in the window. Guard against
+    // the async race: only record if this device is still monitored under the
+    // same package we started sampling for (a mid-sample switch/stop already
+    // cleared the buffer and must not be repopulated with the old app's data).
+    const stillCurrent =
+      this.monitoredDevices.get(device.deviceId) === device &&
+      device.packageName === raw.samplingPackage;
+    if (stillCurrent) {
+      this.perfWindowBuffer.record(device.deviceId, {
+        t: now,
+        fps: raw.fps,
+        frameTimeMs: raw.frameTimeMs,
+        jankFrames: metrics.jankFrames,
+        touchLatencyMs: raw.touchLatencyMs,
+        cpuUsagePercent: metrics.cpuUsagePercent,
+        memoryUsageMb: metrics.memoryUsageMb,
+      });
+    }
 
     // Emit telemetry events when metric health status changes
     this.emitPerformanceTelemetry(device, now, metrics, data.health);

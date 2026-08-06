@@ -144,12 +144,12 @@ describe("PerfWindowBuffer", () => {
       expect(snap.jank!.perSecond).toBe(5);
     });
 
-    it("falls back to total as the rate when the span is zero", () => {
+    it("reports a null rate for a single sample (unknown coverage)", () => {
       const buffer = new PerfWindowBuffer();
       buffer.record("device-1", sample({ t: 1000, jankFrames: 4 }));
-      const snap = buffer.snapshot("device-1", 1000, 5000); // now == sample.t → zero span
+      const snap = buffer.snapshot("device-1", 1000, 5000); // one sample → no known interval
       expect(snap.jank!.total).toBe(4);
-      expect(snap.jank!.perSecond).toBe(4);
+      expect(snap.jank!.perSecond).toBeNull();
     });
   });
 

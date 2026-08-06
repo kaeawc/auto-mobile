@@ -9,21 +9,24 @@ import {
 
 const ENABLE_ENV = "AUTOMOBILE_OBSERVE_PERF_SNAPSHOT";
 const WINDOW_ENV = "AUTOMOBILE_OBSERVE_PERF_WINDOW_MS";
+const ENABLE_ALIAS = "AUTO_MOBILE_OBSERVE_PERF_SNAPSHOT";
+const WINDOW_ALIAS = "AUTO_MOBILE_OBSERVE_PERF_WINDOW_MS";
+const ALL_KEYS = [ENABLE_ENV, WINDOW_ENV, ENABLE_ALIAS, WINDOW_ALIAS];
 
 describe("observePerfSnapshotConfig", () => {
-  let savedEnable: string | undefined;
-  let savedWindow: string | undefined;
+  const saved = new Map<string, string | undefined>();
 
   beforeEach(() => {
-    savedEnable = process.env[ENABLE_ENV];
-    savedWindow = process.env[WINDOW_ENV];
-    delete process.env[ENABLE_ENV];
-    delete process.env[WINDOW_ENV];
+    for (const k of ALL_KEYS) {
+      saved.set(k, process.env[k]);
+      delete process.env[k];
+    }
   });
 
   afterEach(() => {
-    restore(ENABLE_ENV, savedEnable);
-    restore(WINDOW_ENV, savedWindow);
+    for (const k of ALL_KEYS) {
+      restore(k, saved.get(k));
+    }
   });
 
   function restore(key: string, value: string | undefined): void {
@@ -46,6 +49,17 @@ describe("observePerfSnapshotConfig", () => {
 
     it.each(["0", "false", "no", "", "off"])("stays disabled on %p", value => {
       process.env[ENABLE_ENV] = value;
+      expect(isObservePerfSnapshotEnabled()).toBe(false);
+    });
+
+    it("honors the legacy AUTO_MOBILE_* alias when the preferred name is unset", () => {
+      process.env[ENABLE_ALIAS] = "1";
+      expect(isObservePerfSnapshotEnabled()).toBe(true);
+    });
+
+    it("prefers AUTOMOBILE_* over the legacy alias", () => {
+      process.env[ENABLE_ENV] = "0";
+      process.env[ENABLE_ALIAS] = "1";
       expect(isObservePerfSnapshotEnabled()).toBe(false);
     });
   });
@@ -83,6 +97,11 @@ describe("observePerfSnapshotConfig", () => {
     it("rounds a fractional value", () => {
       process.env[WINDOW_ENV] = "2500.7";
       expect(getObservePerfWindowMs()).toBe(2501);
+    });
+
+    it("honors the legacy AUTO_MOBILE_* window alias", () => {
+      process.env[WINDOW_ALIAS] = "2000";
+      expect(getObservePerfWindowMs()).toBe(2000);
     });
   });
 });

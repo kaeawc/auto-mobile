@@ -148,12 +148,13 @@ function jankSummary(samples: PerfSample[]): JankSummary | null {
   // `newest - oldest` across `n - 1` gaps, so the time they actually cover is
   // `n` intervals = span * n/(n-1). Dividing by a bare `newest - oldest` (or
   // `now - oldest`) drops the oldest sample's own interval and inflates the
-  // rate (e.g. two 500ms samples totaling 5 → 10/s instead of 5/s). Guard the
-  // single-sample / zero-span case by treating `total` as a 1s rate.
+  // rate (e.g. two 500ms samples totaling 5 → 10/s instead of 5/s). With a
+  // single sample (or a zero span) there is no known interval duration, so the
+  // rate is `null` rather than a fabricated 1s figure.
   const n = withJank.length;
   const spanMs = withJank[n - 1].t - withJank[0].t;
   const coverageMs = n >= 2 && spanMs > 0 ? (spanMs * n) / (n - 1) : 0;
-  const perSecond = coverageMs > 0 ? round2((total / coverageMs) * 1000) : total;
+  const perSecond = coverageMs > 0 ? round2((total / coverageMs) * 1000) : null;
   return { total, perSecond };
 }
 

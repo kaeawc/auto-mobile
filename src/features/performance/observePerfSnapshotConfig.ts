@@ -10,6 +10,15 @@
 
 const ENABLE_ENV = "AUTOMOBILE_OBSERVE_PERF_SNAPSHOT";
 const WINDOW_ENV = "AUTOMOBILE_OBSERVE_PERF_WINDOW_MS";
+// Every AUTOMOBILE_* var accepts a legacy AUTO_MOBILE_* alias (used only when the
+// preferred name is unset) — see docs/using/environment-variables.md.
+const ENABLE_ENV_ALIAS = "AUTO_MOBILE_OBSERVE_PERF_SNAPSHOT";
+const WINDOW_ENV_ALIAS = "AUTO_MOBILE_OBSERVE_PERF_WINDOW_MS";
+
+/** Read the preferred env var, falling back to its legacy AUTO_MOBILE_* alias. */
+function readEnv(preferred: string, alias: string): string | undefined {
+  return process.env[preferred] ?? process.env[alias];
+}
 
 /** Default rolling window when the env var is unset or invalid. */
 export const DEFAULT_PERF_WINDOW_MS = 5000;
@@ -25,7 +34,7 @@ function parseEnvBoolean(value: string | undefined): boolean {
 
 /** Whether observe should attach a windowed performance snapshot. */
 export function isObservePerfSnapshotEnabled(): boolean {
-  return parseEnvBoolean(process.env[ENABLE_ENV]);
+  return parseEnvBoolean(readEnv(ENABLE_ENV, ENABLE_ENV_ALIAS));
 }
 
 /**
@@ -35,7 +44,7 @@ export function isObservePerfSnapshotEnabled(): boolean {
  * or non-positive value falls back to the default.
  */
 export function getObservePerfWindowMs(): number {
-  const raw = process.env[WINDOW_ENV]?.trim();
+  const raw = readEnv(WINDOW_ENV, WINDOW_ENV_ALIAS)?.trim();
   if (!raw) {
     return DEFAULT_PERF_WINDOW_MS;
   }

@@ -22,7 +22,7 @@
 
 import { RealObserveScreen } from "../src/features/observe/ObserveScreen";
 import { defaultAdbClientFactory } from "../src/utils/android-cmdline-tools/AdbClientFactory";
-import { PerfWindowBuffer, PerfSample } from "../src/features/performance/PerfWindowBuffer";
+import { getPerfWindowBuffer, PerfWindowBuffer, PerfSample } from "../src/features/performance/PerfWindowBuffer";
 import { PerformanceMonitor, PerformanceDataPusher } from "../src/features/performance/PerformanceMonitor";
 import type { LivePerformanceData } from "../src/daemon/performancePushSocketServer";
 import type { BootedDevice } from "../src/models";
@@ -137,6 +137,10 @@ async function runCell(
   sampler: PerformanceMonitor
 ): Promise<CellResult> {
   applyEnv(enabled, windowMs);
+  // Reset retained samples so a cell's window reflects only its own run — every
+  // ON cell re-registers the same device/package, so startMonitoring() would not
+  // clear on its own and later cells would inherit earlier cells' samples.
+  getPerfWindowBuffer().clear(deviceId);
   // OFF baseline runs with the sampler idle; ON cells run it concurrently
   // (monitoring the foreground Settings package) to capture its real load.
   if (enabled) {

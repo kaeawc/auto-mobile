@@ -641,6 +641,9 @@ describe("PerformanceMonitor", () => {
       const idleOnly = buffer.snapshot("device-1", now, PerformanceMonitor.TICK_INTERVAL_MS * 2);
       expect(idleOnly.sampleCount).toBeGreaterThanOrEqual(2);
       expect(idleOnly.fps).toBeNull();
+      // Idle ticks fabricate 16ms touch latency for the stream, but the buffer
+      // records raw null so the fabricated value can't dominate the window.
+      expect(idleOnly.touchLatencyMs).toBeNull();
     });
   });
 });

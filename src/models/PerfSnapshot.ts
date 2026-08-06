@@ -23,8 +23,12 @@ export interface PercentileSummary {
 export interface JankSummary {
   /** Total janky frames observed across the window's samples. */
   total: number;
-  /** Janky frames per second, normalized by the window span the samples cover. */
-  perSecond: number;
+  /**
+   * Janky frames per second, normalized by the time the samples cover, or
+   * `null` when that span is unknown (a single sample carries no duration), so
+   * a warm-up snapshot never publishes a fabricated rate.
+   */
+  perSecond: number | null;
 }
 
 /** Touch-latency rollup (milliseconds). */

@@ -12,6 +12,9 @@ sealed class SharedPreferencesError(message: String) : Exception(message) {
   /** SharedPreferencesInspector was not initialized with a context. */
   class NotInitialized : SharedPreferencesError("SharedPreferencesInspector not initialized")
 
+  /** A named application-provided driver was not registered. */
+  class DriverNotFound(name: String) : SharedPreferencesError("Storage driver not found: $name")
+
   /** Error reading preferences. */
   class ReadError(cause: String) : SharedPreferencesError("Read error: $cause")
 

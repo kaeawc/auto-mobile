@@ -46,7 +46,7 @@ class DatabaseInspectorProvider : ContentProvider() {
     }
 
     try {
-      val driver = DatabaseInspector.getDriver()
+      val driver = DatabaseInspector.getDriver(extras?.getString("storeName"))
       val response =
         when (method) {
           "listDatabases" -> handleListDatabases(driver)

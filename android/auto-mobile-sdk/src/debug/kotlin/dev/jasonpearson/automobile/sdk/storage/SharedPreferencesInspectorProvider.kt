@@ -60,7 +60,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
         return result
       }
 
-      val driver = SharedPreferencesInspector.getDriver()
+      val driver = SharedPreferencesInspector.getDriver(extras?.getString("storeName"))
       val responseJson =
         when (method) {
           "listFiles" -> handleListFiles(driver)

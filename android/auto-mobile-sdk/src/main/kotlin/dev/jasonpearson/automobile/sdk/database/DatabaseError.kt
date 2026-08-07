@@ -14,6 +14,9 @@ sealed class DatabaseError(message: String) : Exception(message) {
   /** DatabaseInspector was not initialized with a context. */
   class NotInitialized : DatabaseError("DatabaseInspector not initialized")
 
+  /** A named application-provided driver was not registered. */
+  class DriverNotFound(name: String) : DatabaseError("Database driver not found: $name")
+
   /** Database path is outside the app's data directory. */
   class InvalidPath(path: String) : DatabaseError("Invalid database path: $path")
 

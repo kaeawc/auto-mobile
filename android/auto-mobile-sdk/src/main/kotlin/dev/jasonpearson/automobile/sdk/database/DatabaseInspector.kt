@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.database
 
 import android.content.Context
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Public API for database inspection.
@@ -23,6 +24,7 @@ object DatabaseInspector {
   private var context: Context? = null
   private var _enabled: Boolean = false
   private var _driver: SQLiteDatabaseDriver? = null
+  private val customDrivers = ConcurrentHashMap<String, DatabaseDriver>()
 
   /**
    * Initialize the DatabaseInspector with application context.
@@ -55,12 +57,27 @@ object DatabaseInspector {
     }
   }
 
+  /** Registers an application-owned database driver under a stable store name. */
+  fun registerDriver(name: String, driver: DatabaseDriver) {
+    require(name.isNotBlank()) { "driver name must not be blank" }
+    customDrivers[name] = driver
+  }
+
+  /** Removes an application-owned database driver and returns whether it was registered. */
+  fun unregisterDriver(name: String): Boolean = customDrivers.remove(name) != null
+
+  /** Returns the names of all application-owned database drivers. */
+  fun registeredDriverNames(): Set<String> = customDrivers.keys.toSet()
+
   /**
    * Get the database driver instance.
    *
    * @throws DatabaseError.NotInitialized if initialize() has not been called
    */
-  internal fun getDriver(): DatabaseDriver {
+  internal fun getDriver(name: String? = null): DatabaseDriver {
+    name?.let {
+      return customDrivers[it] ?: throw DatabaseError.DriverNotFound(it)
+    }
     val ctx = context ?: throw DatabaseError.NotInitialized()
 
     // Create driver lazily
@@ -83,6 +100,7 @@ object DatabaseInspector {
    */
   internal fun reset() {
     _driver?.closeAll()
+    customDrivers.clear()
     _driver = null
     _enabled = false
     context = null

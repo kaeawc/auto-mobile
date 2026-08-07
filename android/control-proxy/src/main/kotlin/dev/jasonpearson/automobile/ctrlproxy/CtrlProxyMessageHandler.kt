@@ -89,7 +89,12 @@ class CtrlProxyMessageHandler(
     // Exhaustive over the sealed hierarchy: adding a new WebSocketRequest subclass without a branch
     // here is a compile error, which is the whole point of retiring the string-typed `when`.
     when (request) {
-      is RequestHierarchy -> actions.requestHierarchy(request.disableAllFiltering)
+      is RequestHierarchy ->
+        actions.requestHierarchy(
+          request.disableAllFiltering,
+          request.maxDepth,
+          request.maxNodes,
+        )
       is RequestHierarchyIfStale -> actions.requestHierarchyIfStale(request.sinceTimestamp)
       is SetHierarchyInterval -> actions.setHierarchyInterval(request.intervalMs)
       is RequestScreenshot -> actions.requestScreenshot(request.requestId)

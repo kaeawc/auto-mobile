@@ -75,6 +75,8 @@ export interface ViewHierarchyResult {
   deviceModel?: string;
   /** Whether running on an emulator (Android only, from accessibility service) */
   isEmulator?: boolean;
+  /** Structured reasons why this Android snapshot is partial or unavailable. */
+  truncationReasons?: string[];
   /** Present when CtrlProxy is reconnecting and the hierarchy is temporarily unavailable. */
   ctrlProxyReconnect?: CtrlProxyReconnectStatus;
 }

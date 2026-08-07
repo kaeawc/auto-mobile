@@ -60,7 +60,8 @@ class HierarchyDebouncer(
   private val perfProvider: PerfProvider = PerfProvider.instance,
   private val quickDebounceMs: Long = 5L,
   private val animationSkipWindowMs: Long = 100L,
-  private val extractHierarchy: (disableAllFiltering: Boolean) -> ViewHierarchy?,
+  private val extractHierarchy:
+    (disableAllFiltering: Boolean, snapshotOptions: HierarchySnapshotOptions) -> ViewHierarchy?,
 ) {
   companion object {
     private const val TAG = "HierarchyDebouncer"
@@ -150,11 +151,16 @@ class HierarchyDebouncer(
   fun extractNowBlocking(
     skipFlowEmit: Boolean = false,
     disableAllFiltering: Boolean = false,
+    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
   ): ViewHierarchy? {
     debounceJob?.cancel()
     inAnimationMode = false
     kotlinx.coroutines.runBlocking {
-      extractAndCompare(skipFlowEmit = skipFlowEmit, disableAllFiltering = disableAllFiltering)
+      extractAndCompare(
+        skipFlowEmit = skipFlowEmit,
+        disableAllFiltering = disableAllFiltering,
+        snapshotOptions = snapshotOptions,
+      )
     }
     return lastHierarchy
   }
@@ -286,6 +292,7 @@ class HierarchyDebouncer(
   private suspend fun extractAndCompare(
     skipFlowEmit: Boolean = false,
     disableAllFiltering: Boolean = false,
+    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
   ) {
     val startTime = timeProvider.currentTimeMillis()
 
@@ -298,7 +305,7 @@ class HierarchyDebouncer(
     perfProvider.independentRoot("hierarchyDebouncer")
     try {
       perfProvider.startOperation("extractHierarchy")
-      val hierarchy = extractHierarchy(disableAllFiltering)
+      val hierarchy = extractHierarchy(disableAllFiltering, snapshotOptions)
       perfProvider.endOperation("extractHierarchy")
 
       if (hierarchy == null) {

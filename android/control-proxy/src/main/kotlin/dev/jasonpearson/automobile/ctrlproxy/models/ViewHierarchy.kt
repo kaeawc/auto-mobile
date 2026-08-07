@@ -8,7 +8,9 @@ import kotlinx.serialization.Serializable
  * framework
  */
 @Serializable
-data class ViewHierarchy(
+data class ViewHierarchy
+  @JvmOverloads
+  constructor(
   val updatedAt: Long = System.currentTimeMillis(),
   val packageName: String? = null,
   val hierarchy: UIElementInfo? = null,
@@ -39,6 +41,8 @@ data class ViewHierarchy(
   val nativeScale: Float? = null,
   val pixelWidth: Int? = null, // Physical screenshot pixel width (== screenWidth on Android)
   val pixelHeight: Int? = null, // Physical screenshot pixel height (== screenHeight on Android)
+  /** Structured reasons why this snapshot is partial or unavailable. */
+  val truncationReasons: List<String>? = null,
 )
 
 @Serializable

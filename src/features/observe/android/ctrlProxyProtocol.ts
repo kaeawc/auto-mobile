@@ -43,6 +43,8 @@ export interface RequestHierarchyMessage {
   type: "request_hierarchy";
   requestId: string;
   disableAllFiltering: boolean;
+  maxDepth?: number;
+  maxNodes?: number;
 }
 
 /**
@@ -653,8 +655,19 @@ export function serializeCtrlProxyRequest(request: CtrlProxyRequest): string {
  * shared cross-platform path).
  */
 export const ctrlProxyRequests = {
-  requestHierarchy(args: { requestId: string; disableAllFiltering: boolean }): RequestHierarchyMessage {
-    return { type: "request_hierarchy", requestId: args.requestId, disableAllFiltering: args.disableAllFiltering };
+  requestHierarchy(args: {
+    requestId: string;
+    disableAllFiltering: boolean;
+    maxDepth?: number;
+    maxNodes?: number;
+  }): RequestHierarchyMessage {
+    return {
+      type: "request_hierarchy",
+      requestId: args.requestId,
+      disableAllFiltering: args.disableAllFiltering,
+      maxDepth: args.maxDepth,
+      maxNodes: args.maxNodes,
+    };
   },
 
   requestHierarchyIfStale(args: { requestId: string; sinceTimestamp: number }): RequestHierarchyIfStaleMessage {

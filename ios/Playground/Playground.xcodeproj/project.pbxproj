@@ -10,12 +10,14 @@
 		007B2120C2735B42A20C510B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2F4747AC5700DF138836D5F /* Theme.swift */; };
 		15B37A3EDBAFD6BD0FC98BFC /* DemosTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */; };
 		327A28D4620038BBA8D02656 /* Shapes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5122FF517804CD75B0F75CBA /* Shapes.swift */; };
+		4546703D0511A96D6060F587 /* CrayonSketch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */; };
 		5339DAC5909A688059ABBA80 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01BCE22E951887741F32904 /* ContentView.swift */; };
 		54C16E199D10E281E1E316CF /* SettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64FD18EC8D1B9A665615C374 /* SettingsTab.swift */; };
 		553F94B4D033BCA44B07AC4E /* PlaygroundApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6EA6F80147865B6F32DD526 /* PlaygroundApp.swift */; };
 		619CDEE3F264DBB3415041D0 /* ShantellSans.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E1B25FBAC5217DE05EA701CF /* ShantellSans.ttf */; };
 		72CDA6DB361FDC97490C3C2C /* AutoMobileSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 3137B15D8D485C363DB78A3E /* AutoMobileSDK */; };
 		7C8CF515031B975C05FA2AD2 /* PlaygroundThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */; };
+		95CF2D08679D32C4A9966ACD /* CrayonSketchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */; };
 		97CA6F2DE628A139094EF72D /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B46870C2DDF4A2F73A5778B /* Colors.swift */; };
 		B3B613858665E331B7E7EB99 /* SdkHighlightOverlayE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */; };
 		B73660170723595B44749E9F /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51580F5FC5ADCD5576885563 /* Typography.swift */; };
@@ -37,6 +39,7 @@
 
 /* Begin PBXFileReference section */
 		0C5B41C44C18F0045A6B61C2 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayonSketchTests.swift; sourceTree = "<group>"; };
 		25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemosTab.swift; sourceTree = "<group>"; };
 		2B46870C2DDF4A2F73A5778B /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Colors.swift; sourceTree = "<group>"; };
 		5122FF517804CD75B0F75CBA /* Shapes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shapes.swift; sourceTree = "<group>"; };
@@ -45,6 +48,7 @@
 		8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHighlightOverlayE2ETests.swift; sourceTree = "<group>"; };
 		AA0EB8290A6E5436B2C8CE6F /* auto-mobile-sdk */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "auto-mobile-sdk"; path = "../auto-mobile-sdk"; sourceTree = SOURCE_ROOT; };
 		BDA9169E926B14087F3B1BA2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayonSketch.swift; sourceTree = "<group>"; };
 		C2F4747AC5700DF138836D5F /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		C6D8C10EFC976E6B3CCD16BD /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		C6EA6F80147865B6F32DD526 /* PlaygroundApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundApp.swift; sourceTree = "<group>"; };
@@ -91,6 +95,7 @@
 			isa = PBXGroup;
 			children = (
 				2B46870C2DDF4A2F73A5778B /* Colors.swift */,
+				C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */,
 				5122FF517804CD75B0F75CBA /* Shapes.swift */,
 				C2F4747AC5700DF138836D5F /* Theme.swift */,
 				51580F5FC5ADCD5576885563 /* Typography.swift */,
@@ -138,6 +143,7 @@
 		B500CE1A6941BEA33903C091 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */,
 				FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */,
 				8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */,
 			);
@@ -279,6 +285,7 @@
 				F99EE983EC6317D09E5A3247 /* AccessibilityRotorDemo.swift in Sources */,
 				97CA6F2DE628A139094EF72D /* Colors.swift in Sources */,
 				5339DAC5909A688059ABBA80 /* ContentView.swift in Sources */,
+				4546703D0511A96D6060F587 /* CrayonSketch.swift in Sources */,
 				15B37A3EDBAFD6BD0FC98BFC /* DemosTab.swift in Sources */,
 				EA349DF37933D70B410F7135 /* DiscoverTab.swift in Sources */,
 				553F94B4D033BCA44B07AC4E /* PlaygroundApp.swift in Sources */,
@@ -293,6 +300,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				95CF2D08679D32C4A9966ACD /* CrayonSketchTests.swift in Sources */,
 				7C8CF515031B975C05FA2AD2 /* PlaygroundThemeTests.swift in Sources */,
 				B3B613858665E331B7E7EB99 /* SdkHighlightOverlayE2ETests.swift in Sources */,
 			);

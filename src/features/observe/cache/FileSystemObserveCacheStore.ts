@@ -24,6 +24,9 @@ interface ObserveResultCacheEntry {
  * legacy-shaped entry can still be within the cache TTL, and downstream code
  * dereferences `layoutWarnings.warnings` — so normalize it here at the disk-load
  * boundary before it warms the in-memory cache or is served to a resource.
+ *
+ * Mutates `parsed` in place (and returns it); pass a freshly parsed value, never
+ * a shared object.
  */
 export function normalizeCachedObserveResult(parsed: unknown): ObserveResult {
   // Mutate through a Record view, but return the original `unknown` value cast to

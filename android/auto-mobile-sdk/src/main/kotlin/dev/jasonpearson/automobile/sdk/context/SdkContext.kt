@@ -9,6 +9,8 @@ internal class SdkContext {
 
   @Volatile var sessionId: String? = null
   @Volatile var userId: String? = null
+  @Volatile var tenantId: String? = null
+  @Volatile var currentScreen: String? = null
   @Volatile var appVersion: String? = null
 
   private val _tags = mutableMapOf<String, String>()
@@ -31,6 +33,8 @@ internal class SdkContext {
       return SdkContextSnapshot(
         sessionId = sessionId,
         userId = userId,
+        tenantId = tenantId,
+        currentScreen = currentScreen,
         appVersion = appVersion,
         tags = HashMap(_tags),
       )
@@ -42,6 +46,8 @@ internal class SdkContext {
     lock.withLock {
       sessionId = null
       userId = null
+      tenantId = null
+      currentScreen = null
       appVersion = null
       _tags.clear()
     }
@@ -54,4 +60,14 @@ data class SdkContextSnapshot(
   val userId: String?,
   val appVersion: String?,
   val tags: Map<String, String>,
-)
+  val tenantId: String? = null,
+  val currentScreen: String? = null,
+) {
+  /** Preserves the pre-context-extension constructor for binary compatibility. */
+  constructor(
+    sessionId: String?,
+    userId: String?,
+    appVersion: String?,
+    tags: Map<String, String>,
+  ) : this(sessionId, userId, appVersion, tags, null, null)
+}

@@ -28,11 +28,15 @@ class SdkContextTest {
   fun `set and get volatile fields`() {
     context.sessionId = "sess-1"
     context.userId = "user-42"
+    context.tenantId = "tenant-42"
+    context.currentScreen = "Home"
     context.appVersion = "1.2.3"
 
     val snap = context.snapshot()
     assertEquals("sess-1", snap.sessionId)
     assertEquals("user-42", snap.userId)
+    assertEquals("tenant-42", snap.tenantId)
+    assertEquals("Home", snap.currentScreen)
     assertEquals("1.2.3", snap.appVersion)
   }
 
@@ -81,6 +85,8 @@ class SdkContextTest {
   fun `reset clears all fields and tags`() {
     context.sessionId = "sess-1"
     context.userId = "user-42"
+    context.tenantId = "tenant-42"
+    context.currentScreen = "Home"
     context.appVersion = "1.0.0"
     context.setTag("env", "prod")
 
@@ -89,8 +95,22 @@ class SdkContextTest {
     val snap = context.snapshot()
     assertNull(snap.sessionId)
     assertNull(snap.userId)
+    assertNull(snap.tenantId)
+    assertNull(snap.currentScreen)
     assertNull(snap.appVersion)
     assertTrue(snap.tags.isEmpty())
+  }
+
+  @Test
+  fun `snapshot includes tenant and current screen`() {
+    val context = SdkContext()
+    context.tenantId = "tenant-1"
+    context.currentScreen = "Home"
+
+    val snapshot = context.snapshot()
+
+    assertEquals("tenant-1", snapshot.tenantId)
+    assertEquals("Home", snapshot.currentScreen)
   }
 
   @Test

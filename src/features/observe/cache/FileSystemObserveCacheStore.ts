@@ -18,6 +18,28 @@ interface ObserveResultCacheEntry {
 }
 
 /**
+ * Migrate an observation written by a pre-#5074 daemon. Back then `layoutWarnings`
+ * was a `LayoutWarning[]` with a sibling `layoutWarningsTruncated` number; it is
+ * now the `{ scope, total?, warnings }` envelope. After an in-place upgrade a
+ * legacy-shaped entry can still be within the cache TTL, and downstream code
+ * dereferences `layoutWarnings.warnings` — so normalize it here at the disk-load
+ * boundary before it warms the in-memory cache or is served to a resource.
+ */
+export function normalizeCachedObserveResult(parsed: unknown): ObserveResult {
+  const record = parsed as Record<string, unknown>;
+  const legacy = record.layoutWarnings;
+  if (Array.isArray(legacy)) {
+    const truncated = record.layoutWarningsTruncated;
+    const total = typeof truncated === "number" ? truncated : undefined;
+    record.layoutWarnings = total !== undefined
+      ? { scope: "truncated", total, warnings: legacy }
+      : { scope: "full", warnings: legacy };
+    delete record.layoutWarningsTruncated;
+  }
+  return record as ObserveResult;
+}
+
+/**
  * Five-minute TTL applied to both in-memory and on-disk cache entries.
  * Preserves the original {@link RealObserveScreen} behaviour.
  */
@@ -192,7 +214,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       logger.debug(`[OBSERVE_CACHE] Loading most recent disk cache file (age: ${age}ms)`);
 
       const cacheData = await readFileAsync(mostRecentFile.path, "utf8");
-      const cachedResult: ObserveResult = JSON.parse(cacheData);
+      const cachedResult = normalizeCachedObserveResult(JSON.parse(cacheData));
 
       // Warm the in-memory cache so subsequent reads avoid the disk round-trip.
       const cacheKey = `${deviceId}:${mostRecentFile.mtime}`;

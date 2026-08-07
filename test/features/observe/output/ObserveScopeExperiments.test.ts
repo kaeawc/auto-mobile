@@ -626,6 +626,31 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     expect(result.layoutWarnings?.warnings).toHaveLength(1);
   });
 
+  test("rejects a same-bounds survivor whose strong id conflicts with the warning (finding 8)", () => {
+    const B: Bounds = { left: 0, top: 100, right: 400, bottom: 160 };
+    const obs = androidFixture();
+    // Two siblings share an exact rectangle and the same text but differ by
+    // resource-id. Anchor focus keeps only `kept`; `dropped` is pruned.
+    obs.viewHierarchy!.hierarchy.node = {
+      "resource-id": `${APP}:id/root`, "bounds": { left: 0, top: 0, right: 1080, bottom: 2400 },
+      "node": [
+        { "resource-id": `${APP}:id/kept`, "text": "OK", "bounds": B },
+        { "resource-id": `${APP}:id/dropped`, "text": "OK", "bounds": B },
+      ],
+    } as never;
+    const warn = (rid: string): Warning => ({ ...warningAt(B), element: { resourceId: rid, text: "OK", bounds: B } });
+    obs.layoutWarnings = { scope: "full", warnings: [warn(`${APP}:id/kept`), warn(`${APP}:id/dropped`)] };
+
+    const result = applyObserveScopeExperiments(obs, {
+      focus: true, focusAnchor: { resourceId: `${APP}:id/kept` }, overview: false, region: false,
+    });
+
+    // The shared text must NOT keep the pruned node's warning: its resource-id
+    // conflicts with the sole survivor's, so only `kept`'s warning remains.
+    const rids = (result.layoutWarnings?.warnings ?? []).map(w => w.element.resourceId);
+    expect(rids).toEqual([`${APP}:id/kept`]);
+  });
+
   test("is pure — does not mutate the caller's layoutWarnings", () => {
     const obs = androidFixture();
     obs.layoutWarnings = { scope: "full", warnings: [warningAt(HEADER_BOUNDS), warningAt(NAV_BAR_BOUNDS)] };

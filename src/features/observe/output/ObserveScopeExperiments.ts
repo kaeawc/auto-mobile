@@ -654,8 +654,15 @@ function scopeLayoutWarnings(out: ObserveResult, pruned: boolean): void {
   out.layoutWarnings = { scope: "scoped", warnings: kept };
 }
 
-/** Per-rectangle survival index: the identity signatures present, and whether any survivor there is anonymous. */
-type SurvivorIndex = Map<string, { identities: Set<string>; anonymous: boolean }>;
+/** A surviving node's identity fields (empty string = absent). */
+interface NodeIdentity {
+  viewId: string;
+  resourceId: string;
+  contentDesc: string;
+  text: string;
+}
+/** Per-rectangle survival index: the identity of every surviving node at each bounds. */
+type SurvivorIndex = Map<string, NodeIdentity[]>;
 
 function collectSurvivorBoundsIdentity(nodes: NodeRecord[]): SurvivorIndex {
   const index: SurvivorIndex = new Map();
@@ -669,27 +676,21 @@ function collectSurvivorBoundsIdentity(nodes: NodeRecord[]): SurvivorIndex {
   return index;
 }
 
-/** Record one surviving node's bounds → identity signatures (or anonymity) in the index. */
+/** Record one surviving node's bounds → identity in the index. */
 function indexSurvivor(node: NodeRecord, index: SurvivorIndex): void {
   const bounds = readBounds(attr(node, "bounds"));
   if (bounds === null) {
     return;
   }
   const key = boundsKey(bounds);
-  const entry = index.get(key) ?? { identities: new Set<string>(), anonymous: false };
-  const ids = identitySignatures(
-    stringAttr(node, "view-id"),
-    stringAttr(node, "resource-id"),
-    stringAttr(node, "content-desc"),
-    stringAttr(node, "text")
-  );
-  if (ids.length === 0) {
-    entry.anonymous = true;
-  }
-  for (const id of ids) {
-    entry.identities.add(id);
-  }
-  index.set(key, entry);
+  const list = index.get(key) ?? [];
+  list.push({
+    viewId: stringAttr(node, "view-id"),
+    resourceId: stringAttr(node, "resource-id"),
+    contentDesc: stringAttr(node, "content-desc"),
+    text: stringAttr(node, "text"),
+  });
+  index.set(key, list);
 }
 
 function warningSurvives(warning: LayoutWarnings["warnings"][number], survivors: SurvivorIndex): boolean {
@@ -697,34 +698,49 @@ function warningSurvives(warning: LayoutWarnings["warnings"][number], survivors:
   if (bounds === null) {
     return false;
   }
-  const entry = survivors.get(boundsKey(bounds));
-  if (entry === undefined) {
+  const candidates = survivors.get(boundsKey(bounds));
+  if (candidates === undefined) {
     return false; // no node survives at this rectangle
   }
-  const element = warning.element ?? {};
-  const wanted = identitySignatures(element.viewId, element.resourceId, element.contentDesc, element.text);
-  // Wildcard cases: the warning has no identity to correlate, or a surviving node
-  // at this rectangle carries none (identity stripped by the transform) — either
-  // way an element is genuinely visible here, so keep the warning.
-  if (wanted.length === 0 || entry.anonymous) {
-    return true;
-  }
-  return wanted.some(id => entry.identities.has(id));
+  return candidates.some(node => nodeMatchesWarning(node, warning.element ?? {}));
 }
 
-/** Non-empty identity signatures for a node/element, namespaced so fields never collide. */
-function identitySignatures(
-  viewId: string | undefined,
-  resourceId: string | undefined,
-  contentDesc: string | undefined,
-  text: string | undefined
-): string[] {
-  return [
-    viewId ? `vid:${viewId}` : "",
-    resourceId ? `rid:${resourceId}` : "",
-    contentDesc ? `cd:${contentDesc}` : "",
-    text ? `txt:${text}` : "",
-  ].filter(signature => signature.length > 0);
+type WarningElement = { viewId?: string; resourceId?: string; contentDesc?: string; text?: string };
+
+/** Two populated values that disagree. */
+function conflicts(a: string | undefined, b: string): boolean {
+  return !!a && !!b && a !== b;
+}
+
+/** Two values that are populated and equal. */
+function shares(a: string | undefined, b: string): boolean {
+  return !!a && a === b;
+}
+
+function hasAnyIdentity(id: WarningElement | NodeIdentity): boolean {
+  return !!(id.viewId || id.resourceId || id.contentDesc || id.text);
+}
+
+/**
+ * Whether a surviving node plausibly IS the warning's element.
+ * - Reject when a strong identifier (`resource-id`/`view-id`) is populated on
+ *   both sides but differs — two distinct nodes at one rectangle (issue #5074).
+ * - Wildcard-keep when either side carries no identity: a genuinely-visible
+ *   element sits here, and dropping its warning would be a false negative (the
+ *   OVERVIEW identity-strip case).
+ * - Otherwise require at least one shared populated field.
+ */
+function nodeMatchesWarning(node: NodeIdentity, element: WarningElement): boolean {
+  if (conflicts(element.resourceId, node.resourceId) || conflicts(element.viewId, node.viewId)) {
+    return false;
+  }
+  if (!hasAnyIdentity(element) || !hasAnyIdentity(node)) {
+    return true;
+  }
+  return shares(element.resourceId, node.resourceId)
+    || shares(element.viewId, node.viewId)
+    || shares(element.contentDesc, node.contentDesc)
+    || shares(element.text, node.text);
 }
 
 /** Canonical bounds identity, shape-independent (object and tuple map to the same key). */

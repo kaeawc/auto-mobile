@@ -18,6 +18,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# shellcheck source=scripts/lib/shell-core.sh disable=SC1091
+source "$SCRIPT_DIR/lib/shell-core.sh"
+
 CHECK_NAMES=()
 CHECK_COMMANDS=()
 CHECK_GROUPS=()
@@ -267,6 +270,14 @@ if ! [[ "$max_parallel" =~ ^[0-9]+$ ]]; then
   echo "--max-parallel must be a positive integer." >&2
   exit 1
 fi
+
+# All CLI options are validated and at least one check is selected. Only now do we
+# self-heal deps: a fresh git worktree has no node_modules, so any check would
+# fail with "turbo: command not found" (issue #5051). Placing this after
+# validation keeps a malformed invocation fail-fast and side-effect-free (it
+# errors without running an install). No-op once deps are present, so CI is
+# unaffected.
+ensure_node_modules "$PROJECT_ROOT"
 
 if [[ "$max_parallel" -lt 1 ]]; then
   echo "--max-parallel must be greater than 0." >&2

@@ -800,6 +800,40 @@ describe("ObserveScreen", function() {
       expect(cachedB?.viewHierarchy).toBe("hierarchy-B");
     });
 
+    test("cached-result getters bound an uncapped layoutWarnings list (issue #5074)", async function() {
+      // The audit is cached UNCAPPED so the observe tool's scope-then-cap path sees
+      // the full set; the resource/registry getters that serialize the cache
+      // directly must still be bounded.
+      const screen = new RealObserveScreen(deviceA, new FakeAdbClientFactory(new FakeAdbExecutor()));
+      const result: ObserveResult = {
+        ...screen.createBaseResult(),
+        layoutWarnings: {
+          scope: "full",
+          warnings: Array.from({ length: 150 }, () => ({
+            type: "important-content-under-inset",
+            severity: "info",
+            element: { bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
+            categories: ["text"],
+            insetTypes: ["systemBars"],
+            sides: ["top"],
+            overflowPx: { top: 1 },
+            insetPx: { top: 1 },
+            overlapPercent: 10,
+            confidence: "medium",
+          })),
+        },
+      };
+      await screen.cacheObserveResult(result);
+
+      const cachedForDevice = RealObserveScreen.getRecentCachedResultForDevice(deviceA.deviceId);
+      expect(cachedForDevice?.layoutWarnings?.scope).toBe("truncated");
+      expect(cachedForDevice?.layoutWarnings?.warnings).toHaveLength(100);
+      expect(cachedForDevice?.layoutWarnings?.total).toBe(150);
+
+      const cachedRecent = RealObserveScreen.getRecentCachedResult();
+      expect(cachedRecent?.layoutWarnings?.warnings).toHaveLength(100);
+    });
+
     test("getRecentCachedResult returns most recent across all devices", async function() {
       const now = Date.now();
       const timerA = new FakeTimer();

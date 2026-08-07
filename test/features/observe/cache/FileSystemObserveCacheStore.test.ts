@@ -6,7 +6,9 @@ import { randomUUID } from "node:crypto";
 import {
   FileSystemObserveCacheStore,
   OBSERVE_RESULT_CACHE_TTL_MS,
+  normalizeCachedObserveResult,
 } from "../../../../src/features/observe/cache/FileSystemObserveCacheStore";
+import { capLayoutWarnings } from "../../../../src/features/observe/audits/SafeAreaAuditor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { ObserveResult } from "../../../../src/models";
 
@@ -156,5 +158,46 @@ describe("FileSystemObserveCacheStore", function() {
     // The surviving file must be the fresh one, not the stale one.
     const restored = await store.getMostRecent("device-1");
     expect(restored?.updatedAt).toBe("fresh");
+  });
+});
+
+describe("normalizeCachedObserveResult — legacy layoutWarnings migration (#5074)", function() {
+  // A pre-#5074 daemon wrote layoutWarnings as an array plus a sibling number.
+  const warning = { type: "important-content-under-inset", severity: "info", element: { bounds: { left: 0, top: 0, right: 10, bottom: 10 } } };
+
+  test("wraps a legacy array + layoutWarningsTruncated into a truncated envelope", function() {
+    const result = normalizeCachedObserveResult({
+      updatedAt: "x", screenSize: { width: 1, height: 1 }, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      layoutWarnings: [warning], layoutWarningsTruncated: 150,
+    });
+    expect(result.layoutWarnings).toEqual({ scope: "truncated", total: 150, warnings: [warning] } as never);
+    expect((result as Record<string, unknown>).layoutWarningsTruncated).toBeUndefined();
+  });
+
+  test("wraps a legacy array with no truncation as a full envelope", function() {
+    const result = normalizeCachedObserveResult({
+      updatedAt: "x", screenSize: { width: 1, height: 1 }, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      layoutWarnings: [warning],
+    });
+    expect(result.layoutWarnings).toEqual({ scope: "full", warnings: [warning] } as never);
+  });
+
+  test("passes a modern envelope through unchanged", function() {
+    const envelope = { scope: "full" as const, warnings: [warning] };
+    const result = normalizeCachedObserveResult({
+      updatedAt: "x", screenSize: { width: 1, height: 1 }, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      layoutWarnings: envelope,
+    });
+    expect(result.layoutWarnings).toBe(envelope as never);
+  });
+
+  test("a normalized legacy result no longer throws when capped (regression: #5074 finding 7)", function() {
+    const many = Array.from({ length: 150 }, () => warning);
+    const result = normalizeCachedObserveResult({
+      updatedAt: "x", screenSize: { width: 1, height: 1 }, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      layoutWarnings: many,
+    });
+    expect(() => capLayoutWarnings(result.layoutWarnings!)).not.toThrow();
+    expect(capLayoutWarnings(result.layoutWarnings!).warnings).toHaveLength(100);
   });
 });

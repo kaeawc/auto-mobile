@@ -78,22 +78,25 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
           source: "ios-status-bar-manager",
         },
       },
-      layoutWarnings: [{
-        type: "important-content-under-inset",
-        severity: "warning",
-        element: { text: "Title", bounds: { top: 0, right: 100, bottom: 30, left: 0 } },
-        categories: ["text"],
-        insetTypes: ["safeArea"],
-        sides: ["top"],
-        overflowPx: { top: 30 },
-        insetPx: { top: 59.5 },
-        overlapPercent: 100,
-        confidence: "high",
-      }],
+      layoutWarnings: {
+        scope: "full",
+        warnings: [{
+          type: "important-content-under-inset",
+          severity: "warning",
+          element: { text: "Title", bounds: { top: 0, right: 100, bottom: 30, left: 0 } },
+          categories: ["text"],
+          insetTypes: ["safeArea"],
+          sides: ["top"],
+          overflowPx: { top: 30 },
+          insetPx: { top: 59.5 },
+          overlapPercent: 100,
+          confidence: "high",
+        }],
+      },
     });
 
     expect(parsed.success).toBe(true);
-    expect(parsed.data?.layoutWarnings?.[0]).toMatchObject({
+    expect(parsed.data?.layoutWarnings?.warnings[0]).toMatchObject({
       overflowPx: { top: 30 },
       insetPx: { top: 59.5 },
     });
@@ -161,23 +164,45 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
   test("accepts compacted layout-warning bounds and fractional legacy iOS insets", () => {
     const observe = {
       systemInsets: { top: 59.5, right: 0, bottom: 34, left: 0 },
-      layoutWarnings: [{
-        type: "important-content-under-inset",
-        severity: "warning",
-        element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
-        categories: ["text"],
-        insetTypes: ["safeArea"],
-        sides: ["top"],
-        overflowPx: { top: 30 },
-        insetPx: { top: 59.5 },
-        overlapPercent: 100,
-        confidence: "high",
-      }],
+      layoutWarnings: {
+        scope: "full",
+        warnings: [{
+          type: "important-content-under-inset",
+          severity: "warning",
+          element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
+          categories: ["text"],
+          insetTypes: ["safeArea"],
+          sides: ["top"],
+          overflowPx: { top: 30 },
+          insetPx: { top: 59.5 },
+          overlapPercent: 100,
+          confidence: "high",
+        }],
+      },
     };
     const compacted = sanitizeObserveResult(observe as never, { dropElements: false, compact: true });
 
-    expect(compacted.layoutWarnings?.[0]?.element.bounds).toEqual([0, 0, 100, 30]);
+    expect(compacted.layoutWarnings?.warnings[0]?.element.bounds).toEqual([0, 0, 100, 30]);
     expect(() => observeResultSchema.parse(compacted)).not.toThrow();
+  });
+
+  test("caps layoutWarnings by default and opts out with capLayoutWarnings:false", () => {
+    const warning = {
+      type: "important-content-under-inset", severity: "info",
+      element: { bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
+      categories: ["text"], insetTypes: ["systemBars"], sides: ["top"],
+      overflowPx: { top: 1 }, insetPx: { top: 1 }, overlapPercent: 10, confidence: "medium",
+    };
+    const observe = { layoutWarnings: { scope: "full", warnings: Array.from({ length: 150 }, () => warning) } };
+
+    const capped = sanitizeObserveResult(observe as never, { dropElements: false });
+    expect(capped.layoutWarnings?.scope).toBe("truncated");
+    expect(capped.layoutWarnings?.warnings).toHaveLength(100);
+    expect(capped.layoutWarnings?.total).toBe(150);
+
+    const uncapped = sanitizeObserveResult(observe as never, { dropElements: false, capLayoutWarnings: false });
+    expect(uncapped.layoutWarnings?.scope).toBe("full");
+    expect(uncapped.layoutWarnings?.warnings).toHaveLength(150);
   });
 
   test("accepts an iOS root hierarchy.bounds with optional left/top (points)", () => {

@@ -1973,3 +1973,50 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
     expect(ids).toContain("com.android.systemui:id/status_bar");
   });
 });
+
+describe("finalizeToolResponse — scope-then-cap for layoutWarnings (issue #5074 finding 3)", () => {
+  test("an in-region warning survives even when 100+ higher-priority warnings are out of region", () => {
+    const W = 1080, H = 2400;
+    // One in-region node (top) plus 120 out-of-region nodes (bottom), each distinct bounds.
+    const inRegionBounds = { left: 0, top: 100, right: 200, bottom: 160 };
+    const outNodes = Array.from({ length: 120 }, (_, i) => ({
+      "resource-id": `com.example:id/out_${i}`,
+      "bounds": { left: 0, top: 1300 + i, right: 200, bottom: 1360 + i },
+    }));
+    const mkWarning = (bounds: Record<string, number>, severity: "warning" | "info", overflow: number): any => ({
+      type: "important-content-under-inset", severity, element: { bounds },
+      categories: ["text"], insetTypes: ["systemBars"], sides: ["top"],
+      overflowPx: { top: overflow }, insetPx: { top: overflow }, overlapPercent: 100, confidence: "medium",
+    });
+    const obs = {
+      updatedAt: 1, screenSize: { width: W, height: H }, systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      activeWindow: { appId: "com.example" },
+      viewHierarchy: { packageName: "com.example", hierarchy: { node: {
+        "resource-id": "com.example:id/root", "bounds": { left: 0, top: 0, right: W, bottom: H },
+        "node": [{ text: "in", bounds: inRegionBounds }, ...outNodes],
+      } } },
+      layoutWarnings: {
+        scope: "full",
+        warnings: [
+          // In-region warning is deliberately LOW priority, so a cap taken BEFORE
+          // scoping (the bug) would evict it in favor of the 120 out-of-region ones.
+          mkWarning(inRegionBounds, "info", 1),
+          ...outNodes.map(n => mkWarning(n.bounds, "warning", 999)),
+        ],
+      },
+    } as unknown as ObserveResult;
+
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
+      name: "observe",
+      // project:"full" keeps the real hierarchy (default is the skeleton projection,
+      // which replaces it and cannot co-scope warnings).
+      args: { project: "full", scope: { region: { x1: 0, y1: 0, x2: 1, y2: 0.5 } } },
+    });
+
+    // Scope-then-cap: the crop keeps only the in-region node, so its warning is the
+    // sole survivor — never evicted by the 120 higher-priority out-of-region ones.
+    const served = finalized.structuredContent as ObserveResult;
+    expect(served.layoutWarnings?.scope).toBe("scoped");
+    expect(served.layoutWarnings?.warnings).toHaveLength(1);
+  });
+});

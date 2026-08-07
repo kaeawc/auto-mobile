@@ -342,25 +342,34 @@ describe("capLayoutWarnings", () => {
     confidence: "medium",
   });
 
-  test("returns the original array unchanged when at or under the cap", () => {
-    const warnings = Array.from({ length: MAX_LAYOUT_WARNINGS }, () => makeWarning("info", 1));
-    const result = capLayoutWarnings(warnings);
-    expect(result.warnings).toBe(warnings);
-    expect(result.total).toBe(MAX_LAYOUT_WARNINGS);
+  test("returns the envelope unchanged when at or under the cap", () => {
+    const envelope = { scope: "full" as const, warnings: Array.from({ length: MAX_LAYOUT_WARNINGS }, () => makeWarning("info", 1)) };
+    const result = capLayoutWarnings(envelope);
+    expect(result).toBe(envelope);
+    expect(result.total).toBeUndefined();
   });
 
-  test("caps to MAX_LAYOUT_WARNINGS and reports the pre-cap total when over", () => {
+  test("scope is 'truncated' with the pre-cap total when over the cap", () => {
     const warnings = Array.from({ length: MAX_LAYOUT_WARNINGS + 25 }, () => makeWarning("info", 1));
-    const result = capLayoutWarnings(warnings);
+    const result = capLayoutWarnings({ scope: "full", warnings });
+    expect(result.scope).toBe("truncated");
     expect(result.warnings).toHaveLength(MAX_LAYOUT_WARNINGS);
     expect(result.total).toBe(MAX_LAYOUT_WARNINGS + 25);
+  });
+
+  test("a scoped list that overflows stays 'scoped' and gains a total", () => {
+    const warnings = Array.from({ length: MAX_LAYOUT_WARNINGS + 5 }, () => makeWarning("info", 1));
+    const result = capLayoutWarnings({ scope: "scoped", warnings });
+    expect(result.scope).toBe("scoped");
+    expect(result.warnings).toHaveLength(MAX_LAYOUT_WARNINGS);
+    expect(result.total).toBe(MAX_LAYOUT_WARNINGS + 5);
   });
 
   test("keeps the highest-severity, largest-overflow warnings when trimming", () => {
     // One high-priority (warning severity, large overflow) among many low ones.
     const low = Array.from({ length: MAX_LAYOUT_WARNINGS + 10 }, () => makeWarning("info", 1));
     const high = makeWarning("warning", 999);
-    const result = capLayoutWarnings([...low, high]);
+    const result = capLayoutWarnings({ scope: "full", warnings: [...low, high] });
     expect(result.warnings).toHaveLength(MAX_LAYOUT_WARNINGS);
     expect(result.warnings).toContain(high);
   });

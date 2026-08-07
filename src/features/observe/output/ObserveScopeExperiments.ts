@@ -1,4 +1,5 @@
 import type { ObserveResult } from "../../../models/ObserveResult";
+import type { LayoutWarnings } from "../../../models/ObservationInsets";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import type {
   FocusAnchor,
@@ -602,6 +603,20 @@ export function applyObserveScopeExperiments(
   if (cfg.region) {
     runRegionStage(run, cfg);
   }
+
+  // Co-scope layoutWarnings against the FOCUS/REGION-pruned tree, captured BEFORE
+  // OVERVIEW (issue #5074). Those two transforms are lossless — kept nodes retain
+  // every attribute (including the iOS `$` bag that holds bounds/identity) — so
+  // matching is exact. OVERVIEW instead strips attributes and collapses leaves
+  // into kept ancestors (a structural summary, not a spatial removal), so reading
+  // identity from the post-OVERVIEW tree both drops iOS warnings wholesale (the
+  // `$` bag is gone) and cannot tell a collapsed child from its surviving parent.
+  // A warning for a leaf OVERVIEW summarizes is retained: its location is still
+  // shown, occupied by the kept ancestor whose `omittedDescendants` flags the
+  // collapse.
+  const survivors = collectSurvivorBoundsIdentity(rootNodes(run.current));
+  const prunedBeforeOverview = countNodes(rootNodes(run.current)) < nodesBefore;
+
   if (cfg.overview) {
     runOverviewStage(run);
   }
@@ -609,8 +624,143 @@ export function applyObserveScopeExperiments(
   // Every stage returns a fresh clone, so `run.current` is never the input here;
   // guard the theoretically-unreachable no-op case anyway.
   const out = run.current === input ? clone(input) : run.current;
+  scopeLayoutWarnings(out, survivors, prunedBeforeOverview);
   out.observeScope = buildScopeMetadata({ ...run, current: out }, nodesBefore, gatedOff);
   return out;
+}
+
+/**
+ * Co-scope `layoutWarnings` with the pruned hierarchy (issue #5074). The audit
+ * runs on the full tree in `ObserveScreen`, before these transforms drop nodes,
+ * so a scoped response could otherwise list a warning for an element no longer
+ * in the returned `viewHierarchy`.
+ *
+ * `survivors` is the identity index of the FOCUS/REGION-pruned tree, captured by
+ * the caller before OVERVIEW (see `applyObserveScopeExperiments`). A warning
+ * survives when a surviving node at its element's bounds is plausibly the *same*
+ * element — same identity, no conflicting identifier — with a wildcard when
+ * either side is genuinely identity-less (a bare bounds match).
+ *
+ * When scoping removes warnings, the list becomes `scope: "scoped"`. A
+ * `truncated` list also becomes `scoped` once the hierarchy was pruned, since a
+ * capped-away warning may belong to a pruned node — so `total` (the pre-cap count
+ * of the *un-scoped* population) no longer describes what is shown and is dropped.
+ */
+function scopeLayoutWarnings(out: ObserveResult, survivors: SurvivorIndex, pruned: boolean): void {
+  const layoutWarnings = out.layoutWarnings;
+  if (!layoutWarnings || layoutWarnings.warnings.length === 0) {
+    return;
+  }
+  const kept = layoutWarnings.warnings.filter(warning => warningSurvives(warning, survivors));
+  const dropped = kept.length !== layoutWarnings.warnings.length;
+  // A `truncated` total counted the un-scoped population; once pruning hides
+  // nodes it may over-count what is reachable, so it is no longer trustworthy.
+  const staleTotal = pruned && layoutWarnings.scope === "truncated";
+  if (!dropped && !staleTotal) {
+    return;
+  }
+  out.layoutWarnings = { scope: "scoped", warnings: kept };
+}
+
+/** A surviving node's identity fields (empty string = absent). */
+interface NodeIdentity {
+  viewId: string;
+  resourceId: string;
+  contentDesc: string;
+  text: string;
+}
+/** Per-rectangle survival index: the identity of every surviving node at each bounds. */
+type SurvivorIndex = Map<string, NodeIdentity[]>;
+
+function collectSurvivorBoundsIdentity(nodes: NodeRecord[]): SurvivorIndex {
+  const index: SurvivorIndex = new Map();
+  const walk = (list: NodeRecord[]): void => {
+    for (const node of list) {
+      indexSurvivor(node, index);
+      walk(childrenOf(node));
+    }
+  };
+  walk(nodes);
+  return index;
+}
+
+/** Record one surviving node's bounds → identity in the index. */
+function indexSurvivor(node: NodeRecord, index: SurvivorIndex): void {
+  const bounds = readBounds(attr(node, "bounds"));
+  if (bounds === null) {
+    return;
+  }
+  const key = boundsKey(bounds);
+  const list = index.get(key) ?? [];
+  list.push({
+    viewId: stringAttr(node, "view-id"),
+    resourceId: stringAttr(node, "resource-id"),
+    contentDesc: stringAttr(node, "content-desc"),
+    text: stringAttr(node, "text"),
+  });
+  index.set(key, list);
+}
+
+function warningSurvives(warning: LayoutWarnings["warnings"][number], survivors: SurvivorIndex): boolean {
+  const bounds = readBounds(warning.element?.bounds);
+  if (bounds === null) {
+    return false;
+  }
+  const candidates = survivors.get(boundsKey(bounds));
+  if (candidates === undefined) {
+    return false; // no node survives at this rectangle
+  }
+  return candidates.some(node => nodeMatchesWarning(node, warning.element ?? {}));
+}
+
+type WarningElement = { viewId?: string; resourceId?: string; contentDesc?: string; text?: string };
+
+/** Two populated values that disagree. */
+function conflicts(a: string | undefined, b: string): boolean {
+  return !!a && !!b && a !== b;
+}
+
+/** Two values that are populated and equal. */
+function shares(a: string | undefined, b: string): boolean {
+  return !!a && a === b;
+}
+
+function hasAnyIdentity(id: WarningElement | NodeIdentity): boolean {
+  return !!(id.viewId || id.resourceId || id.contentDesc || id.text);
+}
+
+/**
+ * Whether a surviving node plausibly IS the warning's element.
+ * - Reject when ANY identity field (`resource-id`/`view-id`/`content-desc`/`text`)
+ *   is populated on both sides but differs — two distinct nodes at one rectangle
+ *   (issue #5074). Since co-scoping runs against the lossless FOCUS/REGION tree,
+ *   every populated field is a reliable discriminator.
+ * - Wildcard-keep when either side carries no identity: a genuinely-visible
+ *   element sits here (a bare bounds match), and dropping its warning would be a
+ *   false negative.
+ * - Otherwise require at least one shared populated field.
+ */
+function nodeMatchesWarning(node: NodeIdentity, element: WarningElement): boolean {
+  if (
+    conflicts(element.resourceId, node.resourceId)
+    || conflicts(element.viewId, node.viewId)
+    || conflicts(element.contentDesc, node.contentDesc)
+    || conflicts(element.text, node.text)
+  ) {
+    return false;
+  }
+  if (!hasAnyIdentity(element) || !hasAnyIdentity(node)) {
+    return true;
+  }
+  return shares(element.resourceId, node.resourceId)
+    || shares(element.viewId, node.viewId)
+    || shares(element.contentDesc, node.contentDesc)
+    || shares(element.text, node.text);
+}
+
+/** Canonical bounds identity, shape-independent (object and tuple map to the same key). */
+function boundsKey(bounds: ElementBounds): string {
+  return `${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}`;
 }
 
 /** The server experiment gates; each honors its `scope` dimension only when on. */

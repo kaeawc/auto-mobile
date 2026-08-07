@@ -50,6 +50,22 @@ import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
  * stores. The static methods below preserve the existing API for server
  * resource handlers and the daemon by delegating to those stores.
  */
+/**
+ * Bound a cached observation's `layoutWarnings` for readers that serialize it
+ * directly (the `observation/latest` resources, nav/registry embeds) without
+ * going through `finalizeToolResponse`. The audit is cached uncapped so the
+ * observe tool's scope-then-cap path (#5074) sees the full set; every other
+ * reader must not inherit an unbounded list. Returns a shallow copy so the cache
+ * itself is never mutated; the reuse path (`getMostRecent`) is untouched.
+ */
+function boundCachedLayoutWarnings(result: ObserveResult | undefined): ObserveResult | undefined {
+  if (!result?.layoutWarnings) {
+    return result;
+  }
+  const capped = capLayoutWarnings(result.layoutWarnings);
+  return capped === result.layoutWarnings ? result : { ...result, layoutWarnings: capped };
+}
+
 export class RealObserveScreen implements ObserveScreen {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -72,11 +88,11 @@ export class RealObserveScreen implements ObserveScreen {
   // ---------- Static API (kept for back-compat with resource handlers/daemon) ----------
 
   static getRecentCachedResult(): ObserveResult | undefined {
-    return getObserveCacheStore().getRecentInMemory();
+    return boundCachedLayoutWarnings(getObserveCacheStore().getRecentInMemory());
   }
 
   static getRecentCachedResultForDevice(deviceId: string): ObserveResult | undefined {
-    return getObserveCacheStore().getRecentInMemoryForDevice(deviceId);
+    return boundCachedLayoutWarnings(getObserveCacheStore().getRecentInMemoryForDevice(deviceId));
   }
 
   static getRecentCachedScreenshotPath(): string | undefined {
@@ -271,11 +287,10 @@ export class RealObserveScreen implements ObserveScreen {
       // navigation-graph recorder) ever observes the other platform's data.
       enforceHierarchyPlatform(result, this.device.platform, this.device.deviceId, this.platformValidator);
 
-      const { warnings: layoutWarnings, total: layoutWarningsTotal } = capLayoutWarnings(this.safeAreaAuditor.inspect(result));
-      result.layoutWarnings = layoutWarnings;
-      if (layoutWarningsTotal > layoutWarnings.length) {
-        result.layoutWarningsTruncated = layoutWarningsTotal;
-      }
+      // Uncapped here; the output boundary (sanitizeObserveResult / the observe
+      // served path in finalizeToolResponse) caps AFTER any scope narrowing so an
+      // in-scope warning is never lost to a cap taken against the full tree (#5074).
+      result.layoutWarnings = { scope: "full", warnings: this.safeAreaAuditor.inspect(result) };
 
       if (result.viewHierarchy) {
         result.elements = this.elementsBuilder.build(result.viewHierarchy, this.device.platform);

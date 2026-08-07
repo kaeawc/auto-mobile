@@ -37,8 +37,10 @@ interface EmulatorControlExecutor {
   suspend fun pressButton(deviceId: String, platform: Platform, button: DeviceButton)
 
   /**
-   * Apply [locale] (a BCP-47 tag) to the device. On Android `changeLocalization` needs an app
-   * target, so the implementation resolves the foreground app; on iOS the change is device-wide.
+   * Apply [locale] (a BCP-47 tag) to the device. The implementation resolves the foreground app on
+   * both platforms: Android `changeLocalization` *requires* an app target, while iOS applies the
+   * locale device-wide but caches it per-app at launch — so the running app only reflects the new
+   * locale after a relaunch, which the daemon performs when the app is passed as `restartApp`.
    */
   suspend fun setLocale(deviceId: String, platform: Platform, locale: String)
 }
@@ -52,7 +54,8 @@ object NoOpEmulatorControlExecutor : EmulatorControlExecutor {
     orientation: Orientation,
   ) = Unit
 
-  override suspend fun pressButton(deviceId: String, platform: Platform, button: DeviceButton) = Unit
+  override suspend fun pressButton(deviceId: String, platform: Platform, button: DeviceButton) =
+    Unit
 
   override suspend fun setLocale(deviceId: String, platform: Platform, locale: String) = Unit
 }
@@ -113,7 +116,8 @@ class DaemonEmulatorControlExecutor(
           )
         // Handled UI-side via the observation stream, not as a fire-and-forget device call.
         EmulatorControl.Screenshot -> Unit
-        // Open menus, not one-shot device calls — their selections go through pressButton/setLocale.
+        // Open menus, not one-shot device calls — their selections go through
+        // pressButton/setLocale.
         EmulatorControl.Locale,
         EmulatorControl.More -> Unit
       }
@@ -141,9 +145,10 @@ class DaemonEmulatorControlExecutor(
       client.setActiveDevice(deviceId, wire)
       // `changeLocalization` lives behind the device-settings capability.
       client.enableToolCapability("device-settings")
-      // Android requires an app target; resolve the foreground app. iOS is device-wide (no appId).
-      val appId = if (platform == Platform.Android) foregroundAppResolver.resolve(deviceId) else null
-      if (platform == Platform.Android && appId == null) {
+      // Resolve the foreground app on both platforms: Android *requires* it as the change target,
+      // while iOS applies the locale device-wide but must relaunch the app (restartApp) to show it.
+      val foregroundApp = foregroundAppResolver.resolve(deviceId)
+      if (platform == Platform.Android && foregroundApp == null) {
         LOG.warn("Cannot change locale on $deviceId: no foreground app to target")
         return@withContext
       }
@@ -153,7 +158,11 @@ class DaemonEmulatorControlExecutor(
           put("locale", locale)
           put("platform", wire)
           put("deviceId", deviceId)
-          if (appId != null) put("appId", appId)
+          // Android sends the app as appId (the change target); iOS sends it as restartApp so the
+          // app relaunches into the new locale. The daemon rejects appId on iOS.
+          foregroundApp?.let {
+            put(if (platform == Platform.Android) "appId" else "restartApp", it)
+          }
         },
       )
     }

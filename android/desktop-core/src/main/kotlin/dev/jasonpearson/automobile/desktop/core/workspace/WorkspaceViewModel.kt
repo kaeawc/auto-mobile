@@ -99,7 +99,9 @@ class WorkspaceViewModel(
     }
   }
 
-  /** Press a device system [button] on the targeted column off the UI thread; failures are logged. */
+  /**
+   * Press a device system [button] on the targeted column off the UI thread; failures are logged.
+   */
   private fun pressDeviceButton(deviceId: String, button: DeviceButton) {
     val column = columnFor(deviceId) ?: return
     scope.launch {

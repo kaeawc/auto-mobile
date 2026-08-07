@@ -817,7 +817,10 @@ private fun EmulatorControls(
           EmulatorControl.Screenshot ->
             Glyph(control.icon, "${control.label} ${column.name}", false, onCaptureScreenshot)
           EmulatorControl.Locale -> LocaleControl(column, onAction)
-          EmulatorControl.More -> MoreControl(column, onAction)
+          // The overflow buttons (Home/Back/Recent/Power) are Android system keys; on an iOS
+          // simulator they are inert (Power, for one, is physical-device-only), so hide the menu.
+          EmulatorControl.More ->
+            if (column.platform == Platform.Android) MoreControl(column, onAction)
           else ->
             Glyph(control.icon, "${control.label} ${column.name}", false) {
               onAction(WorkspaceAction.RunControl(column.deviceId, control))
@@ -827,7 +830,9 @@ private fun EmulatorControls(
   }
 }
 
-/** 🌐 Locale control: a glyph that opens a dropdown of [COMMON_LOCALES]; a pick sets that locale. */
+/**
+ * 🌐 Locale control: a glyph that opens a dropdown of [COMMON_LOCALES]; a pick sets that locale.
+ */
 @Composable
 private fun LocaleControl(column: DeviceColumn, onAction: (WorkspaceAction) -> Unit) {
   var open by remember { mutableStateOf(false) }
@@ -839,7 +844,8 @@ private fun LocaleControl(column: DeviceColumn, onAction: (WorkspaceAction) -> U
       COMMON_LOCALES.forEach { locale ->
         DropdownMenuItem(
           text = { Text("${locale.label} (${locale.tag})") },
-          modifier = Modifier.semantics { contentDescription = "Locale ${locale.label} ${column.name}" },
+          modifier =
+            Modifier.semantics { contentDescription = "Locale ${locale.label} ${column.name}" },
           onClick = {
             open = false
             onAction(WorkspaceAction.SetLocale(column.deviceId, locale.tag))

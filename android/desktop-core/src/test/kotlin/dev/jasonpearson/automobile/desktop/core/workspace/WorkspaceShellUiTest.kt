@@ -224,6 +224,20 @@ class WorkspaceShellUiTest {
     }
 
   @Test
+  fun `More control is absent on iOS panes because its buttons are Android system keys`() =
+    runComposeUiTest {
+      val state =
+        WorkspaceUiState.Content(
+          columns = listOf(col("a", "iPhone 15", Platform.Ios)),
+          focusedDeviceId = "a",
+        )
+      setContent {
+        MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
+      }
+      onNodeWithContentDescription("More iPhone 15").assertDoesNotExist()
+    }
+
+  @Test
   fun `active tool renders a docked facet with a close control`() = runComposeUiTest {
     val state =
       WorkspaceUiState.Content(

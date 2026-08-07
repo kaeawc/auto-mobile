@@ -130,7 +130,11 @@ class DaemonEmulatorControlExecutorTest {
     assertTrue(
       client.toolCalls.any {
         it.name == "setToolCapability" &&
-          it.arguments == buildJsonObject { put("capability", "device-settings"); put("enabled", true) }
+          it.arguments ==
+            buildJsonObject {
+              put("capability", "device-settings")
+              put("enabled", true)
+            }
       }
     )
     assertTrue(
@@ -146,6 +150,29 @@ class DaemonEmulatorControlExecutorTest {
       },
     )
   }
+
+  @Test
+  fun `setLocale on iOS relaunches the resolved foreground app so the change is visible`() =
+    runTest {
+      val client = FakeAutoMobileClient()
+      val resolver = FakeForegroundAppResolver(appId = "com.example.iosapp")
+      executor(client, resolver).setLocale("booted-ipad", Platform.Ios, "ja-JP")
+
+      assertEquals(listOf("booted-ipad"), resolver.requestedDeviceIds)
+      assertTrue(
+        "iOS passes the foreground bundle as restartApp (never appId) so the running app relaunches",
+        client.toolCalls.any {
+          it.name == "changeLocalization" &&
+            it.arguments ==
+              buildJsonObject {
+                put("locale", "ja-JP")
+                put("platform", "ios")
+                put("deviceId", "booted-ipad")
+                put("restartApp", "com.example.iosapp")
+              }
+        },
+      )
+    }
 
   @Test
   fun `setLocale on Android targets the resolved foreground app`() = runTest {

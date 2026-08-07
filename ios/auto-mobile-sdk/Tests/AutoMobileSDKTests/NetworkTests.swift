@@ -421,6 +421,150 @@ final class AutoMobileNetworkTests: XCTestCase {
         XCTAssertEqual(match?.responseBody, "ok")
     }
 
+    func testFaultRulesMatchTransportAndConsumePerConnection() {
+        let store = NetworkMockRuleStore()
+        store.setFaultRules([
+            NetworkFaultRuleDTO(
+                faultId: "reset-1",
+                transport: .nwConnection,
+                host: "api\\.example\\.com",
+                port: 443,
+                scheme: "https",
+                path: "/stream",
+                method: "CONNECTION",
+                headers: nil,
+                origin: nil,
+                connectionId: nil,
+                sessionId: nil,
+                action: .closeConnection,
+                statusCode: nil,
+                responseHeaders: nil,
+                responseBody: nil,
+                contentType: nil,
+                errorType: "connectionReset",
+                delayMs: nil,
+                bandwidthBytesPerSecond: nil,
+                dropBytes: nil,
+                limit: 1,
+                expiresAtEpochMs: nil,
+                scope: "connection",
+                dryRun: false
+            ),
+        ])
+        let request = { (id: String) in
+            NetworkMockRuleStore.FaultRequest(
+                transport: .nwConnection,
+                host: "api.example.com",
+                port: 443,
+                scheme: "https",
+                path: "/stream",
+                method: "CONNECTION",
+                headers: [:],
+                origin: nil,
+                connectionId: id,
+                sessionId: nil
+            )
+        }
+
+        XCTAssertEqual(store.evaluate(request("a"))?.faultId, "reset-1")
+        XCTAssertNil(store.evaluate(request("a")))
+        XCTAssertEqual(store.evaluate(request("b"))?.faultId, "reset-1")
+    }
+
+    func testFaultRulesHonorExpiryAndDryRunWithoutConsuming() {
+        let dateProvider = FakeDateProvider(initialDate: Date(timeIntervalSince1970: 100))
+        let store = NetworkMockRuleStore(dateProvider: dateProvider)
+        let dto = NetworkFaultRuleDTO(
+            faultId: "delay-1",
+            transport: .urlSession,
+            host: ".*",
+            port: nil,
+            scheme: nil,
+            path: ".*",
+            method: "*",
+            headers: nil,
+            origin: nil,
+            connectionId: nil,
+            sessionId: nil,
+            action: .latency,
+            statusCode: nil,
+            responseHeaders: nil,
+            responseBody: nil,
+            contentType: nil,
+            errorType: nil,
+            delayMs: 50,
+            bandwidthBytesPerSecond: nil,
+            dropBytes: nil,
+            limit: 1,
+            expiresAtEpochMs: 101_000,
+            scope: nil,
+            dryRun: true
+        )
+        store.setFaultRules([dto])
+        let request = NetworkMockRuleStore.FaultRequest(
+            transport: .urlSession, host: "api.example.com", port: 443, scheme: "https",
+            path: "/v1", method: "GET", headers: [:], origin: nil,
+            connectionId: nil, sessionId: nil
+        )
+
+        XCTAssertEqual(store.evaluate(request)?.delayMs, 50)
+        XCTAssertEqual(store.evaluate(request)?.delayMs, 50)
+        dateProvider.advance(by: 2)
+        XCTAssertNil(store.evaluate(request))
+    }
+
+    func testClearSessionDoesNotRemoveRulesForOtherSessions() {
+        let store = NetworkMockRuleStore()
+        let rule = { (sessionId: String) in
+            NetworkFaultRuleDTO(
+                faultId: "fault-\(sessionId)",
+                transport: .urlSession,
+                host: "api\\.example\\.com",
+                port: nil,
+                scheme: nil,
+                path: "/v1",
+                method: "GET",
+                headers: nil,
+                origin: nil,
+                connectionId: nil,
+                sessionId: sessionId,
+                action: .error,
+                statusCode: nil,
+                responseHeaders: nil,
+                responseBody: nil,
+                contentType: nil,
+                errorType: "timeout",
+                delayMs: nil,
+                bandwidthBytesPerSecond: nil,
+                dropBytes: nil,
+                limit: nil,
+                expiresAtEpochMs: nil,
+                scope: "session",
+                dryRun: false
+            )
+        }
+        store.setFaultRules([rule("a"), rule("b")])
+        let request = { (sessionId: String) in
+            NetworkMockRuleStore.FaultRequest(
+                transport: .urlSession,
+                host: "api.example.com",
+                port: nil,
+                scheme: "https",
+                path: "/v1",
+                method: "GET",
+                headers: [:],
+                origin: nil,
+                connectionId: nil,
+                sessionId: sessionId
+            )
+        }
+
+        store.clearSession("a")
+
+        XCTAssertNil(store.evaluate(request("a")))
+        XCTAssertEqual(store.evaluate(request("b"))?.faultId, "fault-b")
+    }
+
     func testURLProtocolServesMatchingMockResponseAndRecordsRequest() async throws {
         let collector = EventCollector()
         let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in

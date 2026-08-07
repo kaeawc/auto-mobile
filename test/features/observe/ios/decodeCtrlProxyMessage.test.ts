@@ -262,6 +262,20 @@ describe("decodeCtrlProxyMessage", () => {
     });
   });
 
+  test("set_network_fault_rules_result maps ok to success", () => {
+    const decoded = decodeCtrlProxyMessage(msg({
+      type: "set_network_fault_rules_result",
+      ok: true,
+      totalTimeMs: 9,
+    }));
+
+    expect(decoded?.result).toEqual({
+      success: true,
+      totalTimeMs: 9,
+      error: undefined,
+    });
+  });
+
   test("execute_sql_result carries query fields", () => {
     const decoded = decodeCtrlProxyMessage(msg({
       type: "execute_sql_result",
@@ -400,10 +414,11 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "traversal_order_result",
     "connected",
     "set_network_mock_rules_result",
+    "set_network_fault_rules_result",
   ];
 
-  test("Swift ResponseType declares exactly 44 rawValues", () => {
-    expect(rawValues.length).toBe(44);
+  test("Swift ResponseType declares exactly 45 rawValues", () => {
+    expect(rawValues.length).toBe(45);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -416,8 +431,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly 37 response types", () => {
-    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(37);
+  test("the decoder explicitly reshapes exactly 38 response types", () => {
+    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(38);
   });
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
@@ -440,7 +455,7 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
  */
 describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => {
   // One row per decoded response type → the value of `success` when the wire
-  // message omits it. 37 rows = the 37 explicitly-decoded ResponseTypes.
+  // message omits it. 38 rows = the 38 explicitly-decoded ResponseTypes.
   const DEFAULT_WHEN_ABSENT: Array<{ type: string; expected: boolean | undefined }> = [
     { type: "hierarchy_update", expected: undefined },
     { type: "screenshot", expected: true },
@@ -472,6 +487,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "set_preference_result", expected: false },
     { type: "remove_preference_result", expected: false },
     { type: "clear_preferences_result", expected: false },
+    { type: "set_network_fault_rules_result", expected: false },
     { type: "set_network_error_simulation_result", expected: false },
     { type: "execute_sql_result", expected: false },
     { type: "list_databases_result", expected: false },
@@ -481,8 +497,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "table_structure_result", expected: false },
   ];
 
-  test("the default table covers all 37 explicitly-decoded types", () => {
-    expect(DEFAULT_WHEN_ABSENT.length).toBe(37);
+  test("the default table covers all 38 explicitly-decoded types", () => {
+    expect(DEFAULT_WHEN_ABSENT.length).toBe(38);
   });
 
   for (const { type, expected } of DEFAULT_WHEN_ABSENT) {
@@ -499,8 +515,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     .filter(row => row.type !== "hierarchy_update" && row.type !== "screenshot")
     .map(row => row.type);
 
-  test("the passthrough set is the 35 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(35);
+  test("the passthrough set is the 36 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(36);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {
@@ -519,13 +535,14 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     expect((decoded?.result as { success?: boolean }).success).toBe(true);
   });
 
-  // The four `success ?? ok ?? false` types read the `ok` alias when `success`
+  // The five `success ?? ok ?? false` types read the `ok` alias when `success`
   // is absent (Android wire-protocol carryover), but `success` still wins when
   // both are present.
   const OK_ALIAS_TYPES = [
     "set_preference_result",
     "remove_preference_result",
     "clear_preferences_result",
+    "set_network_fault_rules_result",
     "set_network_error_simulation_result",
   ];
 

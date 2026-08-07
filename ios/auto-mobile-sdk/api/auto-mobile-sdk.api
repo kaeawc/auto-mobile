@@ -460,6 +460,7 @@ public final class NetworkCaptureRecorder: @unchecked Sendable
   public static func redactHeaders(_ headers: [String: String]) -> [String: String]
 public final class URLSessionNetworkCaptureAdapter: @unchecked Sendable
   public init(recorder: NetworkCaptureRecorder)
+  public func evaluateFault(for task: URLSessionTask, sessionId: String? = nil) -> NetworkMockRuleStore.FaultDecision?
   public func begin( url: String, method: String = "GET", connectionId: String? = nil, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil ) -> String
   public func begin( task: URLSessionTask, connectionId: String? = nil ) -> String
   public func didReceiveResponseHeaders(requestId: String, headers: [String: String])
@@ -471,9 +472,11 @@ public final class URLSessionNetworkCaptureAdapter: @unchecked Sendable
   public func didFail(requestId: String, error: Error)
 public final class WebSocketNetworkCaptureAdapter: @unchecked Sendable
   public init(recorder: NetworkCaptureRecorder)
+  public func evaluateFault( url: String, connectionId: String?, direction: NetworkCaptureDirection, sessionId: String? = nil ) -> NetworkMockRuleStore.FaultDecision?
   public func recordFrame( url: String, connectionId: String?, direction: NetworkCaptureDirection, frameType: WebSocketFrameType, payloadSize: Int? )
 public final class NWConnectionNetworkCaptureAdapter: @unchecked Sendable
   public init(recorder: NetworkCaptureRecorder)
+  public func evaluateFault( endpoint: String, connectionId: String, sessionId: String? = nil ) -> NetworkMockRuleStore.FaultDecision?
   public func begin( endpoint: String, connectionId: String ) -> String
   public func didSend(requestId: String, bytes: Int)
   public func didUpdateState(requestId: String, state: String)
@@ -481,6 +484,66 @@ public final class NWConnectionNetworkCaptureAdapter: @unchecked Sendable
   public func didComplete(requestId: String)
   public func didFail(requestId: String, error: NWError)
   public func didCancel(requestId: String)
+
+// Network/NetworkMockRuleStore.swift
+public enum NetworkFaultTransport: String, Codable, Equatable
+public enum NetworkFaultAction: String, Codable, Equatable
+public struct NetworkFaultRuleDTO: Codable, Equatable
+  public let faultId: String
+  public let transport: NetworkFaultTransport?
+  public let host: String?
+  public let port: Int?
+  public let scheme: String?
+  public let path: String?
+  public let method: String?
+  public let headers: [String: String]?
+  public let origin: String?
+  public let connectionId: String?
+  public let sessionId: String?
+  public let action: NetworkFaultAction
+  public let statusCode: Int?
+  public let responseHeaders: [String: String]?
+  public let responseBody: String?
+  public let contentType: String?
+  public let errorType: String?
+  public let delayMs: Int?
+  public let bandwidthBytesPerSecond: Int?
+  public let dropBytes: Int?
+  public let limit: Int?
+  public let expiresAtEpochMs: Int64?
+  public let scope: String?
+  public let dryRun: Bool
+  public init( faultId: String, transport: NetworkFaultTransport?, host: String?, port: Int?, scheme: String?, path: String?, method: String?, headers: [String: String]?, origin: String?, connectionId: String?, sessionId: String?, action: NetworkFaultAction, statusCode: Int?, responseHeaders: [String: String]?, responseBody: String?, contentType: String?, errorType: String?, delayMs: Int?, bandwidthBytesPerSecond: Int?, dropBytes: Int?, limit: Int?, expiresAtEpochMs: Int64?, scope: String?, dryRun: Bool )
+public final class NetworkMockRuleStore: @unchecked Sendable
+public struct FaultDecision: Equatable
+  public let faultId: String
+  public let action: NetworkFaultAction
+  public let statusCode: Int?
+  public let responseHeaders: [String: String]
+  public let responseBody: String?
+  public let contentType: String?
+  public let errorType: String?
+  public let delayMs: Int?
+  public let bandwidthBytesPerSecond: Int?
+  public let dropBytes: Int?
+  public let dryRun: Bool
+public struct FaultRequest: Equatable
+  public let transport: NetworkFaultTransport
+  public let host: String?
+  public let port: Int?
+  public let scheme: String?
+  public let path: String?
+  public let method: String?
+  public let headers: [String: String]
+  public let origin: String?
+  public let connectionId: String?
+  public let sessionId: String?
+  public init(transport: NetworkFaultTransport, host: String?, port: Int?, scheme: String?, path: String?, method: String?, headers: [String: String], origin: String?, connectionId: String?, sessionId: String?)
+  public init()
+  public func setFaultRules(_ dtos: [NetworkFaultRuleDTO])
+  public func clearFaultRules()
+  public func evaluate(_ request: FaultRequest) -> FaultDecision?
+  public func clearSession(_ sessionId: String)
 
 // Network/RetryPolicy.swift
 public struct RetryPolicy: Sendable

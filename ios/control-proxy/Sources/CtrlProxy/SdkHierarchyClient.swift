@@ -45,6 +45,13 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
         return postSync(path: "/network/mock", body: body, session: urlSession)
     }
 
+    public func setNetworkFaultRules(_ rules: [NetworkFaultRuleDTO]) -> Bool {
+        guard let body = try? JSONEncoder().encode(SetNetworkFaultRulesBody(rules: rules)) else {
+            return false
+        }
+        return postSync(path: "/network/fault-rules", body: body, session: urlSession)
+    }
+
     public func setNetworkErrorSimulation(_ config: NetworkErrorSimulationDTO) -> Bool {
         guard let body = try? JSONEncoder().encode(config) else {
             return false
@@ -137,6 +144,10 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
 
 private struct SetMockRulesBody: Encodable {
     let rules: [NetworkMockRuleDTO]
+}
+
+private struct SetNetworkFaultRulesBody: Encodable {
+    let rules: [NetworkFaultRuleDTO]
 }
 
 private struct AddHighlightBody: Encodable {

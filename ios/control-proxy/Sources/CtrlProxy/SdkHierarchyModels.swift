@@ -53,10 +53,12 @@ public struct SdkSystemChrome: Codable, Sendable {
 public struct SdkHierarchyServerInfo: Codable, Sendable {
     public let status: String
     public let bundleId: String?
+    public let capabilities: Set<String>
 
-    public init(status: String, bundleId: String?) {
+    public init(status: String, bundleId: String?, capabilities: Set<String> = []) {
         self.status = status
         self.bundleId = bundleId
+        self.capabilities = capabilities
     }
 }
 

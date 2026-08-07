@@ -233,6 +233,11 @@ public struct RequestSetNetworkMockRules: Decodable {
     public var rules: [NetworkMockRuleDTO]
 }
 
+public struct RequestSetNetworkFaultRules: Decodable {
+    public var requestId: String?
+    public var rules: [NetworkFaultRuleDTO]
+}
+
 public struct RequestSetNetworkErrorSimulation: Decodable {
     public var requestId: String?
     public var enabled: Bool
@@ -326,6 +331,7 @@ extension RequestSetPreference: CommandPayload {}
 extension RequestRemovePreference: CommandPayload {}
 extension RequestClearPreferences: CommandPayload {}
 extension RequestSetNetworkMockRules: CommandPayload {}
+extension RequestSetNetworkFaultRules: CommandPayload {}
 extension RequestSetNetworkErrorSimulation: CommandPayload {}
 extension RequestExecuteSql: CommandPayload {}
 extension RequestListDatabases: CommandPayload {}
@@ -384,6 +390,7 @@ public enum WebSocketRequest: Decodable {
     case clearPreferences(RequestClearPreferences)
 
     case setNetworkMockRules(RequestSetNetworkMockRules)
+    case setNetworkFaultRules(RequestSetNetworkFaultRules)
     case setNetworkErrorSimulation(RequestSetNetworkErrorSimulation)
 
     case executeSql(RequestExecuteSql)
@@ -484,6 +491,8 @@ public enum WebSocketRequest: Decodable {
             self = try .clearPreferences(RequestClearPreferences(from: decoder))
         case .setNetworkMockRules:
             self = try .setNetworkMockRules(RequestSetNetworkMockRules(from: decoder))
+        case .setNetworkFaultRules:
+            self = try .setNetworkFaultRules(RequestSetNetworkFaultRules(from: decoder))
         case .setNetworkErrorSimulation:
             self = try .setNetworkErrorSimulation(RequestSetNetworkErrorSimulation(from: decoder))
         case .executeSql:
@@ -541,6 +550,7 @@ public enum WebSocketRequest: Decodable {
         case .removePreference: return .removePreference
         case .clearPreferences: return .clearPreferences
         case .setNetworkMockRules: return .setNetworkMockRules
+        case .setNetworkFaultRules: return .setNetworkFaultRules
         case .setNetworkErrorSimulation: return .setNetworkErrorSimulation
         case .executeSql: return .executeSql
         case .listDatabases: return .listDatabases
@@ -600,6 +610,7 @@ public enum WebSocketRequest: Decodable {
         case let .removePreference(payload): return payload
         case let .clearPreferences(payload): return payload
         case let .setNetworkMockRules(payload): return payload
+        case let .setNetworkFaultRules(payload): return payload
         case let .setNetworkErrorSimulation(payload): return payload
         case let .executeSql(payload): return payload
         case let .listDatabases(payload): return payload
@@ -665,6 +676,33 @@ public struct NetworkErrorSimulationDTO: Codable, Sendable, Equatable {
         self.limit = limit
         self.expiresAtEpochMs = expiresAtEpochMs
     }
+}
+
+public struct NetworkFaultRuleDTO: Codable, Sendable, Equatable {
+    public let faultId: String
+    public let transport: String?
+    public let host: String?
+    public let port: Int?
+    public let scheme: String?
+    public let path: String?
+    public let method: String?
+    public let headers: [String: String]?
+    public let origin: String?
+    public let connectionId: String?
+    public let sessionId: String?
+    public let action: String
+    public let statusCode: Int?
+    public let responseHeaders: [String: String]?
+    public let responseBody: String?
+    public let contentType: String?
+    public let errorType: String?
+    public let delayMs: Int?
+    public let bandwidthBytesPerSecond: Int?
+    public let dropBytes: Int?
+    public let limit: Int?
+    public let expiresAtEpochMs: Int64?
+    public let scope: String?
+    public let dryRun: Bool
 }
 
 // MARK: - Response Models (matching Android AccessibilityService)
@@ -768,6 +806,22 @@ public struct SetNetworkErrorSimulationResponse: Codable {
 
     public init(requestId: String?, ok: Bool, totalTimeMs: Int64?) {
         type = ResponseType.setNetworkErrorSimulationResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.ok = ok
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+public struct SetNetworkFaultRulesResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let ok: Bool
+    public let totalTimeMs: Int64?
+
+    public init(requestId: String?, ok: Bool, totalTimeMs: Int64?) {
+        type = ResponseType.setNetworkFaultRulesResult.rawValue
         timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.ok = ok
@@ -1743,6 +1797,7 @@ public enum RequestType: String, CaseIterable {
 
     /// Network mocking
     case setNetworkMockRules = "set_network_mock_rules"
+    case setNetworkFaultRules = "set_network_fault_rules"
     case setNetworkErrorSimulation = "set_network_error_simulation"
 
     // Database inspection
@@ -1796,6 +1851,7 @@ public enum ResponseType: String {
     case removePreferenceResult = "remove_preference_result"
     case clearPreferencesResult = "clear_preferences_result"
     case setNetworkMockRulesResult = "set_network_mock_rules_result"
+    case setNetworkFaultRulesResult = "set_network_fault_rules_result"
     case setNetworkErrorSimulationResult = "set_network_error_simulation_result"
 
     // Database inspection
@@ -1858,6 +1914,7 @@ extension RequestType {
         case .removePreference: return .removePreferenceResult
         case .clearPreferences: return .clearPreferencesResult
         case .setNetworkMockRules: return .setNetworkMockRulesResult
+        case .setNetworkFaultRules: return .setNetworkFaultRulesResult
         case .setNetworkErrorSimulation: return .setNetworkErrorSimulationResult
         case .executeSql: return .executeSqlResult
         case .listDatabases: return .listDatabasesResult

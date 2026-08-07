@@ -159,6 +159,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             .removePreference: #"{"key":"k"}"#,
             .clearPreferences: "{}",
             .setNetworkMockRules: #"{"rules":[]}"#,
+            .setNetworkFaultRules: #"{"rules":[]}"#,
             .setNetworkErrorSimulation: #"{"enabled":false}"#,
             .executeSql: "{}",
             .listDatabases: "{}",

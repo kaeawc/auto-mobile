@@ -115,6 +115,8 @@ final class SdkHierarchyServer: @unchecked Sendable {
                     self.handleNetworkMock(connection, initialData: requestData)
                 } else if request.contains("POST /network/error-simulation") {
                     self.handleNetworkErrorSimulation(connection, initialData: requestData)
+                } else if request.contains("POST /network/fault-rules") {
+                    self.handleNetworkFaultRules(connection, initialData: requestData)
                 } else if request.contains("POST /highlight") {
                     self.handleHighlight(connection, initialData: requestData)
                 } else if request.contains("POST /db/execute") {
@@ -145,7 +147,11 @@ final class SdkHierarchyServer: @unchecked Sendable {
     }
 
     private func handleHealth(_ connection: NWConnection) {
-        let payload = HealthPayload(status: "ok", bundleId: tracker?.bundleId)
+        let payload = HealthPayload(
+            status: "ok",
+            bundleId: tracker?.bundleId,
+            capabilities: ["network-fault-rules"]
+        )
         guard let data = try? JSONEncoder().encode(payload) else {
             sendResponse(connection, statusCode: 500, body: Data("{\"error\":\"encode_failed\"}".utf8))
             return
@@ -207,6 +213,22 @@ final class SdkHierarchyServer: @unchecked Sendable {
                 return
             }
             NetworkMockRuleStore.shared.setErrorSimulation(payload)
+            self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
+        }
+    }
+
+    private func handleNetworkFaultRules(_ connection: NWConnection, initialData: Data) {
+        readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
+            guard let self else {
+                connection.cancel()
+                return
+            }
+            guard let body,
+                  let payload = try? JSONDecoder().decode(SetNetworkFaultRulesBody.self, from: body) else {
+                self.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
+                return
+            }
+            NetworkMockRuleStore.shared.setFaultRules(payload.rules)
             self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
         }
     }
@@ -419,9 +441,14 @@ final class SdkHierarchyServer: @unchecked Sendable {
 private struct HealthPayload: Encodable {
     let status: String
     let bundleId: String?
+    let capabilities: Set<String>
 }
 
 private struct SetMockRulesBody: Decodable {
     let rules: [NetworkMockRuleDTO]
+}
+
+private struct SetNetworkFaultRulesBody: Decodable {
+    let rules: [NetworkFaultRuleDTO]
 }
 #endif

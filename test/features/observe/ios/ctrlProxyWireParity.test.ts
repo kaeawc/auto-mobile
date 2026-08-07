@@ -75,6 +75,7 @@ const SWIFT_REQUEST_TYPES = [
   "remove_preference",
   "clear_preferences",
   "set_network_mock_rules",
+  "set_network_fault_rules",
   "set_network_error_simulation",
   "execute_sql",
   "list_databases",

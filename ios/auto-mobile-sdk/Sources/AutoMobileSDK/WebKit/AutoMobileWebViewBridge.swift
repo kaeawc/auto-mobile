@@ -250,6 +250,26 @@ public final class AutoMobileWebViewBridge: NSObject, WKScriptMessageHandler, WK
         var requestId = scriptRequestId
         if name == "request_started", let scriptRequestId,
            let requestURL = body["url"] as? String {
+            #if DEBUG
+            if let fault = NetworkMockRuleStore.shared.evaluate(.init(
+                transport: .webView,
+                host: URL(string: requestURL)?.host,
+                port: URL(string: requestURL)?.port,
+                scheme: URL(string: requestURL)?.scheme,
+                path: URL(string: requestURL)?.path,
+                method: (body["method"] as? String) ?? "GET",
+                headers: [:],
+                origin: url?.absoluteString,
+                connectionId: webViewId,
+                sessionId: nil
+            )) {
+                metadata["fault_id"] = fault.faultId
+                metadata["fault_action"] = fault.action.rawValue
+                if fault.dryRun == false, fault.action == .rejectFrame || fault.action == .closeConnection {
+                    metadata["fault_rejected"] = "true"
+                }
+            }
+            #endif
             let nativeId = recorder?.beginRequest(
                 url: requestURL,
                 method: (body["method"] as? String) ?? "GET",

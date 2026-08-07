@@ -296,6 +296,20 @@ object AutoMobileNetwork {
     return AutoMobileWebSocketListener(delegate, url, buf, applicationId)
   }
 
+  /**
+   * Wrap an opened WebSocket to capture outbound text and binary frames.
+   *
+   * The optional controller can block sends for deterministic debug/test fault injection.
+   */
+  fun wrapWebSocket(
+    webSocket: okhttp3.WebSocket,
+    url: String,
+    controller: WebSocketSendController? = null,
+  ): okhttp3.WebSocket {
+    val buf = buffer ?: return webSocket
+    return AutoMobileWebSocket(webSocket, url, buf, applicationId, controller)
+  }
+
   /** Reset internal state. Visible for testing only. */
   internal fun reset() {
     buffer = null

@@ -9,8 +9,8 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class ViewHierarchy
-  @JvmOverloads
-  constructor(
+@JvmOverloads
+constructor(
   val updatedAt: Long = System.currentTimeMillis(),
   val packageName: String? = null,
   val hierarchy: UIElementInfo? = null,

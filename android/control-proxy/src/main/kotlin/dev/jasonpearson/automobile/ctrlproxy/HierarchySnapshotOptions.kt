@@ -3,8 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy
 /**
  * Limits and cancellation hook for one accessibility hierarchy snapshot.
  *
- * The defaults preserve the existing extractor behavior. Callers that expose snapshots to a
- * remote client can provide tighter limits without changing the shape of the extracted nodes.
+ * The defaults preserve the existing extractor behavior. Callers that expose snapshots to a remote
+ * client can provide tighter limits without changing the shape of the extracted nodes.
  */
 data class HierarchySnapshotOptions(
   val maxDepth: Int = 100,

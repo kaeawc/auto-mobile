@@ -868,7 +868,13 @@ jobs:
           retention-days: 7
 
   bats-tests:
-    timeout-minutes: 5
+    # The BATS suite runs right at the old 5-minute ceiling on macos-latest
+    # (a 4m48s pass left only 12s of headroom), so the job flaked to a timeout
+    # cancellation whenever the runner was slightly slow. Setup is only ~16s of
+    # the budget; the rest is `bats test/bats/` itself, which keeps growing as
+    # tests are added. Give the suite comfortable headroom instead of relying on
+    # reruns against a boundary it now straddles.
+    timeout-minutes: 10
     name: "BATS Shell Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes

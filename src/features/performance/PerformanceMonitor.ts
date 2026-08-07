@@ -9,6 +9,7 @@ import {
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../daemon/deviceDataStreamSocketServer";
 import { RecompositionTracker } from "./RecompositionTracker";
 import { getPerfWindowBuffer, PerfWindowBuffer } from "./PerfWindowBuffer";
+import { getSdkFrameMetricsStore, SdkFrameMetricsStore } from "./SdkFrameMetricsStore";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
 import { defaultAdbClientFactory, AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -131,6 +132,12 @@ export class PerformanceMonitor {
   static readonly TICK_INTERVAL_MS = 500;
   static readonly MEDIUM_INTERVAL_MS = 2000;
   static readonly SLOW_INTERVAL_MS = 10000;
+  /**
+   * How recent an in-app SDK frame sample must be to be preferred over the
+   * dumpsys scrape. The SDK broadcasts ~1/s, so a couple ticks of grace covers
+   * normal jitter; an older sample means the feed went quiet and we fall back.
+   */
+  static readonly SDK_FRAME_TTL_MS = 2500;
 
   private intervalHandle: NodeJS.Timeout | null = null;
   private pending: Promise<void> | null = null;
@@ -141,6 +148,7 @@ export class PerformanceMonitor {
   private readonly execFileAsync: ExecFileAsyncFn;
   private readonly getTelemetryEmitter: () => PerformanceTelemetryEmitter;
   private readonly perfWindowBuffer: PerfWindowBuffer;
+  private readonly frameMetricsStore: SdkFrameMetricsStore;
   private monitoredDevices = new Map<string, MonitoredDevice>();
 
   constructor(
@@ -151,6 +159,7 @@ export class PerformanceMonitor {
     execFileAsync: ExecFileAsyncFn = defaultExecFileAsync,
     getTelemetryEmitter: () => PerformanceTelemetryEmitter = () => TelemetryRecorder.getInstance(),
     perfWindowBuffer: PerfWindowBuffer = getPerfWindowBuffer(),
+    frameMetricsStore: SdkFrameMetricsStore = getSdkFrameMetricsStore(),
   ) {
     this.timer = timer;
     this.adbClientFactory = adbClientFactory;
@@ -159,6 +168,7 @@ export class PerformanceMonitor {
     this.execFileAsync = execFileAsync;
     this.getTelemetryEmitter = getTelemetryEmitter;
     this.perfWindowBuffer = perfWindowBuffer;
+    this.frameMetricsStore = frameMetricsStore;
   }
 
   /**
@@ -189,6 +199,7 @@ export class PerformanceMonitor {
     // Discard every device's retained samples along with the monitored set.
     for (const deviceId of this.monitoredDevices.keys()) {
       this.perfWindowBuffer.clear(deviceId);
+      this.frameMetricsStore.clear(deviceId);
     }
     this.monitoredDevices.clear();
     logger.info("[PerformanceMonitor] Stopped background monitoring");
@@ -224,6 +235,7 @@ export class PerformanceMonitor {
         // cannot attribute app A's fps/cpu/memory to app B (buffer is keyed by
         // deviceId, so a package switch must reset it).
         this.perfWindowBuffer.clear(deviceId);
+        this.frameMetricsStore.clear(deviceId);
         logger.info(`[PerformanceMonitor] Updated monitoring to ${packageName} on ${deviceId} (${platform})`);
       }
       return;
@@ -257,6 +269,7 @@ export class PerformanceMonitor {
       // Discard retained samples so a later reconnect of the same deviceId
       // cannot surface stale metrics from the prior session.
       this.perfWindowBuffer.clear(deviceId);
+      this.frameMetricsStore.clear(deviceId);
       logger.info(`[PerformanceMonitor] Stopped monitoring ${deviceId}`);
     }
   }
@@ -360,8 +373,18 @@ export class PerformanceMonitor {
     const samplingPackage = device.packageName;
     const samplingGeneration = device.monitoringGeneration;
 
-    // Always collect fast metrics (gfxinfo)
-    const gfxPromise = this.collectGfxMetrics(device);
+    // Prefer real per-frame data from the in-app SDK when it is fresh (issue
+    // #5076): it measures the app's own rendering, so we skip the dumpsys frame
+    // scrape entirely this tick and fall back to gfxinfo only when no fresh SDK
+    // sample exists (non-SDK app or a quiet feed).
+    const sdkFrame = this.frameMetricsStore.getFresh(
+      device.deviceId,
+      samplingPackage,
+      now,
+      PerformanceMonitor.SDK_FRAME_TTL_MS
+    );
+
+    const gfxPromise = sdkFrame ? Promise.resolve(null) : this.collectGfxMetrics(device);
 
     // Collect medium metrics (CPU) if interval elapsed or first collection. The
     // collect calls do NOT mutate `device` — caches/timestamps are updated only
@@ -398,38 +421,63 @@ export class PerformanceMonitor {
       device.cachedMemory = memory;
     }
 
-    // Update cached FPS/frame time when we have valid data from actual frames
-    // When app is idle (no frames rendered), use cached values instead of showing 0
+    // Resolve fps / frame time / jank / touch latency from whichever source is
+    // active this tick. `rawFps`/`rawFrameTimeMs`/`rawTouchLatencyMs` feed the
+    // windowed buffer (null when there is genuinely no in-window reading); the
+    // stream values use cached fallbacks to avoid flicker to 0.
     let fps: number | null;
     let frameTimeMs: number | null;
-    if (gfx.fps !== null && gfx.frameTimeMs !== null) {
-      // Got valid data from rendered frames - update cache
-      device.cachedFps = gfx.fps;
-      device.cachedFrameTime = gfx.frameTimeMs;
-      fps = gfx.fps;
-      frameTimeMs = gfx.frameTimeMs;
-    } else {
-      // No frames rendered this interval - use cached values
-      fps = device.cachedFps;
-      frameTimeMs = device.cachedFrameTime;
-    }
+    let jankFrames: number | null;
+    let touchLatencyMs: number;
+    let rawFps: number | null;
+    let rawFrameTimeMs: number | null;
+    let rawTouchLatencyMs: number | null;
 
-    // Jank counters are now per-interval (since we reset gfxinfo after each read)
-    let jankFrames: number | null = null;
-    if (gfx.rawJankCounters) {
-      const curr = gfx.rawJankCounters;
+    if (sdkFrame) {
+      // Real app-process frames from the in-app SDK.
+      rawFps = sdkFrame.fps;
+      rawFrameTimeMs = sdkFrame.frameTimeMs;
+      jankFrames = sdkFrame.jankFrames;
+      if (sdkFrame.fps !== null) {
+        device.cachedFps = sdkFrame.fps;
+      }
+      if (sdkFrame.frameTimeMs !== null) {
+        device.cachedFrameTime = sdkFrame.frameTimeMs;
+      }
+      fps = sdkFrame.fps ?? device.cachedFps;
+      frameTimeMs = sdkFrame.frameTimeMs ?? device.cachedFrameTime;
+      // The SDK does not measure touch latency; keep the buffer honest (null)
+      // while the stream shows the idle-responsive fallback.
+      rawTouchLatencyMs = null;
+      touchLatencyMs = 16;
+    } else {
+      const gfxData = gfx!;
+      if (gfxData.fps !== null && gfxData.frameTimeMs !== null) {
+        device.cachedFps = gfxData.fps;
+        device.cachedFrameTime = gfxData.frameTimeMs;
+        fps = gfxData.fps;
+        frameTimeMs = gfxData.frameTimeMs;
+      } else {
+        // No frames rendered this interval - use cached values for the stream.
+        fps = device.cachedFps;
+        frameTimeMs = device.cachedFrameTime;
+      }
+
       // Prefer gfxinfo's aggregate "Janky frames" count. The individual cause
       // counters overlap (one frame can trip several), so summing them
-      // double-counts; fall back to the sum only when the aggregate is absent
-      // (older Android output).
-      jankFrames = curr.jankyFrames ?? (curr.missedVsync + curr.slowUi + curr.deadlineMissed);
-    }
+      // double-counts; fall back to the sum only when the aggregate is absent.
+      jankFrames = null;
+      if (gfxData.rawJankCounters) {
+        const curr = gfxData.rawJankCounters;
+        jankFrames = curr.jankyFrames ?? (curr.missedVsync + curr.slowUi + curr.deadlineMissed);
+      }
 
-    // Estimate touch latency. `streamMs` is the value sent to the live stream
-    // (fabricated 16ms for an idle app); `rawMs` is null on idle so the buffer
-    // never records the fabricated fallback as a measurement.
-    const { streamMs: touchLatencyMs, rawMs: rawTouchLatencyMs } =
-      this.estimateTouchLatency(gfx, frameTimeMs, device);
+      const touch = this.estimateTouchLatency(gfxData, frameTimeMs, device);
+      touchLatencyMs = touch.streamMs;
+      rawTouchLatencyMs = touch.rawMs;
+      rawFps = gfxData.fps;
+      rawFrameTimeMs = gfxData.frameTimeMs;
+    }
 
     // Get TTI from the global store if available
     const ttiMs = getLastTtiMs(device.packageName);
@@ -450,8 +498,8 @@ export class PerformanceMonitor {
     // flicker to 0, but the buffer must NOT re-record a stale reading every idle
     // tick — that would keep an old fps dominating the percentiles.
     this.pushMetrics(device, now, metrics, jankFrames, server, {
-      fps: gfx.fps,
-      frameTimeMs: gfx.frameTimeMs,
+      fps: rawFps,
+      frameTimeMs: rawFrameTimeMs,
       touchLatencyMs: rawTouchLatencyMs,
       // CPU/memory only when actually collected this tick (null otherwise), so
       // the window never averages a reading acquired outside it.

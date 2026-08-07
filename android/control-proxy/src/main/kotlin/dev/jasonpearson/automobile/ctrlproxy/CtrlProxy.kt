@@ -27,6 +27,7 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
+import dev.jasonpearson.automobile.ctrlproxy.models.FrameMetricsSnapshot
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.InteractionElement
 import dev.jasonpearson.automobile.ctrlproxy.models.InteractionEvent
@@ -50,6 +51,8 @@ import dev.jasonpearson.automobile.protocol.CrashData
 import dev.jasonpearson.automobile.protocol.CrashEvent
 import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.ErrorResponse
+import dev.jasonpearson.automobile.protocol.FrameMetricsData
+import dev.jasonpearson.automobile.protocol.FrameMetricsEventResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
@@ -298,6 +301,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       logError = { message, error -> Log.e(TAG, message, error) },
     )
   private val recompositionStore = RecompositionStore()
+  private val frameMetricsStore = FrameMetricsStore()
   private val viewHierarchyExtractor = ViewHierarchyExtractor(recompositionStore)
   private val json = Json {
     prettyPrint = true
@@ -519,6 +523,39 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           recompositionStore.updateSnapshot(snapshot)
         } catch (e: Exception) {
           Log.e(TAG, "Failed to parse recomposition snapshot", e)
+        }
+      }
+    }
+
+  private val frameMetricsReceiver =
+    object : BroadcastReceiver() {
+      override fun onReceive(context: Context?, intent: Intent?) {
+        if (intent == null || intent.action != AutoMobileSDK.ACTION_FRAME_METRICS_SNAPSHOT) {
+          return
+        }
+
+        val payload = intent.getStringExtra(AutoMobileSDK.EXTRA_FRAME_METRICS_SNAPSHOT) ?: return
+        try {
+          val snapshot = jsonLenient.decodeFromString(serializer<FrameMetricsSnapshot>(), payload)
+          frameMetricsStore.updateSnapshot(snapshot)
+          // Forward live so the host can feed real app-frame data into perfSnapshot.
+          if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+            val response =
+              FrameMetricsEventResponse(
+                timestamp = snapshot.timestamp,
+                frameMetrics =
+                  FrameMetricsData(
+                    applicationId = snapshot.applicationId,
+                    fps = snapshot.fps,
+                    frameTimeMs = snapshot.frameTimeMs,
+                    jankFrames = snapshot.jankFrames,
+                    totalFrames = snapshot.totalFrames,
+                  ),
+              )
+            serviceScope.launch { webSocketServer.broadcast(response) }
+          }
+        } catch (e: Exception) {
+          Log.e(TAG, "Failed to parse frame metrics snapshot", e)
         }
       }
     }
@@ -875,6 +912,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
       Log.d(TAG, "Recomposition receiver registered")
 
+      // Register broadcast receiver for frame-metrics snapshots (issue #5076)
+      val frameMetricsFilter =
+        IntentFilter().apply { addAction(AutoMobileSDK.ACTION_FRAME_METRICS_SNAPSHOT) }
+
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        registerReceiver(frameMetricsReceiver, frameMetricsFilter, RECEIVER_EXPORTED)
+      } else {
+        @SuppressLint("UnspecifiedRegisterReceiverFlag")
+        registerReceiver(frameMetricsReceiver, frameMetricsFilter)
+      }
+      Log.d(TAG, "Frame metrics receiver registered")
+
       // Register broadcast receiver for package changes
       val packageFilter =
         IntentFilter().apply {
@@ -1090,6 +1139,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       unregisterReceiver(recompositionReceiver)
     } catch (e: Exception) {
       Log.e(TAG, "Error unregistering recomposition receiver", e)
+    }
+
+    try {
+      unregisterReceiver(frameMetricsReceiver)
+    } catch (e: Exception) {
+      Log.e(TAG, "Error unregistering frame metrics receiver", e)
     }
 
     try {

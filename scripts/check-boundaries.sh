@@ -1,28 +1,29 @@
 #!/usr/bin/env bash
 #
-# Run every production execution-boundary check concurrently (issue #5121).
+# Run every production execution-boundary check with as much parallelism as is
+# safe (issue #5121).
 #
-# The checks are independent, side-effect-free AST/text scans, so running them
-# serially in the `lint` script was pure latency (~2.8s). This runner launches
-# them in parallel and reports EVERY failure, not just the first. It also
-# includes the android-emulator and ios-ctrl-proxy-process checks that CI runs
-# but `bun run lint` previously omitted, closing a local/CI parity gap.
+# The checks split into two groups:
+#   * FULL-TREE scans (plutil, ffmpeg, codesign, ...) only read source files, so
+#     they run concurrently.
+#   * GIT-DIFF checks (`no-new-direct-*`, host-shell) compare the working tree
+#     against `origin/main`, so they invoke git. Running those concurrently
+#     races on `.git/shallow.lock` ("Another git process seems to be running") —
+#     observed on Windows CI — so they run strictly serially, in a single
+#     background sequence that overlaps the full-tree group.
 #
-# bash-3.2 safe (macOS default): uses arrays + a plain `wait` (no `wait -n`) and
-# a temp dir to collect each check's output and exit code.
+# Every failure is reported, not just the first. This also runs the
+# android-emulator and ios-ctrl-proxy-process checks that CI ran but
+# `bun run lint` previously omitted, closing a local/CI parity gap.
+#
+# bash-3.2 safe (macOS default): arrays + a plain `wait` (no `wait -n`).
 set -uo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
 
-# Each entry is invoked verbatim (word-split intentionally). These mirror the
-# commands the `lint` script and the check:*-boundary npm scripts already use, so
-# behavior is unchanged — only the scheduling is parallel.
-checks=(
-  "bun scripts/check-host-shell-boundary.ts"
-  "bash scripts/check-no-new-direct-simctl.sh"
+# Full-tree scans — safe to run all at once (no git, no shared writes).
+parallel_checks=(
   "bun scripts/check-no-direct-plutil.ts"
-  "bash scripts/check-no-new-direct-xcodebuild.sh"
-  "bash scripts/check-no-new-direct-security.sh"
   "bash scripts/check-no-new-direct-git-metadata.sh"
   "bash scripts/check-no-local-shell-quote.sh"
   "bash scripts/check-app-bundle-metadata-boundary.sh"
@@ -33,40 +34,68 @@ checks=(
   "bash scripts/check-ios-ctrl-proxy-process-boundary.sh"
 )
 
+# Git-diff checks — must run serially to avoid `.git` lock contention.
+serial_checks=(
+  "bun scripts/check-host-shell-boundary.ts"
+  "bash scripts/check-no-new-direct-simctl.sh"
+  "bash scripts/check-no-new-direct-xcodebuild.sh"
+  "bash scripts/check-no-new-direct-security.sh"
+)
+
 # CHECK_BOUNDARIES_CMD_OVERRIDE lets the BATS test inject a controlled check list
-# (newline-separated) so it can exercise the aggregation without running the real
-# scanners. Trusted test-only input; never wire it from an untrusted source.
+# (newline-separated) into the parallel group so it can exercise the aggregation
+# without running the real scanners. Trusted test-only input; never wire it from
+# an untrusted source.
 if [[ -n "${CHECK_BOUNDARIES_CMD_OVERRIDE:-}" ]]; then
-  checks=()
+  parallel_checks=()
+  serial_checks=()
   while IFS= read -r line; do
-    [[ -n "$line" ]] && checks+=("$line")
+    [[ -n "$line" ]] && parallel_checks+=("$line")
   done <<< "$CHECK_BOUNDARIES_CMD_OVERRIDE"
 fi
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-for i in "${!checks[@]}"; do
-  (
-    # shellcheck disable=SC2086 # intentional word-split of "cmd arg" entries
-    out="$(${checks[$i]} 2>&1)"
-    rc=$?
-    printf '%s' "$out" > "$tmp/$i.out"
-    printf '%s' "$rc" > "$tmp/$i.rc"
-  ) &
+run_one() {
+  # $1 = tag (unique file prefix), $2 = command string (word-split intentionally)
+  local out rc
+  # shellcheck disable=SC2086 # intentional word-split of "cmd arg" entries
+  out="$(${2} 2>&1)"
+  rc=$?
+  printf '%s' "$out" > "$tmp/$1.out"
+  printf '%s' "$rc" > "$tmp/$1.rc"
+  printf '%s' "$2" > "$tmp/$1.cmd"
+}
+
+# Launch each full-tree check concurrently.
+for i in "${!parallel_checks[@]}"; do
+  run_one "p$i" "${parallel_checks[$i]}" &
 done
+
+# Run the git-diff checks serially inside one background job, so the group
+# overlaps the parallel group while its own members never race on git.
+(
+  for j in "${!serial_checks[@]}"; do
+    run_one "s$j" "${serial_checks[$j]}"
+  done
+) &
+
 wait
 
 status=0
-for i in "${!checks[@]}"; do
-  rc="$(cat "$tmp/$i.rc" 2>/dev/null || echo 1)"
+for f in "$tmp"/*.rc; do
+  [[ -e "$f" ]] || continue
+  rc="$(cat "$f" 2>/dev/null || echo 1)"
   [[ "$rc" == "0" ]] && continue
   status=1
-  printf '\n--- FAIL: %s (exit %s) ---\n' "${checks[$i]}" "$rc" >&2
-  cat "$tmp/$i.out" >&2
+  tag="$(basename "$f" .rc)"
+  printf '\n--- FAIL: %s (exit %s) ---\n' "$(cat "$tmp/$tag.cmd" 2>/dev/null)" "$rc" >&2
+  cat "$tmp/$tag.out" >&2
 done
 
+total=$(( ${#parallel_checks[@]} + ${#serial_checks[@]} ))
 if [[ "$status" == "0" ]]; then
-  echo "boundary-checks: all ${#checks[@]} passed"
+  echo "boundary-checks: all ${total} passed"
 fi
 exit "$status"

@@ -1,4 +1,5 @@
 import type { ObserveResult } from "../../../models/ObserveResult";
+import type { LayoutWarnings } from "../../../models/ObservationInsets";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import type {
   FocusAnchor,
@@ -609,7 +610,7 @@ export function applyObserveScopeExperiments(
   // Every stage returns a fresh clone, so `run.current` is never the input here;
   // guard the theoretically-unreachable no-op case anyway.
   const out = run.current === input ? clone(input) : run.current;
-  scopeLayoutWarnings(out);
+  scopeLayoutWarnings(out, countNodes(rootNodes(out)) < nodesBefore);
   out.observeScope = buildScopeMetadata({ ...run, current: out }, nodesBefore, gatedOff);
   return out;
 }
@@ -618,42 +619,112 @@ export function applyObserveScopeExperiments(
  * Co-scope `layoutWarnings` with the pruned hierarchy (issue #5074). The audit
  * runs on the full tree in `ObserveScreen`, before these transforms drop nodes,
  * so a scoped response could otherwise list a warning for an element no longer
- * in the returned `viewHierarchy`. A warning is kept only when a surviving node
- * sits at its element's bounds — `OVERVIEW_KEPT_ATTRS` retains `bounds`, and
- * REGION/FOCUS leave kept nodes' bounds intact, so this holds for all three
- * dimensions. `readBounds` normalizes both the object and the compact tuple
- * shape, so it is correct whether or not `--observe-result-compact` ran first.
+ * in the returned `viewHierarchy`.
  *
- * When scoping drops warnings the list becomes `scope: "scoped"` and any `total`
- * (the pre-cap count of the *un-scoped* population) is dropped, since it no
- * longer describes what is shown.
+ * A warning survives only when a node at its element's bounds survives AND that
+ * node is plausibly the *same* element. Bounds alone is ambiguous when a node and
+ * a child share a rectangle (e.g. OVERVIEW keeps an addressable container but
+ * drops its anonymous text child): correlating identity fields distinguishes
+ * them. But some transforms strip identity from kept nodes (OVERVIEW keeps
+ * `bounds`/`resource-id`/`content-desc` but drops `text`/`view-id`), so a
+ * surviving node that carries *no* identity is treated as a wildcard match — it
+ * is genuinely visible at that rectangle, and dropping its warning would be a
+ * false negative. `readBounds` normalizes object and compact-tuple bounds, so
+ * this is correct whether or not `--observe-result-compact` ran first.
+ *
+ * When scoping removes warnings, the list becomes `scope: "scoped"`. A
+ * `truncated` list also becomes `scoped` once the hierarchy was pruned, since a
+ * capped-away warning may belong to a pruned node — so `total` (the pre-cap count
+ * of the *un-scoped* population) no longer describes what is shown and is dropped.
  */
-function scopeLayoutWarnings(out: ObserveResult): void {
+function scopeLayoutWarnings(out: ObserveResult, pruned: boolean): void {
   const layoutWarnings = out.layoutWarnings;
   if (!layoutWarnings || layoutWarnings.warnings.length === 0) {
     return;
   }
-  const visibleBounds = new Set<string>();
-  collectBoundsKeys(rootNodes(out), visibleBounds);
-  const kept = layoutWarnings.warnings.filter(warning => {
-    const bounds = readBounds(warning.element?.bounds);
-    return bounds !== null && visibleBounds.has(boundsKey(bounds));
-  });
-  if (kept.length === layoutWarnings.warnings.length) {
+  const survivors = collectSurvivorBoundsIdentity(rootNodes(out));
+  const kept = layoutWarnings.warnings.filter(warning => warningSurvives(warning, survivors));
+  const dropped = kept.length !== layoutWarnings.warnings.length;
+  // A `truncated` total counted the un-scoped population; once pruning hides
+  // nodes it may over-count what is reachable, so it is no longer trustworthy.
+  const staleTotal = pruned && layoutWarnings.scope === "truncated";
+  if (!dropped && !staleTotal) {
     return;
   }
   out.layoutWarnings = { scope: "scoped", warnings: kept };
 }
 
-/** Collect the bounds key of every node in the (already-scoped) hierarchy. */
-function collectBoundsKeys(nodes: NodeRecord[], into: Set<string>): void {
-  for (const node of nodes) {
-    const bounds = readBounds(attr(node, "bounds"));
-    if (bounds !== null) {
-      into.add(boundsKey(bounds));
+/** Per-rectangle survival index: the identity signatures present, and whether any survivor there is anonymous. */
+type SurvivorIndex = Map<string, { identities: Set<string>; anonymous: boolean }>;
+
+function collectSurvivorBoundsIdentity(nodes: NodeRecord[]): SurvivorIndex {
+  const index: SurvivorIndex = new Map();
+  const walk = (list: NodeRecord[]): void => {
+    for (const node of list) {
+      indexSurvivor(node, index);
+      walk(childrenOf(node));
     }
-    collectBoundsKeys(childrenOf(node), into);
+  };
+  walk(nodes);
+  return index;
+}
+
+/** Record one surviving node's bounds → identity signatures (or anonymity) in the index. */
+function indexSurvivor(node: NodeRecord, index: SurvivorIndex): void {
+  const bounds = readBounds(attr(node, "bounds"));
+  if (bounds === null) {
+    return;
   }
+  const key = boundsKey(bounds);
+  const entry = index.get(key) ?? { identities: new Set<string>(), anonymous: false };
+  const ids = identitySignatures(
+    stringAttr(node, "view-id"),
+    stringAttr(node, "resource-id"),
+    stringAttr(node, "content-desc"),
+    stringAttr(node, "text")
+  );
+  if (ids.length === 0) {
+    entry.anonymous = true;
+  }
+  for (const id of ids) {
+    entry.identities.add(id);
+  }
+  index.set(key, entry);
+}
+
+function warningSurvives(warning: LayoutWarnings["warnings"][number], survivors: SurvivorIndex): boolean {
+  const bounds = readBounds(warning.element?.bounds);
+  if (bounds === null) {
+    return false;
+  }
+  const entry = survivors.get(boundsKey(bounds));
+  if (entry === undefined) {
+    return false; // no node survives at this rectangle
+  }
+  const element = warning.element ?? {};
+  const wanted = identitySignatures(element.viewId, element.resourceId, element.contentDesc, element.text);
+  // Wildcard cases: the warning has no identity to correlate, or a surviving node
+  // at this rectangle carries none (identity stripped by the transform) — either
+  // way an element is genuinely visible here, so keep the warning.
+  if (wanted.length === 0 || entry.anonymous) {
+    return true;
+  }
+  return wanted.some(id => entry.identities.has(id));
+}
+
+/** Non-empty identity signatures for a node/element, namespaced so fields never collide. */
+function identitySignatures(
+  viewId: string | undefined,
+  resourceId: string | undefined,
+  contentDesc: string | undefined,
+  text: string | undefined
+): string[] {
+  return [
+    viewId ? `vid:${viewId}` : "",
+    resourceId ? `rid:${resourceId}` : "",
+    contentDesc ? `cd:${contentDesc}` : "",
+    text ? `txt:${text}` : "",
+  ].filter(signature => signature.length > 0);
 }
 
 /** Canonical bounds identity, shape-independent (object and tuple map to the same key). */

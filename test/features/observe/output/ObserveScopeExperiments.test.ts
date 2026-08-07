@@ -582,6 +582,50 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     expect(result.layoutWarnings?.warnings).toHaveLength(1);
   });
 
+  test("drops a warning whose identity differs from the surviving same-bounds node (finding 1)", () => {
+    const B: Bounds = { left: 0, top: 0, right: 1080, bottom: 200 };
+    const obs = androidFixture();
+    // Addressable card (kept by OVERVIEW) with an anonymous text child at IDENTICAL bounds (dropped).
+    obs.viewHierarchy!.hierarchy.node = {
+      "resource-id": `${APP}:id/root`, "bounds": { left: 0, top: 0, right: 1080, bottom: 2400 },
+      "node": [{ "resource-id": `${APP}:id/card`, "clickable": true, "bounds": B, "node": [{ text: "Buried", bounds: B }] }],
+    } as never;
+    obs.layoutWarnings = { scope: "full", warnings: [{ ...warningAt(B), element: { text: "Buried", bounds: B } }] };
+    const result = applyObserveScopeExperiments(obs, { focus: false, overview: true, region: false });
+    // The `card` survives at B but its identity (resource-id) doesn't match the
+    // warning's (text "Buried" — the dropped child), so the warning is dropped.
+    expect(result.layoutWarnings?.warnings).toHaveLength(0);
+    expect(result.layoutWarnings?.scope).toBe("scoped");
+  });
+
+  test("keeps a warning when the surviving same-bounds node has no identity to correlate (no false negative)", () => {
+    const B: Bounds = { left: 0, top: 0, right: 1080, bottom: 200 };
+    const obs = androidFixture();
+    // A clickable text leaf: OVERVIEW keeps it (clickable) but strips `text`.
+    obs.viewHierarchy!.hierarchy.node = {
+      "resource-id": `${APP}:id/root`, "bounds": { left: 0, top: 0, right: 1080, bottom: 2400 },
+      "node": [{ clickable: true, text: "Tap me", bounds: B }],
+    } as never;
+    obs.layoutWarnings = { scope: "full", warnings: [{ ...warningAt(B), element: { text: "Tap me", bounds: B } }] };
+    const result = applyObserveScopeExperiments(obs, { focus: false, overview: true, region: false });
+    // The leaf is genuinely visible at B; its identity was stripped, so the
+    // anonymous survivor is a wildcard match and the warning is retained.
+    expect(result.layoutWarnings?.warnings).toHaveLength(1);
+  });
+
+  test("downgrades a truncated list to 'scoped' and drops total once the hierarchy is pruned (finding 2)", () => {
+    const obs = androidFixture();
+    // Every shown warning survives the crop, but the list was truncated and the
+    // crop prunes nodes — so a capped-away warning could be out of view.
+    obs.layoutWarnings = { scope: "truncated", total: 137, warnings: [warningAt(HEADER_BOUNDS)] };
+    const result = applyObserveScopeExperiments(obs, {
+      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
+    });
+    expect(result.layoutWarnings?.scope).toBe("scoped");
+    expect(result.layoutWarnings?.total).toBeUndefined();
+    expect(result.layoutWarnings?.warnings).toHaveLength(1);
+  });
+
   test("is pure — does not mutate the caller's layoutWarnings", () => {
     const obs = androidFixture();
     obs.layoutWarnings = { scope: "full", warnings: [warningAt(HEADER_BOUNDS), warningAt(NAV_BAR_BOUNDS)] };

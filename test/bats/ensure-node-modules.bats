@@ -25,12 +25,13 @@ LIB="scripts/lib/shell-core.sh"
   [[ "$output" != *"CALLED_BUN"* ]]
 }
 
-@test "ensure_node_modules installs with --frozen-lockfile when turbo is absent" {
+@test "ensure_node_modules installs with --frozen-lockfile in root when turbo is absent" {
   local root bindir
-  root="$(mktemp -d)"   # no node_modules
+  root="$(cd "$(mktemp -d)" && pwd)"   # no node_modules; canonicalized (macOS /var -> /private)
   bindir="$(mktemp -d)"
-  # A bun that echoes its args so we can assert the exact install invocation.
-  printf '#!/usr/bin/env bash\necho "bun $*"\n' > "$bindir/bun"
+  # A bun that echoes its CWD and args, so we assert both the exact install
+  # invocation AND that it runs in root (removing the `cd "$root"` must fail this).
+  printf '#!/usr/bin/env bash\necho "bun_cwd=$PWD"\necho "bun $*"\n' > "$bindir/bun"
   chmod +x "$bindir/bun"
 
   run env PATH="$bindir:$PATH" bash -c "source '$LIB'; ensure_node_modules '$root'"
@@ -38,6 +39,7 @@ LIB="scripts/lib/shell-core.sh"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"bun install --frozen-lockfile"* ]]
+  [[ "$output" == *"bun_cwd=$root"* ]]
 }
 
 @test "ensure_node_modules leaves the caller's working directory unchanged" {

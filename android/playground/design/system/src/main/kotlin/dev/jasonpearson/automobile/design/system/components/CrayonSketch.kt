@@ -44,16 +44,23 @@ private fun roundedRectPerimeter(
   segmentsPerEdge: Int,
 ): List<Offset> {
   val r = corner.coerceIn(0f, min(width, height) / 2f)
+  // At least one straight-edge sample: a zero count skips every edge point and a
+  // negative one is an empty range that drops the edge entirely.
+  val segs = segmentsPerEdge.coerceAtLeast(1)
   val pts = ArrayList<Offset>()
   fun edge(x0: Float, y0: Float, x1: Float, y1: Float) {
-    for (s in 0 until segmentsPerEdge) {
-      val t = s.toFloat() / segmentsPerEdge
+    for (s in 0 until segs) {
+      val t = s.toFloat() / segs
       pts.add(Offset(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t))
     }
   }
+  // Half-open like `edge`: emit the arc's start but not its end, so the arc's last
+  // point never duplicates the following edge's first point. A duplicated seam point
+  // gets its own jitter and shows as a knot; the dropped corner point is supplied by
+  // the next segment's start (and the final one by the closing append below).
   fun arc(cx: Float, cy: Float, startDeg: Float) {
     val steps = 3
-    for (s in 0..steps) {
+    for (s in 0 until steps) {
       val ang = (startDeg + 90f * s / steps) * PI.toFloat() / 180f
       pts.add(Offset(cx + r * cos(ang), cy + r * sin(ang)))
     }

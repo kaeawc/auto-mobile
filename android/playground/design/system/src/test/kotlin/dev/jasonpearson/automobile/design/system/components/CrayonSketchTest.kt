@@ -59,6 +59,27 @@ class CrayonSketchTest {
   }
 
   @Test
+  fun zeroRoughness_hasNoDuplicateSeamPoints() {
+    // Each perimeter seam is sampled once: with no jitter only the closing point
+    // (last == first) may repeat — no interior consecutive duplicates. A duplicated
+    // arc/edge seam point would jitter independently and render as a knot.
+    val pts = crayonOutlineOffsets(w, h, corner, seed = 3L, roughness = 0f)
+    for (i in 1 until pts.size - 1) {
+      assertNotEquals("duplicate seam point at index $i: ${pts[i]}", pts[i - 1], pts[i])
+    }
+  }
+
+  @Test
+  fun nonPositiveSegmentsPerEdge_clampToOne() {
+    // Zero or negative segmentsPerEdge must not throw and must behave like 1.
+    val one = crayonOutlineOffsets(w, h, corner, seed = 8L, roughness = 0f, segmentsPerEdge = 1)
+    for (bad in listOf(0, -1, -7)) {
+      val got = crayonOutlineOffsets(w, h, corner, seed = 8L, roughness = 0f, segmentsPerEdge = bad)
+      assertEquals("segmentsPerEdge $bad should clamp to 1", one, got)
+    }
+  }
+
+  @Test
   fun zeroRoughness_isAnExactRoundedRectangle() {
     val pts = crayonOutlineOffsets(w, h, corner, seed = 5L, roughness = 0f)
     // With no jitter every point must sit ON the rounded-rect perimeter — a

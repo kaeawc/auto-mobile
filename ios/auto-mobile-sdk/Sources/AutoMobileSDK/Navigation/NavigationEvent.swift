@@ -17,19 +17,31 @@ public struct NavigationEvent: Sendable {
 
     /// Additional metadata.
     public let metadata: [String: String]
+    public let screenIdentity: String?
+    public let sceneIdentifier: String?
+    public let transitionIdentifier: String?
+    public let transitionCompleted: Bool
 
     public init(
         destination: String,
         source: NavigationSource,
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         arguments: [String: String] = [:],
-        metadata: [String: String] = [:]
+        metadata: [String: String] = [:],
+        screenIdentity: String? = nil,
+        sceneIdentifier: String? = nil,
+        transitionIdentifier: String? = nil,
+        transitionCompleted: Bool = true
     ) {
         self.destination = destination
         self.source = source
         self.timestamp = timestamp
         self.arguments = arguments
         self.metadata = metadata
+        self.screenIdentity = screenIdentity
+        self.sceneIdentifier = sceneIdentifier
+        self.transitionIdentifier = transitionIdentifier
+        self.transitionCompleted = transitionCompleted
     }
 
     /// Convenience init that accepts mixed-type arguments (matching Android's Map<String, Any?>).
@@ -39,7 +51,11 @@ public struct NavigationEvent: Sendable {
         source: NavigationSource,
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         mixedArguments: [String: Any],
-        metadata: [String: String] = [:]
+        metadata: [String: String] = [:],
+        screenIdentity: String? = nil,
+        sceneIdentifier: String? = nil,
+        transitionIdentifier: String? = nil,
+        transitionCompleted: Bool = true
     ) {
         self.destination = destination
         self.source = source
@@ -49,5 +65,9 @@ public struct NavigationEvent: Sendable {
             return String(describing: value)
         }
         self.metadata = metadata
+        self.screenIdentity = screenIdentity
+        self.sceneIdentifier = sceneIdentifier
+        self.transitionIdentifier = transitionIdentifier
+        self.transitionCompleted = transitionCompleted
     }
 }

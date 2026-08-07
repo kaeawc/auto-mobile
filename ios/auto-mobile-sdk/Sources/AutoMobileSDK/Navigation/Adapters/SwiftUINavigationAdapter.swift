@@ -12,18 +12,20 @@ public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, @unchec
     public var isActive: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return _isActive
+        return _isActive && NavigationAdapterHub.shared.isActive(owner: "swiftui")
     }
 
     private init() {}
 
     public func start() {
+        NavigationAdapterHub.shared.start(owner: "swiftui")
         lock.lock()
         _isActive = true
         lock.unlock()
     }
 
     public func stop() {
+        NavigationAdapterHub.shared.stop(owner: "swiftui")
         lock.lock()
         _isActive = false
         lock.unlock()
@@ -36,13 +38,32 @@ public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, @unchec
         metadata: [String: String] = [:]
     ) {
         guard isActive else { return }
-        let event = NavigationEvent(
+        NavigationAdapterHub.shared.record(
+            owner: "swiftui",
             destination: destination,
             source: .swiftUINavigation,
+            identity: NavigationScreenIdentity(route: destination),
             arguments: arguments,
             metadata: metadata
         )
-        AutoMobileSDK.shared.notifyNavigationEvent(event)
+    }
+
+    public func trackSheet(destination: String, sceneIdentifier: String? = nil, metadata: [String: String] = [:]) {
+        NavigationAdapterHub.shared.record(owner: "swiftui", destination: destination, source: .swiftUINavigation,
+            identity: NavigationScreenIdentity(route: destination), sceneIdentifier: sceneIdentifier,
+            metadata: metadata.merging(["transition": "sheet"]) { _, new in new })
+    }
+
+    public func trackTab(destination: String, sceneIdentifier: String? = nil) {
+        NavigationAdapterHub.shared.record(owner: "swiftui", destination: destination, source: .swiftUINavigation,
+            identity: NavigationScreenIdentity(route: destination), sceneIdentifier: sceneIdentifier,
+            metadata: ["transition": "tab"])
+    }
+
+    public func trackSplitColumn(destination: String, column: String, sceneIdentifier: String? = nil) {
+        NavigationAdapterHub.shared.record(owner: "swiftui", destination: destination, source: .swiftUINavigation,
+            identity: NavigationScreenIdentity(route: destination), sceneIdentifier: sceneIdentifier,
+            metadata: ["transition": "split", "column": column])
     }
 }
 

@@ -26,6 +26,10 @@ interface ObserveResultCacheEntry {
  * boundary before it warms the in-memory cache or is served to a resource.
  */
 export function normalizeCachedObserveResult(parsed: unknown): ObserveResult {
+  // Mutate through a Record view, but return the original `unknown` value cast to
+  // ObserveResult: `unknown -> ObserveResult` is a single legal assertion, whereas
+  // `Record<string, unknown> -> ObserveResult` is a TS2352 insufficient-overlap
+  // error (and `as unknown as` would trip the no-unknown-cast lint).
   const record = parsed as Record<string, unknown>;
   const legacy = record.layoutWarnings;
   if (Array.isArray(legacy)) {
@@ -36,7 +40,7 @@ export function normalizeCachedObserveResult(parsed: unknown): ObserveResult {
       : { scope: "full", warnings: legacy };
     delete record.layoutWarningsTruncated;
   }
-  return record as ObserveResult;
+  return parsed as ObserveResult;
 }
 
 /**

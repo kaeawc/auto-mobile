@@ -68,6 +68,8 @@ struct VideoRowView: View {
                 .frame(width: 60, height: 40)
                 .background(theme.surfaceVariant)
                 .cornerRadius(8)
+                // Hand-drawn crayon frame on the thumbnail tile (non-destructive overlay).
+                .crayonBorder(color: theme.primary, cornerRadius: 8, seed: 17)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(video.title)

@@ -192,6 +192,59 @@ class WorkspaceShellUiTest {
     }
 
   @Test
+  fun `Locale control opens a picker and selecting a locale dispatches SetLocale`() =
+    runComposeUiTest {
+      var action: WorkspaceAction? = null
+      val state =
+        WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {})
+        }
+      }
+      onNodeWithContentDescription("Locale Pixel 8").performClick()
+      onNodeWithContentDescription("Locale Spanish Pixel 8").performClick()
+      assertEquals(WorkspaceAction.SetLocale("a", "es-ES"), action)
+    }
+
+  @Test
+  fun `More control opens a menu and selecting a button dispatches PressDeviceButton`() =
+    runComposeUiTest {
+      var action: WorkspaceAction? = null
+      val state =
+        WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {})
+        }
+      }
+      onNodeWithContentDescription("More Pixel 8").performClick()
+      // Power shows on Android — a hardware key adb can press.
+      onNodeWithContentDescription("Power Pixel 8").assertIsDisplayed()
+      onNodeWithContentDescription("Home Pixel 8").performClick()
+      assertEquals(WorkspaceAction.PressDeviceButton("a", DeviceButton.Home), action)
+    }
+
+  @Test
+  fun `More menu on iOS offers the navigation buttons but hides simulator-incompatible Power`() =
+    runComposeUiTest {
+      val state =
+        WorkspaceUiState.Content(
+          columns = listOf(col("a", "iPhone 15", Platform.Ios)),
+          focusedDeviceId = "a",
+        )
+      setContent {
+        MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
+      }
+      onNodeWithContentDescription("More iPhone 15").performClick()
+      // Home/Back/Recent route through CtrlProxy on iOS; Power is physical-device-only.
+      onNodeWithContentDescription("Home iPhone 15").assertIsDisplayed()
+      onNodeWithContentDescription("Back iPhone 15").assertIsDisplayed()
+      onNodeWithContentDescription("Recent apps iPhone 15").assertIsDisplayed()
+      onNodeWithContentDescription("Power iPhone 15").assertDoesNotExist()
+    }
+
+  @Test
   fun `active tool renders a docked facet with a close control`() = runComposeUiTest {
     val state =
       WorkspaceUiState.Content(

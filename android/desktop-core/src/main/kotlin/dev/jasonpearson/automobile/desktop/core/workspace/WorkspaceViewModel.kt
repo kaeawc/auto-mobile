@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +42,12 @@ sealed interface WorkspaceAction {
   /** Run an emulator control against a device pane (rotate, screenshot, snapshot, unlock). */
   data class RunControl(val deviceId: String, val control: EmulatorControl) : WorkspaceAction
 
+  /** Press a device system button on a pane (the `more` overflow menu items). */
+  data class PressDeviceButton(val deviceId: String, val button: DeviceButton) : WorkspaceAction
+
+  /** Apply a locale to a pane's device (the `locale` picker selection). */
+  data class SetLocale(val deviceId: String, val locale: String) : WorkspaceAction
+
   /**
    * Update panes' lock state from an observed snapshot (deviceId -> locked). A device absent from
    * [locked] keeps its current state, so a transient empty read never spuriously unlocks a pane.
@@ -77,6 +84,10 @@ class WorkspaceViewModel(
   private val _effect = Channel<WorkspaceEffect>(Channel.BUFFERED)
   val effect = _effect.receiveAsFlow()
 
+  // The in-flight locale request per device, so a newer selection can supersede an older one that
+  // is still resolving the foreground app (see [setLocale]).
+  private val localeJobs = mutableMapOf<String, Job>()
+
   fun onAction(action: WorkspaceAction) {
     when (action) {
       is WorkspaceAction.ObserveDevice -> observe(action.column)
@@ -86,10 +97,49 @@ class WorkspaceViewModel(
       is WorkspaceAction.ToggleShrink -> mutate(action.deviceId) { it.copy(shrunk = !it.shrunk) }
       is WorkspaceAction.SelectTool -> mutate(action.deviceId) { it.copy(activeTool = action.tool) }
       is WorkspaceAction.RunControl -> runControl(action.deviceId, action.control)
+      is WorkspaceAction.PressDeviceButton -> pressDeviceButton(action.deviceId, action.button)
+      is WorkspaceAction.SetLocale -> setLocale(action.deviceId, action.locale)
       is WorkspaceAction.SetLockStates -> setLockStates(action.locked)
       is WorkspaceAction.DiffTool -> diffTool(action.tool)
     }
   }
+
+  /**
+   * Press a device system [button] on the targeted column off the UI thread; failures are logged.
+   */
+  private fun pressDeviceButton(deviceId: String, button: DeviceButton) {
+    val column = columnFor(deviceId) ?: return
+    scope.launch {
+      try {
+        controlExecutor.pressButton(deviceId, column.platform, button)
+      } catch (cancellation: CancellationException) {
+        throw cancellation
+      } catch (error: Exception) {
+        LOG.warn("Device button $button failed for $deviceId: ${error.message}", error)
+      }
+    }
+  }
+
+  /** Apply [locale] to the targeted column's device off the UI thread; failures are logged. */
+  private fun setLocale(deviceId: String, locale: String) {
+    val column = columnFor(deviceId) ?: return
+    // A newer pick supersedes any still-resolving one for this device: resolving the foreground app
+    // can take seconds, and without cancelling, an earlier request could invoke changeLocalization
+    // AFTER a later one and leave the device in a locale the user did not pick last.
+    localeJobs[deviceId]?.cancel()
+    localeJobs[deviceId] = scope.launch {
+      try {
+        controlExecutor.setLocale(deviceId, column.platform, locale)
+      } catch (cancellation: CancellationException) {
+        throw cancellation
+      } catch (error: Exception) {
+        LOG.warn("Set locale $locale failed for $deviceId: ${error.message}", error)
+      }
+    }
+  }
+
+  private fun columnFor(deviceId: String): DeviceColumn? =
+    (_state.value as? WorkspaceUiState.Content)?.columns?.firstOrNull { it.deviceId == deviceId }
 
   /** Reflect an observed lock-state snapshot onto the columns; absent devices keep their state. */
   private fun setLockStates(locked: Map<String, Boolean>) {

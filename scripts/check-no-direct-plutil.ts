@@ -15,6 +15,10 @@ function sourceFiles(directory: string): string[] {
 const violations = sourceFiles(SOURCE_ROOT).flatMap(file => {
   if (file === OWNER) {return [];}
   const source = readFileSync(file, "utf8");
+  // Cheap prefilter (issue #5121): a file with no "plutil" substring cannot
+  // contain a `plutil` command, so skip parsing it. Superset of the detector's
+  // /(?:^|\s)plutil(?:\s|$)/, so it never skips a real violation.
+  if (!source.includes("plutil")) {return [];}
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const found: string[] = [];
   const visit = (node: ts.Node): void => {

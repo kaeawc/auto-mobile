@@ -156,6 +156,53 @@ public final class dev.jasonpearson.automobile.sdk.ComposeRecompositionKt {
   public static final void TrackRecomposition(java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.util.List<java.lang.String>, java.lang.Boolean, java.lang.Integer, java.lang.String, androidx.compose.runtime.Composer, int, int);
   public static final void TrackRecomposition(java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.util.List<java.lang.String>, java.lang.Boolean, java.lang.Integer, java.lang.String, kotlin.jvm.functions.Function2<? super androidx.compose.runtime.Composer, ? super java.lang.Integer, kotlin.Unit>, androidx.compose.runtime.Composer, int, int);
 }
+Compiled from "FrameMetricsCollector.kt"
+public final class dev.jasonpearson.automobile.sdk.FrameMetricsCollector$FrameSample {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.FrameMetricsCollector$FrameSample(long, double);
+  public final long getT();
+  public final double getDurationMs();
+  public final long component1();
+  public final double component2();
+  public final dev.jasonpearson.automobile.sdk.FrameMetricsCollector$FrameSample copy(long, double);
+  public static dev.jasonpearson.automobile.sdk.FrameMetricsCollector$FrameSample copy$default(dev.jasonpearson.automobile.sdk.FrameMetricsCollector$FrameSample, long, double, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+Compiled from "FrameMetricsCollector.kt"
+public final class dev.jasonpearson.automobile.sdk.FrameMetricsCollector$activityCallbacks$1 implements android.app.Application$ActivityLifecycleCallbacks {
+  public void onActivityStarted(android.app.Activity);
+  public void onActivityStopped(android.app.Activity);
+  public void onActivityCreated(android.app.Activity, android.os.Bundle);
+  public void onActivityResumed(android.app.Activity);
+  public void onActivityPaused(android.app.Activity);
+  public void onActivitySaveInstanceState(android.app.Activity, android.os.Bundle);
+  public void onActivityDestroyed(android.app.Activity);
+}
+Compiled from "FrameMetricsCollector.kt"
+public final class dev.jasonpearson.automobile.sdk.FrameMetricsCollector$controlReceiver$1 extends android.content.BroadcastReceiver {
+  public void onReceive(android.content.Context, android.content.Intent);
+}
+Compiled from "FrameMetricsCollector.kt"
+public final class dev.jasonpearson.automobile.sdk.FrameMetricsCollector$scheduleBroadcast$1 implements java.lang.Runnable {
+  public void run();
+}
+Compiled from "FrameMetricsCollector.kt"
+public final class dev.jasonpearson.automobile.sdk.FrameMetricsCollector {
+  public static final dev.jasonpearson.automobile.sdk.FrameMetricsCollector INSTANCE;
+  public static final int $stable;
+  public final void initialize(android.content.Context);
+  public final void reset();
+  public final boolean isEnabled$auto_mobile_sdk();
+  public final void setEnabled$auto_mobile_sdk(boolean);
+  public final java.lang.String buildSnapshotJson$auto_mobile_sdk(java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.FrameMetricsCollector$FrameSample>, long);
+  public static final java.util.concurrent.atomic.AtomicBoolean access$getEnabled$p();
+  public static final void access$broadcastSnapshot(dev.jasonpearson.automobile.sdk.FrameMetricsCollector);
+  public static final android.os.Handler access$getMainHandler$p();
+  public static final void access$attachWindow(dev.jasonpearson.automobile.sdk.FrameMetricsCollector, android.view.Window);
+  public static final void access$detachWindow(dev.jasonpearson.automobile.sdk.FrameMetricsCollector, android.view.Window);
+}
 Compiled from "NavigationEvent.kt"
 public final class dev.jasonpearson.automobile.sdk.NavigationEvent {
   public static final int $stable;
@@ -1117,6 +1164,8 @@ public final class dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork {
   public static okhttp3.Interceptor interceptor$default(dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork, boolean, boolean, int, java.lang.Object);
   public final void recordRequest(dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord, boolean, boolean);
   public static void recordRequest$default(dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork, dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord, boolean, boolean, int, java.lang.Object);
+  public final dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession startCapture(java.lang.String, java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, long, boolean, boolean);
+  public static dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession startCapture$default(dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork, java.lang.String, java.lang.String, java.lang.String, java.util.Map, long, boolean, boolean, int, java.lang.Object);
   public final okhttp3.WebSocketListener wrapWebSocketListener(okhttp3.WebSocketListener, java.lang.String);
   public final void reset$auto_mobile_sdk();
 }
@@ -1146,6 +1195,23 @@ public final class dev.jasonpearson.automobile.sdk.network.AutoMobileWebSocketLi
   public void onClosing(okhttp3.WebSocket, int, java.lang.String);
   public void onClosed(okhttp3.WebSocket, int, java.lang.String);
   public void onFailure(okhttp3.WebSocket, java.lang.Throwable, okhttp3.Response);
+}
+Compiled from "AutoMobileNetwork.kt"
+public final class dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession$Companion {
+  public final dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession create(java.lang.String, java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, long, boolean, boolean);
+  public dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession$Companion(kotlin.jvm.internal.DefaultConstructorMarker);
+}
+Compiled from "AutoMobileNetwork.kt"
+public final class dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession {
+  public static final dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession$Companion Companion;
+  public static final int $stable;
+  public final void complete(int, java.util.Map<java.lang.String, java.lang.String>, long, java.lang.String, java.lang.String, long);
+  public static void complete$default(dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession, int, java.util.Map, long, java.lang.String, java.lang.String, long, int, java.lang.Object);
+  public final void fail(java.lang.Throwable, long);
+  public static void fail$default(dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession, java.lang.Throwable, long, int, java.lang.Object);
+  public final void cancel(long);
+  public static void cancel$default(dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession, long, int, java.lang.Object);
+  public dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession(java.lang.String, java.lang.String, java.lang.String, java.util.Map, long, boolean, boolean, kotlin.jvm.internal.DefaultConstructorMarker);
 }
 Compiled from "NetworkMockRuleStore.kt"
 public final class dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$Companion {
@@ -1266,13 +1332,14 @@ public final class dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore 
 Compiled from "AutoMobileNetwork.kt"
 public final class dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord {
   public static final int $stable;
-  public dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord(java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, long, int, java.util.Map<java.lang.String, java.lang.String>, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String);
-  public dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord(java.lang.String, java.lang.String, java.util.Map, long, int, java.util.Map, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord(java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, long, int, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String);
+  public dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord(java.lang.String, java.lang.String, java.util.Map, long, int, java.lang.String, java.util.Map, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final java.lang.String getUrl();
   public final java.lang.String getMethod();
   public final java.util.Map<java.lang.String, java.lang.String> getRequestHeaders();
   public final long getRequestBodySize();
   public final int getStatusCode();
+  public final java.lang.String getProtocol();
   public final java.util.Map<java.lang.String, java.lang.String> getResponseHeaders();
   public final long getResponseBodySize();
   public final long getDurationMs();
@@ -1287,17 +1354,18 @@ public final class dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord 
   public final java.util.Map<java.lang.String, java.lang.String> component3();
   public final long component4();
   public final int component5();
-  public final java.util.Map<java.lang.String, java.lang.String> component6();
-  public final long component7();
+  public final java.lang.String component6();
+  public final java.util.Map<java.lang.String, java.lang.String> component7();
   public final long component8();
-  public final java.lang.String component9();
+  public final long component9();
   public final java.lang.String component10();
   public final java.lang.String component11();
   public final java.lang.String component12();
   public final java.lang.String component13();
   public final java.lang.String component14();
-  public final dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord copy(java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, long, int, java.util.Map<java.lang.String, java.lang.String>, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String);
-  public static dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord copy$default(dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord, java.lang.String, java.lang.String, java.util.Map, long, int, java.util.Map, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, int, java.lang.Object);
+  public final java.lang.String component15();
+  public final dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord copy(java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, long, int, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String);
+  public static dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord copy$default(dev.jasonpearson.automobile.sdk.network.NetworkRequestRecord, java.lang.String, java.lang.String, java.util.Map, long, int, java.lang.String, java.util.Map, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, int, java.lang.Object);
   public java.lang.String toString();
   public int hashCode();
   public boolean equals(java.lang.Object);

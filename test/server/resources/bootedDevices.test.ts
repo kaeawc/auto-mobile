@@ -1,9 +1,9 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { setDeviceManager, setDeviceLockProbe, BootedDevicesResourceContent, DeviceLockStatesResourceContent } from "../../../src/server/bootedDeviceResources";
+import { setDeviceManager, setDeviceLockProbe, notifyBootedDeviceResourcesUpdated, BootedDevicesResourceContent, DeviceLockStatesResourceContent } from "../../../src/server/bootedDeviceResources";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
@@ -435,6 +435,21 @@ describe("MCP Booted Device Resources", () => {
       expect(data.lockStates).toHaveLength(1);
       expect(data.lockStates[0].deviceId).toBe(mockIosDevice1.deviceId);
       expect(data.lockStates[0].locked).toBeUndefined();
+    });
+
+    test("resource-update notification fans out to the lock-states resource, not just booted", async function() {
+      // A device start/kill changes both the full booted resource and this lightweight one, so
+      // subscribers to either must be notified — regression guard for the notify set.
+      const spy = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
+      try {
+        await notifyBootedDeviceResourcesUpdated();
+        expect(spy).toHaveBeenCalledTimes(1);
+        const uris = spy.mock.calls[0][0];
+        expect(uris).toContain("automobile:devices/booted");
+        expect(uris).toContain("automobile:devices/lockStates");
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     test("should include pool status when daemon is initialized", async function() {

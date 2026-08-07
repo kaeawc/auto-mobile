@@ -5,71 +5,43 @@ import SwiftUI
 struct AutoMobileTheme {
     let colorScheme: ColorScheme
 
-    /// Primary colors
-    var primary: Color {
-        colorScheme == .dark ? .autoMobileWhite : .autoMobileLalala
-    }
+    private var dark: Bool { colorScheme == .dark }
 
-    var onPrimary: Color {
-        colorScheme == .dark ? .autoMobileLalala : .autoMobileWhite
-    }
+    /// Hand-drawn type scale and shape tokens (mirror the Android design system).
+    let typography = PlaygroundTypography()
+    let shapes = PlaygroundShapes()
 
-    /// Secondary colors (red accent)
-    var secondary: Color {
-        .autoMobileRed
-    }
+    /// Primary colors — icon-derived marker red.
+    var primary: Color { dark ? .pgDarkPrimary : .pgLightPrimary }
+    var onPrimary: Color { dark ? .pgDarkOnPrimary : .pgLightOnPrimary }
 
-    var onSecondary: Color {
-        .autoMobileWhite
-    }
+    /// Secondary colors — swing / sky blue.
+    var secondary: Color { dark ? .pgDarkSecondary : .pgLightSecondary }
+    var onSecondary: Color { dark ? .pgDarkOnSecondary : .pgLightOnSecondary }
 
-    /// Background colors
-    var background: Color {
-        colorScheme == .dark ? .autoMobileBlack : .autoMobileEggshell
-    }
+    /// Tertiary colors — sun yellow.
+    var tertiary: Color { dark ? .pgDarkTertiary : .pgLightTertiary }
+    var onTertiary: Color { dark ? .pgDarkOnTertiary : .pgLightOnTertiary }
 
-    var onBackground: Color {
-        colorScheme == .dark ? .autoMobileWhite : .autoMobileLalala
-    }
+    /// Background colors — warm crayon paper.
+    var background: Color { dark ? .pgDarkBackground : .pgLightBackground }
+    var onBackground: Color { dark ? .pgDarkOnBackground : .pgLightOnBackground }
 
-    /// Surface colors
-    var surface: Color {
-        colorScheme == .dark ? .autoMobileLalala : .autoMobileWhite
-    }
+    /// Surface colors.
+    var surface: Color { dark ? .pgDarkSurface : .pgLightSurface }
+    var onSurface: Color { dark ? .pgDarkOnSurface : .pgLightOnSurface }
+    var surfaceVariant: Color { dark ? Color(hex: 0x3A2F24) : Color(hex: 0xF3E8D8) }
 
-    var onSurface: Color {
-        colorScheme == .dark ? .autoMobileWhite : .autoMobileBlack
-    }
+    /// Semantic colors.
+    var success: Color { .pgAccentGrassGreen }
+    var warning: Color { .pgAccentConeOrange }
+    var error: Color { dark ? .pgDarkError : .pgLightError }
+    var onError: Color { dark ? .pgDarkOnError : .pgLightOnError }
+    var info: Color { dark ? .pgDarkSecondary : .pgLightSecondary }
 
-    var surfaceVariant: Color {
-        colorScheme == .dark ? .autoMobileLalala : .autoMobileEggshell
-    }
-
-    /// Semantic colors
-    var success: Color {
-        .autoMobileSuccess
-    }
-
-    var warning: Color {
-        .autoMobileWarning
-    }
-
-    var error: Color {
-        .autoMobileError
-    }
-
-    var info: Color {
-        .autoMobileInfo
-    }
-
-    /// Text colors
-    var textPrimary: Color {
-        onSurface
-    }
-
-    var textSecondary: Color {
-        colorScheme == .dark ? .autoMobileLightGrey : .autoMobileDarkGrey
-    }
+    /// Text colors.
+    var textPrimary: Color { onSurface }
+    var textSecondary: Color { onSurface.opacity(0.68) }
 }
 
 // MARK: - Environment Key
@@ -91,10 +63,11 @@ struct AutoMobileThemeModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
-        content
-            .environment(\.autoMobileTheme, AutoMobileTheme(colorScheme: colorScheme))
-            .tint(.autoMobileRed)
-            .accentColor(.autoMobileRed)
+        let theme = AutoMobileTheme(colorScheme: colorScheme)
+        return content
+            .environment(\.autoMobileTheme, theme)
+            .tint(theme.primary)
+            .accentColor(theme.primary)
     }
 }
 

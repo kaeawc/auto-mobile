@@ -100,7 +100,7 @@ these fields (all in the issue's required pre/post-deploy evidence list):
 | `workerIncarnation` | worker process incarnation id (changes on replacement) |
 | `processSupervisor`, `processIds` | `launchctl` / `ps` for daemon, runner, `com.apple.CoreSimulator.CoreSimulatorService` |
 | `coreSimulatorDataRoot` | `~/Library/Developer/CoreSimulator/Devices/<udid>/data` |
-| `bootedSince` | boot time of the current session (used to detect a mid-window reboot) — **capture it**: without it a reboot inside the window cannot be proven, so a rebooted device may read as `same-device-continuity` |
+| `bootedSince` | boot time of the current session (used to detect a mid-window reboot) — **required for a proven verdict**: without it a reboot cannot be ruled out, so the result is `incomplete-evidence` |
 | `lifecycleState` | `booted` / `shutdown` / … from `simctl list` |
 | `responsive` | result of a responsiveness probe against the device |
 | `reportingStatus` | `reporting` / `delayed` / `lost` from the worker/AutoMobile status |
@@ -137,9 +137,15 @@ one verdict:
 | `boot-recovery` | Same UDID + data, but rebooted during the window (data safe, booted session did not survive). | no | maintenance |
 | `shutdown` | Same device is no longer booted and did not recover. | no | maintenance |
 | `reporting-delay` | Device continuous but worker reporting delayed/lost. | no | maintenance |
-| `orphaned-or-erased-state` | UDID or data root changed with no declared replacement. | no | maintenance |
+| `orphaned-or-erased-state` | UDID, data root, or host identity changed with no declared replacement (also: a controlled replacement of a device that had active work). | no | maintenance |
 | `failed-probe` | Post-deploy state or responsiveness could not be determined. | no | maintenance |
-| `incomplete-evidence` | Required identity/context evidence missing. | no | maintenance |
+| `incomplete-evidence` | Required identity/context evidence missing, `bootedSince` absent, or the pre-deploy baseline was not booted+responsive — continuity of a healthy device cannot be proven. | no | maintenance |
+
+The gate proves continuity, so it holds evidence to a high bar: the before/after
+pair must be from the **same managed host** (a differing `hostIdentity` reads as
+`orphaned-or-erased-state`), the **pre-deploy baseline must itself be healthy**
+(booted + responsive), and `bootedSince` must be present to rule out a reboot.
+Anything short of that is not proven, not silently accepted.
 
 ## 6. Failure and rollback
 

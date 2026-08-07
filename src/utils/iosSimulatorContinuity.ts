@@ -54,8 +54,9 @@ export interface ContinuitySnapshot {
   /**
    * ISO timestamp of when the *current* boot session began. If this falls
    * inside the deploy window the running simulator did not survive even when the
-   * UDID and data root did — that is boot recovery, not continuity. Optional
-   * because not every host can report it; when absent a reboot cannot be proven.
+   * UDID and data root did — that is boot recovery, not continuity. Optional in
+   * the shape, but a *proven* same-device-continuity verdict requires it: when
+   * absent, a reboot cannot be ruled out, so the result is `incomplete-evidence`.
    */
   readonly bootedSince?: string;
   /** Simulator lifecycle state. */
@@ -188,9 +189,23 @@ function hit(verdict: ContinuityVerdict, reason: string): RuleHit {
   return { verdict, reason };
 }
 
-/** True when the after-snapshot identity or CoreSimulator data root changed. */
+/**
+ * True when the after-snapshot identity changed vs before: UDID, CoreSimulator
+ * data root, or host identity. The contract is scoped to one managed host, so a
+ * host-identity change means the before/after evidence was captured on different
+ * machines — that is not continuity of the same device.
+ */
 function identityChanged(before: ContinuitySnapshot, after: ContinuitySnapshot): boolean {
-  return after.udid !== before.udid || after.coreSimulatorDataRoot !== before.coreSimulatorDataRoot;
+  return (
+    after.udid !== before.udid ||
+    after.coreSimulatorDataRoot !== before.coreSimulatorDataRoot ||
+    after.hostIdentity !== before.hostIdentity
+  );
+}
+
+/** True when the pre-deploy baseline was a healthy, booted, responsive device. */
+function healthyBaseline(before: ContinuitySnapshot): boolean {
+  return before.lifecycleState === "booted" && before.responsive;
 }
 
 /**
@@ -239,13 +254,13 @@ const CONTINUITY_RULES: readonly ContinuityRule[] = [
           "Deploy was declared a controlled replacement but the replacement simulator is not booted and responsive.",
         );
   },
-  // 4. Orphaned/erased state — identity or CoreSimulator data changed with no
-  //    planned replacement to explain it. This is the AC3 guard.
+  // 4. Orphaned/erased state — identity, CoreSimulator data, or host changed
+  //    with no planned replacement to explain it. This is the AC3 guard.
   (before, after) =>
     identityChanged(before, after)
       ? hit(
           "orphaned-or-erased-state",
-          "Simulator UDID or CoreSimulator data root changed without a declared controlled replacement.",
+          "Simulator UDID, CoreSimulator data root, or host identity changed without a declared controlled replacement.",
         )
       : null,
   // From here the UDID and data root are unchanged.
@@ -282,6 +297,26 @@ const CONTINUITY_RULES: readonly ContinuityRule[] = [
       : hit(
           "reporting-delay",
           `Simulator is continuous but worker reporting is ${after.reportingStatus}.`,
+        ),
+  // 9. Provability guards for the clean-continuity claim. Same-device-continuity
+  //    asserts "booted and responsive throughout", so the pre-deploy baseline
+  //    must itself have been healthy — an unhealthy `before` cannot prove a
+  //    healthy device was preserved.
+  (before) =>
+    healthyBaseline(before)
+      ? null
+      : hit(
+          "incomplete-evidence",
+          "Pre-deploy baseline was not a booted, responsive simulator; continuity of a healthy device cannot be proven.",
+        ),
+  // 10. Boot-session time is required to rule out a reboot during the window; a
+  //     rollout that cannot prove the booted session survived is not proven.
+  (_before, after) =>
+    after.bootedSince
+      ? null
+      : hit(
+          "incomplete-evidence",
+          "Boot-session time (bootedSince) is required to prove the running simulator survived; without it a reboot cannot be ruled out.",
         ),
 ];
 

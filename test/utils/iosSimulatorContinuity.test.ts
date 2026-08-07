@@ -126,6 +126,19 @@ describe("classifyContinuity — distinguishes the required states (AC5)", () =>
     expect(result.proven).toBe(false);
     expect(result.recommendedState).toBe("maintenance");
   });
+
+  it("an otherwise-clean device with no bootedSince → incomplete-evidence (reboot cannot be ruled out)", () => {
+    const result = classifyContinuity(snapshot(), snapshot({ bootedSince: undefined }), DEPLOY);
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("an unhealthy pre-deploy baseline (booted but unresponsive) cannot prove continuity → incomplete-evidence", () => {
+    const before = snapshot({ responsive: false });
+    const result = classifyContinuity(before, snapshot(), DEPLOY);
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
 });
 
 describe("classifyContinuity — cannot silently erase/orphan managed state (AC3)", () => {
@@ -145,6 +158,13 @@ describe("classifyContinuity — cannot silently erase/orphan managed state (AC3
     const after = snapshot({
       coreSimulatorDataRoot: "/private/tmp/ephemeral-extract/CoreSimulator/Devices/x/data",
     });
+    const result = classifyContinuity(snapshot(), after, DEPLOY);
+    expect(result.verdict).toBe("orphaned-or-erased-state");
+    expect(result.proven).toBe(false);
+  });
+
+  it("before/after captured on different hosts (same UDID) is not continuity → orphaned-or-erased-state", () => {
+    const after = snapshot({ hostIdentity: "mac-worker-09.internal" });
     const result = classifyContinuity(snapshot(), after, DEPLOY);
     expect(result.verdict).toBe("orphaned-or-erased-state");
     expect(result.proven).toBe(false);

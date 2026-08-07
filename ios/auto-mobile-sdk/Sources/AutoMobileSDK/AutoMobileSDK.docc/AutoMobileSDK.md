@@ -31,6 +31,10 @@ AutoMobileSDK.shared.initialize(configuration: config)
 - ``AutoMobileConfiguration``
 - ``SdkContext``
 - ``SdkContextSnapshot``
+- ``AutoMobileObservationBridge``
+- ``AutoMobileObservationProvider``
+- ``AutoMobileActionExecutor``
+- ``AutoMobileSerialActionQueue``
 
 ### Navigation
 
@@ -105,6 +109,15 @@ AutoMobileSDK.shared.initialize(configuration: config)
 - ``SdkInteractionEvent``
 - ``SdkStorageChangedEvent``
 - ``NavigationSourceType``
+
+### Observation and Control
+
+- ``AutoMobileObservationSnapshot``
+- ``AutoMobileObservationNode``
+- ``AutoMobileAction``
+- ``AutoMobileActionResult``
+- ``AutoMobileCoordinateSpace``
+- ``AutoMobileDeviceOrientation``
 
 ### Drop Counting
 

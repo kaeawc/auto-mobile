@@ -445,6 +445,57 @@ public final class AutoMobileNotifications: @unchecked Sendable
   public func post( title: String, body: String, style: NotificationStyle = .default, imagePath: String? = nil, actions: [NotificationAction] = [], categoryId: String? = nil ) async -> Bool
   public func installActionHandler(on center: UNUserNotificationCenter = .current()) -> UNUserNotificationCenterDelegate
 
+// Observation/AutoMobileObservationBridge.swift
+public enum AutoMobileCoordinateSpace: String, Codable, Sendable
+public enum AutoMobileDeviceOrientation: String, Codable, Sendable
+public struct AutoMobileObservationNode: Codable, Sendable, Equatable
+  public let id: String
+  public let role: String
+  public let label: String?
+  public let value: String?
+  public let bounds: SdkBounds
+  public let enabled: Bool
+  public let visible: Bool
+  public let focused: Bool
+  public let children: [AutoMobileObservationNode]
+  public init( id: String, role: String, label: String? = nil, value: String? = nil, bounds: SdkBounds, enabled: Bool = true, visible: Bool = true, focused: Bool = false, children: [AutoMobileObservationNode] = [] )
+  public func contains(id: String) -> Bool
+  public func node(id: String) -> AutoMobileObservationNode?
+public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable
+  public let captureIdentity: UInt64
+  public let orientation: AutoMobileDeviceOrientation
+  public let coordinateSpace: AutoMobileCoordinateSpace
+  public let bounds: SdkBounds
+  public let root: AutoMobileObservationNode?
+  public let focusedElementId: String?
+  public let capabilities: Set<String>
+  public init( captureIdentity: UInt64, orientation: AutoMobileDeviceOrientation = .unknown, coordinateSpace: AutoMobileCoordinateSpace, bounds: SdkBounds, root: AutoMobileObservationNode?, focusedElementId: String? = nil, capabilities: Set<String> = [] )
+  public func containsElement(id: String) -> Bool
+public protocol AutoMobileObservationProvider: AnyObject, Sendable
+public enum AutoMobileAction: Codable, Sendable, Equatable
+  public var observationIdentity: UInt64
+  public var targetElementId: String?
+public struct SdkPoint: Codable, Sendable, Equatable
+  public let x: Double
+  public let y: Double
+  public init(x: Double, y: Double)
+public struct AutoMobileActionResult: Codable, Sendable, Equatable
+public enum Status: String, Codable, Sendable
+  public let status: Status
+  public let reason: String?
+  public let durationMs: Double
+  public let nextObservationIdentity: UInt64?
+  public init(status: Status, reason: String? = nil, durationMs: Double = 0, nextObservationIdentity: UInt64? = nil)
+public protocol AutoMobileActionExecutor: AnyObject, Sendable
+  public actor AutoMobileSerialActionQueue: AutoMobileActionExecutor
+  public typealias Performer = @Sendable (AutoMobileAction) async -> AutoMobileActionResult
+  public init(capacity: Int = 32, performer: @escaping Performer)
+  public func execute(_ action: AutoMobileAction) async -> AutoMobileActionResult
+  public actor AutoMobileObservationBridge
+  public init( provider: any AutoMobileObservationProvider, executor: any AutoMobileActionExecutor )
+  public func observe() async -> AutoMobileObservationSnapshot
+  public func perform(_ action: AutoMobileAction) async -> AutoMobileActionResult
+
 // OsEvents/AutoMobileNotificationObserver.swift
 public final class AutoMobileNotificationObserver: @unchecked Sendable
   public static let shared = AutoMobileNotificationObserver()

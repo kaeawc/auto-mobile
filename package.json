@@ -60,7 +60,8 @@
     "turbo:validate": "turbo run lint build test check:android-emulator-boundary check:ffmpeg-boundary check:host-shell-boundary check:ios-ctrl-proxy-process-boundary",
     "turbo:build": "turbo run build",
     "turbo:lint": "turbo run lint",
-    "turbo:test": "turbo run test"
+    "turbo:test": "turbo run test",
+    "turbo:typecheck": "turbo run typecheck"
   },
   "packageManager": "bun@1.3.14",
   "engines": {

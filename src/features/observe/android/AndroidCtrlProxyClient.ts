@@ -586,6 +586,7 @@ interface WsWebSocketFrameEventMessage extends WsMessageBase {
     url?: string;
     direction?: string;
     payloadSize?: number;
+    success?: boolean;
   };
 }
 

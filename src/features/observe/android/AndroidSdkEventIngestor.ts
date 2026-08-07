@@ -188,6 +188,7 @@ export class DefaultAndroidSdkEventIngestor implements AndroidSdkEventIngestor {
               url: (event.url as string) ?? "",
               direction: (event.direction as string) ?? "",
               payloadSize: String((event.payloadSize as number) ?? 0),
+              success: String((event.success as boolean) ?? true),
             },
           });
           break;

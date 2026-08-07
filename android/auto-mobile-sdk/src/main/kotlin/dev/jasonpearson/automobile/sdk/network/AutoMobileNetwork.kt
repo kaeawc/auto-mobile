@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.network
 import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.Interceptor
 import okhttp3.WebSocketListener
@@ -291,9 +292,32 @@ object AutoMobileNetwork {
    * @param url The WebSocket URL for identification in recorded events
    * @return A wrapping listener that records frame events and delegates to the original
    */
-  fun wrapWebSocketListener(delegate: WebSocketListener, url: String): WebSocketListener {
+  fun wrapWebSocketListener(delegate: WebSocketListener, url: String): WebSocketListener =
+    wrapWebSocketListener(delegate, url, UUID.randomUUID().toString().take(8))
+
+  /** Wrap a WebSocket listener with an explicit connection ID shared with [wrapWebSocket]. */
+  fun wrapWebSocketListener(
+    delegate: WebSocketListener,
+    url: String,
+    connectionId: String,
+  ): WebSocketListener {
     val buf = buffer ?: return delegate
-    return AutoMobileWebSocketListener(delegate, url, buf, applicationId)
+    return AutoMobileWebSocketListener(delegate, url, buf, applicationId, connectionId)
+  }
+
+  /**
+   * Wrap an opened WebSocket to capture outbound text and binary frames.
+   *
+   * The optional controller can block sends for deterministic debug/test fault injection.
+   */
+  fun wrapWebSocket(
+    webSocket: okhttp3.WebSocket,
+    url: String,
+    controller: WebSocketSendController? = null,
+    connectionId: String = UUID.randomUUID().toString().take(8),
+  ): okhttp3.WebSocket {
+    val buf = buffer ?: return webSocket
+    return AutoMobileWebSocket(webSocket, url, buf, applicationId, controller, connectionId)
   }
 
   /** Reset internal state. Visible for testing only. */

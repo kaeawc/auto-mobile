@@ -763,6 +763,11 @@ public interface dev.jasonpearson.automobile.sdk.database.DatabaseDriver {
   public abstract dev.jasonpearson.automobile.sdk.database.SQLExecutionResult executeSQL(java.lang.String, java.lang.String);
 }
 Compiled from "DatabaseError.kt"
+public final class dev.jasonpearson.automobile.sdk.database.DatabaseError$DriverNotFound extends dev.jasonpearson.automobile.sdk.database.DatabaseError {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.database.DatabaseError$DriverNotFound(java.lang.String);
+}
+Compiled from "DatabaseError.kt"
 public final class dev.jasonpearson.automobile.sdk.database.DatabaseError$InvalidPath extends dev.jasonpearson.automobile.sdk.database.DatabaseError {
   public static final int $stable;
   public dev.jasonpearson.automobile.sdk.database.DatabaseError$InvalidPath(java.lang.String);
@@ -804,7 +809,11 @@ public final class dev.jasonpearson.automobile.sdk.database.DatabaseInspector {
   public final void initialize$auto_mobile_sdk(android.content.Context);
   public final boolean isEnabled();
   public final void setEnabled(boolean);
-  public final dev.jasonpearson.automobile.sdk.database.DatabaseDriver getDriver$auto_mobile_sdk();
+  public final void registerDriver(java.lang.String, dev.jasonpearson.automobile.sdk.database.DatabaseDriver);
+  public final boolean unregisterDriver(java.lang.String);
+  public final java.util.Set<java.lang.String> registeredDriverNames();
+  public final dev.jasonpearson.automobile.sdk.database.DatabaseDriver getDriver$auto_mobile_sdk(java.lang.String);
+  public static dev.jasonpearson.automobile.sdk.database.DatabaseDriver getDriver$auto_mobile_sdk$default(dev.jasonpearson.automobile.sdk.database.DatabaseInspector, java.lang.String, int, java.lang.Object);
   public final void closeAll();
   public final void reset$auto_mobile_sdk();
 }
@@ -1669,6 +1678,11 @@ public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriv
   public void clear(java.lang.String);
 }
 Compiled from "SharedPreferencesError.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$DriverNotFound extends dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$DriverNotFound(java.lang.String);
+}
+Compiled from "SharedPreferencesError.kt"
 public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$FileNotFound extends dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError {
   public static final int $stable;
   public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$FileNotFound(java.lang.String);
@@ -1710,7 +1724,11 @@ public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInsp
   public final void initialize$auto_mobile_sdk(android.content.Context);
   public final boolean isEnabled();
   public final void setEnabled(boolean);
-  public final dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriver getDriver$auto_mobile_sdk();
+  public final void registerDriver(java.lang.String, dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriver);
+  public final boolean unregisterDriver(java.lang.String);
+  public final java.util.Set<java.lang.String> registeredDriverNames();
+  public final dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriver getDriver$auto_mobile_sdk(java.lang.String);
+  public static dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriver getDriver$auto_mobile_sdk$default(dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector, java.lang.String, int, java.lang.Object);
   public final void reset$auto_mobile_sdk();
 }
 Compiled from "ConfigurationOverrideHelper.kt"

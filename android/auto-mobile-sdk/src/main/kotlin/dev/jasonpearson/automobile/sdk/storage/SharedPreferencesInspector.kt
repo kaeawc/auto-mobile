@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.storage
 
 import android.content.Context
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Public API for SharedPreferences inspection.
@@ -23,6 +24,7 @@ object SharedPreferencesInspector {
   private var context: Context? = null
   private var _enabled: Boolean = false
   private var _driver: SharedPreferencesDriverImpl? = null
+  private val customDrivers = ConcurrentHashMap<String, SharedPreferencesDriver>()
 
   /**
    * Initialize the SharedPreferencesInspector with application context.
@@ -55,12 +57,27 @@ object SharedPreferencesInspector {
     }
   }
 
+  /** Registers an application-owned key-value driver under a stable store name. */
+  fun registerDriver(name: String, driver: SharedPreferencesDriver) {
+    require(name.isNotBlank()) { "driver name must not be blank" }
+    customDrivers[name] = driver
+  }
+
+  /** Removes an application-owned key-value driver and returns whether it was registered. */
+  fun unregisterDriver(name: String): Boolean = customDrivers.remove(name) != null
+
+  /** Returns the names of all application-owned key-value drivers. */
+  fun registeredDriverNames(): Set<String> = customDrivers.keys.toSet()
+
   /**
    * Get the SharedPreferences driver instance.
    *
    * @throws SharedPreferencesError.NotInitialized if initialize() has not been called
    */
-  internal fun getDriver(): SharedPreferencesDriver {
+  internal fun getDriver(name: String? = null): SharedPreferencesDriver {
+    name?.let {
+      return customDrivers[it] ?: throw SharedPreferencesError.DriverNotFound(it)
+    }
     val ctx = context ?: throw SharedPreferencesError.NotInitialized()
 
     // Create driver lazily
@@ -78,6 +95,7 @@ object SharedPreferencesInspector {
    */
   internal fun reset() {
     _driver?.stopAllListening()
+    customDrivers.clear()
     _driver = null
     _enabled = false
     context = null

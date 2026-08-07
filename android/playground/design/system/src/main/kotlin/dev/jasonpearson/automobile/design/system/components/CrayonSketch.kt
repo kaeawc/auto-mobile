@@ -125,7 +125,9 @@ fun Modifier.crayonBorder(
   val faint = Stroke(width = strokePx * 0.8f, cap = StrokeCap.Round, join = StrokeJoin.Round)
   onDrawWithContent {
     drawContent()
-    drawPath(echo, color = color.copy(alpha = 0.55f), style = faint)
+    // Attenuate the caller's alpha rather than replacing it, so a translucent (or
+    // Transparent) border color stays translucent.
+    drawPath(echo, color = color.copy(alpha = color.alpha * 0.55f), style = faint)
     drawPath(main, color = color, style = solid)
   }
 }

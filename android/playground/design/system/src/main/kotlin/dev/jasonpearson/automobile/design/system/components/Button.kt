@@ -78,7 +78,11 @@ fun AutoMobileOutlinedButton(
     modifier =
       modifier
         .height(AutoMobileDimensions.buttonHeight)
-        .crayonBorder(color = MaterialTheme.colorScheme.primary, cornerRadius = 14.dp, seed = 5L),
+        .crayonBorder(
+          color = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.38f),
+          cornerRadius = 14.dp,
+          seed = 5L,
+        ),
     enabled = enabled,
     colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
     border = null,

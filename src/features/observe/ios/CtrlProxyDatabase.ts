@@ -33,6 +33,22 @@ interface ListDatabasesResult extends DatabaseResultBase {
   databases?: DatabaseInfo[];
 }
 
+export interface StorageCapabilities {
+  readOnly: boolean;
+  mutationAuthorized: boolean;
+  registeredAppGroupSuites: string[];
+  coreDataStores: Array<{
+    identifier: string;
+    modelVersion?: string;
+    entities: string[];
+  }>;
+  unavailableStores: string[];
+}
+
+interface StorageCapabilitiesResult extends DatabaseResultBase {
+  capabilities?: StorageCapabilities;
+}
+
 interface ListTablesResult extends DatabaseResultBase {
   tables?: string[];
 }
@@ -41,20 +57,28 @@ interface TableDataResponseResult extends DatabaseResultBase {
   columns?: string[];
   rows?: unknown[][];
   total?: number;
+  diagnostic?: SQLResult["diagnostic"];
 }
 
 interface TableStructureResponseResult extends DatabaseResultBase {
   columns?: TableStructureResult["columns"];
+  diagnostic?: SQLResult["diagnostic"];
 }
 
 export class CtrlProxyDatabase {
   constructor(private readonly context: DelegateContext) {}
 
-  async executeSQL(appId: string, databasePath: string, query: string, timeoutMs: number = 5000): Promise<SQLResult> {
+  async executeSQL(
+    appId: string,
+    databasePath: string,
+    query: string,
+    timeoutMs: number = 5000,
+    sessionId?: string
+  ): Promise<SQLResult> {
     const result = await this.request<ExecuteSqlResult>(
       "execute_sql",
       "execute_sql_result",
-      { appId, databasePath, query },
+      { appId, databasePath, query, ...(sessionId ? { sessionId } : {}) },
       timeoutMs,
       "Execute SQL"
     );
@@ -79,6 +103,23 @@ export class CtrlProxyDatabase {
       "List databases"
     );
     return result.databases ?? [];
+  }
+
+  async storageCapabilities(appId: string, timeoutMs: number = 5000): Promise<StorageCapabilities> {
+    const result = await this.request<StorageCapabilitiesResult>(
+      "storage_capabilities",
+      "storage_capabilities_result",
+      { appId },
+      timeoutMs,
+      "Get storage capabilities"
+    );
+    return result.capabilities ?? {
+      readOnly: true,
+      mutationAuthorized: false,
+      registeredAppGroupSuites: [],
+      coreDataStores: [],
+      unavailableStores: [],
+    };
   }
 
   async listTables(appId: string, databasePath: string, timeoutMs: number = 5000): Promise<string[]> {
@@ -111,6 +152,7 @@ export class CtrlProxyDatabase {
       columns: result.columns ?? [],
       rows: result.rows ?? [],
       total: result.total ?? 0,
+      diagnostic: result.diagnostic,
     };
   }
 
@@ -127,7 +169,7 @@ export class CtrlProxyDatabase {
       timeoutMs,
       "Get table structure"
     );
-    return { columns: result.columns ?? [] };
+    return { columns: result.columns ?? [], diagnostic: result.diagnostic };
   }
 
   private async request<T extends DatabaseResultBase>(

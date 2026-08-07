@@ -101,21 +101,25 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         let countQuery = "SELECT COUNT(*) FROM \"\(sanitizeIdentifier(table))\""
         var countStmt: OpaquePointer?
         var totalRows = 0
-        if sqlite3_prepare_v2(db, countQuery, -1, &countStmt, nil) == SQLITE_OK {
-            if sqlite3_step(countStmt) == SQLITE_ROW {
-                totalRows = Int(sqlite3_column_int64(countStmt, 0))
-            }
+        guard sqlite3_prepare_v2(db, countQuery, -1, &countStmt, nil) == SQLITE_OK else {
+            let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
+            return TableDataResult(columns: [], rows: [], totalRows: 0, diagnostic: Self.diagnostic(for: message))
         }
-        sqlite3_finalize(countStmt)
+        defer { sqlite3_finalize(countStmt) }
+        guard sqlite3_step(countStmt) == SQLITE_ROW else {
+            let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
+            return TableDataResult(columns: [], rows: [], totalRows: 0, diagnostic: Self.diagnostic(for: message))
+        }
+        totalRows = Int(sqlite3_column_int64(countStmt, 0))
 
         // Get paginated data
         let dataQuery = "SELECT * FROM \"\(sanitizeIdentifier(table))\" ORDER BY rowid LIMIT ? OFFSET ?"
         var dataStmt: OpaquePointer?
         if sqlite3_prepare_v2(db, dataQuery, -1, &dataStmt, nil) != SQLITE_OK {
-            // WITHOUT ROWID tables have no implicit ordering column. Keep them
-            // readable while preserving deterministic ordering for ordinary
-            // tables.
-            let fallbackQuery = "SELECT * FROM \"\(sanitizeIdentifier(table))\" LIMIT ? OFFSET ?"
+            let order = primaryKeyOrder(db: db, table: table)
+            let fallbackQuery = order.isEmpty
+                ? "SELECT * FROM \"\(sanitizeIdentifier(table))\" LIMIT ? OFFSET ?"
+                : "SELECT * FROM \"\(sanitizeIdentifier(table))\" ORDER BY \(order) LIMIT ? OFFSET ?"
             guard sqlite3_prepare_v2(db, fallbackQuery, -1, &dataStmt, nil) == SQLITE_OK else {
                 let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
                 return TableDataResult(
@@ -128,8 +132,8 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         }
         defer { sqlite3_finalize(dataStmt) }
 
-        sqlite3_bind_int(dataStmt, 1, Int32(boundedLimit))
-        sqlite3_bind_int(dataStmt, 2, Int32(boundedOffset))
+        sqlite3_bind_int64(dataStmt, 1, sqlite3_int64(boundedLimit))
+        sqlite3_bind_int64(dataStmt, 2, sqlite3_int64(boundedOffset))
 
         let columnCount = Int(sqlite3_column_count(dataStmt))
         var columns: [String] = []
@@ -140,12 +144,23 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         }
 
         var rows: [[String?]] = []
-        while sqlite3_step(dataStmt) == SQLITE_ROW {
+        var stepResult = sqlite3_step(dataStmt)
+        while stepResult == SQLITE_ROW {
             var row: [String?] = []
             for i in 0 ..< columnCount {
                 row.append(getColumnValue(stmt: dataStmt, index: Int32(i)))
             }
             rows.append(row)
+            stepResult = sqlite3_step(dataStmt)
+        }
+        guard stepResult == SQLITE_DONE else {
+            let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
+            return TableDataResult(
+                columns: columns,
+                rows: rows,
+                totalRows: totalRows,
+                diagnostic: Self.diagnostic(for: message)
+            )
         }
 
         return TableDataResult(columns: columns, rows: rows, totalRows: totalRows)
@@ -553,6 +568,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         case SQLITE_BLOB:
             if let bytes = sqlite3_column_blob(stmt, index) {
                 let count = Int(sqlite3_column_bytes(stmt, index))
+                guard count <= 512 * 1024 else { return "[TRUNCATED]" }
                 let data = Data(bytes: bytes, count: count)
                 return data.base64EncodedString()
             }
@@ -563,6 +579,22 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             }
             return nil
         }
+    }
+
+    private func primaryKeyOrder(db: OpaquePointer, table: String) -> String {
+        let query = "PRAGMA table_info(\"\(sanitizeIdentifier(table))\")"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return "" }
+        defer { sqlite3_finalize(stmt) }
+        var columns: [(Int, String)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let sequence = Int(sqlite3_column_int(stmt, 5))
+            guard sequence > 0, let name = sqlite3_column_text(stmt, 1) else { continue }
+            columns.append((sequence, String(cString: name)))
+        }
+        return columns.sorted { $0.0 < $1.0 }
+            .map { "\"\(sanitizeIdentifier($0.1))\"" }
+            .joined(separator: ", ")
     }
 
     private func sanitizeIdentifier(_ identifier: String) -> String {

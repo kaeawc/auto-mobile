@@ -336,8 +336,9 @@ public protocol SdkHierarchyCaching {
 
 /// Protocol for relaying SQLite database inspection requests to the target app SDK.
 public protocol SdkDatabaseFetching {
-    func executeSQL(databasePath: String, query: String) throws -> SdkExecuteSqlResult
+    func executeSQL(databasePath: String, query: String, sessionId: String?) throws -> SdkExecuteSqlResult
     func listDatabases() throws -> [SdkDatabaseInfo]
+    func storageCapabilities() throws -> SdkStorageCapabilities
     func listTables(databasePath: String) throws -> [String]
     func getTableData(databasePath: String, table: String, limit: Int, offset: Int) throws -> SdkTableDataResult
     func getTableStructure(databasePath: String, table: String) throws -> SdkTableStructureResult

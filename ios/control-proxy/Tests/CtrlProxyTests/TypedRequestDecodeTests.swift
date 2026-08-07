@@ -162,6 +162,7 @@ final class TypedRequestDecodeDispatchTests: XCTestCase {
             .setNetworkErrorSimulation: #"{"enabled":false}"#,
             .executeSql: "{}",
             .listDatabases: "{}",
+            .storageCapabilities: "{}",
             .listTables: "{}",
             .getTableData: "{}",
             .getTableStructure: "{}",

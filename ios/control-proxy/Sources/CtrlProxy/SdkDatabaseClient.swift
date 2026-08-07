@@ -26,6 +26,40 @@ public struct SdkDatabaseInfo: Codable, Equatable {
     }
 }
 
+public struct SdkCoreDataStoreRegistration: Codable, Equatable {
+    public let identifier: String
+    public let modelVersion: String?
+    public let entities: [String]
+
+    public init(identifier: String, modelVersion: String?, entities: [String]) {
+        self.identifier = identifier
+        self.modelVersion = modelVersion
+        self.entities = entities
+    }
+}
+
+public struct SdkStorageCapabilities: Codable, Equatable {
+    public let readOnly: Bool
+    public let mutationAuthorized: Bool
+    public let registeredAppGroupSuites: [String]
+    public let coreDataStores: [SdkCoreDataStoreRegistration]
+    public let unavailableStores: [String]
+
+    public init(
+        readOnly: Bool,
+        mutationAuthorized: Bool,
+        registeredAppGroupSuites: [String],
+        coreDataStores: [SdkCoreDataStoreRegistration],
+        unavailableStores: [String]
+    ) {
+        self.readOnly = readOnly
+        self.mutationAuthorized = mutationAuthorized
+        self.registeredAppGroupSuites = registeredAppGroupSuites
+        self.coreDataStores = coreDataStores
+        self.unavailableStores = unavailableStores
+    }
+}
+
 public struct SdkColumnInfo: Codable, Equatable {
     public let name: String
     public let type: String
@@ -51,6 +85,10 @@ public struct SdkExecuteSqlResult: Codable, Equatable {
     public let diagnostic: SdkStorageDiagnostic?
     public let truncated: Bool
 
+    private enum CodingKeys: String, CodingKey {
+        case queryType, columns, rows, rowsAffected, error, diagnostic, truncated
+    }
+
     public init(
         queryType: String,
         columns: [String]? = nil,
@@ -68,6 +106,17 @@ public struct SdkExecuteSqlResult: Codable, Equatable {
         self.diagnostic = diagnostic
         self.truncated = truncated
     }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        queryType = try container.decode(String.self, forKey: .queryType)
+        columns = try container.decodeIfPresent([String].self, forKey: .columns)
+        rows = try container.decodeIfPresent([[String?]].self, forKey: .rows)
+        rowsAffected = try container.decode(Int.self, forKey: .rowsAffected)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        diagnostic = try container.decodeIfPresent(SdkStorageDiagnostic.self, forKey: .diagnostic)
+        truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+    }
 }
 
 public struct SdkStorageDiagnostic: Codable, Equatable {
@@ -84,19 +133,23 @@ public struct SdkTableDataResult: Codable, Equatable {
     public let columns: [String]
     public let rows: [[String?]]
     public let total: Int
+    public let diagnostic: SdkStorageDiagnostic?
 
-    public init(columns: [String], rows: [[String?]], total: Int) {
+    public init(columns: [String], rows: [[String?]], total: Int, diagnostic: SdkStorageDiagnostic? = nil) {
         self.columns = columns
         self.rows = rows
         self.total = total
+        self.diagnostic = diagnostic
     }
 }
 
 public struct SdkTableStructureResult: Codable, Equatable {
     public let columns: [SdkColumnInfo]
+    public let diagnostic: SdkStorageDiagnostic?
 
-    public init(columns: [SdkColumnInfo]) {
+    public init(columns: [SdkColumnInfo], diagnostic: SdkStorageDiagnostic? = nil) {
         self.columns = columns
+        self.diagnostic = diagnostic
     }
 }
 
@@ -107,6 +160,7 @@ private struct SdkDatabaseErrorPayload: Codable {
 private struct ExecuteSqlRequest: Codable {
     let databasePath: String
     let query: String
+    let sessionId: String?
 }
 
 private struct DatabasePathRequest: Codable {
@@ -129,6 +183,14 @@ private struct ListDatabasesPayload: Codable {
     let databases: [SdkDatabaseInfo]
 }
 
+private struct StorageCapabilitiesPayload: Codable {
+    let readOnly: Bool
+    let mutationAuthorized: Bool
+    let registeredAppGroupSuites: [String]
+    let coreDataStores: [SdkCoreDataStoreRegistration]
+    let unavailableStores: [String]
+}
+
 private struct ListTablesPayload: Codable {
     let tables: [String]
 }
@@ -147,13 +209,24 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, @unchecked Sendable {
         self.urlSession = URLSession(configuration: config)
     }
 
-    public func executeSQL(databasePath: String, query: String) throws -> SdkExecuteSqlResult {
-        try post(path: "/db/execute", body: ExecuteSqlRequest(databasePath: databasePath, query: query))
+    public func executeSQL(databasePath: String, query: String, sessionId: String? = nil) throws -> SdkExecuteSqlResult {
+        try post(path: "/db/execute", body: ExecuteSqlRequest(databasePath: databasePath, query: query, sessionId: sessionId))
     }
 
     public func listDatabases() throws -> [SdkDatabaseInfo] {
         let payload: ListDatabasesPayload = try post(path: "/db/list", body: EmptyRequest())
         return payload.databases
+    }
+
+    public func storageCapabilities() throws -> SdkStorageCapabilities {
+        let payload: StorageCapabilitiesPayload = try post(path: "/db/capabilities", body: EmptyRequest())
+        return SdkStorageCapabilities(
+            readOnly: payload.readOnly,
+            mutationAuthorized: payload.mutationAuthorized,
+            registeredAppGroupSuites: payload.registeredAppGroupSuites,
+            coreDataStores: payload.coreDataStores,
+            unavailableStores: payload.unavailableStores
+        )
     }
 
     public func listTables(databasePath: String) throws -> [String] {

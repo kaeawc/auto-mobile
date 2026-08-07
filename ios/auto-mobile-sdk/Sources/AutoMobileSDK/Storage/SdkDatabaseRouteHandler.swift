@@ -104,7 +104,7 @@
             return encode(SdkStorageCapabilitiesPayload(
                 readOnly: !configuration.allowMutations,
                 mutationAuthorized: DatabaseInspector.shared.canMutate(
-                    sessionId: nil,
+                    sessionId: AutoMobileSDK.shared.currentSessionId(),
                     currentSessionId: AutoMobileSDK.shared.currentSessionId()
                 ),
                 registeredAppGroupSuites: configuration.registeredAppGroupSuites.sorted(),
@@ -120,8 +120,7 @@
 
             let configuration = DatabaseInspector.shared.inspectionConfiguration
             let databases = driver.getDatabases().filter { descriptor in
-                configuration.allowedDatabasePaths.isEmpty
-                    || configuration.allowedDatabasePaths.contains(descriptor.path)
+                configuration.allowedDatabasePaths.contains(descriptor.path)
             }.map {
                 SdkDatabaseDescriptorPayload(name: $0.name, path: $0.path, sizeBytes: $0.sizeBytes)
             }
@@ -169,12 +168,13 @@
                 configuredKeys: configuration.sensitiveKeys
             )
             let bounded = boundRows(redacted, maxBytes: configuration.maxBytes)
-            return encode(SdkTableDataPayload(
+            let payload = SdkTableDataPayload(
                 columns: result.columns,
                 rows: bounded,
                 total: result.totalRows,
                 diagnostic: result.diagnostic
-            ))
+            )
+            return encodeBoundedTableData(payload, maxBytes: configuration.maxBytes)
         }
 
         func handleTableStructure(body: Data) -> SdkRouteResponse {
@@ -247,15 +247,14 @@
                 diagnostic: result.diagnostic,
                 truncated: result.truncated
             )
-            return encode(payload)
+            return encodeBoundedExecuteSql(payload, maxBytes: configuration.maxBytes)
         }
 
         private func isKnownDatabasePath(_ databasePath: String, driver: DatabaseDriver) -> Bool {
             let configuration = DatabaseInspector.shared.inspectionConfiguration
             return driver.getDatabases().contains { descriptor in
                 descriptor.path == databasePath
-                    && (configuration.allowedDatabasePaths.isEmpty
-                        || configuration.allowedDatabasePaths.contains(databasePath))
+                    && configuration.allowedDatabasePaths.contains(databasePath)
             }
         }
 
@@ -268,6 +267,69 @@
                 return error(statusCode: 500, code: "encode_failed")
             }
             return SdkRouteResponse(statusCode: 200, body: data)
+        }
+
+        private func encodeBounded<T: Encodable>(_ payload: T, maxBytes: Int) -> SdkRouteResponse {
+            guard let data = try? JSONEncoder().encode(payload) else {
+                return error(statusCode: 500, code: "encode_failed")
+            }
+            guard data.count <= maxBytes else {
+                return error(statusCode: 413, code: "response_too_large")
+            }
+            return SdkRouteResponse(statusCode: 200, body: data)
+        }
+
+        private func encodeBoundedTableData(
+            _ payload: SdkTableDataPayload,
+            maxBytes: Int
+        ) -> SdkRouteResponse {
+            var rows = payload.rows
+            while true {
+                let candidate = SdkTableDataPayload(
+                    columns: payload.columns,
+                    rows: rows,
+                    total: payload.total,
+                    diagnostic: payload.diagnostic
+                )
+                guard let data = try? JSONEncoder().encode(candidate) else {
+                    return error(statusCode: 500, code: "encode_failed")
+                }
+                if data.count <= maxBytes {
+                    return SdkRouteResponse(statusCode: 200, body: data)
+                }
+                guard !rows.isEmpty else {
+                    return error(statusCode: 413, code: "response_too_large")
+                }
+                rows.removeLast()
+            }
+        }
+
+        private func encodeBoundedExecuteSql(
+            _ payload: SdkExecuteSqlPayload,
+            maxBytes: Int
+        ) -> SdkRouteResponse {
+            var rows = payload.rows ?? []
+            while true {
+                let candidate = SdkExecuteSqlPayload(
+                    queryType: payload.queryType,
+                    columns: payload.columns,
+                    rows: rows,
+                    rowsAffected: payload.rowsAffected,
+                    error: payload.error,
+                    diagnostic: payload.diagnostic,
+                    truncated: payload.truncated || rows.count < (payload.rows?.count ?? 0)
+                )
+                guard let data = try? JSONEncoder().encode(candidate) else {
+                    return error(statusCode: 500, code: "encode_failed")
+                }
+                if data.count <= maxBytes {
+                    return SdkRouteResponse(statusCode: 200, body: data)
+                }
+                guard !rows.isEmpty else {
+                    return error(statusCode: 413, code: "response_too_large")
+                }
+                rows.removeLast()
+            }
         }
 
         private func error(statusCode: Int, code: String) -> SdkRouteResponse {

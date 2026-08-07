@@ -550,6 +550,13 @@ final class DatabaseInspectorTests: XCTestCase {
 }
 
 final class SdkDatabaseRouteHandlerTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(
+            allowedDatabasePaths: ["/app/Documents/app.db"]
+        ))
+    }
+
     override func tearDown() {
         DatabaseInspector.shared.reset()
         super.tearDown()
@@ -725,9 +732,10 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
         DatabaseInspector.shared.initialize()
         DatabaseInspector.shared.setDriver(fakeDriver)
         DatabaseInspector.shared.configure(StorageInspectionConfiguration(
+            allowedDatabasePaths: ["/app/Documents/app.db"],
             sensitiveKeys: ["configured_secret"],
             maxRows: 10,
-            maxBytes: 80
+            maxBytes: 2048
         ))
         DatabaseInspector.shared.setEnabled(true)
 
@@ -742,6 +750,7 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
         XCTAssertEqual(payload.rows?.first, ["jason", "[REDACTED]", "[REDACTED]"])
         XCTAssertFalse(String(data: response.body, encoding: .utf8)?.contains("secret-token") ?? true)
         XCTAssertFalse(String(data: response.body, encoding: .utf8)?.contains("private-value") ?? true)
+        XCTAssertLessThanOrEqual(response.body.count, 2048)
     }
 
     func testConfiguredDatabaseAllowlistBlocksUnregisteredPath() throws {

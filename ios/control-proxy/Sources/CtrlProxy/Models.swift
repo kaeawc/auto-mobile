@@ -248,9 +248,15 @@ public struct RequestExecuteSql: Decodable {
     public var appId: String?
     public var databasePath: String?
     public var query: String?
+    public var sessionId: String?
 }
 
 public struct RequestListDatabases: Decodable {
+    public var requestId: String?
+    public var appId: String?
+}
+
+public struct RequestStorageCapabilities: Decodable {
     public var requestId: String?
     public var appId: String?
 }
@@ -323,6 +329,7 @@ extension RequestSetNetworkMockRules: CommandPayload {}
 extension RequestSetNetworkErrorSimulation: CommandPayload {}
 extension RequestExecuteSql: CommandPayload {}
 extension RequestListDatabases: CommandPayload {}
+extension RequestStorageCapabilities: CommandPayload {}
 extension RequestListTables: CommandPayload {}
 extension RequestGetTableData: CommandPayload {}
 extension RequestGetTableStructure: CommandPayload {}
@@ -381,6 +388,7 @@ public enum WebSocketRequest: Decodable {
 
     case executeSql(RequestExecuteSql)
     case listDatabases(RequestListDatabases)
+    case storageCapabilities(RequestStorageCapabilities)
     case listTables(RequestListTables)
     case getTableData(RequestGetTableData)
     case getTableStructure(RequestGetTableStructure)
@@ -482,6 +490,8 @@ public enum WebSocketRequest: Decodable {
             self = try .executeSql(RequestExecuteSql(from: decoder))
         case .listDatabases:
             self = try .listDatabases(RequestListDatabases(from: decoder))
+        case .storageCapabilities:
+            self = try .storageCapabilities(RequestStorageCapabilities(from: decoder))
         case .listTables:
             self = try .listTables(RequestListTables(from: decoder))
         case .getTableData:
@@ -534,6 +544,7 @@ public enum WebSocketRequest: Decodable {
         case .setNetworkErrorSimulation: return .setNetworkErrorSimulation
         case .executeSql: return .executeSql
         case .listDatabases: return .listDatabases
+        case .storageCapabilities: return .storageCapabilities
         case .listTables: return .listTables
         case .getTableData: return .getTableData
         case .getTableStructure: return .getTableStructure
@@ -592,6 +603,7 @@ public enum WebSocketRequest: Decodable {
         case let .setNetworkErrorSimulation(payload): return payload
         case let .executeSql(payload): return payload
         case let .listDatabases(payload): return payload
+        case let .storageCapabilities(payload): return payload
         case let .listTables(payload): return payload
         case let .getTableData(payload): return payload
         case let .getTableStructure(payload): return payload
@@ -1506,6 +1518,32 @@ public struct ListDatabasesResponse: Codable {
     }
 }
 
+public struct StorageCapabilitiesResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let capabilities: SdkStorageCapabilities?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        capabilities: SdkStorageCapabilities? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        type = ResponseType.storageCapabilitiesResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.capabilities = capabilities
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
 public struct ListTablesResponse: Codable {
     public let type: String
     public let timestamp: Int64
@@ -1541,6 +1579,7 @@ public struct TableDataResponse: Codable {
     public let rows: [[String?]]?
     public let total: Int?
     public let error: String?
+    public let diagnostic: SdkStorageDiagnostic?
     public let totalTimeMs: Int64?
 
     public init(
@@ -1550,6 +1589,7 @@ public struct TableDataResponse: Codable {
         rows: [[String?]]? = nil,
         total: Int? = nil,
         error: String? = nil,
+        diagnostic: SdkStorageDiagnostic? = nil,
         totalTimeMs: Int64? = nil
     ) {
         type = ResponseType.tableDataResult.rawValue
@@ -1560,6 +1600,7 @@ public struct TableDataResponse: Codable {
         self.rows = rows
         self.total = total
         self.error = error
+        self.diagnostic = diagnostic
         self.totalTimeMs = totalTimeMs
     }
 }
@@ -1571,6 +1612,7 @@ public struct TableStructureResponse: Codable {
     public let success: Bool
     public let columns: [SdkColumnInfo]?
     public let error: String?
+    public let diagnostic: SdkStorageDiagnostic?
     public let totalTimeMs: Int64?
 
     public init(
@@ -1578,6 +1620,7 @@ public struct TableStructureResponse: Codable {
         success: Bool,
         columns: [SdkColumnInfo]? = nil,
         error: String? = nil,
+        diagnostic: SdkStorageDiagnostic? = nil,
         totalTimeMs: Int64? = nil
     ) {
         type = ResponseType.tableStructureResult.rawValue
@@ -1586,6 +1629,7 @@ public struct TableStructureResponse: Codable {
         self.success = success
         self.columns = columns
         self.error = error
+        self.diagnostic = diagnostic
         self.totalTimeMs = totalTimeMs
     }
 }
@@ -1704,6 +1748,7 @@ public enum RequestType: String, CaseIterable {
     // Database inspection
     case executeSql = "execute_sql"
     case listDatabases = "list_databases"
+    case storageCapabilities = "storage_capabilities"
     case listTables = "list_tables"
     case getTableData = "get_table_data"
     case getTableStructure = "get_table_structure"
@@ -1756,6 +1801,7 @@ public enum ResponseType: String {
     // Database inspection
     case executeSqlResult = "execute_sql_result"
     case listDatabasesResult = "list_databases_result"
+    case storageCapabilitiesResult = "storage_capabilities_result"
     case listTablesResult = "list_tables_result"
     case tableDataResult = "table_data_result"
     case tableStructureResult = "table_structure_result"
@@ -1815,6 +1861,7 @@ extension RequestType {
         case .setNetworkErrorSimulation: return .setNetworkErrorSimulationResult
         case .executeSql: return .executeSqlResult
         case .listDatabases: return .listDatabasesResult
+        case .storageCapabilities: return .storageCapabilitiesResult
         case .listTables: return .listTablesResult
         case .getTableData: return .tableDataResult
         case .getTableStructure: return .tableStructureResult

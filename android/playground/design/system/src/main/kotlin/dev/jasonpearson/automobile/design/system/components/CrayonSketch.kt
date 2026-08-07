@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.design.system.components
 
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
@@ -85,12 +84,15 @@ fun crayonOutlineOffsets(
   segmentsPerEdge: Int = 6,
 ): List<Offset> {
   val base = roundedRectPerimeter(width, height, cornerRadius, segmentsPerEdge)
-  return base.mapIndexed { i, p ->
+  val jittered = base.mapIndexed { i, p ->
     Offset(
       p.x + sketchNoise(seed, i * 2) * roughness,
       p.y + sketchNoise(seed, i * 2 + 1) * roughness,
     )
   }
+  // The last base point duplicates the first; close the loop *exactly* by reusing
+  // the first jittered point rather than letting it drift by its own noise.
+  return jittered.dropLast(1) + jittered.first()
 }
 
 private fun List<Offset>.toPath(): Path =
@@ -131,6 +133,3 @@ fun Modifier.crayonBorder(
     drawPath(main, color = color, style = solid)
   }
 }
-
-/** Convenience: default insets so a crayon border never clips its own wobble. */
-val CrayonBorderPadding = PaddingValues(2.dp)

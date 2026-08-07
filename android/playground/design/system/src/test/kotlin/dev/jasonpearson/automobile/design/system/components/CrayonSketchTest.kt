@@ -1,5 +1,9 @@
 package dev.jasonpearson.automobile.design.system.components
 
+import androidx.compose.ui.geometry.Offset
+import kotlin.math.abs
+import kotlin.math.hypot
+import kotlin.math.min
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -33,16 +37,10 @@ class CrayonSketchTest {
   }
 
   @Test
-  fun outline_isClosedAndNonTrivial() {
+  fun outline_isClosedExactly() {
     val pts = crayonOutlineOffsets(w, h, corner, seed = 7L, roughness = roughness)
     assertTrue("outline should have a reasonable number of points", pts.size >= 16)
-    val first = pts.first()
-    val last = pts.last()
-    val closeDist = Math.hypot((first.x - last.x).toDouble(), (first.y - last.y).toDouble())
-    assertTrue(
-      "outline must close back near its start (was $closeDist)",
-      closeDist <= roughness * 2 + 0.001,
-    )
+    assertEquals("outline must close exactly: last point == first point", pts.first(), pts.last())
   }
 
   @Test
@@ -63,10 +61,24 @@ class CrayonSketchTest {
   @Test
   fun zeroRoughness_isAnExactRoundedRectangle() {
     val pts = crayonOutlineOffsets(w, h, corner, seed = 5L, roughness = 0f)
-    // With no jitter every point must sit exactly on the rounded-rect perimeter,
-    // i.e. within the [0,w] x [0,h] box.
+    // With no jitter every point must sit ON the rounded-rect perimeter — a
+    // straight edge or a corner arc — not merely inside the bounding box.
     pts.forEach { p ->
-      assertTrue(p.x in 0f..w && p.y in 0f..h)
+      assertTrue("point $p must lie on the perimeter", onPerimeter(p, w, h, corner))
     }
+  }
+
+  private fun onPerimeter(p: Offset, w: Float, h: Float, cornerRadius: Float): Boolean {
+    val r = cornerRadius.coerceIn(0f, min(w, h) / 2f)
+    val eps = 0.05f
+    fun near(a: Float, b: Float) = abs(a - b) < eps
+    // straight edges
+    if (near(p.y, 0f) && p.x >= r - eps && p.x <= w - r + eps) return true
+    if (near(p.y, h) && p.x >= r - eps && p.x <= w - r + eps) return true
+    if (near(p.x, 0f) && p.y >= r - eps && p.y <= h - r + eps) return true
+    if (near(p.x, w) && p.y >= r - eps && p.y <= h - r + eps) return true
+    // corner arcs: distance from a corner-arc centre equals the radius
+    val centres = listOf(Offset(r, r), Offset(w - r, r), Offset(r, h - r), Offset(w - r, h - r))
+    return centres.any { c -> abs(hypot((p.x - c.x).toDouble(), (p.y - c.y).toDouble()) - r) < eps }
   }
 }

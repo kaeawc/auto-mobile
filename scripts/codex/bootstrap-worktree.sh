@@ -14,11 +14,8 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${PROJECT_ROOT}"
 mkdir -p scratch
 
-if [[ ! -d node_modules || ! -x node_modules/.bin/turbo ]]; then
-  echo "Installing Bun dependencies from bun.lock..."
-  bun install --frozen-lockfile
-else
-  echo "Bun dependencies already installed."
-fi
+# shellcheck source=scripts/lib/shell-core.sh
+source "${PROJECT_ROOT}/scripts/lib/shell-core.sh"
+ensure_node_modules "${PROJECT_ROOT}"
 
 echo "Worktree bootstrap complete."

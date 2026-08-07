@@ -25,3 +25,20 @@ detect_arch() {
     *) printf '%s\n' "unknown" ;;
   esac
 }
+
+# Ensure Bun dependencies are installed under <root> (default: current dir).
+# No-op when node_modules/.bin/turbo already exists; otherwise installs from the
+# committed lockfile. A fresh `git worktree` starts without node_modules (the
+# gitignored dir is not copied), so validation entry points call this to
+# self-heal instead of failing with a cryptic "turbo: command not found" (issue
+# #5051). It installs only when deps are absent, so it is a no-op in CI where
+# they are always present. The install runs in a subshell so the caller's
+# working directory is left unchanged.
+ensure_node_modules() {
+  local root="${1:-$PWD}"
+  if [ -x "$root/node_modules/.bin/turbo" ]; then
+    return 0
+  fi
+  echo "node_modules missing in ${root} — installing Bun dependencies from bun.lock..."
+  ( cd "$root" && bun install --frozen-lockfile )
+}

@@ -18,6 +18,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# shellcheck source=scripts/lib/shell-core.sh
+source "$SCRIPT_DIR/lib/shell-core.sh"
+
 CHECK_NAMES=()
 CHECK_COMMANDS=()
 CHECK_GROUPS=()
@@ -220,6 +223,11 @@ if [[ -n "${skip_list[*]-}" ]]; then
     fi
   done
 fi
+
+# A fresh git worktree has no node_modules; install before running any check so
+# the suite self-heals instead of failing with "turbo: command not found"
+# (issue #5051). No-op once deps are present, so CI is unaffected.
+ensure_node_modules "$PROJECT_ROOT"
 
 selected_indices=()
 for idx in "${!CHECK_NAMES[@]}"; do

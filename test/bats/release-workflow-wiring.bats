@@ -132,9 +132,12 @@
   [[ "$output" == *"verify-artifact-sha256.sh"* ]]
   [[ "$output" == *"verify-release-integrity.sh"* ]]
 
+  run yq -r '.packageManager | sub("^bun@"; "")' package.json
+  [ "$status" -eq 0 ]
+  local expected_bun_version="$output"
   run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Setup Bun") | .with."bun-version"' "$workflow"
   [ "$status" -eq 0 ]
-  [ "$output" = "1.3.9" ]
+  [ "$output" = "$expected_bun_version" ]
 
   run yq -r '.jobs."verify-prepared-release".steps[] | select(.name == "Promote verified release and create tag") | .run' "$workflow"
   [ "$status" -eq 0 ]

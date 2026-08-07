@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -83,6 +84,10 @@ class WorkspaceViewModel(
   private val _effect = Channel<WorkspaceEffect>(Channel.BUFFERED)
   val effect = _effect.receiveAsFlow()
 
+  // The in-flight locale request per device, so a newer selection can supersede an older one that
+  // is still resolving the foreground app (see [setLocale]).
+  private val localeJobs = mutableMapOf<String, Job>()
+
   fun onAction(action: WorkspaceAction) {
     when (action) {
       is WorkspaceAction.ObserveDevice -> observe(action.column)
@@ -118,7 +123,11 @@ class WorkspaceViewModel(
   /** Apply [locale] to the targeted column's device off the UI thread; failures are logged. */
   private fun setLocale(deviceId: String, locale: String) {
     val column = columnFor(deviceId) ?: return
-    scope.launch {
+    // A newer pick supersedes any still-resolving one for this device: resolving the foreground app
+    // can take seconds, and without cancelling, an earlier request could invoke changeLocalization
+    // AFTER a later one and leave the device in a locale the user did not pick last.
+    localeJobs[deviceId]?.cancel()
+    localeJobs[deviceId] = scope.launch {
       try {
         controlExecutor.setLocale(deviceId, column.platform, locale)
       } catch (cancellation: CancellationException) {

@@ -817,10 +817,7 @@ private fun EmulatorControls(
           EmulatorControl.Screenshot ->
             Glyph(control.icon, "${control.label} ${column.name}", false, onCaptureScreenshot)
           EmulatorControl.Locale -> LocaleControl(column, onAction)
-          // The overflow buttons (Home/Back/Recent/Power) are Android system keys; on an iOS
-          // simulator they are inert (Power, for one, is physical-device-only), so hide the menu.
-          EmulatorControl.More ->
-            if (column.platform == Platform.Android) MoreControl(column, onAction)
+          EmulatorControl.More -> MoreControl(column, onAction)
           else ->
             Glyph(control.icon, "${control.label} ${column.name}", false) {
               onAction(WorkspaceAction.RunControl(column.deviceId, control))
@@ -865,16 +862,18 @@ private fun MoreControl(column: DeviceColumn, onAction: (WorkspaceAction) -> Uni
       open = true
     }
     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-      DeviceButton.entries.forEach { button ->
-        DropdownMenuItem(
-          text = { Text("${button.icon}  ${button.label}") },
-          modifier = Modifier.semantics { contentDescription = "${button.label} ${column.name}" },
-          onClick = {
-            open = false
-            onAction(WorkspaceAction.PressDeviceButton(column.deviceId, button))
-          },
-        )
-      }
+      DeviceButton.entries
+        .filter { it.isSupportedOn(column.platform) }
+        .forEach { button ->
+          DropdownMenuItem(
+            text = { Text("${button.icon}  ${button.label}") },
+            modifier = Modifier.semantics { contentDescription = "${button.label} ${column.name}" },
+            onClick = {
+              open = false
+              onAction(WorkspaceAction.PressDeviceButton(column.deviceId, button))
+            },
+          )
+        }
     }
   }
 }

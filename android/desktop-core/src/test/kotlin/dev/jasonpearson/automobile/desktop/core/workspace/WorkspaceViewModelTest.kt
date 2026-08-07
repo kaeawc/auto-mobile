@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -204,6 +206,22 @@ class WorkspaceViewModelTest {
         listOf(FakeEmulatorControlExecutor.LocaleRequest("a", Platform.Ios, "ja-JP")),
         exec.localeRequests,
       )
+    }
+
+  @Test
+  fun `a later locale pick supersedes a still-resolving one on the same device`() =
+    testScope.runTest {
+      val gate = CompletableDeferred<Unit>()
+      val exec = FakeEmulatorControlExecutor().apply { localeGate = gate }
+      val vm = WorkspaceViewModel(this, exec)
+      vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+      // The first pick parks while resolving the foreground app; the second must cancel it so the
+      // device ends in the last-picked locale rather than whichever request happens to finish last.
+      vm.onAction(WorkspaceAction.SetLocale("a", "es-ES"))
+      vm.onAction(WorkspaceAction.SetLocale("a", "de-DE"))
+      gate.complete(Unit)
+      advanceUntilIdle()
+      assertEquals(listOf("de-DE"), exec.localeRequests.map { it.locale })
     }
 
   @Test

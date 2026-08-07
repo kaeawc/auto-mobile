@@ -219,12 +219,14 @@ class WorkspaceShellUiTest {
         }
       }
       onNodeWithContentDescription("More Pixel 8").performClick()
+      // Power shows on Android — a hardware key adb can press.
+      onNodeWithContentDescription("Power Pixel 8").assertIsDisplayed()
       onNodeWithContentDescription("Home Pixel 8").performClick()
       assertEquals(WorkspaceAction.PressDeviceButton("a", DeviceButton.Home), action)
     }
 
   @Test
-  fun `More control is absent on iOS panes because its buttons are Android system keys`() =
+  fun `More menu on iOS offers the navigation buttons but hides simulator-incompatible Power`() =
     runComposeUiTest {
       val state =
         WorkspaceUiState.Content(
@@ -234,7 +236,12 @@ class WorkspaceShellUiTest {
       setContent {
         MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
       }
-      onNodeWithContentDescription("More iPhone 15").assertDoesNotExist()
+      onNodeWithContentDescription("More iPhone 15").performClick()
+      // Home/Back/Recent route through CtrlProxy on iOS; Power is physical-device-only.
+      onNodeWithContentDescription("Home iPhone 15").assertIsDisplayed()
+      onNodeWithContentDescription("Back iPhone 15").assertIsDisplayed()
+      onNodeWithContentDescription("Recent apps iPhone 15").assertIsDisplayed()
+      onNodeWithContentDescription("Power iPhone 15").assertDoesNotExist()
     }
 
   @Test

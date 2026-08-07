@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -187,6 +188,10 @@ class FakeEmulatorControlExecutor : EmulatorControlExecutor {
   val localeRequests: MutableList<LocaleRequest> = mutableListOf()
   var error: Throwable? = null
 
+  // When set, [setLocale] suspends on this gate before recording, so a test can hold a locale
+  // request "in flight" (as the real foreground-app resolution would) to exercise supersede/cancel.
+  var localeGate: CompletableDeferred<Unit>? = null
+
   override suspend fun run(
     deviceId: String,
     platform: Platform,
@@ -204,6 +209,7 @@ class FakeEmulatorControlExecutor : EmulatorControlExecutor {
 
   override suspend fun setLocale(deviceId: String, platform: Platform, locale: String) {
     error?.let { throw it }
+    localeGate?.await()
     localeRequests += LocaleRequest(deviceId, platform, locale)
   }
 }

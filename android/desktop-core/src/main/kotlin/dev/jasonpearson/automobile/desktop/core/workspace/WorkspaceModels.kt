@@ -67,7 +67,16 @@ enum class DeviceButton(val icon: String, val label: String, val toolValue: Stri
   Home("🏠", "Home", "home"),
   Back("◀", "Back", "back"),
   Recent("▤", "Recent apps", "recent"),
-  Power("⏻", "Power", "power"),
+  Power("⏻", "Power", "power");
+
+  /**
+   * Whether the workspace offers this button on [platform]. Home/Back/Recent are supported on both
+   * platforms (iOS routes them through CtrlProxy), so all three stay in the menu; Power is a
+   * hardware key the iOS simulator cannot press, so it is Android-only here. Restoring Power for a
+   * *physical* iOS device needs the pane's device kind, which the picker does not yet carry — a
+   * follow-up.
+   */
+  fun isSupportedOn(platform: Platform): Boolean = this != Power || platform == Platform.Android
 }
 
 /** A locale offered by the [EmulatorControl.Locale] picker: a BCP-47 [tag] and a human [label]. */

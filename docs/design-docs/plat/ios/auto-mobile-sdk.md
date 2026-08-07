@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `ios/auto-mobile-sdk/` is a Swift Package providing in-app telemetry for iOS applications. Includes navigation tracking (SwiftUI adapter), crash and signal handler capture, main-thread hang detection, handled exception recording, SwiftUI view body evaluation tracking, network request/response monitoring via URLProtocol, structured logging via `os.Logger`, tap interaction tracking, UserDefaults inspection, SQLite database inspection, biometric test injection, local notification posting, and OS-level event observation. Events flow through a disk-first persistence pipeline with retry delivery to CtrlProxy. 151 unit tests across 20 test files.
+> **Current state:** `ios/auto-mobile-sdk/` is a Swift Package providing in-app telemetry for iOS applications. Includes unified, opt-in navigation adapters for SwiftUI, UIKit, deep links, and custom routers, crash and signal handler capture, main-thread hang detection, handled exception recording, SwiftUI view body evaluation tracking, network request/response monitoring via URLProtocol, structured logging via `os.Logger`, tap interaction tracking, UserDefaults inspection, SQLite database inspection, biometric test injection, local notification posting, and OS-level event observation. Events flow through a disk-first persistence pipeline with retry delivery to CtrlProxy.
 
 See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
@@ -226,7 +226,7 @@ Records non-fatal handled exceptions via `recordHandledException(_:message:curre
 
 ### Event model
 
-`NavigationEvent` contains `destination`, `source` (`NavigationSource` enum: `swiftUINavigation`, `uiKitNavigation`, `deepLink`, `custom`), millisecond timestamp, string arguments, and metadata.
+`NavigationEvent` contains `destination`, stable `screenIdentity`, `source` (`NavigationSource` enum: `swiftUINavigation`, `uiKitNavigation`, `deepLink`, `custom`), optional scene and transition identifiers, completion state, millisecond timestamp, string arguments, and metadata. Hosts configure a `NavigationDataRedacting` processor through the shared adapter hub; adapters are independently enabled and never swizzle or replace host delegates.
 
 ### Listener pattern
 
@@ -238,6 +238,16 @@ Records non-fatal handled exceptions via `recordHandledException(_:message:curre
 
 - `trackNavigation(destination:arguments:metadata:)` for manual tracking
 - `.trackNavigation(destination:)` SwiftUI `ViewModifier` that fires on `onAppear`
+- `trackSheet`, `trackTab`, and `trackSplitColumn` lifecycle helpers
+
+### UIKit, deep-link, and custom adapters
+
+`UIKitNavigationAdapter` provides explicit hooks for push, pop, presentation, tab,
+and split-column completion from existing host delegates. `DeepLinkNavigationAdapter`
+and `CustomNavigationAdapter` expose the same identity, scene, argument, and metadata
+contract for URL routes, notifications, restoration, and application-owned routers.
+Interactive transitions must call the hook only after completion, so cancelled
+transitions do not create false navigation edges.
 
 ## Network Monitoring
 

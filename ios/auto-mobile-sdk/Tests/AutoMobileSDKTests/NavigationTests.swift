@@ -105,4 +105,48 @@ final class SwiftUINavigationAdapterTests: XCTestCase {
 
         XCTAssertEqual(listener.events.count, 0)
     }
+
+    func testNavigationFactoryKeepsStableIdentityAndRedactsArguments() {
+        struct Redactor: NavigationDataRedacting {
+            func redact(_ value: String) -> String { value.replacingOccurrences(of: "secret", with: "<redacted>") }
+        }
+        let factory = NavigationEventFactory(redactor: Redactor())
+        let event = factory.make(
+            destination: "profile/secret",
+            source: .custom,
+            identity: NavigationScreenIdentity(route: "profile", version: "2"),
+            sceneIdentifier: "scene-secret",
+            arguments: ["token": "secret"],
+            metadata: ["label": "secret"]
+        )
+        XCTAssertEqual(event.screenIdentity, "profile@2")
+        XCTAssertEqual(event.destination, "profile/<redacted>")
+        XCTAssertEqual(event.arguments["token"], "<redacted>")
+        XCTAssertEqual(event.sceneIdentifier, "scene-<redacted>")
+    }
+
+    func testCancelledTransitionDoesNotEmit() {
+        let listener = FakeNavigationListener()
+        AutoMobileSDK.shared.addNavigationListener(listener)
+        NavigationAdapterHub.shared.start(owner: "test")
+        NavigationAdapterHub.shared.record(
+            destination: "Cancelled",
+            source: .custom,
+            transitionCompleted: false
+        )
+        NavigationAdapterHub.shared.stop(owner: "test")
+        XCTAssertTrue(listener.events.isEmpty)
+    }
+
+    func testDeepLinkAdapterIsIndependentFromSwiftUIAdapter() {
+        SwiftUINavigationAdapter.shared.stop()
+        let listener = FakeNavigationListener()
+        AutoMobileSDK.shared.addNavigationListener(listener)
+        DeepLinkNavigationAdapter.shared.record(destination: "myapp://ignored")
+        XCTAssertTrue(listener.events.isEmpty)
+        DeepLinkNavigationAdapter.shared.start()
+        DeepLinkNavigationAdapter.shared.record(destination: "myapp://settings")
+        DeepLinkNavigationAdapter.shared.stop()
+        XCTAssertEqual(listener.events.map(\.source), [.deepLink])
+    }
 }

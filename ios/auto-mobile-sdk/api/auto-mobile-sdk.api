@@ -100,7 +100,12 @@ public struct SdkNavigationEvent: SdkEvent
   public let source: NavigationSourceType
   public let arguments: [String: String]
   public let metadata: [String: String]
-  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), sequenceNumber: Int64? = nil, sessionId: String? = nil, sessionEpoch: Int64? = nil, trackingGeneration: Int64? = nil, destination: String, source: NavigationSourceType, arguments: [String: String] = [:], metadata: [String: String] = [:] )
+  public let screenIdentity: String?
+  public let sceneIdentifier: String?
+  public let transitionIdentifier: String?
+  public let transitionCompleted: Bool
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), sequenceNumber: Int64? = nil, sessionId: String? = nil, sessionEpoch: Int64? = nil, trackingGeneration: Int64? = nil, destination: String, source: NavigationSourceType, arguments: [String: String] = [:], metadata: [String: String] = [:], screenIdentity: String? = nil, sceneIdentifier: String? = nil, transitionIdentifier: String? = nil, transitionCompleted: Bool = true )
+  public init(from decoder: Decoder) throws
 public struct SdkHandledExceptionEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .handledException
   public let timestamp: Int64
@@ -306,6 +311,37 @@ public final class AutoMobileLog: @unchecked Sendable
   public func e(_ tag: String? = nil, _ message: String)
   public func fault(_ tag: String? = nil, _ message: String)
 
+// Navigation/Adapters/NavigationAdapters.swift
+public final class NavigationAdapterHub: @unchecked Sendable
+  public static let shared = NavigationAdapterHub()
+  public var isActive: Bool
+  public func isActive(owner: String?) -> Bool
+  public func start(owner: String = "default", redactor: any NavigationDataRedacting = NoOpNavigationRedactor())
+  public func stop(owner: String = "default")
+  public func record( owner: String = "default", destination: String, source: NavigationSource, identity: NavigationScreenIdentity? = nil, sceneIdentifier: String? = nil, transitionIdentifier: String? = nil, transitionCompleted: Bool = true, arguments: [String: String] = [:], metadata: [String: String] = [:] )
+public final class DeepLinkNavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable
+  public static let shared = DeepLinkNavigationAdapter()
+  public var isActive: Bool
+  public func start()
+  public func stop()
+  public func record( destination: String, identity: NavigationScreenIdentity? = nil, sceneIdentifier: String? = nil, arguments: [String: String] = [:], metadata: [String: String] = [:] )
+public final class CustomNavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable
+  public static let shared = CustomNavigationAdapter()
+  public var isActive: Bool
+  public func start()
+  public func stop()
+  public func record( destination: String, identity: NavigationScreenIdentity? = nil, sceneIdentifier: String? = nil, transitionIdentifier: String? = nil, transitionCompleted: Bool = true, arguments: [String: String] = [:], metadata: [String: String] = [:] )
+public final class UIKitNavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable
+  public static let shared = UIKitNavigationAdapter()
+  public var isActive: Bool
+  public func start()
+  public func stop()
+  public func recordPush(_ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true)
+  public func recordPop(_ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true)
+  public func recordPresentation(_ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true)
+  public func recordTabSelection(_ viewController: UIViewController, sceneIdentifier: String? = nil)
+  public func recordSplitColumn(_ viewController: UIViewController, column: String, sceneIdentifier: String? = nil)
+
 // Navigation/Adapters/NavigationFrameworkAdapter.swift
 public protocol NavigationFrameworkAdapter: AnyObject, Sendable
 
@@ -316,6 +352,9 @@ public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, @unchec
   public func start()
   public func stop()
   public func trackNavigation( destination: String, arguments: [String: String] = [:], metadata: [String: String] = [:] )
+  public func trackSheet(destination: String, sceneIdentifier: String? = nil, metadata: [String: String] = [:])
+  public func trackTab(destination: String, sceneIdentifier: String? = nil)
+  public func trackSplitColumn(destination: String, column: String, sceneIdentifier: String? = nil)
 public struct TrackNavigationModifier: ViewModifier
   public func body(content: Content) -> some View
 public extension View
@@ -327,8 +366,27 @@ public struct NavigationEvent: Sendable
   public let timestamp: Int64
   public let arguments: [String: String]
   public let metadata: [String: String]
-  public init( destination: String, source: NavigationSource, timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), arguments: [String: String] = [:], metadata: [String: String] = [:] )
-  public init( destination: String, source: NavigationSource, timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), mixedArguments: [String: Any], metadata: [String: String] = [:] )
+  public let screenIdentity: String?
+  public let sceneIdentifier: String?
+  public let transitionIdentifier: String?
+  public let transitionCompleted: Bool
+  public init( destination: String, source: NavigationSource, timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), arguments: [String: String] = [:], metadata: [String: String] = [:], screenIdentity: String? = nil, sceneIdentifier: String? = nil, transitionIdentifier: String? = nil, transitionCompleted: Bool = true )
+  public init( destination: String, source: NavigationSource, timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), mixedArguments: [String: Any], metadata: [String: String] = [:], screenIdentity: String? = nil, sceneIdentifier: String? = nil, transitionIdentifier: String? = nil, transitionCompleted: Bool = true )
+
+// Navigation/NavigationIdentity.swift
+public protocol NavigationDataRedacting: Sendable
+public struct NoOpNavigationRedactor: NavigationDataRedacting
+  public init()
+  public func redact(_ value: String) -> String
+public struct NavigationScreenIdentity: Sendable, Equatable
+  public let route: String
+  public let version: String?
+  public init(route: String, version: String? = nil)
+  public var value: String
+public struct NavigationEventFactory: Sendable
+  public let redactor: any NavigationDataRedacting
+  public init(redactor: any NavigationDataRedacting = NoOpNavigationRedactor())
+  public func make( destination: String, source: NavigationSource, identity: NavigationScreenIdentity? = nil, sceneIdentifier: String? = nil, transitionIdentifier: String? = nil, transitionCompleted: Bool = true, arguments: [String: String] = [:], metadata: [String: String] = [:] ) -> NavigationEvent
 
 // Navigation/NavigationListener.swift
 public protocol NavigationListener: AnyObject, Sendable

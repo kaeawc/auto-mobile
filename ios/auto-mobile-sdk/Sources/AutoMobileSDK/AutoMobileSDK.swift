@@ -223,7 +223,11 @@ public final class AutoMobileSDK: @unchecked Sendable {
             destination: event.destination,
             source: NavigationSourceType(rawValue: event.source.rawValue) ?? .custom,
             arguments: event.arguments,
-            metadata: event.metadata
+            metadata: event.metadata,
+            screenIdentity: event.screenIdentity,
+            sceneIdentifier: event.sceneIdentifier,
+            transitionIdentifier: event.transitionIdentifier,
+            transitionCompleted: event.transitionCompleted
         )
         eventBuffer?.add(sdkEvent)
         // Navigation is control-plane state for observe/diff, not bulk telemetry.

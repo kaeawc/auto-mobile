@@ -44,6 +44,10 @@ public struct SdkNavigationEvent: SdkEvent {
     public let source: NavigationSourceType
     public let arguments: [String: String]
     public let metadata: [String: String]
+    public let screenIdentity: String?
+    public let sceneIdentifier: String?
+    public let transitionIdentifier: String?
+    public let transitionCompleted: Bool
 
     public init(
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
@@ -54,7 +58,11 @@ public struct SdkNavigationEvent: SdkEvent {
         destination: String,
         source: NavigationSourceType,
         arguments: [String: String] = [:],
-        metadata: [String: String] = [:]
+        metadata: [String: String] = [:],
+        screenIdentity: String? = nil,
+        sceneIdentifier: String? = nil,
+        transitionIdentifier: String? = nil,
+        transitionCompleted: Bool = true
     ) {
         self.timestamp = timestamp
         self.sequenceNumber = sequenceNumber
@@ -65,6 +73,34 @@ public struct SdkNavigationEvent: SdkEvent {
         self.source = source
         self.arguments = arguments
         self.metadata = metadata
+        self.screenIdentity = screenIdentity
+        self.sceneIdentifier = sceneIdentifier
+        self.transitionIdentifier = transitionIdentifier
+        self.transitionCompleted = transitionCompleted
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType, timestamp, sequenceNumber, sessionId, sessionEpoch, trackingGeneration
+        case destination, source, arguments, metadata, screenIdentity, sceneIdentifier
+        case transitionIdentifier, transitionCompleted
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        timestamp = try container.decode(Int64.self, forKey: .timestamp)
+        sequenceNumber = try container.decodeIfPresent(Int64.self, forKey: .sequenceNumber)
+        sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId)
+        sessionEpoch = try container.decodeIfPresent(Int64.self, forKey: .sessionEpoch)
+        trackingGeneration = try container.decodeIfPresent(Int64.self, forKey: .trackingGeneration)
+        destination = try container.decode(String.self, forKey: .destination)
+        source = try container.decode(NavigationSourceType.self, forKey: .source)
+        arguments = try container.decodeIfPresent([String: String].self, forKey: .arguments) ?? [:]
+        metadata = try container.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:]
+        screenIdentity = try container.decodeIfPresent(String.self, forKey: .screenIdentity)
+        sceneIdentifier = try container.decodeIfPresent(String.self, forKey: .sceneIdentifier)
+        transitionIdentifier = try container.decodeIfPresent(String.self, forKey: .transitionIdentifier)
+        transitionCompleted = try container.decodeIfPresent(Bool.self, forKey: .transitionCompleted) ?? true
+        eventType = .navigation
     }
 }
 

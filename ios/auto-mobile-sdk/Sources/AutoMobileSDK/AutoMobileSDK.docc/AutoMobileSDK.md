@@ -44,6 +44,13 @@ AutoMobileSDK.shared.initialize(configuration: config)
 - ``BlockNavigationListener``
 - ``NavigationFrameworkAdapter``
 - ``SwiftUINavigationAdapter``
+- ``UIKitNavigationAdapter``
+- ``DeepLinkNavigationAdapter``
+- ``CustomNavigationAdapter``
+- ``NavigationAdapterHub``
+- ``NavigationScreenIdentity``
+- ``NavigationDataRedacting``
+- ``NavigationEventFactory``
 - ``TrackNavigationModifier``
 
 ### Crashes

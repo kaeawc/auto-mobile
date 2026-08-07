@@ -224,11 +224,6 @@ if [[ -n "${skip_list[*]-}" ]]; then
   done
 fi
 
-# A fresh git worktree has no node_modules; install before running any check so
-# the suite self-heals instead of failing with "turbo: command not found"
-# (issue #5051). No-op once deps are present, so CI is unaffected.
-ensure_node_modules "$PROJECT_ROOT"
-
 selected_indices=()
 for idx in "${!CHECK_NAMES[@]}"; do
   name="${CHECK_NAMES[$idx]}"
@@ -275,6 +270,14 @@ if ! [[ "$max_parallel" =~ ^[0-9]+$ ]]; then
   echo "--max-parallel must be a positive integer." >&2
   exit 1
 fi
+
+# All CLI options are validated and at least one check is selected. Only now do we
+# self-heal deps: a fresh git worktree has no node_modules, so any check would
+# fail with "turbo: command not found" (issue #5051). Placing this after
+# validation keeps a malformed invocation fail-fast and side-effect-free (it
+# errors without running an install). No-op once deps are present, so CI is
+# unaffected.
+ensure_node_modules "$PROJECT_ROOT"
 
 if [[ "$max_parallel" -lt 1 ]]; then
   echo "--max-parallel must be greater than 0." >&2

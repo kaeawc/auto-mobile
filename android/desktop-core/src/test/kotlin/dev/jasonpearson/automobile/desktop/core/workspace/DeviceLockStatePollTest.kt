@@ -35,4 +35,25 @@ class DeviceLockStatePollTest {
     assertTrue(parseDeviceLockStates("not json").isEmpty())
     assertTrue(parseDeviceLockStates("").isEmpty())
   }
+
+  @Test
+  fun `booted-devices fallback derives lock from the full payload, omitting unread devices`() {
+    // Older daemons expose lock only via automobile:devices/booted; the poll's fallback derives the
+    // same deviceId -> locked snapshot from its `locked` field, omitting a device that lacks it.
+    val payload =
+      """
+      {"totalCount":2,"androidCount":2,"iosCount":0,"virtualCount":2,"physicalCount":0,
+       "lastUpdated":"x","devices":[
+         {"name":"P8","platform":"android","deviceId":"emulator-5554","source":"local","isVirtual":true,"status":"booted","locked":true},
+         {"name":"P9","platform":"android","deviceId":"emulator-5556","source":"local","isVirtual":true,"status":"booted"}]}
+      """
+        .trimIndent()
+    assertEquals(mapOf("emulator-5554" to true), parseBootedLockStates(payload))
+  }
+
+  @Test
+  fun `booted-devices fallback yields an empty map for a malformed payload`() {
+    assertTrue(parseBootedLockStates("not json").isEmpty())
+    assertTrue(parseBootedLockStates("").isEmpty())
+  }
 }

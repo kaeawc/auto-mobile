@@ -23,6 +23,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
+import dev.jasonpearson.automobile.desktop.core.workspace.BOOTED_DEVICES_RESOURCE_URI
 import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.workspace.DEVICE_LOCK_STATES_RESOURCE_URI
 import dev.jasonpearson.automobile.desktop.core.workspace.DaemonEmulatorControlExecutor
@@ -45,6 +46,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
 import dev.jasonpearson.automobile.desktop.core.workspace.deriveWorkspaceStatus
+import dev.jasonpearson.automobile.desktop.core.workspace.parseBootedLockStates
 import dev.jasonpearson.automobile.desktop.core.workspace.parseDeviceLockStates
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAction
@@ -262,8 +264,8 @@ fun AutoMobileDesktopApp(
   // Keep each pane's lock state fresh so the contextual Unlock control appears/disappears as the
   // device locks/unlocks. Untested IO poll (mirrors rememberDaemonConnectionState); the VM's
   // SetLockStates handler is the pinned behavior. Gated on observed columns so an idle workspace
-  // is silent; while panes are open it re-reads the (non-trivial) booted-devices resource — see
-  // LOCK_STATE_POLL_MS.
+  // is silent; while panes are open it re-reads the lightweight lockStates resource, falling back
+  // to the full booted-devices resource for older daemons that lack it — see LOCK_STATE_POLL_MS.
   LaunchedEffect(workspaceViewModel, resourceClient) {
     while (true) {
       val hasColumns =
@@ -278,7 +280,20 @@ fun AutoMobileDesktopApp(
                 }
             ) {
               is ResourceReadResult.Success -> parseDeviceLockStates(result.content)
-              is ResourceReadResult.Error -> emptyMap()
+              // An older daemon (reached over a non-reconciling HTTP/STDIO transport) doesn't
+              // expose the lightweight lockStates resource; fall back to the full booted-devices
+              // resource, which also carries each device's lock flag, so the Unlock control keeps
+              // tracking reality instead of going permanently stale.
+              is ResourceReadResult.Error ->
+                when (
+                  val booted =
+                    withContext(Dispatchers.IO) {
+                      resourceClient.readResource(BOOTED_DEVICES_RESOURCE_URI)
+                    }
+                ) {
+                  is ResourceReadResult.Success -> parseBootedLockStates(booted.content)
+                  is ResourceReadResult.Error -> emptyMap()
+                }
             }
           } catch (cancellation: CancellationException) {
             throw cancellation

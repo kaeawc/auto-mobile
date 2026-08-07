@@ -404,8 +404,9 @@ describe("MCP Booted Device Resources", () => {
       const unlocked = data.lockStates.find(s => s.deviceId === mockAndroidDevice2.deviceId);
       expect(locked?.locked).toBe(true);
       expect(unlocked?.locked).toBe(false);
-      // A valid ISO 8601 timestamp is stamped.
-      expect(() => new Date(data.lastUpdated)).not.toThrow();
+      // lastUpdated is a canonical ISO 8601 timestamp: it round-trips through Date, proving it is a
+      // real value rather than merely non-throwing (`new Date()` does not throw on garbage input).
+      expect(data.lastUpdated).toBe(new Date(data.lastUpdated).toISOString());
     });
 
     test("lock-states resource omits lock for a device the probe cannot read", async function() {

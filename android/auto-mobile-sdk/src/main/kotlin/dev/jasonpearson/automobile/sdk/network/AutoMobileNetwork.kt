@@ -3,9 +3,9 @@ package dev.jasonpearson.automobile.sdk.network
 import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.Interceptor
 import okhttp3.WebSocketListener
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Grouped parameters for recording a network request/response manually.
@@ -55,7 +55,8 @@ data class NetworkRequestRecord(
  * separately. The first terminal callback wins, so retries and late callbacks cannot emit duplicate
  * events.
  */
-class NetworkCaptureSession private constructor(
+class NetworkCaptureSession
+private constructor(
   private val url: String,
   private val method: String,
   private val protocol: String?,
@@ -122,15 +123,16 @@ class NetworkCaptureSession private constructor(
       requestBodySize: Long,
       captureHeaders: Boolean,
       captureBodies: Boolean,
-    ) = NetworkCaptureSession(
-      url,
-      method,
-      protocol,
-      requestHeaders,
-      requestBodySize,
-      captureHeaders,
-      captureBodies,
-    )
+    ) =
+      NetworkCaptureSession(
+        url,
+        method,
+        protocol,
+        requestHeaders,
+        requestBodySize,
+        captureHeaders,
+        captureBodies,
+      )
   }
 }
 

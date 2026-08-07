@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `android/auto-mobile-sdk/` is a published Android library providing navigation tracking (Navigation3, Circuit adapters), crash/ANR/handled-exception capture, Compose recomposition tracking, network interception with mock rules, log filtering, notification triggering, biometric stubbing, click tracking, OS event monitoring, SQLite database inspection, and SharedPreferences inspection. All subsystems are initialized through `AutoMobileSDK.initialize()`. Event-producing subsystems communicate with the control-proxy accessibility service via scoped `Intent` broadcasts, while storage inspection (database and SharedPreferences) uses debug-only `ContentProvider` entrypoints. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** `android/auto-mobile-sdk/` is a published Android library providing navigation tracking (Navigation3, Circuit adapters), crash/ANR/handled-exception capture, Compose recomposition tracking, per-frame performance metrics (fps/frame-time/jank via `FrameMetricsCollector`, streamed for observe `perfSnapshot` — #5076), network interception with mock rules, log filtering, notification triggering, biometric stubbing, click tracking, OS event monitoring, SQLite database inspection, and SharedPreferences inspection. All subsystems are initialized through `AutoMobileSDK.initialize()`. Event-producing subsystems communicate with the control-proxy accessibility service via scoped `Intent` broadcasts, while storage inspection (database and SharedPreferences) uses debug-only `ContentProvider` entrypoints. See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Architecture Overview
 

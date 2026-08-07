@@ -329,4 +329,49 @@ class WebSocketResponseTest {
     assertTrue(encoded.contains(""""componentName":"com.example.app/.MainActivity""""))
     assertTrue(encoded.contains(""""packageName":"com.example.app""""))
   }
+
+  @Test
+  fun `serialize frame_metrics_event`() {
+    val response: WebSocketResponse =
+      FrameMetricsEventResponse(
+        timestamp = 1234567890L,
+        frameMetrics =
+          FrameMetricsData(
+            applicationId = "com.example.app",
+            fps = 59.5,
+            frameTimeMs = 16.8,
+            jankFrames = 2,
+            totalFrames = 58,
+          ),
+      )
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+
+    assertTrue(encoded.contains(""""type":"frame_metrics_event""""))
+    assertTrue(encoded.contains(""""applicationId":"com.example.app""""))
+    assertTrue(encoded.contains(""""fps":59.5"""))
+    assertTrue(encoded.contains(""""jankFrames":2"""))
+    assertTrue(encoded.contains(""""totalFrames":58"""))
+
+    val decoded = json.decodeFromString(WebSocketResponse.serializer(), encoded)
+    assertTrue(decoded is FrameMetricsEventResponse)
+    assertEquals(59.5, (decoded as FrameMetricsEventResponse).frameMetrics.fps)
+  }
+
+  @Test
+  fun `frame_metrics_event round-trips a no-frame window`() {
+    val response: WebSocketResponse =
+      FrameMetricsEventResponse(
+        timestamp = 1L,
+        frameMetrics = FrameMetricsData(applicationId = "com.example.app", totalFrames = 0),
+      )
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+    val decoded =
+      json.decodeFromString(WebSocketResponse.serializer(), encoded) as FrameMetricsEventResponse
+
+    assertEquals(0, decoded.frameMetrics.totalFrames)
+    assertEquals(null, decoded.frameMetrics.fps)
+    assertEquals(null, decoded.frameMetrics.jankFrames)
+  }
 }

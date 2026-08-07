@@ -105,6 +105,10 @@ object AutoMobileSDK {
   const val ACTION_RECOMPOSITION_SNAPSHOT = "dev.jasonpearson.automobile.sdk.RECOMPOSITION_SNAPSHOT"
   const val EXTRA_RECOMPOSITION_ENABLED = "enabled"
   const val EXTRA_RECOMPOSITION_SNAPSHOT = "snapshot_json"
+  const val ACTION_FRAME_METRICS_CONTROL = "dev.jasonpearson.automobile.sdk.FRAME_METRICS_CONTROL"
+  const val ACTION_FRAME_METRICS_SNAPSHOT = "dev.jasonpearson.automobile.sdk.FRAME_METRICS_SNAPSHOT"
+  const val EXTRA_FRAME_METRICS_ENABLED = "frame_metrics_enabled"
+  const val EXTRA_FRAME_METRICS_SNAPSHOT = "frame_metrics_snapshot_json"
 
   /**
    * Initialize the SDK with application context. Required for broadcasting navigation events across
@@ -221,6 +225,8 @@ object AutoMobileSDK {
       capabilityRegistry.markLifecycleReady()
       RecompositionTracker.initialize(appContext)
       RecompositionTracker.setEnabled(_isEnabled)
+      FrameMetricsCollector.initialize(appContext)
+      FrameMetricsCollector.setEnabled(_isEnabled)
       AutoMobileNotifications.initialize(appContext)
       if (appContext is Application) {
         AutoMobileClickTracker.initialize(appContext, appContext.packageName)
@@ -315,6 +321,7 @@ object AutoMobileSDK {
     _isEnabled = enabled
     eventBuffer?.isEnabled = enabled
     RecompositionTracker.setEnabled(enabled)
+    FrameMetricsCollector.setEnabled(enabled)
     capabilityRegistry.setEnabled(enabled)
   }
 
@@ -467,6 +474,7 @@ object AutoMobileSDK {
     SdkEventBroadcaster.reset()
     persistence = null
     RecompositionTracker.reset()
+    FrameMetricsCollector.reset()
     listeners.clear()
     _isEnabled = true
     AutoMobileNetwork.setCapturePolicyProvider(null)

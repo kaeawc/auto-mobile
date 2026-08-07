@@ -216,6 +216,28 @@ data class LifecycleEventData(
   val applicationId: String? = null,
 )
 
+/**
+ * Live per-frame performance rollup from the in-app `auto-mobile-sdk` `FrameMetricsCollector`
+ * (issue #5076). Pushed as it arrives so the host can feed real app-frame fps/jank into the observe
+ * `perfSnapshot`, superseding the host-side `dumpsys gfxinfo` scrape for SDK-integrated apps.
+ * fps/frameTimeMs/ jankFrames are absent (null) for a window in which no frames rendered.
+ */
+@Serializable
+@SerialName("frame_metrics_event")
+data class FrameMetricsEventResponse(
+  override val timestamp: Long,
+  val frameMetrics: FrameMetricsData,
+) : WebSocketResponse()
+
+@Serializable
+data class FrameMetricsData(
+  val applicationId: String? = null,
+  val fps: Double? = null,
+  val frameTimeMs: Double? = null,
+  val jankFrames: Int? = null,
+  val totalFrames: Int,
+)
+
 @Serializable
 @SerialName("storage_changed")
 data class StorageChangedEvent(

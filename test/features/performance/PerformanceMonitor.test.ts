@@ -10,6 +10,7 @@ import {
 } from "../../../src/features/performance/PerformanceMonitor";
 import { LivePerformanceData } from "../../../src/daemon/performancePushSocketServer";
 import { PerfWindowBuffer } from "../../../src/features/performance/PerfWindowBuffer";
+import { SdkFrameMetricsStore } from "../../../src/features/performance/SdkFrameMetricsStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -638,6 +639,43 @@ describe("PerformanceMonitor", () => {
 
       monitor.stopMonitoring("device-1");
       expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBe(0);
+    });
+
+    it("prefers a fresh in-app SDK frame sample over the dumpsys scrape", async () => {
+      const buffer = new PerfWindowBuffer();
+      const sdkStore = new SdkFrameMetricsStore();
+      // Fresh SDK sample (receivedAt 0; first tick fires at now=500, within TTL).
+      // Distinctive fps=42 vs the dumpsys default (60) proves the source used.
+      sdkStore.ingest("device-1", "com.example.app", {
+        fps: 42, frameTimeMs: 23.8, jankFrames: 3, receivedAt: 0,
+      });
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer, sdkStore);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      expect(fakePusher.getLastPushedData()?.metrics.fps).toBe(42);
+      expect(fakePusher.getLastPushedData()?.metrics.jankFrames).toBe(3);
+      // The SDK value (not dumpsys 60) also lands in the windowed buffer.
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).fps?.p50).toBe(42);
+    });
+
+    it("falls back to dumpsys when the SDK sample is stale", async () => {
+      const buffer = new PerfWindowBuffer();
+      const sdkStore = new SdkFrameMetricsStore();
+      // receivedAt far in the past: at the first tick (now=500) this is > TTL old.
+      sdkStore.ingest("device-1", "com.example.app", {
+        fps: 42, frameTimeMs: 23.8, jankFrames: 3, receivedAt: -3000,
+      });
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer, sdkStore);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      // dumpsys default gfxinfo → fps derived from 8.5ms p50, capped at 60.
+      expect(fakePusher.getLastPushedData()?.metrics.fps).toBe(60);
     });
 
     it("records raw null fps for idle intervals, not the cached stream value", async () => {

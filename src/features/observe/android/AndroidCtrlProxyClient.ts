@@ -78,6 +78,7 @@ import type { CrashEventSink } from "../../../utils/interfaces/CrashMonitor";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
+import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
 import type { StackTraceElement } from "../../../server/failuresResources";
 import { NetworkState } from "../../../server/NetworkState";
 import { buildNetworkMockRules } from "../../../server/networkMockRules";
@@ -542,6 +543,18 @@ interface WsAnrEventMessage extends WsMessageBase {
   event?: SdkAnrPayload;
 }
 
+/** Real per-frame metrics from the in-app SDK FrameMetricsCollector (issue #5076). */
+interface WsFrameMetricsMessage extends WsMessageBase {
+  type: "frame_metrics_event";
+  frameMetrics?: {
+    applicationId?: string;
+    fps?: number;
+    frameTimeMs?: number;
+    jankFrames?: number;
+    totalFrames?: number;
+  };
+}
+
 interface WsNetworkEventMessage extends WsMessageBase {
   type: "network_event";
   event?: {
@@ -720,6 +733,7 @@ type WebSocketMessage =
   | WsHandledExceptionEventMessage
   | WsCrashEventMessage
   | WsAnrEventMessage
+  | WsFrameMetricsMessage
   | WsNetworkEventMessage
   | WsWebSocketFrameEventMessage
   | WsLogEventMessage
@@ -3001,6 +3015,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }
       }
 
+      if (message.type === "frame_metrics_event" && message.frameMetrics) {
+        this.handleFrameMetricsEvent(message.frameMetrics);
+      }
+
       // Handle telemetry events from SDK event batch. The fan-out to
       // TelemetryRecorder is owned by AndroidSdkEventIngestor (issue #2764); the
       // client only recognizes the wire type and forwards the typed event. These
@@ -3541,6 +3559,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     } catch (error) {
       logger.error(`[CTRL_PROXY] Failed to persist crash: ${error}`);
     }
+  }
+
+  /**
+   * Ingest a live frame-metrics event from the in-app SDK (issue #5076) into the
+   * shared store. `PerformanceMonitor` prefers this real app-frame data over the
+   * dumpsys scrape when it is fresh. The event's applicationId identifies the
+   * app; fall back to the last-known foreground package if the SDK omitted it.
+   */
+  private handleFrameMetricsEvent(data: NonNullable<WsFrameMetricsMessage["frameMetrics"]>): void {
+    const packageName = data.applicationId ?? this.lastForegroundPackage;
+    if (!packageName) {
+      return;
+    }
+    getSdkFrameMetricsStore().ingest(this.device.deviceId, packageName, {
+      fps: data.fps ?? null,
+      frameTimeMs: data.frameTimeMs ?? null,
+      jankFrames: data.jankFrames ?? null,
+      receivedAt: this.timer.now(),
+    });
   }
 
   private async handleCrashEvent(event: SdkCrashPayload): Promise<void> {

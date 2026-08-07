@@ -94,6 +94,10 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK {
   public static final java.lang.String ACTION_RECOMPOSITION_SNAPSHOT;
   public static final java.lang.String EXTRA_RECOMPOSITION_ENABLED;
   public static final java.lang.String EXTRA_RECOMPOSITION_SNAPSHOT;
+  public static final java.lang.String ACTION_FRAME_METRICS_CONTROL;
+  public static final java.lang.String ACTION_FRAME_METRICS_SNAPSHOT;
+  public static final java.lang.String EXTRA_FRAME_METRICS_ENABLED;
+  public static final java.lang.String EXTRA_FRAME_METRICS_SNAPSHOT;
   public static final int $stable;
   public final dev.jasonpearson.automobile.sdk.logging.SdkLogger getLogger$auto_mobile_sdk();
   public final void setLogger$auto_mobile_sdk(dev.jasonpearson.automobile.sdk.logging.SdkLogger);

@@ -38,6 +38,7 @@ class AutoMobileNetworkTest {
       NetworkRequestRecord(
         url = "https://api.example.com/users?page=1",
         method = "GET",
+        protocol = "cronet",
         statusCode = 200,
         durationMs = 42,
         responseBodySize = 1024,
@@ -51,6 +52,7 @@ class AutoMobileNetworkTest {
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertEquals("https://api.example.com/users?page=1", event.url)
     assertEquals("GET", event.method)
+    assertEquals("cronet", event.protocol)
     assertEquals(200, event.statusCode)
     assertEquals(42L, event.durationMs)
     assertEquals(1024L, event.responseBodySize)
@@ -178,5 +180,55 @@ class AutoMobileNetworkTest {
     assertNull(record.requestBody)
     assertNull(record.responseBody)
     assertNull(record.contentType)
+  }
+
+  @Test
+  fun `startCapture emits exactly one terminal event across racing callbacks`() {
+    val (buffer, flushed) = collectingBuffer()
+    AutoMobileNetwork.initialize("com.example", buffer)
+
+    val session =
+      AutoMobileNetwork.startCapture(
+        url = "https://api.example.com/items",
+        method = "GET",
+        protocol = "httpurlconnection",
+      )!!
+
+    session.complete(statusCode = 200, durationMs = 12)
+    session.fail(IllegalStateException("late failure"))
+    session.cancel()
+    buffer.flush()
+
+    assertEquals(1, flushed.size)
+    val event = flushed[0][0] as SdkNetworkRequestEvent
+    assertEquals(200, event.statusCode)
+    assertEquals("httpurlconnection", event.protocol)
+    assertNull(event.error)
+  }
+
+  @Test
+  fun `startCapture preserves opt in payload policy`() {
+    val (buffer, flushed) = collectingBuffer()
+    AutoMobileNetwork.initialize("com.example", buffer)
+    val session =
+      AutoMobileNetwork.startCapture(
+        url = "https://api.example.com/items",
+        method = "POST",
+        requestHeaders = mapOf("Authorization" to "secret"),
+        captureHeaders = true,
+        captureBodies = true,
+      )!!
+
+    session.complete(
+      statusCode = 201,
+      responseHeaders = mapOf("X-Request-Id" to "abc"),
+      responseBody = "{\"ok\":true}",
+    )
+    buffer.flush()
+
+    val event = flushed[0][0] as SdkNetworkRequestEvent
+    assertEquals(mapOf("Authorization" to "secret"), event.requestHeaders)
+    assertEquals(mapOf("X-Request-Id" to "abc"), event.responseHeaders)
+    assertEquals("{\"ok\":true}", event.responseBody)
   }
 }

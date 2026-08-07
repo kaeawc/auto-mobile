@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.network
 import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.Interceptor
 import okhttp3.WebSocketListener
 
@@ -17,6 +18,7 @@ import okhttp3.WebSocketListener
  * @property requestHeaders Optional request headers. Only recorded when header capture is enabled.
  * @property requestBodySize Size of the request body in bytes, or -1 if unknown.
  * @property statusCode HTTP status code of the response (e.g. 200, 404), or 0 on failure.
+ * @property protocol Transport or protocol name (for example "cronet" or "http/1.1").
  * @property responseHeaders Optional response headers. Only recorded when header capture is
  *   enabled.
  * @property responseBodySize Size of the response body in bytes, or -1 if unknown.
@@ -36,6 +38,7 @@ data class NetworkRequestRecord(
   val requestHeaders: Map<String, String>? = null,
   val requestBodySize: Long = -1,
   val statusCode: Int = 0,
+  val protocol: String? = null,
   val responseHeaders: Map<String, String>? = null,
   val responseBodySize: Long = -1,
   val durationMs: Long = 0,
@@ -46,6 +49,92 @@ data class NetworkRequestRecord(
   val responseBody: String? = null,
   val contentType: String? = null,
 )
+
+/**
+ * A cancellation-safe lifecycle handle for transports that report request and response callbacks
+ * separately. The first terminal callback wins, so retries and late callbacks cannot emit duplicate
+ * events.
+ */
+class NetworkCaptureSession
+private constructor(
+  private val url: String,
+  private val method: String,
+  private val protocol: String?,
+  private val requestHeaders: Map<String, String>?,
+  private val requestBodySize: Long,
+  private val captureHeaders: Boolean,
+  private val captureBodies: Boolean,
+) {
+  private val terminal = AtomicBoolean(false)
+
+  fun complete(
+    statusCode: Int,
+    responseHeaders: Map<String, String>? = null,
+    responseBodySize: Long = -1,
+    responseBody: String? = null,
+    contentType: String? = null,
+    durationMs: Long = 0,
+  ) {
+    if (!terminal.compareAndSet(false, true)) return
+    AutoMobileNetwork.recordRequest(
+      NetworkRequestRecord(
+        url = url,
+        method = method,
+        protocol = protocol,
+        requestHeaders = requestHeaders,
+        requestBodySize = requestBodySize,
+        statusCode = statusCode,
+        responseHeaders = responseHeaders,
+        responseBodySize = responseBodySize,
+        responseBody = responseBody,
+        contentType = contentType,
+        durationMs = durationMs,
+      ),
+      captureHeaders = captureHeaders,
+      captureBodies = captureBodies,
+    )
+  }
+
+  fun fail(error: Throwable, durationMs: Long = 0) {
+    if (!terminal.compareAndSet(false, true)) return
+    AutoMobileNetwork.recordRequest(
+      NetworkRequestRecord(
+        url = url,
+        method = method,
+        protocol = protocol,
+        requestHeaders = requestHeaders,
+        requestBodySize = requestBodySize,
+        error = error.message ?: error::class.simpleName,
+        durationMs = durationMs,
+      ),
+      captureHeaders = captureHeaders,
+      captureBodies = captureBodies,
+    )
+  }
+
+  fun cancel(durationMs: Long = 0) = fail(IllegalStateException("cancelled"), durationMs)
+
+  internal companion object {
+    fun create(
+      url: String,
+      method: String,
+      protocol: String?,
+      requestHeaders: Map<String, String>?,
+      requestBodySize: Long,
+      captureHeaders: Boolean,
+      captureBodies: Boolean,
+    ) =
+      NetworkCaptureSession(
+        url,
+        method,
+        protocol,
+        requestHeaders,
+        requestBodySize,
+        captureHeaders,
+        captureBodies,
+      )
+  }
+}
 
 /**
  * Public API for network interception.
@@ -155,6 +244,7 @@ object AutoMobileNetwork {
         method = record.method,
         statusCode = record.statusCode,
         durationMs = record.durationMs,
+        protocol = record.protocol,
         requestBodySize = record.requestBodySize,
         responseBodySize = record.responseBodySize,
         host = host,
@@ -166,6 +256,31 @@ object AutoMobileNetwork {
         responseBody = if (bodiesEnabled) record.responseBody else null,
         contentType = record.contentType,
       )
+    )
+  }
+
+  /**
+   * Start a transport-neutral capture lifecycle. Use the returned handle from success, failure,
+   * timeout, cancellation, and retry callbacks. Each handle emits at most one event.
+   */
+  fun startCapture(
+    url: String,
+    method: String = "GET",
+    protocol: String? = null,
+    requestHeaders: Map<String, String>? = null,
+    requestBodySize: Long = -1,
+    captureHeaders: Boolean = false,
+    captureBodies: Boolean = false,
+  ): NetworkCaptureSession? {
+    if (buffer == null) return null
+    return NetworkCaptureSession.create(
+      url,
+      method,
+      protocol,
+      requestHeaders,
+      requestBodySize,
+      captureHeaders,
+      captureBodies,
     )
   }
 

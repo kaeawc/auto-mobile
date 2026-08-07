@@ -272,14 +272,6 @@ if ! [[ "$max_parallel" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-# All CLI options are validated and at least one check is selected. Only now do we
-# self-heal deps: a fresh git worktree has no node_modules, so any check would
-# fail with "turbo: command not found" (issue #5051). Placing this after
-# validation keeps a malformed invocation fail-fast and side-effect-free (it
-# errors without running an install). No-op once deps are present, so CI is
-# unaffected.
-ensure_node_modules "$PROJECT_ROOT"
-
 if [[ "$max_parallel" -lt 1 ]]; then
   echo "--max-parallel must be greater than 0." >&2
   exit 1
@@ -288,6 +280,14 @@ fi
 if [[ "$parallel_enabled" -eq 0 ]]; then
   max_parallel=1
 fi
+
+# Every CLI option is now validated and at least one check is selected. Only now
+# self-heal deps: a fresh git worktree has no node_modules, so any check would
+# fail with "turbo: command not found" (issue #5051). Running this after all
+# validation keeps a malformed invocation (bad --only/--skip/--group, or a
+# non-numeric / < 1 --max-parallel) fail-fast and side-effect-free. No-op once
+# deps are present, so CI is unaffected.
+ensure_node_modules "$PROJECT_ROOT"
 
 mkdir -p "$PROJECT_ROOT/scratch"
 run_id="$(date +%Y%m%dT%H%M%S)"

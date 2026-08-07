@@ -39,6 +39,27 @@ final class CrayonSketchTests: XCTestCase {
         }
     }
 
+    func testZeroRoughnessHasNoDuplicateSeamPoints() {
+        // Each perimeter seam is sampled once: with no jitter only the closing point
+        // (last == first) may repeat — no interior consecutive duplicates. A duplicated
+        // arc/edge seam point would jitter independently and render as a knot.
+        let pts = crayonOutlineOffsets(width: w, height: h, cornerRadius: corner, seed: 3, roughness: 0)
+        for i in 1..<(pts.count - 1) {
+            XCTAssertNotEqual(pts[i], pts[i - 1], "duplicate seam point at index \(i): \(pts[i])")
+        }
+    }
+
+    func testNonPositiveSegmentsPerEdgeClampToOne() {
+        // Zero or negative segmentsPerEdge must not crash and must behave like 1.
+        let one = crayonOutlineOffsets(
+            width: w, height: h, cornerRadius: corner, seed: 8, roughness: 0, segmentsPerEdge: 1)
+        for bad in [0, -1, -7] {
+            let got = crayonOutlineOffsets(
+                width: w, height: h, cornerRadius: corner, seed: 8, roughness: 0, segmentsPerEdge: bad)
+            XCTAssertEqual(got, one, "segmentsPerEdge \(bad) should clamp to 1")
+        }
+    }
+
     func testZeroRoughnessLiesOnPerimeter() {
         let pts = crayonOutlineOffsets(width: w, height: h, cornerRadius: corner, seed: 5, roughness: 0)
         for p in pts {

@@ -24,16 +24,23 @@ private func roundedRectPerimeter(
     _ width: CGFloat, _ height: CGFloat, _ corner: CGFloat, _ segmentsPerEdge: Int
 ) -> [CGPoint] {
     let r = min(max(corner, 0), min(width, height) / 2)
+    // At least one straight-edge sample: a zero count skips every edge point and a
+    // negative one is a `0..<n` range precondition failure.
+    let segs = max(1, segmentsPerEdge)
     var pts: [CGPoint] = []
     func edge(_ x0: CGFloat, _ y0: CGFloat, _ x1: CGFloat, _ y1: CGFloat) {
-        for s in 0..<segmentsPerEdge {
-            let t = CGFloat(s) / CGFloat(segmentsPerEdge)
+        for s in 0..<segs {
+            let t = CGFloat(s) / CGFloat(segs)
             pts.append(CGPoint(x: x0 + (x1 - x0) * t, y: y0 + (y1 - y0) * t))
         }
     }
+    // Half-open like `edge`: emit the arc's start but not its end, so the arc's last
+    // point never duplicates the following edge's first point. A duplicated seam
+    // point gets its own jitter and shows as a knot; the dropped corner point is
+    // supplied by the next segment's start (and the final one by the closing append).
     func arc(_ cx: CGFloat, _ cy: CGFloat, _ startDeg: CGFloat) {
         let steps = 3
-        for s in 0...steps {
+        for s in 0..<steps {
             let ang = (startDeg + 90 * CGFloat(s) / CGFloat(steps)) * .pi / 180
             pts.append(CGPoint(x: cx + r * cos(ang), y: cy + r * sin(ang)))
         }

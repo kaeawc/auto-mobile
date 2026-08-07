@@ -12,6 +12,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
@@ -99,7 +100,7 @@ fun AutoMobileOutlinedTextField(
   OutlinedTextField(
     value = value,
     onValueChange = onValueChange,
-    modifier = modifier,
+    modifier = modifier.crayonBorder(color = MaterialTheme.colorScheme.outline, seed = 11L),
     enabled = enabled,
     readOnly = readOnly,
     textStyle = textStyle,
@@ -119,9 +120,11 @@ fun AutoMobileOutlinedTextField(
     minLines = minLines,
     colors =
       OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = MaterialTheme.colorScheme.primary,
-        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-        errorBorderColor = MaterialTheme.colorScheme.error,
+        // The visible outline is the hand-drawn crayonBorder above; suppress the
+        // stock Material border so they don't double up.
+        focusedBorderColor = Color.Transparent,
+        unfocusedBorderColor = Color.Transparent,
+        errorBorderColor = Color.Transparent,
         focusedLabelColor = MaterialTheme.colorScheme.primary,
         unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
       ),

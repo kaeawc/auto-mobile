@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileDimensions
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 
@@ -28,7 +29,7 @@ fun AutoMobileCard(
   content: @Composable ColumnScope.() -> Unit,
 ) {
   Card(
-    modifier = modifier,
+    modifier = modifier.crayonBorder(color = MaterialTheme.colorScheme.outline),
     shape = shape,
     colors = CardDefaults.cardColors(containerColor = containerColor, contentColor = contentColor),
     elevation = CardDefaults.cardElevation(defaultElevation = elevation),
@@ -48,14 +49,14 @@ fun AutoMobileOutlinedCard(
   content: @Composable ColumnScope.() -> Unit,
 ) {
   OutlinedCard(
-    modifier = modifier,
+    modifier = modifier.crayonBorder(color = borderColor, seed = 23L),
     shape = shape,
     colors =
       CardDefaults.outlinedCardColors(
         containerColor = containerColor,
         contentColor = contentColor,
       ),
-    border = BorderStroke(width = borderWidth, color = borderColor),
+    border = BorderStroke(width = 0.dp, color = Color.Transparent),
   ) {
     Column(modifier = Modifier.padding(AutoMobileDimensions.spacing4)) { content() }
   }

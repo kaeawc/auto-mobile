@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileDimensions
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 
@@ -74,9 +75,13 @@ fun AutoMobileOutlinedButton(
 ) {
   OutlinedButton(
     onClick = onClick,
-    modifier = modifier.height(AutoMobileDimensions.buttonHeight),
+    modifier =
+      modifier
+        .height(AutoMobileDimensions.buttonHeight)
+        .crayonBorder(color = MaterialTheme.colorScheme.primary, cornerRadius = 14.dp, seed = 5L),
     enabled = enabled,
     colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+    border = null,
     contentPadding = contentPadding,
   ) {
     Text(text = text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)

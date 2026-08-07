@@ -33,6 +33,7 @@ internal object AutoMobileOsEvents {
 
   @Volatile private var buffer: SdkEventBuffer? = null
   @Volatile private var applicationId: String? = null
+  @Volatile private var onLifecycleEvent: (String) -> Unit = {}
   private var connectivityCallback: ConnectivityManager.NetworkCallback? = null
   private var batteryReceiver: BroadcastReceiver? = null
   private var screenReceiver: BroadcastReceiver? = null
@@ -42,9 +43,14 @@ internal object AutoMobileOsEvents {
   @Volatile private var lastBatteryCharging: Boolean? = null
 
   @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
-  internal fun initialize(context: Context, buffer: SdkEventBuffer) {
+  internal fun initialize(
+    context: Context,
+    buffer: SdkEventBuffer,
+    onLifecycleEvent: (String) -> Unit = {},
+  ) {
     this.buffer = buffer
     this.applicationId = context.packageName
+    this.onLifecycleEvent = onLifecycleEvent
     registerLifecycleObserver()
     registerActivityCallbacks(context)
     registerConnectivityCallback(context)
@@ -59,9 +65,11 @@ internal object AutoMobileOsEvents {
     unregisterScreenReceiver(context)
     unregisterLifecycleObserver()
     buffer = null
+    onLifecycleEvent = {}
   }
 
   private fun postEvent(kind: String, details: Map<String, String>? = null) {
+    onLifecycleEvent(kind)
     buffer?.add(
       SdkLifecycleEvent(
         timestamp = System.currentTimeMillis(),

@@ -10,6 +10,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import dev.jasonpearson.automobile.protocol.NavigationSourceType
+import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.biometrics.AutoMobileBiometrics
@@ -83,6 +84,7 @@ object AutoMobileSDK {
   @Volatile internal var logger: SdkLogger = DefaultSdkLogger()
 
   private val listeners = CopyOnWriteArrayList<NavigationListener>()
+  private val runtimeContextListeners = CopyOnWriteArrayList<RuntimeContextListener>()
   @Volatile private var _isEnabled = true
   @Volatile private var context: Context? = null
   @Volatile private var configuration: AutoMobileConfiguration? = null
@@ -207,7 +209,9 @@ object AutoMobileSDK {
     handler.post {
       // Guard: if shutdown() was called before this posted block runs, no-op.
       if (this@AutoMobileSDK.context == null) return@post
-      AutoMobileOsEvents.initialize(appContext, buffer)
+      AutoMobileOsEvents.initialize(appContext, buffer) { kind ->
+        notifyRuntimeContextChanged(kind)
+      }
 
       // Register session tracker with process lifecycle
       val observer =
@@ -252,6 +256,16 @@ object AutoMobileSDK {
   @AnyThread
   fun removeNavigationListener(listener: NavigationListener) {
     listeners.remove(listener)
+  }
+
+  /** Registers a removable listener for lifecycle and host-context changes. */
+  fun addRuntimeContextListener(listener: RuntimeContextListener) {
+    runtimeContextListeners.add(listener)
+  }
+
+  /** Removes a previously registered runtime-context listener. */
+  fun removeRuntimeContextListener(listener: RuntimeContextListener) {
+    runtimeContextListeners.remove(listener)
   }
 
   /** Removes all navigation listeners. */
@@ -382,6 +396,49 @@ object AutoMobileSDK {
     )
   }
 
+  /** Sets the current screen or route used by future diagnostics and lifecycle events. */
+  fun setCurrentScreen(screen: String?) {
+    sdkContext?.currentScreen = screen?.take(MAX_CONTEXT_VALUE_LENGTH)
+    AutoMobileCrashes.currentScreenProvider = { sdkContext?.snapshot()?.currentScreen }
+    notifyRuntimeContextChanged(if (screen == null) "screen_cleared" else "screen_changed")
+  }
+
+  /** Sets the current tenant or workspace identifier used by future diagnostics. */
+  fun setTenantId(tenantId: String?) {
+    sdkContext?.tenantId = tenantId?.take(MAX_CONTEXT_VALUE_LENGTH)
+    notifyRuntimeContextChanged(if (tenantId == null) "tenant_cleared" else "tenant_changed")
+  }
+
+  /** Records a bounded, schema-versioned application event. */
+  fun recordCustomEvent(
+    name: String,
+    schemaVersion: String = "1",
+    fields: Map<String, String> = emptyMap(),
+  ) {
+    if (!_isEnabled || name.isBlank()) return
+    val buf = eventBuffer ?: return
+    val ctx = context ?: return
+    val snapshot = sdkContext?.snapshot()
+    val details = buildMap {
+      fields.entries.take(MAX_CUSTOM_EVENT_FIELDS).forEach { (key, value) ->
+        put(key.take(MAX_CONTEXT_KEY_LENGTH), value.take(MAX_CONTEXT_VALUE_LENGTH))
+      }
+      put("name", name.take(MAX_CONTEXT_VALUE_LENGTH))
+      put("schema_version", schemaVersion.take(MAX_CONTEXT_VALUE_LENGTH))
+      snapshot?.tenantId?.let { put("tenant_id", it) }
+      snapshot?.currentScreen?.let { put("current_screen", it) }
+    }
+    buf.add(
+      SdkLifecycleEvent(
+        timestamp = System.currentTimeMillis(),
+        applicationId = ctx.packageName,
+        kind = "custom_event",
+        details = details,
+      )
+    )
+    addBreadcrumb(name, BreadcrumbCategory.CUSTOM, details)
+  }
+
   /**
    * A snapshot of drop counts by reason.
    *
@@ -395,22 +452,34 @@ object AutoMobileSDK {
 
   /** Sets the user identifier on the SDK context. */
   fun setUserId(userId: String?) {
-    sdkContext?.userId = userId
+    sdkContext?.userId = userId?.take(MAX_CONTEXT_VALUE_LENGTH)
+    notifyRuntimeContextChanged(if (userId == null) "user_cleared" else "user_changed")
   }
 
   /** Sets a tag on the SDK context. */
   fun setTag(key: String, value: String) {
-    sdkContext?.setTag(key, value)
+    if (key.isBlank()) return
+    sdkContext?.setTag(key.take(MAX_CONTEXT_KEY_LENGTH), value.take(MAX_CONTEXT_VALUE_LENGTH))
+    notifyRuntimeContextChanged("tag_changed")
   }
 
   /** Removes a tag from the SDK context. */
   fun removeTag(key: String) {
     sdkContext?.removeTag(key)
+    notifyRuntimeContextChanged("tag_removed")
   }
 
   /** An immutable snapshot of the current SDK context, or null if not initialized. */
   val contextSnapshot: SdkContextSnapshot?
     get() = sdkContext?.snapshot()
+
+  private fun notifyRuntimeContextChanged(kind: String) {
+    if (!_isEnabled) return
+    val snapshot = sdkContext?.snapshot() ?: return
+    runtimeContextListeners.forEach { listener ->
+      runCatching { listener.onRuntimeContextChanged(kind, snapshot) }
+    }
+  }
 
   /**
    * Replay pending event batches from disk (events that survived process death). Each batch is
@@ -476,6 +545,7 @@ object AutoMobileSDK {
     RecompositionTracker.reset()
     FrameMetricsCollector.reset()
     listeners.clear()
+    runtimeContextListeners.clear()
     _isEnabled = true
     AutoMobileNetwork.setCapturePolicyProvider(null)
     AutoMobileNetwork.setNetworkControlProvider(null)
@@ -487,4 +557,8 @@ object AutoMobileSDK {
 
   /** Returns the current configuration, or null if not initialized. */
   internal fun getConfiguration(): AutoMobileConfiguration? = configuration
+
+  private const val MAX_CONTEXT_KEY_LENGTH = 64
+  private const val MAX_CONTEXT_VALUE_LENGTH = 256
+  private const val MAX_CUSTOM_EVENT_FIELDS = 32
 }

@@ -105,6 +105,8 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK {
   public final void initialize(android.content.Context, dev.jasonpearson.automobile.sdk.AutoMobileConfiguration);
   public final void addNavigationListener(dev.jasonpearson.automobile.sdk.NavigationListener);
   public final void removeNavigationListener(dev.jasonpearson.automobile.sdk.NavigationListener);
+  public final void addRuntimeContextListener(dev.jasonpearson.automobile.sdk.RuntimeContextListener);
+  public final void removeRuntimeContextListener(dev.jasonpearson.automobile.sdk.RuntimeContextListener);
   public final void clearNavigationListeners();
   public final void notifyNavigationEvent(dev.jasonpearson.automobile.sdk.NavigationEvent);
   public final void setEnabled(boolean);
@@ -118,6 +120,10 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK {
   public final java.lang.String currentSessionId();
   public final void addBreadcrumb(java.lang.String, dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbCategory, java.util.Map<java.lang.String, java.lang.String>);
   public static void addBreadcrumb$default(dev.jasonpearson.automobile.sdk.AutoMobileSDK, java.lang.String, dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbCategory, java.util.Map, int, java.lang.Object);
+  public final void setCurrentScreen(java.lang.String);
+  public final void setTenantId(java.lang.String);
+  public final void recordCustomEvent(java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>);
+  public static void recordCustomEvent$default(dev.jasonpearson.automobile.sdk.AutoMobileSDK, java.lang.String, java.lang.String, java.util.Map, int, java.lang.Object);
   public final java.util.Map<dev.jasonpearson.automobile.sdk.events.DropReason, java.lang.Long> getDropReport();
   public final dev.jasonpearson.automobile.sdk.events.SdkEventBuffer getEventBuffer$auto_mobile_sdk();
   public final void setUserId(java.lang.String);
@@ -325,6 +331,10 @@ public final class dev.jasonpearson.automobile.sdk.RecompositionTracker {
   public static final void access$broadcastSnapshot(dev.jasonpearson.automobile.sdk.RecompositionTracker);
   public static final android.os.Handler access$getHandler$p();
   public static final java.util.concurrent.atomic.AtomicLong access$getTouchSequence$p();
+}
+Compiled from "RuntimeContextListener.kt"
+public interface dev.jasonpearson.automobile.sdk.RuntimeContextListener {
+  public abstract void onRuntimeContextChanged(java.lang.String, dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot);
 }
 Compiled from "SdkConstants.kt"
 public final class dev.jasonpearson.automobile.sdk.SdkConstants {
@@ -641,6 +651,10 @@ public final class dev.jasonpearson.automobile.sdk.context.SdkContext {
   public final void setSessionId(java.lang.String);
   public final java.lang.String getUserId();
   public final void setUserId(java.lang.String);
+  public final java.lang.String getTenantId();
+  public final void setTenantId(java.lang.String);
+  public final java.lang.String getCurrentScreen();
+  public final void setCurrentScreen(java.lang.String);
   public final java.lang.String getAppVersion();
   public final void setAppVersion(java.lang.String);
   public final void setTag(java.lang.String, java.lang.String);
@@ -652,17 +666,23 @@ public final class dev.jasonpearson.automobile.sdk.context.SdkContext {
 Compiled from "SdkContext.kt"
 public final class dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot {
   public static final int $stable;
-  public dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot(java.lang.String, java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>);
+  public dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot(java.lang.String, java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, java.lang.String, java.lang.String);
+  public dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot(java.lang.String, java.lang.String, java.lang.String, java.util.Map, java.lang.String, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final java.lang.String getSessionId();
   public final java.lang.String getUserId();
   public final java.lang.String getAppVersion();
   public final java.util.Map<java.lang.String, java.lang.String> getTags();
+  public final java.lang.String getTenantId();
+  public final java.lang.String getCurrentScreen();
+  public dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot(java.lang.String, java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>);
   public final java.lang.String component1();
   public final java.lang.String component2();
   public final java.lang.String component3();
   public final java.util.Map<java.lang.String, java.lang.String> component4();
-  public final dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot copy(java.lang.String, java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>);
-  public static dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot copy$default(dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot, java.lang.String, java.lang.String, java.lang.String, java.util.Map, int, java.lang.Object);
+  public final java.lang.String component5();
+  public final java.lang.String component6();
+  public final dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot copy(java.lang.String, java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, java.lang.String, java.lang.String);
+  public static dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot copy$default(dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot, java.lang.String, java.lang.String, java.lang.String, java.util.Map, java.lang.String, java.lang.String, int, java.lang.Object);
   public java.lang.String toString();
   public int hashCode();
   public boolean equals(java.lang.Object);
@@ -1448,7 +1468,8 @@ Compiled from "AutoMobileOsEvents.kt"
 public final class dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents {
   public static final dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents INSTANCE;
   public static final int $stable;
-  public final void initialize$auto_mobile_sdk(android.content.Context, dev.jasonpearson.automobile.sdk.events.SdkEventBuffer);
+  public final void initialize$auto_mobile_sdk(android.content.Context, dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, kotlin.jvm.functions.Function1<? super java.lang.String, kotlin.Unit>);
+  public static void initialize$auto_mobile_sdk$default(dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents, android.content.Context, dev.jasonpearson.automobile.sdk.events.SdkEventBuffer, kotlin.jvm.functions.Function1, int, java.lang.Object);
   public final void shutdown(android.content.Context);
   public static final void access$postEvent(dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents, java.lang.String, java.util.Map);
   public static final java.lang.String access$getLastBatteryPct$p();

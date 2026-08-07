@@ -34,6 +34,7 @@ export interface ColumnInfo {
  */
 export interface TableStructureResult {
   columns: ColumnInfo[];
+  diagnostic?: SQLResult["diagnostic"];
 }
 
 /**
@@ -46,6 +47,7 @@ export interface TableDataResult {
   rows: any[][];
   /** Total number of rows in table */
   total: number;
+  diagnostic?: SQLResult["diagnostic"];
 }
 
 /**
@@ -59,6 +61,11 @@ export interface SQLResult {
   rows?: any[][];
   /** Number of rows affected (mutation only) */
   rowsAffected?: number;
+  diagnostic?: {
+    code: string;
+    message: string;
+  };
+  truncated?: boolean;
 }
 
 

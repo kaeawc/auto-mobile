@@ -52,6 +52,7 @@ final class ErrorResponseTypeTests: XCTestCase {
             .setNetworkErrorSimulation: .setNetworkErrorSimulationResult,
             .executeSql: .executeSqlResult,
             .listDatabases: .listDatabasesResult,
+            .storageCapabilities: .storageCapabilitiesResult,
             .listTables: .listTablesResult,
             .getTableData: .tableDataResult,
             .getTableStructure: .tableStructureResult,

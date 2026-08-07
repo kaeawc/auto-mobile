@@ -78,6 +78,7 @@ const SWIFT_REQUEST_TYPES = [
   "set_network_error_simulation",
   "execute_sql",
   "list_databases",
+  "storage_capabilities",
   "list_tables",
   "get_table_data",
   "get_table_structure",

@@ -1979,7 +1979,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     query: string,
     timeoutMs?: number
   ): Promise<import("../../database/DatabaseInspector").SQLResult> {
-    return this.database.executeSQL(appId, databasePath, query, timeoutMs);
+    return this.database.executeSQL(appId, databasePath, query, timeoutMs, this.boundSessionId ?? undefined);
   }
 
   async listDatabasesForIos(
@@ -1987,6 +1987,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number
   ): Promise<import("../../database/DatabaseInspector").DatabaseInfo[]> {
     return this.database.listDatabases(appId, timeoutMs);
+  }
+
+  async getStorageCapabilitiesForIos(
+    appId: string,
+    timeoutMs?: number
+  ): Promise<import("./CtrlProxyDatabase").StorageCapabilities> {
+    return this.database.storageCapabilities(appId, timeoutMs);
   }
 
   async listTablesForIos(appId: string, databasePath: string, timeoutMs?: number): Promise<string[]> {

@@ -224,6 +224,8 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
         columns: (message as { columns?: string[] }).columns,
         rows: (message as { rows?: unknown[][] }).rows,
         rowsAffected: (message as { rowsAffected?: number }).rowsAffected,
+        diagnostic: (message as { diagnostic?: unknown }).diagnostic,
+        truncated: (message as { truncated?: boolean }).truncated,
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
       };
@@ -233,6 +235,15 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       result = {
         success: message.success ?? false,
         databases: (message as { databases?: unknown[] }).databases ?? [],
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      };
+      break;
+
+    case "storage_capabilities_result":
+      result = {
+        success: message.success ?? false,
+        capabilities: (message as { capabilities?: unknown }).capabilities,
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
       };
@@ -253,6 +264,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
         columns: (message as { columns?: string[] }).columns ?? [],
         rows: (message as { rows?: unknown[][] }).rows ?? [],
         total: (message as { total?: number }).total ?? 0,
+        diagnostic: (message as { diagnostic?: unknown }).diagnostic,
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
       };
@@ -262,6 +274,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       result = {
         success: message.success ?? false,
         columns: (message as { columns?: unknown[] }).columns ?? [],
+        diagnostic: (message as { diagnostic?: unknown }).diagnostic,
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
       };

@@ -141,6 +141,9 @@ AutoMobileSDK.shared.initialize(configuration: config)
 - ``KeyValueType``
 - ``UserDefaultsChangeListener``
 - ``DatabaseInspector``
+- ``StorageInspectionConfiguration``
+- ``CoreDataStoreRegistration``
+- ``StorageDiagnostic``
 - ``DatabaseDriver``
 - ``SQLiteDatabaseDriver``
 - ``DatabaseDescriptor``

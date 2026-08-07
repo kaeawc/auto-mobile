@@ -550,6 +550,13 @@ final class DatabaseInspectorTests: XCTestCase {
 }
 
 final class SdkDatabaseRouteHandlerTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(
+            allowedDatabasePaths: ["/app/Documents/app.db"]
+        ))
+    }
+
     override func tearDown() {
         DatabaseInspector.shared.reset()
         super.tearDown()
@@ -670,6 +677,102 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
         XCTAssertEqual(response.statusCode, 503)
         let payload = try JSONDecoder().decode(SdkDatabaseErrorPayload.self, from: response.body)
         XCTAssertEqual(payload.error, "db_inspection_disabled")
+    }
+
+    func testMutationsRequireExplicitAuthorization() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.setEnabled(true)
+
+        let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+            databasePath: "/app/Documents/app.db",
+            query: "DELETE FROM notes"
+        ))
+        let response = SdkDatabaseRouteHandler().handleExecuteSql(body: body)
+
+        XCTAssertEqual(response.statusCode, 403)
+        XCTAssertTrue(fakeDriver.executeSqlCalls.isEmpty)
+        let payload = try JSONDecoder().decode(SdkDatabaseErrorPayload.self, from: response.body)
+        XCTAssertEqual(payload.diagnostic?.code, "mutation_not_authorized")
+    }
+
+    func testPragmaMutationRequiresExplicitAuthorization() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.setEnabled(true)
+
+        let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+            databasePath: "/app/Documents/app.db",
+            query: "PRAGMA user_version = 7"
+        ))
+        let response = SdkDatabaseRouteHandler().handleExecuteSql(body: body)
+
+        XCTAssertEqual(response.statusCode, 403)
+        XCTAssertTrue(fakeDriver.executeSqlCalls.isEmpty)
+    }
+
+    func testQueryValuesAreRedactedAndBoundedBeforeTransport() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        fakeDriver.sqlResult = SQLExecutionResult(
+            columns: ["username", "access_token", "configured_secret"],
+            rows: [["jason", "secret-token", "private-value"], ["second", "another", "second-value"]],
+            rowsAffected: 0
+        )
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(
+            allowedDatabasePaths: ["/app/Documents/app.db"],
+            sensitiveKeys: ["configured_secret"],
+            maxRows: 10,
+            maxBytes: 2048
+        ))
+        DatabaseInspector.shared.setEnabled(true)
+
+        let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT username, access_token, configured_secret FROM notes"
+        ))
+        let response = SdkDatabaseRouteHandler().handleExecuteSql(body: body)
+        let payload = try JSONDecoder().decode(SdkExecuteSqlPayload.self, from: response.body)
+
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(payload.rows?.first, ["jason", "[REDACTED]", "[REDACTED]"])
+        XCTAssertFalse(String(data: response.body, encoding: .utf8)?.contains("secret-token") ?? true)
+        XCTAssertFalse(String(data: response.body, encoding: .utf8)?.contains("private-value") ?? true)
+        XCTAssertLessThanOrEqual(response.body.count, 2048)
+    }
+
+    func testConfiguredDatabaseAllowlistBlocksUnregisteredPath() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(
+            allowedDatabasePaths: ["/app/Allowed/other.sqlite"]
+        ))
+        DatabaseInspector.shared.setEnabled(true)
+
+        let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT 1"
+        ))
+        let response = SdkDatabaseRouteHandler().handleExecuteSql(body: body)
+
+        XCTAssertEqual(response.statusCode, 404)
+        XCTAssertTrue(fakeDriver.executeSqlCalls.isEmpty)
     }
 }
 

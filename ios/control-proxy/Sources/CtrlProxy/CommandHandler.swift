@@ -214,6 +214,9 @@ public class CommandHandler: CommandHandling {
             case let .listDatabases(payload):
                 return handleListDatabases(payload, startTime: startTime)
 
+            case let .storageCapabilities(payload):
+                return handleStorageCapabilities(payload, startTime: startTime)
+
             case let .listTables(payload):
                 return handleListTables(payload, startTime: startTime)
 
@@ -1422,7 +1425,7 @@ public class CommandHandler: CommandHandling {
 
         do {
             try validateDatabaseAppId(request.appId)
-            let result = try client.executeSQL(databasePath: databasePath, query: query)
+            let result = try client.executeSQL(databasePath: databasePath, query: query, sessionId: request.sessionId)
             if let error = result.error {
                 return ExecuteSqlResponse(
                     requestId: request.requestId,
@@ -1436,9 +1439,11 @@ public class CommandHandler: CommandHandling {
                 success: true,
                 queryType: result.queryType,
                 columns: result.columns,
-                rows: result.rows,
-                rowsAffected: result.rowsAffected,
-                totalTimeMs: totalTimeMs(from: startTime)
+                    rows: result.rows,
+                    rowsAffected: result.rowsAffected,
+                    diagnostic: result.diagnostic,
+                    truncated: result.truncated,
+                    totalTimeMs: totalTimeMs(from: startTime)
             )
         } catch {
             return ExecuteSqlResponse(
@@ -1470,6 +1475,38 @@ public class CommandHandler: CommandHandling {
             )
         } catch {
             return ListDatabasesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
+    private func handleStorageCapabilities(
+        _ request: RequestStorageCapabilities,
+        startTime: Date
+    ) -> StorageCapabilitiesResponse {
+        guard let client = sdkDatabaseClient else {
+            return StorageCapabilitiesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: databaseUnavailableMessage,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            try validateDatabaseAppId(request.appId)
+            let capabilities = try client.storageCapabilities()
+            return StorageCapabilitiesResponse(
+                requestId: request.requestId,
+                success: true,
+                capabilities: capabilities,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return StorageCapabilitiesResponse(
                 requestId: request.requestId,
                 success: false,
                 error: error.localizedDescription,
@@ -1554,6 +1591,7 @@ public class CommandHandler: CommandHandling {
                 columns: data.columns,
                 rows: data.rows,
                 total: data.total,
+                diagnostic: data.diagnostic,
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         } catch {
@@ -1616,6 +1654,7 @@ public class CommandHandler: CommandHandling {
                 requestId: request.requestId,
                 success: true,
                 columns: structure.columns,
+                diagnostic: structure.diagnostic,
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         } catch {

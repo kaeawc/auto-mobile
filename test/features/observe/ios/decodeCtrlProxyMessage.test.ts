@@ -402,8 +402,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "set_network_mock_rules_result",
   ];
 
-  test("Swift ResponseType declares exactly 43 rawValues", () => {
-    expect(rawValues.length).toBe(43);
+  test("Swift ResponseType declares exactly 44 rawValues", () => {
+    expect(rawValues.length).toBe(44);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -416,8 +416,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly 36 response types", () => {
-    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(36);
+  test("the decoder explicitly reshapes exactly 37 response types", () => {
+    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(37);
   });
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
@@ -440,7 +440,7 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
  */
 describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => {
   // One row per decoded response type → the value of `success` when the wire
-  // message omits it. 36 rows = the 36 explicitly-decoded ResponseTypes.
+  // message omits it. 37 rows = the 37 explicitly-decoded ResponseTypes.
   const DEFAULT_WHEN_ABSENT: Array<{ type: string; expected: boolean | undefined }> = [
     { type: "hierarchy_update", expected: undefined },
     { type: "screenshot", expected: true },
@@ -475,13 +475,14 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "set_network_error_simulation_result", expected: false },
     { type: "execute_sql_result", expected: false },
     { type: "list_databases_result", expected: false },
+    { type: "storage_capabilities_result", expected: false },
     { type: "list_tables_result", expected: false },
     { type: "table_data_result", expected: false },
     { type: "table_structure_result", expected: false },
   ];
 
-  test("the default table covers all 36 explicitly-decoded types", () => {
-    expect(DEFAULT_WHEN_ABSENT.length).toBe(36);
+  test("the default table covers all 37 explicitly-decoded types", () => {
+    expect(DEFAULT_WHEN_ABSENT.length).toBe(37);
   });
 
   for (const { type, expected } of DEFAULT_WHEN_ABSENT) {
@@ -498,8 +499,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     .filter(row => row.type !== "hierarchy_update" && row.type !== "screenshot")
     .map(row => row.type);
 
-  test("the passthrough set is the 34 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(34);
+  test("the passthrough set is the 35 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(35);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

@@ -1073,13 +1073,20 @@ public class FakeSdkDatabaseFetcher: SdkDatabaseFetching {
     public var executeSqlResult = SdkExecuteSqlResult(queryType: "query", columns: [], rows: [], rowsAffected: 0)
     public var executeSqlError: Error?
     public var databases: [SdkDatabaseInfo] = []
+    public var storageCapabilitiesResult = SdkStorageCapabilities(
+        readOnly: true,
+        mutationAuthorized: false,
+        registeredAppGroupSuites: [],
+        coreDataStores: [],
+        unavailableStores: ["keychain", "file_caches"]
+    )
     public var tables: [String] = []
     public var tableData = SdkTableDataResult(columns: [], rows: [], total: 0)
     public var tableStructure = SdkTableStructureResult(columns: [])
 
     public init() {}
 
-    public func executeSQL(databasePath: String, query: String) throws -> SdkExecuteSqlResult {
+    public func executeSQL(databasePath: String, query: String, sessionId: String? = nil) throws -> SdkExecuteSqlResult {
         executeSqlCalls.append((databasePath: databasePath, query: query))
         if let executeSqlError {
             throw executeSqlError
@@ -1090,6 +1097,10 @@ public class FakeSdkDatabaseFetcher: SdkDatabaseFetching {
     public func listDatabases() throws -> [SdkDatabaseInfo] {
         listDatabasesCallCount += 1
         return databases
+    }
+
+    public func storageCapabilities() throws -> SdkStorageCapabilities {
+        storageCapabilitiesResult
     }
 
     public func listTables(databasePath: String) throws -> [String] {

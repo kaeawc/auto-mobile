@@ -33,7 +33,7 @@ Every observation includes report-only `layoutWarnings`, always under that singl
 
 - **`full`** — every warning found is present.
 - **`truncated`** — the audit found more than 100 warnings (`MAX_LAYOUT_WARNINGS`); `warnings` holds the highest-severity, largest-overflow 100 and `total` is the pre-cap count (omitted count is `total - warnings.length`). Real screens flag only a handful — only elements physically inside the thin inset strips are reported — so this only ever trims pathological hierarchies.
-- **`scoped`** — the observe-scope transforms (`--observe-region` / `--observe-focus` / `--observe-overview`) narrowed the list to elements still present in the returned hierarchy, so no warning references a pruned element. `total` is dropped when this happens.
+- **`scoped`** — the observe-scope transforms (`--observe-region` / `--observe-focus` / `--observe-overview`) narrowed the list to elements still present in the returned hierarchy, so no warning references a pruned element. The stale pre-scope `total` is dropped; if the scoped set itself still exceeds 100 it is then capped, and `total` is set anew to the post-scope pre-cap count (same `total - warnings.length` omitted-count meaning). So a `scoped` set with no `total` is complete for the returned hierarchy, and one with a `total` was additionally capped.
 
 When available, `insets.systemChrome` provides the system-chrome state that explains a
 safe-area warning's screen context. Android reports the current visibility of the status

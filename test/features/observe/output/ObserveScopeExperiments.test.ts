@@ -538,13 +538,32 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     expect(boundsOf(result)).not.toContainEqual(STATUS_BAR_BOUNDS);
   });
 
-  test("OVERVIEW drops a warning for a collapsed anonymous leaf", () => {
+  test("OVERVIEW alone retains warnings (matched before the structural collapse)", () => {
     const obs = androidFixture();
-    // HEADER is addressable (kept in the skeleton); Item 2 is an anonymous leaf (dropped).
+    // Item 2 is a leaf OVERVIEW collapses into the list. Its warning is matched
+    // against the pre-collapse tree, so it is retained — the location is still
+    // shown, represented by the kept `list` ancestor. Nothing is spatially
+    // removed, so scope stays "full".
     obs.layoutWarnings = { scope: "full", warnings: [warningAt(HEADER_BOUNDS), warningAt(ITEM2_BOUNDS)] };
     const result = applyObserveScopeExperiments(obs, { focus: false, overview: true, region: false });
     expect(boundsOf(result)).toContainEqual(HEADER_BOUNDS);
-    expect(boundsOf(result)).not.toContainEqual(ITEM2_BOUNDS);
+    expect(boundsOf(result)).toContainEqual(ITEM2_BOUNDS);
+    expect(result.layoutWarnings?.scope).toBe("full");
+  });
+
+  test("OVERVIEW does not strip iOS `$`-bag warnings (finding 9)", () => {
+    // iOS nodes hold bounds/identity in a `$` bag that OVERVIEW strips. Matching
+    // against the pre-overview tree keeps them; reading the post-overview tree
+    // would drop every iOS warning.
+    const B: Bounds = { left: 0, top: 80, right: 300, bottom: 140 };
+    const obs = androidFixture();
+    obs.viewHierarchy!.hierarchy.node = {
+      "$": { "resource-id": `${APP}:id/ios-root`, "bounds": { left: 0, top: 0, right: 1080, bottom: 2400 } },
+      "node": [{ $: { "resource-id": `${APP}:id/ios-cell`, "clickable": "true", "bounds": B } }],
+    } as never;
+    obs.layoutWarnings = { scope: "full", warnings: [{ ...warningAt(B), element: { resourceId: `${APP}:id/ios-cell`, bounds: B } }] };
+    const result = applyObserveScopeExperiments(obs, { focus: false, overview: true, region: false });
+    expect(result.layoutWarnings?.warnings).toHaveLength(1);
   });
 
   test("matches against compacted-tuple node bounds", () => {
@@ -582,35 +601,21 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     expect(result.layoutWarnings?.warnings).toHaveLength(1);
   });
 
-  test("drops a warning whose identity differs from the surviving same-bounds node (finding 1)", () => {
+  test("retains an OVERVIEW-collapsed child's warning, matched before the collapse", () => {
     const B: Bounds = { left: 0, top: 0, right: 1080, bottom: 200 };
     const obs = androidFixture();
-    // Addressable card (kept by OVERVIEW) with an anonymous text child at IDENTICAL bounds (dropped).
+    // A card with a text child at identical bounds; OVERVIEW collapses the child.
     obs.viewHierarchy!.hierarchy.node = {
       "resource-id": `${APP}:id/root`, "bounds": { left: 0, top: 0, right: 1080, bottom: 2400 },
       "node": [{ "resource-id": `${APP}:id/card`, "clickable": true, "bounds": B, "node": [{ text: "Buried", bounds: B }] }],
     } as never;
     obs.layoutWarnings = { scope: "full", warnings: [{ ...warningAt(B), element: { text: "Buried", bounds: B } }] };
     const result = applyObserveScopeExperiments(obs, { focus: false, overview: true, region: false });
-    // The `card` survives at B but its identity (resource-id) doesn't match the
-    // warning's (text "Buried" — the dropped child), so the warning is dropped.
-    expect(result.layoutWarnings?.warnings).toHaveLength(0);
-    expect(result.layoutWarnings?.scope).toBe("scoped");
-  });
-
-  test("keeps a warning when the surviving same-bounds node has no identity to correlate (no false negative)", () => {
-    const B: Bounds = { left: 0, top: 0, right: 1080, bottom: 200 };
-    const obs = androidFixture();
-    // A clickable text leaf: OVERVIEW keeps it (clickable) but strips `text`.
-    obs.viewHierarchy!.hierarchy.node = {
-      "resource-id": `${APP}:id/root`, "bounds": { left: 0, top: 0, right: 1080, bottom: 2400 },
-      "node": [{ clickable: true, text: "Tap me", bounds: B }],
-    } as never;
-    obs.layoutWarnings = { scope: "full", warnings: [{ ...warningAt(B), element: { text: "Tap me", bounds: B } }] };
-    const result = applyObserveScopeExperiments(obs, { focus: false, overview: true, region: false });
-    // The leaf is genuinely visible at B; its identity was stripped, so the
-    // anonymous survivor is a wildcard match and the warning is retained.
+    // Matched against the pre-collapse tree, where the "Buried" child is present
+    // and uniquely identified by its text — so the warning is retained (its
+    // location is shown, summarized into the kept card).
     expect(result.layoutWarnings?.warnings).toHaveLength(1);
+    expect(result.layoutWarnings?.scope).toBe("full");
   });
 
   test("downgrades a truncated list to 'scoped' and drops total once the hierarchy is pruned (finding 2)", () => {
@@ -649,6 +654,30 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     // conflicts with the sole survivor's, so only `kept`'s warning remains.
     const rids = (result.layoutWarnings?.warnings ?? []).map(w => w.element.resourceId);
     expect(rids).toEqual([`${APP}:id/kept`]);
+  });
+
+  test("rejects a same-bounds survivor whose content-desc conflicts (finding 10)", () => {
+    const B: Bounds = { left: 0, top: 100, right: 400, bottom: 160 };
+    const obs = androidFixture();
+    // Same bounds and text, but different content-desc and no resource-id.
+    obs.viewHierarchy!.hierarchy.node = {
+      "resource-id": `${APP}:id/root`, "bounds": { left: 0, top: 0, right: 1080, bottom: 2400 },
+      "node": [
+        { "resource-id": `${APP}:id/anchor`, "content-desc": "kept", "text": "OK", "bounds": B },
+        { "content-desc": "dropped", "text": "OK", "bounds": B },
+      ],
+    } as never;
+    const warn = (cd: string): Warning => ({ ...warningAt(B), element: { contentDesc: cd, text: "OK", bounds: B } });
+    obs.layoutWarnings = { scope: "full", warnings: [warn("kept"), warn("dropped")] };
+
+    const result = applyObserveScopeExperiments(obs, {
+      focus: true, focusAnchor: { resourceId: `${APP}:id/anchor` }, overview: false, region: false,
+    });
+
+    // Anchor focus keeps only the `kept` node; the shared text must not retain the
+    // `dropped` warning, because its content-desc conflicts with the survivor's.
+    const descs = (result.layoutWarnings?.warnings ?? []).map(w => w.element.contentDesc);
+    expect(descs).toEqual(["kept"]);
   });
 
   test("is pure — does not mutate the caller's layoutWarnings", () => {

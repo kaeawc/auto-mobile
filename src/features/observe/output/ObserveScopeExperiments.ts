@@ -603,6 +603,20 @@ export function applyObserveScopeExperiments(
   if (cfg.region) {
     runRegionStage(run, cfg);
   }
+
+  // Co-scope layoutWarnings against the FOCUS/REGION-pruned tree, captured BEFORE
+  // OVERVIEW (issue #5074). Those two transforms are lossless — kept nodes retain
+  // every attribute (including the iOS `$` bag that holds bounds/identity) — so
+  // matching is exact. OVERVIEW instead strips attributes and collapses leaves
+  // into kept ancestors (a structural summary, not a spatial removal), so reading
+  // identity from the post-OVERVIEW tree both drops iOS warnings wholesale (the
+  // `$` bag is gone) and cannot tell a collapsed child from its surviving parent.
+  // A warning for a leaf OVERVIEW summarizes is retained: its location is still
+  // shown, occupied by the kept ancestor whose `omittedDescendants` flags the
+  // collapse.
+  const survivors = collectSurvivorBoundsIdentity(rootNodes(run.current));
+  const prunedBeforeOverview = countNodes(rootNodes(run.current)) < nodesBefore;
+
   if (cfg.overview) {
     runOverviewStage(run);
   }
@@ -610,7 +624,7 @@ export function applyObserveScopeExperiments(
   // Every stage returns a fresh clone, so `run.current` is never the input here;
   // guard the theoretically-unreachable no-op case anyway.
   const out = run.current === input ? clone(input) : run.current;
-  scopeLayoutWarnings(out, countNodes(rootNodes(out)) < nodesBefore);
+  scopeLayoutWarnings(out, survivors, prunedBeforeOverview);
   out.observeScope = buildScopeMetadata({ ...run, current: out }, nodesBefore, gatedOff);
   return out;
 }
@@ -621,28 +635,22 @@ export function applyObserveScopeExperiments(
  * so a scoped response could otherwise list a warning for an element no longer
  * in the returned `viewHierarchy`.
  *
- * A warning survives only when a node at its element's bounds survives AND that
- * node is plausibly the *same* element. Bounds alone is ambiguous when a node and
- * a child share a rectangle (e.g. OVERVIEW keeps an addressable container but
- * drops its anonymous text child): correlating identity fields distinguishes
- * them. But some transforms strip identity from kept nodes (OVERVIEW keeps
- * `bounds`/`resource-id`/`content-desc` but drops `text`/`view-id`), so a
- * surviving node that carries *no* identity is treated as a wildcard match — it
- * is genuinely visible at that rectangle, and dropping its warning would be a
- * false negative. `readBounds` normalizes object and compact-tuple bounds, so
- * this is correct whether or not `--observe-result-compact` ran first.
+ * `survivors` is the identity index of the FOCUS/REGION-pruned tree, captured by
+ * the caller before OVERVIEW (see `applyObserveScopeExperiments`). A warning
+ * survives when a surviving node at its element's bounds is plausibly the *same*
+ * element — same identity, no conflicting identifier — with a wildcard when
+ * either side is genuinely identity-less (a bare bounds match).
  *
  * When scoping removes warnings, the list becomes `scope: "scoped"`. A
  * `truncated` list also becomes `scoped` once the hierarchy was pruned, since a
  * capped-away warning may belong to a pruned node — so `total` (the pre-cap count
  * of the *un-scoped* population) no longer describes what is shown and is dropped.
  */
-function scopeLayoutWarnings(out: ObserveResult, pruned: boolean): void {
+function scopeLayoutWarnings(out: ObserveResult, survivors: SurvivorIndex, pruned: boolean): void {
   const layoutWarnings = out.layoutWarnings;
   if (!layoutWarnings || layoutWarnings.warnings.length === 0) {
     return;
   }
-  const survivors = collectSurvivorBoundsIdentity(rootNodes(out));
   const kept = layoutWarnings.warnings.filter(warning => warningSurvives(warning, survivors));
   const dropped = kept.length !== layoutWarnings.warnings.length;
   // A `truncated` total counted the un-scoped population; once pruning hides
@@ -723,15 +731,22 @@ function hasAnyIdentity(id: WarningElement | NodeIdentity): boolean {
 
 /**
  * Whether a surviving node plausibly IS the warning's element.
- * - Reject when a strong identifier (`resource-id`/`view-id`) is populated on
- *   both sides but differs — two distinct nodes at one rectangle (issue #5074).
+ * - Reject when ANY identity field (`resource-id`/`view-id`/`content-desc`/`text`)
+ *   is populated on both sides but differs — two distinct nodes at one rectangle
+ *   (issue #5074). Since co-scoping runs against the lossless FOCUS/REGION tree,
+ *   every populated field is a reliable discriminator.
  * - Wildcard-keep when either side carries no identity: a genuinely-visible
- *   element sits here, and dropping its warning would be a false negative (the
- *   OVERVIEW identity-strip case).
+ *   element sits here (a bare bounds match), and dropping its warning would be a
+ *   false negative.
  * - Otherwise require at least one shared populated field.
  */
 function nodeMatchesWarning(node: NodeIdentity, element: WarningElement): boolean {
-  if (conflicts(element.resourceId, node.resourceId) || conflicts(element.viewId, node.viewId)) {
+  if (
+    conflicts(element.resourceId, node.resourceId)
+    || conflicts(element.viewId, node.viewId)
+    || conflicts(element.contentDesc, node.contentDesc)
+    || conflicts(element.text, node.text)
+  ) {
     return false;
   }
   if (!hasAnyIdentity(element) || !hasAnyIdentity(node)) {

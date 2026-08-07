@@ -204,6 +204,9 @@ public class CommandHandler: CommandHandling {
             case let .setNetworkMockRules(payload):
                 return try handleSetNetworkMockRules(payload, startTime: startTime)
 
+            case let .setNetworkFaultRules(payload):
+                return try handleSetNetworkFaultRules(payload, startTime: startTime)
+
             case let .setNetworkErrorSimulation(payload):
                 return try handleSetNetworkErrorSimulation(payload, startTime: startTime)
 
@@ -266,6 +269,20 @@ public class CommandHandler: CommandHandling {
         )
         let succeeded = sdkHierarchyClient?.setNetworkErrorSimulation(config) ?? false
         return SetNetworkErrorSimulationResponse(
+            requestId: request.requestId,
+            ok: succeeded,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleSetNetworkFaultRules(
+        _ request: RequestSetNetworkFaultRules,
+        startTime: Date
+    )
+        throws -> SetNetworkFaultRulesResponse
+    {
+        let succeeded = sdkHierarchyClient?.setNetworkFaultRules(request.rules) ?? false
+        return SetNetworkFaultRulesResponse(
             requestId: request.requestId,
             ok: succeeded,
             totalTimeMs: totalTimeMs(from: startTime)

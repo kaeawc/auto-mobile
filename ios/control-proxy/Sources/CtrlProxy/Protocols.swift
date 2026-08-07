@@ -301,6 +301,7 @@ public protocol SdkHierarchyFetching {
     func isAvailable() -> Bool
     /// Replace network mock rules in the in-app SDK.
     func setMockRules(_ rules: [NetworkMockRuleDTO]) -> Bool
+    func setNetworkFaultRules(_ rules: [NetworkFaultRuleDTO]) -> Bool
     /// Replace active network error simulation in the in-app SDK.
     func setNetworkErrorSimulation(_ config: NetworkErrorSimulationDTO) -> Bool
     /// Draw a highlight in the in-app SDK process.

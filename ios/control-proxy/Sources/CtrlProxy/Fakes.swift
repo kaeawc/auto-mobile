@@ -836,6 +836,7 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
     private var _lastHighlight: (id: String, shape: HighlightShape)?
     public var setMockRulesResult = true
     public var setNetworkErrorSimulationResult = true
+    public var setNetworkFaultRulesResult = true
     public var addHighlightResult: SdkHighlightOutcome = .unavailable
 
     public init() {}
@@ -984,6 +985,10 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         let result = setMockRulesResult
         lock.unlock()
         return result
+    }
+
+    public func setNetworkFaultRules(_ rules: [NetworkFaultRuleDTO]) -> Bool {
+        return setNetworkFaultRulesResult
     }
 
     public func setNetworkErrorSimulation(_ config: NetworkErrorSimulationDTO) -> Bool {

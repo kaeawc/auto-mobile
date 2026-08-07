@@ -1620,6 +1620,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       recompositionRate: null,
     };
 
+    // NOTE: this CtrlProxy snapshot is intentionally NOT fed into the observe
+    // `perfSnapshot` buffer. Its CADisplayLink fps/frame/jank measure the
+    // XCUITest *runner* process's own main-thread cadence, and its cpu/memory
+    // (task_info on the runner) describe the runner — none of it is the app
+    // under test. The app's real CPU/memory reach the buffer via
+    // PerformanceMonitor's host-side sampler (ps/simctl by bundle id). Feeding
+    // runner-cadence numbers here would present runner health as app perf.
+    // A real per-app iOS source is tracked in #5078; it still flows to the IDE
+    // stream below (unchanged existing behavior).
     try {
       server.pushPerformanceUpdate(this.device.deviceId, streamData);
       // Log occasionally to avoid spam

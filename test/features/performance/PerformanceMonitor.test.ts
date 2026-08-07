@@ -9,6 +9,7 @@ import {
   ExecFileAsyncFn,
 } from "../../../src/features/performance/PerformanceMonitor";
 import { LivePerformanceData } from "../../../src/daemon/performancePushSocketServer";
+import { PerfWindowBuffer } from "../../../src/features/performance/PerfWindowBuffer";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -553,6 +554,132 @@ describe("PerformanceMonitor", () => {
       expect(device2Data).toBeDefined();
       expect(device1Data!.packageName).toBe("com.app1");
       expect(device2Data!.packageName).toBe("com.app2");
+    });
+  });
+
+  describe("windowed buffer tap", () => {
+    it("records each Android sample into the injected PerfWindowBuffer", async () => {
+      const buffer = new PerfWindowBuffer();
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer
+      );
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      // The tick pushed metrics, so the buffer holds at least one sample and the
+      // snapshot exposes the gfxinfo-derived fps and dumpsys-derived cpu/memory.
+      const snap = buffer.snapshot("device-1", fakeTimer.now(), 60000);
+      expect(snap.sampleCount).toBeGreaterThanOrEqual(1);
+      expect(snap.fps).not.toBeNull();
+      expect(snap.memoryMb).not.toBeNull();
+    });
+
+    it("prefers gfxinfo's aggregate Janky frames over summing overlapping causes", async () => {
+      // Causes sum to 6 (2+1+3) but overlap; the aggregate "Janky frames: 4" is
+      // the deduplicated truth and must win.
+      fakeAdbClient.setCommandResult(
+        "shell dumpsys gfxinfo com.example.app reset",
+        `
+          Total frames rendered: 100
+          50th percentile: 8.5ms
+          Janky frames: 4 (4.00%)
+          Missed Vsync: 2
+          Slow UI thread: 1
+          Frame deadline missed: 3
+        `
+      );
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      expect(fakePusher.getLastPushedData()?.metrics.jankFrames).toBe(4);
+    });
+
+    it("falls back to summing causes when no aggregate Janky frames line exists", async () => {
+      // Default fixture has the three cause counters (2+1+3) and no aggregate.
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      expect(fakePusher.getLastPushedData()?.metrics.jankFrames).toBe(6);
+    });
+
+    it("clears the buffer when the monitored package changes", async () => {
+      const buffer = new PerfWindowBuffer();
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBeGreaterThanOrEqual(1);
+
+      // Switching the monitored package must drop app A's samples so the next
+      // snapshot cannot attribute them to app B.
+      monitor.startMonitoring("device-1", "com.other.app");
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBe(0);
+    });
+
+    it("clears the buffer when monitoring stops", async () => {
+      const buffer = new PerfWindowBuffer();
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBeGreaterThanOrEqual(1);
+
+      monitor.stopMonitoring("device-1");
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBe(0);
+    });
+
+    it("records raw null fps for idle intervals, not the cached stream value", async () => {
+      const buffer = new PerfWindowBuffer();
+      // Tick 1 renders frames (fps derived); later ticks are idle (no frames).
+      // The IDE stream keeps the cached fps, but the buffer must record the raw
+      // null so an idle app does not keep an old fps pinned in the window.
+      fakeAdbClient.setCommandResultSequence("shell dumpsys gfxinfo com.example.app reset", [
+        {
+          stdout: `
+            Total frames rendered: 100
+            50th percentile: 8.5ms
+            90th percentile: 12.3ms
+            95th percentile: 15.7ms
+            99th percentile: 22.1ms
+            Missed Vsync: 0
+          `,
+        },
+        { stdout: "Total frames rendered: 0\n" },
+        { stdout: "Total frames rendered: 0\n" },
+        { stdout: "Total frames rendered: 0\n" },
+        { stdout: "Total frames rendered: 0\n" },
+      ]);
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 5);
+
+      // A short window that excludes the single real-frame tick sees only idle
+      // samples: with the fix their fps is null → the window's fps is null.
+      // (Under the old cached-fps behavior it would still report the stale fps.)
+      const now = fakeTimer.now();
+      const idleOnly = buffer.snapshot("device-1", now, PerformanceMonitor.TICK_INTERVAL_MS * 2);
+      expect(idleOnly.sampleCount).toBeGreaterThanOrEqual(2);
+      expect(idleOnly.fps).toBeNull();
+      // Idle ticks fabricate 16ms touch latency for the stream, but the buffer
+      // records raw null so the fabricated value can't dominate the window.
+      expect(idleOnly.touchLatencyMs).toBeNull();
+      // Memory is collected every 10s; none is re-collected within this short
+      // trailing window, so the buffer holds only raw-null memory there (a stale
+      // cached value must not be recorded as an in-window sample).
+      expect(idleOnly.memoryMb).toBeNull();
     });
   });
 });

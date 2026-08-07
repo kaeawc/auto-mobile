@@ -155,6 +155,9 @@ function projectSkeleton(out: ObserveResult): void {
  * `performanceAudit.metrics` are removed.
  */
 function reduceTopLevelDebugPerfTelemetry(out: ObserveResult): void {
+  // NOTE: `out.perfSnapshot` (the opt-in windowed rollup) is deliberately NOT
+  // stripped here — it is a compact, user-facing summary meant to reach the
+  // client. Do not fold it into this debug-perf pruning.
   delete out.perfTiming;
 
   const auditMetrics = out.performanceAudit?.metrics;

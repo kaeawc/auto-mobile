@@ -35,6 +35,7 @@ export * from "./GrantIosSimulatorPermissionsResult";
 export * from "./GestureOptions";
 export * from "./GrantAndroidPermissionsResult";
 export * from "./GfxMetrics";
+export * from "./PerfSnapshot";
 export * from "./HomeScreenResult";
 export * from "./ImeActionResult";
 export * from "./InstalledApp";

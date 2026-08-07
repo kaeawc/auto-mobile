@@ -630,10 +630,12 @@ public struct TableDataResult: Sendable
   public let columns: [String]
   public let rows: [[String?]]
   public let totalRows: Int
-  public init(columns: [String], rows: [[String?]], totalRows: Int)
+  public let diagnostic: StorageDiagnostic?
+  public init(columns: [String], rows: [[String?]], totalRows: Int, diagnostic: StorageDiagnostic? = nil)
 public struct TableStructureResult: Sendable
   public let columns: [ColumnInfo]
-  public init(columns: [ColumnInfo])
+  public let diagnostic: StorageDiagnostic?
+  public init(columns: [ColumnInfo], diagnostic: StorageDiagnostic? = nil)
 public struct ColumnInfo: Sendable
   public let name: String
   public let type: String
@@ -647,7 +649,8 @@ public struct SQLExecutionResult: Sendable
   public let rowsAffected: Int
   public let error: String?
   public let diagnostic: StorageDiagnostic?
-  public init(columns: [String]?, rows: [[String?]]?, rowsAffected: Int, error: String? = nil, diagnostic: StorageDiagnostic? = nil)
+  public let truncated: Bool
+  public init( columns: [String]?, rows: [[String?]]?, rowsAffected: Int, error: String? = nil, diagnostic: StorageDiagnostic? = nil, truncated: Bool = false )
 
 // Storage/SQLiteDatabaseDriver.swift
 public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable

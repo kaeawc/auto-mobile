@@ -331,6 +331,13 @@ SQLite database inspection using the `sqlite3` C API directly:
 - Table listing, paginated data retrieval, schema inspection via `PRAGMA table_info`
 - Raw SQL execution with read/write detection (SELECT/EXPLAIN/PRAGMA = read-only, opens with `SQLITE_OPEN_READONLY`)
 - Connection caching, 5-second busy timeout, identifier sanitization
+- Read-only inspection is the default. Host mutation authorization and the
+  active SDK session are both required before a write can run.
+- Hosts can configure database path allowlists, app-group registrations,
+  Core Data metadata, sensitive-key redaction, and row/byte response limits.
+- Storage failures expose structured diagnostics for WAL, busy-lock,
+  migration/schema, and corrupted-store conditions; unavailable stores are
+  reported by the capabilities endpoint.
 - MCP `sqlQuery` and database resources are available on iOS through the DEBUG-only in-app SDK HTTP server on port 8766, relayed by CtrlProxy on port 8765. Apps must call `DatabaseInspector.shared.setEnabled(true)`.
 
 ## Other Subsystems

@@ -59,6 +59,11 @@ export interface SQLResult {
   rows?: any[][];
   /** Number of rows affected (mutation only) */
   rowsAffected?: number;
+  diagnostic?: {
+    code: string;
+    message: string;
+  };
+  truncated?: boolean;
 }
 
 

@@ -153,20 +153,24 @@ public struct TableDataResult: Sendable {
     public let columns: [String]
     public let rows: [[String?]]
     public let totalRows: Int
+    public let diagnostic: StorageDiagnostic?
 
-    public init(columns: [String], rows: [[String?]], totalRows: Int) {
+    public init(columns: [String], rows: [[String?]], totalRows: Int, diagnostic: StorageDiagnostic? = nil) {
         self.columns = columns
         self.rows = rows
         self.totalRows = totalRows
+        self.diagnostic = diagnostic
     }
 }
 
 /// Result of a table structure query containing column definitions.
 public struct TableStructureResult: Sendable {
     public let columns: [ColumnInfo]
+    public let diagnostic: StorageDiagnostic?
 
-    public init(columns: [ColumnInfo]) {
+    public init(columns: [ColumnInfo], diagnostic: StorageDiagnostic? = nil) {
         self.columns = columns
+        self.diagnostic = diagnostic
     }
 }
 
@@ -194,13 +198,22 @@ public struct SQLExecutionResult: Sendable {
     public let rowsAffected: Int
     public let error: String?
     public let diagnostic: StorageDiagnostic?
+    public let truncated: Bool
 
-    public init(columns: [String]?, rows: [[String?]]?, rowsAffected: Int, error: String? = nil, diagnostic: StorageDiagnostic? = nil) {
+    public init(
+        columns: [String]?,
+        rows: [[String?]]?,
+        rowsAffected: Int,
+        error: String? = nil,
+        diagnostic: StorageDiagnostic? = nil,
+        truncated: Bool = false
+    ) {
         self.columns = columns
         self.rows = rows
         self.rowsAffected = rowsAffected
         self.error = error
         self.diagnostic = diagnostic
+        self.truncated = truncated
     }
 }
 

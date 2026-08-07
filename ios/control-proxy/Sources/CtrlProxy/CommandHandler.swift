@@ -1436,9 +1436,11 @@ public class CommandHandler: CommandHandling {
                 success: true,
                 queryType: result.queryType,
                 columns: result.columns,
-                rows: result.rows,
-                rowsAffected: result.rowsAffected,
-                totalTimeMs: totalTimeMs(from: startTime)
+                    rows: result.rows,
+                    rowsAffected: result.rowsAffected,
+                    diagnostic: result.diagnostic,
+                    truncated: result.truncated,
+                    totalTimeMs: totalTimeMs(from: startTime)
             )
         } catch {
             return ExecuteSqlResponse(

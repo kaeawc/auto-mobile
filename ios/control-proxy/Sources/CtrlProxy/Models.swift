@@ -1449,6 +1449,8 @@ public struct ExecuteSqlResponse: Codable {
     public let rows: [[String?]]?
     public let rowsAffected: Int?
     public let error: String?
+    public let diagnostic: SdkStorageDiagnostic?
+    public let truncated: Bool?
     public let totalTimeMs: Int64?
 
     public init(
@@ -1459,6 +1461,8 @@ public struct ExecuteSqlResponse: Codable {
         rows: [[String?]]? = nil,
         rowsAffected: Int? = nil,
         error: String? = nil,
+        diagnostic: SdkStorageDiagnostic? = nil,
+        truncated: Bool? = nil,
         totalTimeMs: Int64? = nil
     ) {
         type = ResponseType.executeSqlResult.rawValue
@@ -1470,6 +1474,8 @@ public struct ExecuteSqlResponse: Codable {
         self.rows = rows
         self.rowsAffected = rowsAffected
         self.error = error
+        self.diagnostic = diagnostic
+        self.truncated = truncated
         self.totalTimeMs = totalTimeMs
     }
 }

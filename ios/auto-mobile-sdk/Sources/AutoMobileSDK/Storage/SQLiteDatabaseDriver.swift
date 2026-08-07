@@ -81,7 +81,12 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         defer { operationLock.unlock() }
 
         guard let db = openDatabase(path: databasePath, readOnly: true) else {
-            return TableDataResult(columns: [], rows: [], totalRows: 0)
+            return TableDataResult(
+                columns: [],
+                rows: [],
+                totalRows: 0,
+                diagnostic: StorageDiagnostic(code: "store_unavailable", message: "Failed to open database read-only")
+            )
         }
 
         // Keep the count and page in one read transaction so concurrent writes
@@ -112,7 +117,13 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             // tables.
             let fallbackQuery = "SELECT * FROM \"\(sanitizeIdentifier(table))\" LIMIT ? OFFSET ?"
             guard sqlite3_prepare_v2(db, fallbackQuery, -1, &dataStmt, nil) == SQLITE_OK else {
-                return TableDataResult(columns: [], rows: [], totalRows: totalRows)
+                let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
+                return TableDataResult(
+                    columns: [],
+                    rows: [],
+                    totalRows: totalRows,
+                    diagnostic: Self.diagnostic(for: message)
+                )
             }
         }
         defer { sqlite3_finalize(dataStmt) }
@@ -145,13 +156,17 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         defer { operationLock.unlock() }
 
         guard let db = openDatabase(path: databasePath, readOnly: true) else {
-            return TableStructureResult(columns: [])
+            return TableStructureResult(
+                columns: [],
+                diagnostic: StorageDiagnostic(code: "store_unavailable", message: "Failed to open database read-only")
+            )
         }
 
         let query = "PRAGMA table_info(\"\(sanitizeIdentifier(table))\")"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
-            return TableStructureResult(columns: [])
+            let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
+            return TableStructureResult(columns: [], diagnostic: Self.diagnostic(for: message))
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -398,17 +413,25 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         }
 
         var rows: [[String?]] = []
+        var bytesRead = 0
+        var truncated = false
         var stepResult = sqlite3_step(stmt)
         while stepResult == SQLITE_ROW {
             var row: [String?] = []
             for i in 0 ..< columnCount {
                 row.append(getColumnValue(stmt: stmt, index: Int32(i)))
             }
+            let rowBytes = row.reduce(0) { $0 + ($1?.utf8.count ?? 0) }
+            if rows.count >= 500 || bytesRead + rowBytes > 512 * 1024 {
+                truncated = true
+                break
+            }
             rows.append(row)
+            bytesRead += rowBytes
             stepResult = sqlite3_step(stmt)
         }
 
-        if stepResult != SQLITE_DONE {
+        if !truncated && stepResult != SQLITE_DONE {
             let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
             let diagnostic = Self.diagnostic(for: error)
             return SQLExecutionResult(
@@ -421,14 +444,20 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         }
 
         let rowsAffected = includeRowsAffected ? Int(sqlite3_changes(db)) : 0
-        return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: rowsAffected)
+        return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: rowsAffected, truncated: truncated)
     }
 
     private func executeMutation(db: OpaquePointer, query: String) -> SQLExecutionResult {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
             let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-            return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0, error: error)
+            return SQLExecutionResult(
+                columns: nil,
+                rows: nil,
+                rowsAffected: 0,
+                error: error,
+                diagnostic: Self.diagnostic(for: error)
+            )
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -446,16 +475,36 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                 }
             }
             var rows: [[String?]] = []
+            var bytesRead = 0
+            var truncated = false
             // First row is already stepped
+            var finalResult = SQLITE_ROW
             repeat {
                 var row: [String?] = []
                 for i in 0 ..< columnCount {
                     row.append(getColumnValue(stmt: stmt, index: Int32(i)))
                 }
+                let rowBytes = row.reduce(0) { $0 + ($1?.utf8.count ?? 0) }
+                if rows.count >= 500 || bytesRead + rowBytes > 512 * 1024 {
+                    truncated = true
+                    break
+                }
                 rows.append(row)
-            } while sqlite3_step(stmt) == SQLITE_ROW
+                bytesRead += rowBytes
+                finalResult = sqlite3_step(stmt)
+            } while finalResult == SQLITE_ROW
+            guard truncated || finalResult == SQLITE_DONE else {
+                let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
+                return SQLExecutionResult(
+                    columns: nil,
+                    rows: nil,
+                    rowsAffected: 0,
+                    error: error,
+                    diagnostic: Self.diagnostic(for: error)
+                )
+            }
             let changes = Int(sqlite3_changes(db))
-            return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: changes)
+            return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: changes, truncated: truncated)
         } else {
             let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
             let diagnostic = Self.diagnostic(for: error)

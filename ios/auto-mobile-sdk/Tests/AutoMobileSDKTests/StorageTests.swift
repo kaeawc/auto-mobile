@@ -693,6 +693,25 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
         XCTAssertEqual(payload.diagnostic?.code, "mutation_not_authorized")
     }
 
+    func testPragmaMutationRequiresExplicitAuthorization() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.setEnabled(true)
+
+        let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+            databasePath: "/app/Documents/app.db",
+            query: "PRAGMA user_version = 7"
+        ))
+        let response = SdkDatabaseRouteHandler().handleExecuteSql(body: body)
+
+        XCTAssertEqual(response.statusCode, 403)
+        XCTAssertTrue(fakeDriver.executeSqlCalls.isEmpty)
+    }
+
     func testQueryValuesAreRedactedAndBoundedBeforeTransport() throws {
         let fakeDriver = RouteFakeDatabaseDriver()
         fakeDriver.databases = [

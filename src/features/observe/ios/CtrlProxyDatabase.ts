@@ -25,6 +25,8 @@ interface ExecuteSqlResult extends DatabaseResultBase {
   columns?: string[];
   rows?: unknown[][];
   rowsAffected?: number;
+  diagnostic?: SQLResult["diagnostic"];
+  truncated?: boolean;
 }
 
 interface ListDatabasesResult extends DatabaseResultBase {
@@ -58,11 +60,13 @@ export class CtrlProxyDatabase {
     );
 
     return result.queryType === "mutation"
-      ? { type: "mutation", rowsAffected: result.rowsAffected ?? 0 }
+      ? { type: "mutation", rowsAffected: result.rowsAffected ?? 0, diagnostic: result.diagnostic, truncated: result.truncated }
       : {
         type: "query",
         columns: result.columns ?? [],
         rows: result.rows ?? [],
+        diagnostic: result.diagnostic,
+        truncated: result.truncated,
       };
   }
 

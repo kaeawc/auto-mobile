@@ -48,19 +48,35 @@ public struct SdkExecuteSqlResult: Codable, Equatable {
     public let rows: [[String?]]?
     public let rowsAffected: Int
     public let error: String?
+    public let diagnostic: SdkStorageDiagnostic?
+    public let truncated: Bool
 
     public init(
         queryType: String,
         columns: [String]? = nil,
         rows: [[String?]]? = nil,
         rowsAffected: Int,
-        error: String? = nil
+        error: String? = nil,
+        diagnostic: SdkStorageDiagnostic? = nil,
+        truncated: Bool = false
     ) {
         self.queryType = queryType
         self.columns = columns
         self.rows = rows
         self.rowsAffected = rowsAffected
         self.error = error
+        self.diagnostic = diagnostic
+        self.truncated = truncated
+    }
+}
+
+public struct SdkStorageDiagnostic: Codable, Equatable {
+    public let code: String
+    public let message: String
+
+    public init(code: String, message: String) {
+        self.code = code
+        self.message = message
     }
 }
 

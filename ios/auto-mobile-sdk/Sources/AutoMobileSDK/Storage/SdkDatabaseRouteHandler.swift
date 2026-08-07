@@ -48,6 +48,7 @@
         let rowsAffected: Int
         let error: String?
         let diagnostic: StorageDiagnostic?
+        let truncated: Bool
     }
 
     struct SdkDatabaseListPayload: Codable {
@@ -76,10 +77,12 @@
         let columns: [String]
         let rows: [[String?]]
         let total: Int
+        let diagnostic: StorageDiagnostic?
     }
 
     struct SdkTableStructurePayload: Codable {
         let columns: [SdkColumnInfoPayload]
+        let diagnostic: StorageDiagnostic?
     }
 
     struct SdkColumnInfoPayload: Codable {
@@ -166,7 +169,12 @@
                 configuredKeys: configuration.sensitiveKeys
             )
             let bounded = boundRows(redacted, maxBytes: configuration.maxBytes)
-            return encode(SdkTableDataPayload(columns: result.columns, rows: bounded, total: result.totalRows))
+            return encode(SdkTableDataPayload(
+                columns: result.columns,
+                rows: bounded,
+                total: result.totalRows,
+                diagnostic: result.diagnostic
+            ))
         }
 
         func handleTableStructure(body: Data) -> SdkRouteResponse {
@@ -184,15 +192,19 @@
             }
 
             let result = driver.getTableStructure(databasePath: request.databasePath, table: request.table)
+            let configuration = DatabaseInspector.shared.inspectionConfiguration
             return encode(SdkTableStructurePayload(columns: result.columns.map {
                 SdkColumnInfoPayload(
                     name: $0.name,
                     type: $0.type,
                     nullable: $0.isNullable,
                     primaryKey: $0.isPrimaryKey,
-                    defaultValue: $0.defaultValue
+                    defaultValue: StorageInspectionAccess.isSensitive(
+                        $0.name,
+                        configured: configuration.sensitiveKeys
+                    ) ? "[REDACTED]" : $0.defaultValue
                 )
-            }))
+            }, diagnostic: result.diagnostic))
         }
 
         func handleExecuteSql(body: Data) -> SdkRouteResponse {
@@ -232,7 +244,8 @@
                 rows: rows,
                 rowsAffected: result.rowsAffected,
                 error: result.error,
-                diagnostic: result.diagnostic
+                diagnostic: result.diagnostic,
+                truncated: result.truncated
             )
             return encode(payload)
         }
@@ -271,7 +284,8 @@
                 .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
                 .first?
                 .uppercased()
-            return keyword == "SELECT" || keyword == "EXPLAIN" || keyword == "PRAGMA"
+            return keyword == "SELECT" || keyword == "EXPLAIN"
+                || keyword == "PRAGMA" && !query.contains("=")
                 || keyword == "WITH" && !query.localizedCaseInsensitiveContains("INSERT")
                     && !query.localizedCaseInsensitiveContains("UPDATE")
                     && !query.localizedCaseInsensitiveContains("DELETE")

@@ -27,6 +27,24 @@ export const BOOTED_DEVICE_RESOURCE_URIS = {
   PLATFORM_TEMPLATE: "automobile:devices/booted/{platform}"
 } as const;
 
+// A lightweight per-device lock-state resource. The full booted-devices resource also carries
+// `locked`, but computing it there recomputes service status (isInstalled/isEnabled/sha256) for
+// every device — too heavy for the desktop's frequent lock poll (issue #5056). This resource
+// enumerates booted devices and runs ONLY the keyguard probe.
+export const DEVICE_LOCK_STATES_RESOURCE_URI = "automobile:devices/lockStates";
+
+// Per-device lock state. `locked` is Android-only (from the keyguard probe) and omitted when it
+// could not be read — a transient failure, or iOS, which has no lock probe.
+interface DeviceLockStateInfo {
+  deviceId: string;
+  locked?: boolean;
+}
+
+export interface DeviceLockStatesResourceContent {
+  lastUpdated: string;  // ISO 8601
+  lockStates: DeviceLockStateInfo[];
+}
+
 // Service status for a booted device
 interface DeviceServiceStatus {
   installed: boolean;
@@ -144,6 +162,85 @@ async function realDeviceLockProbe(device: BootedDevice): Promise<boolean | unde
   }
   const lock = await defaultAdbClientFactory.create(device).getDeviceLock();
   return lock?.locked;
+}
+
+const LOCK_STATE_TIMEOUT_MS = 3000;
+
+/** The active lock probe: an injected fake (tests) or the real adb probe when no fake manager is set. */
+function activeLockProbe(): DeviceLockProbe | null {
+  return injectedLockProbe ?? (serviceStatusEnabled ? realDeviceLockProbe : null);
+}
+
+/**
+ * Resolve a device's lock state via [lockProbe], bounded by a per-device timeout so a slow/failed
+ * read leaves it `undefined` rather than stalling the caller. Clears the losing timer when the probe
+ * wins, so a fast success never logs a spurious "timeout" on the desktop's periodic poll.
+ */
+async function probeDeviceLock(
+  device: BootedDevice,
+  lockProbe: DeviceLockProbe
+): Promise<boolean | undefined> {
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      lockProbe(device),
+      new Promise<undefined>(resolve => {
+        timeoutHandle = defaultTimer.setTimeout(() => {
+          logger.warn(`[BootedDeviceResources] Lock-state timeout for ${device.deviceId}`);
+          resolve(undefined);
+        }, LOCK_STATE_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    logger.warn(`[BootedDeviceResources] Failed to query lock state for ${device.deviceId}: ${error}`);
+    return undefined;
+  } finally {
+    if (timeoutHandle) {
+      defaultTimer.clearTimeout(timeoutHandle);
+    }
+  }
+}
+
+/**
+ * Compute the lightweight [DEVICE_LOCK_STATES_RESOURCE_URI] payload: enumerate booted devices and
+ * run ONLY the keyguard probe (no service-status), so the desktop's frequent lock poll doesn't pay
+ * for isInstalled/isEnabled/sha256 every cycle (issue #5056).
+ */
+async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceContent> {
+  const devices: BootedDevice[] = [];
+  for (const platform of ["android", "ios"] as Platform[]) {
+    try {
+      const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
+      devices.push(...discovery.devices);
+    } catch (error) {
+      logger.warn(`[DeviceLockStates] Failed to enumerate ${platform} booted devices: ${error}`);
+    }
+  }
+
+  const lockStates: DeviceLockStateInfo[] = devices.map(device => ({ deviceId: device.deviceId }));
+  const lockProbe = activeLockProbe();
+  if (lockProbe) {
+    const results = await Promise.allSettled(
+      devices.map(device => probeDeviceLock(device, lockProbe))
+    );
+    for (let i = 0; i < devices.length; i++) {
+      const result = results[i];
+      if (result.status === "fulfilled" && result.value !== undefined) {
+        lockStates[i] = { deviceId: devices[i].deviceId, locked: result.value };
+      }
+    }
+  }
+
+  return { lastUpdated: new Date().toISOString(), lockStates };
+}
+
+async function getDeviceLockStates(): Promise<ResourceContent> {
+  const content = await computeDeviceLockStates();
+  return {
+    uri: DEVICE_LOCK_STATES_RESOURCE_URI,
+    mimeType: "application/json",
+    text: JSON.stringify(content, null, 2)
+  };
 }
 
 // Convert BootedDevice to BootedDeviceInfo
@@ -417,40 +514,17 @@ async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<Boot
   // only with an injected probe (tests) or a real device manager (production), never against a fake
   // manager's mock devices. Best-effort with a per-device timeout: a slow/failed read leaves `locked`
   // unset rather than stalling the whole resource.
-  const lockProbe = injectedLockProbe ?? (serviceStatusEnabled ? realDeviceLockProbe : null);
+  const lockProbe = activeLockProbe();
   if (lockProbe) {
-    const LOCK_STATE_TIMEOUT_MS = 3000;
     const lockResults = await Promise.allSettled(
-      devices.map(async device => {
-        // The adb lock probe only needs the device identity; `source` (whose BootedDeviceInfo type
-        // is wider than BootedDevice's) is irrelevant, so omit it rather than force a cast.
-        const bootedDevice: BootedDevice = {
-          name: device.name,
-          platform: device.platform,
-          deviceId: device.deviceId,
-        };
-        // Clear the timeout when the probe wins so the losing timer never fires — otherwise, on the
-        // desktop's periodic poll, a fast successful probe still logs a spurious "timeout" every cycle.
-        let timeoutHandle: NodeJS.Timeout | undefined;
-        try {
-          return await Promise.race([
-            lockProbe(bootedDevice),
-            new Promise<undefined>(resolve => {
-              timeoutHandle = defaultTimer.setTimeout(() => {
-                logger.warn(`[BootedDeviceResources] Lock-state timeout for ${device.deviceId}`);
-                resolve(undefined);
-              }, LOCK_STATE_TIMEOUT_MS);
-            }),
-          ]);
-        } catch (error) {
-          logger.warn(`[BootedDeviceResources] Failed to query lock state for ${device.deviceId}: ${error}`);
-          return undefined;
-        } finally {
-          if (timeoutHandle) {
-            defaultTimer.clearTimeout(timeoutHandle);
-          }
-        }
-      })
+      // The adb lock probe only needs the device identity; `source` (whose BootedDeviceInfo type is
+      // wider than BootedDevice's) is irrelevant, so omit it rather than force a cast.
+      devices.map(device =>
+        probeDeviceLock(
+          { name: device.name, platform: device.platform, deviceId: device.deviceId },
+          lockProbe
+        )
+      )
     );
 
     for (let i = 0; i < devices.length; i++) {
@@ -576,12 +650,24 @@ export function registerBootedDeviceResources(): void {
     getBootedDevicesByPlatform
   );
 
+  // Register the lightweight per-device lock-state resource (issue #5056).
+  ResourceRegistry.register(
+    DEVICE_LOCK_STATES_RESOURCE_URI,
+    "Device Lock States",
+    "Per-device keyguard/lock state (Android). Lightweight — enumerates booted devices and runs only the keyguard probe, without the service-status computation the full booted-devices resource does.",
+    "application/json",
+    getDeviceLockStates
+  );
+
   logger.info("[BootedDeviceResources] Registered booted device resources");
 }
 
-// Send notifications for booted device resource updates
+// Send notifications for booted device resource updates. Both the full booted-devices resource and
+// the lightweight lock-states resource (#5056) enumerate the same booted inventory, so a device
+// starting/killing changes both — notify subscribers of each, not just the full resource.
 export async function notifyBootedDeviceResourcesUpdated(): Promise<void> {
   await ResourceRegistry.notifyResourcesUpdated([
-    BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED
+    BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
+    DEVICE_LOCK_STATES_RESOURCE_URI
   ]);
 }

@@ -95,6 +95,20 @@ data class DeviceImageInfo(
   val architecture: String? = null,
 )
 
+/** Response from the lightweight automobile:devices/lockStates resource (issue #5056). */
+@Serializable
+data class DeviceLockStatesResponse(
+  val lastUpdated: String = "",
+  val lockStates: List<DeviceLockStateInfo> = emptyList(),
+)
+
+@Serializable
+data class DeviceLockStateInfo(
+  val deviceId: String,
+  // Android keyguard state; omitted (null) when the daemon couldn't read it, or on iOS.
+  val locked: Boolean? = null,
+)
+
 /** Parser for device resource responses */
 object DeviceResourceParser {
   private val json = Json {
@@ -113,6 +127,14 @@ object DeviceResourceParser {
   fun parseDeviceImages(jsonString: String): DeviceImagesResponse? {
     return try {
       json.decodeFromString<DeviceImagesResponse>(jsonString)
+    } catch (e: Exception) {
+      null
+    }
+  }
+
+  fun parseLockStates(jsonString: String): DeviceLockStatesResponse? {
+    return try {
+      json.decodeFromString<DeviceLockStatesResponse>(jsonString)
     } catch (e: Exception) {
       null
     }

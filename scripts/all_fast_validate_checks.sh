@@ -18,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# shellcheck source=scripts/lib/shell-core.sh
+# shellcheck source=scripts/lib/shell-core.sh disable=SC1091
 source "$SCRIPT_DIR/lib/shell-core.sh"
 
 CHECK_NAMES=()

@@ -14,7 +14,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${PROJECT_ROOT}"
 mkdir -p scratch
 
-# shellcheck source=scripts/lib/shell-core.sh
+# shellcheck source=scripts/lib/shell-core.sh disable=SC1091
 source "${PROJECT_ROOT}/scripts/lib/shell-core.sh"
 ensure_node_modules "${PROJECT_ROOT}"
 

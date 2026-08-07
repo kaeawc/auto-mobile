@@ -30,7 +30,8 @@ class FrameMetricsCollectorTest {
 
   @Test
   fun `buildSnapshotJson omits frame fields when no frames rendered`() {
-    val json = JSONObject(FrameMetricsCollector.buildSnapshotJson("com.example", emptyList(), 1000L))
+    val json =
+      JSONObject(FrameMetricsCollector.buildSnapshotJson("com.example", emptyList(), 1000L))
 
     assertEquals(0, json.getInt("totalFrames"))
     assertFalse(json.has("fps"))

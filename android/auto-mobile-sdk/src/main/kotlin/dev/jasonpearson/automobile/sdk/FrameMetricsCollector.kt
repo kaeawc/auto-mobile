@@ -21,15 +21,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONObject
 
 /**
- * Collects the host app's real per-frame timing via
- * [Window.OnFrameMetricsAvailableListener] (API 24+) and broadcasts a 1s rollup
- * (fps / average frame time / jank count) to the CtrlProxy, mirroring
- * [RecompositionTracker]'s control-receiver + broadcast shape.
+ * Collects the host app's real per-frame timing via [Window.OnFrameMetricsAvailableListener] (API
+ * 24+) and broadcasts a 1s rollup (fps / average frame time / jank count) to the CtrlProxy,
+ * mirroring [RecompositionTracker]'s control-receiver + broadcast shape.
  *
- * Because it runs INSIDE the app process it measures the app's own rendering,
- * unlike the host-side `dumpsys gfxinfo` scrape — the whole point of #5076. It
- * attaches to each foreground Activity window through
- * [Application.ActivityLifecycleCallbacks] and delivers frame callbacks on a
+ * Because it runs INSIDE the app process it measures the app's own rendering, unlike the host-side
+ * `dumpsys gfxinfo` scrape — the whole point of #5076. It attaches to each foreground Activity
+ * window through [Application.ActivityLifecycleCallbacks] and delivers frame callbacks on a
  * dedicated background thread (the API forbids the main thread).
  */
 internal object FrameMetricsCollector {
@@ -37,11 +35,10 @@ internal object FrameMetricsCollector {
   private const val BROADCAST_INTERVAL_MS = 1000L
 
   /**
-   * A frame slower than one 60Hz refresh interval counts as jank. Conservative
-   * default: high-refresh displays render faster, so this never under-counts on
-   * 60Hz and only mildly over-counts on 90/120Hz. `FrameMetrics.DEADLINE` (the
-   * exact budget) only exists on API 31+, so a fixed threshold keeps the API-24
-   * floor.
+   * A frame slower than one 60Hz refresh interval counts as jank. Conservative default:
+   * high-refresh displays render faster, so this never under-counts on 60Hz and only mildly
+   * over-counts on 90/120Hz. `FrameMetrics.DEADLINE` (the exact budget) only exists on API 31+, so
+   * a fixed threshold keeps the API-24 floor.
    */
   private const val JANK_THRESHOLD_MS = 16.7
   private const val NANOS_PER_MS = 1_000_000.0
@@ -62,9 +59,8 @@ internal object FrameMetricsCollector {
   private val samples = ConcurrentLinkedQueue<FrameSample>()
 
   // Windows we've attached a listener to, so we can detach exactly once.
-  private val attachedWindows = Collections.synchronizedSet(
-    Collections.newSetFromMap(WeakHashMap<Window, Boolean>())
-  )
+  private val attachedWindows =
+    Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<Window, Boolean>()))
 
   internal data class FrameSample(val t: Long, val durationMs: Double)
 
@@ -162,15 +158,21 @@ internal object FrameMetricsCollector {
   }
 
   /**
-   * Build the broadcast payload from a window of frame samples. `fps` is
-   * `1000 / avgFrameTimeMs` (per-frame smoothness, matching the host's dumpsys
-   * derivation and pairing with `jankFrames`). When no frames rendered, only the
-   * metadata is present so the host reads fps/jank as unavailable rather than 0.
-   * Package-visible and pure for unit testing.
+   * Build the broadcast payload from a window of frame samples. `fps` is `1000 / avgFrameTimeMs`
+   * (per-frame smoothness, matching the host's dumpsys derivation and pairing with `jankFrames`).
+   * When no frames rendered, only the metadata is present so the host reads fps/jank as unavailable
+   * rather than 0. Package-visible and pure for unit testing.
    */
-  internal fun buildSnapshotJson(applicationId: String, window: List<FrameSample>, now: Long): String {
+  internal fun buildSnapshotJson(
+    applicationId: String,
+    window: List<FrameSample>,
+    now: Long,
+  ): String {
     val json =
-      JSONObject().put("timestamp", now).put("applicationId", applicationId).put("totalFrames", window.size)
+      JSONObject()
+        .put("timestamp", now)
+        .put("applicationId", applicationId)
+        .put("totalFrames", window.size)
     if (window.isNotEmpty()) {
       val avgFrameTimeMs = window.sumOf { it.durationMs } / window.size
       val jankFrames = window.count { it.durationMs > JANK_THRESHOLD_MS }
@@ -182,16 +184,15 @@ internal object FrameMetricsCollector {
 
   // ---- per-Activity window attach/detach ----------------------------------
 
-  private val frameListener =
-    Window.OnFrameMetricsAvailableListener { _, frameMetrics, _ ->
-      if (!enabled.get()) return@OnFrameMetricsAvailableListener
-      val durationMs = frameMetrics.getMetric(FrameMetrics.TOTAL_DURATION) / NANOS_PER_MS
-      samples.add(FrameSample(System.currentTimeMillis(), durationMs))
-      // Bound the queue; a healthy broadcast prunes it every second.
-      while (samples.size > MAX_SAMPLES) {
-        samples.poll() ?: break
-      }
+  private val frameListener = Window.OnFrameMetricsAvailableListener { _, frameMetrics, _ ->
+    if (!enabled.get()) return@OnFrameMetricsAvailableListener
+    val durationMs = frameMetrics.getMetric(FrameMetrics.TOTAL_DURATION) / NANOS_PER_MS
+    samples.add(FrameSample(System.currentTimeMillis(), durationMs))
+    // Bound the queue; a healthy broadcast prunes it every second.
+    while (samples.size > MAX_SAMPLES) {
+      samples.poll() ?: break
     }
+  }
 
   private fun attachWindow(window: Window?) {
     val handler = metricsHandler ?: return
@@ -257,7 +258,12 @@ internal object FrameMetricsCollector {
       )
     } else {
       @SuppressLint("UnspecifiedRegisterReceiverFlag")
-      context.registerReceiver(controlReceiver, filter, SdkConstants.PERMISSION_NETWORK_CONTROL, null)
+      context.registerReceiver(
+        controlReceiver,
+        filter,
+        SdkConstants.PERMISSION_NETWORK_CONTROL,
+        null,
+      )
     }
   }
 

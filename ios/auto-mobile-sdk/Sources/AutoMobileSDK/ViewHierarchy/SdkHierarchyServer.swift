@@ -123,6 +123,8 @@ final class SdkHierarchyServer: @unchecked Sendable {
                     }
                 } else if request.contains("POST /db/list") {
                     self.sendRouteResponse(connection, self.databaseRouteHandler.handleListDatabases())
+                } else if request.contains("POST /db/capabilities") {
+                    self.sendRouteResponse(connection, self.databaseRouteHandler.handleCapabilities())
                 } else if request.contains("POST /db/tables") {
                     self.handleBodyRoute(connection, initialData: requestData) {
                         self.databaseRouteHandler.handleListTables(body: $0)

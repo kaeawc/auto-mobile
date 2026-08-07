@@ -9,6 +9,20 @@
     struct SdkExecuteSqlRequest: Codable {
         let databasePath: String
         let query: String
+        let sessionId: String?
+
+        init(databasePath: String, query: String, sessionId: String? = nil) {
+            self.databasePath = databasePath
+            self.query = query
+            self.sessionId = sessionId
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            databasePath = try container.decode(String.self, forKey: .databasePath)
+            query = try container.decode(String.self, forKey: .query)
+            sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId)
+        }
     }
 
     struct SdkDatabasePathRequest: Codable {
@@ -33,10 +47,19 @@
         let rows: [[String?]]?
         let rowsAffected: Int
         let error: String?
+        let diagnostic: StorageDiagnostic?
     }
 
     struct SdkDatabaseListPayload: Codable {
         let databases: [SdkDatabaseDescriptorPayload]
+    }
+
+    struct SdkStorageCapabilitiesPayload: Codable {
+        let readOnly: Bool
+        let mutationAuthorized: Bool
+        let registeredAppGroupSuites: [String]
+        let coreDataStores: [CoreDataStoreRegistration]
+        let unavailableStores: [String]
     }
 
     struct SdkDatabaseDescriptorPayload: Codable {
@@ -69,15 +92,34 @@
 
     struct SdkDatabaseErrorPayload: Codable {
         let error: String
+        let diagnostic: StorageDiagnostic?
     }
 
     final class SdkDatabaseRouteHandler {
+        func handleCapabilities() -> SdkRouteResponse {
+            let configuration = DatabaseInspector.shared.inspectionConfiguration
+            return encode(SdkStorageCapabilitiesPayload(
+                readOnly: !configuration.allowMutations,
+                mutationAuthorized: DatabaseInspector.shared.canMutate(
+                    sessionId: nil,
+                    currentSessionId: AutoMobileSDK.shared.currentSessionId()
+                ),
+                registeredAppGroupSuites: configuration.registeredAppGroupSuites.sorted(),
+                coreDataStores: configuration.coreDataStores,
+                unavailableStores: ["keychain", "file_caches"]
+            ))
+        }
+
         func handleListDatabases() -> SdkRouteResponse {
             guard let driver = DatabaseInspector.shared.getDriver() else {
                 return error(statusCode: 503, code: "db_inspection_disabled")
             }
 
-            let databases = driver.getDatabases().map {
+            let configuration = DatabaseInspector.shared.inspectionConfiguration
+            let databases = driver.getDatabases().filter { descriptor in
+                configuration.allowedDatabasePaths.isEmpty
+                    || configuration.allowedDatabasePaths.contains(descriptor.path)
+            }.map {
                 SdkDatabaseDescriptorPayload(name: $0.name, path: $0.path, sizeBytes: $0.sizeBytes)
             }
             return encode(SdkDatabaseListPayload(databases: databases))
@@ -114,10 +156,17 @@
             let result = driver.getTableData(
                 databasePath: request.databasePath,
                 table: request.table,
-                limit: request.limit,
-                offset: request.offset
+                limit: min(max(request.limit, 1), DatabaseInspector.shared.inspectionConfiguration.maxRows),
+                offset: max(request.offset, 0)
             )
-            return encode(SdkTableDataPayload(columns: result.columns, rows: result.rows, total: result.totalRows))
+            let configuration = DatabaseInspector.shared.inspectionConfiguration
+            let redacted = StorageInspectionAccess.redactedRows(
+                columns: result.columns,
+                rows: Array(result.rows.prefix(configuration.maxRows)),
+                configuredKeys: configuration.sensitiveKeys
+            )
+            let bounded = boundRows(redacted, maxBytes: configuration.maxBytes)
+            return encode(SdkTableDataPayload(columns: result.columns, rows: bounded, total: result.totalRows))
         }
 
         func handleTableStructure(body: Data) -> SdkRouteResponse {
@@ -157,19 +206,44 @@
                 return error(statusCode: 404, code: "unknown_database_path")
             }
 
+            if !isReadOnlyQuery(request.query)
+                && !DatabaseInspector.shared.canMutate(
+                    sessionId: request.sessionId,
+                    currentSessionId: AutoMobileSDK.shared.currentSessionId()
+                ) {
+                return error(statusCode: 403, code: "mutation_not_authorized")
+            }
             let result = driver.executeSQL(databasePath: request.databasePath, query: request.query)
+            let configuration = DatabaseInspector.shared.inspectionConfiguration
+            let columns = result.columns
+            let rows = columns.map {
+                boundRows(
+                    StorageInspectionAccess.redactedRows(
+                        columns: $0,
+                        rows: Array((result.rows ?? []).prefix(configuration.maxRows)),
+                        configuredKeys: configuration.sensitiveKeys
+                    ),
+                    maxBytes: configuration.maxBytes
+                )
+            }
             let payload = SdkExecuteSqlPayload(
                 queryType: result.columns == nil ? "mutation" : "query",
-                columns: result.columns,
-                rows: result.rows,
+                columns: columns,
+                rows: rows,
                 rowsAffected: result.rowsAffected,
-                error: result.error
+                error: result.error,
+                diagnostic: result.diagnostic
             )
             return encode(payload)
         }
 
         private func isKnownDatabasePath(_ databasePath: String, driver: DatabaseDriver) -> Bool {
-            driver.getDatabases().contains { $0.path == databasePath }
+            let configuration = DatabaseInspector.shared.inspectionConfiguration
+            return driver.getDatabases().contains { descriptor in
+                descriptor.path == databasePath
+                    && (configuration.allowedDatabasePaths.isEmpty
+                        || configuration.allowedDatabasePaths.contains(databasePath))
+            }
         }
 
         private func isKnownTable(_ table: String, databasePath: String, driver: DatabaseDriver) -> Bool {
@@ -184,9 +258,35 @@
         }
 
         private func error(statusCode: Int, code: String) -> SdkRouteResponse {
-            let payload = SdkDatabaseErrorPayload(error: code)
+            let payload = SdkDatabaseErrorPayload(
+                error: code,
+                diagnostic: StorageDiagnostic(code: code, message: code)
+            )
             let body = (try? JSONEncoder().encode(payload)) ?? Data("{\"error\":\"\(code)\"}".utf8)
             return SdkRouteResponse(statusCode: statusCode, body: body)
+        }
+
+        private func isReadOnlyQuery(_ query: String) -> Bool {
+            let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
+                .first?
+                .uppercased()
+            return keyword == "SELECT" || keyword == "EXPLAIN" || keyword == "PRAGMA"
+                || keyword == "WITH" && !query.localizedCaseInsensitiveContains("INSERT")
+                    && !query.localizedCaseInsensitiveContains("UPDATE")
+                    && !query.localizedCaseInsensitiveContains("DELETE")
+        }
+
+        private func boundRows(_ rows: [[String?]], maxBytes: Int) -> [[String?]] {
+            var used = 0
+            var result: [[String?]] = []
+            for row in rows {
+                let bytes = row.reduce(0) { $0 + ($1?.utf8.count ?? 0) }
+                guard used + bytes <= maxBytes else { break }
+                result.append(row)
+                used += bytes
+            }
+            return result
         }
     }
 #endif

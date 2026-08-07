@@ -84,6 +84,14 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             return TableDataResult(columns: [], rows: [], totalRows: 0)
         }
 
+        // Keep the count and page in one read transaction so concurrent writes
+        // cannot make the page and total describe different snapshots.
+        _ = sqlite3_exec(db, "BEGIN", nil, nil, nil)
+        defer { _ = sqlite3_exec(db, "ROLLBACK", nil, nil, nil) }
+
+        let boundedLimit = max(0, min(limit, 500))
+        let boundedOffset = max(0, offset)
+
         // Get total count
         let countQuery = "SELECT COUNT(*) FROM \"\(sanitizeIdentifier(table))\""
         var countStmt: OpaquePointer?
@@ -96,15 +104,21 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         sqlite3_finalize(countStmt)
 
         // Get paginated data
-        let dataQuery = "SELECT * FROM \"\(sanitizeIdentifier(table))\" LIMIT ? OFFSET ?"
+        let dataQuery = "SELECT * FROM \"\(sanitizeIdentifier(table))\" ORDER BY rowid LIMIT ? OFFSET ?"
         var dataStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, dataQuery, -1, &dataStmt, nil) == SQLITE_OK else {
-            return TableDataResult(columns: [], rows: [], totalRows: totalRows)
+        if sqlite3_prepare_v2(db, dataQuery, -1, &dataStmt, nil) != SQLITE_OK {
+            // WITHOUT ROWID tables have no implicit ordering column. Keep them
+            // readable while preserving deterministic ordering for ordinary
+            // tables.
+            let fallbackQuery = "SELECT * FROM \"\(sanitizeIdentifier(table))\" LIMIT ? OFFSET ?"
+            guard sqlite3_prepare_v2(db, fallbackQuery, -1, &dataStmt, nil) == SQLITE_OK else {
+                return TableDataResult(columns: [], rows: [], totalRows: totalRows)
+            }
         }
         defer { sqlite3_finalize(dataStmt) }
 
-        sqlite3_bind_int(dataStmt, 1, Int32(limit))
-        sqlite3_bind_int(dataStmt, 2, Int32(offset))
+        sqlite3_bind_int(dataStmt, 1, Int32(boundedLimit))
+        sqlite3_bind_int(dataStmt, 2, Int32(boundedOffset))
 
         let columnCount = Int(sqlite3_column_count(dataStmt))
         var columns: [String] = []
@@ -168,7 +182,17 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let classification = classifySQL(trimmed)
         guard let db = openDatabase(path: databasePath, readOnly: classification.readOnly) else {
-            return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0, error: "Failed to open database")
+            let diagnostic = StorageDiagnostic(
+                code: "store_unavailable",
+                message: "Failed to open database in \(classification.readOnly ? "read-only" : "read-write") mode"
+            )
+            return SQLExecutionResult(
+                columns: nil,
+                rows: nil,
+                rowsAffected: 0,
+                error: diagnostic.message,
+                diagnostic: diagnostic
+            )
         }
 
         if classification.returnsRows {
@@ -354,7 +378,14 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
             let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-            return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0, error: error)
+            let diagnostic = Self.diagnostic(for: error)
+            return SQLExecutionResult(
+                columns: nil,
+                rows: nil,
+                rowsAffected: 0,
+                error: error,
+                diagnostic: diagnostic
+            )
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -379,7 +410,14 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
         if stepResult != SQLITE_DONE {
             let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-            return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0, error: error)
+            let diagnostic = Self.diagnostic(for: error)
+            return SQLExecutionResult(
+                columns: nil,
+                rows: nil,
+                rowsAffected: 0,
+                error: error,
+                diagnostic: diagnostic
+            )
         }
 
         let rowsAffected = includeRowsAffected ? Int(sqlite3_changes(db)) : 0
@@ -420,8 +458,32 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: changes)
         } else {
             let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-            return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0, error: error)
+            let diagnostic = Self.diagnostic(for: error)
+            return SQLExecutionResult(
+                columns: nil,
+                rows: nil,
+                rowsAffected: 0,
+                error: error,
+                diagnostic: diagnostic
+            )
         }
+    }
+
+    private static func diagnostic(for message: String) -> StorageDiagnostic {
+        let code: String
+        switch message.lowercased() {
+        case let value where value.contains("locked") || value.contains("busy"):
+            code = "busy_lock"
+        case let value where value.contains("malformed") || value.contains("corrupt"):
+            code = "corrupt_store"
+        case let value where value.contains("no such table") || value.contains("schema"):
+            code = "migration_or_schema"
+        case let value where value.contains("wal"):
+            code = "wal_error"
+        default:
+            code = "sqlite_error"
+        }
+        return StorageDiagnostic(code: code, message: message)
     }
 
     private func getColumnValue(stmt: OpaquePointer?, index: Int32) -> String? {

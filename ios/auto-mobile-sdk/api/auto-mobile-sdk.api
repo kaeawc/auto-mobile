@@ -614,6 +614,11 @@ public final class DatabaseInspector: @unchecked Sendable
   public static let shared = DatabaseInspector()
   public var isEnabled: Bool
   public func setEnabled(_ enabled: Bool)
+  public func configure(_ configuration: StorageInspectionConfiguration)
+  public func registerAppGroupSuite(_ suiteName: String)
+  public func registerCoreDataStore(_ store: CoreDataStoreRegistration)
+  public func authorizeHostMutations(_ authorized: Bool)
+  public func authorizeSessionMutations(sessionId: String?)
   public func getDriver() -> DatabaseDriver?
 public protocol DatabaseDriver: Sendable
 public struct DatabaseDescriptor: Sendable
@@ -641,7 +646,8 @@ public struct SQLExecutionResult: Sendable
   public let rows: [[String?]]?
   public let rowsAffected: Int
   public let error: String?
-  public init(columns: [String]?, rows: [[String?]]?, rowsAffected: Int, error: String? = nil)
+  public let diagnostic: StorageDiagnostic?
+  public init(columns: [String]?, rows: [[String?]]?, rowsAffected: Int, error: String? = nil, diagnostic: StorageDiagnostic? = nil)
 
 // Storage/SQLiteDatabaseDriver.swift
 public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable
@@ -652,6 +658,26 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable
   public func getTableStructure(databasePath: String, table: String) -> TableStructureResult
   public func executeSQL(databasePath: String, query: String) -> SQLExecutionResult
   public func closeAll()
+
+// Storage/StorageInspectionPolicy.swift
+public struct CoreDataStoreRegistration: Sendable, Codable
+  public let identifier: String
+  public let modelVersion: String?
+  public let entities: [String]
+  public init(identifier: String, modelVersion: String? = nil, entities: [String] = [])
+public struct StorageInspectionConfiguration: Sendable
+  public var allowedDatabasePaths: Set<String>
+  public var registeredAppGroupSuites: Set<String>
+  public var coreDataStores: [CoreDataStoreRegistration]
+  public var sensitiveKeys: Set<String>
+  public var maxRows: Int
+  public var maxBytes: Int
+  public var allowMutations: Bool
+  public init( allowedDatabasePaths: Set<String> = [], registeredAppGroupSuites: Set<String> = [], coreDataStores: [CoreDataStoreRegistration] = [], sensitiveKeys: Set<String> = [], maxRows: Int = 500, maxBytes: Int = 512 * 1024, allowMutations: Bool = false )
+public struct StorageDiagnostic: Sendable, Codable, Equatable
+  public let code: String
+  public let message: String
+  public init(code: String, message: String)
 
 // Storage/UserDefaultsInspector.swift
 public final class UserDefaultsInspector: @unchecked Sendable

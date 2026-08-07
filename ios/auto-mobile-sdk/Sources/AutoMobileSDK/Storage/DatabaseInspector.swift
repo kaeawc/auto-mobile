@@ -8,6 +8,9 @@ public final class DatabaseInspector: @unchecked Sendable {
     private let lock = NSLock()
     private var _isEnabled = false
     private var _driver: DatabaseDriver?
+    private var _configuration = StorageInspectionConfiguration()
+    private var _hostMutationAuthorization = false
+    private var _sessionMutationAuthorization: String?
 
     private init() {}
 
@@ -31,6 +34,58 @@ public final class DatabaseInspector: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Configure explicit storage registrations and transport limits.
+    public func configure(_ configuration: StorageInspectionConfiguration) {
+        lock.lock()
+        _configuration = configuration
+        lock.unlock()
+    }
+
+    /// Register an app-group suite for host-coordinated inspection.
+    public func registerAppGroupSuite(_ suiteName: String) {
+        lock.lock()
+        _configuration.registeredAppGroupSuites.insert(suiteName)
+        lock.unlock()
+    }
+
+    /// Register Core Data metadata supplied by the host.
+    public func registerCoreDataStore(_ store: CoreDataStoreRegistration) {
+        lock.lock()
+        _configuration.coreDataStores.removeAll { $0.identifier == store.identifier }
+        _configuration.coreDataStores.append(store)
+        lock.unlock()
+    }
+
+    /// Authorize the host half of the mutation gate.
+    public func authorizeHostMutations(_ authorized: Bool) {
+        lock.lock()
+        _hostMutationAuthorization = authorized
+        lock.unlock()
+    }
+
+    /// Authorize mutations for one active SDK session.
+    public func authorizeSessionMutations(sessionId: String?) {
+        lock.lock()
+        _sessionMutationAuthorization = sessionId
+        lock.unlock()
+    }
+
+    var inspectionConfiguration: StorageInspectionConfiguration {
+        lock.lock()
+        defer { lock.unlock() }
+        return _configuration
+    }
+
+    func canMutate(sessionId: String?, currentSessionId: String?) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _configuration.allowMutations
+            && _hostMutationAuthorization
+            && sessionId != nil
+            && sessionId == currentSessionId
+            && sessionId == _sessionMutationAuthorization
+    }
+
     /// Get the driver for direct access.
     public func getDriver() -> DatabaseDriver? {
         lock.lock()
@@ -51,6 +106,9 @@ public final class DatabaseInspector: @unchecked Sendable {
         lock.lock()
         _isEnabled = false
         _driver = nil
+        _configuration = StorageInspectionConfiguration()
+        _hostMutationAuthorization = false
+        _sessionMutationAuthorization = nil
         lock.unlock()
     }
 }
@@ -135,12 +193,14 @@ public struct SQLExecutionResult: Sendable {
     public let rows: [[String?]]?
     public let rowsAffected: Int
     public let error: String?
+    public let diagnostic: StorageDiagnostic?
 
-    public init(columns: [String]?, rows: [[String?]]?, rowsAffected: Int, error: String? = nil) {
+    public init(columns: [String]?, rows: [[String?]]?, rowsAffected: Int, error: String? = nil, diagnostic: StorageDiagnostic? = nil) {
         self.columns = columns
         self.rows = rows
         self.rowsAffected = rowsAffected
         self.error = error
+        self.diagnostic = diagnostic
     }
 }
 

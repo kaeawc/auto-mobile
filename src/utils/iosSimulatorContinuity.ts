@@ -1,0 +1,362 @@
+import { createHash } from "node:crypto";
+import { redactHomeDir } from "./redactPath";
+
+/**
+ * macOS host contract for managed iOS simulator continuity (issue #5104).
+ *
+ * These are the pure decision functions behind the deployment-continuity
+ * validation: given the evidence captured for one managed simulator before and
+ * after a worker/AutoMobile rollout, classify what actually happened and decide
+ * whether continuity was *proven* (and therefore whether the deploy gate should
+ * pass). "A successful inventory listing alone is not continuity evidence" — so
+ * identity, boot state, responsiveness, reporting, and the CoreSimulator data
+ * root are all weighed, not just presence in a device list.
+ *
+ * The capture side (shelling to `simctl`, reading host identity, etc.) lives in
+ * the runbook and the CLI that wraps these functions; keeping the classifier
+ * pure is what lets it be unit-tested deterministically and run in CI.
+ */
+
+/** Lifecycle state of a managed simulator at a point in time. */
+export type SimulatorLifecycleState =
+  | "booted"
+  | "shutdown"
+  | "booting"
+  | "shutting-down"
+  | "unknown";
+
+/** Whether AutoMobile/worker reporting was observed for the device. */
+export type ReportingStatus = "reporting" | "delayed" | "lost" | "unknown";
+
+/**
+ * A point-in-time capture of one managed simulator plus the host/worker context
+ * needed to prove continuity. Every field in the issue's "Required Pre/Post
+ * Deploy Evidence" list is represented so the same shape is captured before and
+ * after a deploy.
+ */
+export interface ContinuitySnapshot {
+  /** Simulator UDID (the 8-4-4-4-12 CoreSimulator identity). */
+  readonly udid: string;
+  /** Runtime + device type, e.g. "iOS 17.5 / iPhone 15". */
+  readonly runtimeDeviceType: string;
+  /** Managed host identity (hostname or stable host id). */
+  readonly hostIdentity: string;
+  /** AutoMobile package/version, e.g. "@kaeawc/auto-mobile@0.0.45". */
+  readonly automobileVersion: string;
+  /** Worker incarnation id — changes when the worker process is replaced. */
+  readonly workerIncarnation: string;
+  /** Process supervisor, e.g. "launchd". */
+  readonly processSupervisor: string;
+  /** Relevant process identifiers (daemon, runner, CoreSimulator service...). */
+  readonly processIds: Readonly<Record<string, number>>;
+  /** CoreSimulator data root / stable storage identity for this device. */
+  readonly coreSimulatorDataRoot: string;
+  /**
+   * ISO timestamp of when the *current* boot session began. If this falls
+   * inside the deploy window the running simulator did not survive even when the
+   * UDID and data root did — that is boot recovery, not continuity. Optional
+   * because not every host can report it; when absent a reboot cannot be proven.
+   */
+  readonly bootedSince?: string;
+  /** Simulator lifecycle state. */
+  readonly lifecycleState: SimulatorLifecycleState;
+  /** Whether the simulator answered a responsiveness probe. */
+  readonly responsive: boolean;
+  /** AutoMobile/worker reporting status. */
+  readonly reportingStatus: ReportingStatus;
+  /** Whether an active lease, execution, or drain was present. */
+  readonly activeWork: boolean;
+}
+
+/** The deployment window the evidence brackets. */
+export interface DeploymentWindow {
+  /** ISO timestamp the deploy started. */
+  readonly startedAt: string;
+  /** ISO timestamp the deploy completed. */
+  readonly completedAt: string;
+  /**
+   * The operator declared this deploy an intentional, controlled replacement of
+   * this device. A new UDID / data root is only acceptable continuity when this
+   * is set — otherwise a changed identity is treated as orphaned/erased state.
+   */
+  readonly plannedReplacement?: boolean;
+}
+
+/** The distinguished continuity outcomes (issue #5104, AC5). */
+export type ContinuityVerdict =
+  | "same-device-continuity"
+  | "controlled-replacement"
+  | "boot-recovery"
+  | "shutdown"
+  | "reporting-delay"
+  | "orphaned-or-erased-state"
+  | "failed-probe"
+  | "incomplete-evidence";
+
+/** Whether the recommended post-deploy state is leaseable or held out. */
+export type RecommendedState = "available" | "maintenance";
+
+/** The outcome of classifying one before/after pair. */
+export interface ContinuityResult {
+  readonly verdict: ContinuityVerdict;
+  /** True only when acceptable continuity is *proven*. */
+  readonly proven: boolean;
+  /** What the device should be marked as until fresh evidence exists. */
+  readonly recommendedState: RecommendedState;
+  /** Human-readable reasons behind the verdict. */
+  readonly reasons: readonly string[];
+}
+
+/** A full evidence record for one managed simulator across a deploy. */
+export interface ContinuityEvidence {
+  readonly before: ContinuitySnapshot;
+  readonly after: ContinuitySnapshot;
+  readonly deploy: DeploymentWindow;
+  /** Optional attached classification result. */
+  readonly result?: ContinuityResult;
+}
+
+/**
+ * A snapshot with sensitive fields replaced by one-way tokens. The token fields
+ * are strings (not the raw UDID/host/PIDs) because that is what redaction
+ * produces; keeping a distinct type avoids pretending a token is still a PID.
+ */
+export interface RedactedContinuitySnapshot extends Omit<
+  ContinuitySnapshot,
+  "udid" | "hostIdentity" | "workerIncarnation" | "coreSimulatorDataRoot" | "processIds"
+> {
+  readonly udid: string;
+  readonly hostIdentity: string;
+  readonly workerIncarnation: string;
+  readonly coreSimulatorDataRoot: string;
+  readonly processIds: Readonly<Record<string, string>>;
+}
+
+/** A redacted evidence record safe to retain or share. */
+export interface RedactedContinuityEvidence {
+  readonly before: RedactedContinuitySnapshot;
+  readonly after: RedactedContinuitySnapshot;
+  readonly deploy: DeploymentWindow;
+  readonly result?: ContinuityResult;
+}
+
+/** Verdicts that count as acceptable, proven continuity. */
+const PROVEN_VERDICTS: ReadonlySet<ContinuityVerdict> = new Set<ContinuityVerdict>([
+  "same-device-continuity",
+  "controlled-replacement",
+]);
+
+/** Identity/context fields that must be present for evidence to be usable. */
+function hasRequiredIdentity(snapshot: ContinuitySnapshot): boolean {
+  return (
+    snapshot.udid.trim().length > 0 &&
+    snapshot.runtimeDeviceType.trim().length > 0 &&
+    snapshot.hostIdentity.trim().length > 0 &&
+    snapshot.automobileVersion.trim().length > 0 &&
+    snapshot.workerIncarnation.trim().length > 0 &&
+    snapshot.processSupervisor.trim().length > 0 &&
+    snapshot.coreSimulatorDataRoot.trim().length > 0 &&
+    snapshot.reportingStatus !== "unknown"
+  );
+}
+
+/** True when the device's current boot session began inside the deploy window. */
+function rebootedDuringWindow(after: ContinuitySnapshot, deploy: DeploymentWindow): boolean {
+  if (!after.bootedSince) {
+    return false;
+  }
+  const bootedAt = Date.parse(after.bootedSince);
+  const windowStart = Date.parse(deploy.startedAt);
+  if (Number.isNaN(bootedAt) || Number.isNaN(windowStart)) {
+    return false;
+  }
+  return bootedAt >= windowStart;
+}
+
+/** A verdict plus its reason, or null when a rule does not apply. */
+interface RuleHit {
+  readonly verdict: ContinuityVerdict;
+  readonly reason: string;
+}
+type ContinuityRule = (
+  before: ContinuitySnapshot,
+  after: ContinuitySnapshot,
+  deploy: DeploymentWindow,
+) => RuleHit | null;
+
+function hit(verdict: ContinuityVerdict, reason: string): RuleHit {
+  return { verdict, reason };
+}
+
+/** True when the after-snapshot identity or CoreSimulator data root changed. */
+function identityChanged(before: ContinuitySnapshot, after: ContinuitySnapshot): boolean {
+  return after.udid !== before.udid || after.coreSimulatorDataRoot !== before.coreSimulatorDataRoot;
+}
+
+/**
+ * Ordered rules, from "cannot tell" to "clean continuity". The first rule that
+ * fires wins, so an earlier, more serious finding takes precedence: incomplete
+ * evidence and failed probes short-circuit before any continuity claim, and an
+ * unexplained identity/data change is flagged as orphaned state (the AC3 guard)
+ * rather than silently accepted. If no rule fires it is same-device continuity.
+ */
+const CONTINUITY_RULES: readonly ContinuityRule[] = [
+  // 1. Incomplete evidence — required identity/context missing on either side.
+  (before, after) =>
+    hasRequiredIdentity(before) && hasRequiredIdentity(after)
+      ? null
+      : hit(
+          "incomplete-evidence",
+          "Required identity/context evidence is missing before or after the deploy.",
+        ),
+  // 2. Failed probe — the post-deploy device-state probe was indeterminate.
+  (_before, after) =>
+    after.lifecycleState === "unknown"
+      ? hit("failed-probe", "Post-deploy simulator lifecycle state could not be determined.")
+      : null,
+  // 3. Explicit, controlled replacement — the only case where a changed identity
+  //    or data root is acceptable, and only if the new device is actually up.
+  (_before, after, deploy) => {
+    if (!deploy.plannedReplacement) {
+      return null;
+    }
+    return after.lifecycleState === "booted" && after.responsive
+      ? hit(
+          "controlled-replacement",
+          "Deploy was an explicit controlled replacement; the replacement simulator is booted and responsive.",
+        )
+      : hit(
+          "failed-probe",
+          "Deploy was declared a controlled replacement but the replacement simulator is not booted and responsive.",
+        );
+  },
+  // 4. Orphaned/erased state — identity or CoreSimulator data changed with no
+  //    planned replacement to explain it. This is the AC3 guard.
+  (before, after) =>
+    identityChanged(before, after)
+      ? hit(
+          "orphaned-or-erased-state",
+          "Simulator UDID or CoreSimulator data root changed without a declared controlled replacement.",
+        )
+      : null,
+  // From here the UDID and data root are unchanged.
+  // 5. Shutdown — the same device is no longer booted.
+  (_before, after) =>
+    after.lifecycleState !== "booted"
+      ? hit(
+          "shutdown",
+          `Simulator is ${after.lifecycleState} after the deploy and did not recover.`,
+        )
+      : null,
+  // 6. Failed probe — booted but responsiveness could not be proven.
+  (_before, after) =>
+    after.responsive
+      ? null
+      : hit(
+          "failed-probe",
+          "Simulator is booted after the deploy but did not answer a responsiveness probe.",
+        ),
+  // 7. Boot recovery — same identity and data, but it rebooted mid-window, so
+  //    the running simulator did not survive even though its data did.
+  (_before, after, deploy) =>
+    rebootedDuringWindow(after, deploy)
+      ? hit(
+          "boot-recovery",
+          "Simulator rebooted during the deploy window; CoreSimulator data was preserved but the booted session did not survive.",
+        )
+      : null,
+  // 8. Reporting delay/loss — device is continuous but the worker is not
+  //    reporting for it. A restarted worker must not read as leaseable.
+  (_before, after) =>
+    after.reportingStatus === "reporting"
+      ? null
+      : hit(
+          "reporting-delay",
+          `Simulator is continuous but worker reporting is ${after.reportingStatus}.`,
+        ),
+];
+
+/**
+ * Classify what happened to one managed simulator across a deploy window by
+ * running the ordered {@link CONTINUITY_RULES}; the first rule that fires wins.
+ */
+export function classifyContinuity(
+  before: ContinuitySnapshot,
+  after: ContinuitySnapshot,
+  deploy: DeploymentWindow,
+): ContinuityResult {
+  for (const rule of CONTINUITY_RULES) {
+    const fired = rule(before, after, deploy);
+    if (fired) {
+      return result(fired.verdict, [fired.reason]);
+    }
+  }
+  return result("same-device-continuity", [
+    "Same UDID and CoreSimulator data root, booted and responsive throughout, worker reporting restored.",
+  ]);
+}
+
+function result(verdict: ContinuityVerdict, reasons: readonly string[]): ContinuityResult {
+  const proven = PROVEN_VERDICTS.has(verdict);
+  return { verdict, proven, recommendedState: proven ? "available" : "maintenance", reasons };
+}
+
+/**
+ * Process exit code for the deploy gate: 0 only when continuity is proven,
+ * non-zero otherwise so a rollout that cannot prove continuity fails loudly.
+ */
+export function continuityExitCode(result: ContinuityResult): number {
+  return result.proven ? 0 : 1;
+}
+
+// A fixed salt so redaction tokens are deterministic within and across runs
+// (needed to compare retained evidence) while still not being the raw value.
+const REDACTION_SALT = "auto-mobile:ios-continuity:v1";
+
+/** One-way, correlation-preserving token for a sensitive value. */
+function token(prefix: string, value: string): string {
+  const digest = createHash("sha256")
+    .update(`${REDACTION_SALT}:${value}`)
+    .digest("hex")
+    .slice(0, 12);
+  return `${prefix}:${digest}`;
+}
+
+function redactSnapshot(snapshot: ContinuitySnapshot): RedactedContinuitySnapshot {
+  const redactedPids: Record<string, string> = {};
+  for (const [name, pid] of Object.entries(snapshot.processIds)) {
+    // PIDs are not exposed; keep per-process correlation via a stable token.
+    redactedPids[name] = token("pid", String(pid));
+  }
+  return {
+    ...snapshot,
+    udid: token("sim", snapshot.udid),
+    hostIdentity: token("host", snapshot.hostIdentity),
+    workerIncarnation: token("worker", snapshot.workerIncarnation),
+    // The data root embeds the UDID and a home prefix; tokenize the whole path.
+    coreSimulatorDataRoot: token("dataroot", snapshot.coreSimulatorDataRoot),
+    processIds: redactedPids,
+  };
+}
+
+/**
+ * Produce a redacted copy of an evidence record safe to retain with a
+ * deployment record or share in a public issue (issue #5104, AC7). Host names,
+ * UDIDs, PIDs, and home-dir paths are replaced with deterministic one-way tokens
+ * that preserve equality — so a reader can still tell "same device before and
+ * after" or "the worker was replaced" — without exposing the raw values. The
+ * non-sensitive fields (runtime/device type, version, lifecycle, reporting,
+ * timestamps) are kept verbatim so the evidence stays readable.
+ */
+export function redactContinuityEvidence(evidence: ContinuityEvidence): RedactedContinuityEvidence {
+  // redactHomeDir is applied first for any residual path leakage in reasons.
+  const redactedResult = evidence.result
+    ? { ...evidence.result, reasons: evidence.result.reasons.map((r) => redactHomeDir(r)) }
+    : undefined;
+  return {
+    before: redactSnapshot(evidence.before),
+    after: redactSnapshot(evidence.after),
+    deploy: evidence.deploy,
+    ...(redactedResult ? { result: redactedResult } : {}),
+  };
+}

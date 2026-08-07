@@ -25,20 +25,26 @@ type WarningCandidate = {
 export const MAX_LAYOUT_WARNINGS = 100;
 
 /**
- * Wrap the advisory list in the `LayoutWarnings` envelope, capping at
- * {@link MAX_LAYOUT_WARNINGS}. At or under the cap the original array is kept
- * unchanged (identical order) with `scope: "full"`; over it, the
- * highest-severity, largest-overflow warnings are kept and `scope: "truncated"`
- * carries the pre-cap `total`.
+ * Cap a `LayoutWarnings` envelope at {@link MAX_LAYOUT_WARNINGS}. Applied at the
+ * output boundary *after* the observe-scope transforms (issue #5074), so the cap
+ * bounds the visible set rather than discarding an in-scope warning against the
+ * full tree. At or under the cap the envelope is returned unchanged; over it, the
+ * highest-severity, largest-overflow warnings are kept and `total` carries the
+ * pre-cap count. A `scoped` list stays `scoped` when it also overflows (it was
+ * narrowed *and* capped); an unscoped one becomes `truncated`.
  */
-export function capLayoutWarnings(warnings: LayoutWarning[]): LayoutWarnings {
-  if (warnings.length <= MAX_LAYOUT_WARNINGS) {
-    return { scope: "full", warnings };
+export function capLayoutWarnings(layoutWarnings: LayoutWarnings): LayoutWarnings {
+  if (layoutWarnings.warnings.length <= MAX_LAYOUT_WARNINGS) {
+    return layoutWarnings;
   }
-  const kept = [...warnings]
+  const kept = [...layoutWarnings.warnings]
     .sort((a, b) => layoutWarningPriority(b) - layoutWarningPriority(a))
     .slice(0, MAX_LAYOUT_WARNINGS);
-  return { scope: "truncated", total: warnings.length, warnings: kept };
+  return {
+    scope: layoutWarnings.scope === "scoped" ? "scoped" : "truncated",
+    total: layoutWarnings.warnings.length,
+    warnings: kept,
+  };
 }
 
 /** Higher = kept first when capping: `warning` severity outranks `info`, then larger total overflow. */

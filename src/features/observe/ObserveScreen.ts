@@ -39,7 +39,7 @@ import {
   RealHierarchyPlatformValidator
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
-import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
+import { SafeAreaAuditor } from "./audits/SafeAreaAuditor";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -269,7 +269,10 @@ export class RealObserveScreen implements ObserveScreen {
       // navigation-graph recorder) ever observes the other platform's data.
       enforceHierarchyPlatform(result, this.device.platform, this.device.deviceId, this.platformValidator);
 
-      result.layoutWarnings = capLayoutWarnings(this.safeAreaAuditor.inspect(result));
+      // Uncapped here; the output boundary (sanitizeObserveResult / the observe
+      // served path in finalizeToolResponse) caps AFTER any scope narrowing so an
+      // in-scope warning is never lost to a cap taken against the full tree (#5074).
+      result.layoutWarnings = { scope: "full", warnings: this.safeAreaAuditor.inspect(result) };
 
       if (result.viewHierarchy) {
         result.elements = this.elementsBuilder.build(result.viewHierarchy, this.device.platform);

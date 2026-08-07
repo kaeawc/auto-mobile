@@ -186,6 +186,25 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
     expect(() => observeResultSchema.parse(compacted)).not.toThrow();
   });
 
+  test("caps layoutWarnings by default and opts out with capLayoutWarnings:false", () => {
+    const warning = {
+      type: "important-content-under-inset", severity: "info",
+      element: { bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
+      categories: ["text"], insetTypes: ["systemBars"], sides: ["top"],
+      overflowPx: { top: 1 }, insetPx: { top: 1 }, overlapPercent: 10, confidence: "medium",
+    };
+    const observe = { layoutWarnings: { scope: "full", warnings: Array.from({ length: 150 }, () => warning) } };
+
+    const capped = sanitizeObserveResult(observe as never, { dropElements: false });
+    expect(capped.layoutWarnings?.scope).toBe("truncated");
+    expect(capped.layoutWarnings?.warnings).toHaveLength(100);
+    expect(capped.layoutWarnings?.total).toBe(150);
+
+    const uncapped = sanitizeObserveResult(observe as never, { dropElements: false, capLayoutWarnings: false });
+    expect(uncapped.layoutWarnings?.scope).toBe("full");
+    expect(uncapped.layoutWarnings?.warnings).toHaveLength(150);
+  });
+
   test("accepts an iOS root hierarchy.bounds with optional left/top (points)", () => {
     // Hierarchy.bounds is `{left?, top?, right, bottom}` on iOS — the element
     // union (all four keys required) would wrongly reject it, so it rides

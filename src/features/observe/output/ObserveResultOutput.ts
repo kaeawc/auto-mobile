@@ -1,6 +1,7 @@
 import type { ObserveResult } from "../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import { toSkeleton } from "./SkeletonProjection";
+import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 
 /**
  * Output-only shrinking of a single `ObserveResult` for serialization
@@ -87,6 +88,14 @@ export interface SanitizeObserveConfig {
    * observations stay `"full"` so `--actions-diff-observe` can still diff a tree.
    */
   project?: "full" | "skeleton";
+  /**
+   * Cap `layoutWarnings` at `MAX_LAYOUT_WARNINGS` (issue #5074). Default on, so
+   * every served/baseline/action payload is bounded. The observe **served** path
+   * passes `false` to keep the full set for the scope transforms, then caps the
+   * scoped result itself — scope-then-cap, so an in-scope warning is never lost
+   * to a cap taken against the full tree.
+   */
+  capLayoutWarnings?: boolean;
 }
 
 /** Positional order of a compacted bounds tuple: `[left, top, right, bottom]`. */
@@ -130,6 +139,12 @@ export function sanitizeObserveResult(obs: ObserveResult, cfg: SanitizeObserveCo
 
   if (cfg.dropElements) {
     delete out.elements;
+  }
+
+  // Bound the advisory list (issue #5074). Default on; the observe served path
+  // opts out (cfg.capLayoutWarnings === false) so it can scope first, then cap.
+  if (cfg.capLayoutWarnings !== false && out.layoutWarnings) {
+    out.layoutWarnings = capLayoutWarnings(out.layoutWarnings);
   }
 
   return out;

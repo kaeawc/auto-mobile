@@ -10,6 +10,7 @@ import {
   buildObserveScopeConfig,
 } from "../features/observe/output/ObserveScopeExperiments";
 import type { ObserveScopeInput } from "../models/ObserveScope";
+import { capLayoutWarnings } from "../features/observe/audits/SafeAreaAuditor";
 import { isInPlacePressButton, isNavigationPressButton } from "../features/action/pressButtonPolicy";
 import { serverConfig } from "../utils/ServerConfig";
 import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
@@ -315,7 +316,15 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         });
       }
     } else if (scopeActive) {
-      served = applyObserveScopeExperiments(sanitized, scopeConfig);
+      // Scope-then-cap (#5074): re-derive the served copy UNCAPPED so the scope
+      // transforms see every warning, then cap the scoped result — an in-scope
+      // warning is never lost to a cap taken against the full tree. The baseline
+      // above stays the capped `sanitized` full tree.
+      const uncapped = sanitizeObserveResult(observeResult, { ...cfg, capLayoutWarnings: false });
+      served = applyObserveScopeExperiments(uncapped, scopeConfig);
+      if (served.layoutWarnings) {
+        served.layoutWarnings = capLayoutWarnings(served.layoutWarnings);
+      }
     }
     sanitizedPayload = served as unknown as Record<string, unknown>;
     hasArtifactableObservation = true;

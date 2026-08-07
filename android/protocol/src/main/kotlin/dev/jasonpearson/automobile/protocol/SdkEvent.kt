@@ -253,6 +253,8 @@ data class SdkWebSocketFrameEvent(
   val frameType: WebSocketFrameType,
   /** Frame payload size in bytes */
   val payloadSize: Long = 0,
+  /** Whether the operation succeeded */
+  val success: Boolean = true,
 ) : SdkEvent()
 
 // =============================================================================

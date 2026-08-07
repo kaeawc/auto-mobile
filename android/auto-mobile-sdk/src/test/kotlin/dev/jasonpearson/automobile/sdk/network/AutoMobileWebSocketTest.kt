@@ -76,6 +76,7 @@ class AutoMobileWebSocketTest {
     assertEquals(WebSocketFrameType.BINARY, event.frameType)
     assertEquals(bytes.size.toLong(), event.payloadSize)
     assertEquals(listOf(bytes), delegate.binarySends)
+    assertEquals(false, event.success)
   }
 
   @Test
@@ -99,6 +100,7 @@ class AutoMobileWebSocketTest {
     val event = events.single() as SdkWebSocketFrameEvent
     assertEquals(WebSocketFrameDirection.SENT, event.direction)
     assertEquals(WebSocketFrameType.TEXT, event.frameType)
+    assertEquals(false, event.success)
   }
 
   @Test
@@ -121,6 +123,38 @@ class AutoMobileWebSocketTest {
     val event = events.single() as SdkWebSocketFrameEvent
     assertEquals(WebSocketFrameType.CLOSE, event.frameType)
     assertEquals(6L, event.payloadSize)
+    assertEquals(true, event.success)
+  }
+
+  @Test
+  fun `shared connection id correlates listener and websocket events`() {
+    val (buffer, events) = collectingBuffer()
+    val delegate = FakeWebSocket(sendResult = true)
+    val connectionId = "shared-connection"
+    val listener =
+      AutoMobileWebSocketListener(
+        delegate = object : okhttp3.WebSocketListener() {},
+        url = "wss://x",
+        buffer = buffer,
+        connectionId = connectionId,
+      )
+    val webSocket =
+      AutoMobileWebSocket(
+        delegate,
+        "wss://x",
+        buffer,
+        applicationId = null,
+        controller = null,
+        connectionId = connectionId,
+      )
+
+    listener.onMessage(delegate, "received")
+    webSocket.send("sent")
+
+    assertEquals(
+      listOf(connectionId, connectionId),
+      events.map { (it as SdkWebSocketFrameEvent).connectionId },
+    )
   }
 
   private class FakeWebSocket(

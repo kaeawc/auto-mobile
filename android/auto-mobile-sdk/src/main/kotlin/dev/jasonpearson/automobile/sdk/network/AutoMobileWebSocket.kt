@@ -33,26 +33,29 @@ internal class AutoMobileWebSocket(
   }
 
   override fun close(code: Int, reason: String?): Boolean {
+    val success = delegate.close(code, reason)
     recordFrame(
       WebSocketFrameDirection.SENT,
       WebSocketFrameType.CLOSE,
       reason?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0,
+      success,
     )
-    return delegate.close(code, reason)
+    return success
   }
 
   override fun cancel() = delegate.cancel()
 
   private fun send(type: WebSocketFrameType, size: Long, action: () -> Boolean): Boolean {
-    recordFrame(WebSocketFrameDirection.SENT, type, size)
-    if (controller?.allow(type, size) == false) return false
-    return action()
+    val success = controller?.allow(type, size) != false && action()
+    recordFrame(WebSocketFrameDirection.SENT, type, size, success)
+    return success
   }
 
   private fun recordFrame(
     direction: WebSocketFrameDirection,
     type: WebSocketFrameType,
     size: Long,
+    success: Boolean,
   ) {
     buffer.add(
       SdkWebSocketFrameEvent(
@@ -63,6 +66,7 @@ internal class AutoMobileWebSocket(
         direction = direction,
         frameType = type,
         payloadSize = size,
+        success = success,
       )
     )
   }

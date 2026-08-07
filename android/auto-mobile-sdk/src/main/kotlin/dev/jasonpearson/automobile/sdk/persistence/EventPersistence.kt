@@ -173,6 +173,7 @@ internal class FileEventPersistence(
           obj.put("direction", event.direction.name)
           obj.put("frameType", event.frameType.name)
           obj.put("payloadSize", event.payloadSize)
+          obj.put("success", event.success)
         }
         is SdkLogEvent -> {
           obj.put("level", event.level)
@@ -351,6 +352,7 @@ internal class FileEventPersistence(
           direction = direction,
           frameType = frameType,
           payloadSize = obj.optLong("payloadSize"),
+          success = obj.optBoolean("success", true),
         )
       }
       "log" ->

@@ -5755,6 +5755,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   direction = event.direction.name.lowercase(),
                   frameType = event.frameType.name.lowercase(),
                   payloadSize = event.payloadSize,
+                  success = event.success,
                   applicationId = event.applicationId,
                 ),
             )

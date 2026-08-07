@@ -1196,8 +1196,9 @@ public final class dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork {
   public final dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession startCapture(java.lang.String, java.lang.String, java.lang.String, java.util.Map<java.lang.String, java.lang.String>, long, boolean, boolean);
   public static dev.jasonpearson.automobile.sdk.network.NetworkCaptureSession startCapture$default(dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork, java.lang.String, java.lang.String, java.lang.String, java.util.Map, long, boolean, boolean, int, java.lang.Object);
   public final okhttp3.WebSocketListener wrapWebSocketListener(okhttp3.WebSocketListener, java.lang.String);
-  public final okhttp3.WebSocket wrapWebSocket(okhttp3.WebSocket, java.lang.String, dev.jasonpearson.automobile.sdk.network.WebSocketSendController);
-  public static okhttp3.WebSocket wrapWebSocket$default(dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork, okhttp3.WebSocket, java.lang.String, dev.jasonpearson.automobile.sdk.network.WebSocketSendController, int, java.lang.Object);
+  public final okhttp3.WebSocketListener wrapWebSocketListener(okhttp3.WebSocketListener, java.lang.String, java.lang.String);
+  public final okhttp3.WebSocket wrapWebSocket(okhttp3.WebSocket, java.lang.String, dev.jasonpearson.automobile.sdk.network.WebSocketSendController, java.lang.String);
+  public static okhttp3.WebSocket wrapWebSocket$default(dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork, okhttp3.WebSocket, java.lang.String, dev.jasonpearson.automobile.sdk.network.WebSocketSendController, java.lang.String, int, java.lang.Object);
   public final void reset$auto_mobile_sdk();
 }
 Compiled from "AutoMobileNetworkInterceptor.kt"

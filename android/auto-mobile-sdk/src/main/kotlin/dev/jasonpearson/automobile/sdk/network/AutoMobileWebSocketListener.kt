@@ -20,7 +20,7 @@ import okio.ByteString
  * @param url The WebSocket URL for identification
  * @param buffer The event buffer to post events to
  * @param applicationId Optional application ID
- * @param connectionId Unique ID for this WebSocket connection (auto-generated)
+ * @param connectionId Unique ID for this WebSocket connection
  */
 internal class AutoMobileWebSocketListener(
   private val delegate: WebSocketListener,
@@ -71,6 +71,7 @@ internal class AutoMobileWebSocketListener(
         direction = direction,
         frameType = type,
         payloadSize = size,
+        success = true,
       )
     )
   }

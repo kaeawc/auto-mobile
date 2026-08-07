@@ -167,6 +167,7 @@ data class WebSocketFrameData(
   val direction: String,
   val frameType: String,
   val payloadSize: Long = 0,
+  val success: Boolean = true,
   val applicationId: String? = null,
 )
 

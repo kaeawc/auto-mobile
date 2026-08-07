@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { redactHomeDir } from "./redactPath";
 
 /**
@@ -216,9 +216,18 @@ const CONTINUITY_RULES: readonly ContinuityRule[] = [
       : null,
   // 3. Explicit, controlled replacement — the only case where a changed identity
   //    or data root is acceptable, and only if the new device is actually up.
-  (_before, after, deploy) => {
+  //    A replacement must operate on an *idle* device: replacing one that had an
+  //    active lease/execution/drain destroys that in-flight state, so it is
+  //    flagged as orphaned/erased rather than certified as controlled.
+  (before, after, deploy) => {
     if (!deploy.plannedReplacement) {
       return null;
+    }
+    if (before.activeWork) {
+      return hit(
+        "orphaned-or-erased-state",
+        "Deploy was declared a controlled replacement but the simulator had active work (lease/execution/drain); replacement must operate on an idle device.",
+      );
     }
     return after.lifecycleState === "booted" && after.responsive
       ? hit(
@@ -309,32 +318,38 @@ export function continuityExitCode(result: ContinuityResult): number {
   return result.proven ? 0 : 1;
 }
 
-// A fixed salt so redaction tokens are deterministic within and across runs
-// (needed to compare retained evidence) while still not being the raw value.
-const REDACTION_SALT = "auto-mobile:ios-continuity:v1";
+/**
+ * A fresh random salt for one redaction pass. A *fixed*, committed salt would
+ * be worthless for enumerable inputs — with the salt public, PIDs and predictable
+ * host names can be recovered by precomputing tokens offline. A per-artifact
+ * random salt makes precomputation impossible while still preserving equality
+ * *within* the artifact (same value → same token, because one salt is used for
+ * the whole record). Cross-artifact correlation is intentionally not offered;
+ * issue #5104 never requires correlating tokens across separate records.
+ */
+export function generateRedactionSalt(): string {
+  return randomBytes(16).toString("hex");
+}
 
-/** One-way, correlation-preserving token for a sensitive value. */
-function token(prefix: string, value: string): string {
-  const digest = createHash("sha256")
-    .update(`${REDACTION_SALT}:${value}`)
-    .digest("hex")
-    .slice(0, 12);
+/** One-way, within-artifact-correlation-preserving token for a sensitive value. */
+function token(prefix: string, value: string, salt: string): string {
+  const digest = createHash("sha256").update(`${salt}:${value}`).digest("hex").slice(0, 12);
   return `${prefix}:${digest}`;
 }
 
-function redactSnapshot(snapshot: ContinuitySnapshot): RedactedContinuitySnapshot {
+function redactSnapshot(snapshot: ContinuitySnapshot, salt: string): RedactedContinuitySnapshot {
   const redactedPids: Record<string, string> = {};
   for (const [name, pid] of Object.entries(snapshot.processIds)) {
     // PIDs are not exposed; keep per-process correlation via a stable token.
-    redactedPids[name] = token("pid", String(pid));
+    redactedPids[name] = token("pid", String(pid), salt);
   }
   return {
     ...snapshot,
-    udid: token("sim", snapshot.udid),
-    hostIdentity: token("host", snapshot.hostIdentity),
-    workerIncarnation: token("worker", snapshot.workerIncarnation),
+    udid: token("sim", snapshot.udid, salt),
+    hostIdentity: token("host", snapshot.hostIdentity, salt),
+    workerIncarnation: token("worker", snapshot.workerIncarnation, salt),
     // The data root embeds the UDID and a home prefix; tokenize the whole path.
-    coreSimulatorDataRoot: token("dataroot", snapshot.coreSimulatorDataRoot),
+    coreSimulatorDataRoot: token("dataroot", snapshot.coreSimulatorDataRoot, salt),
     processIds: redactedPids,
   };
 }
@@ -342,20 +357,29 @@ function redactSnapshot(snapshot: ContinuitySnapshot): RedactedContinuitySnapsho
 /**
  * Produce a redacted copy of an evidence record safe to retain with a
  * deployment record or share in a public issue (issue #5104, AC7). Host names,
- * UDIDs, PIDs, and home-dir paths are replaced with deterministic one-way tokens
- * that preserve equality — so a reader can still tell "same device before and
- * after" or "the worker was replaced" — without exposing the raw values. The
+ * UDIDs, PIDs, and home-dir paths are replaced with one-way tokens that preserve
+ * equality *within this record* — so a reader can still tell "same device before
+ * and after" or "the worker was replaced" — without exposing the raw values. The
  * non-sensitive fields (runtime/device type, version, lifecycle, reporting,
  * timestamps) are kept verbatim so the evidence stays readable.
+ *
+ * @param salt - Injectable redaction salt. Defaults to a fresh random salt per
+ *   call so tokens cannot be precomputed from a known salt; pass a fixed salt in
+ *   tests to assert token stability.
  */
-export function redactContinuityEvidence(evidence: ContinuityEvidence): RedactedContinuityEvidence {
-  // redactHomeDir is applied first for any residual path leakage in reasons.
+export function redactContinuityEvidence(
+  evidence: ContinuityEvidence,
+  salt: string = generateRedactionSalt(),
+): RedactedContinuityEvidence {
+  // reasons only interpolate lifecycle/reporting enums today; redactHomeDir is a
+  // cheap guard against a future reason that embeds a path, not a load-bearing
+  // control.
   const redactedResult = evidence.result
     ? { ...evidence.result, reasons: evidence.result.reasons.map((r) => redactHomeDir(r)) }
     : undefined;
   return {
-    before: redactSnapshot(evidence.before),
-    after: redactSnapshot(evidence.after),
+    before: redactSnapshot(evidence.before, salt),
+    after: redactSnapshot(evidence.after, salt),
     deploy: evidence.deploy,
     ...(redactedResult ? { result: redactedResult } : {}),
   };

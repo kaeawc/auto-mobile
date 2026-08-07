@@ -51,7 +51,10 @@ it can be distinguished (see §5): `boot-recovery`, `shutdown`, `reporting-delay
 `orphaned-or-erased-state`, `failed-probe`, `incomplete-evidence`.
 
 A controlled replacement must operate on an **idle** simulator (no active lease,
-execution, or drain). Never replace a device that has active work.
+execution, or drain). Never replace a device that has active work — the validation
+enforces this: a declared replacement of a device whose before-snapshot has
+`activeWork: true` classifies as `orphaned-or-erased-state` (not proven), because
+replacing a busy device destroys its in-flight state.
 
 ## 3. Why replacement cannot silently erase or orphan state
 
@@ -97,7 +100,7 @@ these fields (all in the issue's required pre/post-deploy evidence list):
 | `workerIncarnation` | worker process incarnation id (changes on replacement) |
 | `processSupervisor`, `processIds` | `launchctl` / `ps` for daemon, runner, `com.apple.CoreSimulator.CoreSimulatorService` |
 | `coreSimulatorDataRoot` | `~/Library/Developer/CoreSimulator/Devices/<udid>/data` |
-| `bootedSince` | boot time of the current session (used to detect a mid-window reboot) |
+| `bootedSince` | boot time of the current session (used to detect a mid-window reboot) — **capture it**: without it a reboot inside the window cannot be proven, so a rebooted device may read as `same-device-continuity` |
 | `lifecycleState` | `booted` / `shutdown` / … from `simctl list` |
 | `responsive` | result of a responsiveness probe against the device |
 | `reportingStatus` | `reporting` / `delayed` / `lost` from the worker/AutoMobile status |
@@ -116,8 +119,11 @@ bun run validate:ios-continuity \
   --out redacted-evidence.json
 ```
 
-Exit codes: `0` continuity proven, `1` not proven (verdict printed), `2` usage
-error. Wire the non-zero exit into the deploy so an unproven rollout fails.
+`--deploy` is **required**: reboot detection is only meaningful against a real
+deploy window, so there is no sound default for it. Exit codes: `0` continuity
+proven, `1` not proven (verdict printed), `2` usage error or bad input (missing
+file / malformed JSON, kept distinct from a not-proven result). Wire the non-zero
+exit into the deploy so an unproven rollout fails.
 
 ## 5. Distinguished outcomes
 
@@ -153,9 +159,13 @@ When the gate returns non-zero:
 ## Evidence retention and redaction
 
 The `--out` artifact is a **redacted** evidence record: host identity, UDIDs,
-process ids, and home-dir paths are replaced with deterministic one-way tokens
-that preserve equality (so a reader can still tell "same device before and after"
-or "the worker was replaced") without exposing raw values. Non-sensitive fields
-(runtime/device type, AutoMobile version, lifecycle, reporting, timestamps) are
-kept verbatim. Retain this redacted artifact with the deployment record; it is
-safe to attach to a public issue.
+process ids, and home-dir paths are replaced with one-way tokens that preserve
+equality **within the artifact** (so a reader can still tell "same device before
+and after" or "the worker was replaced") without exposing raw values. Each artifact
+uses a **fresh random salt**, so the tokens cannot be de-anonymized by
+precomputing hashes for guessable inputs such as PIDs or predictable host names —
+a fixed, committed salt would not protect those low-entropy fields. The trade-off
+is that tokens do not correlate across separate artifacts (not needed here).
+Non-sensitive fields (runtime/device type, AutoMobile version, lifecycle,
+reporting, timestamps) are kept verbatim. Retain this redacted artifact with the
+deployment record; it is safe to attach to a public issue.

@@ -81,6 +81,19 @@ describe("classifyContinuity — distinguishes the required states (AC5)", () =>
     expect(result.recommendedState).toBe("maintenance");
   });
 
+  it("a boot exactly at the window start counts as a reboot (inclusive boundary)", () => {
+    const after = snapshot({ bootedSince: DEPLOY.startedAt });
+    const result = classifyContinuity(snapshot(), after, DEPLOY);
+    expect(result.verdict).toBe("boot-recovery");
+  });
+
+  it("a boot before the window start is survival, not a reboot → same-device-continuity", () => {
+    const after = snapshot({ bootedSince: "2026-08-07T09:59:59.000Z" });
+    const result = classifyContinuity(snapshot(), after, DEPLOY);
+    expect(result.verdict).toBe("same-device-continuity");
+    expect(result.proven).toBe(true);
+  });
+
   it("device continuous but worker reporting lost → reporting-delay", () => {
     const result = classifyContinuity(snapshot(), snapshot({ reportingStatus: "lost" }), DEPLOY);
     expect(result.verdict).toBe("reporting-delay");
@@ -146,6 +159,19 @@ describe("classifyContinuity — cannot silently erase/orphan managed state (AC3
     const result = classifyContinuity(snapshot(), after, { ...DEPLOY, plannedReplacement: true });
     expect(result.verdict).toBe("controlled-replacement");
   });
+
+  it("a planned replacement of a device that had active work is NOT certified (idle-only)", () => {
+    const before = snapshot({ activeWork: true });
+    const after = snapshot({
+      udid: "11111111-2222-3333-4444-555555555555",
+      coreSimulatorDataRoot:
+        "/Users/ci/Library/Developer/CoreSimulator/Devices/11111111-2222-3333-4444-555555555555/data",
+    });
+    const result = classifyContinuity(before, after, { ...DEPLOY, plannedReplacement: true });
+    expect(result.verdict).toBe("orphaned-or-erased-state");
+    expect(result.proven).toBe(false);
+    expect(result.recommendedState).toBe("maintenance");
+  });
 });
 
 describe("continuityExitCode — gate exits non-zero unless continuity is proven", () => {
@@ -190,14 +216,23 @@ describe("redactContinuityEvidence — retains a shareable, redacted result (AC7
     expect(redacted.deploy.startedAt).toBe(DEPLOY.startedAt);
   });
 
-  it("is deterministic and preserves same-device correlation across before/after", () => {
-    const a = redactContinuityEvidence(evidence);
-    const b = redactContinuityEvidence(evidence);
-    // Deterministic: same input → identical redacted output.
+  it("preserves same-device correlation within one artifact, stable under a fixed salt", () => {
+    const salt = "fixed-test-salt";
+    const a = redactContinuityEvidence(evidence, salt);
+    const b = redactContinuityEvidence(evidence, salt);
+    // Same salt + same input → identical redacted output.
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
     // Correlation preserved: identical raw UDID before/after → identical token,
     // so a reader can still tell it was the same device.
     expect(a.before.udid).toBe(a.after.udid);
+  });
+
+  it("uses a fresh random salt per call so tokens cannot be precomputed", () => {
+    // Without an injected salt, two passes over identical input yield different
+    // tokens — defeating offline precomputation against a known salt.
+    const a = redactContinuityEvidence(evidence);
+    const b = redactContinuityEvidence(evidence);
+    expect(a.before.udid).not.toBe(b.before.udid);
   });
 
   it("maps a changed UDID to a different token (replacement stays visible)", () => {

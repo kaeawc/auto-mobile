@@ -11,11 +11,11 @@
  *
  * Usage:
  *   bun scripts/validate-ios-simulator-continuity.ts \
- *     --before before.json --after after.json [--deploy deploy.json] [--out redacted.json]
+ *     --before before.json --after after.json --deploy deploy.json [--out redacted.json]
  *
  * before.json / after.json are ContinuitySnapshot records; deploy.json is a
- * DeploymentWindow (defaults to a window bracketing "now" with no planned
- * replacement when omitted).
+ * DeploymentWindow. --deploy is required: reboot detection is only meaningful
+ * against a real deploy window, so there is no sound default for it.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -137,20 +137,29 @@ function readJson(file: string): unknown {
   return JSON.parse(readFileSync(file, "utf8"));
 }
 
+const USAGE =
+  "Usage: bun scripts/validate-ios-simulator-continuity.ts --before <file> --after <file> --deploy <file> [--out <file>]";
+
 function main(): number {
   const args = parseArgs(process.argv.slice(2));
-  if (!args.before || !args.after) {
-    console.error(
-      "Usage: bun scripts/validate-ios-simulator-continuity.ts --before <file> --after <file> [--deploy <file>] [--out <file>]",
-    );
+  if (!args.before || !args.after || !args.deploy) {
+    console.error(USAGE);
     return 2;
   }
 
-  const before = parseSnapshot(readJson(args.before), args.before);
-  const after = parseSnapshot(readJson(args.after), args.after);
-  const deploy: DeploymentWindow = args.deploy
-    ? parseDeploy(readJson(args.deploy), args.deploy)
-    : { startedAt: before.bootedSince ?? "", completedAt: "", plannedReplacement: false };
+  let before: ContinuitySnapshot;
+  let after: ContinuitySnapshot;
+  let deploy: DeploymentWindow;
+  try {
+    before = parseSnapshot(readJson(args.before), args.before);
+    after = parseSnapshot(readJson(args.after), args.after);
+    deploy = parseDeploy(readJson(args.deploy), args.deploy);
+  } catch (error) {
+    // Bad input (missing file / malformed JSON) is a usage error (exit 2), kept
+    // distinct from a well-formed "continuity not proven" result (exit 1).
+    console.error(`${error instanceof Error ? error.message : String(error)}\n${USAGE}`);
+    return 2;
+  }
 
   const result = classifyContinuity(before, after, deploy);
   const redacted = redactContinuityEvidence({ before, after, deploy, result });

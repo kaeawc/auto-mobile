@@ -1527,6 +1527,17 @@ describe("AndroidCtrlProxyClient", function() {
   });
 
   describe("convertToViewHierarchyResult", function() {
+    test("preserves Android snapshot truncation reasons", function() {
+      const result = accessibilityServiceClient.convertToViewHierarchyResult({
+        updatedAt: 1,
+        packageName: "com.example",
+        hierarchy: { text: "root" },
+        truncationReasons: ["max_nodes", "cancelled"]
+      });
+
+      expect(result.truncationReasons).toEqual(["max_nodes", "cancelled"]);
+    });
+
     test("should convert accessibility hierarchy to ViewHierarchyResult format", function() {
       const accessibilityHierarchy = {
         updatedAt: 1750934583218,

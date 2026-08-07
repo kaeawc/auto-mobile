@@ -18,6 +18,12 @@ import dev.jasonpearson.automobile.protocol.NodeSelector
 interface CtrlProxyActions {
   fun requestHierarchy(disableAllFiltering: Boolean)
 
+  fun requestHierarchy(
+    disableAllFiltering: Boolean,
+    maxDepth: Int?,
+    maxNodes: Int?,
+  ) = requestHierarchy(disableAllFiltering)
+
   fun requestHierarchyIfStale(sinceTimestamp: Long)
 
   fun setHierarchyInterval(intervalMs: Long?)

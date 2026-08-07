@@ -134,6 +134,8 @@ export interface AccessibilityHierarchy {
   deviceModel?: string;
   /** Whether running on an emulator */
   isEmulator?: boolean;
+  /** Structured reasons why this snapshot is partial or unavailable. */
+  truncationReasons?: string[];
   /**
    * Bounds->screenshot-pixel ratio (#4548, additive; absent from pre-#4548 runners). Android
    * bounds and screenshots are both physical pixels, so the runner reports exactly 1. The runner

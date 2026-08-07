@@ -34,6 +34,17 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `deserialize request_hierarchy snapshot limits`() {
+    val message =
+      """{"type":"request_hierarchy","requestId":"bounded","maxDepth":8,"maxNodes":128}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestHierarchy>(request)
+    assertEquals(8, request.maxDepth)
+    assertEquals(128, request.maxNodes)
+  }
+
+  @Test
   fun `deserialize request_tap_coordinates`() {
     val message = """{"type":"request_tap_coordinates","requestId":"tap-1","x":100,"y":200}"""
     val request = json.decodeFromString<WebSocketRequest>(message)

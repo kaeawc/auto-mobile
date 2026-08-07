@@ -11,6 +11,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -22,6 +23,33 @@ class ViewHierarchyExtractorTest {
 
   private lateinit var extractor: ViewHierarchyExtractor
   private val json = Json { ignoreUnknownKeys = true }
+
+  @Test
+  fun `snapshot options reject unsafe bounds`() {
+    assertThrows(IllegalArgumentException::class.java) {
+      HierarchySnapshotOptions(maxDepth = -1)
+    }
+    assertThrows(IllegalArgumentException::class.java) {
+      HierarchySnapshotOptions(maxNodes = 0)
+    }
+  }
+
+  @Test
+  fun `snapshot budget reports cancellation and limits`() {
+    val cancelled = HierarchySnapshotBudget(HierarchySnapshotOptions(isCancelled = { true }))
+    assertFalse(cancelled.enter(0))
+    assertEquals(listOf("cancelled"), cancelled.truncationReasons())
+
+    val depthLimited = HierarchySnapshotBudget(HierarchySnapshotOptions(maxDepth = 0))
+    assertTrue(depthLimited.enter(0))
+    assertFalse(depthLimited.enter(1))
+    assertEquals(listOf("max_depth"), depthLimited.truncationReasons())
+
+    val nodeLimited = HierarchySnapshotBudget(HierarchySnapshotOptions(maxNodes = 1))
+    assertTrue(nodeLimited.enter(0))
+    assertFalse(nodeLimited.enter(0))
+    assertEquals(listOf("max_nodes"), nodeLimited.truncationReasons())
+  }
 
   @Before
   fun setUp() {

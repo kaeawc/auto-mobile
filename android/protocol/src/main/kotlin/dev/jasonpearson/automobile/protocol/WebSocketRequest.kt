@@ -23,6 +23,8 @@ sealed class WebSocketRequest {
 data class RequestHierarchy(
   override val requestId: String? = null,
   val disableAllFiltering: Boolean = false,
+  val maxDepth: Int? = null,
+  val maxNodes: Int? = null,
 ) : WebSocketRequest()
 
 @Serializable

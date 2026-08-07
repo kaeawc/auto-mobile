@@ -21,7 +21,7 @@ class HierarchyDebouncerErrorEmitTest {
     val debouncer =
       HierarchyDebouncer(
         scope = CoroutineScope(Dispatchers.Unconfined),
-        extractHierarchy = { _: Boolean -> null as ViewHierarchy? }, // force failure
+        extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions -> null as ViewHierarchy? },
       )
 
     debouncer.extractNowBlocking()

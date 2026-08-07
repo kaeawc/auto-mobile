@@ -509,6 +509,7 @@ export class CtrlProxyHierarchy {
           intentChooserDetected: accessibilityHierarchy.intentChooserDetected,
           notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected,
           ctrlProxyIncomplete: accessibilityHierarchy.ctrlProxyIncomplete,
+          truncationReasons: accessibilityHierarchy.truncationReasons,
           sources: ["control-proxy"],
           // Carry the #4548 scale metadata through the rootless / UIAutomator-fallback branch too,
           // so #4549 can consume it regardless of which route produced the hierarchy. Same
@@ -558,6 +559,7 @@ export class CtrlProxyHierarchy {
         "sdkInt": accessibilityHierarchy.sdkInt,
         "deviceModel": accessibilityHierarchy.deviceModel,
         "isEmulator": accessibilityHierarchy.isEmulator,
+        "truncationReasons": accessibilityHierarchy.truncationReasons,
         // Additive scale metadata (#4548), retained for #4549. All-or-nothing via the shared
         // validator (same rule as client retention): the three keys are spread only when the whole
         // tuple is complete-finite-positive, and omitted entirely otherwise — so a partial or

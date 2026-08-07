@@ -30,7 +30,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
   companion object {
     private const val TAG = "ViewHierarchyExtractor"
-    private const val MAX_DEPTH = 100 // Prevent infinite recursion
+    private const val MAX_DEPTH = 100 // Prevent infinite traversal in focus-order extraction
     private const val MAX_CHILDREN = 256 // Limit children to prevent memory issues
     private const val OCCLUSION_THRESHOLD = 0.95
     private const val DEFAULT_WINDOW_KEY = -1
@@ -65,12 +65,14 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
    * @param disableAllFiltering When true, disable all optimizations and filtering (for observe with
    *   raw:true)
    */
+  @JvmOverloads
   fun extractFromActiveWindow(
     rootNode: AccessibilityNodeInfo?,
     textFilter: String? = null,
     screenDimensions: ScreenDimensions? = null,
     dedupeTextContentDesc: Boolean = true,
     disableAllFiltering: Boolean = false,
+    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
   ): ViewHierarchy? {
     if (rootNode == null) {
       Log.w(TAG, "Root node is null")
@@ -81,6 +83,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       // Find accessibility-focused node before extracting hierarchy
       val accessibilityFocusedNode = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
 
+      val budget = HierarchySnapshotBudget(snapshotOptions)
       val rootElement =
         extractNodeInfo(
           rootNode,
@@ -89,6 +92,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           screenDimensions,
           dedupeTextContentDesc,
           accessibilityFocusedNode,
+          budget = budget,
         )
       val contentHiddenRegions = rootElement?.let {
         detectContentHiddenRegions(listOf(it), screenDimensions)
@@ -140,6 +144,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         notificationPermissionDetected = notificationPermissionDetected,
         accessibilityFocusedElement = accessibilityFocusedElement,
         contentHiddenRegions = contentHiddenRegions?.takeIf { it.isNotEmpty() },
+        truncationReasons = budget.truncationReasons().ifEmpty { null },
       )
     } catch (e: Exception) {
       Log.e(TAG, "Error extracting view hierarchy", e)
@@ -162,6 +167,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
    *   loop, no occlusionState/occludedBy/occludedByViewId fields (daemon's --no-occlusion flag,
    *   default true)
    */
+  @JvmOverloads
   fun extractFromAllWindows(
     windows: List<AccessibilityWindowInfo>,
     activeWindowRoot: AccessibilityNodeInfo?,
@@ -170,6 +176,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     dedupeTextContentDesc: Boolean = true,
     disableAllFiltering: Boolean = false,
     occlusionEnabled: Boolean = true,
+    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
   ): ViewHierarchy {
     if (windows.isEmpty() && activeWindowRoot == null) {
       Log.w(TAG, "No windows available for extraction")
@@ -193,6 +200,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     }
 
     val windowEntries = mutableListOf<WindowEntry>()
+    val budget = HierarchySnapshotBudget(snapshotOptions)
     var mainHierarchy: UIElementInfo? = null
     var mainPackageName: String? = null
     var intentChooserDetected = false
@@ -272,6 +280,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
             dedupeTextContentDesc,
             accessibilityFocusedNode,
             parentPath = "w${window.id}",
+            budget = budget,
           )
         if (element != null) {
           contentHiddenRegionRoots.add(element)
@@ -338,6 +347,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           screenDimensions,
           dedupeTextContentDesc,
           accessibilityFocusedNode,
+          budget = budget,
         )
       if (element != null) {
         contentHiddenRegionRoots.add(element)
@@ -460,6 +470,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       accessibilityFocusedElement = accessibilityFocusedElement,
       ctrlProxyIncomplete = if (ctrlProxyIncomplete) true else null,
       contentHiddenRegions = detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
+      truncationReasons = budget.truncationReasons().ifEmpty { null },
     )
   }
 
@@ -752,8 +763,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     accessibilityFocusedNode: AccessibilityNodeInfo? = null,
     parentPath: String = "",
     childIndex: Int = 0,
+    budget: HierarchySnapshotBudget,
   ): UIElementInfo? {
-    if (depth > MAX_DEPTH) {
+    if (!budget.enter(depth)) {
       return null
     }
 
@@ -804,6 +816,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               accessibilityFocusedNode,
               parentPath = currentPath,
               childIndex = i,
+              budget = budget,
             )
           if (childInfo != null) {
             children.add(childInfo)

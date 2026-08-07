@@ -1017,8 +1017,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           perfProvider = perfProvider,
           quickDebounceMs = 5L,
           animationSkipWindowMs = 100L,
-          extractHierarchy = { disableAllFiltering ->
-            extractHierarchyDirect(disableAllFiltering)
+          extractHierarchy = { disableAllFiltering, snapshotOptions ->
+            extractHierarchyDirect(disableAllFiltering, snapshotOptions)
           },
         )
 
@@ -1234,6 +1234,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestHierarchy(disableAllFiltering: Boolean) =
     extractHierarchyNow(disableAllFiltering)
+
+  override fun requestHierarchy(
+    disableAllFiltering: Boolean,
+    maxDepth: Int?,
+    maxNodes: Int?,
+  ) =
+    extractHierarchyNow(
+      disableAllFiltering,
+      HierarchySnapshotOptions(
+        maxDepth = maxDepth ?: 100,
+        maxNodes = maxNodes ?: 10_000,
+        isCancelled = { serviceScope.coroutineContext[Job]?.isActive == false },
+      ),
+    )
 
   override fun requestHierarchyIfStale(sinceTimestamp: Long) =
     hierarchyDebouncer.extractIfStale(sinceTimestamp)
@@ -2262,7 +2276,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Direct hierarchy extraction without debouncing. Used by the HierarchyDebouncer. Extracts from
    * all visible windows to capture popups, toolbars, etc.
    */
-  private fun extractHierarchyDirect(disableAllFiltering: Boolean = false): ViewHierarchy? {
+  private fun extractHierarchyDirect(
+    disableAllFiltering: Boolean = false,
+    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
+  ): ViewHierarchy? {
     val contextAtExtractionStart = currentFrameContext()
     // Bracket every input acquisition and the extraction itself. If rotation changes anywhere in
     // that interval, hierarchy geometry cannot be proven to match a single display orientation.
@@ -2366,12 +2383,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * SharedFlow async path. Used for explicit WebSocket requests where the daemon is waiting for
    * fresh data. Matches the sync=true pattern used by tap/setText/imeAction handlers.
    */
-  private fun extractHierarchyNow(disableAllFiltering: Boolean = false) {
+  private fun extractHierarchyNow(
+    disableAllFiltering: Boolean = false,
+    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
+  ) {
     Log.d(TAG, "extractHierarchyNow (disableAllFiltering: $disableAllFiltering)")
     val hierarchy =
       hierarchyDebouncer.extractNowBlocking(
         skipFlowEmit = true,
         disableAllFiltering = disableAllFiltering,
+        snapshotOptions = snapshotOptions,
       )
     if (hierarchy != null) {
       writeHierarchyToFile(hierarchy)

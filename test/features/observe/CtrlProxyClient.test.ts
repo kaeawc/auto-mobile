@@ -27,6 +27,7 @@ import {
 } from "../../../src/daemon/deviceDataStreamSocketServer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
 import { FakeScreenshotBackoffScheduler } from "../../../src/features/observe/ScreenshotBackoffScheduler";
+import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/android/screenshotFallbackReason";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -606,7 +607,7 @@ describe("AndroidCtrlProxyClient", function() {
     const driveA11yScreenshot = async (
       client: AndroidCtrlProxyClient,
       socket: CapturingWebSocket,
-      resolveWith: { kind: "error" } | { kind: "success" }
+      resolveWith: { kind: "error"; error?: string } | { kind: "success" }
     ): Promise<any> => {
       const before = countScreenshotRequests(socket);
       const capturePromise = (client as any).captureScreenshotForObservationStream() as Promise<any>;
@@ -614,7 +615,11 @@ describe("AndroidCtrlProxyClient", function() {
       const request = findSentMessage(socket, "request_screenshot");
       expect(countScreenshotRequests(socket)).toBe(before + 1);
       const frame = resolveWith.kind === "error"
-        ? { type: "screenshot_error", requestId: request.requestId, error: "Runner failed to capture screenshot" }
+        ? {
+          type: "screenshot_error",
+          requestId: request.requestId,
+          error: resolveWith.error ?? "Runner failed to capture screenshot",
+        }
         : { type: "screenshot", requestId: request.requestId, data: "jpeg-base64", format: "jpeg", timestamp: 1 };
       socket.emit("message", JSON.stringify(frame));
       await flushPromises();
@@ -698,6 +703,26 @@ describe("AndroidCtrlProxyClient", function() {
       // Because the counter reset, two more failures still do not reach the latch threshold.
       await driveA11yScreenshot(client, socket, { kind: "error" });
       await driveA11yScreenshot(client, socket, { kind: "error" });
+      expect((client as any).a11yScreenshotSupported).not.toBe(false);
+    });
+
+    test("does not count rate-limited screenshots as unsupported failures", async function() {
+      const { client, socket } = await setupConnectedCapturingClient();
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const result = await driveA11yScreenshot(client, socket, {
+          kind: "error",
+          error: CTRLPROXY_RATE_LIMITED_ERROR,
+        });
+        expect(result.screenshotFallbackReason).toBe("ctrlproxy_rate_limited");
+      }
+
+      expect((client as any).a11yScreenshotFailures).toBe(0);
+      expect((client as any).a11yScreenshotSupported).toBe(null);
+
+      const next = await driveA11yScreenshot(client, socket, { kind: "error" });
+      expect(next.screenshotFallbackReason).toBe("ctrlproxy_failed");
+      expect((client as any).a11yScreenshotFailures).toBe(1);
       expect((client as any).a11yScreenshotSupported).not.toBe(false);
     });
   });

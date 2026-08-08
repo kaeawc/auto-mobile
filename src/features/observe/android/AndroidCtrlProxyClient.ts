@@ -64,6 +64,7 @@ import {
   type ScreenshotPerformanceMetadata,
 } from "../ScreenshotMetadata";
 import {
+  CTRLPROXY_RATE_LIMITED_ERROR,
   CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR,
   fallbackReasonForCtrlProxyFailure,
 } from "./screenshotFallbackReason";
@@ -3396,6 +3397,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const result = await screenshotPromise;
 
       if (!result.success || !result.data) {
+        if (result.error === CTRLPROXY_RATE_LIMITED_ERROR) {
+          this.a11yScreenshotFailures = 0;
+          return this.captureScreenshotViaAdb(fallbackReasonForCtrlProxyFailure(result.error));
+        }
+
         this.a11yScreenshotFailures++;
         if (this.a11yScreenshotSupported === null &&
             this.a11yScreenshotFailures >= AndroidCtrlProxyClient.A11Y_SCREENSHOT_MAX_FAILURES) {

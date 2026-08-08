@@ -515,6 +515,9 @@ class VideoStreamWriter(
    */
   fun reconnectWindowExpired(): Boolean = reconnectWindow.isExpired()
 
+  /** Consume the handoff's coalesced data-loss signal for encode-loop recovery. */
+  internal fun consumeDropGap(): Boolean = handoff.consumeDropGap()
+
   /**
    * Atomically clear the replay cache for a device-rotation encoder swap (issue #4785).
    *

@@ -106,7 +106,7 @@ these fields (all in the issue's required pre/post-deploy evidence list):
 | `hostIdentity` | `scutil --get LocalHostName` (or your stable host id) |
 | `automobileVersion` | AutoMobile package/version reported by the daemon |
 | `workerIncarnation` | worker process incarnation id (changes on replacement) |
-| `processSupervisor`, `processIds` | `launchctl` / `ps` for daemon, runner, `com.apple.CoreSimulator.CoreSimulatorService` |
+| `processSupervisor`, `processIds` | `launchctl` / `ps`. `processIds` **must** include positive-integer PIDs for the keys `daemon`, `runner`, and `coreSimulatorService` (`com.apple.CoreSimulator.CoreSimulatorService`); a missing role is `incomplete-evidence` |
 | `coreSimulatorDataRoot` | `~/Library/Developer/CoreSimulator/Devices/<udid>/data` |
 | `bootedSince` | boot time of the current session (used to detect a mid-window reboot) — **required for a proven verdict**: without it a reboot cannot be ruled out, so the result is `incomplete-evidence` |
 | `lifecycleState` | `booted` / `shutdown` / … from `simctl list` |

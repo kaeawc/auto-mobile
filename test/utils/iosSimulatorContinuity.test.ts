@@ -175,9 +175,15 @@ describe("classifyContinuity — distinguishes the required states (AC5)", () =>
     expect(result.proven).toBe(false);
   });
 
-  it("junk process ids (non-positive or non-integer) → incomplete-evidence", () => {
-    for (const bad of [{ daemon: 0 }, { daemon: -1 }, { daemon: 1.5 }, { "": 4201 }]) {
-      const result = classifyContinuity(snapshot({ processIds: bad }), snapshot(), DEPLOY);
+  it("junk or role-incomplete process ids → incomplete-evidence", () => {
+    const bad = [
+      { daemon: 0, runner: 4310, coreSimulatorService: 512 }, // non-positive PID
+      { daemon: 1.5, runner: 4310, coreSimulatorService: 512 }, // non-integer PID
+      { placeholder: 1 }, // unrelated role, none of the required ones
+      { daemon: 4201, runner: 4310 }, // missing coreSimulatorService
+    ];
+    for (const processIds of bad) {
+      const result = classifyContinuity(snapshot({ processIds }), snapshot(), DEPLOY);
       expect(result.verdict).toBe("incomplete-evidence");
       expect(result.proven).toBe(false);
     }

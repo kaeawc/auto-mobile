@@ -147,17 +147,21 @@ const PROVEN_VERDICTS: ReadonlySet<ContinuityVerdict> = new Set<ContinuityVerdic
   "controlled-replacement",
 ]);
 
+// The process roles the runbook requires every capture to record — the
+// supervised processes whose survival the evidence is meant to prove.
+const REQUIRED_PROCESS_ROLES: readonly string[] = ["daemon", "runner", "coreSimulatorService"];
+
 /**
- * True when the process-identifier map is real evidence: at least one entry, and
- * every entry a non-blank process name mapped to a positive integer PID. Rejects
- * a nonempty-but-junk map (`{ daemon: 0 }`, `{ daemon: -1 }`, `{ daemon: 1.5 }`).
+ * True when the process-identifier map is real evidence: each required role
+ * (daemon, runner, CoreSimulator service) is present with a positive integer PID.
+ * Rejects a missing role and junk values (`{ daemon: 0 }`, `{ daemon: 1.5 }`) or
+ * an unrelated placeholder (`{ placeholder: 1 }`).
  */
 function hasValidProcessIds(processIds: Readonly<Record<string, number>>): boolean {
-  const entries = Object.entries(processIds);
-  return (
-    entries.length > 0 &&
-    entries.every(([name, pid]) => name.trim().length > 0 && Number.isInteger(pid) && pid > 0)
-  );
+  return REQUIRED_PROCESS_ROLES.every((role) => {
+    const pid = processIds[role];
+    return typeof pid === "number" && Number.isInteger(pid) && pid > 0;
+  });
 }
 
 /** Identity/context fields that must be present for evidence to be usable. */
@@ -169,8 +173,9 @@ function hasRequiredIdentity(snapshot: ContinuitySnapshot): boolean {
     snapshot.automobileVersion.trim().length > 0 &&
     snapshot.workerIncarnation.trim().length > 0 &&
     snapshot.processSupervisor.trim().length > 0 &&
-    // The issue lists process identifiers as required evidence; a missing or
-    // junk PID capture (no daemon/runner/CoreSimulator PIDs) is not evidence.
+    // The issue lists process identifiers as required evidence; a capture
+    // missing the daemon/runner/CoreSimulator PIDs (or with junk values) is not
+    // evidence that the supervised processes are accounted for.
     hasValidProcessIds(snapshot.processIds) &&
     snapshot.coreSimulatorDataRoot.trim().length > 0 &&
     snapshot.reportingStatus !== "unknown"

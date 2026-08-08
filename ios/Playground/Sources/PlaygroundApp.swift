@@ -9,8 +9,8 @@ struct PlaygroundApp: App {
 
         // Enable storage inspection in debug builds
         #if DEBUG
-        UserDefaultsInspector.shared.setEnabled(true)
-        DatabaseInspector.shared.setEnabled(true)
+            UserDefaultsInspector.shared.setEnabled(true)
+            PlaygroundDatabaseFixture().install()
         #endif
 
         AutoMobileLog.shared.i("PlaygroundApp", "app_launched")

@@ -272,6 +272,13 @@ object VideoServer {
     val heartbeat =
       FrameHeartbeat(clock = FrameHeartbeat.Clock { android.os.SystemClock.uptimeMillis() })
     heartbeat.start()
+    val stats =
+      VideoStatsAccumulator(
+          socketName = session.socketName,
+          clock = VideoStatsAccumulator.Clock { android.os.SystemClock.uptimeMillis() },
+          droppedCount = { streamWriter?.droppedCount() ?: 0L },
+        )
+        .also { it.start() }
 
     // The writer keeps the encoder alive while its LocalSocket client reconnects, replays cached
     // decoder state, and requests a new IDR at attach.
@@ -355,6 +362,13 @@ object VideoServer {
             println("Client disconnected")
             break
           }
+          if (
+            shouldCountVideoStatsFrame(
+              isCodecConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+            )
+          ) {
+            stats.onFrame(bufferInfo.size)
+          }
         }
         encoder!!.releaseOutputBuffer(index)
         heartbeat.onFrameEmitted()
@@ -373,6 +387,8 @@ object VideoServer {
       if (heartbeat.poll()) {
         capture?.forceFrame()
       }
+
+      stats.poll()?.let(::println)
 
       if (currentWriter.reconnectWindowExpired()) {
         println("VIDEO_CLIENT_RECONNECT_EXPIRED socket=${session.socketName}")
@@ -454,6 +470,8 @@ object VideoServer {
    * null-tolerance is unit-testable without the Android capture stack.
    */
   internal fun <T : Any> encodeLoopSnapshot(field: T?): T? = field
+
+  internal fun shouldCountVideoStatsFrame(isCodecConfig: Boolean): Boolean = !isCodecConfig
 
   /**
    * Request one recovery IDR after a handoff drop. The handoff signal coalesces a drop burst, while

@@ -518,6 +518,9 @@ class VideoStreamWriter(
   /** Consume the handoff's coalesced data-loss signal for encode-loop recovery. */
   internal fun consumeDropGap(): Boolean = handoff.consumeDropGap()
 
+  /** Total packets discarded by the transport handoff. */
+  internal fun droppedCount(): Long = handoff.droppedCount()
+
   /**
    * Atomically clear the replay cache for a device-rotation encoder swap (issue #4785).
    *

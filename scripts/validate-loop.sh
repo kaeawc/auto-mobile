@@ -24,7 +24,10 @@ cd "$ROOT" || exit 1
 
 # shellcheck source=scripts/lib/shell-core.sh disable=SC1091
 source "$ROOT/scripts/lib/shell-core.sh"
-ensure_node_modules "$ROOT"
+if ! ensure_node_modules "$ROOT"; then
+  echo "==> dependency bootstrap failed — aborting" >&2
+  exit 1
+fi
 
 # Route the gate and tests through `bun run` package scripts (not bare `turbo`):
 # turbo is a local dependency that may not be on PATH, and the repo contract

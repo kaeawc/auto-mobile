@@ -187,8 +187,8 @@ interface AutoMobileClient {
     val success = payloadObject["success"]?.jsonPrimitive?.booleanOrNull
     if (envelopeError || success == false) {
       val message =
-        payloadObject["message"]?.jsonPrimitive?.contentOrNull
-          ?: payloadObject["error"]?.jsonPrimitive?.contentOrNull
+        payloadObject["error"]?.jsonPrimitive?.contentOrNull
+          ?: payloadObject["message"]?.jsonPrimitive?.contentOrNull
           ?: payloadObject["reason"]?.jsonPrimitive?.contentOrNull
           ?: payloadObject["code"]?.jsonPrimitive?.contentOrNull
           ?: "Tool operation failed"

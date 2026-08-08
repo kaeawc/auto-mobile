@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -20,21 +21,29 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class DaemonEmulatorControlExecutorTest {
 
-  private fun toolResponse(success: Boolean, message: String): JsonElement = buildJsonObject {
-    put(
-      "content",
-      kotlinx.serialization.json.buildJsonArray {
-        add(
-          buildJsonObject {
-            put("type", "text")
-            put(
-              "text",
-              """{"success":$success,"message":"$message"}""",
-            )
-          }
-        )
-      },
-    )
+  private fun toolResponse(
+    success: Boolean,
+    message: String,
+    error: String? = null,
+  ): JsonElement {
+    val payload = buildJsonObject {
+      put("success", success)
+      put("message", message)
+      error?.let { put("error", it) }
+    }
+    return buildJsonObject {
+      put(
+        "content",
+        kotlinx.serialization.json.buildJsonArray {
+          add(
+            buildJsonObject {
+              put("type", "text")
+              put("text", payload.toString())
+            }
+          )
+        },
+      )
+    }
   }
 
   private fun deviceLossToolResponse(): JsonElement = buildJsonObject {
@@ -165,15 +174,23 @@ class DaemonEmulatorControlExecutorTest {
   fun `tool-level failure is propagated from pressButton`() = runTest {
     val client =
       FakeAutoMobileClient().apply {
-        callToolResult = toolResponse(success = false, message = "Unsupported button")
+        callToolResult =
+          toolResponse(
+            success = false,
+            message = "Pressed button home",
+            error = "Unsupported button",
+          )
       }
 
+    var failureMessage: String? = null
     try {
       executor(client).pressButton("emulator-5554", Platform.Android, DeviceButton.Home)
       fail("Expected tool failure")
-    } catch (error: Exception) {
-      assertEquals("Unsupported button", error.message)
+    } catch (error: McpConnectionException) {
+      failureMessage = error.message
     }
+
+    assertEquals("Unsupported button", failureMessage)
   }
 
   @Test

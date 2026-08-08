@@ -87,11 +87,40 @@ describe("classifyContinuity — distinguishes the required states (AC5)", () =>
     expect(result.verdict).toBe("boot-recovery");
   });
 
-  it("a boot before the window start is survival, not a reboot → same-device-continuity", () => {
-    const after = snapshot({ bootedSince: "2026-08-07T09:59:59.000Z" });
-    const result = classifyContinuity(snapshot(), after, DEPLOY);
+  it("an identical boot session (before === after) predating the window → same-device-continuity", () => {
+    const boot = { bootedSince: "2026-08-07T09:30:00.000Z" };
+    const result = classifyContinuity(snapshot(boot), snapshot(boot), DEPLOY);
     expect(result.verdict).toBe("same-device-continuity");
     expect(result.proven).toBe(true);
+  });
+
+  it("equivalent ISO spellings of the same boot instant are the same session → same-device-continuity", () => {
+    const before = snapshot({ bootedSince: "2026-08-07T09:00:00Z" });
+    const after = snapshot({ bootedSince: "2026-08-07T09:00:00.000Z" });
+    const result = classifyContinuity(before, after, DEPLOY);
+    expect(result.verdict).toBe("same-device-continuity");
+    expect(result.proven).toBe(true);
+  });
+
+  it("a real leap day is accepted, not falsely rejected as an impossible date", () => {
+    const boot = { bootedSince: "2028-02-29T09:00:00.000Z" };
+    const window: DeploymentWindow = {
+      startedAt: "2028-02-29T10:00:00.000Z",
+      completedAt: "2028-02-29T10:05:00.000Z",
+    };
+    const result = classifyContinuity(snapshot(boot), snapshot(boot), window);
+    expect(result.verdict).toBe("same-device-continuity");
+    expect(result.proven).toBe(true);
+  });
+
+  it("a changed boot session across the deploy (before !== after) → boot-recovery", () => {
+    // before booted 09:00, after booted 09:59 — the session changed even though
+    // both predate the window; the original booted session did not survive.
+    const before = snapshot({ bootedSince: "2026-08-07T09:00:00.000Z" });
+    const after = snapshot({ bootedSince: "2026-08-07T09:59:00.000Z" });
+    const result = classifyContinuity(before, after, DEPLOY);
+    expect(result.verdict).toBe("boot-recovery");
+    expect(result.proven).toBe(false);
   });
 
   it("device continuous but worker reporting lost → reporting-delay", () => {
@@ -136,6 +165,54 @@ describe("classifyContinuity — distinguishes the required states (AC5)", () =>
   it("an unhealthy pre-deploy baseline (booted but unresponsive) cannot prove continuity → incomplete-evidence", () => {
     const before = snapshot({ responsive: false });
     const result = classifyContinuity(before, snapshot(), DEPLOY);
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("no process-identifier evidence (empty processIds) → incomplete-evidence", () => {
+    const result = classifyContinuity(snapshot({ processIds: {} }), snapshot(), DEPLOY);
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("junk or role-incomplete process ids → incomplete-evidence", () => {
+    const bad = [
+      { daemon: 0, runner: 4310, coreSimulatorService: 512 }, // non-positive PID
+      { daemon: 1.5, runner: 4310, coreSimulatorService: 512 }, // non-integer PID
+      { placeholder: 1 }, // unrelated role, none of the required ones
+      { daemon: 4201, runner: 4310 }, // missing coreSimulatorService
+    ];
+    for (const processIds of bad) {
+      const result = classifyContinuity(snapshot({ processIds }), snapshot(), DEPLOY);
+      expect(result.verdict).toBe("incomplete-evidence");
+      expect(result.proven).toBe(false);
+    }
+  });
+
+  it("the same PID reused across the three required roles → incomplete-evidence", () => {
+    const processIds = { daemon: 1, runner: 1, coreSimulatorService: 1 };
+    const result = classifyContinuity(snapshot({ processIds }), snapshot({ processIds }), DEPLOY);
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("a backwards boot instant (after earlier than before) → incomplete-evidence, not boot-recovery", () => {
+    const before = snapshot({ bootedSince: "2026-08-07T09:00:00.000Z" });
+    const after = snapshot({ bootedSince: "2026-08-07T08:00:00.000Z" });
+    const result = classifyContinuity(before, after, DEPLOY);
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("an unhealthy baseline outranks a changed boot instant → incomplete-evidence, not boot-recovery", () => {
+    // before is shutdown (unhealthy) yet carries a boot time; after is healthy
+    // with a different instant. Baseline health is checked first.
+    const before = snapshot({
+      lifecycleState: "shutdown",
+      bootedSince: "2026-08-07T08:00:00.000Z",
+    });
+    const after = snapshot({ bootedSince: "2026-08-07T09:00:00.000Z" });
+    const result = classifyContinuity(before, after, DEPLOY);
     expect(result.verdict).toBe("incomplete-evidence");
     expect(result.proven).toBe(false);
   });
@@ -258,6 +335,15 @@ describe("classifyContinuity — malformed evidence and windows are not proven",
         completedAt: "2",
       },
     );
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("an impossible calendar date Date.parse would normalize (2026-02-30) → incomplete-evidence", () => {
+    const result = classifyContinuity(snapshot(), snapshot(), {
+      startedAt: "2026-02-30T10:00:00.000Z",
+      completedAt: "2026-02-30T10:05:00.000Z",
+    });
     expect(result.verdict).toBe("incomplete-evidence");
     expect(result.proven).toBe(false);
   });

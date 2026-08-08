@@ -106,9 +106,9 @@ these fields (all in the issue's required pre/post-deploy evidence list):
 | `hostIdentity` | `scutil --get LocalHostName` (or your stable host id) |
 | `automobileVersion` | AutoMobile package/version reported by the daemon |
 | `workerIncarnation` | worker process incarnation id (changes on replacement) |
-| `processSupervisor`, `processIds` | `launchctl` / `ps` for daemon, runner, `com.apple.CoreSimulator.CoreSimulatorService` |
+| `processSupervisor`, `processIds` | `launchctl` / `ps`. `processIds` **must** include positive-integer PIDs for the keys `daemon`, `runner`, and `coreSimulatorService` (`com.apple.CoreSimulator.CoreSimulatorService`); a missing role is `incomplete-evidence` |
 | `coreSimulatorDataRoot` | `~/Library/Developer/CoreSimulator/Devices/<udid>/data` |
-| `bootedSince` | boot time of the current session (used to detect a mid-window reboot) — **required for a proven verdict**: without it a reboot cannot be ruled out, so the result is `incomplete-evidence` |
+| `bootedSince` | boot time of the current session (used to detect a boot-session change between the before and after captures) — **required for a proven verdict**: without it a reboot cannot be ruled out, so the result is `incomplete-evidence` |
 | `lifecycleState` | `booted` / `shutdown` / … from `simctl list` |
 | `responsive` | result of a responsiveness probe against the device |
 | `reportingStatus` | `reporting` / `delayed` / `lost` from the worker/AutoMobile status |
@@ -142,7 +142,7 @@ one verdict:
 | --- | --- | --- | --- |
 | `same-device-continuity` | Same UDID + data root, booted/responsive throughout, reporting restored. | yes | available |
 | `controlled-replacement` | Declared replacement; new device booted and responsive. | yes | available |
-| `boot-recovery` | Same UDID + data, but rebooted during the window (data safe, booted session did not survive). | no | maintenance |
+| `boot-recovery` | Same UDID + data, but the boot session changed between the before/after captures — a reboot at any point after the pre-deploy capture (data safe, booted session did not survive). | no | maintenance |
 | `shutdown` | Same device is no longer booted and did not recover. | no | maintenance |
 | `reporting-delay` | Device continuous but worker reporting delayed/lost. | no | maintenance |
 | `orphaned-or-erased-state` | UDID, data root, or host identity changed with no declared replacement (also: a controlled replacement of a device that had active work). | no | maintenance |

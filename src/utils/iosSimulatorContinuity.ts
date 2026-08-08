@@ -147,6 +147,26 @@ const PROVEN_VERDICTS: ReadonlySet<ContinuityVerdict> = new Set<ContinuityVerdic
   "controlled-replacement",
 ]);
 
+// The process roles the runbook requires every capture to record — the
+// supervised processes whose survival the evidence is meant to prove.
+const REQUIRED_PROCESS_ROLES: readonly string[] = ["daemon", "runner", "coreSimulatorService"];
+
+/**
+ * True when the process-identifier map is real evidence: each required role
+ * (daemon, runner, CoreSimulator service) is present with a positive integer PID,
+ * and the three PIDs are distinct (they are contemporaneous processes, so a
+ * reused PID means malformed evidence). Rejects a missing role, junk values
+ * (`{ daemon: 0 }`, `{ daemon: 1.5 }`), an unrelated placeholder
+ * (`{ placeholder: 1 }`), and duplicates (`{ daemon: 1, runner: 1, ... }`).
+ */
+function hasValidProcessIds(processIds: Readonly<Record<string, number>>): boolean {
+  const pids = REQUIRED_PROCESS_ROLES.map((role) => processIds[role]);
+  if (!pids.every((pid) => typeof pid === "number" && Number.isInteger(pid) && pid > 0)) {
+    return false;
+  }
+  return new Set(pids).size === pids.length;
+}
+
 /** Identity/context fields that must be present for evidence to be usable. */
 function hasRequiredIdentity(snapshot: ContinuitySnapshot): boolean {
   return (
@@ -156,6 +176,10 @@ function hasRequiredIdentity(snapshot: ContinuitySnapshot): boolean {
     snapshot.automobileVersion.trim().length > 0 &&
     snapshot.workerIncarnation.trim().length > 0 &&
     snapshot.processSupervisor.trim().length > 0 &&
+    // The issue lists process identifiers as required evidence; a capture
+    // missing the daemon/runner/CoreSimulator PIDs (or with junk values) is not
+    // evidence that the supervised processes are accounted for.
+    hasValidProcessIds(snapshot.processIds) &&
     snapshot.coreSimulatorDataRoot.trim().length > 0 &&
     snapshot.reportingStatus !== "unknown"
   );
@@ -174,11 +198,33 @@ function hit(verdict: ContinuityVerdict, reason: string): RuleHit {
 // Strict ISO-8601 date-time with a timezone: `2026-08-07T10:00:00(.000)?(Z|±hh:mm)`.
 // Permissive Date.parse alone accepts junk like "0"/"1" as valid dates, which
 // would let malformed evidence read as proven — so the shape is checked too.
-const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_8601 =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 
-/** True when the value is a strict ISO-8601 timestamp with a real calendar value. */
+/** True when (year, month, day) is a real calendar date that Date.parse would not normalize. */
+function isRealCalendarDate(year: number, month: number, day: number): boolean {
+  // setUTCFullYear (not Date.UTC) so years 0-99 are not remapped to 1900-1999.
+  const utc = new Date(0);
+  utc.setUTCFullYear(year, month - 1, day);
+  return (
+    utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === day
+  );
+}
+
+/**
+ * True when the value is a strict ISO-8601 timestamp with a real calendar value.
+ * The regex fixes the shape (rejecting `"0"`/`"1"`) and the calendar round-trip
+ * rejects impossible dates that Date.parse silently normalizes (e.g. `02-30`).
+ */
 function isValidTimestamp(value: string | undefined): value is string {
-  return typeof value === "string" && ISO_8601.test(value) && !Number.isNaN(Date.parse(value));
+  if (typeof value !== "string") {
+    return false;
+  }
+  const match = ISO_8601.exec(value);
+  if (match === null || Number.isNaN(Date.parse(value))) {
+    return false;
+  }
+  return isRealCalendarDate(Number(match[1]), Number(match[2]), Number(match[3]));
 }
 
 /** True when all identity/context evidence and the deploy window are present and well-formed. */
@@ -199,25 +245,47 @@ function evidenceComplete(
 }
 
 /**
- * A boot-recovery verdict when the current boot session began at or after the
- * deploy started (so the pre-deploy booted session did not survive), or null when
- * it began before the deploy (the session survived). A boot at or after the start
- * is not proven regardless of whether it lands inside or after the window — a
- * post-window reboot before capture still means the session did not survive — but
- * the reason distinguishes the two. Reached only after the isValidTimestamp gates.
+ * Prove the *same* booted session bracketed the deploy. The boot instant must be
+ * a valid pre-deploy timestamp, identical in the before and after snapshots, and
+ * predate the window — a changed instant (before ≠ after) means it rebooted at
+ * some point, and an instant at/after the deploy start means no pre-deploy session
+ * survived. Returns a not-proven hit, or null when survival is proven. The
+ * after-timestamp is already validated by {@link postStateShortfall}.
  */
-function bootRecovery(after: ContinuitySnapshot, deploy: DeploymentWindow): RuleHit | null {
-  const bootedAt = Date.parse(after.bootedSince as string);
-  if (bootedAt < Date.parse(deploy.startedAt)) {
-    return null;
+function sessionSurvival(
+  before: ContinuitySnapshot,
+  after: ContinuitySnapshot,
+  deploy: DeploymentWindow,
+): RuleHit | null {
+  if (!isValidTimestamp(before.bootedSince) || !isValidTimestamp(after.bootedSince)) {
+    return hit(
+      "incomplete-evidence",
+      "Boot-session time (bootedSince) is missing or invalid; survival of the booted session cannot be proven.",
+    );
   }
-  const duringWindow = bootedAt <= Date.parse(deploy.completedAt);
-  return hit(
-    "boot-recovery",
-    duringWindow
-      ? "Simulator rebooted during the deploy window; CoreSimulator data was preserved but the booted session did not survive."
-      : "Simulator's boot session began after the deploy completed but before capture; the pre-deploy booted session did not survive.",
-  );
+  // Compare the parsed instants, not the raw strings, so equivalent ISO
+  // spellings of the same instant (e.g. `09:00:00Z` vs `09:00:00.000Z`) match.
+  const beforeBoot = Date.parse(before.bootedSince);
+  const afterBoot = Date.parse(after.bootedSince);
+  if (afterBoot < beforeBoot) {
+    return hit(
+      "incomplete-evidence",
+      "The post-deploy boot instant precedes the pre-deploy one; the evidence is contradictory or clock-skewed, so survival cannot be proven.",
+    );
+  }
+  if (beforeBoot !== afterBoot) {
+    return hit(
+      "boot-recovery",
+      "The boot session changed between the pre- and post-deploy captures; CoreSimulator data was preserved but the booted session did not survive.",
+    );
+  }
+  if (beforeBoot >= Date.parse(deploy.startedAt)) {
+    return hit(
+      "boot-recovery",
+      "The booted session began at or after the deploy start, so no pre-deploy session survived.",
+    );
+  }
+  return null;
 }
 
 /**
@@ -308,16 +376,20 @@ function classifySameDevice(
   if (shortfall) {
     return shortfall;
   }
-  // After-state is fully proven; now the survival-specific checks.
-  const recovery = bootRecovery(after, deploy);
-  if (recovery) {
-    return recovery;
-  }
+  // Establish a healthy pre-deploy baseline before reasoning about survival —
+  // an unhealthy `before` cannot prove a healthy device was preserved, whatever
+  // the boot instants show.
   if (before.lifecycleState !== "booted" || !before.responsive) {
     return hit(
       "incomplete-evidence",
       "Pre-deploy baseline was not a booted, responsive simulator; continuity of a healthy device cannot be proven.",
     );
+  }
+  // Baseline is healthy and the after-state is fully proven; now that the same
+  // booted session survived.
+  const recovery = sessionSurvival(before, after, deploy);
+  if (recovery) {
+    return recovery;
   }
   return hit(
     "same-device-continuity",

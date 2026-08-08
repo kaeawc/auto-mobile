@@ -6,10 +6,13 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -67,6 +70,13 @@ interface AutoMobileClient {
   ): StartDeviceResult
 
   fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult
+
+  fun setActiveDeviceChecked(deviceId: String, platform: String) {
+    val result = setActiveDevice(deviceId, platform)
+    if (!result.success) {
+      throw McpConnectionException(result.message ?: "Failed to set active device")
+    }
+  }
 
   fun observe(platform: String = "android"): ObserveResult
 
@@ -152,6 +162,40 @@ interface AutoMobileClient {
   ): ClearKeyValueResult
 
   fun callTool(name: String, arguments: JsonObject): JsonElement
+
+  /**
+   * Calls a tool whose JSON payload follows the daemon's `{success, message}` operation-result
+   * convention and turns operational or MCP envelope failures into the same exception path as
+   * transport errors.
+   */
+  fun callToolChecked(name: String, arguments: JsonObject): JsonElement {
+    val response =
+      callTool(name, arguments) as? JsonObject
+        ?: throw McpConnectionException("Tool response was not an object")
+    val envelopeError = response["isError"]?.jsonPrimitive?.booleanOrNull == true
+    val text =
+      response["content"]
+        ?.let { content ->
+          (content as? JsonArray)?.firstOrNull { item ->
+            (item as? JsonObject)?.get("type")?.jsonPrimitive?.content == "text"
+          }
+        }
+        ?.let { (it as? JsonObject)?.get("text")?.jsonPrimitive?.content }
+        ?: throw McpConnectionException("Tool response missing text content")
+    val payload = DaemonJson.decodeFromString<JsonElement>(text)
+    val payloadObject = payload as? JsonObject ?: return payload
+    val success = payloadObject["success"]?.jsonPrimitive?.booleanOrNull
+    if (envelopeError || success == false) {
+      val message =
+        payloadObject["message"]?.jsonPrimitive?.contentOrNull
+          ?: payloadObject["error"]?.jsonPrimitive?.contentOrNull
+          ?: payloadObject["reason"]?.jsonPrimitive?.contentOrNull
+          ?: payloadObject["code"]?.jsonPrimitive?.contentOrNull
+          ?: "Tool operation failed"
+      throw McpConnectionException(message)
+    }
+    return payload
+  }
 
   /** Enable one optional server capability for this client connection. */
   fun enableToolCapability(capability: String) {

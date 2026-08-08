@@ -94,6 +94,25 @@ describe("classifyContinuity — distinguishes the required states (AC5)", () =>
     expect(result.proven).toBe(true);
   });
 
+  it("equivalent ISO spellings of the same boot instant are the same session → same-device-continuity", () => {
+    const before = snapshot({ bootedSince: "2026-08-07T09:00:00Z" });
+    const after = snapshot({ bootedSince: "2026-08-07T09:00:00.000Z" });
+    const result = classifyContinuity(before, after, DEPLOY);
+    expect(result.verdict).toBe("same-device-continuity");
+    expect(result.proven).toBe(true);
+  });
+
+  it("a real leap day is accepted, not falsely rejected as an impossible date", () => {
+    const boot = { bootedSince: "2028-02-29T09:00:00.000Z" };
+    const window: DeploymentWindow = {
+      startedAt: "2028-02-29T10:00:00.000Z",
+      completedAt: "2028-02-29T10:05:00.000Z",
+    };
+    const result = classifyContinuity(snapshot(boot), snapshot(boot), window);
+    expect(result.verdict).toBe("same-device-continuity");
+    expect(result.proven).toBe(true);
+  });
+
   it("a changed boot session across the deploy (before !== after) → boot-recovery", () => {
     // before booted 09:00, after booted 09:59 — the session changed even though
     // both predate the window; the original booted session did not survive.

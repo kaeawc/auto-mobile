@@ -182,7 +182,9 @@ const ISO_8601 =
 
 /** True when (year, month, day) is a real calendar date that Date.parse would not normalize. */
 function isRealCalendarDate(year: number, month: number, day: number): boolean {
-  const utc = new Date(Date.UTC(year, month - 1, day));
+  // setUTCFullYear (not Date.UTC) so years 0-99 are not remapped to 1900-1999.
+  const utc = new Date(0);
+  utc.setUTCFullYear(year, month - 1, day);
   return (
     utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === day
   );
@@ -234,13 +236,15 @@ function sessionSurvival(
   after: ContinuitySnapshot,
   deploy: DeploymentWindow,
 ): RuleHit | null {
-  if (!isValidTimestamp(before.bootedSince)) {
+  if (!isValidTimestamp(before.bootedSince) || !isValidTimestamp(after.bootedSince)) {
     return hit(
       "incomplete-evidence",
-      "Pre-deploy boot-session time (bootedSince) is missing or invalid; survival of the booted session cannot be proven.",
+      "Boot-session time (bootedSince) is missing or invalid; survival of the booted session cannot be proven.",
     );
   }
-  if (before.bootedSince !== after.bootedSince) {
+  // Compare the parsed instants, not the raw strings, so equivalent ISO
+  // spellings of the same instant (e.g. `09:00:00Z` vs `09:00:00.000Z`) match.
+  if (Date.parse(before.bootedSince) !== Date.parse(after.bootedSince)) {
     return hit(
       "boot-recovery",
       "The boot session changed between the pre- and post-deploy captures; CoreSimulator data was preserved but the booted session did not survive.",

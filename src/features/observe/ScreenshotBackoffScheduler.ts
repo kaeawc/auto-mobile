@@ -60,8 +60,18 @@ export interface ScreenshotBackoffScheduler {
   /**
    * Cancel any pending screenshot captures.
    * Called when new activity occurs (e.g., new request to accessibility service).
+   *
+   * Deliberately preserves the trailing throttle capture so a storm of sequence restarts during
+   * an animation still lands one settled frame (issue #4927). Use {@link stop} to quiesce fully.
    */
   cancelPendingCaptures(): void;
+
+  /**
+   * Fully quiesce the scheduler: cancel pending captures AND the trailing throttle capture. Unlike
+   * {@link cancelPendingCaptures}, nothing survives — call this when captures should genuinely stop
+   * (e.g. the device connection closed), not on a sequence restart (issue #4927).
+   */
+  stop(): void;
 
   /**
    * Check if a backoff sequence is currently active.
@@ -77,6 +87,14 @@ export interface ScreenshotBackoffScheduler {
    * Recompute the pending keepalive timeout using the current cadence.
    */
   rescheduleKeepAlive(): void;
+
+  /**
+   * Record that a capture was just issued outside the scheduler's own timers (e.g. the direct
+   * initial-frame capture at subscriber connect). Advances the shared rate-limit floor clock so a
+   * scheduler capture armed for the same instant coalesces instead of firing a second, redundant
+   * accessibility screenshot the platform would reject as rate-limited (issue #4927).
+   */
+  noteCaptureStarted(): void;
 }
 
 /**
@@ -101,6 +119,16 @@ interface ScreenshotBackoffConfig {
    * each time the next keepalive capture is scheduled.
    */
   getKeepAliveIntervalMs?: () => number | null | undefined;
+
+  /**
+   * Minimum wall-clock interval (ms) between two capture attempts. Set this to the platform's
+   * screenshot rate-limit floor so a front-loaded burst — or a storm of sequence restarts during
+   * an animation — never issues captures faster than the device allows (issue #4927). A tick that
+   * would fire within the floor of the last capture is coalesced into a single trailing capture at
+   * the floor boundary, which reflects the latest state and still lands once the UI settles.
+   * Null/undefined/<=0 disables throttling (default), preserving the raw backoff cadence.
+   */
+  minCaptureIntervalMs?: number | null;
 }
 
 type ScreenshotBackoffConfigInput = Partial<ScreenshotBackoffConfig>;
@@ -132,6 +160,13 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
   private lastEmittedChecksum: string | null = null;
   private lastEmittedMetadataSignature: string | null = null;
   private sequenceId: number = 0;
+
+  // Rate-limit throttle state (issue #4927). `lastCaptureStartMs` is the wall-clock time a real
+  // capture was last issued; `trailingCaptureTimeout` is the single coalesced capture pending at
+  // the floor boundary. The trailing capture deliberately outlives a sequence restart so an
+  // animation storm still lands one settled frame after it stops.
+  private lastCaptureStartMs: number | null = null;
+  private trailingCaptureTimeout: ReturnType<Timer["setTimeout"]> | null = null;
 
   constructor(
     captureCallback: ScreenshotCaptureCallback,
@@ -185,6 +220,18 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
     }
   }
 
+  stop(): void {
+    this.cancelPendingCaptures();
+    // The trailing capture deliberately outlives cancelPendingCaptures (restart-storm survival),
+    // so it must be cleared explicitly here or a capture armed just before a disconnect fires
+    // afterward and re-bootstraps the keepalive loop (issue #4927).
+    if (this.trailingCaptureTimeout) {
+      logger.debug("[ScreenshotBackoff] Cancelling trailing throttle capture");
+      this.timer.clearTimeout(this.trailingCaptureTimeout);
+      this.trailingCaptureTimeout = null;
+    }
+  }
+
   isActive(): boolean {
     return this.pendingTimeouts.length > 0 || this.keepAliveTimeout !== null;
   }
@@ -225,10 +272,75 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
       this.pendingTimeouts.shift();
     }
 
+    // Below the platform floor: coalesce into the single trailing capture rather than issue a
+    // capture the device would reject as rate-limited (issue #4927).
+    if (this.shouldDeferForFloor()) {
+      logger.debug(`[ScreenshotBackoff] Deferring capture at t=${interval}ms to the rate-limit floor (sequence ${sequenceId})`);
+      this.armTrailingCapture();
+      this.scheduleKeepAliveIfIdle(sequenceId);
+      return;
+    }
+
     logger.debug(`[ScreenshotBackoff] Capturing screenshot at t=${interval}ms (sequence ${sequenceId})`);
 
     try {
       await this.captureAndEmit(sequenceId, `t=${interval}ms`, false);
+    } finally {
+      this.scheduleKeepAliveIfIdle(sequenceId);
+    }
+  }
+
+  /**
+   * Whether a capture requested now would violate the rate-limit floor. False when throttling is
+   * disabled or no capture has happened yet (the leading edge always fires immediately).
+   */
+  noteCaptureStarted(): void {
+    // Same clock the scheduler's own captures stamp in captureAndEmit, so an external capture and a
+    // scheduler-owned one share one floor window (issue #4927).
+    this.lastCaptureStartMs = this.timer.now();
+  }
+
+  private shouldDeferForFloor(): boolean {
+    const floor = this.config.minCaptureIntervalMs;
+    if (!floor || floor <= 0 || this.lastCaptureStartMs === null) {
+      return false;
+    }
+    return this.timer.now() - this.lastCaptureStartMs < floor;
+  }
+
+  /**
+   * Schedule a single capture at the floor boundary after the last capture. Coalesced: if one is
+   * already armed it is kept, so a dense burst or restart storm collapses to at most one capture
+   * per floor window. Not cleared by cancelPendingCaptures, so it survives sequence restarts and
+   * still fires the settled frame once activity stops.
+   */
+  private armTrailingCapture(): void {
+    const floor = this.config.minCaptureIntervalMs;
+    if (!floor || floor <= 0 || this.lastCaptureStartMs === null || this.trailingCaptureTimeout) {
+      return;
+    }
+    const dueInMs = Math.max(0, this.lastCaptureStartMs + floor - this.timer.now());
+    this.trailingCaptureTimeout = this.timer.setTimeout(() => {
+      this.trailingCaptureTimeout = null;
+      void this.fireTrailingCapture();
+    }, dueInMs);
+  }
+
+  private async fireTrailingCapture(): Promise<void> {
+    // Reflect the LATEST state: bind the current sequence so captureAndEmit does not discard this
+    // as stale, and drop entirely if nobody is watching anymore.
+    const sequenceId = this.sequenceId;
+    if (!this.shouldKeepAlive()) {
+      logger.debug("[ScreenshotBackoff] Dropping trailing capture - no active subscribers");
+      return;
+    }
+    // Activity since arming may have pushed the floor out again; re-arm instead of firing early.
+    if (this.shouldDeferForFloor()) {
+      this.armTrailingCapture();
+      return;
+    }
+    try {
+      await this.captureAndEmit(sequenceId, "throttle-trailing", false);
     } finally {
       this.scheduleKeepAliveIfIdle(sequenceId);
     }
@@ -247,6 +359,16 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
       return;
     }
 
+    // A subscriber can request a keepalive cadence below the platform floor (screenshot interval
+    // clamps to 250ms, under the 350ms accessibility floor), and a burst capture may have just
+    // fired. Skip this beat rather than trip the rate limit; the reschedule below keeps liveness
+    // going at an effective cadence no faster than the floor (issue #4927).
+    if (this.shouldDeferForFloor()) {
+      logger.debug("[ScreenshotBackoff] Skipping keepalive capture - within the rate-limit floor");
+      this.scheduleKeepAliveIfIdle(sequenceId);
+      return;
+    }
+
     logger.debug(`[ScreenshotBackoff] Capturing keepalive screenshot (sequence ${sequenceId})`);
 
     try {
@@ -262,6 +384,10 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
     emitDuplicates: boolean
   ): Promise<void> {
     try {
+      // Stamp the capture start before issuing it so the rate-limit floor (issue #4927) is
+      // measured from when the device was actually asked — covering burst, trailing, and
+      // keepalive captures alike.
+      this.lastCaptureStartMs = this.timer.now();
       const result = await this.captureCallback();
 
       // Check again if sequence is still valid (capture might have taken time)
@@ -352,7 +478,9 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
 export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffScheduler {
   public startBackoffSequenceCalls: number = 0;
   public cancelPendingCapturesCalls: number = 0;
+  public stopCalls: number = 0;
   public rescheduleKeepAliveCalls: number = 0;
+  public noteCaptureStartedCalls: number = 0;
   private _isActive: boolean = false;
   private _pendingCount: number = 0;
 
@@ -368,6 +496,11 @@ export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffSchedule
     this._pendingCount = 0;
   }
 
+  stop(): void {
+    this.stopCalls++;
+    this.cancelPendingCaptures();
+  }
+
   isActive(): boolean {
     return this._isActive;
   }
@@ -378,6 +511,10 @@ export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffSchedule
 
   rescheduleKeepAlive(): void {
     this.rescheduleKeepAliveCalls++;
+  }
+
+  noteCaptureStarted(): void {
+    this.noteCaptureStartedCalls++;
   }
 
   // Test helpers
@@ -392,7 +529,9 @@ export class FakeScreenshotBackoffScheduler implements ScreenshotBackoffSchedule
   reset(): void {
     this.startBackoffSequenceCalls = 0;
     this.cancelPendingCapturesCalls = 0;
+    this.stopCalls = 0;
     this.rescheduleKeepAliveCalls = 0;
+    this.noteCaptureStartedCalls = 0;
     this._isActive = false;
     this._pendingCount = 0;
   }

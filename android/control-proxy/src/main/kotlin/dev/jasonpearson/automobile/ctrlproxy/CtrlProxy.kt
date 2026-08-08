@@ -399,6 +399,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val base64Length: Int,
   )
 
+  /**
+   * Raw result of the platform takeScreenshot callback, carrying the failure code (issue #4927).
+   */
+  private sealed interface ScreenshotCallbackResult {
+    data class Captured(val bitmap: Bitmap, val rotation: Int?) : ScreenshotCallbackResult
+
+    data class Failed(val errorCode: Int?) : ScreenshotCallbackResult
+  }
+
+  /**
+   * Outcome of [takeScreenshotAsync]: an encoded payload, or a failure that retains the platform
+   * error code so the broadcast can surface a rate limit distinctly instead of a generic failure.
+   */
+  private sealed interface ScreenshotCaptureOutcome {
+    data class Success(val payload: ScreenshotCapturePayload) : ScreenshotCaptureOutcome
+
+    data class Failure(val errorCode: Int?) : ScreenshotCaptureOutcome
+  }
+
   // Job for collecting hierarchy flow results
   private var hierarchyFlowJob: Job? = null
 
@@ -2661,10 +2680,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Takes a screenshot and returns it as a base64-encoded JPEG plus capture diagnostics. Requires
    * Android R (API 30) or higher. Runs on IO dispatcher to avoid blocking the main thread.
    */
-  private suspend fun takeScreenshotAsync(quality: Int = 80): ScreenshotCapturePayload? {
+  private suspend fun takeScreenshotAsync(quality: Int = 80): ScreenshotCaptureOutcome {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
       Log.w(TAG, "Screenshot API requires Android R (API 30) or higher")
-      return null
+      return ScreenshotCaptureOutcome.Failure(null)
     }
 
     return withContext(Dispatchers.IO) {
@@ -2675,7 +2694,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val rotationCapture = rotationProvenance.beginCapture()
         val rotationAtCaptureStart = getRotationOrNull()
         val captured =
-          suspendCancellableCoroutine<Pair<Bitmap, Int?>?> { continuation ->
+          suspendCancellableCoroutine<ScreenshotCallbackResult> { continuation ->
             takeScreenshot(
               Display.DEFAULT_DISPLAY,
               mainExecutor,
@@ -2688,7 +2707,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                     )
                   screenshot.hardwareBuffer.close()
                   if (hardwareBitmap == null) {
-                    continuation.resume(null)
+                    continuation.resume(ScreenshotCallbackResult.Failed(null))
                     return
                   }
                   // A display change makes the pixels' orientation ambiguous. Preserve that
@@ -2699,23 +2718,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                       rotationAtCaptureStart,
                       getRotationOrNull(),
                     )
-                  continuation.resume(hardwareBitmap to rotation)
+                  continuation.resume(ScreenshotCallbackResult.Captured(hardwareBitmap, rotation))
                 }
 
                 override fun onFailure(errorCode: Int) {
+                  // Retain the platform error code so the broadcast can distinguish a rate limit
+                  // (ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) from a real failure (issue #4927).
                   Log.e(TAG, "Screenshot failed with error code: $errorCode")
-                  continuation.resume(null)
+                  continuation.resume(ScreenshotCallbackResult.Failed(errorCode))
                 }
               },
             )
           }
 
-        if (captured == null) {
-          Log.e(TAG, "Failed to capture screenshot bitmap")
-          return@withContext null
+        if (captured is ScreenshotCallbackResult.Failed) {
+          Log.e(TAG, "Failed to capture screenshot bitmap (errorCode=${captured.errorCode})")
+          return@withContext ScreenshotCaptureOutcome.Failure(captured.errorCode)
         }
 
-        val (bitmap, rotation) = captured
+        val (bitmap, rotation) = captured as ScreenshotCallbackResult.Captured
 
         val screenshotTime = System.currentTimeMillis() - startTime
         Log.d(TAG, "Screenshot captured in ${screenshotTime}ms (${bitmap.width}x${bitmap.height})")
@@ -2742,13 +2763,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           "Screenshot encoded: ${jpegBytes.size} bytes -> ${base64String.length} base64 chars in ${encodeTime}ms (total: ${totalTime}ms)",
         )
 
-        ScreenshotCapturePayload(
-          base64Image = base64String,
-          rotation = rotation,
-          captureDurationMs = screenshotTime,
-          encodeDurationMs = encodeTime,
-          byteLength = jpegBytes.size,
-          base64Length = base64String.length,
+        ScreenshotCaptureOutcome.Success(
+          ScreenshotCapturePayload(
+            base64Image = base64String,
+            rotation = rotation,
+            captureDurationMs = screenshotTime,
+            encodeDurationMs = encodeTime,
+            byteLength = jpegBytes.size,
+            base64Length = base64String.length,
+          )
         )
       } catch (e: CancellationException) {
         // The awaiting caller is being cancelled — rethrow instead of converting the cancellation
@@ -2756,7 +2779,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         throw e
       } catch (e: Exception) {
         Log.e(TAG, "Error taking screenshot", e)
-        null
+        ScreenshotCaptureOutcome.Failure(null)
       }
     }
   }
@@ -5502,33 +5525,40 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // and hanging the awaiting client until timeout (issue #3023).
     asyncActionRunner.launch(requestId, "screenshot") {
       val contextBeforeCapture = currentFrameContext()
-      val screenshot = takeScreenshotAsync()
+      val outcome = takeScreenshotAsync()
       val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
-      if (screenshot != null) {
-        webSocketServer.broadcast(
-          ProtocolScreenshotResult(
-            timestamp = System.currentTimeMillis(),
-            requestId = requestId,
-            data = screenshot.base64Image,
-            format = "jpeg",
-            rotation = screenshot.rotation,
-            screenshotCaptureDurationMs = screenshot.captureDurationMs,
-            screenshotEncodeDurationMs = screenshot.encodeDurationMs,
-            screenshotByteLength = screenshot.byteLength,
-            screenshotBase64Length = screenshot.base64Length,
-            frameContext = stableContext?.toString(),
+      when (outcome) {
+        is ScreenshotCaptureOutcome.Success -> {
+          val screenshot = outcome.payload
+          webSocketServer.broadcast(
+            ProtocolScreenshotResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = requestId,
+              data = screenshot.base64Image,
+              format = "jpeg",
+              rotation = screenshot.rotation,
+              screenshotCaptureDurationMs = screenshot.captureDurationMs,
+              screenshotEncodeDurationMs = screenshot.encodeDurationMs,
+              screenshotByteLength = screenshot.byteLength,
+              screenshotBase64Length = screenshot.base64Length,
+              frameContext = stableContext?.toString(),
+            )
           )
-        )
-        Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
-      } else {
-        val errorMessage = buildString {
-          append("""{"type":"screenshot_error","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","error":"Failed to capture screenshot"}""")
+          Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
         }
-        webSocketServer.broadcast(errorMessage)
+        is ScreenshotCaptureOutcome.Failure -> {
+          // Surface a rate limit distinctly so the daemon classifies it as ctrlproxy_rate_limited
+          // rather than a generic capture failure (issue #4927).
+          val error = CtrlProxyScreenshotWire.errorMessageForCode(outcome.errorCode)
+          val errorMessage = buildString {
+            append("""{"type":"screenshot_error","timestamp":${System.currentTimeMillis()}""")
+            if (requestId != null) {
+              append(""","requestId":"$requestId"""")
+            }
+            append(""","error":"$error"}""")
+          }
+          webSocketServer.broadcast(errorMessage)
+        }
       }
     }
   }

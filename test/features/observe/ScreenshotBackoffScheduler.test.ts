@@ -716,3 +716,212 @@ describe("DefaultScreenshotBackoffScheduler", () => {
     });
   });
 });
+
+describe("DefaultScreenshotBackoffScheduler minCaptureIntervalMs throttle", () => {
+  // The Android accessibility takeScreenshot() API rate-limits calls below a platform floor.
+  // With minCaptureIntervalMs set, the scheduler must never issue two captures closer than the
+  // floor — no matter how dense the burst intervals are or how often the sequence restarts.
+  const FLOOR = 350;
+
+  function makeThrottledScheduler(fakeTimer: FakeTimer, captureTimes: number[]) {
+    return new DefaultScreenshotBackoffScheduler(
+      async () => {
+        captureTimes.push(fakeTimer.now());
+        return { success: true, data: `frame-${captureTimes.length}` };
+      },
+      () => {},
+      {
+        intervals: [0, 100, 300, 500, 800, 1300],
+        keepAliveIntervalMs: null,
+        minCaptureIntervalMs: FLOOR,
+      },
+      fakeTimer
+    );
+  }
+
+  function assertNeverBelowFloor(captureTimes: number[]) {
+    for (let i = 1; i < captureTimes.length; i++) {
+      expect(captureTimes[i] - captureTimes[i - 1]).toBeGreaterThanOrEqual(FLOOR);
+    }
+  }
+
+  it("never captures two frames closer than the floor across a single front-loaded burst", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeThrottledScheduler(fakeTimer, captureTimes);
+
+    scheduler.startBackoffSequence();
+    for (let t = 0; t < 2000; t += 50) {
+      await fakeTimer.advanceTimersByTimeAsync(50);
+    }
+
+    expect(captureTimes.length).toBeGreaterThanOrEqual(2);
+    expect(captureTimes[0]).toBe(0); // leading edge fires immediately
+    assertNeverBelowFloor(captureTimes);
+  });
+
+  it("holds the floor through a restart storm and still captures the settled frame", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeThrottledScheduler(fakeTimer, captureTimes);
+
+    // Simulate an animation: a new hierarchy every 50ms restarts the sequence for ~1s.
+    for (let t = 0; t < 1000; t += 50) {
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(50);
+    }
+    // Let the trailing (settle) capture land after the storm ends.
+    for (let t = 0; t < 800; t += 50) {
+      await fakeTimer.advanceTimersByTimeAsync(50);
+    }
+
+    expect(captureTimes.length).toBeGreaterThanOrEqual(2); // liveness during the storm
+    assertNeverBelowFloor(captureTimes);
+    // A capture must land at/after the last restart so the settled UI is not dropped.
+    expect(Math.max(...captureTimes)).toBeGreaterThanOrEqual(950);
+  });
+
+  it("does not throttle when the floor is unset (default behavior preserved)", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = new DefaultScreenshotBackoffScheduler(
+      async () => {
+        captureTimes.push(fakeTimer.now());
+        return { success: true, data: `frame-${captureTimes.length}` };
+      },
+      () => {},
+      { intervals: [0, 100, 300, 500, 800, 1300], keepAliveIntervalMs: null },
+      fakeTimer
+    );
+
+    scheduler.startBackoffSequence();
+    for (let t = 0; t < 1400; t += 50) {
+      await fakeTimer.advanceTimersByTimeAsync(50);
+    }
+
+    // All six front-loaded intervals fire, including sub-floor gaps (100ms, 200ms).
+    expect(captureTimes).toEqual([0, 100, 300, 500, 800, 1300]);
+  });
+});
+
+describe("DefaultScreenshotBackoffScheduler stop() vs cancelPendingCaptures()", () => {
+  // cancelPendingCaptures must preserve the trailing capture (restart-storm survival), but stop()
+  // must clear it so a disconnect genuinely quiesces the scheduler (issue #4927, Finding 1).
+  const FLOOR = 350;
+
+  function makeScheduler(fakeTimer: FakeTimer, captureTimes: number[]) {
+    return new DefaultScreenshotBackoffScheduler(
+      async () => {
+        captureTimes.push(fakeTimer.now());
+        return { success: true, data: `frame-${captureTimes.length}` };
+      },
+      () => {},
+      { intervals: [0, 100], keepAliveIntervalMs: null, minCaptureIntervalMs: FLOOR },
+      fakeTimer
+    );
+  }
+
+  it("cancelPendingCaptures lets an already-armed trailing capture still fire", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeScheduler(fakeTimer, captureTimes);
+
+    scheduler.startBackoffSequence();
+    await fakeTimer.advanceTimersByTimeAsync(0); // leading capture at t=0
+    await fakeTimer.advanceTimersByTimeAsync(100); // t=100 tick defers -> arms trailing at t=350
+    scheduler.cancelPendingCaptures(); // restart-storm semantics: trailing survives
+    await fakeTimer.advanceTimersByTimeAsync(300); // reach t=350
+
+    expect(captureTimes).toEqual([0, 350]);
+  });
+
+  it("stop() clears the trailing capture so nothing fires after quiesce", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeScheduler(fakeTimer, captureTimes);
+
+    scheduler.startBackoffSequence();
+    await fakeTimer.advanceTimersByTimeAsync(0); // leading capture at t=0
+    await fakeTimer.advanceTimersByTimeAsync(100); // arms trailing at t=350
+    scheduler.stop(); // disconnect semantics: trailing must NOT survive
+    await fakeTimer.advanceTimersByTimeAsync(1000);
+
+    expect(captureTimes).toEqual([0]);
+    expect(scheduler.isActive()).toBe(false);
+  });
+});
+
+describe("DefaultScreenshotBackoffScheduler keepalive respects the floor", () => {
+  // A subscriber can request a keepalive cadence below the platform floor; keepalive captures must
+  // not bypass the throttle or they keep tripping the rate limit in steady state (issue #4927 P1).
+  const FLOOR = 350;
+
+  it("never issues keepalive captures faster than the floor even at a sub-floor cadence", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = new DefaultScreenshotBackoffScheduler(
+      async () => {
+        captureTimes.push(fakeTimer.now());
+        return { success: true, data: `frame-${captureTimes.length}` };
+      },
+      () => {},
+      { intervals: [0], keepAliveIntervalMs: 250, minCaptureIntervalMs: FLOOR },
+      fakeTimer
+    );
+
+    scheduler.startBackoffSequence();
+    for (let t = 0; t < 1200; t += 50) {
+      await fakeTimer.advanceTimersByTimeAsync(50);
+    }
+
+    expect(captureTimes[0]).toBe(0);
+    expect(captureTimes.length).toBeGreaterThan(1); // keepalive still provides liveness
+    for (let i = 1; i < captureTimes.length; i++) {
+      expect(captureTimes[i] - captureTimes[i - 1]).toBeGreaterThanOrEqual(FLOOR);
+    }
+  });
+});
+
+describe("DefaultScreenshotBackoffScheduler noteCaptureStarted() (external capture participates)", () => {
+  // The initial-frame path issues a direct capture AND arms a backoff sequence; without sharing the
+  // floor clock the armed leading (t=0) capture fires a second a11y screenshot in the same window
+  // and trips the rate limit (issue #4927 P2).
+  const FLOOR = 350;
+
+  function makeScheduler(fakeTimer: FakeTimer, captureTimes: number[]) {
+    return new DefaultScreenshotBackoffScheduler(
+      async () => {
+        captureTimes.push(fakeTimer.now());
+        return { success: true, data: `frame-${captureTimes.length}` };
+      },
+      () => {},
+      { intervals: [0, 100, 300], keepAliveIntervalMs: null, minCaptureIntervalMs: FLOOR },
+      fakeTimer
+    );
+  }
+
+  it("defers the armed leading capture when an external capture was just recorded", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeScheduler(fakeTimer, captureTimes);
+
+    // Simulate the direct initial-frame capture, then the backoff armed alongside it.
+    scheduler.noteCaptureStarted();
+    scheduler.startBackoffSequence();
+    await fakeTimer.advanceTimersByTimeAsync(0); // t=0 leading tick: must DEFER, not capture
+    await fakeTimer.advanceTimersByTimeAsync(400); // reach the floor boundary -> trailing fires
+
+    expect(captureTimes).toEqual([FLOOR]); // one settled capture at the floor, no t=0 collision
+  });
+
+  it("without noteCaptureStarted the leading capture fires immediately (control)", async () => {
+    const fakeTimer = new FakeTimer();
+    const captureTimes: number[] = [];
+    const scheduler = makeScheduler(fakeTimer, captureTimes);
+
+    scheduler.startBackoffSequence();
+    await fakeTimer.advanceTimersByTimeAsync(0);
+
+    expect(captureTimes).toEqual([0]); // leading edge fires when nothing preceded it
+  });
+});

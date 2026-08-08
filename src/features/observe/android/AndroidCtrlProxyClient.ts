@@ -64,6 +64,10 @@ import {
   type ScreenshotPerformanceMetadata,
 } from "../ScreenshotMetadata";
 import {
+  CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR,
+  fallbackReasonForCtrlProxyFailure,
+} from "./screenshotFallbackReason";
+import {
   normalizeAnr,
   normalizeCrash,
   type SdkAnrPayload,
@@ -986,6 +990,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private a11yScreenshotSupported: boolean | null = null;
   private a11yScreenshotFailures: number = 0;
   private static readonly A11Y_SCREENSHOT_MAX_FAILURES = 3;
+  // Minimum interval between accessibility takeScreenshot() requests. The platform rate-limits
+  // calls below its floor (~333ms, ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT); 350ms sits just
+  // above it so a front-loaded backoff burst or an animation's restart storm cannot trip the
+  // limit into needless ADB-screencap fallover (issue #4927).
+  private static readonly A11Y_SCREENSHOT_MIN_INTERVAL_MS = 350;
 
   // Work profile monitor for polling profiles without accessibility service
   private workProfileMonitor: WorkProfileMonitor | null = null;
@@ -1270,9 +1279,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
     sdkEventIngestor?: AndroidSdkEventIngestor,
     loggerInstance?: Logger,
-    certificateFileSystem?: CertificateFileSystem
+    certificateFileSystem?: CertificateFileSystem,
+    screenshotBackoffScheduler?: ScreenshotBackoffScheduler
   ): AndroidCtrlProxyClient {
-    return new AndroidCtrlProxyClient(
+    const client = new AndroidCtrlProxyClient(
       device,
       adb,
       webSocketFactory,
@@ -1285,6 +1295,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       loggerInstance,
       certificateFileSystem
     );
+    // Test-only seam: pre-seed the lazily-built scheduler so tests can assert shared floor
+    // accounting (noteCaptureStarted) without the live device-data-stream server. Not exposed on
+    // the production getInstance path.
+    if (screenshotBackoffScheduler) {
+      client.screenshotBackoffScheduler = screenshotBackoffScheduler;
+    }
+    return client;
   }
 
   // ===========================================================================
@@ -2203,6 +2220,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           throw new Error("WebSocket not connected");
         }
         const message = serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId: sentRequestId }));
+        // Shared rate-limit floor accounting (issue #4927): a one-shot screenshot (observe /
+        // junit-runner) and the observation-stream scheduler both hit the same rate-limited
+        // accessibility takeScreenshot(). Advancing the shared clock here (non-blocking) makes the
+        // stream scheduler coalesce around a one-shot instead of the two engines rate-limiting each
+        // other while a live viewer is attached. requestScreenshot always issues a real a11y capture
+        // (it has no ADB path), so the stamp is unconditionally correct.
+        this.getScreenshotBackoffScheduler().noteCaptureStarted();
         this.ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent screenshot request (requestId: ${sentRequestId})`);
       });
@@ -2384,7 +2408,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   cancelScreenshotBackoff(): void {
     if (this.screenshotBackoffScheduler) {
-      this.screenshotBackoffScheduler.cancelPendingCaptures();
+      // Fully quiesce (including the trailing throttle capture) — this is a teardown/quiesce path
+      // (disconnect, pre-action), not a sequence restart, so nothing should survive (issue #4927).
+      this.screenshotBackoffScheduler.stop();
     }
   }
 
@@ -3317,6 +3343,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             const server = getDeviceDataStreamServer();
             return server?.getScreenshotIntervalMsForDevice(this.device.deviceId) ?? 3000;
           },
+          minCaptureIntervalMs: AndroidCtrlProxyClient.A11Y_SCREENSHOT_MIN_INTERVAL_MS,
         },
         this.timer,
         () => {
@@ -3357,9 +3384,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.screenshotObservationStreamSuppressions.add(requestId);
       const screenshotPromise = this.requestManager.register<ScreenshotResult>(
         requestId, "screenshot", 3000,
-        (_id, _type, _timeout) => ({ success: false, error: "Screenshot timeout" })
+        (_id, _type, _timeout) => ({ success: false, error: CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR })
       );
 
+      // Advance the shared rate-limit floor clock at the a11y-request boundary so a direct capture
+      // (e.g. the initial subscriber frame) and a scheduler-armed capture cannot both hit the
+      // accessibility screenshot API in the same floor window (issue #4927).
+      this.getScreenshotBackoffScheduler().noteCaptureStarted();
       this.ws.send(message);
 
       const result = await screenshotPromise;
@@ -3372,7 +3403,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             `${this.a11yScreenshotFailures} consecutive failures, falling back to ADB screencap`);
           this.a11yScreenshotSupported = false;
         }
-        return this.captureScreenshotViaAdb(this.fallbackReasonForCtrlProxyFailure(result.error));
+        return this.captureScreenshotViaAdb(fallbackReasonForCtrlProxyFailure(result.error));
       }
 
       this.a11yScreenshotFailures = 0;
@@ -3395,10 +3426,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     } finally {
       this.screenshotObservationStreamSuppressions.delete(requestId);
     }
-  }
-
-  private fallbackReasonForCtrlProxyFailure(error?: string): ScreenshotFallbackReason {
-    return error === "Screenshot timeout" ? "ctrlproxy_timeout" : "ctrlproxy_failed";
   }
 
   /**

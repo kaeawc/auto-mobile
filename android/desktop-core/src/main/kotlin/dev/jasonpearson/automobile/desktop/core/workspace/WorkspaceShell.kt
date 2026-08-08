@@ -812,6 +812,7 @@ private fun EmulatorControls(
     // one-shot device calls; Screenshot captures to disk; Locale/More open menus.
     EmulatorControl.entries
       .filter { it != EmulatorControl.Unlock || column.locked }
+      .filter { it.isSupportedOn(column.platform, column.isVirtual) }
       .forEach { control ->
         when (control) {
           EmulatorControl.Screenshot ->
@@ -863,7 +864,7 @@ private fun MoreControl(column: DeviceColumn, onAction: (WorkspaceAction) -> Uni
     }
     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
       DeviceButton.entries
-        .filter { it.isSupportedOn(column.platform) }
+        .filter { it.isSupportedOn(column.platform, column.isVirtual) }
         .forEach { button ->
           DropdownMenuItem(
             text = { Text("${button.icon}  ${button.label}") },

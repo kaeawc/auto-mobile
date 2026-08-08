@@ -192,6 +192,62 @@ describe("classifyContinuity — cannot silently erase/orphan managed state (AC3
     expect(result.proven).toBe(false);
     expect(result.recommendedState).toBe("maintenance");
   });
+
+  it("a planned replacement across different hosts is NOT certified", () => {
+    const after = snapshot({
+      udid: "11111111-2222-3333-4444-555555555555",
+      hostIdentity: "mac-worker-09.internal",
+    });
+    const result = classifyContinuity(snapshot(), after, { ...DEPLOY, plannedReplacement: true });
+    expect(result.verdict).toBe("orphaned-or-erased-state");
+    expect(result.proven).toBe(false);
+  });
+
+  it("a planned replacement whose new device is not reporting is NOT certified", () => {
+    const after = snapshot({
+      udid: "11111111-2222-3333-4444-555555555555",
+      reportingStatus: "lost",
+    });
+    const result = classifyContinuity(snapshot(), after, { ...DEPLOY, plannedReplacement: true });
+    expect(result.verdict).toBe("reporting-delay");
+    expect(result.proven).toBe(false);
+  });
+
+  it("a planned replacement with no boot-session time is NOT certified", () => {
+    const after = snapshot({
+      udid: "11111111-2222-3333-4444-555555555555",
+      bootedSince: undefined,
+    });
+    const result = classifyContinuity(snapshot(), after, { ...DEPLOY, plannedReplacement: true });
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+});
+
+describe("classifyContinuity — malformed evidence and windows are not proven", () => {
+  it("a malformed after.bootedSince → incomplete-evidence (not silently 'no reboot')", () => {
+    const result = classifyContinuity(snapshot(), snapshot({ bootedSince: "not-a-date" }), DEPLOY);
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("a malformed deploy window (missing/invalid timestamps) → incomplete-evidence", () => {
+    const result = classifyContinuity(snapshot(), snapshot(), {
+      startedAt: "",
+      completedAt: "",
+    });
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("an inverted deploy window (completed before started) → incomplete-evidence", () => {
+    const result = classifyContinuity(snapshot(), snapshot(), {
+      startedAt: "2026-08-07T10:05:00.000Z",
+      completedAt: "2026-08-07T10:00:00.000Z",
+    });
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
 });
 
 describe("continuityExitCode — gate exits non-zero unless continuity is proven", () => {

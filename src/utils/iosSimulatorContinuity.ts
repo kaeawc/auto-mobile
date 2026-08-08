@@ -161,32 +161,42 @@ function hasRequiredIdentity(snapshot: ContinuitySnapshot): boolean {
   );
 }
 
-/** True when the device's current boot session began inside the deploy window. */
-function rebootedDuringWindow(after: ContinuitySnapshot, deploy: DeploymentWindow): boolean {
-  if (!after.bootedSince) {
-    return false;
-  }
-  const bootedAt = Date.parse(after.bootedSince);
-  const windowStart = Date.parse(deploy.startedAt);
-  if (Number.isNaN(bootedAt) || Number.isNaN(windowStart)) {
-    return false;
-  }
-  return bootedAt >= windowStart;
-}
-
-/** A verdict plus its reason, or null when a rule does not apply. */
+/** A verdict plus its reason. */
 interface RuleHit {
   readonly verdict: ContinuityVerdict;
   readonly reason: string;
 }
-type ContinuityRule = (
-  before: ContinuitySnapshot,
-  after: ContinuitySnapshot,
-  deploy: DeploymentWindow,
-) => RuleHit | null;
 
 function hit(verdict: ContinuityVerdict, reason: string): RuleHit {
   return { verdict, reason };
+}
+
+/** True when the value is a non-empty, parseable ISO timestamp. */
+function isValidTimestamp(value: string | undefined): value is string {
+  return typeof value === "string" && value.length > 0 && !Number.isNaN(Date.parse(value));
+}
+
+/** True when all identity/context evidence and the deploy window are present and well-formed. */
+function evidenceComplete(
+  before: ContinuitySnapshot,
+  after: ContinuitySnapshot,
+  deploy: DeploymentWindow,
+): boolean {
+  if (!hasRequiredIdentity(before) || !hasRequiredIdentity(after)) {
+    return false;
+  }
+  // A well-formed, non-inverted deploy window is required to reason about it.
+  return (
+    isValidTimestamp(deploy.startedAt) &&
+    isValidTimestamp(deploy.completedAt) &&
+    Date.parse(deploy.startedAt) <= Date.parse(deploy.completedAt)
+  );
+}
+
+/** True when the device's current boot session began at or after the deploy window start. */
+function rebootedDuringWindow(after: ContinuitySnapshot, deploy: DeploymentWindow): boolean {
+  // Reached only after isValidTimestamp gates, so both parse.
+  return Date.parse(after.bootedSince as string) >= Date.parse(deploy.startedAt);
 }
 
 /**
@@ -203,141 +213,122 @@ function identityChanged(before: ContinuitySnapshot, after: ContinuitySnapshot):
   );
 }
 
-/** True when the pre-deploy baseline was a healthy, booted, responsive device. */
-function healthyBaseline(before: ContinuitySnapshot): boolean {
-  return before.lifecycleState === "booted" && before.responsive;
+/**
+ * Post-deploy proof shared by both the continuity and the controlled-replacement
+ * paths: whatever device is present after the deploy must be booted, responsive,
+ * reporting, and carry a valid boot-session time. Returns the first shortfall as
+ * a not-proven verdict, or null when the after-state is fully proven.
+ */
+function postStateShortfall(after: ContinuitySnapshot): RuleHit | null {
+  if (after.lifecycleState === "unknown") {
+    return hit("failed-probe", "Post-deploy simulator lifecycle state could not be determined.");
+  }
+  if (after.lifecycleState !== "booted") {
+    return hit(
+      "shutdown",
+      `Simulator is ${after.lifecycleState} after the deploy and did not recover.`,
+    );
+  }
+  if (!after.responsive) {
+    return hit(
+      "failed-probe",
+      "Simulator is booted after the deploy but did not answer a responsiveness probe.",
+    );
+  }
+  if (!isValidTimestamp(after.bootedSince)) {
+    return hit(
+      "incomplete-evidence",
+      "Boot-session time (bootedSince) is missing or invalid; the booted session cannot be proven.",
+    );
+  }
+  if (after.reportingStatus !== "reporting") {
+    return hit("reporting-delay", `Worker reporting is ${after.reportingStatus} after the deploy.`);
+  }
+  return null;
+}
+
+/** Classify an explicit, controlled replacement: idle old device, same host, replacement fully up. */
+function classifyReplacement(before: ContinuitySnapshot, after: ContinuitySnapshot): RuleHit {
+  if (before.activeWork) {
+    return hit(
+      "orphaned-or-erased-state",
+      "Declared controlled replacement but the simulator had active work (lease/execution/drain); replacement must operate on an idle device.",
+    );
+  }
+  if (before.hostIdentity !== after.hostIdentity) {
+    return hit(
+      "orphaned-or-erased-state",
+      "Declared controlled replacement but the before/after evidence is from different hosts; a replacement must stay on the same managed host.",
+    );
+  }
+  const shortfall = postStateShortfall(after);
+  if (shortfall) {
+    return shortfall;
+  }
+  return hit(
+    "controlled-replacement",
+    "Explicit controlled replacement; the replacement simulator is booted, responsive, and reporting on the same host.",
+  );
+}
+
+/** Classify a non-replacement deploy: the same device must have survived intact. */
+function classifySameDevice(
+  before: ContinuitySnapshot,
+  after: ContinuitySnapshot,
+  deploy: DeploymentWindow,
+): RuleHit {
+  if (identityChanged(before, after)) {
+    return hit(
+      "orphaned-or-erased-state",
+      "Simulator UDID, CoreSimulator data root, or host identity changed without a declared controlled replacement.",
+    );
+  }
+  const shortfall = postStateShortfall(after);
+  if (shortfall) {
+    return shortfall;
+  }
+  // After-state is fully proven; now the survival-specific checks.
+  if (rebootedDuringWindow(after, deploy)) {
+    return hit(
+      "boot-recovery",
+      "Simulator rebooted during the deploy window; CoreSimulator data was preserved but the booted session did not survive.",
+    );
+  }
+  if (before.lifecycleState !== "booted" || !before.responsive) {
+    return hit(
+      "incomplete-evidence",
+      "Pre-deploy baseline was not a booted, responsive simulator; continuity of a healthy device cannot be proven.",
+    );
+  }
+  return hit(
+    "same-device-continuity",
+    "Same UDID, data root, and host; booted and responsive throughout, worker reporting restored.",
+  );
 }
 
 /**
- * Ordered rules, from "cannot tell" to "clean continuity". The first rule that
- * fires wins, so an earlier, more serious finding takes precedence: incomplete
- * evidence and failed probes short-circuit before any continuity claim, and an
- * unexplained identity/data change is flagged as orphaned state (the AC3 guard)
- * rather than silently accepted. If no rule fires it is same-device continuity.
- */
-const CONTINUITY_RULES: readonly ContinuityRule[] = [
-  // 1. Incomplete evidence — required identity/context missing on either side.
-  (before, after) =>
-    hasRequiredIdentity(before) && hasRequiredIdentity(after)
-      ? null
-      : hit(
-          "incomplete-evidence",
-          "Required identity/context evidence is missing before or after the deploy.",
-        ),
-  // 2. Failed probe — the post-deploy device-state probe was indeterminate.
-  (_before, after) =>
-    after.lifecycleState === "unknown"
-      ? hit("failed-probe", "Post-deploy simulator lifecycle state could not be determined.")
-      : null,
-  // 3. Explicit, controlled replacement — the only case where a changed identity
-  //    or data root is acceptable, and only if the new device is actually up.
-  //    A replacement must operate on an *idle* device: replacing one that had an
-  //    active lease/execution/drain destroys that in-flight state, so it is
-  //    flagged as orphaned/erased rather than certified as controlled.
-  (before, after, deploy) => {
-    if (!deploy.plannedReplacement) {
-      return null;
-    }
-    if (before.activeWork) {
-      return hit(
-        "orphaned-or-erased-state",
-        "Deploy was declared a controlled replacement but the simulator had active work (lease/execution/drain); replacement must operate on an idle device.",
-      );
-    }
-    return after.lifecycleState === "booted" && after.responsive
-      ? hit(
-          "controlled-replacement",
-          "Deploy was an explicit controlled replacement; the replacement simulator is booted and responsive.",
-        )
-      : hit(
-          "failed-probe",
-          "Deploy was declared a controlled replacement but the replacement simulator is not booted and responsive.",
-        );
-  },
-  // 4. Orphaned/erased state — identity, CoreSimulator data, or host changed
-  //    with no planned replacement to explain it. This is the AC3 guard.
-  (before, after) =>
-    identityChanged(before, after)
-      ? hit(
-          "orphaned-or-erased-state",
-          "Simulator UDID, CoreSimulator data root, or host identity changed without a declared controlled replacement.",
-        )
-      : null,
-  // From here the UDID and data root are unchanged.
-  // 5. Shutdown — the same device is no longer booted.
-  (_before, after) =>
-    after.lifecycleState !== "booted"
-      ? hit(
-          "shutdown",
-          `Simulator is ${after.lifecycleState} after the deploy and did not recover.`,
-        )
-      : null,
-  // 6. Failed probe — booted but responsiveness could not be proven.
-  (_before, after) =>
-    after.responsive
-      ? null
-      : hit(
-          "failed-probe",
-          "Simulator is booted after the deploy but did not answer a responsiveness probe.",
-        ),
-  // 7. Boot recovery — same identity and data, but it rebooted mid-window, so
-  //    the running simulator did not survive even though its data did.
-  (_before, after, deploy) =>
-    rebootedDuringWindow(after, deploy)
-      ? hit(
-          "boot-recovery",
-          "Simulator rebooted during the deploy window; CoreSimulator data was preserved but the booted session did not survive.",
-        )
-      : null,
-  // 8. Reporting delay/loss — device is continuous but the worker is not
-  //    reporting for it. A restarted worker must not read as leaseable.
-  (_before, after) =>
-    after.reportingStatus === "reporting"
-      ? null
-      : hit(
-          "reporting-delay",
-          `Simulator is continuous but worker reporting is ${after.reportingStatus}.`,
-        ),
-  // 9. Provability guards for the clean-continuity claim. Same-device-continuity
-  //    asserts "booted and responsive throughout", so the pre-deploy baseline
-  //    must itself have been healthy — an unhealthy `before` cannot prove a
-  //    healthy device was preserved.
-  (before) =>
-    healthyBaseline(before)
-      ? null
-      : hit(
-          "incomplete-evidence",
-          "Pre-deploy baseline was not a booted, responsive simulator; continuity of a healthy device cannot be proven.",
-        ),
-  // 10. Boot-session time is required to rule out a reboot during the window; a
-  //     rollout that cannot prove the booted session survived is not proven.
-  (_before, after) =>
-    after.bootedSince
-      ? null
-      : hit(
-          "incomplete-evidence",
-          "Boot-session time (bootedSince) is required to prove the running simulator survived; without it a reboot cannot be ruled out.",
-        ),
-];
-
-/**
- * Classify what happened to one managed simulator across a deploy window by
- * running the ordered {@link CONTINUITY_RULES}; the first rule that fires wins.
+ * Classify what happened to one managed simulator across a deploy window.
+ *
+ * Both a controlled replacement and a same-device survival must clear the same
+ * post-deploy proof ({@link postStateShortfall} — booted, responsive, reporting,
+ * valid boot time); they differ only in what a legitimate identity change means
+ * and whether the running session had to survive. Incomplete or malformed
+ * evidence short-circuits before any continuity claim.
  */
 export function classifyContinuity(
   before: ContinuitySnapshot,
   after: ContinuitySnapshot,
   deploy: DeploymentWindow,
 ): ContinuityResult {
-  for (const rule of CONTINUITY_RULES) {
-    const fired = rule(before, after, deploy);
-    if (fired) {
-      return result(fired.verdict, [fired.reason]);
-    }
+  if (!evidenceComplete(before, after, deploy)) {
+    return result("incomplete-evidence", [
+      "Required identity/context evidence is missing, or the deploy window timestamps are absent, malformed, or inverted.",
+    ]);
   }
-  return result("same-device-continuity", [
-    "Same UDID and CoreSimulator data root, booted and responsive throughout, worker reporting restored.",
-  ]);
+  const fired = deploy.plannedReplacement
+    ? classifyReplacement(before, after)
+    : classifySameDevice(before, after, deploy);
+  return result(fired.verdict, [fired.reason]);
 }
 
 function result(verdict: ContinuityVerdict, reasons: readonly string[]): ContinuityResult {

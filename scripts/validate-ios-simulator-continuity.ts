@@ -73,6 +73,16 @@ function bool(rec: Record<string, unknown>, key: string): boolean {
   return rec[key] === true;
 }
 
+function requireBool(rec: Record<string, unknown>, key: string, source: string): boolean {
+  const value = rec[key];
+  if (typeof value !== "boolean") {
+    // Absence must not silently read as false: a missing `activeWork` would let a
+    // busy device pass as idle, and a missing `responsive` as unresponsive.
+    throw new Error(`${source}: "${key}" must be present and a boolean`);
+  }
+  return value;
+}
+
 const LIFECYCLE_STATES: ReadonlySet<string> = new Set([
   "booted",
   "shutdown",
@@ -118,9 +128,9 @@ function parseSnapshot(raw: unknown, source: string): ContinuitySnapshot {
     coreSimulatorDataRoot: str(rec, "coreSimulatorDataRoot"),
     bootedSince: optionalStr(rec, "bootedSince"),
     lifecycleState: lifecycle(rec),
-    responsive: bool(rec, "responsive"),
+    responsive: requireBool(rec, "responsive", source),
     reportingStatus: reporting(rec),
-    activeWork: bool(rec, "activeWork"),
+    activeWork: requireBool(rec, "activeWork", source),
   };
 }
 

@@ -43,8 +43,9 @@ A rollout of the worker or AutoMobile on a managed host must do exactly one of:
   the rollout completes. This is `same-device-continuity`.
 - **Perform a controlled replacement of one idle simulator at a time** — an
   explicit lifecycle transition to a new/re-created device, declared as
-  `plannedReplacement`, where the replacement device is booted and responsive
-  before it is marked leaseable. This is `controlled-replacement`.
+  `plannedReplacement`. The replacement must clear the **same post-deploy proof**
+  as a survival (booted, responsive, reporting, with a valid boot-session time)
+  and stay **on the same managed host**; only then is it `controlled-replacement`.
 
 Everything else is a continuity failure and is enumerated as its own outcome so
 it can be distinguished (see §5): `boot-recovery`, `shutdown`, `reporting-delay`,

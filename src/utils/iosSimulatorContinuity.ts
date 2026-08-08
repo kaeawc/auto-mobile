@@ -147,6 +147,19 @@ const PROVEN_VERDICTS: ReadonlySet<ContinuityVerdict> = new Set<ContinuityVerdic
   "controlled-replacement",
 ]);
 
+/**
+ * True when the process-identifier map is real evidence: at least one entry, and
+ * every entry a non-blank process name mapped to a positive integer PID. Rejects
+ * a nonempty-but-junk map (`{ daemon: 0 }`, `{ daemon: -1 }`, `{ daemon: 1.5 }`).
+ */
+function hasValidProcessIds(processIds: Readonly<Record<string, number>>): boolean {
+  const entries = Object.entries(processIds);
+  return (
+    entries.length > 0 &&
+    entries.every(([name, pid]) => name.trim().length > 0 && Number.isInteger(pid) && pid > 0)
+  );
+}
+
 /** Identity/context fields that must be present for evidence to be usable. */
 function hasRequiredIdentity(snapshot: ContinuitySnapshot): boolean {
   return (
@@ -156,9 +169,9 @@ function hasRequiredIdentity(snapshot: ContinuitySnapshot): boolean {
     snapshot.automobileVersion.trim().length > 0 &&
     snapshot.workerIncarnation.trim().length > 0 &&
     snapshot.processSupervisor.trim().length > 0 &&
-    // The issue lists process identifiers as required evidence; an empty map
-    // means the daemon/runner/CoreSimulator PID capture is missing.
-    Object.keys(snapshot.processIds).length > 0 &&
+    // The issue lists process identifiers as required evidence; a missing or
+    // junk PID capture (no daemon/runner/CoreSimulator PIDs) is not evidence.
+    hasValidProcessIds(snapshot.processIds) &&
     snapshot.coreSimulatorDataRoot.trim().length > 0 &&
     snapshot.reportingStatus !== "unknown"
   );
@@ -347,16 +360,20 @@ function classifySameDevice(
   if (shortfall) {
     return shortfall;
   }
-  // After-state is fully proven; now the survival-specific checks.
-  const recovery = sessionSurvival(before, after, deploy);
-  if (recovery) {
-    return recovery;
-  }
+  // Establish a healthy pre-deploy baseline before reasoning about survival —
+  // an unhealthy `before` cannot prove a healthy device was preserved, whatever
+  // the boot instants show.
   if (before.lifecycleState !== "booted" || !before.responsive) {
     return hit(
       "incomplete-evidence",
       "Pre-deploy baseline was not a booted, responsive simulator; continuity of a healthy device cannot be proven.",
     );
+  }
+  // Baseline is healthy and the after-state is fully proven; now that the same
+  // booted session survived.
+  const recovery = sessionSurvival(before, after, deploy);
+  if (recovery) {
+    return recovery;
   }
   return hit(
     "same-device-continuity",

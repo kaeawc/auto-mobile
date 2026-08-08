@@ -174,6 +174,27 @@ describe("classifyContinuity — distinguishes the required states (AC5)", () =>
     expect(result.verdict).toBe("incomplete-evidence");
     expect(result.proven).toBe(false);
   });
+
+  it("junk process ids (non-positive or non-integer) → incomplete-evidence", () => {
+    for (const bad of [{ daemon: 0 }, { daemon: -1 }, { daemon: 1.5 }, { "": 4201 }]) {
+      const result = classifyContinuity(snapshot({ processIds: bad }), snapshot(), DEPLOY);
+      expect(result.verdict).toBe("incomplete-evidence");
+      expect(result.proven).toBe(false);
+    }
+  });
+
+  it("an unhealthy baseline outranks a changed boot instant → incomplete-evidence, not boot-recovery", () => {
+    // before is shutdown (unhealthy) yet carries a boot time; after is healthy
+    // with a different instant. Baseline health is checked first.
+    const before = snapshot({
+      lifecycleState: "shutdown",
+      bootedSince: "2026-08-07T08:00:00.000Z",
+    });
+    const after = snapshot({ bootedSince: "2026-08-07T09:00:00.000Z" });
+    const result = classifyContinuity(before, after, DEPLOY);
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
 });
 
 describe("classifyContinuity — cannot silently erase/orphan managed state (AC3)", () => {

@@ -345,7 +345,13 @@ class DevicePickerViewModel(
         .filter { it.id in selectedIds && it.state == DeviceState.Booted }
         .map {
           // Seed the pane's lock state from the booted snapshot; the host's poll keeps it fresh.
-          DeviceColumn(deviceId = it.id, name = it.name, platform = it.platform, locked = it.locked)
+          DeviceColumn(
+            deviceId = it.id,
+            name = it.name,
+            platform = it.platform,
+            locked = it.locked,
+            isVirtual = it.isVirtual,
+          )
         }
     if (columns.isNotEmpty()) {
       scope.launch { _effect.send(DevicePickerEffect.Observe(columns)) }

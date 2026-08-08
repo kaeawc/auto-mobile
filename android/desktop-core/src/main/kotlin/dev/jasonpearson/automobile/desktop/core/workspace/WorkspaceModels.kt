@@ -59,6 +59,10 @@ enum class EmulatorControl(val icon: String, val label: String) {
   Unlock("🔓", "Unlock"), // 🔓
 }
 
+/** Whether this control is meaningful for the platform and device kind in a workspace column. */
+fun EmulatorControl.isSupportedOn(platform: Platform, isVirtual: Boolean): Boolean =
+  this != EmulatorControl.Locale || platform != Platform.Ios || isVirtual
+
 /**
  * Device system buttons offered by the [EmulatorControl.More] overflow menu. Each maps to a value
  * of the `pressButton` MCP tool. [toolValue] is the exact string the tool expects.
@@ -69,14 +73,9 @@ enum class DeviceButton(val icon: String, val label: String, val toolValue: Stri
   Recent("▤", "Recent apps", "recent"),
   Power("⏻", "Power", "power");
 
-  /**
-   * Whether the workspace offers this button on [platform]. Home/Back/Recent are supported on both
-   * platforms (iOS routes them through CtrlProxy), so all three stay in the menu; Power is a
-   * hardware key the iOS simulator cannot press, so it is Android-only here. Restoring Power for a
-   * *physical* iOS device needs the pane's device kind, which the picker does not yet carry — a
-   * follow-up.
-   */
-  fun isSupportedOn(platform: Platform): Boolean = this != Power || platform == Platform.Android
+  /** Whether the workspace offers this button on the platform and device kind. */
+  fun isSupportedOn(platform: Platform, isVirtual: Boolean = true): Boolean =
+    this != Power || platform == Platform.Android || !isVirtual
 }
 
 /** A locale offered by the [EmulatorControl.Locale] picker: a BCP-47 [tag] and a human [label]. */
@@ -122,4 +121,6 @@ data class DeviceColumn(
   val locked: Boolean = false,
   /** Current orientation; the Rotate control toggles it and drives the `rotate` tool value. */
   val orientation: Orientation = Orientation.Portrait,
+  /** Whether this is a simulator/emulator rather than a physical device. */
+  val isVirtual: Boolean = true,
 )

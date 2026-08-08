@@ -71,4 +71,25 @@ class PickerModelsTest {
     assertEquals(listOf("udid-1"), devices.map { it.id })
     assertTrue(devices.single().state == DeviceState.Booted)
   }
+
+  @Test
+  fun `booted device preserves its virtual kind for workspace controls`() {
+    val physical =
+      buildPickerDevices(
+        booted =
+          listOf(
+            BootedDeviceInfo(
+              name = "iPhone 15",
+              platform = "ios",
+              deviceId = "udid-1",
+              source = "local",
+              isVirtual = false,
+              status = "booted",
+            )
+          ),
+        images = emptyList(),
+      )
+
+    assertEquals(false, physical.single().isVirtual)
+  }
 }

@@ -96,6 +96,7 @@ class DevicePickerViewModelTest {
       val columns = (effect as DevicePickerEffect.Observe).columns
       assertEquals(listOf("emulator-5554"), columns.map { it.deviceId })
       assertEquals(Platform.Android, columns.first().platform)
+      assertTrue(columns.first().isVirtual)
       cancelAndIgnoreRemainingEvents()
     }
   }

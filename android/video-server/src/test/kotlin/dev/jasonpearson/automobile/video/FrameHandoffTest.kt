@@ -61,6 +61,30 @@ class FrameHandoffTest {
   }
 
   @Test
+  fun droppedFrameArmsOneConsumableGap() {
+    val handoff = FrameHandoff()
+
+    handoff.offer(delta())
+    handoff.offer(delta())
+
+    assertTrue(handoff.consumeDropGap())
+    assertFalse(handoff.consumeDropGap())
+  }
+
+  @Test
+  fun eachDropAfterConsumptionArmsAnotherGap() {
+    val handoff = FrameHandoff()
+
+    handoff.offer(delta())
+    handoff.offer(delta())
+    assertTrue(handoff.consumeDropGap())
+
+    handoff.offer(delta())
+    assertTrue(handoff.consumeDropGap())
+    assertFalse(handoff.consumeDropGap())
+  }
+
+  @Test
   fun deltaNeverEvictsUnsentKeyFrame() {
     val handoff = FrameHandoff()
     val idr = keyFrame()

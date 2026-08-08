@@ -366,6 +366,8 @@ object VideoServer {
         }
       }
 
+      recoverFromFrameDrop(currentWriter::consumeDropGap, encoder!!::requestKeyFrame, heartbeat)
+
       // Backstop the encoder's own idle repeats: if the mirror has gone quiet (or a
       // keyframe request produced nothing), nudge it into re-submitting a fresh frame.
       if (heartbeat.poll()) {
@@ -452,6 +454,24 @@ object VideoServer {
    * null-tolerance is unit-testable without the Android capture stack.
    */
   internal fun <T : Any> encodeLoopSnapshot(field: T?): T? = field
+
+  /**
+   * Request one recovery IDR after a handoff drop. The handoff signal coalesces a drop burst, while
+   * [FrameHeartbeat] coalesces concurrent keyframe requests and supplies the surface nudge.
+   */
+  internal fun recoverFromFrameDrop(
+    consumeDropGap: () -> Boolean,
+    requestKeyFrame: () -> Unit,
+    heartbeat: FrameHeartbeat,
+  ): Boolean {
+    if (!consumeDropGap()) {
+      return false
+    }
+    if (heartbeat.onKeyFrameRequested()) {
+      requestKeyFrame()
+    }
+    return true
+  }
 
   private fun shutdown() {
     running = false

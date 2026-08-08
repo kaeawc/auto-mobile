@@ -153,15 +153,18 @@ const REQUIRED_PROCESS_ROLES: readonly string[] = ["daemon", "runner", "coreSimu
 
 /**
  * True when the process-identifier map is real evidence: each required role
- * (daemon, runner, CoreSimulator service) is present with a positive integer PID.
- * Rejects a missing role and junk values (`{ daemon: 0 }`, `{ daemon: 1.5 }`) or
- * an unrelated placeholder (`{ placeholder: 1 }`).
+ * (daemon, runner, CoreSimulator service) is present with a positive integer PID,
+ * and the three PIDs are distinct (they are contemporaneous processes, so a
+ * reused PID means malformed evidence). Rejects a missing role, junk values
+ * (`{ daemon: 0 }`, `{ daemon: 1.5 }`), an unrelated placeholder
+ * (`{ placeholder: 1 }`), and duplicates (`{ daemon: 1, runner: 1, ... }`).
  */
 function hasValidProcessIds(processIds: Readonly<Record<string, number>>): boolean {
-  return REQUIRED_PROCESS_ROLES.every((role) => {
-    const pid = processIds[role];
-    return typeof pid === "number" && Number.isInteger(pid) && pid > 0;
-  });
+  const pids = REQUIRED_PROCESS_ROLES.map((role) => processIds[role]);
+  if (!pids.every((pid) => typeof pid === "number" && Number.isInteger(pid) && pid > 0)) {
+    return false;
+  }
+  return new Set(pids).size === pids.length;
 }
 
 /** Identity/context fields that must be present for evidence to be usable. */
@@ -262,13 +265,21 @@ function sessionSurvival(
   }
   // Compare the parsed instants, not the raw strings, so equivalent ISO
   // spellings of the same instant (e.g. `09:00:00Z` vs `09:00:00.000Z`) match.
-  if (Date.parse(before.bootedSince) !== Date.parse(after.bootedSince)) {
+  const beforeBoot = Date.parse(before.bootedSince);
+  const afterBoot = Date.parse(after.bootedSince);
+  if (afterBoot < beforeBoot) {
+    return hit(
+      "incomplete-evidence",
+      "The post-deploy boot instant precedes the pre-deploy one; the evidence is contradictory or clock-skewed, so survival cannot be proven.",
+    );
+  }
+  if (beforeBoot !== afterBoot) {
     return hit(
       "boot-recovery",
       "The boot session changed between the pre- and post-deploy captures; CoreSimulator data was preserved but the booted session did not survive.",
     );
   }
-  if (Date.parse(before.bootedSince) >= Date.parse(deploy.startedAt)) {
+  if (beforeBoot >= Date.parse(deploy.startedAt)) {
     return hit(
       "boot-recovery",
       "The booted session began at or after the deploy start, so no pre-deploy session survived.",

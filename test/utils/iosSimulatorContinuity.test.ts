@@ -189,6 +189,21 @@ describe("classifyContinuity — distinguishes the required states (AC5)", () =>
     }
   });
 
+  it("the same PID reused across the three required roles → incomplete-evidence", () => {
+    const processIds = { daemon: 1, runner: 1, coreSimulatorService: 1 };
+    const result = classifyContinuity(snapshot({ processIds }), snapshot({ processIds }), DEPLOY);
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("a backwards boot instant (after earlier than before) → incomplete-evidence, not boot-recovery", () => {
+    const before = snapshot({ bootedSince: "2026-08-07T09:00:00.000Z" });
+    const after = snapshot({ bootedSince: "2026-08-07T08:00:00.000Z" });
+    const result = classifyContinuity(before, after, DEPLOY);
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
   it("an unhealthy baseline outranks a changed boot instant → incomplete-evidence, not boot-recovery", () => {
     // before is shutdown (unhealthy) yet carries a boot time; after is healthy
     // with a different instant. Baseline health is checked first.

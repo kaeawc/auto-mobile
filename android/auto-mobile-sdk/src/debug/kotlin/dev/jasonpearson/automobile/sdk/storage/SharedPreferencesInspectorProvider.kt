@@ -11,6 +11,7 @@ import dev.jasonpearson.automobile.protocol.StorageFileInfo
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
+import dev.jasonpearson.automobile.sdk.DebugInspectorAccess
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -41,6 +42,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
   }
 
   override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+    DebugInspectorAccess.enforceCaller()
     val result = Bundle()
 
     // Check if inspection is enabled

@@ -87,11 +87,21 @@ describe("classifyContinuity — distinguishes the required states (AC5)", () =>
     expect(result.verdict).toBe("boot-recovery");
   });
 
-  it("a boot before the window start is survival, not a reboot → same-device-continuity", () => {
-    const after = snapshot({ bootedSince: "2026-08-07T09:59:59.000Z" });
-    const result = classifyContinuity(snapshot(), after, DEPLOY);
+  it("an identical boot session (before === after) predating the window → same-device-continuity", () => {
+    const boot = { bootedSince: "2026-08-07T09:30:00.000Z" };
+    const result = classifyContinuity(snapshot(boot), snapshot(boot), DEPLOY);
     expect(result.verdict).toBe("same-device-continuity");
     expect(result.proven).toBe(true);
+  });
+
+  it("a changed boot session across the deploy (before !== after) → boot-recovery", () => {
+    // before booted 09:00, after booted 09:59 — the session changed even though
+    // both predate the window; the original booted session did not survive.
+    const before = snapshot({ bootedSince: "2026-08-07T09:00:00.000Z" });
+    const after = snapshot({ bootedSince: "2026-08-07T09:59:00.000Z" });
+    const result = classifyContinuity(before, after, DEPLOY);
+    expect(result.verdict).toBe("boot-recovery");
+    expect(result.proven).toBe(false);
   });
 
   it("device continuous but worker reporting lost → reporting-delay", () => {
@@ -136,6 +146,12 @@ describe("classifyContinuity — distinguishes the required states (AC5)", () =>
   it("an unhealthy pre-deploy baseline (booted but unresponsive) cannot prove continuity → incomplete-evidence", () => {
     const before = snapshot({ responsive: false });
     const result = classifyContinuity(before, snapshot(), DEPLOY);
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("no process-identifier evidence (empty processIds) → incomplete-evidence", () => {
+    const result = classifyContinuity(snapshot({ processIds: {} }), snapshot(), DEPLOY);
     expect(result.verdict).toBe("incomplete-evidence");
     expect(result.proven).toBe(false);
   });
@@ -258,6 +274,15 @@ describe("classifyContinuity — malformed evidence and windows are not proven",
         completedAt: "2",
       },
     );
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("an impossible calendar date Date.parse would normalize (2026-02-30) → incomplete-evidence", () => {
+    const result = classifyContinuity(snapshot(), snapshot(), {
+      startedAt: "2026-02-30T10:00:00.000Z",
+      completedAt: "2026-02-30T10:05:00.000Z",
+    });
     expect(result.verdict).toBe("incomplete-evidence");
     expect(result.proven).toBe(false);
   });

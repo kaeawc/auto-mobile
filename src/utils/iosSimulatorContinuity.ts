@@ -156,6 +156,9 @@ function hasRequiredIdentity(snapshot: ContinuitySnapshot): boolean {
     snapshot.automobileVersion.trim().length > 0 &&
     snapshot.workerIncarnation.trim().length > 0 &&
     snapshot.processSupervisor.trim().length > 0 &&
+    // The issue lists process identifiers as required evidence; an empty map
+    // means the daemon/runner/CoreSimulator PID capture is missing.
+    Object.keys(snapshot.processIds).length > 0 &&
     snapshot.coreSimulatorDataRoot.trim().length > 0 &&
     snapshot.reportingStatus !== "unknown"
   );
@@ -174,11 +177,31 @@ function hit(verdict: ContinuityVerdict, reason: string): RuleHit {
 // Strict ISO-8601 date-time with a timezone: `2026-08-07T10:00:00(.000)?(Z|±hh:mm)`.
 // Permissive Date.parse alone accepts junk like "0"/"1" as valid dates, which
 // would let malformed evidence read as proven — so the shape is checked too.
-const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_8601 =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 
-/** True when the value is a strict ISO-8601 timestamp with a real calendar value. */
+/** True when (year, month, day) is a real calendar date that Date.parse would not normalize. */
+function isRealCalendarDate(year: number, month: number, day: number): boolean {
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  return (
+    utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === day
+  );
+}
+
+/**
+ * True when the value is a strict ISO-8601 timestamp with a real calendar value.
+ * The regex fixes the shape (rejecting `"0"`/`"1"`) and the calendar round-trip
+ * rejects impossible dates that Date.parse silently normalizes (e.g. `02-30`).
+ */
 function isValidTimestamp(value: string | undefined): value is string {
-  return typeof value === "string" && ISO_8601.test(value) && !Number.isNaN(Date.parse(value));
+  if (typeof value !== "string") {
+    return false;
+  }
+  const match = ISO_8601.exec(value);
+  if (match === null || Number.isNaN(Date.parse(value))) {
+    return false;
+  }
+  return isRealCalendarDate(Number(match[1]), Number(match[2]), Number(match[3]));
 }
 
 /** True when all identity/context evidence and the deploy window are present and well-formed. */
@@ -199,25 +222,37 @@ function evidenceComplete(
 }
 
 /**
- * A boot-recovery verdict when the current boot session began at or after the
- * deploy started (so the pre-deploy booted session did not survive), or null when
- * it began before the deploy (the session survived). A boot at or after the start
- * is not proven regardless of whether it lands inside or after the window — a
- * post-window reboot before capture still means the session did not survive — but
- * the reason distinguishes the two. Reached only after the isValidTimestamp gates.
+ * Prove the *same* booted session bracketed the deploy. The boot instant must be
+ * a valid pre-deploy timestamp, identical in the before and after snapshots, and
+ * predate the window — a changed instant (before ≠ after) means it rebooted at
+ * some point, and an instant at/after the deploy start means no pre-deploy session
+ * survived. Returns a not-proven hit, or null when survival is proven. The
+ * after-timestamp is already validated by {@link postStateShortfall}.
  */
-function bootRecovery(after: ContinuitySnapshot, deploy: DeploymentWindow): RuleHit | null {
-  const bootedAt = Date.parse(after.bootedSince as string);
-  if (bootedAt < Date.parse(deploy.startedAt)) {
-    return null;
+function sessionSurvival(
+  before: ContinuitySnapshot,
+  after: ContinuitySnapshot,
+  deploy: DeploymentWindow,
+): RuleHit | null {
+  if (!isValidTimestamp(before.bootedSince)) {
+    return hit(
+      "incomplete-evidence",
+      "Pre-deploy boot-session time (bootedSince) is missing or invalid; survival of the booted session cannot be proven.",
+    );
   }
-  const duringWindow = bootedAt <= Date.parse(deploy.completedAt);
-  return hit(
-    "boot-recovery",
-    duringWindow
-      ? "Simulator rebooted during the deploy window; CoreSimulator data was preserved but the booted session did not survive."
-      : "Simulator's boot session began after the deploy completed but before capture; the pre-deploy booted session did not survive.",
-  );
+  if (before.bootedSince !== after.bootedSince) {
+    return hit(
+      "boot-recovery",
+      "The boot session changed between the pre- and post-deploy captures; CoreSimulator data was preserved but the booted session did not survive.",
+    );
+  }
+  if (Date.parse(before.bootedSince) >= Date.parse(deploy.startedAt)) {
+    return hit(
+      "boot-recovery",
+      "The booted session began at or after the deploy start, so no pre-deploy session survived.",
+    );
+  }
+  return null;
 }
 
 /**
@@ -309,7 +344,7 @@ function classifySameDevice(
     return shortfall;
   }
   // After-state is fully proven; now the survival-specific checks.
-  const recovery = bootRecovery(after, deploy);
+  const recovery = sessionSurvival(before, after, deploy);
   if (recovery) {
     return recovery;
   }

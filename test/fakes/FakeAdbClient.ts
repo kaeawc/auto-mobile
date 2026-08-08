@@ -191,6 +191,10 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.commandErrors.set(command, error);
   }
 
+  clearCommandError(command: string): void {
+    this.commandErrors.delete(command);
+  }
+
   /**
    * Configure the current foreground app
    */

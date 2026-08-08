@@ -115,6 +115,8 @@ interface MonitoredDevice {
   cachedPid: number | null;
   /** Previous Android process CPU sample for interval-delta calculation */
   previousCpuSample: PreviousCpuSample | null;
+  /** Whether the cumulative first gfxinfo sample has already been primed */
+  gfxPrimed: boolean;
   /** Previous per-metric health for detecting threshold crossings */
   previousMetricHealth: Record<string, string>;
 }
@@ -241,6 +243,7 @@ export class PerformanceMonitor {
         existing.lastSlowTick = 0;
         existing.prevJankCounters = null;
         existing.previousCpuSample = null;
+        existing.gfxPrimed = false;
         // Bump the generation so any A→B→A in-flight sample is rejected even
         // though the package name matches again.
         existing.monitoringGeneration += 1;
@@ -270,6 +273,7 @@ export class PerformanceMonitor {
       prevJankCounters: null,
       cachedPid: null,
       previousCpuSample: null,
+      gfxPrimed: false,
       previousMetricHealth: {},
     });
     logger.info(`[PerformanceMonitor] Started monitoring ${packageName} on ${deviceId} (${platform})`);
@@ -399,6 +403,7 @@ export class PerformanceMonitor {
     );
 
     const gfxPromise = sdkFrame ? Promise.resolve(null) : this.collectGfxMetrics(device);
+    const recordFrameMetrics = sdkFrame !== null || device.gfxPrimed;
 
     // Collect medium metrics (CPU) if interval elapsed or first collection. The
     // collect calls do NOT mutate `device` — caches/timestamps are updated only
@@ -427,6 +432,9 @@ export class PerformanceMonitor {
     }
 
     device.lastFastTick = now;
+    if (!sdkFrame && gfx?.resetSucceeded) {
+      device.gfxPrimed = true;
+    }
     if (shouldCollectCpu) {
       device.lastMediumTick = now;
       device.cachedCpu = cpu;
@@ -518,9 +526,10 @@ export class PerformanceMonitor {
     // flicker to 0, but the buffer must NOT re-record a stale reading every idle
     // tick — that would keep an old fps dominating the percentiles.
     this.pushMetrics(device, now, metrics, jankFrames, server, {
-      fps: rawFps,
-      frameTimeMs: rawFrameTimeMs,
-      touchLatencyMs: rawTouchLatencyMs,
+      fps: recordFrameMetrics ? rawFps : null,
+      frameTimeMs: recordFrameMetrics ? rawFrameTimeMs : null,
+      jankFrames: recordFrameMetrics ? jankFrames : null,
+      touchLatencyMs: recordFrameMetrics ? rawTouchLatencyMs : null,
       // CPU/memory only when actually collected this tick (null otherwise), so
       // the window never averages a reading acquired outside it.
       cpuUsagePercent: shouldCollectCpu ? cpu : null,
@@ -624,6 +633,7 @@ export class PerformanceMonitor {
     this.pushMetrics(device, now, metrics, jankFrames, server, {
       fps,
       frameTimeMs,
+      jankFrames: null,
       touchLatencyMs: null,
       cpuUsagePercent: shouldCollectCpu ? cpu : null,
       memoryUsageMb: shouldCollectMemory ? memory : null,
@@ -655,6 +665,7 @@ export class PerformanceMonitor {
     raw: {
       fps: number | null;
       frameTimeMs: number | null;
+      jankFrames: number | null;
       touchLatencyMs: number | null;
       cpuUsagePercent: number | null;
       memoryUsageMb: number | null;
@@ -681,7 +692,7 @@ export class PerformanceMonitor {
       t: now,
       fps: raw.fps,
       frameTimeMs: raw.frameTimeMs,
-      jankFrames: metrics.jankFrames,
+      jankFrames: raw.jankFrames,
       touchLatencyMs: raw.touchLatencyMs,
       cpuUsagePercent: raw.cpuUsagePercent,
       memoryUsageMb: raw.memoryUsageMb,
@@ -799,7 +810,9 @@ export class PerformanceMonitor {
    * Resets gfxinfo after reading to get fresh data for the next interval.
    * Jank delta calculation happens in sampleDevice.
    */
-  private async collectGfxMetrics(device: MonitoredDevice): Promise<GfxMetrics & { rawJankCounters: RawJankCounters | null }> {
+  private async collectGfxMetrics(
+    device: MonitoredDevice
+  ): Promise<GfxMetrics & { rawJankCounters: RawJankCounters | null; resetSucceeded: boolean }> {
     try {
       const adb = this.adbClientFactory.create({
         deviceId: device.deviceId,
@@ -844,10 +857,19 @@ export class PerformanceMonitor {
         highInputLatencyFrames,
         totalFrames,
         rawJankCounters: { missedVsync, slowUi, deadlineMissed, jankyFrames },
+        resetSucceeded: true,
       };
     } catch (error) {
       logger.debug(`[PerformanceMonitor] gfxinfo failed for ${device.deviceId}: ${error}`);
-      return { fps: null, frameTimeMs: null, jankFrames: null, highInputLatencyFrames: null, totalFrames: null, rawJankCounters: null };
+      return {
+        fps: null,
+        frameTimeMs: null,
+        jankFrames: null,
+        highInputLatencyFrames: null,
+        totalFrames: null,
+        rawJankCounters: null,
+        resetSucceeded: false,
+      };
     }
   }
 

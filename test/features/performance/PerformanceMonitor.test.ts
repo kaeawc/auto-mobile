@@ -348,6 +348,32 @@ describe("PerformanceMonitor", () => {
       expect(fakePusher.getLastPushedData()!.metrics.cpuUsagePercent).toBe(50);
     });
 
+    it("should preserve the CPU baseline across a transient collection failure", async () => {
+      fakeAdbClient.setCommandResultSequence("shell cat /proc/12345/stat", [
+        "12345 (app) S 1 12345 12345 0 -1 4194560 1234 0 0 0 500 200 0 0 20 0 1 0 12345 123456789 12345 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0",
+        "12345 (app) S 1 12345 12345 0 -1 4194560 1234 0 0 0 600 200 0 0 20 0 1 0 12345 123456789 12345 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0",
+        "12345 (app) S 1 12345 12345 0 -1 4194560 1234 0 0 0 600 200 0 0 20 0 1 0 12345 123456789 12345 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0",
+      ]);
+      fakeAdbClient.setCommandResultSequence("shell cat /proc/uptime", [
+        "1000.00 800.00\n",
+        "invalid uptime\n",
+        "1002.00 801.00\n",
+      ]);
+
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      expect(fakePusher.getLastPushedData()!.metrics.cpuUsagePercent).toBeNull();
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.MEDIUM_INTERVAL_MS);
+      expect(fakePusher.getLastPushedData()!.metrics.cpuUsagePercent).toBeNull();
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.MEDIUM_INTERVAL_MS);
+      expect(fakePusher.getLastPushedData()!.metrics.cpuUsagePercent).toBe(50);
+    });
+
     it("should collect memory metrics only at slow intervals", async () => {
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
       monitor.start();

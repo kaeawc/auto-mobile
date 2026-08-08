@@ -430,7 +430,11 @@ export class PerformanceMonitor {
     if (shouldCollectCpu) {
       device.lastMediumTick = now;
       device.cachedCpu = cpu;
-      device.previousCpuSample = cpuResult.sample;
+      // Keep the last valid baseline across transient collection failures so the
+      // next successful sample can still measure the full interval.
+      if (cpuResult.sample) {
+        device.previousCpuSample = cpuResult.sample;
+      }
     }
     if (shouldCollectMemory) {
       device.lastSlowTick = now;

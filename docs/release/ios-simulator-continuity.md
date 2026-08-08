@@ -88,6 +88,13 @@ The gate is `bun run validate:ios-continuity`
 evidence snapshot for one managed simulator, classifies the outcome, prints a
 redacted summary, and **exits non-zero unless continuity is proven**.
 
+Run it from a **source checkout of the auto-mobile repo** on the managed host —
+like the repo's other `validate:*` / `check:*` scripts, it is release-engineering
+tooling and is not shipped in the published npm package. The deployment owner
+already has the repo (they build/cut AutoMobile), so `bun install && bun run
+validate:ios-continuity …` from that checkout is the intended invocation. All
+timestamps must be strict ISO-8601 with a timezone (e.g. `2026-08-07T10:00:00Z`).
+
 ### Evidence to capture (before and after the deploy)
 
 For each managed simulator selected for validation, capture a JSON snapshot with

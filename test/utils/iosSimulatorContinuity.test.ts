@@ -248,6 +248,27 @@ describe("classifyContinuity — malformed evidence and windows are not proven",
     expect(result.verdict).toBe("incomplete-evidence");
     expect(result.proven).toBe(false);
   });
+
+  it("non-ISO timestamps that Date.parse would accept (e.g. '0') → incomplete-evidence", () => {
+    const result = classifyContinuity(
+      snapshot({ bootedSince: "0" }),
+      snapshot({ bootedSince: "1" }),
+      {
+        startedAt: "1",
+        completedAt: "2",
+      },
+    );
+    expect(result.verdict).toBe("incomplete-evidence");
+    expect(result.proven).toBe(false);
+  });
+
+  it("a reboot after the deploy completed (before capture) is still not proven → boot-recovery", () => {
+    // Window is 10:00–10:05; the boot session began at 10:06, after completion.
+    const after = snapshot({ bootedSince: "2026-08-07T10:06:00.000Z" });
+    const result = classifyContinuity(snapshot(), after, DEPLOY);
+    expect(result.verdict).toBe("boot-recovery");
+    expect(result.proven).toBe(false);
+  });
 });
 
 describe("continuityExitCode — gate exits non-zero unless continuity is proven", () => {

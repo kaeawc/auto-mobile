@@ -171,9 +171,14 @@ function hit(verdict: ContinuityVerdict, reason: string): RuleHit {
   return { verdict, reason };
 }
 
-/** True when the value is a non-empty, parseable ISO timestamp. */
+// Strict ISO-8601 date-time with a timezone: `2026-08-07T10:00:00(.000)?(Z|±hh:mm)`.
+// Permissive Date.parse alone accepts junk like "0"/"1" as valid dates, which
+// would let malformed evidence read as proven — so the shape is checked too.
+const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/** True when the value is a strict ISO-8601 timestamp with a real calendar value. */
 function isValidTimestamp(value: string | undefined): value is string {
-  return typeof value === "string" && value.length > 0 && !Number.isNaN(Date.parse(value));
+  return typeof value === "string" && ISO_8601.test(value) && !Number.isNaN(Date.parse(value));
 }
 
 /** True when all identity/context evidence and the deploy window are present and well-formed. */
@@ -193,10 +198,26 @@ function evidenceComplete(
   );
 }
 
-/** True when the device's current boot session began at or after the deploy window start. */
-function rebootedDuringWindow(after: ContinuitySnapshot, deploy: DeploymentWindow): boolean {
-  // Reached only after isValidTimestamp gates, so both parse.
-  return Date.parse(after.bootedSince as string) >= Date.parse(deploy.startedAt);
+/**
+ * A boot-recovery verdict when the current boot session began at or after the
+ * deploy started (so the pre-deploy booted session did not survive), or null when
+ * it began before the deploy (the session survived). A boot at or after the start
+ * is not proven regardless of whether it lands inside or after the window — a
+ * post-window reboot before capture still means the session did not survive — but
+ * the reason distinguishes the two. Reached only after the isValidTimestamp gates.
+ */
+function bootRecovery(after: ContinuitySnapshot, deploy: DeploymentWindow): RuleHit | null {
+  const bootedAt = Date.parse(after.bootedSince as string);
+  if (bootedAt < Date.parse(deploy.startedAt)) {
+    return null;
+  }
+  const duringWindow = bootedAt <= Date.parse(deploy.completedAt);
+  return hit(
+    "boot-recovery",
+    duringWindow
+      ? "Simulator rebooted during the deploy window; CoreSimulator data was preserved but the booted session did not survive."
+      : "Simulator's boot session began after the deploy completed but before capture; the pre-deploy booted session did not survive.",
+  );
 }
 
 /**
@@ -288,11 +309,9 @@ function classifySameDevice(
     return shortfall;
   }
   // After-state is fully proven; now the survival-specific checks.
-  if (rebootedDuringWindow(after, deploy)) {
-    return hit(
-      "boot-recovery",
-      "Simulator rebooted during the deploy window; CoreSimulator data was preserved but the booted session did not survive.",
-    );
+  const recovery = bootRecovery(after, deploy);
+  if (recovery) {
+    return recovery;
   }
   if (before.lifecycleState !== "booted" || !before.responsive) {
     return hit(

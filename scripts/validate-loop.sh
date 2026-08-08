@@ -26,16 +26,22 @@ cd "$ROOT" || exit 1
 source "$ROOT/scripts/lib/shell-core.sh"
 ensure_node_modules "$ROOT"
 
+# ensure_node_modules may have just installed node_modules/.bin/turbo; when this
+# script is run directly (not via `bun run`, which does this for us) that dir is
+# not on PATH, so a bare `turbo` would be "command not found". Put it on PATH so
+# the self-healing direct entry point actually works.
+export PATH="$ROOT/node_modules/.bin:$PATH"
+
 gate_cmd="${VALIDATE_LOOP_GATE_CMD:-turbo run lint build typecheck --output-logs=errors-only}"
 test_cmd="${VALIDATE_LOOP_TEST_CMD:-bash scripts/test-fast.sh}"
 
+# Run the (trusted) gate/test strings through a shell so quoted arguments survive
+# — a bare `${cmd}` word-split would mangle any command with quoted args.
 echo "==> gate: ${gate_cmd}"
-# shellcheck disable=SC2086 # intentional word-split of the command string
-if ! ${gate_cmd}; then
+if ! bash -c "$gate_cmd"; then
   echo "==> gate failed — skipping tests" >&2
   exit 1
 fi
 
 echo "==> gate passed; running tests: ${test_cmd}"
-# shellcheck disable=SC2086 # intentional word-split of the command string
-exec ${test_cmd}
+exec bash -c "$test_cmd"

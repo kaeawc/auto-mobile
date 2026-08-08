@@ -20,9 +20,17 @@ SCRIPT="scripts/validate-loop.sh"
   [[ "$output" == *"gate failed"* ]]
 }
 
-@test "forwards the gate's failure without running tests" {
-  run env VALIDATE_LOOP_GATE_CMD="sh -c 'echo GATE_OUTPUT; exit 1'" VALIDATE_LOOP_TEST_CMD="echo TESTS_RAN" bash "$SCRIPT"
+@test "forwards the gate's child output and skips tests on failure" {
+  local dir
+  dir="$(mktemp -d)"
+  # A failing gate fixture whose output marker (CHILD_MARKER) is absent from its
+  # invocation, so the assertion passes only if the child actually ran and its
+  # output was forwarded — not because the script echoed the command line.
+  printf '#!/usr/bin/env bash\necho CHILD_MARKER\nexit 1\n' > "$dir/gate.sh"
+  chmod +x "$dir/gate.sh"
+  run env VALIDATE_LOOP_GATE_CMD="bash $dir/gate.sh" VALIDATE_LOOP_TEST_CMD="echo TESTS_RAN" bash "$SCRIPT"
+  rm -rf "$dir"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"GATE_OUTPUT"* ]]
+  [[ "$output" == *"CHILD_MARKER"* ]]
   [[ "$output" != *"TESTS_RAN"* ]]
 }

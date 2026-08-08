@@ -25,8 +25,7 @@ internal object DebugInspectorAccess {
 
   fun enforceCaller(context: Context?) {
     val callingUid = Binder.getCallingUid()
-    val callingPackages =
-      context?.packageManager?.getPackagesForUid(callingUid)?.toSet().orEmpty()
+    val callingPackages = context?.packageManager?.getPackagesForUid(callingUid)?.toSet().orEmpty()
     if (!isAuthorized(callingUid, Process.myUid(), callingPackages)) {
       throw SecurityException("Debug inspector access denied for uid $callingUid")
     }

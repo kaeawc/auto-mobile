@@ -56,17 +56,20 @@ describe("normalizeAppFileRelativePath (property-based)", () => {
     );
   });
 
-  // AC2 — a dangerous segment anywhere (guaranteed non-strippable by a leading safe
-  // segment) must throw, for any separator mix and depth.
-  test("rejection: a `.`/`..`/empty segment after a safe leading segment always throws", () => {
+  // AC2 — a dangerous segment at an ARBITRARY depth, behind an arbitrary all-safe
+  // prefix, must throw. The prefix is >= 1 so the danger is never leading (hence never
+  // strippable / never mistaken for a leading slash), and the suffix is all-safe so the
+  // inserted segment is the *only* dangerous one — this precisely exercises deep
+  // traversal like `safe/safe/../secret` that a first-component-only guard would miss.
+  test("rejection: a `.`/`..`/empty segment at any depth behind a safe prefix always throws", () => {
     const arb = fc
       .tuple(
-        safeSegment,
+        fc.array(safeSegment, { minLength: 1, maxLength: 4 }),
         dangerousSegment,
-        fc.array(fc.oneof(safeSegment, dangerousSegment), { maxLength: 4 }),
+        fc.array(safeSegment, { maxLength: 4 }),
       )
-      .chain(([lead, danger, rest]) => {
-        const segments = [lead, danger, ...rest];
+      .chain(([prefix, danger, suffix]) => {
+        const segments = [...prefix, danger, ...suffix];
         return fc
           .array(separator, { minLength: segments.length - 1, maxLength: segments.length - 1 })
           .map((seps) => joinMixed(segments, seps));
@@ -97,8 +100,10 @@ describe("normalizeAppFileRelativePath (property-based)", () => {
   });
 
   // Complements AC2: a path built only from safe segments must NOT throw and must
-  // round-trip its own segment set (guards against over-rejection).
-  test("acceptance: safe relative paths normalize without throwing", () => {
+  // recover its exact segment set (guards against over-rejection AND against a guard
+  // that returns a different-but-safe path — e.g. truncating, reordering, or a fixed
+  // value — by asserting `out === segments.join("/")`, the sole legal normalization).
+  test("acceptance: safe relative paths normalize to their exact segment set", () => {
     const arb = fc
       .tuple(
         fc.boolean(), // optional leading `./` (stripped by the guard)
@@ -110,11 +115,14 @@ describe("normalizeAppFileRelativePath (property-based)", () => {
           segments,
           Array.from({ length: Math.max(0, segments.length - 1) }, (_, i) => seps[i] ?? "/"),
         );
-        return dotSlash ? `./${body}` : body;
+        // Separators all normalize to `/`, segments carry none, and a leading `./` is
+        // stripped, so the only correct result is the segments rejoined with `/`.
+        return { path: dotSlash ? `./${body}` : body, expected: segments.join("/") };
       });
     fc.assert(
-      fc.property(arb, (path) => {
+      fc.property(arb, ({ path, expected }) => {
         const out = normalizeAppFileRelativePath(path);
+        expect(out).toBe(expected);
         expect(isSafeOutput(out)).toBe(true);
         expect(normalizeAppFileRelativePath(out)).toBe(out);
       }),

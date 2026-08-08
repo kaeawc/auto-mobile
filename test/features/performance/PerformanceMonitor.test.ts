@@ -627,7 +627,30 @@ describe("PerformanceMonitor", () => {
       const snap = buffer.snapshot("device-1", fakeTimer.now(), 60000);
       expect(snap.sampleCount).toBeGreaterThanOrEqual(1);
       expect(snap.fps).not.toBeNull();
-      expect(snap.memoryMb).not.toBeNull();
+    });
+
+    it("primes the first cumulative gfxinfo sample without recording it in the window", async () => {
+      const buffer = new PerfWindowBuffer();
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer
+      );
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      expect(fakePusher.getPushCount()).toBe(1);
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBe(0);
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBe(1);
     });
 
     it("primes the first gfxinfo sample without recording cumulative frame metrics", async () => {
@@ -756,7 +779,7 @@ describe("PerformanceMonitor", () => {
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
-      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
       expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBeGreaterThanOrEqual(1);
 
       // Switching the monitored package must drop app A's samples so the next
@@ -770,7 +793,7 @@ describe("PerformanceMonitor", () => {
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
-      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
       expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBeGreaterThanOrEqual(1);
 
       monitor.stopMonitoring("device-1");

@@ -6,12 +6,18 @@ import {
   DEFAULT_THRESHOLDS,
   PerformancePushSocketServer,
 } from "../../daemon/performancePushSocketServer";
-import { getDeviceDataStreamServer, PerformanceStreamData } from "../../daemon/deviceDataStreamSocketServer";
+import {
+  getDeviceDataStreamServer,
+  PerformanceStreamData,
+} from "../../daemon/deviceDataStreamSocketServer";
 import { RecompositionTracker } from "./RecompositionTracker";
 import { getPerfWindowBuffer, PerfWindowBuffer } from "./PerfWindowBuffer";
 import { getSdkFrameMetricsStore, SdkFrameMetricsStore } from "./SdkFrameMetricsStore";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
-import { defaultAdbClientFactory, AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultAdbClientFactory,
+  AdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -28,7 +34,10 @@ export interface PerformanceTelemetryEmitter {
  * Type for the exec function used to run host commands.
  * Injected for testing.
  */
-export type ExecFileAsyncFn = (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
+export type ExecFileAsyncFn = (
+  file: string,
+  args: string[],
+) => Promise<{ stdout: string; stderr: string }>;
 
 /**
  * Factory interface for creating SimCtlClient instances.
@@ -78,6 +87,18 @@ interface RawJankCounters {
   jankyFrames: number | null;
 }
 
+interface CpuSample {
+  pid: string;
+  processTicks: number;
+  uptimeSeconds: number;
+}
+
+interface CpuCollectionResult {
+  cpuUsagePercent: number | null;
+  sample: CpuSample | null;
+  reset: boolean;
+}
+
 interface MonitoredDevice {
   deviceId: string;
   packageName: string;
@@ -92,6 +113,8 @@ interface MonitoredDevice {
   lastMediumTick: number;
   lastSlowTick: number;
   cachedCpu: number | null;
+  /** Previous Android CPU sample for interval-based usage calculation */
+  previousCpuSample: CpuSample | null;
   cachedMemory: number | null;
   /** Cached FPS from last interval with actual frames */
   cachedFps: number | null;
@@ -132,6 +155,7 @@ export class PerformanceMonitor {
   static readonly TICK_INTERVAL_MS = 500;
   static readonly MEDIUM_INTERVAL_MS = 2000;
   static readonly SLOW_INTERVAL_MS = 10000;
+  private static readonly CPU_CLOCK_TICKS_PER_SECOND = 100;
   /**
    * How recent an in-app SDK frame sample must be to be preferred over the
    * dumpsys scrape. The SDK broadcasts ~1/s, so a couple ticks of grace covers
@@ -211,7 +235,11 @@ export class PerformanceMonitor {
    * @param packageName - The package/bundle identifier to monitor
    * @param platform - The platform ("android" or "ios"), defaults to "android"
    */
-  startMonitoring(deviceId: string, packageName: string, platform: "android" | "ios" = "android"): void {
+  startMonitoring(
+    deviceId: string,
+    packageName: string,
+    platform: "android" | "ios" = "android",
+  ): void {
     if (this.monitoredDevices.has(deviceId)) {
       // Update package name if already monitoring this device
       const existing = this.monitoredDevices.get(deviceId)!;
@@ -220,6 +248,7 @@ export class PerformanceMonitor {
         existing.platform = platform;
         // Reset cached metrics for the new package
         existing.cachedCpu = null;
+        existing.previousCpuSample = null;
         existing.cachedMemory = null;
         existing.cachedFps = null;
         existing.cachedFrameTime = null;
@@ -236,7 +265,9 @@ export class PerformanceMonitor {
         // deviceId, so a package switch must reset it).
         this.perfWindowBuffer.clear(deviceId);
         this.frameMetricsStore.clear(deviceId);
-        logger.info(`[PerformanceMonitor] Updated monitoring to ${packageName} on ${deviceId} (${platform})`);
+        logger.info(
+          `[PerformanceMonitor] Updated monitoring to ${packageName} on ${deviceId} (${platform})`,
+        );
       }
       return;
     }
@@ -250,6 +281,7 @@ export class PerformanceMonitor {
       lastMediumTick: 0,
       lastSlowTick: 0,
       cachedCpu: null,
+      previousCpuSample: null,
       cachedMemory: null,
       cachedFps: null,
       cachedFrameTime: null,
@@ -258,7 +290,9 @@ export class PerformanceMonitor {
       cachedPid: null,
       previousMetricHealth: {},
     });
-    logger.info(`[PerformanceMonitor] Started monitoring ${packageName} on ${deviceId} (${platform})`);
+    logger.info(
+      `[PerformanceMonitor] Started monitoring ${packageName} on ${deviceId} (${platform})`,
+    );
   }
 
   /**
@@ -288,10 +322,16 @@ export class PerformanceMonitor {
    * package switch or `stopMonitoring()`, and such a stale sample must not touch
    * the current device's caches, stream, or buffer.
    */
-  private isSampleCurrent(device: MonitoredDevice, samplingPackage: string, samplingGeneration: number): boolean {
-    return this.monitoredDevices.get(device.deviceId) === device &&
+  private isSampleCurrent(
+    device: MonitoredDevice,
+    samplingPackage: string,
+    samplingGeneration: number,
+  ): boolean {
+    return (
+      this.monitoredDevices.get(device.deviceId) === device &&
       device.packageName === samplingPackage &&
-      device.monitoringGeneration === samplingGeneration;
+      device.monitoringGeneration === samplingGeneration
+    );
   }
 
   /**
@@ -345,7 +385,7 @@ export class PerformanceMonitor {
   private async sampleDevice(
     device: MonitoredDevice,
     now: number,
-    server: PerformancePushSocketServer
+    server: PerformancePushSocketServer,
   ): Promise<void> {
     try {
       if (device.platform === "ios") {
@@ -364,7 +404,7 @@ export class PerformanceMonitor {
   private async sampleAndroidDevice(
     device: MonitoredDevice,
     now: number,
-    server: PerformancePushSocketServer
+    server: PerformancePushSocketServer,
   ): Promise<void> {
     // Identity captured before any await: if the monitored package switches (or
     // monitoring stops) while these adb calls are in flight, this whole sample
@@ -381,7 +421,7 @@ export class PerformanceMonitor {
       device.deviceId,
       samplingPackage,
       now,
-      PerformanceMonitor.SDK_FRAME_TTL_MS
+      PerformanceMonitor.SDK_FRAME_TTL_MS,
     );
 
     const gfxPromise = sdkFrame ? Promise.resolve(null) : this.collectGfxMetrics(device);
@@ -394,17 +434,20 @@ export class PerformanceMonitor {
       now - device.lastMediumTick >= PerformanceMonitor.MEDIUM_INTERVAL_MS;
     const cpuPromise = shouldCollectCpu
       ? this.collectCpuMetrics(device)
-      : Promise.resolve(device.cachedCpu);
+      : Promise.resolve({
+          cpuUsagePercent: device.cachedCpu,
+          sample: null,
+          reset: false,
+        });
 
     // Collect slow metrics (memory) if interval elapsed or first collection
     const shouldCollectMemory =
-      device.lastSlowTick === 0 ||
-      now - device.lastSlowTick >= PerformanceMonitor.SLOW_INTERVAL_MS;
+      device.lastSlowTick === 0 || now - device.lastSlowTick >= PerformanceMonitor.SLOW_INTERVAL_MS;
     const memoryPromise = shouldCollectMemory
       ? this.collectMemoryMetrics(device)
       : Promise.resolve(device.cachedMemory);
 
-    const [gfx, cpu, memory] = await Promise.all([gfxPromise, cpuPromise, memoryPromise]);
+    const [gfx, cpuResult, memory] = await Promise.all([gfxPromise, cpuPromise, memoryPromise]);
 
     // Drop the whole sample if monitoring changed apps or stopped mid-collection.
     if (!this.isSampleCurrent(device, samplingPackage, samplingGeneration)) {
@@ -414,7 +457,12 @@ export class PerformanceMonitor {
     device.lastFastTick = now;
     if (shouldCollectCpu) {
       device.lastMediumTick = now;
-      device.cachedCpu = cpu;
+      device.cachedCpu = cpuResult.cpuUsagePercent;
+      if (cpuResult.reset) {
+        device.previousCpuSample = null;
+      } else if (cpuResult.sample) {
+        device.previousCpuSample = cpuResult.sample;
+      }
     }
     if (shouldCollectMemory) {
       device.lastSlowTick = now;
@@ -469,7 +517,7 @@ export class PerformanceMonitor {
       jankFrames = null;
       if (gfxData.rawJankCounters) {
         const curr = gfxData.rawJankCounters;
-        jankFrames = curr.jankyFrames ?? (curr.missedVsync + curr.slowUi + curr.deadlineMissed);
+        jankFrames = curr.jankyFrames ?? curr.missedVsync + curr.slowUi + curr.deadlineMissed;
       }
 
       const touch = this.estimateTouchLatency(gfxData, frameTimeMs, device);
@@ -489,7 +537,7 @@ export class PerformanceMonitor {
       touchLatencyMs,
       ttffMs: null,
       ttiMs,
-      cpuUsagePercent: cpu,
+      cpuUsagePercent: cpuResult.cpuUsagePercent,
       memoryUsageMb: memory,
     };
 
@@ -503,7 +551,7 @@ export class PerformanceMonitor {
       touchLatencyMs: rawTouchLatencyMs,
       // CPU/memory only when actually collected this tick (null otherwise), so
       // the window never averages a reading acquired outside it.
-      cpuUsagePercent: shouldCollectCpu ? cpu : null,
+      cpuUsagePercent: shouldCollectCpu ? cpuResult.cpuUsagePercent : null,
       memoryUsageMb: shouldCollectMemory ? memory : null,
     });
   }
@@ -518,7 +566,7 @@ export class PerformanceMonitor {
   private estimateTouchLatency(
     gfx: { totalFrames: number | null; highInputLatencyFrames: number | null },
     frameTimeMs: number | null,
-    device: MonitoredDevice
+    device: MonitoredDevice,
   ): { streamMs: number; rawMs: number | null } {
     if (gfx.totalFrames === null || gfx.totalFrames <= 0 || frameTimeMs === null) {
       // No frames this interval - assume optimal latency (idle app is responsive).
@@ -540,7 +588,7 @@ export class PerformanceMonitor {
   private async sampleIOSDevice(
     device: MonitoredDevice,
     now: number,
-    server: PerformancePushSocketServer
+    server: PerformancePushSocketServer,
   ): Promise<void> {
     // Identity captured before any await (see sampleAndroidDevice).
     const samplingPackage = device.packageName;
@@ -557,8 +605,7 @@ export class PerformanceMonitor {
 
     // Collect slow metrics (memory) if interval elapsed or first collection
     const shouldCollectMemory =
-      device.lastSlowTick === 0 ||
-      now - device.lastSlowTick >= PerformanceMonitor.SLOW_INTERVAL_MS;
+      device.lastSlowTick === 0 || now - device.lastSlowTick >= PerformanceMonitor.SLOW_INTERVAL_MS;
     const memoryPromise = shouldCollectMemory
       ? this.collectIOSMemoryMetrics(device)
       : Promise.resolve(device.cachedMemory);
@@ -638,7 +685,7 @@ export class PerformanceMonitor {
       touchLatencyMs: number | null;
       cpuUsagePercent: number | null;
       memoryUsageMb: number | null;
-    }
+    },
   ): void {
     const data: LivePerformanceData = {
       deviceId: device.deviceId,
@@ -678,7 +725,10 @@ export class PerformanceMonitor {
 
     const observationServer = getDeviceDataStreamServer();
     if (observationServer) {
-      const recompositionSummary = RecompositionTracker.getInstance().getLatestSummary(device.deviceId, device.packageName);
+      const recompositionSummary = RecompositionTracker.getInstance().getLatestSummary(
+        device.deviceId,
+        device.packageName,
+      );
       const streamData: PerformanceStreamData = {
         fps: metrics.fps ?? 0,
         frameTimeMs: metrics.frameTimeMs ?? 0,
@@ -712,7 +762,7 @@ export class PerformanceMonitor {
       memoryUsageMb: number | null;
       cpuUsagePercent: number | null;
     },
-    overallHealth: string
+    overallHealth: string,
   ): void {
     const th = DEFAULT_THRESHOLDS;
     const currentHealth: Record<string, string> = {};
@@ -720,16 +770,36 @@ export class PerformanceMonitor {
 
     // Classify each metric
     if (metrics.fps !== null) {
-      currentHealth.fps = metrics.fps < th.fpsCritical ? "critical" : metrics.fps < th.fpsWarning ? "warning" : "healthy";
+      currentHealth.fps =
+        metrics.fps < th.fpsCritical
+          ? "critical"
+          : metrics.fps < th.fpsWarning
+            ? "warning"
+            : "healthy";
     }
     if (metrics.frameTimeMs !== null) {
-      currentHealth.frameTime = metrics.frameTimeMs > th.frameTimeCritical ? "critical" : metrics.frameTimeMs > th.frameTimeWarning ? "warning" : "healthy";
+      currentHealth.frameTime =
+        metrics.frameTimeMs > th.frameTimeCritical
+          ? "critical"
+          : metrics.frameTimeMs > th.frameTimeWarning
+            ? "warning"
+            : "healthy";
     }
     if (metrics.jankFrames !== null) {
-      currentHealth.jank = metrics.jankFrames > th.jankCritical ? "critical" : metrics.jankFrames > th.jankWarning ? "warning" : "healthy";
+      currentHealth.jank =
+        metrics.jankFrames > th.jankCritical
+          ? "critical"
+          : metrics.jankFrames > th.jankWarning
+            ? "warning"
+            : "healthy";
     }
     if (metrics.touchLatencyMs !== null) {
-      currentHealth.touchLatency = metrics.touchLatencyMs > th.touchLatencyCritical ? "critical" : metrics.touchLatencyMs > th.touchLatencyWarning ? "warning" : "healthy";
+      currentHealth.touchLatency =
+        metrics.touchLatencyMs > th.touchLatencyCritical
+          ? "critical"
+          : metrics.touchLatencyMs > th.touchLatencyWarning
+            ? "warning"
+            : "healthy";
     }
     if (metrics.memoryUsageMb !== null) {
       // Classify memory into bands — emit telemetry when band changes.
@@ -779,7 +849,9 @@ export class PerformanceMonitor {
    * Resets gfxinfo after reading to get fresh data for the next interval.
    * Jank delta calculation happens in sampleDevice.
    */
-  private async collectGfxMetrics(device: MonitoredDevice): Promise<GfxMetrics & { rawJankCounters: RawJankCounters | null }> {
+  private async collectGfxMetrics(
+    device: MonitoredDevice,
+  ): Promise<GfxMetrics & { rawJankCounters: RawJankCounters | null }> {
     try {
       const adb = this.adbClientFactory.create({
         deviceId: device.deviceId,
@@ -789,7 +861,9 @@ export class PerformanceMonitor {
 
       // Read and reset gfxinfo in one command to get fresh interval data
       // The 'reset' flag clears stats after reading, so next read reflects only new frames
-      const { stdout } = await adb.executeCommand(`shell dumpsys gfxinfo ${device.packageName} reset`);
+      const { stdout } = await adb.executeCommand(
+        `shell dumpsys gfxinfo ${device.packageName} reset`,
+      );
 
       // Check if any frames were actually rendered in this interval
       const totalFramesMatch = stdout.match(/Total frames rendered:\s+(\d+)/);
@@ -805,14 +879,19 @@ export class PerformanceMonitor {
       // Parse jank counters (now reflects only jank since last reset)
       const missedVsync = parseInt(stdout.match(/Missed Vsync:\s+(\d+)/)?.[1] || "0", 10);
       const slowUi = parseInt(stdout.match(/Slow UI thread:\s+(\d+)/)?.[1] || "0", 10);
-      const deadlineMissed = parseInt(stdout.match(/Frame deadline missed:\s+(\d+)/)?.[1] || "0", 10);
+      const deadlineMissed = parseInt(
+        stdout.match(/Frame deadline missed:\s+(\d+)/)?.[1] || "0",
+        10,
+      );
       // Aggregate janky-frame count (deduplicated across causes) when present.
       const jankyMatch = stdout.match(/Janky frames:\s+(\d+)/);
       const jankyFrames = jankyMatch ? parseInt(jankyMatch[1], 10) : null;
 
       // Parse high input latency frame count
       const highInputLatencyMatch = stdout.match(/Number High input latency:\s+(\d+)/);
-      const highInputLatencyFrames = highInputLatencyMatch ? parseInt(highInputLatencyMatch[1], 10) : null;
+      const highInputLatencyFrames = highInputLatencyMatch
+        ? parseInt(highInputLatencyMatch[1], 10)
+        : null;
 
       // Calculate FPS from frame time
       const fps = frameTimeMs && frameTimeMs > 0 ? Math.min(1000 / frameTimeMs, 60) : null;
@@ -827,15 +906,22 @@ export class PerformanceMonitor {
       };
     } catch (error) {
       logger.debug(`[PerformanceMonitor] gfxinfo failed for ${device.deviceId}: ${error}`);
-      return { fps: null, frameTimeMs: null, jankFrames: null, highInputLatencyFrames: null, totalFrames: null, rawJankCounters: null };
+      return {
+        fps: null,
+        frameTimeMs: null,
+        jankFrames: null,
+        highInputLatencyFrames: null,
+        totalFrames: null,
+        rawJankCounters: null,
+      };
     }
   }
 
   /**
    * Collect CPU usage from /proc/{pid}/stat.
-   * Returns percentage of CPU time used by the process.
+   * Returns interval-based percentage of CPU time used by the process.
    */
-  private async collectCpuMetrics(device: MonitoredDevice): Promise<number | null> {
+  private async collectCpuMetrics(device: MonitoredDevice): Promise<CpuCollectionResult> {
     try {
       const adb = this.adbClientFactory.create({
         deviceId: device.deviceId,
@@ -847,7 +933,7 @@ export class PerformanceMonitor {
       const { stdout: pidOut } = await adb.executeCommand(`shell pidof ${device.packageName}`);
       const pid = pidOut.trim().split(/\s+/)[0]; // Take first PID if multiple
       if (!pid) {
-        return null;
+        return { cpuUsagePercent: null, sample: null, reset: true };
       }
 
       // Get CPU stats from /proc/stat
@@ -858,21 +944,30 @@ export class PerformanceMonitor {
 
       // Get system uptime
       const { stdout: uptimeOut } = await adb.executeCommand("shell cat /proc/uptime");
-      const uptime = parseFloat(uptimeOut.split(" ")[0] || "0");
+      const uptimeSeconds = parseFloat(uptimeOut.split(" ")[0] || "0");
+      const processTicks = utime + stime;
+      const sample = { pid, processTicks, uptimeSeconds };
+      const previous = device.previousCpuSample;
 
-      // Calculate CPU percentage
-      // Note: This is a simplified calculation - actual CPU% would need delta sampling
-      if (uptime > 0) {
-        // Clock ticks per second is typically 100 (HZ)
-        const cpuTime = utime + stime;
-        const cpuPercent = (cpuTime / (uptime * 100)) * 100;
-        return Math.min(cpuPercent, 100); // Cap at 100%
+      if (
+        previous &&
+        previous.pid === pid &&
+        uptimeSeconds > previous.uptimeSeconds &&
+        processTicks >= previous.processTicks
+      ) {
+        const elapsedTicks =
+          (uptimeSeconds - previous.uptimeSeconds) * PerformanceMonitor.CPU_CLOCK_TICKS_PER_SECOND;
+        const processDelta = processTicks - previous.processTicks;
+        if (elapsedTicks > 0) {
+          const cpuPercent = (processDelta / elapsedTicks) * 100;
+          return { cpuUsagePercent: Math.min(cpuPercent, 100), sample, reset: false };
+        }
       }
 
-      return null;
+      return { cpuUsagePercent: null, sample, reset: false };
     } catch (error) {
       logger.debug(`[PerformanceMonitor] CPU metrics failed for ${device.deviceId}: ${error}`);
-      return null;
+      return { cpuUsagePercent: null, sample: null, reset: true };
     }
   }
 
@@ -889,7 +984,7 @@ export class PerformanceMonitor {
       });
 
       const { stdout } = await adb.executeCommand(
-        `shell dumpsys meminfo ${device.packageName} | grep "TOTAL PSS"`
+        `shell dumpsys meminfo ${device.packageName} | grep "TOTAL PSS"`,
       );
 
       // Format: "TOTAL PSS:    12345"
@@ -974,7 +1069,9 @@ export class PerformanceMonitor {
 
       return null;
     } catch (error) {
-      logger.debug(`[PerformanceMonitor] iOS memory metrics failed for ${device.deviceId}: ${error}`);
+      logger.debug(
+        `[PerformanceMonitor] iOS memory metrics failed for ${device.deviceId}: ${error}`,
+      );
       return null;
     }
   }

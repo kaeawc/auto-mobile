@@ -75,7 +75,7 @@ internal fun sessionTokenSha256Hex(token: String): String =
 object VideoSessionArguments {
   private const val DEFAULT_SOCKET_NAME = "automobile_video"
   private val SAFE_SOCKET_NAME = Regex("[A-Za-z0-9_.-]{1,100}")
-  private val SAFE_TOKEN = Regex("[A-Za-z0-9-]{8,80}")
+  internal val SAFE_TOKEN = Regex("[A-Za-z0-9-]{8,80}")
 
   fun parse(args: Array<String>): VideoSessionOptions {
     val socketName = valueAfter(args, "--socket-name") ?: DEFAULT_SOCKET_NAME

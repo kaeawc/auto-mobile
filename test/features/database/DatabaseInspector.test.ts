@@ -380,6 +380,12 @@ describe("DatabaseInspector", () => {
         "Database error (UNKNOWN): java.lang.SecurityException: Do not have permission in call getContentProviderExternal()"
       );
     });
+
+    test("preserves both stdout and stderr when content call writes to both", async () => {
+      const message = await errorFor("stdout failure", "stderr failure");
+
+      expect(message).toBe("Database error (UNKNOWN): stdout failure\nstderr failure");
+    });
   });
 
   describe("error handling", () => {

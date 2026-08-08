@@ -151,6 +151,18 @@ describe("PerfWindowBuffer", () => {
       expect(snap.jank!.total).toBe(4);
       expect(snap.jank!.perSecond).toBeNull();
     });
+
+    it("excludes the sample exactly at the window cutoff from jank", () => {
+      const buffer = new PerfWindowBuffer();
+      buffer.record("device-1", sample({ t: 1000, jankFrames: 2 }));
+      buffer.record("device-1", sample({ t: 1500, jankFrames: 3 }));
+      buffer.record("device-1", sample({ t: 2000, jankFrames: 5 }));
+
+      const snap = buffer.snapshot("device-1", 2000, 1000);
+      expect(snap.sampleCount).toBe(3);
+      expect(snap.jank!.total).toBe(8);
+      expect(snap.jank!.perSecond).toBe(8);
+    });
   });
 
   describe("touch latency, cpu, memory", () => {

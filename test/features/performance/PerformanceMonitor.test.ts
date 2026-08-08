@@ -620,7 +620,7 @@ describe("PerformanceMonitor", () => {
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
-      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
 
       // The tick pushed metrics, so the buffer holds at least one sample and the
       // snapshot exposes the gfxinfo-derived fps and dumpsys-derived cpu/memory.
@@ -628,6 +628,65 @@ describe("PerformanceMonitor", () => {
       expect(snap.sampleCount).toBeGreaterThanOrEqual(1);
       expect(snap.fps).not.toBeNull();
       expect(snap.memoryMb).not.toBeNull();
+    });
+
+    it("primes the first gfxinfo sample without recording cumulative frame metrics", async () => {
+      const buffer = new PerfWindowBuffer();
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer
+      );
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      const first = buffer.snapshot("device-1", fakeTimer.now(), 60000);
+      expect(first.sampleCount).toBe(1);
+      expect(first.fps).toBeNull();
+      expect(first.jank).toBeNull();
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      const second = buffer.snapshot("device-1", fakeTimer.now(), 60000);
+      expect(second.fps?.p50).toBe(60);
+      expect(second.jank?.total).toBe(6);
+    });
+
+    it("re-primes gfxinfo after switching the monitored package", async () => {
+      const buffer = new PerfWindowBuffer();
+      fakeAdbClient.setCommandResult(
+        "shell dumpsys gfxinfo com.other.app reset",
+        `
+          Total frames rendered: 100
+          50th percentile: 8.5ms
+          Missed Vsync: 2
+          Slow UI thread: 1
+          Frame deadline missed: 3
+        `
+      );
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer
+      );
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
+
+      monitor.startMonitoring("device-1", "com.other.app");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      const firstOtherPackageSample = buffer.snapshot("device-1", fakeTimer.now(), 60000);
+      expect(firstOtherPackageSample.fps).toBeNull();
+      expect(firstOtherPackageSample.jank).toBeNull();
     });
 
     it("prefers gfxinfo's aggregate Janky frames over summing overlapping causes", async () => {

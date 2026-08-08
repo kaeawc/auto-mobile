@@ -60,6 +60,12 @@ class VideoServerEncodeLoopTest {
   }
 
   @Test
+  fun codecConfigBuffersDoNotCountAsVideoStatsFrames() {
+    assertFalse(VideoServer.shouldCountVideoStatsFrame(isCodecConfig = true))
+    assertTrue(VideoServer.shouldCountVideoStatsFrame(isCodecConfig = false))
+  }
+
+  @Test
   fun dropGapRequestsOneRecoveryKeyFramePerDropBurst() {
     val handoff = FrameHandoff()
     val clock = FakeClock()

@@ -37,6 +37,7 @@
     "profile:memory": "bun --expose-gc --inspect scripts/detect-memory-leaks.ts --mode=profile",
     "profile:heap": "bun --expose-gc --heap-prof scripts/stress-test.ts",
     "validate:yaml": "bun scripts/validate-yaml.ts",
+    "validate:ios-continuity": "bun scripts/validate-ios-simulator-continuity.ts",
     "check:bun-version-coherence": "bun scripts/check-bun-version-coherence.ts",
     "check:stdlib-first": "bash scripts/check-stdlib-first.sh",
     "check:host-shell-boundary": "bun scripts/check-host-shell-boundary.ts",

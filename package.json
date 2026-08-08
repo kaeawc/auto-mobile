@@ -63,6 +63,7 @@
     "turbo:lint": "turbo run lint",
     "turbo:test": "turbo run test",
     "turbo:typecheck": "turbo run typecheck",
+    "turbo:gate": "turbo run lint build typecheck --output-logs=errors-only",
     "loop": "bash scripts/validate-loop.sh"
   },
   "packageManager": "bun@1.3.14",

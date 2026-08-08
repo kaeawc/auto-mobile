@@ -26,14 +26,13 @@ cd "$ROOT" || exit 1
 source "$ROOT/scripts/lib/shell-core.sh"
 ensure_node_modules "$ROOT"
 
-# ensure_node_modules may have just installed node_modules/.bin/turbo; when this
-# script is run directly (not via `bun run`, which does this for us) that dir is
-# not on PATH, so a bare `turbo` would be "command not found". Put it on PATH so
-# the self-healing direct entry point actually works.
-export PATH="$ROOT/node_modules/.bin:$PATH"
-
-gate_cmd="${VALIDATE_LOOP_GATE_CMD:-turbo run lint build typecheck --output-logs=errors-only}"
-test_cmd="${VALIDATE_LOOP_TEST_CMD:-bash scripts/test-fast.sh}"
+# Route the gate and tests through `bun run` package scripts (not bare `turbo`):
+# turbo is a local dependency that may not be on PATH, and the repo contract
+# (AGENTS.md) requires invoking it via `bun run turbo:*`. `bun run` also puts
+# node_modules/.bin on PATH for the child, so the self-healing direct entry point
+# works with no global turbo.
+gate_cmd="${VALIDATE_LOOP_GATE_CMD:-bun run turbo:gate}"
+test_cmd="${VALIDATE_LOOP_TEST_CMD:-bun run test:fast}"
 
 # Run the (trusted) gate/test strings through a shell so quoted arguments survive
 # — a bare `${cmd}` word-split would mangle any command with quoted args.

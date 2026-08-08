@@ -432,7 +432,7 @@ export class PerformanceMonitor {
     }
 
     device.lastFastTick = now;
-    if (!sdkFrame) {
+    if (!sdkFrame && gfx?.resetSucceeded) {
       device.gfxPrimed = true;
     }
     if (shouldCollectCpu) {
@@ -810,7 +810,9 @@ export class PerformanceMonitor {
    * Resets gfxinfo after reading to get fresh data for the next interval.
    * Jank delta calculation happens in sampleDevice.
    */
-  private async collectGfxMetrics(device: MonitoredDevice): Promise<GfxMetrics & { rawJankCounters: RawJankCounters | null }> {
+  private async collectGfxMetrics(
+    device: MonitoredDevice
+  ): Promise<GfxMetrics & { rawJankCounters: RawJankCounters | null; resetSucceeded: boolean }> {
     try {
       const adb = this.adbClientFactory.create({
         deviceId: device.deviceId,
@@ -855,10 +857,19 @@ export class PerformanceMonitor {
         highInputLatencyFrames,
         totalFrames,
         rawJankCounters: { missedVsync, slowUi, deadlineMissed, jankyFrames },
+        resetSucceeded: true,
       };
     } catch (error) {
       logger.debug(`[PerformanceMonitor] gfxinfo failed for ${device.deviceId}: ${error}`);
-      return { fps: null, frameTimeMs: null, jankFrames: null, highInputLatencyFrames: null, totalFrames: null, rawJankCounters: null };
+      return {
+        fps: null,
+        frameTimeMs: null,
+        jankFrames: null,
+        highInputLatencyFrames: null,
+        totalFrames: null,
+        rawJankCounters: null,
+        resetSucceeded: false,
+      };
     }
   }
 

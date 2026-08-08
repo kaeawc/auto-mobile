@@ -656,6 +656,36 @@ describe("PerformanceMonitor", () => {
       expect(second.jank?.total).toBe(6);
     });
 
+    it("keeps priming after an initial gfxinfo collection failure", async () => {
+      const buffer = new PerfWindowBuffer();
+      const gfxinfoCommand = "shell dumpsys gfxinfo com.example.app reset";
+      fakeAdbClient.setCommandError(gfxinfoCommand, new Error("temporary ADB failure"));
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer
+      );
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      fakeAdbClient.clearCommandError(gfxinfoCommand);
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      const firstSuccessfulSample = buffer.snapshot("device-1", fakeTimer.now(), 60000);
+      expect(firstSuccessfulSample.fps).toBeNull();
+      expect(firstSuccessfulSample.jank).toBeNull();
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      const secondSuccessfulSample = buffer.snapshot("device-1", fakeTimer.now(), 60000);
+      expect(secondSuccessfulSample.fps?.p50).toBe(60);
+      expect(secondSuccessfulSample.jank?.total).toBe(6);
+    });
+
     it("re-primes gfxinfo after switching the monitored package", async () => {
       const buffer = new PerfWindowBuffer();
       fakeAdbClient.setCommandResult(

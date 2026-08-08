@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.sdk
 
+import android.content.Context
 import android.os.Binder
 import android.os.Process
 
@@ -11,13 +12,22 @@ import android.os.Process
  */
 internal object DebugInspectorAccess {
 
-  fun isAuthorized(callingUid: Int, ownUid: Int): Boolean {
-    return callingUid == Process.SHELL_UID || callingUid == Process.ROOT_UID || callingUid == ownUid
+  fun isAuthorized(
+    callingUid: Int,
+    ownUid: Int,
+    callingPackages: Set<String> = emptySet(),
+  ): Boolean {
+    return callingUid == Process.SHELL_UID ||
+      callingUid == Process.ROOT_UID ||
+      callingUid == ownUid ||
+      SdkConstants.CTRL_PROXY_PACKAGE in callingPackages
   }
 
-  fun enforceCaller() {
+  fun enforceCaller(context: Context?) {
     val callingUid = Binder.getCallingUid()
-    if (!isAuthorized(callingUid, Process.myUid())) {
+    val callingPackages =
+      context?.packageManager?.getPackagesForUid(callingUid)?.toSet().orEmpty()
+    if (!isAuthorized(callingUid, Process.myUid(), callingPackages)) {
       throw SecurityException("Debug inspector access denied for uid $callingUid")
     }
   }

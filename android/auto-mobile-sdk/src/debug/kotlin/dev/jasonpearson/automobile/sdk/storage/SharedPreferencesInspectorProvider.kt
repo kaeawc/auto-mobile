@@ -42,7 +42,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
   }
 
   override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
-    DebugInspectorAccess.enforceCaller()
+    DebugInspectorAccess.enforceCaller(context)
     val result = Bundle()
 
     // Check if inspection is enabled

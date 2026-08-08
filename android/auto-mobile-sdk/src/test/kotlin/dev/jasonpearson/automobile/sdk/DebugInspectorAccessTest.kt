@@ -22,8 +22,25 @@ class DebugInspectorAccessTest {
   }
 
   @Test
+  fun `allows the CtrlProxy caller`() {
+    assertTrue(
+      DebugInspectorAccess.isAuthorized(
+        callingUid = 10_211,
+        ownUid = 10_210,
+        callingPackages = setOf(SdkConstants.CTRL_PROXY_PACKAGE),
+      )
+    )
+  }
+
+  @Test
   fun `rejects unrelated app callers`() {
-    assertFalse(DebugInspectorAccess.isAuthorized(callingUid = 10_211, ownUid = 10_210))
+    assertFalse(
+      DebugInspectorAccess.isAuthorized(
+        callingUid = 10_212,
+        ownUid = 10_210,
+        callingPackages = setOf("com.example.untrusted"),
+      )
+    )
   }
 
   private object ProcessUid {

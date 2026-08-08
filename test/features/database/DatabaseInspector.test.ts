@@ -274,10 +274,10 @@ describe("DatabaseInspector", () => {
       expect(message).toBe("Database error (DISABLED): Database inspection is disabled");
     });
 
-    test("falls back to UNKNOWN and Unknown error when the keys are absent", async () => {
+    test("includes raw output when the keys are absent", async () => {
       const message = await errorFor(`Bundle[{success=false}]`);
 
-      expect(message).toBe("Database error (UNKNOWN): Unknown error");
+      expect(message).toBe("Database error (UNKNOWN): Bundle[{success=false}]");
     });
 
     test("keeps flat values when an old reply's error text embeds a parseable result={}", async () => {
@@ -340,10 +340,45 @@ describe("DatabaseInspector", () => {
       expect(message).toBe("Database error (SQLiteException): disk I/O error");
     });
 
-    test("falls back to UNKNOWN when the envelope omits the fields", async () => {
+    test("includes the raw bundle when the envelope omits the fields", async () => {
       const message = await errorFor(`Bundle[{success=false, result={}}]`);
 
-      expect(message).toBe("Database error (UNKNOWN): Unknown error");
+      expect(message).toBe("Database error (UNKNOWN): Bundle[{success=false, result={}}]");
+    });
+  });
+
+  describe("raw command output diagnostics", () => {
+    const command = `shell content call --uri content://${appId}.automobile.database --method listDatabases`;
+
+    const errorFor = async (stdout: string, stderr = ""): Promise<string> => {
+      fakeAdb.setCommandResult(command, stdout, stderr);
+      try {
+        await inspector.listDatabases(appId);
+      } catch (error) {
+        return (error as Error).message;
+      }
+      throw new Error("expected listDatabases to reject");
+    };
+
+    test("includes raw stdout when content call returns an unstructured error", async () => {
+      const message = await errorFor(
+        "java.lang.SecurityException: Permission Denial: opening provider that is not exported"
+      );
+
+      expect(message).toBe(
+        "Database error (UNKNOWN): java.lang.SecurityException: Permission Denial: opening provider that is not exported"
+      );
+    });
+
+    test("includes raw stderr when content call writes an unstructured error there", async () => {
+      const message = await errorFor(
+        "",
+        "java.lang.SecurityException: Do not have permission in call getContentProviderExternal()"
+      );
+
+      expect(message).toBe(
+        "Database error (UNKNOWN): java.lang.SecurityException: Do not have permission in call getContentProviderExternal()"
+      );
     });
   });
 

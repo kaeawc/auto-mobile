@@ -627,7 +627,36 @@ describe("PerformanceMonitor", () => {
       const snap = buffer.snapshot("device-1", fakeTimer.now(), 60000);
       expect(snap.sampleCount).toBeGreaterThanOrEqual(1);
       expect(snap.fps).not.toBeNull();
-      expect(snap.memoryMb).not.toBeNull();
+    });
+
+    it("primes gfxinfo while preserving non-gfx metrics from the first tick", async () => {
+      const buffer = new PerfWindowBuffer();
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer
+      );
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      expect(fakePusher.getPushCount()).toBe(1);
+      const firstSnapshot = buffer.snapshot("device-1", fakeTimer.now(), 60000);
+      expect(firstSnapshot.sampleCount).toBe(1);
+      expect(firstSnapshot.fps).toBeNull();
+      expect(firstSnapshot.jank).toBeNull();
+      expect(firstSnapshot.memoryMb?.latest).toBe(100);
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      const secondSnapshot = buffer.snapshot("device-1", fakeTimer.now(), 60000);
+      expect(secondSnapshot.sampleCount).toBe(2);
+      expect(secondSnapshot.fps).not.toBeNull();
     });
 
     it("primes the first gfxinfo sample without recording cumulative frame metrics", async () => {
@@ -756,7 +785,7 @@ describe("PerformanceMonitor", () => {
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
-      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
       expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBeGreaterThanOrEqual(1);
 
       // Switching the monitored package must drop app A's samples so the next
@@ -770,7 +799,7 @@ describe("PerformanceMonitor", () => {
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
-      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
       expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBeGreaterThanOrEqual(1);
 
       monitor.stopMonitoring("device-1");
@@ -812,6 +841,50 @@ describe("PerformanceMonitor", () => {
 
       // dumpsys default gfxinfo → fps derived from 8.5ms p50, capped at 60.
       expect(fakePusher.getLastPushedData()?.metrics.fps).toBe(60);
+    });
+
+    it("re-primes the first dumpsys sample after an SDK interval", async () => {
+      const buffer = new PerfWindowBuffer();
+      const sdkStore = new SdkFrameMetricsStore();
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer, sdkStore);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      sdkStore.ingest("device-1", "com.example.app", {
+        fps: 42, frameTimeMs: 23.8, jankFrames: 3, receivedAt: fakeTimer.now(),
+      });
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBe(2);
+
+      sdkStore.clear("device-1");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      const afterFallbackBaseline = buffer.snapshot("device-1", fakeTimer.now(), 60000);
+      expect(afterFallbackBaseline.sampleCount).toBe(3);
+      expect(afterFallbackBaseline.fps?.p50).toBe(42);
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBe(4);
+    });
+
+    it("does not prime gfxinfo after a failed reset", async () => {
+      const buffer = new PerfWindowBuffer();
+      const gfxCommand = "shell dumpsys gfxinfo com.example.app reset";
+      fakeAdbClient.setCommandError(gfxCommand, new Error("ADB connection failed"));
+      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
+      monitor.start();
+      monitor.startMonitoring("device-1", "com.example.app");
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      fakeAdbClient.clearCommandError(gfxCommand);
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+
+      const afterFirstSuccess = buffer.snapshot("device-1", fakeTimer.now(), 60000);
+      expect(afterFirstSuccess.sampleCount).toBe(2);
+      expect(afterFirstSuccess.fps).toBeNull();
+
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).fps).not.toBeNull();
     });
 
     it("records raw null fps for idle intervals, not the cached stream value", async () => {

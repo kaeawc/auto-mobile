@@ -97,6 +97,21 @@ class DatabaseInspectorProviderTest {
   }
 
   @Test
+  fun `observational pragmas allow inter-token comments and quoted identifiers`() {
+    listOf(
+        "PRAGMA /* inspect */ user_version",
+        "PRAGMA \"user_version\"",
+        "PRAGMA [user_version]",
+        "PRAGMA `user_version`",
+      )
+      .forEach { query ->
+        val response = provider.handleExecuteSQL(driver, executeSqlExtras(query))
+
+        assertEquals("Expected query response for $query", "query", response.getString("type"))
+      }
+  }
+
+  @Test
   fun `unrestricted leading-comment select returns query rows`() {
     val result = driver.executeSQL(databasePath, "-- inspect\nSELECT 1 AS one")
 
@@ -137,6 +152,7 @@ class DatabaseInspectorProviderTest {
     listOf(
         "PRAGMA user_version=42",
         "PRAGMA user_version(42)",
+        "PRAGMA /* blocked */ \"user_version\"=42",
       )
       .forEach { query ->
         val error = runCatching {
@@ -155,6 +171,7 @@ class DatabaseInspectorProviderTest {
   fun `process-mutating pragmas fail the read-only admission gate`() {
     assertTrue(driver.isMutationQuery("PRAGMA hard_heap_limit=1"))
     assertTrue(driver.isMutationQuery("PRAGMA hard_heap_limit(1)"))
+    assertTrue(driver.isMutationQuery("PRAGMA [hard_heap_limit]=1"))
     assertTrue(driver.isMutationQuery("PRAGMA shrink_memory"))
   }
 

@@ -209,17 +209,16 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   }
 
   private fun isReadOnlyPragma(query: String, statementIndex: Int): Boolean {
-    var index = statementIndex + "PRAGMA".length
-    while (query.getOrNull(index)?.isWhitespace() == true) index++
+    var index = skipSqlTrivia(query, statementIndex + "PRAGMA".length) ?: return false
 
     val firstIdentifier = readIdentifier(query, index) ?: return false
     var pragmaName = firstIdentifier.first
-    index = firstIdentifier.second
+    index = skipSqlTrivia(query, firstIdentifier.second) ?: return false
 
     if (query.getOrNull(index) == '.') {
       val pragmaIdentifier = readIdentifier(query, index + 1) ?: return false
       pragmaName = pragmaIdentifier.first
-      index = pragmaIdentifier.second
+      index = skipSqlTrivia(query, pragmaIdentifier.second) ?: return false
     }
 
     pragmaName = pragmaName.lowercase()
@@ -308,12 +307,58 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     }
 
   private fun readIdentifier(query: String, startIndex: Int): Pair<String, Int>? {
-    var index = startIndex
-    while (query.getOrNull(index)?.isWhitespace() == true) index++
+    var index = skipSqlTrivia(query, startIndex) ?: return null
+    val quoteEnd =
+      when (query.getOrNull(index)) {
+        '"' -> '"'
+        '`' -> '`'
+        '[' -> ']'
+        else -> null
+      }
+    if (quoteEnd != null) {
+      val identifier = StringBuilder()
+      index++
+      while (index < query.length) {
+        val char = query[index]
+        if (char == quoteEnd) {
+          if (quoteEnd != ']' && query.getOrNull(index + 1) == quoteEnd) {
+            identifier.append(quoteEnd)
+            index += 2
+            continue
+          }
+          return Pair(identifier.toString(), index + 1)
+        }
+        identifier.append(char)
+        index++
+      }
+      return null
+    }
+
     val identifierStart = index
     while (query.getOrNull(index)?.let(::isWordChar) == true) index++
     if (identifierStart == index) return null
     return Pair(query.substring(identifierStart, index), index)
+  }
+
+  private fun skipSqlTrivia(query: String, startIndex: Int): Int? {
+    var index = startIndex
+    while (index < query.length) {
+      while (query.getOrNull(index)?.isWhitespace() == true) index++
+      when {
+        query.startsWith("--", index) -> {
+          val lineEnd = query.indexOfAny(charArrayOf('\n', '\r'), startIndex = index + 2)
+          if (lineEnd < 0) return query.length
+          index = lineEnd + 1
+        }
+        query.startsWith("/*", index) -> {
+          val commentEnd = query.indexOf("*/", startIndex = index + 2)
+          if (commentEnd < 0) return null
+          index = commentEnd + 2
+        }
+        else -> return index
+      }
+    }
+    return index
   }
 
   private fun startsWithKeyword(text: String, keyword: String): Boolean =

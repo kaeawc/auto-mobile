@@ -7,9 +7,20 @@ import SQLite3
 public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     private let lock = NSLock()
     private let operationLock = NSLock()
+    private let searchPaths: [String]
     private var openDatabases: [String: OpaquePointer] = [:]
 
-    public init() {}
+    public init() {
+        searchPaths = [
+            NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true),
+            NSSearchPathForDirectoriesInDomains(.libraryDirectory, .userDomainMask, true),
+            NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true),
+        ].flatMap { $0 }
+    }
+
+    init(searchPaths: [String]) {
+        self.searchPaths = searchPaths
+    }
 
     deinit {
         closeAll()
@@ -19,15 +30,10 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
     public func getDatabases() -> [DatabaseDescriptor] {
         var databases: [DatabaseDescriptor] = []
+        var seenPaths = Set<String>()
         let fileManager = FileManager.default
         let extensions = ["sqlite", "db", "sqlite3"]
         let journalSuffixes = ["-journal", "-wal", "-shm"]
-
-        let searchPaths: [String] = [
-            NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true),
-            NSSearchPathForDirectoriesInDomains(.libraryDirectory, .userDomainMask, true),
-            NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true),
-        ].flatMap { $0 }
 
         for basePath in searchPaths {
             guard let enumerator = fileManager.enumerator(atPath: basePath) else { continue }
@@ -39,6 +45,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                 guard extensions.contains(ext) else { continue }
 
                 let fullPath = (basePath as NSString).appendingPathComponent(file)
+                guard seenPaths.insert(fullPath).inserted else { continue }
                 let attrs = try? fileManager.attributesOfItem(atPath: fullPath)
                 let size = attrs?[.size] as? Int64 ?? 0
                 databases.append(DatabaseDescriptor(
@@ -249,7 +256,9 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK else {
-            if let db = db { sqlite3_close(db) }
+            if let db = db {
+                sqlite3_close(db)
+            }
             return nil
         }
 

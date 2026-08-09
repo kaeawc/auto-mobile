@@ -38,6 +38,27 @@ final class SQLiteDatabaseDriverTests: XCTestCase {
         XCTAssertEqual(result.rowsAffected, 1)
     }
 
+    func testGetDatabasesDeduplicatesOverlappingSearchPaths() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let nestedURL = rootURL
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+        let databaseURL = nestedURL.appendingPathComponent("nested.sqlite")
+        try FileManager.default.createDirectory(at: nestedURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        FileManager.default.createFile(atPath: databaseURL.path, contents: Data())
+
+        let driver = SQLiteDatabaseDriver(searchPaths: [
+            rootURL.appendingPathComponent("Library", isDirectory: true).path,
+            nestedURL.path,
+        ])
+
+        let matches = driver.getDatabases().filter { $0.path == databaseURL.path }
+
+        XCTAssertEqual(matches.count, 1)
+    }
+
     func testUpdateReturningAppliesMutationAndReturnsChangedRow() {
         let result = driver.executeSQL(
             databasePath: databaseURL.path,

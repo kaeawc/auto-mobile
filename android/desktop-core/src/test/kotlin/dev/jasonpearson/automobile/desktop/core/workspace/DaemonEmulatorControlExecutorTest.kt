@@ -1,13 +1,16 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 /**
@@ -18,10 +21,70 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class DaemonEmulatorControlExecutorTest {
 
+  private fun toolResponse(
+    success: Boolean,
+    message: String,
+    error: String? = null,
+  ): JsonElement {
+    val payload = buildJsonObject {
+      put("success", success)
+      put("message", message)
+      error?.let { put("error", it) }
+    }
+    return buildJsonObject {
+      put(
+        "content",
+        kotlinx.serialization.json.buildJsonArray {
+          add(
+            buildJsonObject {
+              put("type", "text")
+              put("text", payload.toString())
+            }
+          )
+        },
+      )
+    }
+  }
+
+  private fun deviceLossToolResponse(): JsonElement = buildJsonObject {
+    put("isError", true)
+    put(
+      "content",
+      kotlinx.serialization.json.buildJsonArray {
+        add(
+          buildJsonObject {
+            put("type", "text")
+            put("text", """{"code":"device_lost","reason":"confirmed-unavailable"}""")
+          }
+        )
+      },
+    )
+  }
+
+  private fun plainTextToolErrorResponse(text: String): JsonElement = buildJsonObject {
+    put("isError", true)
+    put(
+      "content",
+      kotlinx.serialization.json.buildJsonArray {
+        add(
+          buildJsonObject {
+            put("type", "text")
+            put("text", text)
+          }
+        )
+      },
+    )
+  }
+
   private fun executor(
     client: FakeAutoMobileClient,
     resolver: ForegroundAppResolver = FakeForegroundAppResolver(appId = null),
-  ) = DaemonEmulatorControlExecutor(client, resolver, UnconfinedTestDispatcher())
+  ): DaemonEmulatorControlExecutor {
+    if (client.callToolResult == kotlinx.serialization.json.JsonObject(emptyMap())) {
+      client.callToolResult = toolResponse(success = true, message = "")
+    }
+    return DaemonEmulatorControlExecutor(client, resolver, UnconfinedTestDispatcher())
+  }
 
   @Test
   fun `rotate sets the active device then calls rotate with the target orientation`() = runTest {
@@ -120,6 +183,115 @@ class DaemonEmulatorControlExecutorTest {
             }
       }
     )
+  }
+
+  @Test
+  fun `tool-level failure is propagated from pressButton`() = runTest {
+    val client =
+      FakeAutoMobileClient().apply {
+        callToolResult =
+          toolResponse(
+            success = false,
+            message = "Pressed button home",
+            error = "Unsupported button",
+          )
+      }
+
+    var failureMessage: String? = null
+    try {
+      executor(client).pressButton("emulator-5554", Platform.Android, DeviceButton.Home)
+      fail("Expected tool failure")
+    } catch (error: McpConnectionException) {
+      failureMessage = error.message
+    }
+
+    assertEquals("Unsupported button", failureMessage)
+  }
+
+  @Test
+  fun `MCP error envelope is propagated from device control`() = runTest {
+    val client =
+      FakeAutoMobileClient().apply {
+        callToolResult = deviceLossToolResponse()
+      }
+
+    try {
+      executor(client)
+        .run(
+          "emulator-5554",
+          Platform.Android,
+          EmulatorControl.Unlock,
+          Orientation.Portrait,
+        )
+      fail("Expected MCP tool failure")
+    } catch (error: McpConnectionException) {
+      assertEquals("confirmed-unavailable", error.message)
+    }
+  }
+
+  @Test
+  fun `plain text MCP error preserves the proxy message`() {
+    val client =
+      FakeAutoMobileClient().apply {
+        callToolResult = plainTextToolErrorResponse("Error: rotate failed")
+      }
+
+    try {
+      client.callToolChecked("rotate", buildJsonObject {})
+      fail("Expected MCP tool failure")
+    } catch (error: McpConnectionException) {
+      assertEquals("rotate failed", error.message)
+    }
+  }
+
+  @Test
+  fun `non-object MCP error payload is not treated as success`() {
+    val client =
+      FakeAutoMobileClient().apply {
+        callToolResult = plainTextToolErrorResponse("[]")
+      }
+
+    try {
+      client.callToolChecked("rotate", buildJsonObject {})
+      fail("Expected MCP tool failure")
+    } catch (error: McpConnectionException) {
+      assertEquals("[]", error.message)
+    }
+  }
+
+  @Test
+  fun `capability failure is not silently ignored`() {
+    val client =
+      FakeAutoMobileClient().apply {
+        callToolResult = plainTextToolErrorResponse("Error: capability denied")
+      }
+
+    try {
+      client.enableToolCapability("advanced-interaction")
+      fail("Expected capability failure")
+    } catch (error: McpConnectionException) {
+      assertEquals("capability denied", error.message)
+    }
+  }
+
+  @Test
+  fun `active-device failure prevents the control tool call`() = runTest {
+    val client =
+      FakeAutoMobileClient().apply {
+        setActiveDeviceResult =
+          dev.jasonpearson.automobile.desktop.core.daemon.SetActiveDeviceResult(
+            success = false,
+            message = "Device is unavailable",
+          )
+      }
+
+    try {
+      executor(client).pressButton("emulator-5554", Platform.Android, DeviceButton.Home)
+      fail("Expected active-device failure")
+    } catch (error: McpConnectionException) {
+      assertEquals("Device is unavailable", error.message)
+      assertTrue(client.toolCalls.none { it.name == "pressButton" })
+    }
   }
 
   @Test

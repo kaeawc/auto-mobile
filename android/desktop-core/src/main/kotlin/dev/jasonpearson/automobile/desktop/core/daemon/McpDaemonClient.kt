@@ -24,9 +24,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 
@@ -38,8 +37,6 @@ private const val UNSUPPORTED_APPEND_MODE_ERROR =
   "The connected daemon does not support input/typeText mode:append. Restart or update the daemon before typing into the device."
 private const val SET_TOOL_CAPABILITY_TOOL_NAME = "setToolCapability"
 private const val DAEMON_CAPABILITY_PROFILE_PARAM = "__autoMobileCapabilityProfileUuid"
-
-@Serializable private data class CapabilityProfileResponse(val sessionUuid: String)
 
 class McpDaemonClient(
   private val socketPathValue: String = DaemonSocketPaths.socketPath(),
@@ -568,7 +565,7 @@ class McpDaemonClient(
   override fun enableToolCapability(capability: String) {
     val response =
       try {
-        callTool(
+        callToolChecked(
           SET_TOOL_CAPABILITY_TOOL_NAME,
           buildJsonObject {
             put("capability", JsonPrimitive(capability))
@@ -582,16 +579,9 @@ class McpDaemonClient(
         if (error.message?.contains("unknown tool", ignoreCase = true) != true) throw error
         return
       }
-    val text =
-      response.jsonObject["content"]
-        ?.jsonArray
-        ?.firstOrNull { it.jsonObject["type"]?.jsonPrimitive?.content == "text" }
-        ?.jsonObject
-        ?.get("text")
-        ?.jsonPrimitive
-        ?.content
+    capabilityProfileUuid =
+      (response as? JsonObject)?.get("sessionUuid")?.jsonPrimitive?.contentOrNull
         ?: throw DaemonUnavailableException("Capability control response missing profile UUID")
-    capabilityProfileUuid = json.decodeFromString<CapabilityProfileResponse>(text).sessionUuid
   }
 
   private fun sendInputRequest(method: String, params: JsonObject): InputActionResult {

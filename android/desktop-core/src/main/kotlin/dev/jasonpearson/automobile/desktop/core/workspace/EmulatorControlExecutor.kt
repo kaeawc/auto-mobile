@@ -81,12 +81,12 @@ class DaemonEmulatorControlExecutor(
       val wire = platform.wireName()
       // Target the pane's device explicitly (belt-and-suspenders with the deviceId arg below), so a
       // control never races onto whichever device happened to be active.
-      client.setActiveDevice(deviceId, wire)
+      client.setActiveDeviceChecked(deviceId, wire)
       when (control) {
         EmulatorControl.Rotate -> {
           // `rotate` lives behind the advanced-interaction capability.
           client.enableToolCapability("advanced-interaction")
-          client.callTool(
+          client.callToolChecked(
             "rotate",
             buildJsonObject {
               put("orientation", orientation.toolValue)
@@ -98,7 +98,7 @@ class DaemonEmulatorControlExecutor(
         EmulatorControl.Snapshot -> {
           // `deviceSnapshot` lives behind the screen-artifacts capability.
           client.enableToolCapability("screen-artifacts")
-          client.callTool(
+          client.callToolChecked(
             "deviceSnapshot",
             buildJsonObject {
               put("action", "capture")
@@ -108,7 +108,7 @@ class DaemonEmulatorControlExecutor(
           )
         }
         EmulatorControl.Unlock ->
-          client.callTool(
+          client.callToolChecked(
             "wakeAndUnlock",
             buildJsonObject {
               put("platform", wire)
@@ -128,8 +128,8 @@ class DaemonEmulatorControlExecutor(
   override suspend fun pressButton(deviceId: String, platform: Platform, button: DeviceButton) {
     withContext(ioDispatcher) {
       val wire = platform.wireName()
-      client.setActiveDevice(deviceId, wire)
-      client.callTool(
+      client.setActiveDeviceChecked(deviceId, wire)
+      client.callToolChecked(
         "pressButton",
         buildJsonObject {
           put("button", button.toolValue)
@@ -143,7 +143,7 @@ class DaemonEmulatorControlExecutor(
   override suspend fun setLocale(deviceId: String, platform: Platform, locale: String) {
     withContext(ioDispatcher) {
       val wire = platform.wireName()
-      client.setActiveDevice(deviceId, wire)
+      client.setActiveDeviceChecked(deviceId, wire)
       // `changeLocalization` lives behind the device-settings capability.
       client.enableToolCapability("device-settings")
       // Resolve the foreground app on both platforms: Android *requires* it as the change target,
@@ -153,7 +153,7 @@ class DaemonEmulatorControlExecutor(
         LOG.warn("Cannot change locale on $deviceId: no foreground app to target")
         return@withContext
       }
-      client.callTool(
+      client.callToolChecked(
         "changeLocalization",
         buildJsonObject {
           put("locale", locale)

@@ -71,13 +71,14 @@ jobs:
           )
           # The bump script owns the list of files it rewrites; consume it so
           # the allow-list cannot drift from the script again (#5008).
-          mapfile -t allowed_patterns < <(
+          managed_paths_output="$(
             bash scripts/versioning/bump-versions.sh --print-managed-paths
-          )
-          if ((${#allowed_patterns[@]} == 0)); then
+          )"
+          if [[ -z "$managed_paths_output" ]]; then
             echo "Failed to read managed paths from bump-versions.sh" >&2
             exit 1
           fi
+          mapfile -t allowed_patterns <<< "$managed_paths_output"
           # CHANGELOG.md is written by the changelog step, not the version bump.
           allowed_patterns+=("CHANGELOG.md")
 

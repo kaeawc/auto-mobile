@@ -174,6 +174,12 @@
   commit_step="$(yq -r '.jobs."prepare-version".steps[] | select(.id == "commit") | .run' .github/workflows/prepare-release.yml)"
   # The allow-list is owned by bump-versions.sh, not restated in the workflow.
   [[ "$commit_step" == *'bump-versions.sh --print-managed-paths'* ]]
+  # Capture the producer status directly; process substitution would hide a
+  # partial-output failure and let the release guard continue.
+  [[ "$commit_step" == *'managed_paths_output='* ]]
+  [[ "$commit_step" == *'if [[ -z "$managed_paths_output" ]]; then'* ]]
+  [[ "$commit_step" == *'mapfile -t allowed_patterns <<< "$managed_paths_output"'* ]]
+  [[ "$commit_step" != *'mapfile -t allowed_patterns < <('* ]]
   # CHANGELOG.md is written by the changelog step, so the workflow appends it.
   [[ "$commit_step" == *'allowed_patterns+=("CHANGELOG.md")'* ]]
 }

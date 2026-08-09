@@ -161,12 +161,15 @@ run_bump() {
 }
 
 @test "--print-managed-paths lists patterns without requiring a version or writing files (#5008)" {
+  local marker="${TEST_ROOT}/.print-managed-paths-started"
+  touch "$marker"
   run bash -c "cd '${TEST_ROOT}' && bash '${SCRIPT_ABS}' --print-managed-paths"
   [ "$status" -eq 0 ]
   [[ "$output" == *"package.json"* ]]
   [[ "$output" == *"android/*/build.gradle.kts"* ]]
-  # No file may be modified by a print-only invocation.
-  [ "$(json_field "${TEST_ROOT}/package.json" 'data["version"]')" = "0.0.1" ]
+  # No fixture file may be modified by a print-only invocation.
+  ! find "${TEST_ROOT}" -type f -newer "$marker" \
+    ! -path "$marker" -print -quit | grep -q .
 }
 
 @test "every file the bump rewrites matches a managed path pattern (#5008)" {
@@ -178,8 +181,10 @@ run_bump() {
   run_bump
   [ "$status" -eq 0 ]
 
-  local patterns
-  mapfile -t patterns < <(bash "${SCRIPT_ABS}" --print-managed-paths)
+  local patterns=()
+  while IFS= read -r pattern; do
+    patterns+=("$pattern")
+  done < <(bash "${SCRIPT_ABS}" --print-managed-paths)
   (("${#patterns[@]}" > 0))
 
   local file rel pattern matched rewritten_count=0

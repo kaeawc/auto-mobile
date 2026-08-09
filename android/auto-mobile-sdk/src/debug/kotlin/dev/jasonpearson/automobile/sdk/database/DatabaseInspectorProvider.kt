@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
+import dev.jasonpearson.automobile.sdk.DebugInspectorAccess
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -37,6 +38,7 @@ class DatabaseInspectorProvider : ContentProvider() {
   }
 
   override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+    DebugInspectorAccess.enforceCaller(context)
     val result = Bundle()
 
     // Check if inspection is enabled

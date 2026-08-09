@@ -20,11 +20,11 @@
     <provider
       android:name="dev.jasonpearson.automobile.sdk.database.DatabaseInspectorProvider"
       android:authorities="${applicationId}.automobile.database"
-      android:exported="false" />
+      android:exported="true" />
 
     <provider
       android:name="dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspectorProvider"
       android:authorities="${applicationId}.automobile.sharedprefs"
-      android:exported="false" />
+      android:exported="true" />
   </application>
 </manifest>

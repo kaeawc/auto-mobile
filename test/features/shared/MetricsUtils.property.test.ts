@@ -12,7 +12,10 @@ import {
 // integer sums. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 150 } as const;
 
-const finite = fc.double({ noNaN: true, noDefaultInfinity: true });
+// Median values are bounded so the even-length average can't overflow to ±Infinity
+// (e.g. (MAX_VALUE + MAX_VALUE) / 2), and permutation-invariance is compared with
+// `===` rather than `toBe`/Object.is so a `-0` result equals a `+0` result.
+const medianValue = fc.double({ min: -1e6, max: 1e6, noNaN: true });
 
 /** Reorder `items` by an independently generated key vector (a pseudo-permutation). */
 function permuteBy<T>(items: T[], keys: number[]): T[] {
@@ -37,8 +40,9 @@ function withKeys<T>(elements: fc.Arbitrary<T>, opts: fc.ArrayConstraints) {
 describe("calculateMedian (property-based)", () => {
   test("permutation invariance: median is independent of input order", () => {
     fc.assert(
-      fc.property(withKeys(finite, { minLength: 1, maxLength: 12 }), ({ items, keys }) => {
-        expect(calculateMedian(permuteBy(items, keys))).toBe(calculateMedian(items));
+      fc.property(withKeys(medianValue, { minLength: 1, maxLength: 12 }), ({ items, keys }) => {
+        // `===` treats -0 and +0 as equal; median can return either depending on order.
+        expect(calculateMedian(permuteBy(items, keys)) === calculateMedian(items)).toBe(true);
       }),
       RUN_OPTIONS,
     );
@@ -46,7 +50,7 @@ describe("calculateMedian (property-based)", () => {
 
   test("non-mutation: the input array is unchanged", () => {
     fc.assert(
-      fc.property(fc.array(finite, { minLength: 1, maxLength: 12 }), (values) => {
+      fc.property(fc.array(medianValue, { minLength: 1, maxLength: 12 }), (values) => {
         const snapshot = [...values];
         calculateMedian(values);
         expect(values).toEqual(snapshot);
@@ -57,7 +61,7 @@ describe("calculateMedian (property-based)", () => {
 
   test("bounds: median lies within [min, max]", () => {
     fc.assert(
-      fc.property(fc.array(finite, { minLength: 1, maxLength: 12 }), (values) => {
+      fc.property(fc.array(medianValue, { minLength: 1, maxLength: 12 }), (values) => {
         const m = calculateMedian(values)!;
         expect(m).toBeGreaterThanOrEqual(Math.min(...values));
         expect(m).toBeLessThanOrEqual(Math.max(...values));
@@ -146,6 +150,20 @@ describe("calculateWeightedAverage (property-based)", () => {
       fc.property(fc.array(intValue, { minLength: 1, maxLength: 8 }), (values) => {
         const zeroWeighted = values.map((value) => ({ value, weight: 0 }));
         expect(calculateWeightedAverage(zeroWeighted, getValue, getWeight)).toBeNull();
+      }),
+      RUN_OPTIONS,
+    );
+  });
+
+  test("null when nonzero weights cancel to a zero total", () => {
+    // The contract is total-weight === 0, not every-weight-zero: nonzero weights that
+    // sum to zero must also yield null. Appending each item's negated weight forces
+    // Σw = 0 while keeping individual weights nonzero.
+    const base = fc.record({ value: intValue, weight: fc.integer({ min: 1, max: 100 }) });
+    fc.assert(
+      fc.property(fc.array(base, { minLength: 1, maxLength: 6 }), (items) => {
+        const canceling = [...items, ...items.map((i) => ({ value: i.value, weight: -i.weight }))];
+        expect(calculateWeightedAverage(canceling, getValue, getWeight)).toBeNull();
       }),
       RUN_OPTIONS,
     );

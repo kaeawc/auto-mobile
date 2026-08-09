@@ -31,20 +31,21 @@ class McpHttpClientIntegrationTest {
   }
 
   /** Build an MCP tool response wrapping the given JSON text. */
-  private fun mcpToolResponse(textJson: String, isError: Boolean = false): JsonElement = buildJsonObject {
-    if (isError) put("isError", true)
-    put(
-      "content",
-      buildJsonArray {
-        add(
-          buildJsonObject {
-            put("type", "text")
-            put("text", textJson)
-          }
-        )
-      },
-    )
-  }
+  private fun mcpToolResponse(textJson: String, isError: Boolean = false): JsonElement =
+    buildJsonObject {
+      if (isError) put("isError", true)
+      put(
+        "content",
+        buildJsonArray {
+          add(
+            buildJsonObject {
+              put("type", "text")
+              put("text", textJson)
+            }
+          )
+        },
+      )
+    }
 
   @Test
   fun `ping initializes session and records calls`() {

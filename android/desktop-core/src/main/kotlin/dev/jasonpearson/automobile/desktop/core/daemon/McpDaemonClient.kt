@@ -26,8 +26,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 
@@ -582,10 +580,7 @@ class McpDaemonClient(
         return
       }
     capabilityProfileUuid =
-      (response as? JsonObject)
-        ?.get("sessionUuid")
-        ?.jsonPrimitive
-        ?.contentOrNull
+      (response as? JsonObject)?.get("sessionUuid")?.jsonPrimitive?.contentOrNull
         ?: throw DaemonUnavailableException("Capability control response missing profile UUID")
   }
 

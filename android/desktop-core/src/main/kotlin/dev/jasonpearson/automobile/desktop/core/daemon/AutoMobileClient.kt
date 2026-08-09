@@ -468,15 +468,13 @@ internal fun <T> decodeToolResponse(
 private fun toolErrorMessage(json: Json, text: String): String {
   val payload = runCatching { json.decodeFromString<JsonElement>(text) }.getOrNull()
   val payloadObject = payload as? JsonObject
-  val structuredMessage =
-    payloadObject?.let {
-      (it["error"] as? JsonPrimitive)?.contentOrNull
-        ?: (it["message"] as? JsonPrimitive)?.contentOrNull
-        ?: (it["reason"] as? JsonPrimitive)?.contentOrNull
-        ?: (it["code"] as? JsonPrimitive)?.contentOrNull
-    }
-  return structuredMessage
-    ?: text.removePrefix("Error:").trim().ifBlank { "Tool operation failed" }
+  val structuredMessage = payloadObject?.let {
+    (it["error"] as? JsonPrimitive)?.contentOrNull
+      ?: (it["message"] as? JsonPrimitive)?.contentOrNull
+      ?: (it["reason"] as? JsonPrimitive)?.contentOrNull
+      ?: (it["code"] as? JsonPrimitive)?.contentOrNull
+  }
+  return structuredMessage ?: text.removePrefix("Error:").trim().ifBlank { "Tool operation failed" }
 }
 
 internal fun <T> decodeResourceResponse(

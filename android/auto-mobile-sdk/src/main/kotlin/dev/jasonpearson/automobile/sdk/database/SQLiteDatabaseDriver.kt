@@ -227,7 +227,54 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     val suffix = query.substring(index).trim()
     if (hasOnlyPragmaTerminatorAndComments(suffix)) return true
 
-    return suffix.startsWith('(') && isObservablePragmaWithArgument(pragmaName)
+    return isObservablePragmaWithArgument(pragmaName) && hasSinglePragmaArgument(suffix)
+  }
+
+  private fun hasSinglePragmaArgument(suffix: String): Boolean {
+    val parenthesized = suffix.startsWith('(')
+    if (!parenthesized && !suffix.startsWith('=')) return false
+
+    var index = skipSqlTrivia(suffix, 1) ?: return false
+    if (suffix.getOrNull(index) == '+' || suffix.getOrNull(index) == '-') index++
+    index = readPragmaValueEnd(suffix, index) ?: return false
+    index = skipSqlTrivia(suffix, index) ?: return false
+
+    if (parenthesized) {
+      if (suffix.getOrNull(index) != ')') return false
+      index++
+    }
+
+    return hasOnlyPragmaTerminatorAndComments(suffix.substring(index))
+  }
+
+  private fun readPragmaValueEnd(text: String, startIndex: Int): Int? {
+    var index = startIndex
+    val quoteEnd =
+      when (text.getOrNull(index)) {
+        '\'',
+        '"' -> text[index]
+        '`' -> '`'
+        '[' -> ']'
+        else -> null
+      }
+    if (quoteEnd != null) {
+      index++
+      while (index < text.length) {
+        if (text[index] == quoteEnd) {
+          if (quoteEnd != ']' && text.getOrNull(index + 1) == quoteEnd) {
+            index += 2
+            continue
+          }
+          return index + 1
+        }
+        index++
+      }
+      return null
+    }
+
+    val valueStart = index
+    while (text.getOrNull(index)?.let(::isWordChar) == true) index++
+    return index.takeIf { it > valueStart }
   }
 
   private fun hasOnlyPragmaTerminatorAndComments(suffix: String): Boolean {
@@ -371,7 +418,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     return nextChar == null || !isWordChar(nextChar)
   }
 
-  private fun isWordChar(char: Char): Boolean = char.isLetterOrDigit() || char == '_'
+  private fun isWordChar(char: Char): Boolean = char.isLetterOrDigit() || char == '_' || char == '$'
 
   private fun stripLeadingSqlComments(query: String): String {
     var index = 0

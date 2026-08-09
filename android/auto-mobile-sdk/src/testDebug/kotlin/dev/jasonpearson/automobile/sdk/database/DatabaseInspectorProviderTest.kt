@@ -134,14 +134,32 @@ class DatabaseInspectorProviderTest {
   }
 
   @Test
+  fun `read-only CTE treats dollar signs as identifier characters`() {
+    val response =
+      provider.handleExecuteSQL(
+        driver,
+        executeSqlExtras("WITH foo\$update AS (VALUES(1)) SELECT * FROM foo\$update"),
+      )
+
+    assertEquals("query", response.getString("type"))
+    assertEquals(1, response.getJSONArray("rows").getJSONArray(0).getInt(0))
+  }
+
+  @Test
   fun `argument-taking read-only pragma is allowed when mutation capability is unsupported`() {
     val tableInfo = provider.handleExecuteSQL(driver, executeSqlExtras("PRAGMA table_info(notes)"))
+    val equalsTableInfo =
+      provider.handleExecuteSQL(driver, executeSqlExtras("PRAGMA table_info = notes"))
+    val quotedEqualsTableInfo =
+      provider.handleExecuteSQL(driver, executeSqlExtras("PRAGMA table_info = 'notes'"))
     val indexInfo =
       provider.handleExecuteSQL(driver, executeSqlExtras("PRAGMA index_info(notes_body_idx)"))
 
     assertEquals("query", tableInfo.getString("type"))
     assertEquals("name", tableInfo.getJSONArray("columns").getString(1))
     assertEquals("id", tableInfo.getJSONArray("rows").getJSONArray(0).getString(1))
+    assertEquals(tableInfo.toString(), equalsTableInfo.toString())
+    assertEquals(tableInfo.toString(), quotedEqualsTableInfo.toString())
     assertEquals("body", indexInfo.getJSONArray("rows").getJSONArray(0).getString(2))
   }
 
@@ -169,10 +187,46 @@ class DatabaseInspectorProviderTest {
 
   @Test
   fun `process-mutating pragmas fail the read-only admission gate`() {
-    assertTrue(driver.isMutationQuery("PRAGMA hard_heap_limit=1"))
-    assertTrue(driver.isMutationQuery("PRAGMA hard_heap_limit(1)"))
-    assertTrue(driver.isMutationQuery("PRAGMA [hard_heap_limit]=1"))
-    assertTrue(driver.isMutationQuery("PRAGMA shrink_memory"))
+    listOf(
+        "PRAGMA hard_heap_limit=1",
+        "PRAGMA hard_heap_limit(1)",
+        "PRAGMA [hard_heap_limit]=1",
+        "PRAGMA shrink_memory",
+      )
+      .forEach { query ->
+        assertTrue(driver.isMutationQuery(query))
+
+        val error = runCatching {
+          provider.handleExecuteSQL(driver, executeSqlExtras(query))
+        }
+          .exceptionOrNull()
+        assertTrue(
+          "Expected MutationNotAllowed for $query, got $error",
+          error is DatabaseError.MutationNotAllowed,
+        )
+      }
+  }
+
+  @Test
+  fun `observational pragma arguments fail closed on extra or missing syntax`() {
+    listOf(
+        "PRAGMA table_info =",
+        "PRAGMA table_info = notes extra",
+        "PRAGMA table_info(notes) extra",
+        "PRAGMA table_info = notes; SELECT 1",
+      )
+      .forEach { query ->
+        assertTrue("Expected mutation classification for $query", driver.isMutationQuery(query))
+
+        val error = runCatching {
+          provider.handleExecuteSQL(driver, executeSqlExtras(query))
+        }
+          .exceptionOrNull()
+        assertTrue(
+          "Expected MutationNotAllowed for $query, got $error",
+          error is DatabaseError.MutationNotAllowed,
+        )
+      }
   }
 
   @Test
@@ -222,6 +276,11 @@ class DatabaseInspectorProviderTest {
 
     assertTrue(!vacuumCopyFile.exists())
     assertTrue(!attachedDatabaseFile.exists())
+    val rows =
+      provider.handleExecuteSQL(driver, executeSqlExtras("SELECT id FROM notes ORDER BY id"))
+    assertEquals(1, rows.getJSONArray("rows").length())
+    assertEquals(1, rows.getJSONArray("rows").getJSONArray(0).getInt(0))
+    assertTrue("blocked" !in driver.getTables(databasePath))
   }
 
   @Test

@@ -403,7 +403,6 @@ export class PerformanceMonitor {
     );
 
     const gfxPromise = sdkFrame ? Promise.resolve(null) : this.collectGfxMetrics(device);
-    const recordFrameMetrics = sdkFrame !== null || device.gfxPrimed;
 
     // Collect medium metrics (CPU) if interval elapsed or first collection. The
     // collect calls do NOT mutate `device` — caches/timestamps are updated only
@@ -432,9 +431,6 @@ export class PerformanceMonitor {
     }
 
     device.lastFastTick = now;
-    if (!sdkFrame && gfx?.resetSucceeded) {
-      device.gfxPrimed = true;
-    }
     if (shouldCollectCpu) {
       device.lastMediumTick = now;
       device.cachedCpu = cpu;
@@ -507,6 +503,15 @@ export class PerformanceMonitor {
       rawFrameTimeMs = gfxData.frameTimeMs;
     }
 
+    // The first gfxinfo read is cumulative since app launch rather than since
+    // monitoring started. Keep it for the live stream, but do not let it seed
+    // the windowed snapshot. SDK samples are already interval-scoped.
+    const recordGfxWindowSample = this.consumeGfxPriming(
+      device,
+      sdkFrame,
+      gfx?.resetSucceeded ?? false,
+    );
+
     // Get TTI from the global store if available
     const ttiMs = getLastTtiMs(device.packageName);
 
@@ -526,10 +531,10 @@ export class PerformanceMonitor {
     // flicker to 0, but the buffer must NOT re-record a stale reading every idle
     // tick — that would keep an old fps dominating the percentiles.
     this.pushMetrics(device, now, metrics, jankFrames, server, {
-      fps: recordFrameMetrics ? rawFps : null,
-      frameTimeMs: recordFrameMetrics ? rawFrameTimeMs : null,
-      jankFrames: recordFrameMetrics ? jankFrames : null,
-      touchLatencyMs: recordFrameMetrics ? rawTouchLatencyMs : null,
+      fps: recordGfxWindowSample ? rawFps : null,
+      frameTimeMs: recordGfxWindowSample ? rawFrameTimeMs : null,
+      jankFrames: recordGfxWindowSample ? jankFrames : null,
+      touchLatencyMs: recordGfxWindowSample ? rawTouchLatencyMs : null,
       // CPU/memory only when actually collected this tick (null otherwise), so
       // the window never averages a reading acquired outside it.
       cpuUsagePercent: shouldCollectCpu ? cpu : null,
@@ -726,6 +731,24 @@ export class PerformanceMonitor {
       };
       observationServer.pushPerformanceUpdate(device.deviceId, streamData);
     }
+  }
+
+  private consumeGfxPriming(device: MonitoredDevice, sdkFrame: unknown, resetSucceeded: boolean): boolean {
+    const hasSdkFrame = sdkFrame !== null;
+    if (hasSdkFrame) {
+      // SDK samples are interval-scoped. A later fallback must still be treated
+      // as its first cumulative read after the SDK feed goes stale.
+      device.gfxPrimed = false;
+      return true;
+    }
+    if (!resetSucceeded) {
+      // A caught ADB error did not establish a reset baseline. Keep priming
+      // pending so the first successful reset is also excluded.
+      return false;
+    }
+    const shouldRecord = device.gfxPrimed;
+    device.gfxPrimed = true;
+    return shouldRecord;
   }
 
   /**

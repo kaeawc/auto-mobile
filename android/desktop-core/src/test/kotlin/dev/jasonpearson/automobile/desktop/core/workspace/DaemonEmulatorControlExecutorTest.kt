@@ -61,6 +61,21 @@ class DaemonEmulatorControlExecutorTest {
     )
   }
 
+  private fun plainTextToolErrorResponse(text: String): JsonElement = buildJsonObject {
+    put("isError", true)
+    put(
+      "content",
+      kotlinx.serialization.json.buildJsonArray {
+        add(
+          buildJsonObject {
+            put("type", "text")
+            put("text", text)
+          }
+        )
+      },
+    )
+  }
+
   private fun executor(
     client: FakeAutoMobileClient,
     resolver: ForegroundAppResolver = FakeForegroundAppResolver(appId = null),
@@ -209,8 +224,53 @@ class DaemonEmulatorControlExecutorTest {
           Orientation.Portrait,
         )
       fail("Expected MCP tool failure")
-    } catch (error: Exception) {
+    } catch (error: McpConnectionException) {
       assertEquals("confirmed-unavailable", error.message)
+    }
+  }
+
+  @Test
+  fun `plain text MCP error preserves the proxy message`() {
+    val client =
+      FakeAutoMobileClient().apply {
+        callToolResult = plainTextToolErrorResponse("Error: rotate failed")
+      }
+
+    try {
+      client.callToolChecked("rotate", buildJsonObject {})
+      fail("Expected MCP tool failure")
+    } catch (error: McpConnectionException) {
+      assertEquals("rotate failed", error.message)
+    }
+  }
+
+  @Test
+  fun `non-object MCP error payload is not treated as success`() {
+    val client =
+      FakeAutoMobileClient().apply {
+        callToolResult = plainTextToolErrorResponse("[]")
+      }
+
+    try {
+      client.callToolChecked("rotate", buildJsonObject {})
+      fail("Expected MCP tool failure")
+    } catch (error: McpConnectionException) {
+      assertEquals("[]", error.message)
+    }
+  }
+
+  @Test
+  fun `capability failure is not silently ignored`() {
+    val client =
+      FakeAutoMobileClient().apply {
+        callToolResult = plainTextToolErrorResponse("Error: capability denied")
+      }
+
+    try {
+      client.enableToolCapability("advanced-interaction")
+      fail("Expected capability failure")
+    } catch (error: McpConnectionException) {
+      assertEquals("capability denied", error.message)
     }
   }
 
@@ -228,7 +288,7 @@ class DaemonEmulatorControlExecutorTest {
     try {
       executor(client).pressButton("emulator-5554", Platform.Android, DeviceButton.Home)
       fail("Expected active-device failure")
-    } catch (error: Exception) {
+    } catch (error: McpConnectionException) {
       assertEquals("Device is unavailable", error.message)
       assertTrue(client.toolCalls.none { it.name == "pressButton" })
     }

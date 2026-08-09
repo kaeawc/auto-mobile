@@ -31,7 +31,8 @@ class McpHttpClientIntegrationTest {
   }
 
   /** Build an MCP tool response wrapping the given JSON text. */
-  private fun mcpToolResponse(textJson: String): JsonElement = buildJsonObject {
+  private fun mcpToolResponse(textJson: String, isError: Boolean = false): JsonElement = buildJsonObject {
+    if (isError) put("isError", true)
     put(
       "content",
       buildJsonArray {
@@ -159,5 +160,21 @@ class McpHttpClientIntegrationTest {
     assertTrue(result.success)
     assertEquals("started", result.message)
     assertTrue(daemon.calls.contains("tools/call:startDevice"))
+  }
+
+  @Test
+  fun `typed tool results preserve MCP error envelopes`() {
+    daemon.setToolResponse(
+      "setActiveDevice",
+      mcpToolResponse(
+        """{"code":"device_lost","reason":"confirmed-unavailable"}""",
+        isError = true,
+      ),
+    )
+
+    val result = client.setActiveDevice("emulator-5554", "android")
+
+    assertEquals(false, result.success)
+    assertEquals("confirmed-unavailable", result.message)
   }
 }

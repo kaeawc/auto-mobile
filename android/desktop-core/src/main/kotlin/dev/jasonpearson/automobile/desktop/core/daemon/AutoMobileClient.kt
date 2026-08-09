@@ -169,43 +169,21 @@ interface AutoMobileClient {
    * transport errors.
    */
   fun callToolChecked(name: String, arguments: JsonObject): JsonElement {
-    val response =
-      callTool(name, arguments) as? JsonObject
-        ?: throw McpConnectionException("Tool response was not an object")
-    val envelopeError = response["isError"]?.jsonPrimitive?.booleanOrNull == true
-    val text =
-      response["content"]
-        ?.let { content ->
-          (content as? JsonArray)?.firstOrNull { item ->
-            (item as? JsonObject)?.get("type")?.jsonPrimitive?.content == "text"
-          }
-        }
-        ?.let { (it as? JsonObject)?.get("text")?.jsonPrimitive?.content }
-        ?: throw McpConnectionException("Tool response missing text content")
-    val payload = DaemonJson.decodeFromString<JsonElement>(text)
-    val payloadObject = payload as? JsonObject ?: return payload
-    val success = payloadObject["success"]?.jsonPrimitive?.booleanOrNull
-    if (envelopeError || success == false) {
-      val message =
-        payloadObject["error"]?.jsonPrimitive?.contentOrNull
-          ?: payloadObject["message"]?.jsonPrimitive?.contentOrNull
-          ?: payloadObject["reason"]?.jsonPrimitive?.contentOrNull
-          ?: payloadObject["code"]?.jsonPrimitive?.contentOrNull
-          ?: "Tool operation failed"
-      throw McpConnectionException(message)
-    }
-    return payload
+    return checkToolResponse(callTool(name, arguments), DaemonJson)
   }
 
   /** Enable one optional server capability for this client connection. */
   fun enableToolCapability(capability: String) {
     try {
-      callTool(
-        "setToolCapability",
-        buildJsonObject {
-          put("capability", capability)
-          put("enabled", true)
-        },
+      checkToolResponse(
+        callTool(
+          "setToolCapability",
+          buildJsonObject {
+            put("capability", capability)
+            put("enabled", true)
+          },
+        ),
+        DaemonJson,
       )
     } catch (error: McpConnectionException) {
       if (error.message?.contains("unknown tool", ignoreCase = true) != true) throw error
@@ -213,6 +191,37 @@ interface AutoMobileClient {
   }
 
   fun close() {}
+}
+
+private fun checkToolResponse(responseElement: JsonElement, json: Json): JsonElement {
+  val response =
+    responseElement as? JsonObject
+      ?: throw McpConnectionException("Tool response was not an object")
+  val envelopeError = (response["isError"] as? JsonPrimitive)?.booleanOrNull == true
+  val text =
+    response["content"]
+      ?.let { content ->
+        (content as? JsonArray)?.firstOrNull { item ->
+          (item as? JsonObject)?.get("type")?.jsonPrimitive?.content == "text"
+        }
+      }
+      ?.let { ((it as? JsonObject)?.get("text") as? JsonPrimitive)?.contentOrNull }
+      ?: throw McpConnectionException("Tool response missing text content")
+  val payload =
+    try {
+      json.decodeFromString<JsonElement>(text)
+    } catch (error: Exception) {
+      if (envelopeError) {
+        throw McpConnectionException(toolErrorMessage(json, text), error)
+      }
+      throw McpConnectionException("Tool response contained invalid JSON", error)
+    }
+  val payloadObject = payload as? JsonObject
+  val success = (payloadObject?.get("success") as? JsonPrimitive)?.booleanOrNull
+  if (envelopeError || success == false) {
+    throw McpConnectionException(toolErrorMessage(json, text))
+  }
+  return payload
 }
 
 @Serializable
@@ -343,7 +352,11 @@ data class McpToolContent(
   val text: String? = null,
 )
 
-@Serializable data class McpToolResponse(val content: List<McpToolContent>)
+@Serializable
+data class McpToolResponse(
+  val content: List<McpToolContent>,
+  val isError: Boolean = false,
+)
 
 @Serializable
 data class FeatureFlagState(
@@ -446,7 +459,24 @@ internal fun <T> decodeToolResponse(
   val text =
     response.content.firstOrNull { it.type == "text" }?.text
       ?: throw McpConnectionException("Tool response missing text content")
+  if (response.isError) {
+    throw McpConnectionException(toolErrorMessage(json, text))
+  }
   return json.decodeFromString(serializer, text)
+}
+
+private fun toolErrorMessage(json: Json, text: String): String {
+  val payload = runCatching { json.decodeFromString<JsonElement>(text) }.getOrNull()
+  val payloadObject = payload as? JsonObject
+  val structuredMessage =
+    payloadObject?.let {
+      (it["error"] as? JsonPrimitive)?.contentOrNull
+        ?: (it["message"] as? JsonPrimitive)?.contentOrNull
+        ?: (it["reason"] as? JsonPrimitive)?.contentOrNull
+        ?: (it["code"] as? JsonPrimitive)?.contentOrNull
+    }
+  return structuredMessage
+    ?: text.removePrefix("Error:").trim().ifBlank { "Tool operation failed" }
 }
 
 internal fun <T> decodeResourceResponse(

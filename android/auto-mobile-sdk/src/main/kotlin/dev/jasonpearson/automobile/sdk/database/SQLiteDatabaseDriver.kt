@@ -478,7 +478,12 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   private fun stripLeadingSqlComments(query: String): String {
     var index = 0
     while (index < query.length) {
-      while (query.getOrNull(index)?.isWhitespace() == true) index++
+      while (
+        query.getOrNull(index)?.isWhitespace() == true ||
+          (index == 0 && query.getOrNull(index) == '\uFEFF')
+      ) {
+        index++
+      }
       when {
         query.startsWith("--", index) -> {
           val lineEnd = query.indexOfAny(charArrayOf('\n', '\r'), startIndex = index + 2)

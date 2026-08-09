@@ -113,6 +113,14 @@ class DatabaseInspectorProviderTest {
   }
 
   @Test
+  fun `read-only SQL allows a leading byte order mark`() {
+    val response = provider.handleExecuteSQL(driver, executeSqlExtras("\uFEFFSELECT 1 AS one"))
+
+    assertEquals("query", response.getString("type"))
+    assertEquals(1, response.getJSONArray("rows").getJSONArray(0).getInt(0))
+  }
+
+  @Test
   fun `observational pragmas allow trailing comments`() {
     listOf(
         "PRAGMA user_version; -- inspect",

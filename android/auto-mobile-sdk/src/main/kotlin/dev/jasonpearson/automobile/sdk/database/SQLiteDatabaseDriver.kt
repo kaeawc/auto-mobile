@@ -291,9 +291,44 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       return null
     }
 
+    if (
+      text.getOrNull(index)?.isDigit() == true ||
+        (text.getOrNull(index) == '.' && text.getOrNull(index + 1)?.isDigit() == true)
+    ) {
+      return readNumericLiteralEnd(text, index)
+    }
+
     val valueStart = index
     while (text.getOrNull(index)?.let(::isWordChar) == true) index++
     return index.takeIf { it > valueStart }
+  }
+
+  private fun readNumericLiteralEnd(text: String, startIndex: Int): Int? {
+    var index = startIndex
+    var hasDigits = false
+
+    while (text.getOrNull(index)?.isDigit() == true) {
+      hasDigits = true
+      index++
+    }
+    if (text.getOrNull(index) == '.') {
+      index++
+      while (text.getOrNull(index)?.isDigit() == true) {
+        hasDigits = true
+        index++
+      }
+    }
+    if (!hasDigits) return null
+
+    if (text.getOrNull(index)?.let { it == 'e' || it == 'E' } == true) {
+      index++
+      if (text.getOrNull(index)?.let { it == '+' || it == '-' } == true) index++
+      val exponentStart = index
+      while (text.getOrNull(index)?.isDigit() == true) index++
+      if (index == exponentStart) return null
+    }
+
+    return index
   }
 
   private fun hasOnlyPragmaTerminatorAndComments(suffix: String): Boolean {
@@ -475,6 +510,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       query,
       "WITH".length,
       keywords,
+      requireCompletedGroupSinceLastComma = true,
     )
   }
 
@@ -482,8 +518,10 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     query: String,
     startIndex: Int,
     keywords: List<String>,
+    requireCompletedGroupSinceLastComma: Boolean = false,
   ): Pair<String, Int>? {
     var depth = 0
+    var completedGroupSinceLastComma = false
     var i = startIndex
     var inSingleQuote = false
     var inDoubleQuote = false
@@ -533,8 +571,12 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
         char == '`' -> inBacktickQuote = true
         char == '[' -> inBracketQuote = true
         char == '(' -> depth++
-        char == ')' && depth > 0 -> depth--
-        depth == 0 -> {
+        char == ')' && depth > 0 -> {
+          depth--
+          if (depth == 0) completedGroupSinceLastComma = true
+        }
+        char == ',' && depth == 0 -> completedGroupSinceLastComma = false
+        depth == 0 && (!requireCompletedGroupSinceLastComma || completedGroupSinceLastComma) -> {
           for (keyword in keywords) {
             if (matchesKeywordAt(query, i, keyword)) {
               return Pair(keyword, i)

@@ -187,6 +187,18 @@ class DatabaseInspectorProviderTest {
   }
 
   @Test
+  fun `read-only CTE may use a statement keyword as its identifier`() {
+    val response =
+      provider.handleExecuteSQL(
+        driver,
+        executeSqlExtras("WITH pragma(value) AS (VALUES(1)) SELECT value FROM pragma"),
+      )
+
+    assertEquals("query", response.getString("type"))
+    assertEquals(1, response.getJSONArray("rows").getJSONArray(0).getInt(0))
+  }
+
+  @Test
   fun `argument-taking read-only pragma is allowed when mutation capability is unsupported`() {
     val tableInfo = provider.handleExecuteSQL(driver, executeSqlExtras("PRAGMA table_info(notes)"))
     val equalsTableInfo =
@@ -195,6 +207,11 @@ class DatabaseInspectorProviderTest {
       provider.handleExecuteSQL(driver, executeSqlExtras("PRAGMA table_info = 'notes'"))
     val indexInfo =
       provider.handleExecuteSQL(driver, executeSqlExtras("PRAGMA index_info(notes_body_idx)"))
+
+    listOf("PRAGMA quick_check(1.0)", "PRAGMA quick_check(1e1)").forEach { query ->
+      val response = provider.handleExecuteSQL(driver, executeSqlExtras(query))
+      assertEquals("Expected query response for $query", "query", response.getString("type"))
+    }
 
     assertEquals("query", tableInfo.getString("type"))
     assertEquals("name", tableInfo.getJSONArray("columns").getString(1))
@@ -256,6 +273,8 @@ class DatabaseInspectorProviderTest {
         "PRAGMA table_info = notes extra",
         "PRAGMA table_info(notes) extra",
         "PRAGMA table_info = notes; SELECT 1",
+        "PRAGMA quick_check(1e)",
+        "PRAGMA quick_check(.)",
       )
       .forEach { query ->
         assertTrue("Expected mutation classification for $query", driver.isMutationQuery(query))

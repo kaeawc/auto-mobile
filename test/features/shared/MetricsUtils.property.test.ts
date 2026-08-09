@@ -69,6 +69,21 @@ describe("calculateMedian (property-based)", () => {
       RUN_OPTIONS,
     );
   });
+
+  test("numeric rank: at most half the values fall on either side (catches a non-numeric sort)", () => {
+    // A regression to JS's default lexicographic `.sort()` would still pass the
+    // bounds and permutation properties, but produces a value of the wrong numeric
+    // rank — so pin the rank directly (oracle-free).
+    fc.assert(
+      fc.property(fc.array(medianValue, { minLength: 1, maxLength: 12 }), (values) => {
+        const m = calculateMedian(values)!;
+        const half = Math.floor(values.length / 2);
+        expect(values.filter((v) => v < m).length).toBeLessThanOrEqual(half);
+        expect(values.filter((v) => v > m).length).toBeLessThanOrEqual(half);
+      }),
+      RUN_OPTIONS,
+    );
+  });
 });
 
 describe("calculateMode (property-based)", () => {
@@ -155,14 +170,18 @@ describe("calculateWeightedAverage (property-based)", () => {
     );
   });
 
-  test("null when nonzero weights cancel to a zero total", () => {
-    // The contract is total-weight === 0, not every-weight-zero: nonzero weights that
-    // sum to zero must also yield null. Appending each item's negated weight forces
-    // Σw = 0 while keeping individual weights nonzero.
-    const base = fc.record({ value: intValue, weight: fc.integer({ min: 1, max: 100 }) });
+  test("null when nonzero weights cancel to a zero total (with a nonzero numerator)", () => {
+    // The contract is total-weight === 0, not every-weight-zero and not weightedSum
+    // === 0. Pair each +w with a -w on a DIFFERENT value so Σweight === 0 while
+    // Σ(value·weight) stays nonzero — distinguishing a correct total-weight guard
+    // from one that keys on the numerator.
+    const pair = fc.record({ value: intValue, weight: fc.integer({ min: 1, max: 100 }) });
     fc.assert(
-      fc.property(fc.array(base, { minLength: 1, maxLength: 6 }), (items) => {
-        const canceling = [...items, ...items.map((i) => ({ value: i.value, weight: -i.weight }))];
+      fc.property(fc.array(pair, { minLength: 1, maxLength: 6 }), (items) => {
+        const canceling = items.flatMap((i) => [
+          { value: i.value, weight: i.weight },
+          { value: i.value + 1, weight: -i.weight }, // different value → nonzero numerator
+        ]);
         expect(calculateWeightedAverage(canceling, getValue, getWeight)).toBeNull();
       }),
       RUN_OPTIONS,

@@ -71,6 +71,18 @@ class DatabaseInspectorProviderTest {
   }
 
   @Test
+  fun `explain applies the read-only admission policy to its statement`() {
+    listOf(
+        "EXPLAIN SELECT 1",
+        "EXPLAIN QUERY PLAN SELECT 1",
+        "EXPLAIN PRAGMA user_version",
+      )
+      .forEach { query ->
+        assertTrue("Expected read-only classification for $query", !driver.isMutationQuery(query))
+      }
+  }
+
+  @Test
   fun `read-only SQL does not depend on comment-aware classification`() {
     val response =
       provider.handleExecuteSQL(
@@ -192,6 +204,7 @@ class DatabaseInspectorProviderTest {
         "PRAGMA hard_heap_limit(1)",
         "PRAGMA [hard_heap_limit]=1",
         "PRAGMA shrink_memory",
+        "EXPLAIN PRAGMA hard_heap_limit=1",
       )
       .forEach { query ->
         assertTrue(driver.isMutationQuery(query))

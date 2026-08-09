@@ -191,8 +191,12 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     val keyword = statement?.first ?: return Pair(false, false)
     val statementIndex = statement.second
 
-    if (keyword == "SELECT" || keyword == "VALUES" || keyword == "EXPLAIN") {
+    if (keyword == "SELECT" || keyword == "VALUES") {
       return Pair(true, true)
+    }
+
+    if (keyword == "EXPLAIN") {
+      return Pair(true, isReadOnlyExplain(query, statementIndex))
     }
 
     if (keyword == "PRAGMA") {
@@ -206,6 +210,18 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     }
 
     return Pair(false, false)
+  }
+
+  private fun isReadOnlyExplain(query: String, statementIndex: Int): Boolean {
+    var explainedIndex = skipSqlTrivia(query, statementIndex + "EXPLAIN".length) ?: return false
+    if (matchesKeywordAt(query, explainedIndex, "QUERY")) {
+      explainedIndex = skipSqlTrivia(query, explainedIndex + "QUERY".length) ?: return false
+      if (!matchesKeywordAt(query, explainedIndex, "PLAN")) return false
+      explainedIndex = skipSqlTrivia(query, explainedIndex + "PLAN".length) ?: return false
+    }
+
+    val (_, explainedReadOnly) = classifySQL(query.substring(explainedIndex))
+    return explainedReadOnly
   }
 
   private fun isReadOnlyPragma(query: String, statementIndex: Int): Boolean {

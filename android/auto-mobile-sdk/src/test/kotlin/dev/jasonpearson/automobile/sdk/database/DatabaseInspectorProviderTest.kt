@@ -128,6 +128,19 @@ class DatabaseInspectorProviderTest {
   }
 
   @Test
+  fun `permitted follow-up read preserves writable connection session`() {
+    driver.executeSQL(databasePath, "CREATE TEMP TABLE session_notes (body TEXT NOT NULL)")
+    driver.executeSQL(databasePath, "INSERT INTO session_notes (body) VALUES ('still here')")
+
+    val result = driver.executeSQL(databasePath, "SELECT body FROM session_notes")
+
+    assertEquals(
+      listOf(listOf("still here")),
+      (result as SQLExecutionResult.Query).rows,
+    )
+  }
+
+  @Test
   fun `non-query SQL is rejected before it can mutate the database or filesystem`() {
     listOf(
         "INSERT INTO notes (id, body) VALUES (2, 'blocked')",

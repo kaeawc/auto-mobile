@@ -174,6 +174,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
         databasePath,
         trimmedQuery,
         readOnly = true,
+        requireExactReadOnly = true,
         mapReadOnlyFailureToPolicyError = true,
       )
     }
@@ -327,9 +328,15 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     databasePath: String,
     query: String,
     readOnly: Boolean,
+    requireExactReadOnly: Boolean = false,
     mapReadOnlyFailureToPolicyError: Boolean = false,
   ): SQLExecutionResult.Query {
-    val db = openDatabase(databasePath, readOnly = readOnly)
+    val db =
+      openDatabase(
+        databasePath,
+        readOnly = readOnly,
+        requireExactReadOnly = requireExactReadOnly,
+      )
     val columns = mutableListOf<String>()
     val rows = mutableListOf<List<Any?>>()
 
@@ -375,13 +382,19 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     }
   }
 
-  private fun openDatabase(path: String, readOnly: Boolean): SQLiteDatabase {
+  private fun openDatabase(
+    path: String,
+    readOnly: Boolean,
+    requireExactReadOnly: Boolean = false,
+  ): SQLiteDatabase {
     validatePath(path)
 
     // Check if we have a cached connection with compatible mode
     val cached = openDatabases[path]
     if (cached != null && cached.isOpen) {
-      if (cached.isReadOnly != readOnly) {
+      val needsWritableConnection = !readOnly && cached.isReadOnly
+      val needsExactReadOnlyConnection = readOnly && requireExactReadOnly && !cached.isReadOnly
+      if (needsWritableConnection || needsExactReadOnlyConnection) {
         cached.close()
         openDatabases.remove(path)
       } else {

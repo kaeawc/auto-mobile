@@ -56,6 +56,25 @@ describe("Android emulator boot failure diagnostics", () => {
     expect(error.message).toContain("2048 MB");
   });
 
+  test("fails before spawning an AVD with an invalid RAM setting", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const reader: AvdConfigReader = { readConfig: async () => ({ apiLevel: 36, tag: "google_apis_playstore", ramSizeInvalid: true }) };
+    const client = new AndroidEmulatorClient(
+      async (_file, args) => args.includes("-list-avds") ? result("Pixel_9_Pro\n") : result(),
+      (() => { throw new Error("spawn should not be reached"); }) as any,
+      timer,
+      { create: () => new FakeAdbExecutor() } as AdbClientFactory,
+      reader,
+    );
+    (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () => false;
+    (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () => false;
+    (client as unknown as { checkArchitectureCompatibility: () => Promise<unknown> }).checkArchitectureCompatibility = async () => ({ compatible: true });
+
+    const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
+    expect(error.message).toContain("hw.ramSize is invalid");
+  });
+
   test("applies the RAM floor when the AVD config comes from an absolute registry path", async () => {
     const path = require("path");
     const avdHome = path.resolve("fake", "avd");

@@ -14,6 +14,8 @@ export interface AvdConfig {
   screenDensity?: number;
   /** Configured guest memory in megabytes. */
   ramSizeMb?: number;
+  /** Whether config.ini contains an unrecognized guest-memory value. */
+  ramSizeInvalid?: boolean;
   deviceName?: string;
   tag?: string;
 }
@@ -182,11 +184,19 @@ function parseDimension(value: string | undefined): number | undefined {
   return parsed || undefined;
 }
 
-function parseRamSize(props: Map<string, string>): Pick<AvdConfig, "ramSizeMb"> {
+function parseRamSize(props: Map<string, string>): Pick<AvdConfig, "ramSizeMb" | "ramSizeInvalid"> {
   const value = props.get("hw.ramSize");
-  if (!value) {return {};}
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? { ramSizeMb: parsed } : {};
+  if (value === undefined) {
+    return {};
+  }
+  const match = /^(\d+)\s*(?:(k|m|g)(?:i?b)?)?$/i.exec(value);
+  if (!match) {return { ramSizeInvalid: true };}
+
+  const amount = Number(match[1]);
+  const unit = match[2]?.toLowerCase();
+  const multiplier = unit === "g" ? 1024 : unit === "k" ? 1 / 1024 : 1;
+  const ramSizeMb = amount * multiplier;
+  return Number.isFinite(ramSizeMb) ? { ramSizeMb } : {};
 }
 
 function parseDeviceMetadata(props: Map<string, string>): Pick<AvdConfig, "deviceName" | "tag"> {

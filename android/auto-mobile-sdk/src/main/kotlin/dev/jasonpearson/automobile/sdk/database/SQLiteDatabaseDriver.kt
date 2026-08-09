@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.database
 import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteReadOnlyDatabaseException
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -161,10 +162,27 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     }
   }
 
-  /** Returns whether executing this statement can mutate the database. */
+  /** Executes arbitrary SQL without granting the statement a writable database handle. */
+  @JvmSynthetic
+  internal fun executeReadOnlySQL(databasePath: String, query: String): SQLExecutionResult.Query {
+    synchronized(databaseLock) {
+      val trimmedQuery = query.trim()
+      val (_, classifiedReadOnly) = classifySQL(stripLeadingSqlComments(trimmedQuery))
+      if (!classifiedReadOnly) throw DatabaseError.MutationNotAllowed()
+
+      return executeQuery(
+        databasePath,
+        trimmedQuery,
+        readOnly = true,
+        mapReadOnlyFailureToPolicyError = true,
+      )
+    }
+  }
+
+  /** Returns whether the coarse statement family is in the read-only allowlist. */
   internal fun isMutationQuery(query: String): Boolean {
-    val (returnsRows, readOnly) = classifySQL(query.trim())
-    return !returnsRows && !readOnly
+    val (_, classifiedReadOnly) = classifySQL(stripLeadingSqlComments(query.trim()))
+    return !classifiedReadOnly
   }
 
   private fun classifySQL(query: String): Pair<Boolean, Boolean> {
@@ -172,7 +190,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     val keyword = statement?.first ?: return Pair(false, false)
     val statementIndex = statement.second
 
-    if (keyword == "SELECT" || keyword == "PRAGMA" || keyword == "EXPLAIN") {
+    if (keyword == "SELECT" || keyword == "VALUES" || keyword == "PRAGMA" || keyword == "EXPLAIN") {
       return Pair(true, true)
     }
 
@@ -197,8 +215,29 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
 
   private fun isWordChar(char: Char): Boolean = char.isLetterOrDigit() || char == '_'
 
+  private fun stripLeadingSqlComments(query: String): String {
+    var index = 0
+    while (index < query.length) {
+      while (query.getOrNull(index)?.isWhitespace() == true) index++
+      when {
+        query.startsWith("--", index) -> {
+          val lineEnd = query.indexOfAny(charArrayOf('\n', '\r'), startIndex = index + 2)
+          if (lineEnd < 0) return ""
+          index = lineEnd + 1
+        }
+        query.startsWith("/*", index) -> {
+          val commentEnd = query.indexOf("*/", startIndex = index + 2)
+          if (commentEnd < 0) return ""
+          index = commentEnd + 2
+        }
+        else -> return query.substring(index)
+      }
+    }
+    return ""
+  }
+
   private fun findTopLevelStatement(query: String): Pair<String, Int>? {
-    val keywords = listOf("SELECT", "PRAGMA", "EXPLAIN", "INSERT", "UPDATE", "DELETE")
+    val keywords = listOf("SELECT", "VALUES", "PRAGMA", "EXPLAIN", "INSERT", "UPDATE", "DELETE")
     if (!startsWithKeyword(query, "WITH")) {
       return keywords
         .firstOrNull { keyword -> startsWithKeyword(query, keyword) }
@@ -288,6 +327,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     databasePath: String,
     query: String,
     readOnly: Boolean,
+    mapReadOnlyFailureToPolicyError: Boolean = false,
   ): SQLExecutionResult.Query {
     val db = openDatabase(databasePath, readOnly = readOnly)
     val columns = mutableListOf<String>()
@@ -301,6 +341,9 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
           rows.add((0 until cursor.columnCount).map { getColumnValue(cursor, it) })
         }
       }
+    } catch (e: SQLiteReadOnlyDatabaseException) {
+      if (mapReadOnlyFailureToPolicyError) throw DatabaseError.MutationNotAllowed()
+      throw DatabaseError.SqlError(e.message ?: "Unknown SQL error")
     } catch (e: Exception) {
       throw DatabaseError.SqlError(e.message ?: "Unknown SQL error")
     }
@@ -338,8 +381,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     // Check if we have a cached connection with compatible mode
     val cached = openDatabases[path]
     if (cached != null && cached.isOpen) {
-      // If we need write access but have read-only, close and reopen
-      if (!readOnly && cached.isReadOnly) {
+      if (cached.isReadOnly != readOnly) {
         cached.close()
         openDatabases.remove(path)
       } else {

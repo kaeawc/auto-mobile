@@ -171,20 +171,21 @@ class DatabaseInspectorProvider : ContentProvider() {
     return JSONObject().put("columns", columnsArray)
   }
 
-  private fun handleExecuteSQL(driver: DatabaseDriver, extras: Bundle?): JSONObject {
+  internal fun handleExecuteSQL(driver: DatabaseDriver, extras: Bundle?): JSONObject {
     val databasePath =
       extras?.getString("databasePath") ?: throw IllegalArgumentException("databasePath required")
     val query = extras.getString("query") ?: throw IllegalArgumentException("query required")
-    if (
-      driver is SQLiteDatabaseDriver &&
-        driver.isMutationQuery(query) &&
-        !AutoMobileSDK.capabilities.policy.allowMutations ||
-        !AutoMobileSDK.isCapabilitySupported("storage.mutation")
-    ) {
-      throw DatabaseError.MutationNotAllowed()
-    }
+    val mutationsAllowed =
+      AutoMobileSDK.capabilities.policy.allowMutations &&
+        AutoMobileSDK.isCapabilitySupported("storage.mutation")
+    val execution =
+      when {
+        mutationsAllowed -> driver.executeSQL(databasePath, query)
+        driver is SQLiteDatabaseDriver -> driver.executeReadOnlySQL(databasePath, query)
+        else -> throw DatabaseError.MutationNotAllowed()
+      }
 
-    return when (val result = driver.executeSQL(databasePath, query)) {
+    return when (val result = execution) {
       is SQLExecutionResult.Query -> {
         val columnsArray = JSONArray()
         result.columns.forEach { columnsArray.put(it) }

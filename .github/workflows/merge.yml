@@ -1353,7 +1353,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # Independent of each other: setup-uv fetches a standalone binary and
-      # never reads the Python toolchain. Both are joined before `uv sync`.
+      # never reads the Python toolchain. Both are joined before `uv sync --locked`.
       - name: "Setup Python"
         uses: actions/setup-python@v6
         background: true
@@ -1372,7 +1372,7 @@ jobs:
 
       - name: "Install MkDocs and dependencies"
         working-directory: scripts/github
-        run: uv sync
+        run: uv sync --locked
 
       - name: "Build documentation"
         run: scripts/github/deploy_pages.py build

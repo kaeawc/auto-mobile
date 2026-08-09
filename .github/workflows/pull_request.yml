@@ -699,6 +699,23 @@ jobs:
           # contain the base commit and the diff would fail.
           fetch-depth: 0
 
+      # The documentation build consumes scripts/github/uv.lock after merge.
+      # Start its independent toolchain setup now so the required Fast Validation
+      # job can validate that lockfile before a PR lands.
+      - name: "Setup Python for documentation lock validation"
+        uses: actions/setup-python@v6
+        background: true
+        id: setup-python-lock
+        with:
+          python-version: "3.11"
+
+      - name: "Install uv for documentation lock validation"
+        uses: astral-sh/setup-uv@v7
+        background: true
+        id: setup-uv-lock
+        with:
+          enable-cache: true
+
       # Pulls a Docker image and consumes nothing this job produces, so start
       # it up front and let the whole job overlap the pull. It has no consumer,
       # so the barrier sits at the end -- a hadolint failure surfaces there
@@ -785,6 +802,8 @@ jobs:
             }
             core.setFailed('Timed out waiting for the forced XCTestRunner job.');
 
+      - wait: [setup-python-lock, setup-uv-lock]
+
       - name: "Run fast validation checks"
         shell: bash
         env:
@@ -795,7 +814,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,sharp-matrix,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,mkdocs-nav,ktfmt,claude-plugin,codex-skills \
+            --only yaml,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,sharp-matrix,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,mkdocs-nav,ktfmt,claude-plugin,codex-skills,github-python-lock \
             --max-parallel 4
 
       - name: "Run BATS Tests (Ubuntu)"

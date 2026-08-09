@@ -78,6 +78,22 @@ describe("#4130 hadolint hoist (fast-validation)", () => {
     expect(waitIndex).toBeGreaterThan(checksIndex);
     expect(waitIndex).toBeGreaterThan(batsIndex);
   });
+
+  test("the documentation lock validation toolchain is ready before fast checks", () => {
+    const python = stepNamed(steps, "Setup Python for documentation lock validation");
+    const uv = stepNamed(steps, "Install uv for documentation lock validation");
+    const waitIndex = indexOfWaitOn(steps, "setup-python-lock");
+    const checks = stepNamed(steps, "Run fast validation checks");
+
+    expect(python?.background).toBe(true);
+    expect(python?.id).toBe("setup-python-lock");
+    expect(uv?.background).toBe(true);
+    expect(uv?.id).toBe("setup-uv-lock");
+    expect(waitIndex).toBeGreaterThanOrEqual(0);
+    expect(waitIndex).toBe(indexOfWaitOn(steps, "setup-uv-lock"));
+    expect(waitIndex).toBeLessThan(indexOfNamed(steps, "Run fast validation checks"));
+    expect(checks?.run).toContain("github-python-lock");
+  });
 });
 
 describe("#4130 deploy-docs fan-outs (merge.yml)", () => {
@@ -100,6 +116,10 @@ describe("#4130 deploy-docs fan-outs (merge.yml)", () => {
     expect(waitPython).toBeGreaterThanOrEqual(0);
     expect(waitPython).toBe(waitUv);
     expect(waitPython).toBeLessThan(mkdocsIndex);
+  });
+
+  test("the documentation install enforces the committed lockfile", () => {
+    expect(stepNamed(steps, "Install MkDocs and dependencies")?.run).toBe("uv sync --locked");
   });
 
   test("the badge downloads are backgrounded and joined before Setup Pages", () => {

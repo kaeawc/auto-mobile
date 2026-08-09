@@ -55,13 +55,24 @@ describe("combineApkDigests (property-based)", () => {
   });
 
   test("garbage-line invariance: non-digest lines do not change the result", () => {
-    const arb = fc.tuple(
-      fc.array(validLine, { minLength: 1, maxLength: 6 }),
-      fc.array(garbageLine, { maxLength: 6 }),
-      fc.array(fc.double({ noNaN: true, noDefaultInfinity: true }), { maxLength: 12 }),
-    );
+    // One sort key per combined element, so every valid/garbage line is actually
+    // shuffled — a short key vector would leave a suffix in original order and yield
+    // NaN comparisons in permuteBy, silently weakening the interleaving coverage.
+    const arb = fc
+      .tuple(
+        fc.array(validLine, { minLength: 1, maxLength: 6 }),
+        fc.array(garbageLine, { maxLength: 6 }),
+      )
+      .chain(([valid, garbage]) =>
+        fc
+          .array(fc.double({ noNaN: true, noDefaultInfinity: true }), {
+            minLength: valid.length + garbage.length,
+            maxLength: valid.length + garbage.length,
+          })
+          .map((keys) => ({ valid, garbage, keys })),
+      );
     fc.assert(
-      fc.property(arb, ([valid, garbage, keys]) => {
+      fc.property(arb, ({ valid, garbage, keys }) => {
         const clean = combineApkDigests(valid.join("\n"));
         const mixed = permuteBy([...valid, ...garbage], keys).join("\n");
         expect(combineApkDigests(mixed)).toBe(clean);

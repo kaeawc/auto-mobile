@@ -152,7 +152,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   override fun executeSQL(databasePath: String, query: String): SQLExecutionResult {
     synchronized(databaseLock) {
       val trimmedQuery = query.trim()
-      val (returnsRows, readOnly) = classifySQL(trimmedQuery)
+      val (returnsRows, readOnly) = classifySQL(stripLeadingSqlComments(trimmedQuery))
 
       return if (returnsRows) {
         executeQuery(databasePath, trimmedQuery, readOnly = readOnly)
@@ -191,8 +191,12 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     val keyword = statement?.first ?: return Pair(false, false)
     val statementIndex = statement.second
 
-    if (keyword == "SELECT" || keyword == "VALUES" || keyword == "PRAGMA" || keyword == "EXPLAIN") {
+    if (keyword == "SELECT" || keyword == "VALUES" || keyword == "EXPLAIN") {
       return Pair(true, true)
+    }
+
+    if (keyword == "PRAGMA") {
+      return Pair(true, isReadOnlyPragma(query, statementIndex))
     }
 
     if (keyword == "INSERT" || keyword == "UPDATE" || keyword == "DELETE") {
@@ -202,6 +206,84 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     }
 
     return Pair(false, false)
+  }
+
+  private fun isReadOnlyPragma(query: String, statementIndex: Int): Boolean {
+    var index = statementIndex + "PRAGMA".length
+    while (query.getOrNull(index)?.isWhitespace() == true) index++
+
+    val firstIdentifier = readIdentifier(query, index) ?: return false
+    var pragmaName = firstIdentifier.first
+    index = firstIdentifier.second
+
+    if (query.getOrNull(index) == '.') {
+      val pragmaIdentifier = readIdentifier(query, index + 1) ?: return false
+      pragmaName = pragmaIdentifier.first
+      index = pragmaIdentifier.second
+    }
+
+    pragmaName = pragmaName.lowercase()
+    if (!isObservablePragma(pragmaName)) return false
+
+    val suffix = query.substring(index).trim()
+    if (suffix.isEmpty() || suffix == ";") return true
+
+    return suffix.startsWith('(') && isObservablePragmaWithArgument(pragmaName)
+  }
+
+  // OPEN_READONLY blocks database-file writes, but some PRAGMAs mutate connection or process
+  // state. Keep policy-enforced access to an explicit observation allowlist.
+  private fun isObservablePragma(pragmaName: String): Boolean =
+    when (pragmaName) {
+      "application_id",
+      "collation_list",
+      "compile_options",
+      "data_version",
+      "database_list",
+      "encoding",
+      "foreign_key_check",
+      "foreign_key_list",
+      "freelist_count",
+      "function_list",
+      "index_info",
+      "index_list",
+      "index_xinfo",
+      "integrity_check",
+      "module_list",
+      "page_count",
+      "page_size",
+      "pragma_list",
+      "quick_check",
+      "schema_version",
+      "table_info",
+      "table_list",
+      "table_xinfo",
+      "user_version" -> true
+      else -> false
+    }
+
+  private fun isObservablePragmaWithArgument(pragmaName: String): Boolean =
+    when (pragmaName) {
+      "foreign_key_check",
+      "foreign_key_list",
+      "index_info",
+      "index_list",
+      "index_xinfo",
+      "integrity_check",
+      "quick_check",
+      "table_info",
+      "table_list",
+      "table_xinfo" -> true
+      else -> false
+    }
+
+  private fun readIdentifier(query: String, startIndex: Int): Pair<String, Int>? {
+    var index = startIndex
+    while (query.getOrNull(index)?.isWhitespace() == true) index++
+    val identifierStart = index
+    while (query.getOrNull(index)?.let(::isWordChar) == true) index++
+    if (identifierStart == index) return null
+    return Pair(query.substring(identifierStart, index), index)
   }
 
   private fun startsWithKeyword(text: String, keyword: String): Boolean =

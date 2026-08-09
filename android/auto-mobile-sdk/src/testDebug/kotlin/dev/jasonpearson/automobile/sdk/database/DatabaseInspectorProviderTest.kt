@@ -14,6 +14,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 
+/** Regression coverage for the debug-only database inspector provider. */
 @RunWith(RobolectricTestRunner::class)
 class DatabaseInspectorProviderTest {
   private lateinit var context: Context
@@ -83,6 +84,16 @@ class DatabaseInspectorProviderTest {
   }
 
   @Test
+  fun `unrestricted leading-comment select returns query rows`() {
+    val result = driver.executeSQL(databasePath, "-- inspect\nSELECT 1 AS one")
+
+    assertEquals(
+      listOf(listOf(1L)),
+      (result as SQLExecutionResult.Query).rows,
+    )
+  }
+
+  @Test
   fun `read-only CTE is allowed when mutation capability is unsupported`() {
     val response =
       provider.handleExecuteSQL(
@@ -125,6 +136,25 @@ class DatabaseInspectorProviderTest {
           error is DatabaseError.MutationNotAllowed,
         )
       }
+  }
+
+  @Test
+  fun `process-mutating pragmas fail the read-only admission gate`() {
+    assertTrue(driver.isMutationQuery("PRAGMA hard_heap_limit=1"))
+    assertTrue(driver.isMutationQuery("PRAGMA hard_heap_limit(1)"))
+    assertTrue(driver.isMutationQuery("PRAGMA shrink_memory"))
+  }
+
+  @Test
+  fun `authorized pragma setter uses the writable connection`() {
+    driver.executeSQL(databasePath, "PRAGMA user_version=42")
+
+    val result = driver.executeSQL(databasePath, "PRAGMA user_version")
+
+    assertEquals(
+      listOf(listOf(42L)),
+      (result as SQLExecutionResult.Query).rows,
+    )
   }
 
   @Test

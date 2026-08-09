@@ -585,6 +585,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     if (!avdConfig) {return;}
     const isModernPlayImage = avdConfig.tag?.toLowerCase().includes("play")
       && (avdConfig.apiLevel ?? 0) >= MODERN_PLAY_IMAGE_MIN_API_LEVEL;
+    if (isModernPlayImage && avdConfig.ramSizeInvalid) {
+      throw new ActionableError(
+        `Cannot start AVD '${avdName}': hw.ramSize is invalid. Use a whole number in MB or a K, M, or G size suffix and retry.`
+      );
+    }
     if (isModernPlayImage && avdConfig.ramSizeMb !== undefined && avdConfig.ramSizeMb < MIN_AVD_RAM_MB) {
       throw new ActionableError(
         `Cannot start AVD '${avdName}': hw.ramSize is ${avdConfig.ramSizeMb} MB, below the minimum ${MIN_AVD_RAM_MB} MB needed for a modern system image. Increase hw.ramSize in the AVD config and retry.`

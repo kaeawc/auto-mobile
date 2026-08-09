@@ -40,12 +40,15 @@ describe("parseAvdConfig", () => {
 
   it("normalizes RAM size suffixes to megabytes", () => {
     expect(parseAvdConfig("hw.ramSize=2G\n").ramSizeMb).toBe(2048);
+    expect(parseAvdConfig("hw.ramSize=1024KiB\n").ramSizeMb).toBe(1);
     expect(parseAvdConfig("hw.ramSize=2048M\n").ramSizeMb).toBe(2048);
     expect(parseAvdConfig("hw.ramSize=2GiB\n").ramSizeMb).toBe(2048);
   });
 
-  it("does not interpret malformed RAM sizes as partial numbers", () => {
-    expect(parseAvdConfig("hw.ramSize=2G-invalid\n").ramSizeMb).toBeUndefined();
+  it("marks malformed RAM sizes without interpreting partial numbers", () => {
+    const config = parseAvdConfig("hw.ramSize=2G-invalid\n");
+    expect(config.ramSizeMb).toBeUndefined();
+    expect(config.ramSizeInvalid).toBe(true);
   });
 
   it("preserves a zero RAM value so the launch preflight can reject it", () => {

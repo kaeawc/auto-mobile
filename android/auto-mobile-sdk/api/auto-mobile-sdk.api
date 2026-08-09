@@ -857,6 +857,7 @@ public final class dev.jasonpearson.automobile.sdk.database.SQLiteDatabaseDriver
   public dev.jasonpearson.automobile.sdk.database.TableDataResult getTableData(java.lang.String, java.lang.String, int, int);
   public dev.jasonpearson.automobile.sdk.database.TableStructureResult getTableStructure(java.lang.String, java.lang.String);
   public dev.jasonpearson.automobile.sdk.database.SQLExecutionResult executeSQL(java.lang.String, java.lang.String);
+  public final dev.jasonpearson.automobile.sdk.database.SQLExecutionResult$Query executeReadOnlySQL$auto_mobile_sdk(java.lang.String, java.lang.String);
   public final boolean isMutationQuery$auto_mobile_sdk(java.lang.String);
   public final void closeAll();
 }

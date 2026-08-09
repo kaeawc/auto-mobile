@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.database
 import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteReadOnlyDatabaseException
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -151,7 +152,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   override fun executeSQL(databasePath: String, query: String): SQLExecutionResult {
     synchronized(databaseLock) {
       val trimmedQuery = query.trim()
-      val (returnsRows, readOnly) = classifySQL(trimmedQuery)
+      val (returnsRows, readOnly) = classifySQL(stripLeadingSqlComments(trimmedQuery))
 
       return if (returnsRows) {
         executeQuery(databasePath, trimmedQuery, readOnly = readOnly)
@@ -161,10 +162,28 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     }
   }
 
-  /** Returns whether executing this statement can mutate the database. */
+  /** Executes arbitrary SQL without granting the statement a writable database handle. */
+  @JvmSynthetic
+  internal fun executeReadOnlySQL(databasePath: String, query: String): SQLExecutionResult.Query {
+    synchronized(databaseLock) {
+      val trimmedQuery = query.trim()
+      val (_, classifiedReadOnly) = classifySQL(stripLeadingSqlComments(trimmedQuery))
+      if (!classifiedReadOnly) throw DatabaseError.MutationNotAllowed()
+
+      return executeQuery(
+        databasePath,
+        trimmedQuery,
+        readOnly = true,
+        requireExactReadOnly = true,
+        mapReadOnlyFailureToPolicyError = true,
+      )
+    }
+  }
+
+  /** Returns whether the coarse statement family is in the read-only allowlist. */
   internal fun isMutationQuery(query: String): Boolean {
-    val (returnsRows, readOnly) = classifySQL(query.trim())
-    return !returnsRows && !readOnly
+    val (_, classifiedReadOnly) = classifySQL(stripLeadingSqlComments(query.trim()))
+    return !classifiedReadOnly
   }
 
   private fun classifySQL(query: String): Pair<Boolean, Boolean> {
@@ -172,8 +191,16 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     val keyword = statement?.first ?: return Pair(false, false)
     val statementIndex = statement.second
 
-    if (keyword == "SELECT" || keyword == "PRAGMA" || keyword == "EXPLAIN") {
+    if (keyword == "SELECT" || keyword == "VALUES") {
       return Pair(true, true)
+    }
+
+    if (keyword == "EXPLAIN") {
+      return Pair(true, isReadOnlyExplain(query, statementIndex))
+    }
+
+    if (keyword == "PRAGMA") {
+      return Pair(true, isReadOnlyPragma(query, statementIndex))
     }
 
     if (keyword == "INSERT" || keyword == "UPDATE" || keyword == "DELETE") {
@@ -183,6 +210,256 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     }
 
     return Pair(false, false)
+  }
+
+  private fun isReadOnlyExplain(query: String, statementIndex: Int): Boolean {
+    var explainedIndex = skipSqlTrivia(query, statementIndex + "EXPLAIN".length) ?: return false
+    if (matchesKeywordAt(query, explainedIndex, "QUERY")) {
+      explainedIndex = skipSqlTrivia(query, explainedIndex + "QUERY".length) ?: return false
+      if (!matchesKeywordAt(query, explainedIndex, "PLAN")) return false
+      explainedIndex = skipSqlTrivia(query, explainedIndex + "PLAN".length) ?: return false
+    }
+
+    val explainedQuery = query.substring(explainedIndex)
+    val explainedStatement = findTopLevelStatement(explainedQuery)
+    if (explainedStatement?.first != "PRAGMA") return true
+
+    return isReadOnlyPragma(explainedQuery, explainedStatement.second)
+  }
+
+  private fun isReadOnlyPragma(query: String, statementIndex: Int): Boolean {
+    var index = skipSqlTrivia(query, statementIndex + "PRAGMA".length) ?: return false
+
+    val firstIdentifier = readIdentifier(query, index) ?: return false
+    var pragmaName = firstIdentifier.first
+    index = skipSqlTrivia(query, firstIdentifier.second) ?: return false
+
+    if (query.getOrNull(index) == '.') {
+      val pragmaIdentifier = readIdentifier(query, index + 1) ?: return false
+      pragmaName = pragmaIdentifier.first
+      index = skipSqlTrivia(query, pragmaIdentifier.second) ?: return false
+    }
+
+    pragmaName = pragmaName.lowercase()
+    if (!isObservablePragma(pragmaName)) return false
+
+    val suffix = query.substring(index).trim()
+    if (hasOnlyPragmaTerminatorAndComments(suffix)) return true
+
+    return isObservablePragmaWithArgument(pragmaName) && hasSinglePragmaArgument(suffix)
+  }
+
+  private fun hasSinglePragmaArgument(suffix: String): Boolean {
+    val parenthesized = suffix.startsWith('(')
+    if (!parenthesized && !suffix.startsWith('=')) return false
+
+    var index = skipSqlTrivia(suffix, 1) ?: return false
+    if (suffix.getOrNull(index) == '+' || suffix.getOrNull(index) == '-') index++
+    index = readPragmaValueEnd(suffix, index) ?: return false
+    index = skipSqlTrivia(suffix, index) ?: return false
+
+    if (parenthesized) {
+      if (suffix.getOrNull(index) != ')') return false
+      index++
+    }
+
+    return hasOnlyPragmaTerminatorAndComments(suffix.substring(index))
+  }
+
+  private fun readPragmaValueEnd(text: String, startIndex: Int): Int? {
+    var index = startIndex
+    val quoteEnd =
+      when (text.getOrNull(index)) {
+        '\'',
+        '"' -> text[index]
+        '`' -> '`'
+        '[' -> ']'
+        else -> null
+      }
+    if (quoteEnd != null) {
+      index++
+      while (index < text.length) {
+        if (text[index] == quoteEnd) {
+          if (quoteEnd != ']' && text.getOrNull(index + 1) == quoteEnd) {
+            index += 2
+            continue
+          }
+          return index + 1
+        }
+        index++
+      }
+      return null
+    }
+
+    if (
+      text.getOrNull(index)?.isDigit() == true ||
+        (text.getOrNull(index) == '.' && text.getOrNull(index + 1)?.isDigit() == true)
+    ) {
+      return readNumericLiteralEnd(text, index)
+    }
+
+    val valueStart = index
+    while (text.getOrNull(index)?.let(::isWordChar) == true) index++
+    return index.takeIf { it > valueStart }
+  }
+
+  private fun readNumericLiteralEnd(text: String, startIndex: Int): Int? {
+    var index = startIndex
+    var hasDigits = false
+
+    while (text.getOrNull(index)?.isDigit() == true) {
+      hasDigits = true
+      index++
+    }
+    if (text.getOrNull(index) == '.') {
+      index++
+      while (text.getOrNull(index)?.isDigit() == true) {
+        hasDigits = true
+        index++
+      }
+    }
+    if (!hasDigits) return null
+
+    if (text.getOrNull(index)?.let { it == 'e' || it == 'E' } == true) {
+      index++
+      if (text.getOrNull(index)?.let { it == '+' || it == '-' } == true) index++
+      val exponentStart = index
+      while (text.getOrNull(index)?.isDigit() == true) index++
+      if (index == exponentStart) return null
+    }
+
+    return index
+  }
+
+  private fun hasOnlyPragmaTerminatorAndComments(suffix: String): Boolean {
+    var index = 0
+    var hasTerminator = false
+
+    while (index < suffix.length) {
+      while (suffix.getOrNull(index)?.isWhitespace() == true) index++
+      if (index >= suffix.length) return true
+
+      when {
+        suffix.startsWith("--", index) -> {
+          val lineEnd = suffix.indexOfAny(charArrayOf('\n', '\r'), startIndex = index + 2)
+          if (lineEnd < 0) return true
+          index = lineEnd + 1
+        }
+        suffix.startsWith("/*", index) -> {
+          val commentEnd = suffix.indexOf("*/", startIndex = index + 2)
+          if (commentEnd < 0) return false
+          index = commentEnd + 2
+        }
+        suffix[index] == ';' && !hasTerminator -> {
+          hasTerminator = true
+          index++
+        }
+        else -> return false
+      }
+    }
+
+    return true
+  }
+
+  // OPEN_READONLY blocks database-file writes, but some PRAGMAs mutate connection or process
+  // state. Keep policy-enforced access to an explicit observation allowlist.
+  private fun isObservablePragma(pragmaName: String): Boolean =
+    when (pragmaName) {
+      "application_id",
+      "collation_list",
+      "compile_options",
+      "data_version",
+      "database_list",
+      "encoding",
+      "foreign_key_check",
+      "foreign_key_list",
+      "freelist_count",
+      "function_list",
+      "index_info",
+      "index_list",
+      "index_xinfo",
+      "integrity_check",
+      "module_list",
+      "page_count",
+      "page_size",
+      "pragma_list",
+      "quick_check",
+      "schema_version",
+      "table_info",
+      "table_list",
+      "table_xinfo",
+      "user_version" -> true
+      else -> false
+    }
+
+  private fun isObservablePragmaWithArgument(pragmaName: String): Boolean =
+    when (pragmaName) {
+      "foreign_key_check",
+      "foreign_key_list",
+      "index_info",
+      "index_list",
+      "index_xinfo",
+      "integrity_check",
+      "quick_check",
+      "table_info",
+      "table_list",
+      "table_xinfo" -> true
+      else -> false
+    }
+
+  private fun readIdentifier(query: String, startIndex: Int): Pair<String, Int>? {
+    var index = skipSqlTrivia(query, startIndex) ?: return null
+    val quoteEnd =
+      when (query.getOrNull(index)) {
+        '"' -> '"'
+        '`' -> '`'
+        '[' -> ']'
+        else -> null
+      }
+    if (quoteEnd != null) {
+      val identifier = StringBuilder()
+      index++
+      while (index < query.length) {
+        val char = query[index]
+        if (char == quoteEnd) {
+          if (quoteEnd != ']' && query.getOrNull(index + 1) == quoteEnd) {
+            identifier.append(quoteEnd)
+            index += 2
+            continue
+          }
+          return Pair(identifier.toString(), index + 1)
+        }
+        identifier.append(char)
+        index++
+      }
+      return null
+    }
+
+    val identifierStart = index
+    while (query.getOrNull(index)?.let(::isWordChar) == true) index++
+    if (identifierStart == index) return null
+    return Pair(query.substring(identifierStart, index), index)
+  }
+
+  private fun skipSqlTrivia(query: String, startIndex: Int): Int? {
+    var index = startIndex
+    while (index < query.length) {
+      while (query.getOrNull(index)?.let(::isSqlTriviaWhitespace) == true) index++
+      when {
+        query.startsWith("--", index) -> {
+          val lineEnd = query.indexOfAny(charArrayOf('\n', '\r'), startIndex = index + 2)
+          if (lineEnd < 0) return query.length
+          index = lineEnd + 1
+        }
+        query.startsWith("/*", index) -> {
+          val commentEnd = query.indexOf("*/", startIndex = index + 2)
+          if (commentEnd < 0) return null
+          index = commentEnd + 2
+        }
+        else -> return index
+      }
+    }
+    return index
   }
 
   private fun startsWithKeyword(text: String, keyword: String): Boolean =
@@ -195,10 +472,34 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     return nextChar == null || !isWordChar(nextChar)
   }
 
-  private fun isWordChar(char: Char): Boolean = char.isLetterOrDigit() || char == '_'
+  private fun isWordChar(char: Char): Boolean =
+    char != '\uFEFF' && (char.isLetterOrDigit() || char == '_' || char == '$' || char.code >= 0x80)
+
+  private fun isSqlTriviaWhitespace(char: Char): Boolean = char.isWhitespace() || char == '\uFEFF'
+
+  private fun stripLeadingSqlComments(query: String): String {
+    var index = 0
+    while (index < query.length) {
+      while (query.getOrNull(index)?.let(::isSqlTriviaWhitespace) == true) index++
+      when {
+        query.startsWith("--", index) -> {
+          val lineEnd = query.indexOfAny(charArrayOf('\n', '\r'), startIndex = index + 2)
+          if (lineEnd < 0) return ""
+          index = lineEnd + 1
+        }
+        query.startsWith("/*", index) -> {
+          val commentEnd = query.indexOf("*/", startIndex = index + 2)
+          if (commentEnd < 0) return ""
+          index = commentEnd + 2
+        }
+        else -> return query.substring(index)
+      }
+    }
+    return ""
+  }
 
   private fun findTopLevelStatement(query: String): Pair<String, Int>? {
-    val keywords = listOf("SELECT", "PRAGMA", "EXPLAIN", "INSERT", "UPDATE", "DELETE")
+    val keywords = listOf("SELECT", "VALUES", "PRAGMA", "EXPLAIN", "INSERT", "UPDATE", "DELETE")
     if (!startsWithKeyword(query, "WITH")) {
       return keywords
         .firstOrNull { keyword -> startsWithKeyword(query, keyword) }
@@ -211,6 +512,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       query,
       "WITH".length,
       keywords,
+      requireCompletedGroupSinceLastComma = true,
     )
   }
 
@@ -218,8 +520,10 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     query: String,
     startIndex: Int,
     keywords: List<String>,
+    requireCompletedGroupSinceLastComma: Boolean = false,
   ): Pair<String, Int>? {
     var depth = 0
+    var completedGroupSinceLastComma = false
     var i = startIndex
     var inSingleQuote = false
     var inDoubleQuote = false
@@ -269,8 +573,12 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
         char == '`' -> inBacktickQuote = true
         char == '[' -> inBracketQuote = true
         char == '(' -> depth++
-        char == ')' && depth > 0 -> depth--
-        depth == 0 -> {
+        char == ')' && depth > 0 -> {
+          depth--
+          if (depth == 0) completedGroupSinceLastComma = true
+        }
+        char == ',' && depth == 0 -> completedGroupSinceLastComma = false
+        depth == 0 && (!requireCompletedGroupSinceLastComma || completedGroupSinceLastComma) -> {
           for (keyword in keywords) {
             if (matchesKeywordAt(query, i, keyword)) {
               return Pair(keyword, i)
@@ -288,8 +596,15 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     databasePath: String,
     query: String,
     readOnly: Boolean,
+    requireExactReadOnly: Boolean = false,
+    mapReadOnlyFailureToPolicyError: Boolean = false,
   ): SQLExecutionResult.Query {
-    val db = openDatabase(databasePath, readOnly = readOnly)
+    val db =
+      openDatabase(
+        databasePath,
+        readOnly = readOnly,
+        requireExactReadOnly = requireExactReadOnly,
+      )
     val columns = mutableListOf<String>()
     val rows = mutableListOf<List<Any?>>()
 
@@ -301,6 +616,9 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
           rows.add((0 until cursor.columnCount).map { getColumnValue(cursor, it) })
         }
       }
+    } catch (e: SQLiteReadOnlyDatabaseException) {
+      if (mapReadOnlyFailureToPolicyError) throw DatabaseError.MutationNotAllowed()
+      throw DatabaseError.SqlError(e.message ?: "Unknown SQL error")
     } catch (e: Exception) {
       throw DatabaseError.SqlError(e.message ?: "Unknown SQL error")
     }
@@ -332,14 +650,19 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     }
   }
 
-  private fun openDatabase(path: String, readOnly: Boolean): SQLiteDatabase {
+  private fun openDatabase(
+    path: String,
+    readOnly: Boolean,
+    requireExactReadOnly: Boolean = false,
+  ): SQLiteDatabase {
     validatePath(path)
 
     // Check if we have a cached connection with compatible mode
     val cached = openDatabases[path]
     if (cached != null && cached.isOpen) {
-      // If we need write access but have read-only, close and reopen
-      if (!readOnly && cached.isReadOnly) {
+      val needsWritableConnection = !readOnly && cached.isReadOnly
+      val needsExactReadOnlyConnection = readOnly && requireExactReadOnly && !cached.isReadOnly
+      if (needsWritableConnection || needsExactReadOnlyConnection) {
         cached.close()
         openDatabases.remove(path)
       } else {

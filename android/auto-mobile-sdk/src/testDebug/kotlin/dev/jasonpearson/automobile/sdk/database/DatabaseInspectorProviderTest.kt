@@ -83,6 +83,23 @@ class DatabaseInspectorProviderTest {
   }
 
   @Test
+  fun `explain allows DML plans without executing the mutation`() {
+    listOf(
+        "EXPLAIN INSERT INTO notes (id, body) VALUES (2, 'not executed')",
+        "EXPLAIN QUERY PLAN DELETE FROM notes WHERE id = 1",
+      )
+      .forEach { query ->
+        val response = provider.handleExecuteSQL(driver, executeSqlExtras(query))
+        assertEquals("Expected query response for $query", "query", response.getString("type"))
+      }
+
+    val rows =
+      provider.handleExecuteSQL(driver, executeSqlExtras("SELECT id FROM notes ORDER BY id"))
+    assertEquals(1, rows.getJSONArray("rows").length())
+    assertEquals(1, rows.getJSONArray("rows").getJSONArray(0).getInt(0))
+  }
+
+  @Test
   fun `read-only SQL does not depend on comment-aware classification`() {
     val response =
       provider.handleExecuteSQL(
@@ -151,6 +168,18 @@ class DatabaseInspectorProviderTest {
       provider.handleExecuteSQL(
         driver,
         executeSqlExtras("WITH foo\$update AS (VALUES(1)) SELECT * FROM foo\$update"),
+      )
+
+    assertEquals("query", response.getString("type"))
+    assertEquals(1, response.getJSONArray("rows").getJSONArray(0).getInt(0))
+  }
+
+  @Test
+  fun `read-only CTE treats non-ASCII characters as identifier characters`() {
+    val response =
+      provider.handleExecuteSQL(
+        driver,
+        executeSqlExtras("WITH foo😀update AS (VALUES(1)) SELECT * FROM foo😀update"),
       )
 
     assertEquals("query", response.getString("type"))

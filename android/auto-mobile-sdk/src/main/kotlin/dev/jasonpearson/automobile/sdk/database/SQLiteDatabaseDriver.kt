@@ -220,8 +220,11 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       explainedIndex = skipSqlTrivia(query, explainedIndex + "PLAN".length) ?: return false
     }
 
-    val (_, explainedReadOnly) = classifySQL(query.substring(explainedIndex))
-    return explainedReadOnly
+    val explainedQuery = query.substring(explainedIndex)
+    val explainedStatement = findTopLevelStatement(explainedQuery)
+    if (explainedStatement?.first != "PRAGMA") return true
+
+    return isReadOnlyPragma(explainedQuery, explainedStatement.second)
   }
 
   private fun isReadOnlyPragma(query: String, statementIndex: Int): Boolean {
@@ -434,7 +437,8 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     return nextChar == null || !isWordChar(nextChar)
   }
 
-  private fun isWordChar(char: Char): Boolean = char.isLetterOrDigit() || char == '_' || char == '$'
+  private fun isWordChar(char: Char): Boolean =
+    char.isLetterOrDigit() || char == '_' || char == '$' || char.code >= 0x80
 
   private fun stripLeadingSqlComments(query: String): String {
     var index = 0

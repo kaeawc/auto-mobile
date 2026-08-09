@@ -69,25 +69,33 @@ jobs:
           mapfile -t changed_files < <(
             { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u
           )
+          # The bump script owns the list of files it rewrites; consume it so
+          # the allow-list cannot drift from the script again (#5008).
+          managed_paths_output="$(
+            bash scripts/versioning/bump-versions.sh --print-managed-paths
+          )"
+          if [[ -z "$managed_paths_output" ]]; then
+            echo "Failed to read managed paths from bump-versions.sh" >&2
+            exit 1
+          fi
+          mapfile -t allowed_patterns <<< "$managed_paths_output"
+          # CHANGELOG.md is written by the changelog step, not the version bump.
+          allowed_patterns+=("CHANGELOG.md")
+
           unexpected_files=()
           for path in "${changed_files[@]}"; do
-            case "$path" in
-              .claude-plugin/marketplace.json | \
-              .claude-plugin/plugin.json | \
-              CHANGELOG.md | \
-              android/gradle.properties | \
-              android/*/build.gradle.kts | \
-              docs/design-docs/mcp/daemon/client-frame-snapshot.md | \
-              docs/design-docs/mcp/daemon/client-screen-control.md | \
-              docs/design-docs/mcp/daemon/unix-socket-api.md | \
-              ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift | \
-              package.json | \
-              server.json)
-                ;;
-              *)
-                unexpected_files+=("$path")
-                ;;
-            esac
+            allowed=false
+            for pattern in "${allowed_patterns[@]}"; do
+              # Pattern intentionally unquoted: entries like
+              # android/*/build.gradle.kts must glob-match.
+              if [[ "$path" == $pattern ]]; then
+                allowed=true
+                break
+              fi
+            done
+            if [[ "$allowed" == false ]]; then
+              unexpected_files+=("$path")
+            fi
           done
 
           if ((${#unexpected_files[@]} > 0)); then

@@ -173,10 +173,13 @@ export class FakeAdbClient implements FakeAdbClientContract {
    * Call N returns entry N; once exhausted the last entry repeats. Takes
    * precedence over {@link setCommandResult} for the same command.
    */
-  setCommandResultSequence(command: string, results: Array<{ stdout: string; stderr?: string }>): void {
+  setCommandResultSequence(command: string, results: Array<{ stdout: string; stderr?: string } | string>): void {
     this.commandResultSequences.set(
       command,
-      results.map(entry => ({ stdout: entry.stdout, stderr: entry.stderr ?? "" }))
+      results.map(entry => ({
+        stdout: typeof entry === "string" ? entry : entry.stdout,
+        stderr: typeof entry === "string" ? "" : entry.stderr ?? "",
+      }))
     );
     this.commandSequenceCursor.set(command, 0);
   }
@@ -186,6 +189,10 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   setCommandError(command: string, error: Error): void {
     this.commandErrors.set(command, error);
+  }
+
+  clearCommandError(command: string): void {
+    this.commandErrors.delete(command);
   }
 
   /**

@@ -51,6 +51,7 @@ class FrameHandoff {
   private var slot: EncodedVideoFrame? = null
   private var closed = false
   private var dropped = 0L
+  private var dropGapArmed = false
 
   /**
    * Offer an encoded packet to the writer. Never blocks the caller (the encode loop).
@@ -68,11 +69,13 @@ class FrameHandoff {
         // Sticky critical: never overwrite an unsent config/keyframe. Drop the newcomer;
         // the encoder re-emits an IDR on the next GOP boundary or keyframe request.
         dropped++
+        dropGapArmed = true
         return true
       }
       else -> {
         // Slot holds a delta; the newer packet supersedes it (drop-oldest / latest-wins).
         dropped++
+        dropGapArmed = true
         slot = frame
       }
     }
@@ -110,6 +113,20 @@ class FrameHandoff {
 
   /** Total packets discarded by the drop-oldest policy since construction. */
   fun droppedCount(): Long = lock.withLock { dropped }
+
+  /**
+   * Consume the data-loss signal raised by a discarded packet.
+   *
+   * The signal is level-triggered: a burst of drops produces one recovery request until the encode
+   * loop consumes it, while a later drop arms a new request.
+   */
+  fun consumeDropGap(): Boolean = lock.withLock {
+    if (!dropGapArmed) {
+      return false
+    }
+    dropGapArmed = false
+    true
+  }
 
   /** The currently-slotted packet without removing it; for tests and diagnostics. */
   fun peek(): EncodedVideoFrame? = lock.withLock { slot }

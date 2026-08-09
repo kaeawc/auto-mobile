@@ -11,6 +11,7 @@ export type ScreenshotFallbackReason =
   | "a11y_screenshot_unsupported"
   | "websocket_unavailable"
   | "ctrlproxy_failed"
+  | "ctrlproxy_rate_limited"
   | "ctrlproxy_timeout"
   | "ctrlproxy_exception";
 

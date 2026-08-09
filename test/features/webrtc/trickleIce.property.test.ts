@@ -1,82 +1,97 @@
-import { describe, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import {
   parseTrickleFragment,
+  serializeEndOfCandidates,
   serializeTrickleFragment,
   type TrickleCandidate,
   type TrickleIceMediaContext,
 } from "../../../src/features/webrtc/trickleIce";
 
-// Property-based tests. See test/utils/Backoff.property.test.ts for the
-// pinned-seed rationale.
-const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
+// Property-based round-trip tests for the pure trickle-ICE serializer/parser.
+// Candidate/mid values are drawn from the real single-line domain (SDP fragment
+// lines carry no CR/LF by construction) but deliberately exercise embedded colons
+// and internal whitespace — the edge cases hand-picked examples miss. See
+// test/utils/Backoff.property.test.ts for the pinned-seed rationale.
+const RUN_OPTIONS = { seed: 1_234_567, numRuns: 200 } as const;
 
-// ICE candidate attribute bodies look like "0 1 UDP 2130706431 10.0.0.1 54400
-// typ host". Generated loosely (no embedded CR/LF, since a real candidate
-// line is one SDP line) but with enough token variety to exercise the
-// "candidate:" prefix handling.
-const candidateBody = fc
-  .array(fc.stringMatching(/^[a-zA-Z0-9.:_-]{1,10}$/), { minLength: 3, maxLength: 8 })
-  .map(tokens => tokens.join(" "));
+/** SDP token (mid/ufrag/pwd): non-empty, no whitespace or line breaks. */
+const token = fc.stringMatching(/^[A-Za-z0-9_+/-]{1,24}$/);
 
-const trickleCandidate: fc.Arbitrary<TrickleCandidate> = fc.record({
-  candidate: candidateBody,
-  sdpMid: fc.option(fc.stringMatching(/^[a-zA-Z0-9_-]{1,8}$/), { nil: undefined }),
+/** A candidate payload: any single-line string (colons and spaces allowed, no CR/LF). */
+const candidatePayload = fc.string({ maxLength: 48 }).filter((s) => !/[\r\n]/.test(s));
+
+/** An m-line, constrained to start with `m=` so it cannot masquerade as a=mid/a=candidate. */
+const mLine = fc.stringMatching(/^m=[A-Za-z0-9 /]+$/).filter((s) => s.length > 2);
+
+const contextArb: fc.Arbitrary<TrickleIceMediaContext> = fc.record({
+  mLine,
+  mid: token,
+  ice: fc.record({ ufrag: token, pwd: token }),
 });
 
-const mediaContext: fc.Arbitrary<TrickleIceMediaContext> = fc.record({
-  mLine: fc.constant("m=audio 9 UDP/TLS/RTP/SAVPF 0"),
-  mid: fc.stringMatching(/^[a-zA-Z0-9_-]{1,8}$/),
-  ice: fc.record({
-    ufrag: fc.stringMatching(/^[a-zA-Z0-9]{4,10}$/),
-    pwd: fc.stringMatching(/^[a-zA-Z0-9]{22,32}$/),
-  }),
-});
+const candidateArb: fc.Arbitrary<TrickleCandidate> = fc.record(
+  { candidate: candidatePayload, sdpMid: fc.option(token, { nil: undefined }) },
+  { requiredKeys: ["candidate"] },
+);
 
-describe("trickleIce parse/serialize (property-based)", () => {
-  test("round-trip: parsing a serialized candidate recovers its candidate line", () => {
+/** The documented normalization: ensure the `candidate:` prefix exactly once, trimmed. */
+function expectedCandidateLine(raw: string): string {
+  const trimmed = raw.trim();
+  return trimmed.startsWith("candidate:") ? trimmed : `candidate:${trimmed}`;
+}
+
+describe("trickleIce round-trip (property-based)", () => {
+  test("parse(serialize(candidate)) recovers the normalized candidate and mid", () => {
     fc.assert(
-      fc.property(trickleCandidate, mediaContext, (candidate, context) => {
-        const fragment = serializeTrickleFragment(candidate, context);
-        const [parsed] = parseTrickleFragment(fragment);
-        const expectedCandidateLine = candidate.candidate.startsWith("candidate:")
-          ? candidate.candidate.trim()
-          : `candidate:${candidate.candidate.trim()}`;
-        return parsed !== undefined && parsed.candidate === expectedCandidateLine;
+      fc.property(candidateArb, contextArb, (candidate, context) => {
+        const parsed = parseTrickleFragment(serializeTrickleFragment(candidate, context));
+        expect(parsed).toHaveLength(1);
+        expect(parsed[0].candidate).toBe(expectedCandidateLine(candidate.candidate));
+        expect(parsed[0].sdpMid).toBe(candidate.sdpMid ?? context.mid);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
-  test("round-trip: the parsed mid falls back to the context mid when the candidate has none", () => {
+  test("idempotence: re-serializing a parsed candidate reproduces it exactly", () => {
     fc.assert(
-      fc.property(trickleCandidate, mediaContext, (candidate, context) => {
-        const fragment = serializeTrickleFragment(candidate, context);
-        const [parsed] = parseTrickleFragment(fragment);
-        const expectedMid = candidate.sdpMid ?? context.mid;
-        return parsed !== undefined && parsed.sdpMid === expectedMid;
+      fc.property(candidateArb, contextArb, (candidate, context) => {
+        const first = parseTrickleFragment(serializeTrickleFragment(candidate, context))[0];
+        const second = parseTrickleFragment(serializeTrickleFragment(first, context))[0];
+        expect(second).toEqual(first);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
-  test("serialize always emits exactly one candidate parseable back out", () => {
+  test("multi-candidate: every candidate under one mid is recovered and attributed", () => {
+    const arb = fc.tuple(fc.array(candidatePayload, { minLength: 1, maxLength: 6 }), contextArb);
     fc.assert(
-      fc.property(trickleCandidate, mediaContext, (candidate, context) => {
-        const fragment = serializeTrickleFragment(candidate, context);
-        return parseTrickleFragment(fragment).length === 1;
+      fc.property(arb, ([payloads, context]) => {
+        // A single fragment: the mid line once, then several candidate lines.
+        const lines = [
+          context.mLine,
+          `a=mid:${context.mid}`,
+          ...payloads.map((p) => `a=${expectedCandidateLine(p)}`),
+        ];
+        const parsed = parseTrickleFragment(`${lines.join("\r\n")}\r\n`);
+        expect(parsed).toHaveLength(payloads.length);
+        for (let i = 0; i < payloads.length; i++) {
+          expect(parsed[i].candidate).toBe(expectedCandidateLine(payloads[i]));
+          expect(parsed[i].sdpMid).toBe(context.mid);
+        }
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
-  test("parseTrickleFragment is total: never throws on arbitrary text", () => {
+  test("end-of-candidates fragments parse to no candidates", () => {
     fc.assert(
-      fc.property(fc.string({ maxLength: 300 }), fragment => {
-        parseTrickleFragment(fragment);
-        return true;
+      fc.property(contextArb, (context) => {
+        expect(parseTrickleFragment(serializeEndOfCandidates(context))).toEqual([]);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

@@ -26,6 +26,8 @@ import {
   stopDeviceDataStreamSocketServer,
 } from "../../../src/daemon/deviceDataStreamSocketServer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
+import { FakeScreenshotBackoffScheduler } from "../../../src/features/observe/ScreenshotBackoffScheduler";
+import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/android/screenshotFallbackReason";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -605,7 +607,7 @@ describe("AndroidCtrlProxyClient", function() {
     const driveA11yScreenshot = async (
       client: AndroidCtrlProxyClient,
       socket: CapturingWebSocket,
-      resolveWith: { kind: "error" } | { kind: "success" }
+      resolveWith: { kind: "error"; error?: string } | { kind: "success" }
     ): Promise<any> => {
       const before = countScreenshotRequests(socket);
       const capturePromise = (client as any).captureScreenshotForObservationStream() as Promise<any>;
@@ -613,7 +615,11 @@ describe("AndroidCtrlProxyClient", function() {
       const request = findSentMessage(socket, "request_screenshot");
       expect(countScreenshotRequests(socket)).toBe(before + 1);
       const frame = resolveWith.kind === "error"
-        ? { type: "screenshot_error", requestId: request.requestId, error: "Runner failed to capture screenshot" }
+        ? {
+          type: "screenshot_error",
+          requestId: request.requestId,
+          error: resolveWith.error ?? "Runner failed to capture screenshot",
+        }
         : { type: "screenshot", requestId: request.requestId, data: "jpeg-base64", format: "jpeg", timestamp: 1 };
       socket.emit("message", JSON.stringify(frame));
       await flushPromises();
@@ -697,6 +703,26 @@ describe("AndroidCtrlProxyClient", function() {
       // Because the counter reset, two more failures still do not reach the latch threshold.
       await driveA11yScreenshot(client, socket, { kind: "error" });
       await driveA11yScreenshot(client, socket, { kind: "error" });
+      expect((client as any).a11yScreenshotSupported).not.toBe(false);
+    });
+
+    test("does not count rate-limited screenshots as unsupported failures", async function() {
+      const { client, socket } = await setupConnectedCapturingClient();
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const result = await driveA11yScreenshot(client, socket, {
+          kind: "error",
+          error: CTRLPROXY_RATE_LIMITED_ERROR,
+        });
+        expect(result.screenshotFallbackReason).toBe("ctrlproxy_rate_limited");
+      }
+
+      expect((client as any).a11yScreenshotFailures).toBe(0);
+      expect((client as any).a11yScreenshotSupported).toBe(null);
+
+      const next = await driveA11yScreenshot(client, socket, { kind: "error" });
+      expect(next.screenshotFallbackReason).toBe("ctrlproxy_failed");
+      expect((client as any).a11yScreenshotFailures).toBe(1);
       expect((client as any).a11yScreenshotSupported).not.toBe(false);
     });
   });
@@ -3589,6 +3615,61 @@ describe("AndroidCtrlProxyClient", function() {
         pixelHeight: null,
       });
       expect(accessibilityServiceClient.getScreenScaleMetadata()).toBeNull();
+    });
+  });
+
+  describe("shared rate-limit floor accounting (issue #4927)", function() {
+    test("one-shot requestScreenshot advances the shared floor clock so the stream scheduler coalesces around it", async function() {
+      const localTimer = new FakeTimer();
+      localTimer.enableAutoAdvance();
+      const fakeScheduler = new FakeScreenshotBackoffScheduler();
+      const { factory, getSocket } = createCapturingWebSocketFactory(localTimer);
+      // Inject the fake scheduler via the test-only createForTesting seam (positional optionals).
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        localTimer,
+        undefined, // installedAppsRepository
+        undefined, // retryExecutor
+        undefined, // crashEventSink
+        undefined, // deviceConnectionLostNotifier
+        undefined, // sdkEventIngestor
+        undefined, // loggerInstance
+        undefined, // certificateFileSystem
+        fakeScheduler
+      );
+      client.invalidateCache();
+      await client.ensureConnected();
+      const socket = await waitForSocket(getSocket) as CapturingWebSocket | null;
+      await waitForSocketOpen(socket);
+      if (!socket) {
+        throw new Error("Expected capturing CtrlProxy socket");
+      }
+
+      // A one-shot capture (the observe / junit-runner path) must stamp the shared clock even
+      // though it never runs the backoff scheduler itself. The stamp happens synchronously at the
+      // moment the a11y request is sent, before any await, so it is observable as soon as the
+      // request frame lands on the socket.
+      expect(fakeScheduler.noteCaptureStartedCalls).toBe(0);
+      const before = socket.sentMessages.length;
+      const capture = client.requestScreenshot(500);
+      await waitForSentMessages(socket, before + 1);
+
+      const req = socket.sentMessages
+        .map(raw => { try { return JSON.parse(raw); } catch { return null; } })
+        .reverse()
+        .find(m => m && m.type === "request_screenshot");
+      expect(req).toBeTruthy();
+      expect(fakeScheduler.noteCaptureStartedCalls).toBe(1);
+
+      // Resolve the request so the pending promise settles; the assertion above is the contract.
+      socket.emit("message", JSON.stringify({
+        type: "screenshot", requestId: req.requestId, data: "jpeg-base64", format: "jpeg", timestamp: 1,
+      }));
+      await capture.catch(() => undefined);
+
+      await client.close();
     });
   });
 });

@@ -78,6 +78,16 @@ interface RawJankCounters {
   jankyFrames: number | null;
 }
 
+interface PreviousCpuSample {
+  processTicks: number;
+  uptimeSeconds: number;
+}
+
+interface CpuMetricsResult {
+  cpuUsagePercent: number | null;
+  sample: PreviousCpuSample | null;
+}
+
 interface MonitoredDevice {
   deviceId: string;
   packageName: string;
@@ -103,6 +113,10 @@ interface MonitoredDevice {
   prevJankCounters: RawJankCounters | null;
   /** PID of the app process (cached for iOS since it requires a lookup) */
   cachedPid: number | null;
+  /** Previous Android process CPU sample for interval-delta calculation */
+  previousCpuSample: PreviousCpuSample | null;
+  /** Whether the cumulative first gfxinfo sample has already been primed */
+  gfxPrimed: boolean;
   /** Previous per-metric health for detecting threshold crossings */
   previousMetricHealth: Record<string, string>;
 }
@@ -228,6 +242,8 @@ export class PerformanceMonitor {
         existing.lastMediumTick = 0;
         existing.lastSlowTick = 0;
         existing.prevJankCounters = null;
+        existing.previousCpuSample = null;
+        existing.gfxPrimed = false;
         // Bump the generation so any A→B→A in-flight sample is rejected even
         // though the package name matches again.
         existing.monitoringGeneration += 1;
@@ -256,6 +272,8 @@ export class PerformanceMonitor {
       cachedTouchLatency: null,
       prevJankCounters: null,
       cachedPid: null,
+      previousCpuSample: null,
+      gfxPrimed: false,
       previousMetricHealth: {},
     });
     logger.info(`[PerformanceMonitor] Started monitoring ${packageName} on ${deviceId} (${platform})`);
@@ -385,6 +403,7 @@ export class PerformanceMonitor {
     );
 
     const gfxPromise = sdkFrame ? Promise.resolve(null) : this.collectGfxMetrics(device);
+    const recordFrameMetrics = sdkFrame !== null || device.gfxPrimed;
 
     // Collect medium metrics (CPU) if interval elapsed or first collection. The
     // collect calls do NOT mutate `device` — caches/timestamps are updated only
@@ -394,7 +413,7 @@ export class PerformanceMonitor {
       now - device.lastMediumTick >= PerformanceMonitor.MEDIUM_INTERVAL_MS;
     const cpuPromise = shouldCollectCpu
       ? this.collectCpuMetrics(device)
-      : Promise.resolve(device.cachedCpu);
+      : Promise.resolve({ cpuUsagePercent: device.cachedCpu, sample: null });
 
     // Collect slow metrics (memory) if interval elapsed or first collection
     const shouldCollectMemory =
@@ -404,7 +423,8 @@ export class PerformanceMonitor {
       ? this.collectMemoryMetrics(device)
       : Promise.resolve(device.cachedMemory);
 
-    const [gfx, cpu, memory] = await Promise.all([gfxPromise, cpuPromise, memoryPromise]);
+    const [gfx, cpuResult, memory] = await Promise.all([gfxPromise, cpuPromise, memoryPromise]);
+    const cpu = cpuResult.cpuUsagePercent;
 
     // Drop the whole sample if monitoring changed apps or stopped mid-collection.
     if (!this.isSampleCurrent(device, samplingPackage, samplingGeneration)) {
@@ -412,9 +432,17 @@ export class PerformanceMonitor {
     }
 
     device.lastFastTick = now;
+    if (!sdkFrame && gfx?.resetSucceeded) {
+      device.gfxPrimed = true;
+    }
     if (shouldCollectCpu) {
       device.lastMediumTick = now;
       device.cachedCpu = cpu;
+      // Keep the last valid baseline across transient collection failures so the
+      // next successful sample can still measure the full interval.
+      if (cpuResult.sample) {
+        device.previousCpuSample = cpuResult.sample;
+      }
     }
     if (shouldCollectMemory) {
       device.lastSlowTick = now;
@@ -498,9 +526,10 @@ export class PerformanceMonitor {
     // flicker to 0, but the buffer must NOT re-record a stale reading every idle
     // tick — that would keep an old fps dominating the percentiles.
     this.pushMetrics(device, now, metrics, jankFrames, server, {
-      fps: rawFps,
-      frameTimeMs: rawFrameTimeMs,
-      touchLatencyMs: rawTouchLatencyMs,
+      fps: recordFrameMetrics ? rawFps : null,
+      frameTimeMs: recordFrameMetrics ? rawFrameTimeMs : null,
+      jankFrames: recordFrameMetrics ? jankFrames : null,
+      touchLatencyMs: recordFrameMetrics ? rawTouchLatencyMs : null,
       // CPU/memory only when actually collected this tick (null otherwise), so
       // the window never averages a reading acquired outside it.
       cpuUsagePercent: shouldCollectCpu ? cpu : null,
@@ -604,6 +633,7 @@ export class PerformanceMonitor {
     this.pushMetrics(device, now, metrics, jankFrames, server, {
       fps,
       frameTimeMs,
+      jankFrames: null,
       touchLatencyMs: null,
       cpuUsagePercent: shouldCollectCpu ? cpu : null,
       memoryUsageMb: shouldCollectMemory ? memory : null,
@@ -635,6 +665,7 @@ export class PerformanceMonitor {
     raw: {
       fps: number | null;
       frameTimeMs: number | null;
+      jankFrames: number | null;
       touchLatencyMs: number | null;
       cpuUsagePercent: number | null;
       memoryUsageMb: number | null;
@@ -661,7 +692,7 @@ export class PerformanceMonitor {
       t: now,
       fps: raw.fps,
       frameTimeMs: raw.frameTimeMs,
-      jankFrames: metrics.jankFrames,
+      jankFrames: raw.jankFrames,
       touchLatencyMs: raw.touchLatencyMs,
       cpuUsagePercent: raw.cpuUsagePercent,
       memoryUsageMb: raw.memoryUsageMb,
@@ -779,7 +810,9 @@ export class PerformanceMonitor {
    * Resets gfxinfo after reading to get fresh data for the next interval.
    * Jank delta calculation happens in sampleDevice.
    */
-  private async collectGfxMetrics(device: MonitoredDevice): Promise<GfxMetrics & { rawJankCounters: RawJankCounters | null }> {
+  private async collectGfxMetrics(
+    device: MonitoredDevice
+  ): Promise<GfxMetrics & { rawJankCounters: RawJankCounters | null; resetSucceeded: boolean }> {
     try {
       const adb = this.adbClientFactory.create({
         deviceId: device.deviceId,
@@ -824,18 +857,27 @@ export class PerformanceMonitor {
         highInputLatencyFrames,
         totalFrames,
         rawJankCounters: { missedVsync, slowUi, deadlineMissed, jankyFrames },
+        resetSucceeded: true,
       };
     } catch (error) {
       logger.debug(`[PerformanceMonitor] gfxinfo failed for ${device.deviceId}: ${error}`);
-      return { fps: null, frameTimeMs: null, jankFrames: null, highInputLatencyFrames: null, totalFrames: null, rawJankCounters: null };
+      return {
+        fps: null,
+        frameTimeMs: null,
+        jankFrames: null,
+        highInputLatencyFrames: null,
+        totalFrames: null,
+        rawJankCounters: null,
+        resetSucceeded: false,
+      };
     }
   }
 
   /**
-   * Collect CPU usage from /proc/{pid}/stat.
-   * Returns percentage of CPU time used by the process.
+   * Collect CPU usage from /proc/{pid}/stat and /proc/uptime.
+   * Returns the interval percentage and the sample used as the next baseline.
    */
-  private async collectCpuMetrics(device: MonitoredDevice): Promise<number | null> {
+  private async collectCpuMetrics(device: MonitoredDevice): Promise<CpuMetricsResult> {
     try {
       const adb = this.adbClientFactory.create({
         deviceId: device.deviceId,
@@ -847,7 +889,7 @@ export class PerformanceMonitor {
       const { stdout: pidOut } = await adb.executeCommand(`shell pidof ${device.packageName}`);
       const pid = pidOut.trim().split(/\s+/)[0]; // Take first PID if multiple
       if (!pid) {
-        return null;
+        return { cpuUsagePercent: null, sample: null };
       }
 
       // Get CPU stats from /proc/stat
@@ -860,19 +902,30 @@ export class PerformanceMonitor {
       const { stdout: uptimeOut } = await adb.executeCommand("shell cat /proc/uptime");
       const uptime = parseFloat(uptimeOut.split(" ")[0] || "0");
 
-      // Calculate CPU percentage
-      // Note: This is a simplified calculation - actual CPU% would need delta sampling
-      if (uptime > 0) {
-        // Clock ticks per second is typically 100 (HZ)
-        const cpuTime = utime + stime;
-        const cpuPercent = (cpuTime / (uptime * 100)) * 100;
-        return Math.min(cpuPercent, 100); // Cap at 100%
+      const processTicks = utime + stime;
+      if (!Number.isFinite(processTicks) || !Number.isFinite(uptime) || uptime <= 0) {
+        return { cpuUsagePercent: null, sample: null };
       }
 
-      return null;
+      const sample = { processTicks, uptimeSeconds: uptime };
+      const previous = device.previousCpuSample;
+      if (!previous) {
+        return { cpuUsagePercent: null, sample };
+      }
+
+      const processTickDelta = processTicks - previous.processTicks;
+      const uptimeDelta = uptime - previous.uptimeSeconds;
+      if (processTickDelta < 0 || uptimeDelta <= 0) {
+        return { cpuUsagePercent: null, sample };
+      }
+
+      // Android reports process CPU time in clock ticks; 100 ticks represent one
+      // second on the supported devices. Calculate usage over the sampling interval.
+      const cpuPercent = (processTickDelta / (uptimeDelta * 100)) * 100;
+      return { cpuUsagePercent: Math.min(cpuPercent, 100), sample };
     } catch (error) {
       logger.debug(`[PerformanceMonitor] CPU metrics failed for ${device.deviceId}: ${error}`);
-      return null;
+      return { cpuUsagePercent: null, sample: null };
     }
   }
 

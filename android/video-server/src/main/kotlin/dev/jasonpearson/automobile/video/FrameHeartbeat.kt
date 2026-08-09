@@ -61,13 +61,19 @@ class FrameHeartbeat(
     keyFrameNudges = 0
   }
 
-  /** Record a keyframe request (a relayed WHEP viewer PLI). Coalesces repeats. */
+  /**
+   * Record a keyframe request (a relayed WHEP viewer PLI). Coalesces repeats.
+   *
+   * @return true when this call created a new pending request.
+   */
   @Synchronized
-  fun onKeyFrameRequested() {
+  fun onKeyFrameRequested(): Boolean {
     if (keyFramePendingSinceMs == null) {
       keyFramePendingSinceMs = clock.nowMs()
       keyFrameNudges = 0
+      return true
     }
+    return false
   }
 
   /**

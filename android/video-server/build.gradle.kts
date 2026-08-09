@@ -71,6 +71,11 @@ abstract class D8DexTask @Inject constructor(private val execOperations: ExecOpe
       commandLine(
         buildList {
           add(d8Path.get())
+          // Compile without debug dex info (line tables, local-variable data). d8 defaults to
+          // --debug; the server is launched via `app_process` from adb shell and is never attached
+          // to a jdwp debugger on-device, so the debug info has no consumer and only bloats the
+          // jar and its `adb push` payload.
+          add("--release")
           add("--output")
           add(outputJar.get().asFile.absolutePath)
           add("--min-api")

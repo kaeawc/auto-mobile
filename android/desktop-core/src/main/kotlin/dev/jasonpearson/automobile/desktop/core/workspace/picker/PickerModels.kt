@@ -30,6 +30,8 @@ data class PickerDevice(
   val architecture: String? = null,
   /** Whether the booted device's keyguard is up (from the booted resource). Shutdown -> false. */
   val locked: Boolean = false,
+  /** Whether the device is virtual; shutdown images are simulator/emulator definitions. */
+  val isVirtual: Boolean = true,
 )
 
 private val ANDROID_TARGET = Regex("android-(\\d+)")
@@ -95,6 +97,7 @@ fun buildPickerDevices(
       architecture = null,
       // Seed value only; an unknown (null) lock state seeds unlocked and the host poll refines it.
       locked = device.locked == true,
+      isVirtual = device.isVirtual,
     )
   }
 

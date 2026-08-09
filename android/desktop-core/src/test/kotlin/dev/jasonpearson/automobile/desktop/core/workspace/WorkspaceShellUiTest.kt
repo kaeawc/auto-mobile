@@ -245,6 +245,38 @@ class WorkspaceShellUiTest {
     }
 
   @Test
+  fun `physical iOS offers Power and hides Locale`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "iPhone 15", Platform.Ios).copy(isVirtual = false)),
+        focusedDeviceId = "a",
+      )
+    setContent {
+      MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
+    }
+
+    onNodeWithContentDescription("Locale iPhone 15").assertDoesNotExist()
+    onNodeWithContentDescription("More iPhone 15").performClick()
+    onNodeWithContentDescription("Power iPhone 15").assertIsDisplayed()
+  }
+
+  @Test
+  fun `iOS simulator offers Locale and hides Power`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "iPhone 15", Platform.Ios).copy(isVirtual = true)),
+        focusedDeviceId = "a",
+      )
+    setContent {
+      MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
+    }
+
+    onNodeWithContentDescription("Locale iPhone 15").assertIsDisplayed()
+    onNodeWithContentDescription("More iPhone 15").performClick()
+    onNodeWithContentDescription("Power iPhone 15").assertDoesNotExist()
+  }
+
+  @Test
   fun `active tool renders a docked facet with a close control`() = runComposeUiTest {
     val state =
       WorkspaceUiState.Content(

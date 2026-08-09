@@ -1,85 +1,82 @@
-import { describe, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { roundHalfAwayFromZero } from "../../src/daemon/canonicalPixels";
 
-// Property-based tests. See test/utils/Backoff.property.test.ts for the
-// pinned-seed rationale.
+// Property-based tests for the canonical-pixel rounding rule. A `coordinateSpace:"px"`
+// frame is compared exactly, so a drift at the .5 boundary between hierarchy bounds and
+// reported screenshot dimensions is a real correctness bug. The invariants below are
+// deliberately ORACLE-FREE — asserting the defining properties of round-to-nearest-
+// ties-away-from-zero rather than comparing to `Math.round(x + 0.5)`, whose own
+// representation artifacts would make a disagreement ambiguous. See
+// test/utils/Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 
-const finiteNumber = fc.double({ noNaN: true, noDefaultInfinity: true, min: -1e9, max: 1e9 });
+/** Arbitrary finite double (excludes NaN and ±Infinity, which are tested separately). */
+const finite = fc.double({ noNaN: true, noDefaultInfinity: true });
 
 describe("roundHalfAwayFromZero (property-based)", () => {
-  test("always returns an integer for finite input", () => {
+  test("result is always an integer", () => {
     fc.assert(
-      fc.property(finiteNumber, value => Number.isInteger(roundHalfAwayFromZero(value))),
-      RUN_OPTIONS
+      fc.property(finite, (x) => Number.isInteger(roundHalfAwayFromZero(x))),
+      RUN_OPTIONS,
     );
   });
 
-  test("result is within 1 of the input (rounds, never truncates further)", () => {
+  test("nearest: |round(x) - x| <= 0.5 (the defining round-to-nearest property)", () => {
     fc.assert(
-      fc.property(finiteNumber, value => Math.abs(roundHalfAwayFromZero(value) - value) <= 1),
-      RUN_OPTIONS
+      fc.property(finite, (x) => Math.abs(roundHalfAwayFromZero(x) - x) <= 0.5),
+      RUN_OPTIONS,
     );
   });
 
-  test("sign is preserved for non-zero results, and -0 never appears", () => {
+  test("sign is preserved (or zero); never flips", () => {
     fc.assert(
-      fc.property(finiteNumber, value => {
-        const result = roundHalfAwayFromZero(value);
-        if (result === 0) {
-          return !Object.is(result, -0);
-        }
-        return Math.sign(result) === Math.sign(value);
+      fc.property(finite, (x) => {
+        const r = roundHalfAwayFromZero(x);
+        return r === 0 || Math.sign(r) === Math.sign(x);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
-  test("idempotent: rounding an already-integer value is a no-op", () => {
+  test("never returns negative zero", () => {
     fc.assert(
       fc.property(
-        fc.integer({ min: -1_000_000_000, max: 1_000_000_000 }),
-        value => roundHalfAwayFromZero(value) === value
+        fc.oneof(finite, fc.constant(-0)),
+        (x) => !Object.is(roundHalfAwayFromZero(x), -0),
       ),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
-  test("idempotent: re-rounding the output changes nothing (fixed point)", () => {
+  test("idempotence: round(round(x)) === round(x)", () => {
     fc.assert(
-      fc.property(finiteNumber, value => {
-        const once = roundHalfAwayFromZero(value);
+      fc.property(finite, (x) => {
+        const once = roundHalfAwayFromZero(x);
         return roundHalfAwayFromZero(once) === once;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
-  test("exact .5 ties (integer + 0.5) round away from zero", () => {
+  // Exact ties, built from a non-negative magnitude base and a sign so the tie is
+  // exactly at .5 (m + 0.5 is representable for m well below 2^52): magnitude m + 0.5
+  // must round to magnitude m + 1, away from zero.
+  test("exact .5 ties round away from zero", () => {
+    const tie = fc
+      .tuple(fc.nat({ max: 2 ** 30 }), fc.constantFrom(1, -1))
+      .map(([m, sign]) => ({ x: sign * (m + 0.5), expectedMagnitude: m + 1 }));
     fc.assert(
-      fc.property(
-        fc.integer({ min: -1_000_000, max: 1_000_000 }),
-        base => {
-          const value = base >= 0 ? base + 0.5 : base - 0.5;
-          const expected = base >= 0 ? base + 1 : base - 1;
-          return roundHalfAwayFromZero(value) === expected;
-        }
-      ),
-      RUN_OPTIONS
+      fc.property(tie, ({ x, expectedMagnitude }) => {
+        return Math.abs(roundHalfAwayFromZero(x)) === expectedMagnitude;
+      }),
+      RUN_OPTIONS,
     );
   });
 
-  test("non-finite input passes through unchanged", () => {
-    fc.assert(
-      fc.property(
-        fc.constantFrom(Infinity, -Infinity, NaN),
-        value => {
-          const result = roundHalfAwayFromZero(value);
-          return Number.isNaN(value) ? Number.isNaN(result) : result === value;
-        }
-      ),
-      RUN_OPTIONS
-    );
+  test("non-finite values pass through unchanged", () => {
+    expect(roundHalfAwayFromZero(Infinity)).toBe(Infinity);
+    expect(roundHalfAwayFromZero(-Infinity)).toBe(-Infinity);
+    expect(Number.isNaN(roundHalfAwayFromZero(NaN))).toBe(true);
   });
 });

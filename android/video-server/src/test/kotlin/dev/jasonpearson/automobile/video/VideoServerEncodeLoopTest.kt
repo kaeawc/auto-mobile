@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.video
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -57,4 +58,75 @@ class VideoServerEncodeLoopTest {
     assertEquals("loop should run twice on the live writer before shutdown nulls it", 2, iterations)
     assertTrue("loop should exit via the null snapshot, not a deref throw", brokeOnNull)
   }
+
+  @Test
+  fun codecConfigBuffersDoNotCountAsVideoStatsFrames() {
+    assertFalse(VideoServer.shouldCountVideoStatsFrame(isCodecConfig = true))
+    assertTrue(VideoServer.shouldCountVideoStatsFrame(isCodecConfig = false))
+  }
+
+  @Test
+  fun dropGapRequestsOneRecoveryKeyFramePerDropBurst() {
+    val handoff = FrameHandoff()
+    val clock = FakeClock()
+    val heartbeat =
+      FrameHeartbeat(clock, idleForceIntervalMs = 10_000, keyFrameGraceMs = 150).also { it.start() }
+    var requests = 0
+
+    handoff.offer(frame(0))
+    handoff.offer(frame(1))
+
+    assertTrue(VideoServer.recoverFromFrameDrop(handoff::consumeDropGap, { requests++ }, heartbeat))
+    assertFalse(
+      VideoServer.recoverFromFrameDrop(handoff::consumeDropGap, { requests++ }, heartbeat)
+    )
+    assertEquals(1, requests)
+
+    heartbeat.onFrameEmitted()
+    handoff.offer(frame(2))
+    assertTrue(VideoServer.recoverFromFrameDrop(handoff::consumeDropGap, { requests++ }, heartbeat))
+    assertEquals(2, requests)
+  }
+
+  @Test
+  fun noDropDoesNotRequestRecoveryKeyFrame() {
+    val handoff = FrameHandoff()
+    val heartbeat =
+      FrameHeartbeat(FakeClock(), idleForceIntervalMs = 10_000, keyFrameGraceMs = 150).also {
+        it.start()
+      }
+    var requests = 0
+
+    assertFalse(
+      VideoServer.recoverFromFrameDrop(handoff::consumeDropGap, { requests++ }, heartbeat)
+    )
+    assertEquals(0, requests)
+  }
+
+  @Test
+  fun dropRecoveryDoesNotDuplicateAnOutstandingKeyFrameRequest() {
+    val handoff = FrameHandoff()
+    val heartbeat =
+      FrameHeartbeat(FakeClock(), idleForceIntervalMs = 10_000, keyFrameGraceMs = 150).also {
+        it.start()
+      }
+    var requests = 0
+    heartbeat.onKeyFrameRequested()
+
+    handoff.offer(frame(0))
+    handoff.offer(frame(1))
+
+    assertTrue(VideoServer.recoverFromFrameDrop(handoff::consumeDropGap, { requests++ }, heartbeat))
+    assertEquals(0, requests)
+  }
+
+  private class FakeClock(var nowMs: Long = 0) : FrameHeartbeat.Clock {
+    override fun nowMs(): Long = nowMs
+  }
+
+  private fun frame(pts: Long): EncodedVideoFrame =
+    EncodedVideoFrame(
+      VideoStreamProtocol.ptsAndFlags(pts, isConfig = false, isKeyFrame = false),
+      byteArrayOf(1),
+    )
 }

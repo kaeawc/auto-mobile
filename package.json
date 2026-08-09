@@ -37,6 +37,7 @@
     "profile:memory": "bun --expose-gc --inspect scripts/detect-memory-leaks.ts --mode=profile",
     "profile:heap": "bun --expose-gc --heap-prof scripts/stress-test.ts",
     "validate:yaml": "bun scripts/validate-yaml.ts",
+    "validate:ios-continuity": "bun scripts/validate-ios-simulator-continuity.ts",
     "check:bun-version-coherence": "bun scripts/check-bun-version-coherence.ts",
     "check:stdlib-first": "bash scripts/check-stdlib-first.sh",
     "check:host-shell-boundary": "bun scripts/check-host-shell-boundary.ts",
@@ -60,7 +61,10 @@
     "turbo:validate": "turbo run lint build test check:android-emulator-boundary check:ffmpeg-boundary check:host-shell-boundary check:ios-ctrl-proxy-process-boundary",
     "turbo:build": "turbo run build",
     "turbo:lint": "turbo run lint",
-    "turbo:test": "turbo run test"
+    "turbo:test": "turbo run test",
+    "turbo:typecheck": "turbo run typecheck",
+    "turbo:gate": "turbo run lint build typecheck --output-logs=errors-only",
+    "loop": "bash scripts/validate-loop.sh"
   },
   "packageManager": "bun@1.3.14",
   "engines": {
@@ -174,7 +178,7 @@
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "fast-check": "^4.9.0",
     "knip": "^6.0.0",
-    "oxc-parser": "0.140.0",
+    "oxc-parser": "0.143.0",
     "oxfmt": "0.62.0",
     "oxlint": "1.77.0",
     "oxlint-tsgolint": "7.0.2001",

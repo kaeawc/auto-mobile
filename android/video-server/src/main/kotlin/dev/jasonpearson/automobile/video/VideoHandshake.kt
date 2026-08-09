@@ -49,9 +49,6 @@ object VideoHandshake {
   const val MIN_TOKEN_LENGTH = 8
   const val MAX_TOKEN_LENGTH = 80
 
-  /** Mirrors `VideoSessionArguments.SAFE_TOKEN`; the on-wire token must satisfy the same shape. */
-  private val SAFE_TOKEN = Regex("[A-Za-z0-9-]{8,80}")
-
   sealed interface Result {
     /** A well-formed handshake carrying the expected token arrived. */
     object Accepted : Result
@@ -95,7 +92,7 @@ object VideoHandshake {
       connection.readFully(tokenLength, remainingMs)
         ?: return Result.Rejected("token-timeout-or-eof")
     val token = String(tokenBytes, Charsets.US_ASCII)
-    if (!SAFE_TOKEN.matches(token)) {
+    if (!VideoSessionArguments.SAFE_TOKEN.matches(token)) {
       return Result.Rejected("unsafe-token")
     }
     // MessageDigest.isEqual is the JDK's constant-time byte-array compare: it does not

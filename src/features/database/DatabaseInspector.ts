@@ -175,7 +175,10 @@ export class DatabaseInspector {
     }
 
     const result = await this.adb.executeCommand(cmd);
-    return this.parseContentCallResult<T>(result.stdout);
+    const output = [result.stdout, result.stderr]
+      .filter((part) => part.trim().length > 0)
+      .join("\n");
+    return this.parseContentCallResult<T>(output);
   }
 
   /**
@@ -216,8 +219,8 @@ export class DatabaseInspector {
    *
    * Older SDK builds emit the flat form (`errorType=...`, `error=...` as raw Bundle entries).
    * Version skew is the normal state between releases, so when there is no parseable envelope we
-   * fall back to reading the flat entries with {@link extractBundleValue}, preserving the prior
-   * behavior (and its documented ambiguity, which only the envelope form can eliminate).
+   * fall back to reading the flat entries with {@link extractBundleValue}. If neither form is
+   * present, the raw command output is retained so shell/provider failures remain actionable.
    */
   private extractError(output: string): { errorType: string; error: string } {
     const json = this.extractJsonFromBundle(output);
@@ -243,7 +246,7 @@ export class DatabaseInspector {
 
     return {
       errorType: this.extractBundleValue(output, "errorType") || "UNKNOWN",
-      error: this.extractBundleValue(output, "error") || "Unknown error"
+      error: this.extractBundleValue(output, "error") || output.trim() || "Unknown error"
     };
   }
 

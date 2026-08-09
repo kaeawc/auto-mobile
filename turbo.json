@@ -89,7 +89,15 @@
       "description": "Prevent new production host-shell execution",
       "inputs": ["src/**", "scripts/check-host-shell-boundary.ts", "package.json"],
       "outputs": [],
-      "outputLogs": "new-only"
+      "outputLogs": "new-only",
+      "cache": false
+    },
+    "typecheck": {
+      "description": "tsgo --noEmit baseline gate (scripts/typecheck-baseline.sh, issue #3001). Cached on src/** + tsconfig + the baseline so an unchanged src/ skips the ~5.6s run; a test/docs/native-only edit is a cache hit. Keyed on declared inputs, not the tsc/tsgo binary, so it is migration-neutral — a TypeScript-version bump changes package.json and the regenerated baseline and busts the hash. Only exit-0 is cached, so a red gate is never memoized.",
+      "inputs": ["src/**", "tsconfig.json", "scripts/typecheck-baseline.sh", "scripts/typecheck-baseline.txt", "package.json"],
+      "outputs": [],
+      "outputLogs": "new-only",
+      "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
     },
     "test:coverage": {
       "description": "Run tests with coverage reporting to coverage/. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach; without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.test.ts (issue #4351).",

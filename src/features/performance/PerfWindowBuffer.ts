@@ -100,7 +100,9 @@ export class PerfWindowBuffer {
       sampleCount: inWindow.length,
       oldestSampleAgeMs: oldest !== null ? now - oldest.t : null,
       fps: percentileSummary(collect(inWindow, s => s.fps)),
-      jank: jankSummary(inWindow),
+      // A jank sample describes the interval ending at its timestamp. A
+      // sample exactly on the cutoff therefore began before this window.
+      jank: jankSummary(inWindow.filter(sample => sample.t > cutoff)),
       touchLatencyMs: touchLatencySummary(inWindow),
       cpu: averageLatestSummary(collect(inWindow, s => s.cpuUsagePercent)),
       memoryMb: averageLatestSummary(collect(inWindow, s => s.memoryUsageMb)),

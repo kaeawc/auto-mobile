@@ -4,6 +4,7 @@
   "description": "Mobile device interaction automation via MCP",
   "scripts": {
     "test": "bun test --isolate",
+    "test:windows": "bun test",
     "test:coverage": "bun test --isolate --coverage",
     "test:fast": "bash scripts/test-fast.sh",
     "test:startup:bun": "bash scripts/ci/mcp-startup-smoke.sh",

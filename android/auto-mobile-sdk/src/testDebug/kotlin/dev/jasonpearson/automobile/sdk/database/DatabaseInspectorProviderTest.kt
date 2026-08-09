@@ -4,6 +4,10 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.os.Bundle
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import java.io.File
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -259,6 +263,7 @@ class DatabaseInspectorProviderTest {
         "PRAGMA [hard_heap_limit]=1",
         "PRAGMA shrink_memory",
         "EXPLAIN PRAGMA hard_heap_limit=1",
+        "EXPLAIN \uFEFFPRAGMA hard_heap_limit=1",
       )
       .forEach { query ->
         assertTrue(driver.isMutationQuery(query))
@@ -380,6 +385,52 @@ class DatabaseInspectorProviderTest {
     assertTrue(error is DatabaseError.MutationNotAllowed)
     assertEquals(0, customDriver.executeSqlCallCount)
   }
+
+  @Test
+  fun `disabled mutation policy enforces read-only SQL when capability is supported`() {
+    val capabilities = mutationCapabilities(allowMutations = false)
+
+    val queryResponse =
+      provider.handleExecuteSQL(
+        driver,
+        executeSqlExtras("SELECT id FROM notes ORDER BY id"),
+        capabilities,
+      )
+    val mutationError = runCatching {
+      provider.handleExecuteSQL(
+        driver,
+        executeSqlExtras("INSERT INTO notes (id, body) VALUES (2, 'blocked')"),
+        capabilities,
+      )
+    }
+      .exceptionOrNull()
+
+    assertEquals("query", queryResponse.getString("type"))
+    assertEquals(1, queryResponse.getJSONArray("rows").length())
+    assertTrue(mutationError is DatabaseError.MutationNotAllowed)
+  }
+
+  @Test
+  fun `enabled mutation policy uses writable SQL when capability is supported`() {
+    val capabilities = mutationCapabilities(allowMutations = true)
+
+    val response =
+      provider.handleExecuteSQL(
+        driver,
+        executeSqlExtras("INSERT INTO notes (id, body) VALUES (2, 'allowed')"),
+        capabilities,
+      )
+
+    assertEquals("mutation", response.getString("type"))
+    assertEquals(1, response.getInt("rowsAffected"))
+  }
+
+  private fun mutationCapabilities(allowMutations: Boolean) =
+    SdkCapabilityDocument(
+      capabilities =
+        listOf(SdkCapabilityDescriptor("storage.mutation", SdkCapabilityState.SUPPORTED)),
+      policy = SdkCapturePolicy(allowMutations = allowMutations),
+    )
 
   private fun executeSqlExtras(query: String) =
     Bundle().apply {

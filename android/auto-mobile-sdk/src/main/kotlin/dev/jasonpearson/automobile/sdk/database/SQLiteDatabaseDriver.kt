@@ -444,7 +444,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   private fun skipSqlTrivia(query: String, startIndex: Int): Int? {
     var index = startIndex
     while (index < query.length) {
-      while (query.getOrNull(index)?.isWhitespace() == true) index++
+      while (query.getOrNull(index)?.let(::isSqlTriviaWhitespace) == true) index++
       when {
         query.startsWith("--", index) -> {
           val lineEnd = query.indexOfAny(charArrayOf('\n', '\r'), startIndex = index + 2)
@@ -473,17 +473,14 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   }
 
   private fun isWordChar(char: Char): Boolean =
-    char.isLetterOrDigit() || char == '_' || char == '$' || char.code >= 0x80
+    char != '\uFEFF' && (char.isLetterOrDigit() || char == '_' || char == '$' || char.code >= 0x80)
+
+  private fun isSqlTriviaWhitespace(char: Char): Boolean = char.isWhitespace() || char == '\uFEFF'
 
   private fun stripLeadingSqlComments(query: String): String {
     var index = 0
     while (index < query.length) {
-      while (
-        query.getOrNull(index)?.isWhitespace() == true ||
-          (index == 0 && query.getOrNull(index) == '\uFEFF')
-      ) {
-        index++
-      }
+      while (query.getOrNull(index)?.let(::isSqlTriviaWhitespace) == true) index++
       when {
         query.startsWith("--", index) -> {
           val lineEnd = query.indexOfAny(charArrayOf('\n', '\r'), startIndex = index + 2)

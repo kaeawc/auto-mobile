@@ -226,9 +226,39 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     if (!isObservablePragma(pragmaName)) return false
 
     val suffix = query.substring(index).trim()
-    if (suffix.isEmpty() || suffix == ";") return true
+    if (hasOnlyPragmaTerminatorAndComments(suffix)) return true
 
     return suffix.startsWith('(') && isObservablePragmaWithArgument(pragmaName)
+  }
+
+  private fun hasOnlyPragmaTerminatorAndComments(suffix: String): Boolean {
+    var index = 0
+    var hasTerminator = false
+
+    while (index < suffix.length) {
+      while (suffix.getOrNull(index)?.isWhitespace() == true) index++
+      if (index >= suffix.length) return true
+
+      when {
+        suffix.startsWith("--", index) -> {
+          val lineEnd = suffix.indexOfAny(charArrayOf('\n', '\r'), startIndex = index + 2)
+          if (lineEnd < 0) return true
+          index = lineEnd + 1
+        }
+        suffix.startsWith("/*", index) -> {
+          val commentEnd = suffix.indexOf("*/", startIndex = index + 2)
+          if (commentEnd < 0) return false
+          index = commentEnd + 2
+        }
+        suffix[index] == ';' && !hasTerminator -> {
+          hasTerminator = true
+          index++
+        }
+        else -> return false
+      }
+    }
+
+    return true
   }
 
   // OPEN_READONLY blocks database-file writes, but some PRAGMAs mutate connection or process

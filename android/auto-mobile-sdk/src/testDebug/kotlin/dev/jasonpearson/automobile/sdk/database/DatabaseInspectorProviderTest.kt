@@ -84,6 +84,19 @@ class DatabaseInspectorProviderTest {
   }
 
   @Test
+  fun `observational pragmas allow trailing comments`() {
+    listOf(
+        "PRAGMA user_version; -- inspect",
+        "PRAGMA application_id /* read */",
+      )
+      .forEach { query ->
+        val response = provider.handleExecuteSQL(driver, executeSqlExtras(query))
+
+        assertEquals("Expected query response for $query", "query", response.getString("type"))
+      }
+  }
+
+  @Test
   fun `unrestricted leading-comment select returns query rows`() {
     val result = driver.executeSQL(databasePath, "-- inspect\nSELECT 1 AS one")
 

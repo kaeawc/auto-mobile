@@ -331,6 +331,20 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `discovers a mise-shimmed bun when PATH is stripped`() {
+    val miseBunx = "/Users/dev/.local/share/mise/shims/bunx"
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        // Bun is installed only through mise's shims, and the GUI-session PATH omits them.
+        executableAt = { it == miseBunx },
+        onPath = { _, _ -> null },
+      )
+
+    assertEquals(miseBunx, resolver.resolve("Mac OS X"))
+  }
+
+  @Test
   fun `emits the bare bunx name when nothing resolves`() {
     val resolver =
       SystemDaemonPackageRunnerResolver(

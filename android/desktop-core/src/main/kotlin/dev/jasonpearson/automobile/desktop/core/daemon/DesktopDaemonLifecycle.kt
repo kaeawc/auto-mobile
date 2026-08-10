@@ -283,34 +283,46 @@ internal class SystemDaemonPackageRunnerResolver(
         // often omits Linuxbrew, so probe its default multi-user and per-user prefixes.
         add("/home/linuxbrew/.linuxbrew/bin/bunx")
         home?.let { add("$it/.linuxbrew/bin/bunx") }
+        // Version-manager shims (mise, asdf) at their default roots — a stripped GUI PATH omits
+        // these too, so a Bun installed only through mise/asdf would otherwise be missed.
+        home?.let {
+          add("$it/.local/share/mise/shims/bunx")
+          add("$it/.asdf/shims/bunx")
+        }
       }
     }
 
   private companion object {
     fun whichRunner(runner: String, isWindows: Boolean): String? {
       val locator = if (isWindows) "where" else "which"
-      return try {
-        val process = ProcessBuilder(locator, runner).redirectErrorStream(true).start()
+      val process =
         try {
-          if (!process.waitFor(2, TimeUnit.SECONDS)) {
-            process.destroy()
-            return null
-          }
-          if (process.exitValue() != 0) return null
-          selectRunnerFromLookup(
-            process.inputStream.bufferedReader().readText(),
-            isWindows,
-            executableExtensions(),
-          )
-        } finally {
-          // Close the locator's streams on every path — the timeout and non-zero-exit branches
-          // would otherwise leak file descriptors until GC.
-          runCatching { process.inputStream.close() }
-          runCatching { process.outputStream.close() }
-          runCatching { process.errorStream.close() }
+          ProcessBuilder(locator, runner).redirectErrorStream(true).start()
+        } catch (_: Exception) {
+          return null
         }
+      return try {
+        if (!process.waitFor(2, TimeUnit.SECONDS)) return null
+        if (process.exitValue() != 0) return null
+        selectRunnerFromLookup(
+          process.inputStream.bufferedReader().readText(),
+          isWindows,
+          executableExtensions(),
+        )
+      } catch (interrupted: InterruptedException) {
+        // Preserve cancellation: don't swallow the interrupt and fall through to spawning bunx.
+        // Restore the flag and rethrow so a cancelled lifecycle call launches no daemon.
+        Thread.currentThread().interrupt()
+        throw interrupted
       } catch (_: Exception) {
         null
+      } finally {
+        // Terminate the locator and close its streams on every path — otherwise the timeout,
+        // cancellation, and non-zero-exit branches leak file descriptors until GC.
+        process.destroy()
+        runCatching { process.inputStream.close() }
+        runCatching { process.outputStream.close() }
+        runCatching { process.errorStream.close() }
       }
     }
 

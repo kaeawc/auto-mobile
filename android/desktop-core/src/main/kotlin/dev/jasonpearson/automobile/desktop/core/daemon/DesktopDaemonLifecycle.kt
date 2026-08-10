@@ -291,16 +291,24 @@ internal class SystemDaemonPackageRunnerResolver(
       val locator = if (isWindows) "where" else "which"
       return try {
         val process = ProcessBuilder(locator, runner).redirectErrorStream(true).start()
-        if (!process.waitFor(2, TimeUnit.SECONDS)) {
-          process.destroy()
-          return null
+        try {
+          if (!process.waitFor(2, TimeUnit.SECONDS)) {
+            process.destroy()
+            return null
+          }
+          if (process.exitValue() != 0) return null
+          selectRunnerFromLookup(
+            process.inputStream.bufferedReader().readText(),
+            isWindows,
+            executableExtensions(),
+          )
+        } finally {
+          // Close the locator's streams on every path — the timeout and non-zero-exit branches
+          // would otherwise leak file descriptors until GC.
+          runCatching { process.inputStream.close() }
+          runCatching { process.outputStream.close() }
+          runCatching { process.errorStream.close() }
         }
-        if (process.exitValue() != 0) return null
-        selectRunnerFromLookup(
-          process.inputStream.bufferedReader().readText(),
-          isWindows,
-          executableExtensions(),
-        )
       } catch (_: Exception) {
         null
       }

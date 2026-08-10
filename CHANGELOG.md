@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.52] - 2026-08-10
+### Other
+- fix(android): support unit-suffixed AVD RAM settings ([#5194](https://github.com/kaeawc/auto-mobile/issues/5194))
+
 ## [v0.0.51] - 2026-08-09
 ### Added
 - feat(dx): add a fail-fast validate-loop pre-push command (loop) ([#5149](https://github.com/kaeawc/auto-mobile/issues/5149))

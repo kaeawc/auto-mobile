@@ -282,26 +282,28 @@ internal class SystemDaemonPackageRunnerResolver(
 ) : DaemonPackageRunnerResolver {
   override fun resolve(osName: String): String {
     val isWindows = osName.lowercase().contains("win")
-    // Bun-first: every `bunx` probe — absolute install locations AND the PATH lookup — must rank
-    // ahead of every `npx` probe, so a Bun supplied on PATH by mise/asdf is never passed over for
-    // an absolute npm `npx`. bunx is self-contained, so being executable is enough.
+    // Prefer the runner the user's PATH actually resolves — their currently configured install
+    // (e.g. via mise/asdf/Homebrew) — and use the hard-coded absolute install locations only as a
+    // fallback for GUI-launched apps whose PATH is stripped (there `which/where` returns nothing,
+    // so we still land on the known install). Bun-first throughout: every `bunx` probe ranks ahead
+    // of every `npx` probe; bunx is self-contained, so being executable is enough.
+    onPath("bunx", isWindows)?.let {
+      return it
+    }
     bunAbsoluteCandidates(isWindows)
       .firstOrNull { executableAt(it) }
       ?.let {
         return it
       }
-    onPath("bunx", isWindows)?.let {
-      return it
-    }
     // npx needs a reachable Node runtime beside it (or along its symlink chain); a stale npx with
     // no `node` must not be selected, or it would mask a later working install and still exit 127.
-    nodeAbsoluteCandidates(isWindows)
-      .firstOrNull { executableAt(it) && hasReachableNode(it) }
+    onPath("npx", isWindows)
+      ?.takeIf { hasReachableNode(it) }
       ?.let {
         return it
       }
-    onPath("npx", isWindows)
-      ?.takeIf { hasReachableNode(it) }
+    nodeAbsoluteCandidates(isWindows)
+      .firstOrNull { executableAt(it) && hasReachableNode(it) }
       ?.let {
         return it
       }

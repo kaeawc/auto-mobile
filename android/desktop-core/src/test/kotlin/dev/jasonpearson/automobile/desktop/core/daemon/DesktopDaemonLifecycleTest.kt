@@ -365,21 +365,34 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
-  fun `prefers a probed bun install over PATH lookups`() {
-    val onPathQueries = mutableListOf<String>()
+  fun `prefers the PATH bunx over a hard-coded install`() {
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        // A stale hard-coded ~/.bun/bin/bunx lingers, but the user has migrated to mise.
+        executableAt = { it == "/Users/dev/.bun/bin/bunx" },
+        listDir = { emptyList() },
+        onPath = { runner, _ ->
+          if (runner == "bunx") "/Users/dev/.local/share/mise/shims/bunx" else null
+        },
+      )
+
+    // The PATH-configured runner wins over the hard-coded install.
+    assertEquals("/Users/dev/.local/share/mise/shims/bunx", resolver.resolve("Mac OS X"))
+  }
+
+  @Test
+  fun `falls back to a probed bun install when PATH is stripped`() {
     val resolver =
       SystemDaemonPackageRunnerResolver(
         home = "/Users/dev",
         executableAt = { it == "/Users/dev/.bun/bin/bunx" },
         listDir = { emptyList() },
-        onPath = { runner, _ ->
-          onPathQueries += runner
-          null
-        },
+        // GUI-launched app: where/which resolves nothing against the stripped PATH.
+        onPath = { _, _ -> null },
       )
 
     assertEquals("/Users/dev/.bun/bin/bunx", resolver.resolve("Mac OS X"))
-    assertTrue(onPathQueries.isEmpty())
   }
 
   @Test

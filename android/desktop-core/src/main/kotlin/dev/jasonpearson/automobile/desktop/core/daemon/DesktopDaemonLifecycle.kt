@@ -237,6 +237,77 @@ internal object SystemDaemonRetryTimer : DaemonRetryTimer {
   }
 }
 
+/**
+ * Resolves the package runner used to launch the pinned daemon package. AutoMobile runs on Bun, so
+ * `bunx` is preferred over `npx`. Desktop apps launched from the GUI (Finder, Dock) inherit a
+ * stripped PATH that omits `~/.bun/bin` and Homebrew, so the resolver probes known absolute install
+ * locations before falling back to a PATH lookup — otherwise `ProcessBuilder` fails with "Cannot
+ * run program" even when Bun is installed.
+ */
+internal interface DaemonPackageRunnerResolver {
+  fun resolve(osName: String): String
+}
+
+internal class SystemDaemonPackageRunnerResolver(
+  private val home: String? =
+    System.getProperty("user.home")?.takeIf { it.isNotEmpty() } ?: System.getenv("HOME"),
+  private val executableAt: (String) -> Boolean = { File(it).canExecute() },
+  private val onPath: (String, Boolean) -> String? = ::whichRunner,
+) : DaemonPackageRunnerResolver {
+  override fun resolve(osName: String): String {
+    val isWindows = osName.lowercase().contains("win")
+    for (candidate in absoluteCandidates(isWindows)) {
+      if (executableAt(candidate)) return candidate
+    }
+    for (runner in listOf("bunx", "npx")) {
+      onPath(runner, isWindows)?.let { resolved ->
+        return resolved
+      }
+    }
+    // Nothing resolved: emit the legacy npx name so the failure surfaces actionable guidance.
+    return if (isWindows) "npx.cmd" else "npx"
+  }
+
+  private fun absoluteCandidates(isWindows: Boolean): List<String> =
+    if (isWindows) {
+      buildList { home?.let { add("$it\\.bun\\bin\\bunx.exe") } }
+    } else {
+      buildList {
+        home?.let { add("$it/.bun/bin/bunx") }
+        add("/opt/homebrew/bin/bunx")
+        add("/usr/local/bin/bunx")
+        add("/opt/homebrew/bin/npx")
+        add("/usr/local/bin/npx")
+        home?.let {
+          add("$it/.nvm/current/bin/npx")
+          add("$it/.volta/bin/npx")
+        }
+      }
+    }
+
+  private companion object {
+    fun whichRunner(runner: String, isWindows: Boolean): String? {
+      val locator = if (isWindows) "where" else "which"
+      return try {
+        val process = ProcessBuilder(locator, runner).redirectErrorStream(true).start()
+        if (!process.waitFor(2, TimeUnit.SECONDS)) {
+          process.destroy()
+          return null
+        }
+        if (process.exitValue() != 0) return null
+        process.inputStream
+          .bufferedReader()
+          .readText()
+          .lineSequence()
+          .map { it.trim() }
+          .firstOrNull { it.isNotEmpty() }
+      } catch (_: Exception) {
+        null
+      }
+    }
+  }
+}
+
 internal sealed interface DaemonLifecycleResult {
   data class Ready(val restarted: Boolean) : DaemonLifecycleResult
 
@@ -258,6 +329,8 @@ internal class DesktopDaemonLifecycle(
   private val pidFileReader: DaemonPidFileReader = JsonDaemonPidFileReader(),
   private val commandExecutor: DaemonCommandExecutor = SystemDaemonCommandExecutor,
   private val timer: DaemonRetryTimer = SystemDaemonRetryTimer,
+  private val packageRunnerResolver: DaemonPackageRunnerResolver =
+    SystemDaemonPackageRunnerResolver(),
   private val verificationAttempts: Int = DEFAULT_VERIFICATION_ATTEMPTS,
 ) : DaemonLifecycleEnsurer {
   override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult =
@@ -306,7 +379,7 @@ internal class DesktopDaemonLifecycle(
         } catch (error: Exception) {
           return DaemonLifecycleResult.Failure(
             "Could not $action AutoMobile $expectedVersion: ${error.message ?: error.javaClass.simpleName}. " +
-              "Install Node.js with npx available, then try again."
+              "Install Bun (recommended) or Node.js so bunx/npx is available, then try again."
           )
         }
       if (commandResult.cancelled) {
@@ -348,17 +421,23 @@ internal class DesktopDaemonLifecycle(
     version: String,
     action: String,
     existingOptions: List<String>,
-  ): List<String> =
-    commandForPlatform(
-      listOf(
-        npxExecutable(System.getProperty("os.name", "")),
-        "-y",
-        "@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}",
-        "--daemon",
-        action,
-      ) + existingOptions,
-      System.getProperty("os.name", ""),
-    )
+  ): List<String> {
+    val osName = System.getProperty("os.name", "")
+    val runner = packageRunnerResolver.resolve(osName)
+    val runnerArguments = buildList {
+      add(runner)
+      // Bun's `bunx` auto-installs without prompting; only npm's `npx` needs `-y`.
+      if (usesYesFlag(runner)) add("-y")
+      add("@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}")
+      add("--daemon")
+      add(action)
+      addAll(existingOptions)
+    }
+    return commandForPlatform(runnerArguments, osName)
+  }
+
+  internal fun usesYesFlag(runner: String): Boolean =
+    File(runner).nameWithoutExtension.lowercase() == "npx"
 
   private fun readPidStateWithRetry(): DaemonPidReadResult {
     repeat(PID_READ_ATTEMPTS) { attempt ->
@@ -413,9 +492,6 @@ internal class DesktopDaemonLifecycle(
 
   private fun declaresFullVersion(version: String): Boolean =
     DaemonSocketPaths.releaseVersion(version) != version
-
-  internal fun npxExecutable(osName: String): String =
-    if (osName.lowercase().contains("win")) "npx.cmd" else "npx"
 
   internal fun commandForPlatform(command: List<String>, osName: String): List<String> {
     if (!osName.lowercase().contains("win")) return command

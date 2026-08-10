@@ -43,6 +43,7 @@ class DesktopDaemonLifecycleTest {
           ),
         commandExecutor = commands,
         timer = timer,
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -52,8 +53,7 @@ class DesktopDaemonLifecycleTest {
     assertEquals(
       listOf(
         listOf(
-          "npx",
-          "-y",
+          "bunx",
           "@kaeawc/auto-mobile@0.0.40",
           "--daemon",
           "start",
@@ -115,6 +115,7 @@ class DesktopDaemonLifecycleTest {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.39", "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -122,7 +123,31 @@ class DesktopDaemonLifecycleTest {
     assertIs<DaemonLifecycleResult.Ready>(result)
     assertTrue(result.restarted)
     assertEquals(
-      listOf(listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
+      listOf(listOf("bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
+      commands.commands,
+    )
+  }
+
+  @Test
+  fun `falls back to npx with the yes flag when bun is unavailable`() {
+    val commands = FakeDaemonCommandExecutor()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(true, true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.39", "0.0.40")),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("/usr/local/bin/npx"),
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertEquals(
+      listOf(
+        listOf("/usr/local/bin/npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")
+      ),
       commands.commands,
     )
   }
@@ -141,6 +166,7 @@ class DesktopDaemonLifecycleTest {
           ),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -149,8 +175,7 @@ class DesktopDaemonLifecycleTest {
     assertEquals(
       listOf(
         listOf(
-          "npx",
-          "-y",
+          "bunx",
           "@kaeawc/auto-mobile@0.0.40",
           "--daemon",
           "restart",
@@ -173,6 +198,7 @@ class DesktopDaemonLifecycleTest {
         pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -180,7 +206,7 @@ class DesktopDaemonLifecycleTest {
     assertIs<DaemonLifecycleResult.Ready>(result)
     assertTrue(result.restarted)
     assertEquals(
-      listOf(listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
+      listOf(listOf("bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
       commands.commands,
     )
   }
@@ -260,15 +286,64 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
-  fun `uses the Windows npm command shim`() {
+  fun `wraps the resolved runner in the Windows command shim`() {
     val lifecycle = DesktopDaemonLifecycle()
 
-    assertEquals("npx.cmd", lifecycle.npxExecutable("Windows 11"))
-    assertEquals("npx", lifecycle.npxExecutable("Mac OS X"))
     assertEquals(
-      listOf("cmd.exe", "/d", "/v:off", "/s", "/c", "\"\"npx.cmd\" \"-y\"\""),
-      lifecycle.commandForPlatform(listOf("npx.cmd", "-y"), "Windows 11"),
+      listOf("cmd.exe", "/d", "/v:off", "/s", "/c", "\"\"bunx.exe\" \"-y\"\""),
+      lifecycle.commandForPlatform(listOf("bunx.exe", "-y"), "Windows 11"),
     )
+  }
+
+  @Test
+  fun `adds the yes flag only for npx runners`() {
+    val lifecycle = DesktopDaemonLifecycle()
+
+    assertFalse(lifecycle.usesYesFlag("bunx"))
+    assertFalse(lifecycle.usesYesFlag("/Users/dev/.bun/bin/bunx"))
+    assertFalse(lifecycle.usesYesFlag("bunx.exe"))
+    assertTrue(lifecycle.usesYesFlag("npx"))
+    assertTrue(lifecycle.usesYesFlag("/usr/local/bin/npx"))
+    assertTrue(lifecycle.usesYesFlag("npx.cmd"))
+  }
+
+  @Test
+  fun `prefers a probed bun install over PATH lookups`() {
+    val onPathQueries = mutableListOf<String>()
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        executableAt = { it == "/Users/dev/.bun/bin/bunx" },
+        onPath = { runner, _ ->
+          onPathQueries += runner
+          null
+        },
+      )
+
+    assertEquals("/Users/dev/.bun/bin/bunx", resolver.resolve("Mac OS X"))
+    assertTrue(onPathQueries.isEmpty())
+  }
+
+  @Test
+  fun `falls back to a PATH runner then the npx name`() {
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        executableAt = { false },
+        onPath = { runner, _ -> if (runner == "npx") "/opt/npx" else null },
+      )
+
+    assertEquals("/opt/npx", resolver.resolve("Mac OS X"))
+
+    val unresolved =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        executableAt = { false },
+        onPath = { _, _ -> null },
+      )
+
+    assertEquals("npx", unresolved.resolve("Mac OS X"))
+    assertEquals("npx.cmd", unresolved.resolve("Windows 11"))
   }
 
   @Test
@@ -407,6 +482,11 @@ class DesktopDaemonLifecycleTest {
       commands += command
       return DaemonCommandResult(exitCode = exitCode, output = output, timedOut = timedOut)
     }
+  }
+
+  private class FakeDaemonPackageRunnerResolver(private val runner: String) :
+    DaemonPackageRunnerResolver {
+    override fun resolve(osName: String): String = runner
   }
 
   private class FakeDaemonRetryTimer : DaemonRetryTimer {

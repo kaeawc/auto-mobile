@@ -409,24 +409,46 @@ internal interface DaemonLifecycleEnsurer {
  * (`lib/node_modules/npm/bin/npx-cli.js`), which never holds `node`. A bare runner name (the
  * unresolved fallback) has no directory to publish.
  */
-internal fun resolveRunnerDirectory(runner: String): String? {
+/** Injectable filesystem link operations, so [resolveRunnerDirectory] is testable without real, */
+/** privilege-gated symlinks (Windows requires elevation to create them). Path arithmetic stays */
+/** on `java.nio.file.Path`, which is pure. */
+internal interface RunnerFileSystem {
+  fun exists(path: Path): Boolean
+
+  fun isSymbolicLink(path: Path): Boolean
+
+  fun readSymbolicLink(path: Path): Path
+}
+
+internal object SystemRunnerFileSystem : RunnerFileSystem {
+  override fun exists(path: Path): Boolean = Files.exists(path)
+
+  override fun isSymbolicLink(path: Path): Boolean = Files.isSymbolicLink(path)
+
+  override fun readSymbolicLink(path: Path): Path = Files.readSymbolicLink(path)
+}
+
+internal fun resolveRunnerDirectory(
+  runner: String,
+  fileSystem: RunnerFileSystem = SystemRunnerFileSystem,
+): String? {
   val start = File(runner)
   val lexicalParent = start.parent ?: return null // bare name → nothing to publish
-  return runCatching { nodeBinDirectory(start.toPath()) }.getOrNull() ?: lexicalParent
+  return runCatching { nodeBinDirectory(start.toPath(), fileSystem) }.getOrNull() ?: lexicalParent
 }
 
 private const val SYMLINK_HOP_LIMIT = 10
 
-private fun directoryHoldsNode(directory: Path): Boolean =
-  Files.exists(directory.resolve("node")) || Files.exists(directory.resolve("node.exe"))
+private fun directoryHoldsNode(directory: Path, fileSystem: RunnerFileSystem): Boolean =
+  fileSystem.exists(directory.resolve("node")) || fileSystem.exists(directory.resolve("node.exe"))
 
-private fun nodeBinDirectory(npx: Path): String? {
+private fun nodeBinDirectory(npx: Path, fileSystem: RunnerFileSystem): String? {
   var current: Path = npx
   repeat(SYMLINK_HOP_LIMIT) {
     val parent = current.parent
-    if (parent != null && directoryHoldsNode(parent)) return parent.toString()
-    if (!Files.isSymbolicLink(current)) return null
-    val target = Files.readSymbolicLink(current)
+    if (parent != null && directoryHoldsNode(parent, fileSystem)) return parent.toString()
+    if (!fileSystem.isSymbolicLink(current)) return null
+    val target = fileSystem.readSymbolicLink(current)
     current =
       (if (target.isAbsolute) target else current.parent?.resolve(target))?.normalize()
         ?: return null
@@ -447,7 +469,7 @@ internal class DesktopDaemonLifecycle(
   private val timer: DaemonRetryTimer = SystemDaemonRetryTimer,
   private val packageRunnerResolver: DaemonPackageRunnerResolver =
     SystemDaemonPackageRunnerResolver(),
-  private val runnerDirectoryOf: (String) -> String? = ::resolveRunnerDirectory,
+  private val runnerDirectoryOf: (String) -> String? = { resolveRunnerDirectory(it) },
   private val verificationAttempts: Int = DEFAULT_VERIFICATION_ATTEMPTS,
 ) : DaemonLifecycleEnsurer {
   override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult =

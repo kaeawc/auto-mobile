@@ -1,7 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
-import java.io.File
 import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -164,38 +164,25 @@ class DesktopDaemonLifecycleTest {
 
   @Test
   fun `resolveRunnerDirectory resolves npx to the node bin, not npm's script dir`() {
-    val temp = Files.createTempDirectory("automobile-runner")
-    try {
-      // Standard nvm layout: node lives in bin, and bin/npx is a symlink into npm's script dir.
-      val nodeBin = Files.createDirectories(temp.resolve("versions/node/v24/bin"))
-      Files.createFile(nodeBin.resolve("node"))
-      val npmBin =
-        Files.createDirectories(temp.resolve("versions/node/v24/lib/node_modules/npm/bin"))
-      val npxCli = Files.createFile(npmBin.resolve("npx-cli.js"))
-      val nvmNpx = Files.createSymbolicLink(nodeBin.resolve("npx"), npxCli)
-
-      val expected = nodeBin.toFile().canonicalPath
-
-      // Direct nvm npx: node sits beside it. Must return the node bin, NOT npm/bin (the fully
-      // canonical target's parent), which has no node.
-      assertEquals(
-        expected,
-        resolveRunnerDirectory(nvmNpx.toString())!!.let { File(it).canonicalPath },
+    // Standard nvm layout modeled in memory (no real, privilege-gated symlinks): node lives in
+    // bin, bin/npx is a symlink into npm's script dir, and a /usr/local/bin shim links into bin.
+    val nodeBin = Path.of("/opt/nvm/versions/node/v24/bin")
+    val npmBin = Path.of("/opt/nvm/versions/node/v24/lib/node_modules/npm/bin")
+    val nvmNpx = nodeBin.resolve("npx")
+    val shimNpx = Path.of("/usr/local/bin/npx")
+    val fs =
+      FakeRunnerFileSystem(
+        nodeFiles = setOf(nodeBin.resolve("node")),
+        symlinks = mapOf(nvmNpx to npmBin.resolve("npx-cli.js"), shimNpx to nvmNpx),
       )
 
-      // A shim in /usr/local/bin that links into the nvm bin resolves to the nvm bin (one hop).
-      val shimDir = Files.createDirectories(temp.resolve("usr/local/bin"))
-      val shimNpx = Files.createSymbolicLink(shimDir.resolve("npx"), nvmNpx)
-      assertEquals(
-        expected,
-        resolveRunnerDirectory(shimNpx.toString())!!.let { File(it).canonicalPath },
-      )
-
-      // A bare runner name (unresolved fallback) has no directory to publish.
-      assertEquals(null, resolveRunnerDirectory("npx"))
-    } finally {
-      temp.toFile().deleteRecursively()
-    }
+    // Direct nvm npx: node sits beside it. Must return the node bin, NOT npm/bin (the fully
+    // canonical target's parent), which has no node.
+    assertEquals(nodeBin.toString(), resolveRunnerDirectory(nvmNpx.toString(), fs))
+    // A shim in /usr/local/bin that links into the nvm bin resolves to the nvm bin (one hop).
+    assertEquals(nodeBin.toString(), resolveRunnerDirectory(shimNpx.toString(), fs))
+    // A bare runner name (unresolved fallback) has no directory to publish.
+    assertEquals(null, resolveRunnerDirectory("npx", fs))
   }
 
   @Test
@@ -610,6 +597,17 @@ class DesktopDaemonLifecycleTest {
   private class FakeDaemonPackageRunnerResolver(private val runner: String) :
     DaemonPackageRunnerResolver {
     override fun resolve(osName: String): String = runner
+  }
+
+  private class FakeRunnerFileSystem(
+    private val nodeFiles: Set<Path>,
+    private val symlinks: Map<Path, Path>,
+  ) : RunnerFileSystem {
+    override fun exists(path: Path): Boolean = path in nodeFiles || path in symlinks
+
+    override fun isSymbolicLink(path: Path): Boolean = path in symlinks
+
+    override fun readSymbolicLink(path: Path): Path = symlinks.getValue(path)
   }
 
   private class FakeDaemonRetryTimer : DaemonRetryTimer {

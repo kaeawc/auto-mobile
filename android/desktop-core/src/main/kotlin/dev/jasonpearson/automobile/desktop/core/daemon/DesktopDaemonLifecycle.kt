@@ -485,17 +485,23 @@ private fun directoryHoldsNode(directory: Path, fileSystem: RunnerFileSystem): B
     fileSystem.isExecutable(directory.resolve("node.exe"))
 
 private fun nodeBinDirectory(npx: Path, fileSystem: RunnerFileSystem): String? {
+  // Follow the symlink chain first and collect each resolved target's directory. The directory npx
+  // actually points into holds the Node it was installed against, so it must outrank an unrelated
+  // `node` sitting beside the shim. The shim's own directory is kept only as a fallback — that is
+  // what makes Homebrew and direct-nvm work, where npx links into npm's node-less script dir.
+  val resolvedDirs = mutableListOf<Path>()
   var current: Path = npx
-  repeat(SYMLINK_HOP_LIMIT) {
-    val parent = current.parent
-    if (parent != null && directoryHoldsNode(parent, fileSystem)) return parent.toString()
-    if (!fileSystem.isSymbolicLink(current)) return null
+  var hops = 0
+  while (hops < SYMLINK_HOP_LIMIT && fileSystem.isSymbolicLink(current)) {
     val target = fileSystem.readSymbolicLink(current)
     current =
-      (if (target.isAbsolute) target else current.parent?.resolve(target))?.normalize()
-        ?: return null
+      (if (target.isAbsolute) target else current.parent?.resolve(target))?.normalize() ?: break
+    current.parent?.let { resolvedDirs.add(it) }
+    hops++
   }
-  return null
+  return (resolvedDirs + listOfNotNull(npx.parent))
+    .firstOrNull { directoryHoldsNode(it, fileSystem) }
+    ?.toString()
 }
 
 /**

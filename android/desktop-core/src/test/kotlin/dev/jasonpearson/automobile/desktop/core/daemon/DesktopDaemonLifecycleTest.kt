@@ -189,6 +189,24 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `resolveRunnerDirectory prefers the node paired with the symlinked npx`() {
+    val shimDir = Path.of("/usr/local/bin")
+    val shimNpx = shimDir.resolve("npx")
+    val nvmBin = Path.of("/Users/dev/.nvm/versions/node/v20.11.1/bin")
+    val nvmNpx = nvmBin.resolve("npx")
+    val fs =
+      FakeRunnerFileSystem(
+        // Both directories have an executable node: the shim's is unrelated/stale, and the
+        // symlink target's is the runtime this npx was installed against.
+        executableNodes = setOf(shimDir.resolve("node"), nvmBin.resolve("node")),
+        symlinks = mapOf(shimNpx to nvmNpx),
+      )
+
+    // The symlink target's node bin wins over the unrelated node beside the shim.
+    assertEquals(nvmBin.toString(), resolveRunnerDirectory(shimNpx.toString(), fs))
+  }
+
+  @Test
   fun `preserves the skewed daemon options when restarting`() {
     val commands = FakeDaemonCommandExecutor()
     val lifecycle =

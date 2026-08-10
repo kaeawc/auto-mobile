@@ -167,10 +167,7 @@ internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
     val builder = ProcessBuilder(command).redirectErrorStream(true)
     if (runnerDirectory != null) {
       val environment = builder.environment()
-      val existingPath = environment["PATH"].orEmpty()
-      environment["PATH"] =
-        if (existingPath.isEmpty()) runnerDirectory
-        else "$runnerDirectory${File.pathSeparator}$existingPath"
+      environment["PATH"] = composePath(runnerDirectory, environment["PATH"])
     }
     val process = builder.start()
     val output = StringBuffer()
@@ -214,6 +211,11 @@ internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
     }
     descendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
   }
+
+  /** Prepends [runnerDirectory] to [existingPath], preserving the caller's order after it. */
+  internal fun composePath(runnerDirectory: String, existingPath: String?): String =
+    if (existingPath.isNullOrEmpty()) runnerDirectory
+    else "$runnerDirectory${File.pathSeparator}$existingPath"
 
   internal fun commandTimeoutMillis(
     startupTimeoutOverride: String? =
@@ -493,17 +495,22 @@ internal class DesktopDaemonLifecycle(
   ): DaemonLaunchCommand {
     val osName = System.getProperty("os.name", "")
     val runner = packageRunnerResolver.resolve(osName)
+    val isNpx = usesYesFlag(runner)
     val runnerArguments = buildList {
       add(runner)
       // Bun's `bunx` auto-installs without prompting; only npm's `npx` needs `-y`.
-      if (usesYesFlag(runner)) add("-y")
+      if (isNpx) add("-y")
       add("@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}")
       add("--daemon")
       add(action)
       addAll(existingOptions)
     }
-    // A bare runner name (the unresolved fallback) has no directory to publish onto PATH.
-    return DaemonLaunchCommand(commandForPlatform(runnerArguments, osName), File(runner).parent)
+    // Publish the runner directory onto PATH only for npx, whose `env node` shebang needs the
+    // sibling `node`. bunx is self-contained, so leave the daemon's inherited PATH order untouched
+    // to avoid shadowing user-configured bare-name tools (e.g. ffmpeg). A bare runner name (the
+    // unresolved fallback) likewise has no directory to publish.
+    val runnerDirectory = if (isNpx) File(runner).parent else null
+    return DaemonLaunchCommand(commandForPlatform(runnerArguments, osName), runnerDirectory)
   }
 
   internal fun usesYesFlag(runner: String): Boolean =

@@ -117,7 +117,7 @@ class DesktopDaemonLifecycleTest {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.39", "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("/opt/homebrew/bin/bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -125,9 +125,12 @@ class DesktopDaemonLifecycleTest {
     assertIs<DaemonLifecycleResult.Ready>(result)
     assertTrue(result.restarted)
     assertEquals(
-      listOf(listOf("bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
+      listOf(listOf("/opt/homebrew/bin/bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
       commands.commands,
     )
+    // bunx is self-contained: its directory is NOT published onto PATH, so the daemon's inherited
+    // PATH order (and its bare-name tool resolution) is left untouched.
+    assertEquals(listOf<String?>(null), commands.runnerDirectories)
   }
 
   @Test
@@ -391,17 +394,21 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
-  fun `prepends the runner directory onto the child PATH`() {
-    if (System.getProperty("os.name", "").lowercase().contains("win")) return
+  fun `composes the child PATH with the runner directory first`() {
+    val separator = java.io.File.pathSeparator
 
-    val result =
-      SystemDaemonCommandExecutor.execute(
-        listOf("sh", "-c", "printf '%s' \"\$PATH\""),
-        runnerDirectory = "/opt/automobile/runner-bin",
-      )
-
-    assertEquals(0, result.exitCode)
-    assertTrue(result.output.trim().startsWith("/opt/automobile/runner-bin:"))
+    assertEquals(
+      "/opt/automobile/runner-bin${separator}/custom/bin",
+      SystemDaemonCommandExecutor.composePath("/opt/automobile/runner-bin", "/custom/bin"),
+    )
+    assertEquals(
+      "/opt/automobile/runner-bin",
+      SystemDaemonCommandExecutor.composePath("/opt/automobile/runner-bin", null),
+    )
+    assertEquals(
+      "/opt/automobile/runner-bin",
+      SystemDaemonCommandExecutor.composePath("/opt/automobile/runner-bin", ""),
+    )
   }
 
   @Test

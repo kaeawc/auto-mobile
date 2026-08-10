@@ -320,6 +320,10 @@ internal class SystemDaemonPackageRunnerResolver(
         home?.let { add("$it/.bun/bin/bunx") }
         add("/opt/homebrew/bin/bunx")
         add("/usr/local/bin/bunx")
+        // Homebrew on Linux (Linuxbrew): the desktop ships a Linux Deb, and a desktop-session PATH
+        // often omits Linuxbrew, so probe its default multi-user and per-user prefixes.
+        add("/home/linuxbrew/.linuxbrew/bin/bunx")
+        home?.let { add("$it/.linuxbrew/bin/bunx") }
       }
     }
 
@@ -336,6 +340,8 @@ internal class SystemDaemonPackageRunnerResolver(
       buildList {
         add("/opt/homebrew/bin/npx")
         add("/usr/local/bin/npx")
+        add("/home/linuxbrew/.linuxbrew/bin/npx")
+        home?.let { add("$it/.linuxbrew/bin/npx") }
         home?.let { h ->
           val nvmNodeDir = "$h/.nvm/versions/node"
           nvmNodeVersionsNewestFirst(nvmNodeDir).forEach { version ->
@@ -445,7 +451,8 @@ internal interface DaemonLifecycleEnsurer {
 /** privilege-gated symlinks (Windows requires elevation to create them). Path arithmetic stays */
 /** on `java.nio.file.Path`, which is pure. */
 internal interface RunnerFileSystem {
-  fun exists(path: Path): Boolean
+  /** True only when [path] is an existing, *executable* file. */
+  fun isExecutable(path: Path): Boolean
 
   fun isSymbolicLink(path: Path): Boolean
 
@@ -453,7 +460,7 @@ internal interface RunnerFileSystem {
 }
 
 internal object SystemRunnerFileSystem : RunnerFileSystem {
-  override fun exists(path: Path): Boolean = Files.exists(path)
+  override fun isExecutable(path: Path): Boolean = Files.isExecutable(path)
 
   override fun isSymbolicLink(path: Path): Boolean = Files.isSymbolicLink(path)
 
@@ -465,16 +472,17 @@ internal fun resolveRunnerDirectory(
   fileSystem: RunnerFileSystem = SystemRunnerFileSystem,
 ): String? {
   if (File(runner).parent == null) return null // bare name → nothing to publish
-  // Null when no reachable Node exists along the chain — the caller must NOT publish a node-less
-  // directory (it would still fail `env node`); a node-less npx is treated as an unusable
-  // candidate.
+  // Null when no *executable* Node exists along the chain — the caller must NOT publish such a
+  // directory (a missing or non-executable node still fails `env node`); the npx is then treated
+  // as an unusable candidate so the resolver moves on to the next one.
   return runCatching { nodeBinDirectory(File(runner).toPath(), fileSystem) }.getOrNull()
 }
 
 private const val SYMLINK_HOP_LIMIT = 10
 
 private fun directoryHoldsNode(directory: Path, fileSystem: RunnerFileSystem): Boolean =
-  fileSystem.exists(directory.resolve("node")) || fileSystem.exists(directory.resolve("node.exe"))
+  fileSystem.isExecutable(directory.resolve("node")) ||
+    fileSystem.isExecutable(directory.resolve("node.exe"))
 
 private fun nodeBinDirectory(npx: Path, fileSystem: RunnerFileSystem): String? {
   var current: Path = npx

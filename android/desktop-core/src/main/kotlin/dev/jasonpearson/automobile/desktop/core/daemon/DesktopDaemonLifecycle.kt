@@ -252,6 +252,7 @@ internal class SystemDaemonPackageRunnerResolver(
   private val home: String? =
     System.getProperty("user.home")?.takeIf { it.isNotEmpty() } ?: System.getenv("HOME"),
   private val executableAt: (String) -> Boolean = { File(it).canExecute() },
+  private val listDir: (String) -> List<String> = { File(it).list()?.toList().orEmpty() },
   private val onPath: (String, Boolean) -> String? = ::whichRunner,
 ) : DaemonPackageRunnerResolver {
   override fun resolve(osName: String): String {
@@ -268,6 +269,13 @@ internal class SystemDaemonPackageRunnerResolver(
     return if (isWindows) "npx.cmd" else "npx"
   }
 
+  /**
+   * Ordered highest-precedence first. Bun (`bunx`) always outranks Node (`npx`). Among the Node
+   * fallbacks, an nvm-installed Node is resolved by scanning `~/.nvm/versions/node/<version>/bin`
+   * newest-version first — nvm only publishes a `current` symlink when `NVM_SYMLINK_CURRENT=true`
+   * (off by default), and a detached GUI process cannot observe the shell-active version, so the
+   * newest installed version is the deterministic proxy.
+   */
   private fun absoluteCandidates(isWindows: Boolean): List<String> =
     if (isWindows) {
       buildList { home?.let { add("$it\\.bun\\bin\\bunx.exe") } }
@@ -278,14 +286,37 @@ internal class SystemDaemonPackageRunnerResolver(
         add("/usr/local/bin/bunx")
         add("/opt/homebrew/bin/npx")
         add("/usr/local/bin/npx")
-        home?.let {
-          add("$it/.nvm/current/bin/npx")
-          add("$it/.volta/bin/npx")
+        home?.let { h ->
+          val nvmNodeDir = "$h/.nvm/versions/node"
+          nvmNodeVersionsNewestFirst(nvmNodeDir).forEach { version ->
+            add("$nvmNodeDir/$version/bin/npx")
+          }
+          add("$h/.volta/bin/npx")
         }
       }
     }
 
+  private fun nvmNodeVersionsNewestFirst(nvmNodeDir: String): List<String> =
+    listDir(nvmNodeDir).filter { it.startsWith("v") }.sortedWith(NVM_VERSION_ORDER.reversed())
+
   private companion object {
+    /**
+     * Ascending numeric order over dotted version dirs (`v20.11.1`); unparseable parts sort as 0.
+     */
+    val NVM_VERSION_ORDER: Comparator<String> = Comparator { left, right ->
+      val leftParts = versionParts(left)
+      val rightParts = versionParts(right)
+      for (index in 0 until maxOf(leftParts.size, rightParts.size)) {
+        val difference =
+          leftParts.getOrElse(index) { 0 }.compareTo(rightParts.getOrElse(index) { 0 })
+        if (difference != 0) return@Comparator difference
+      }
+      0
+    }
+
+    private fun versionParts(version: String): List<Int> =
+      version.removePrefix("v").split('.', '-').mapNotNull { it.toIntOrNull() }
+
     fun whichRunner(runner: String, isWindows: Boolean): String? {
       val locator = if (isWindows) "where" else "which"
       return try {

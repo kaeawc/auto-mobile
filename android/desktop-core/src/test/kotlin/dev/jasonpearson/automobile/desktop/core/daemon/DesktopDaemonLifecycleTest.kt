@@ -314,6 +314,7 @@ class DesktopDaemonLifecycleTest {
       SystemDaemonPackageRunnerResolver(
         home = "/Users/dev",
         executableAt = { it == "/Users/dev/.bun/bin/bunx" },
+        listDir = { emptyList() },
         onPath = { runner, _ ->
           onPathQueries += runner
           null
@@ -325,11 +326,29 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `resolves the newest nvm-installed node before the volta fallback`() {
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        executableAt = { it.startsWith("/Users/dev/.nvm/") || it == "/Users/dev/.volta/bin/npx" },
+        listDir = { dir ->
+          if (dir == "/Users/dev/.nvm/versions/node") listOf("v16.20.2", "v20.11.1", "v18.19.0")
+          else emptyList()
+        },
+        onPath = { _, _ -> null },
+      )
+
+    // Newest installed version wins over older ones and the Volta fallback.
+    assertEquals("/Users/dev/.nvm/versions/node/v20.11.1/bin/npx", resolver.resolve("Mac OS X"))
+  }
+
+  @Test
   fun `falls back to a PATH runner then the npx name`() {
     val resolver =
       SystemDaemonPackageRunnerResolver(
         home = "/Users/dev",
         executableAt = { false },
+        listDir = { emptyList() },
         onPath = { runner, _ -> if (runner == "npx") "/opt/npx" else null },
       )
 
@@ -339,6 +358,7 @@ class DesktopDaemonLifecycleTest {
       SystemDaemonPackageRunnerResolver(
         home = "/Users/dev",
         executableAt = { false },
+        listDir = { emptyList() },
         onPath = { _, _ -> null },
       )
 

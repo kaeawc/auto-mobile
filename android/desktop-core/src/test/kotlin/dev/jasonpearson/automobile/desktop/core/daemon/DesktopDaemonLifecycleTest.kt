@@ -62,6 +62,8 @@ class DesktopDaemonLifecycleTest {
       ),
       commands.commands,
     )
+    // A bare runner name (unresolved fallback) has no directory to publish onto PATH.
+    assertEquals(listOf<String?>(null), commands.runnerDirectories)
     assertEquals(listOf(150L, 150L), timer.delays)
   }
 
@@ -150,6 +152,9 @@ class DesktopDaemonLifecycleTest {
       ),
       commands.commands,
     )
+    // The runner's own directory is published onto the child PATH so npx's `env node` shebang
+    // finds the sibling `node` under a GUI-stripped PATH.
+    assertEquals(listOf<String?>("/usr/local/bin"), commands.runnerDirectories)
   }
 
   @Test
@@ -240,6 +245,7 @@ class DesktopDaemonLifecycleTest {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.39", "0.0.39")),
         commandExecutor = FakeDaemonCommandExecutor(),
         timer = timer,
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
         verificationAttempts = 2,
       )
 
@@ -260,6 +266,7 @@ class DesktopDaemonLifecycleTest {
         pidFileReader = FakeDaemonPidFileReader(listOf(null)),
         commandExecutor = FakeDaemonCommandExecutor(exitCode = 1, output = ""),
         timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -277,6 +284,7 @@ class DesktopDaemonLifecycleTest {
         pidFileReader = FakeDaemonPidFileReader(listOf(null)),
         commandExecutor = FakeDaemonCommandExecutor(exitCode = -1, timedOut = true),
         timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -364,6 +372,20 @@ class DesktopDaemonLifecycleTest {
 
     assertEquals("npx", unresolved.resolve("Mac OS X"))
     assertEquals("npx.cmd", unresolved.resolve("Windows 11"))
+  }
+
+  @Test
+  fun `prepends the runner directory onto the child PATH`() {
+    if (System.getProperty("os.name", "").lowercase().contains("win")) return
+
+    val result =
+      SystemDaemonCommandExecutor.execute(
+        listOf("sh", "-c", "printf '%s' \"\$PATH\""),
+        runnerDirectory = "/opt/automobile/runner-bin",
+      )
+
+    assertEquals(0, result.exitCode)
+    assertTrue(result.output.trim().startsWith("/opt/automobile/runner-bin:"))
   }
 
   @Test
@@ -497,9 +519,11 @@ class DesktopDaemonLifecycleTest {
     private val timedOut: Boolean = false,
   ) : DaemonCommandExecutor {
     val commands = mutableListOf<List<String>>()
+    val runnerDirectories = mutableListOf<String?>()
 
-    override fun execute(command: List<String>): DaemonCommandResult {
+    override fun execute(command: List<String>, runnerDirectory: String?): DaemonCommandResult {
       commands += command
+      runnerDirectories += runnerDirectory
       return DaemonCommandResult(exitCode = exitCode, output = output, timedOut = timedOut)
     }
   }

@@ -146,13 +146,33 @@ internal data class DaemonCommandResult(
   val cancelled: Boolean = false,
 )
 
+/** A resolved launch command plus the runner's own directory to publish onto the child `PATH`. */
+internal data class DaemonLaunchCommand(
+  val command: List<String>,
+  val runnerDirectory: String?,
+)
+
 internal interface DaemonCommandExecutor {
-  fun execute(command: List<String>): DaemonCommandResult
+  /**
+   * [runnerDirectory], when non-null, is prepended to the child's `PATH`. `npx` is a
+   * `#!/usr/bin/env node` script, so under a GUI-stripped `PATH` an absolute `npx` still exits 127
+   * because the sibling `node` is undiscoverable; publishing the runner's own directory fixes that
+   * (and is harmless for the self-contained `bunx`).
+   */
+  fun execute(command: List<String>, runnerDirectory: String? = null): DaemonCommandResult
 }
 
 internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
-  override fun execute(command: List<String>): DaemonCommandResult {
-    val process = ProcessBuilder(command).redirectErrorStream(true).start()
+  override fun execute(command: List<String>, runnerDirectory: String?): DaemonCommandResult {
+    val builder = ProcessBuilder(command).redirectErrorStream(true)
+    if (runnerDirectory != null) {
+      val environment = builder.environment()
+      val existingPath = environment["PATH"].orEmpty()
+      environment["PATH"] =
+        if (existingPath.isEmpty()) runnerDirectory
+        else "$runnerDirectory${File.pathSeparator}$existingPath"
+    }
+    val process = builder.start()
     val output = StringBuffer()
     val outputDrainer = Thread {
       process.inputStream.bufferedReader().useLines { lines ->
@@ -404,9 +424,9 @@ internal class DesktopDaemonLifecycle(
       val action = if (daemonAvailable) "restart" else "start"
       val commandResult =
         try {
-          val command =
+          val launch =
             packageDaemonCommand(expectedVersion, action, currentDaemon?.launchArguments.orEmpty())
-          commandExecutor.execute(command)
+          commandExecutor.execute(launch.command, launch.runnerDirectory)
         } catch (error: Exception) {
           return DaemonLifecycleResult.Failure(
             "Could not $action AutoMobile $expectedVersion: ${error.message ?: error.javaClass.simpleName}. " +
@@ -452,7 +472,7 @@ internal class DesktopDaemonLifecycle(
     version: String,
     action: String,
     existingOptions: List<String>,
-  ): List<String> {
+  ): DaemonLaunchCommand {
     val osName = System.getProperty("os.name", "")
     val runner = packageRunnerResolver.resolve(osName)
     val runnerArguments = buildList {
@@ -464,7 +484,8 @@ internal class DesktopDaemonLifecycle(
       add(action)
       addAll(existingOptions)
     }
-    return commandForPlatform(runnerArguments, osName)
+    // A bare runner name (the unresolved fallback) has no directory to publish onto PATH.
+    return DaemonLaunchCommand(commandForPlatform(runnerArguments, osName), File(runner).parent)
   }
 
   internal fun usesYesFlag(runner: String): Boolean =

@@ -408,6 +408,24 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `prefers the stable nvm release over an installed release candidate`() {
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        executableAt = { it.startsWith("/Users/dev/.nvm/") },
+        listDir = { dir ->
+          if (dir == "/Users/dev/.nvm/versions/node")
+            listOf("v20.11.1-rc.1", "v20.11.1", "v18.19.0")
+          else emptyList()
+        },
+        onPath = { _, _ -> null },
+      )
+
+    // The stable release must win even though the RC's trailing number would sort it "newer".
+    assertEquals("/Users/dev/.nvm/versions/node/v20.11.1/bin/npx", resolver.resolve("Mac OS X"))
+  }
+
+  @Test
   fun `falls back to a PATH runner then the npx name`() {
     val resolver =
       SystemDaemonPackageRunnerResolver(

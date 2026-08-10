@@ -338,8 +338,16 @@ internal class SystemDaemonPackageRunnerResolver(
       }
     }
 
-  private fun nvmNodeVersionsNewestFirst(nvmNodeDir: String): List<String> =
-    listDir(nvmNodeDir).filter { it.startsWith("v") }.sortedWith(NVM_VERSION_ORDER.reversed())
+  private fun nvmNodeVersionsNewestFirst(nvmNodeDir: String): List<String> {
+    val versions = listDir(nvmNodeDir).filter { it.startsWith("v") }
+    // A prerelease dir (`v20.11.1-rc.1`) must never outrank its stable release: `versionParts`
+    // drops the `rc` identifier but keeps its trailing number, so a naive numeric sort would call
+    // the RC newer. Rank all stable releases ahead of all prereleases; keep prereleases only as a
+    // last resort so a prerelease-only install still resolves. Newest numeric version wins in each.
+    val (stable, prerelease) = versions.partition { !it.contains('-') }
+    return stable.sortedWith(NVM_VERSION_ORDER.reversed()) +
+      prerelease.sortedWith(NVM_VERSION_ORDER.reversed())
+  }
 
   private companion object {
     /**

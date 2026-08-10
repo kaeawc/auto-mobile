@@ -278,12 +278,13 @@ internal class SystemDaemonPackageRunnerResolver(
   private val executableAt: (String) -> Boolean = { File(it).canExecute() },
   private val listDir: (String) -> List<String> = { File(it).list()?.toList().orEmpty() },
   private val onPath: (String, Boolean) -> String? = ::whichRunner,
+  private val fileSystem: RunnerFileSystem = SystemRunnerFileSystem,
 ) : DaemonPackageRunnerResolver {
   override fun resolve(osName: String): String {
     val isWindows = osName.lowercase().contains("win")
     // Bun-first: every `bunx` probe — absolute install locations AND the PATH lookup — must rank
     // ahead of every `npx` probe, so a Bun supplied on PATH by mise/asdf is never passed over for
-    // an absolute npm `npx`. Only after Bun is exhausted do we fall back to Node.
+    // an absolute npm `npx`. bunx is self-contained, so being executable is enough.
     bunAbsoluteCandidates(isWindows)
       .firstOrNull { executableAt(it) }
       ?.let {
@@ -292,17 +293,24 @@ internal class SystemDaemonPackageRunnerResolver(
     onPath("bunx", isWindows)?.let {
       return it
     }
+    // npx needs a reachable Node runtime beside it (or along its symlink chain); a stale npx with
+    // no `node` must not be selected, or it would mask a later working install and still exit 127.
     nodeAbsoluteCandidates(isWindows)
-      .firstOrNull { executableAt(it) }
+      .firstOrNull { executableAt(it) && hasReachableNode(it) }
       ?.let {
         return it
       }
-    onPath("npx", isWindows)?.let {
-      return it
-    }
+    onPath("npx", isWindows)
+      ?.takeIf { hasReachableNode(it) }
+      ?.let {
+        return it
+      }
     // Nothing resolved: emit the legacy npx name so the failure surfaces actionable guidance.
     return if (isWindows) "npx.cmd" else "npx"
   }
+
+  private fun hasReachableNode(npx: String): Boolean =
+    resolveRunnerDirectory(npx, fileSystem) != null
 
   private fun bunAbsoluteCandidates(isWindows: Boolean): List<String> =
     if (isWindows) {
@@ -432,9 +440,11 @@ internal fun resolveRunnerDirectory(
   runner: String,
   fileSystem: RunnerFileSystem = SystemRunnerFileSystem,
 ): String? {
-  val start = File(runner)
-  val lexicalParent = start.parent ?: return null // bare name → nothing to publish
-  return runCatching { nodeBinDirectory(start.toPath(), fileSystem) }.getOrNull() ?: lexicalParent
+  if (File(runner).parent == null) return null // bare name → nothing to publish
+  // Null when no reachable Node exists along the chain — the caller must NOT publish a node-less
+  // directory (it would still fail `env node`); a node-less npx is treated as an unusable
+  // candidate.
+  return runCatching { nodeBinDirectory(File(runner).toPath(), fileSystem) }.getOrNull()
 }
 
 private const val SYMLINK_HOP_LIMIT = 10

@@ -183,6 +183,9 @@ class DesktopDaemonLifecycleTest {
     assertEquals(nodeBin.toString(), resolveRunnerDirectory(shimNpx.toString(), fs))
     // A bare runner name (unresolved fallback) has no directory to publish.
     assertEquals(null, resolveRunnerDirectory("npx", fs))
+    // No reachable node along the chain → null, so the caller never publishes a node-less dir.
+    val emptyFs = FakeRunnerFileSystem(nodeFiles = emptySet(), symlinks = emptyMap())
+    assertEquals(null, resolveRunnerDirectory("/usr/local/bin/npx", emptyFs))
   }
 
   @Test
@@ -388,6 +391,12 @@ class DesktopDaemonLifecycleTest {
           else emptyList()
         },
         onPath = { _, _ -> null },
+        fileSystem =
+          fsWithNodeIn(
+            "/Users/dev/.nvm/versions/node/v20.11.1/bin",
+            "/Users/dev/.nvm/versions/node/v18.19.0/bin",
+            "/Users/dev/.nvm/versions/node/v16.20.2/bin",
+          ),
       )
 
     // Newest installed version wins over older ones and the Volta fallback.
@@ -406,10 +415,35 @@ class DesktopDaemonLifecycleTest {
           else emptyList()
         },
         onPath = { _, _ -> null },
+        fileSystem =
+          fsWithNodeIn(
+            "/Users/dev/.nvm/versions/node/v20.11.1/bin",
+            "/Users/dev/.nvm/versions/node/v18.19.0/bin",
+          ),
       )
 
     // The stable release must win even though the RC's trailing number would sort it "newer".
     assertEquals("/Users/dev/.nvm/versions/node/v20.11.1/bin/npx", resolver.resolve("Mac OS X"))
+  }
+
+  @Test
+  fun `skips a node-less npx and selects a working nvm install`() {
+    val staleNpx = "/opt/homebrew/bin/npx"
+    val nvmBin = "/Users/dev/.nvm/versions/node/v20.11.1/bin"
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        // Both npx binaries are executable, but only the nvm one has node beside it.
+        executableAt = { it == staleNpx || it == "$nvmBin/npx" },
+        listDir = { dir ->
+          if (dir == "/Users/dev/.nvm/versions/node") listOf("v20.11.1") else emptyList()
+        },
+        onPath = { _, _ -> null },
+        fileSystem = fsWithNodeIn(nvmBin),
+      )
+
+    // The stale Homebrew npx (no reachable node) is skipped rather than masking the working nvm.
+    assertEquals("$nvmBin/npx", resolver.resolve("Mac OS X"))
   }
 
   @Test
@@ -420,6 +454,8 @@ class DesktopDaemonLifecycleTest {
         executableAt = { false },
         listDir = { emptyList() },
         onPath = { runner, _ -> if (runner == "npx") "/opt/npx" else null },
+        // node lives beside the PATH-resolved npx, so it is usable.
+        fileSystem = fsWithNodeIn("/opt"),
       )
 
     assertEquals("/opt/npx", resolver.resolve("Mac OS X"))
@@ -609,6 +645,12 @@ class DesktopDaemonLifecycleTest {
 
     override fun readSymbolicLink(path: Path): Path = symlinks.getValue(path)
   }
+
+  private fun fsWithNodeIn(vararg binDirs: String): FakeRunnerFileSystem =
+    FakeRunnerFileSystem(
+      nodeFiles = binDirs.map { Path.of(it).resolve("node") }.toSet(),
+      symlinks = emptyMap(),
+    )
 
   private class FakeDaemonRetryTimer : DaemonRetryTimer {
     val delays = mutableListOf<Long>()

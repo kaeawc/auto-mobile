@@ -1,11 +1,11 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import java.nio.file.Files
-import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DesktopDaemonLifecycleTest {
@@ -53,18 +53,10 @@ class DesktopDaemonLifecycleTest {
     assertTrue(result.restarted)
     assertEquals(
       listOf(
-        listOf(
-          "bunx",
-          "@kaeawc/auto-mobile@0.0.40",
-          "--daemon",
-          "start",
-          "--network-mockable",
-        )
+        listOf("bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "start", "--network-mockable")
       ),
       commands.commands,
     )
-    // A bare runner name (unresolved fallback) has no directory to publish onto PATH.
-    assertEquals(listOf<String?>(null), commands.runnerDirectories)
     assertEquals(listOf(150L, 150L), timer.delays)
   }
 
@@ -129,81 +121,6 @@ class DesktopDaemonLifecycleTest {
       listOf(listOf("/opt/homebrew/bin/bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
       commands.commands,
     )
-    // bunx is self-contained: its directory is NOT published onto PATH, so the daemon's inherited
-    // PATH order (and its bare-name tool resolution) is left untouched.
-    assertEquals(listOf<String?>(null), commands.runnerDirectories)
-  }
-
-  @Test
-  fun `falls back to npx with the yes flag when bun is unavailable`() {
-    val commands = FakeDaemonCommandExecutor()
-    val lifecycle =
-      DesktopDaemonLifecycle(
-        expectedVersionProvider = { "0.0.40" },
-        socketChecker = FakeDaemonSocketChecker(listOf(true, true)),
-        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.39", "0.0.40")),
-        commandExecutor = commands,
-        timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("/usr/local/bin/npx"),
-        runnerDirectoryOf = { "/usr/local/bin" },
-      )
-
-    val result = lifecycle.ensureVersionMatchedDaemon()
-
-    assertIs<DaemonLifecycleResult.Ready>(result)
-    assertEquals(
-      listOf(
-        listOf("/usr/local/bin/npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")
-      ),
-      commands.commands,
-    )
-    // The npx directory is published onto the child PATH so npx's `env node` shebang finds the
-    // sibling `node` under a GUI-stripped PATH.
-    assertEquals(listOf<String?>("/usr/local/bin"), commands.runnerDirectories)
-  }
-
-  @Test
-  fun `resolveRunnerDirectory resolves npx to the node bin, not npm's script dir`() {
-    // Standard nvm layout modeled in memory (no real, privilege-gated symlinks): node lives in
-    // bin, bin/npx is a symlink into npm's script dir, and a /usr/local/bin shim links into bin.
-    val nodeBin = Path.of("/opt/nvm/versions/node/v24/bin")
-    val npmBin = Path.of("/opt/nvm/versions/node/v24/lib/node_modules/npm/bin")
-    val nvmNpx = nodeBin.resolve("npx")
-    val shimNpx = Path.of("/usr/local/bin/npx")
-    val fs =
-      FakeRunnerFileSystem(
-        executableNodes = setOf(nodeBin.resolve("node")),
-        symlinks = mapOf(nvmNpx to npmBin.resolve("npx-cli.js"), shimNpx to nvmNpx),
-      )
-
-    // Direct nvm npx: node sits beside it. Must return the node bin, NOT npm/bin (the fully
-    // canonical target's parent), which has no node.
-    assertEquals(nodeBin.toString(), resolveRunnerDirectory(nvmNpx.toString(), fs))
-    // A shim in /usr/local/bin that links into the nvm bin resolves to the nvm bin (one hop).
-    assertEquals(nodeBin.toString(), resolveRunnerDirectory(shimNpx.toString(), fs))
-    // A bare runner name (unresolved fallback) has no directory to publish.
-    assertEquals(null, resolveRunnerDirectory("npx", fs))
-    // No reachable node along the chain → null, so the caller never publishes a node-less dir.
-    val emptyFs = FakeRunnerFileSystem(executableNodes = emptySet(), symlinks = emptyMap())
-    assertEquals(null, resolveRunnerDirectory("/usr/local/bin/npx", emptyFs))
-  }
-
-  @Test
-  fun `resolveRunnerDirectory prefers the node paired with the symlinked npx`() {
-    val shimDir = Path.of("/usr/local/bin")
-    val shimNpx = shimDir.resolve("npx")
-    val nvmBin = Path.of("/Users/dev/.nvm/versions/node/v20.11.1/bin")
-    val nvmNpx = nvmBin.resolve("npx")
-    val fs =
-      FakeRunnerFileSystem(
-        // Both directories have an executable node: the shim's is unrelated/stale, and the
-        // symlink target's is the runtime this npx was installed against.
-        executableNodes = setOf(shimDir.resolve("node"), nvmBin.resolve("node")),
-        symlinks = mapOf(shimNpx to nvmNpx),
-      )
-
-    // The symlink target's node bin wins over the unrelated node beside the shim.
-    assertEquals(nvmBin.toString(), resolveRunnerDirectory(shimNpx.toString(), fs))
   }
 
   @Test
@@ -325,6 +242,24 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `reports actionable guidance when bunx cannot be run`() {
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(false)),
+        pidFileReader = FakeDaemonPidFileReader(listOf(null)),
+        commandExecutor = ThrowingDaemonCommandExecutor("Cannot run program \"bunx\""),
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Failure>(result)
+    assertTrue(result.message.contains("Install Bun so bunx is available"))
+  }
+
+  @Test
   fun `reports an actionable error when the pinned launch command times out`() {
     val lifecycle =
       DesktopDaemonLifecycle(
@@ -347,21 +282,9 @@ class DesktopDaemonLifecycleTest {
     val lifecycle = DesktopDaemonLifecycle()
 
     assertEquals(
-      listOf("cmd.exe", "/d", "/v:off", "/s", "/c", "\"\"bunx.exe\" \"-y\"\""),
-      lifecycle.commandForPlatform(listOf("bunx.exe", "-y"), "Windows 11"),
+      listOf("cmd.exe", "/d", "/v:off", "/s", "/c", "\"\"bunx.exe\" \"restart\"\""),
+      lifecycle.commandForPlatform(listOf("bunx.exe", "restart"), "Windows 11"),
     )
-  }
-
-  @Test
-  fun `adds the yes flag only for npx runners`() {
-    val lifecycle = DesktopDaemonLifecycle()
-
-    assertFalse(lifecycle.usesYesFlag("bunx"))
-    assertFalse(lifecycle.usesYesFlag("/Users/dev/.bun/bin/bunx"))
-    assertFalse(lifecycle.usesYesFlag("bunx.exe"))
-    assertTrue(lifecycle.usesYesFlag("npx"))
-    assertTrue(lifecycle.usesYesFlag("/usr/local/bin/npx"))
-    assertTrue(lifecycle.usesYesFlag("npx.cmd"))
   }
 
   @Test
@@ -371,7 +294,6 @@ class DesktopDaemonLifecycleTest {
         home = "/Users/dev",
         // A stale hard-coded ~/.bun/bin/bunx lingers, but the user has migrated to mise.
         executableAt = { it == "/Users/dev/.bun/bin/bunx" },
-        listDir = { emptyList() },
         onPath = { runner, _ ->
           if (runner == "bunx") "/Users/dev/.local/share/mise/shims/bunx" else null
         },
@@ -387,28 +309,11 @@ class DesktopDaemonLifecycleTest {
       SystemDaemonPackageRunnerResolver(
         home = "/Users/dev",
         executableAt = { it == "/Users/dev/.bun/bin/bunx" },
-        listDir = { emptyList() },
         // GUI-launched app: where/which resolves nothing against the stripped PATH.
         onPath = { _, _ -> null },
       )
 
     assertEquals("/Users/dev/.bun/bin/bunx", resolver.resolve("Mac OS X"))
-  }
-
-  @Test
-  fun `prefers a PATH bunx over an absolute npx fallback`() {
-    // Bun supplied on PATH by mise/asdf, npx present only at an absolute Homebrew path.
-    val resolver =
-      SystemDaemonPackageRunnerResolver(
-        home = "/Users/dev",
-        executableAt = { it == "/opt/homebrew/bin/npx" },
-        listDir = { emptyList() },
-        onPath = { runner, _ ->
-          if (runner == "bunx") "/Users/dev/.local/share/mise/shims/bunx" else null
-        },
-      )
-
-    assertEquals("/Users/dev/.local/share/mise/shims/bunx", resolver.resolve("Mac OS X"))
   }
 
   @Test
@@ -419,7 +324,6 @@ class DesktopDaemonLifecycleTest {
         home = "/home/dev",
         // Bun is only under Linuxbrew, and the desktop-session PATH omits it.
         executableAt = { it == linuxbrewBunx },
-        listDir = { emptyList() },
         onPath = { _, _ -> null },
       )
 
@@ -427,113 +331,24 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
-  fun `resolves the newest nvm-installed node before the volta fallback`() {
-    val resolver =
-      SystemDaemonPackageRunnerResolver(
-        home = "/Users/dev",
-        executableAt = { it.startsWith("/Users/dev/.nvm/") || it == "/Users/dev/.volta/bin/npx" },
-        listDir = { dir ->
-          if (dir == "/Users/dev/.nvm/versions/node") listOf("v16.20.2", "v20.11.1", "v18.19.0")
-          else emptyList()
-        },
-        onPath = { _, _ -> null },
-        fileSystem =
-          fsWithNodeIn(
-            "/Users/dev/.nvm/versions/node/v20.11.1/bin",
-            "/Users/dev/.nvm/versions/node/v18.19.0/bin",
-            "/Users/dev/.nvm/versions/node/v16.20.2/bin",
-          ),
-      )
-
-    // Newest installed version wins over older ones and the Volta fallback.
-    assertEquals("/Users/dev/.nvm/versions/node/v20.11.1/bin/npx", resolver.resolve("Mac OS X"))
-  }
-
-  @Test
-  fun `prefers the stable nvm release over an installed release candidate`() {
-    val resolver =
-      SystemDaemonPackageRunnerResolver(
-        home = "/Users/dev",
-        executableAt = { it.startsWith("/Users/dev/.nvm/") },
-        listDir = { dir ->
-          if (dir == "/Users/dev/.nvm/versions/node")
-            listOf("v20.11.1-rc.1", "v20.11.1", "v18.19.0")
-          else emptyList()
-        },
-        onPath = { _, _ -> null },
-        fileSystem =
-          fsWithNodeIn(
-            "/Users/dev/.nvm/versions/node/v20.11.1/bin",
-            "/Users/dev/.nvm/versions/node/v18.19.0/bin",
-          ),
-      )
-
-    // The stable release must win even though the RC's trailing number would sort it "newer".
-    assertEquals("/Users/dev/.nvm/versions/node/v20.11.1/bin/npx", resolver.resolve("Mac OS X"))
-  }
-
-  @Test
-  fun `skips an npx without an executable node and selects a working nvm install`() {
-    val staleNpx = "/opt/homebrew/bin/npx"
-    val nvmBin = "/Users/dev/.nvm/versions/node/v20.11.1/bin"
-    val resolver =
-      SystemDaemonPackageRunnerResolver(
-        home = "/Users/dev",
-        // Both npx binaries are executable, but only the nvm one has an executable node beside it
-        // (the Homebrew npx's node is missing or non-executable).
-        executableAt = { it == staleNpx || it == "$nvmBin/npx" },
-        listDir = { dir ->
-          if (dir == "/Users/dev/.nvm/versions/node") listOf("v20.11.1") else emptyList()
-        },
-        onPath = { _, _ -> null },
-        fileSystem = fsWithNodeIn(nvmBin),
-      )
-
-    // The stale Homebrew npx (no executable node) is skipped rather than masking the working nvm.
-    assertEquals("$nvmBin/npx", resolver.resolve("Mac OS X"))
-  }
-
-  @Test
-  fun `falls back to a PATH runner then the npx name`() {
+  fun `emits the bare bunx name when nothing resolves`() {
     val resolver =
       SystemDaemonPackageRunnerResolver(
         home = "/Users/dev",
         executableAt = { false },
-        listDir = { emptyList() },
-        onPath = { runner, _ -> if (runner == "npx") "/opt/npx" else null },
-        // node lives beside the PATH-resolved npx, so it is usable.
-        fileSystem = fsWithNodeIn("/opt"),
-      )
-
-    assertEquals("/opt/npx", resolver.resolve("Mac OS X"))
-
-    val unresolved =
-      SystemDaemonPackageRunnerResolver(
-        home = "/Users/dev",
-        executableAt = { false },
-        listDir = { emptyList() },
         onPath = { _, _ -> null },
       )
 
-    assertEquals("npx", unresolved.resolve("Mac OS X"))
-    assertEquals("npx.cmd", unresolved.resolve("Windows 11"))
+    assertEquals("bunx", resolver.resolve("Mac OS X"))
+    assertEquals("bunx.exe", resolver.resolve("Windows 11"))
   }
 
   @Test
-  fun `windows runner lookup skips the POSIX shim for the cmd shell`() {
+  fun `windows runner lookup selects a PATHEXT-executable bunx`() {
     val pathExt = listOf(".COM", ".EXE", ".BAT", ".CMD")
 
-    // `where npx` on stock Node-for-Windows lists the extensionless POSIX shim before npx.cmd;
-    // cmd.exe /c can only run the .cmd, so it must be chosen.
-    assertEquals(
-      "C:\\Program Files\\nodejs\\npx.cmd",
-      selectRunnerFromLookup(
-        "C:\\Program Files\\nodejs\\npx\nC:\\Program Files\\nodejs\\npx.cmd\n",
-        isWindows = true,
-        pathExt,
-      ),
-    )
-    // bunx.exe is chosen over any extensionless shim.
+    // `where bunx` may list an extensionless entry before bunx.exe; cmd.exe /c can only run the
+    // PATHEXT entry, so it must be chosen.
     assertEquals(
       "C:\\Users\\dev\\.bun\\bin\\bunx.exe",
       selectRunnerFromLookup(
@@ -544,32 +359,11 @@ class DesktopDaemonLifecycleTest {
     )
     // POSIX `which` returns an already-executable path; take the first.
     assertEquals(
-      "/usr/local/bin/npx",
-      selectRunnerFromLookup("/usr/local/bin/npx\n", isWindows = false, pathExt),
+      "/Users/dev/.bun/bin/bunx",
+      selectRunnerFromLookup("/Users/dev/.bun/bin/bunx\n", isWindows = false, pathExt),
     )
-    // No PATHEXT match (unusual) falls back to the first line rather than returning null.
-    assertEquals(
-      "C:\\weird\\npx",
-      selectRunnerFromLookup("C:\\weird\\npx\n", isWindows = true, pathExt),
-    )
-  }
-
-  @Test
-  fun `composes the child PATH with the runner directory first`() {
-    val separator = java.io.File.pathSeparator
-
-    assertEquals(
-      "/opt/automobile/runner-bin${separator}/custom/bin",
-      SystemDaemonCommandExecutor.composePath("/opt/automobile/runner-bin", "/custom/bin"),
-    )
-    assertEquals(
-      "/opt/automobile/runner-bin",
-      SystemDaemonCommandExecutor.composePath("/opt/automobile/runner-bin", null),
-    )
-    assertEquals(
-      "/opt/automobile/runner-bin",
-      SystemDaemonCommandExecutor.composePath("/opt/automobile/runner-bin", ""),
-    )
+    // No PATHEXT match on Windows → null, so the resolver falls back to the absolute bunx.exe.
+    assertNull(selectRunnerFromLookup("C:\\weird\\bunx\n", isWindows = true, pathExt))
   }
 
   @Test
@@ -703,36 +497,22 @@ class DesktopDaemonLifecycleTest {
     private val timedOut: Boolean = false,
   ) : DaemonCommandExecutor {
     val commands = mutableListOf<List<String>>()
-    val runnerDirectories = mutableListOf<String?>()
 
-    override fun execute(command: List<String>, runnerDirectory: String?): DaemonCommandResult {
+    override fun execute(command: List<String>): DaemonCommandResult {
       commands += command
-      runnerDirectories += runnerDirectory
       return DaemonCommandResult(exitCode = exitCode, output = output, timedOut = timedOut)
     }
+  }
+
+  private class ThrowingDaemonCommandExecutor(private val message: String) : DaemonCommandExecutor {
+    override fun execute(command: List<String>): DaemonCommandResult =
+      throw java.io.IOException(message)
   }
 
   private class FakeDaemonPackageRunnerResolver(private val runner: String) :
     DaemonPackageRunnerResolver {
     override fun resolve(osName: String): String = runner
   }
-
-  private class FakeRunnerFileSystem(
-    private val executableNodes: Set<Path>,
-    private val symlinks: Map<Path, Path>,
-  ) : RunnerFileSystem {
-    override fun isExecutable(path: Path): Boolean = path in executableNodes
-
-    override fun isSymbolicLink(path: Path): Boolean = path in symlinks
-
-    override fun readSymbolicLink(path: Path): Path = symlinks.getValue(path)
-  }
-
-  private fun fsWithNodeIn(vararg binDirs: String): FakeRunnerFileSystem =
-    FakeRunnerFileSystem(
-      executableNodes = binDirs.map { Path.of(it).resolve("node") }.toSet(),
-      symlinks = emptyMap(),
-    )
 
   private class FakeDaemonRetryTimer : DaemonRetryTimer {
     val delays = mutableListOf<Long>()

@@ -3,8 +3,6 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import java.io.File
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.SocketChannel
-import java.nio.file.Files
-import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -148,30 +146,13 @@ internal data class DaemonCommandResult(
   val cancelled: Boolean = false,
 )
 
-/** A resolved launch command plus the runner's own directory to publish onto the child `PATH`. */
-internal data class DaemonLaunchCommand(
-  val command: List<String>,
-  val runnerDirectory: String?,
-)
-
 internal interface DaemonCommandExecutor {
-  /**
-   * [runnerDirectory], when non-null, is prepended to the child's `PATH`. `npx` is a
-   * `#!/usr/bin/env node` script, so under a GUI-stripped `PATH` an absolute `npx` still exits 127
-   * because the sibling `node` is undiscoverable; publishing the runner's own directory fixes that
-   * (and is harmless for the self-contained `bunx`).
-   */
-  fun execute(command: List<String>, runnerDirectory: String? = null): DaemonCommandResult
+  fun execute(command: List<String>): DaemonCommandResult
 }
 
 internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
-  override fun execute(command: List<String>, runnerDirectory: String?): DaemonCommandResult {
-    val builder = ProcessBuilder(command).redirectErrorStream(true)
-    if (runnerDirectory != null) {
-      val environment = builder.environment()
-      environment["PATH"] = composePath(runnerDirectory, environment["PATH"])
-    }
-    val process = builder.start()
+  override fun execute(command: List<String>): DaemonCommandResult {
+    val process = ProcessBuilder(command).redirectErrorStream(true).start()
     val output = StringBuffer()
     val outputDrainer = Thread {
       process.inputStream.bufferedReader().useLines { lines ->
@@ -213,11 +194,6 @@ internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
     }
     descendants.filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly)
   }
-
-  /** Prepends [runnerDirectory] to [existingPath], preserving the caller's order after it. */
-  internal fun composePath(runnerDirectory: String, existingPath: String?): String =
-    if (existingPath.isNullOrEmpty()) runnerDirectory
-    else "$runnerDirectory${File.pathSeparator}$existingPath"
 
   internal fun commandTimeoutMillis(
     startupTimeoutOverride: String? =
@@ -262,11 +238,10 @@ internal object SystemDaemonRetryTimer : DaemonRetryTimer {
 }
 
 /**
- * Resolves the package runner used to launch the pinned daemon package. AutoMobile runs on Bun, so
- * `bunx` is preferred over `npx`. Desktop apps launched from the GUI (Finder, Dock) inherit a
- * stripped PATH that omits `~/.bun/bin` and Homebrew, so the resolver probes known absolute install
- * locations before falling back to a PATH lookup — otherwise `ProcessBuilder` fails with "Cannot
- * run program" even when Bun is installed.
+ * Resolves the `bunx` runner used to launch the pinned daemon package. AutoMobile runs exclusively
+ * on Bun. It prefers the `bunx` the user's PATH resolves (their configured install) and falls back
+ * to known absolute install locations for GUI-launched apps (Finder, Dock) whose PATH is stripped —
+ * otherwise `ProcessBuilder` fails with "Cannot run program" even when Bun is installed.
  */
 internal interface DaemonPackageRunnerResolver {
   fun resolve(osName: String): String
@@ -276,17 +251,13 @@ internal class SystemDaemonPackageRunnerResolver(
   private val home: String? =
     System.getProperty("user.home")?.takeIf { it.isNotEmpty() } ?: System.getenv("HOME"),
   private val executableAt: (String) -> Boolean = { File(it).canExecute() },
-  private val listDir: (String) -> List<String> = { File(it).list()?.toList().orEmpty() },
   private val onPath: (String, Boolean) -> String? = ::whichRunner,
-  private val fileSystem: RunnerFileSystem = SystemRunnerFileSystem,
 ) : DaemonPackageRunnerResolver {
   override fun resolve(osName: String): String {
     val isWindows = osName.lowercase().contains("win")
-    // Prefer the runner the user's PATH actually resolves — their currently configured install
-    // (e.g. via mise/asdf/Homebrew) — and use the hard-coded absolute install locations only as a
-    // fallback for GUI-launched apps whose PATH is stripped (there `which/where` returns nothing,
-    // so we still land on the known install). Bun-first throughout: every `bunx` probe ranks ahead
-    // of every `npx` probe; bunx is self-contained, so being executable is enough.
+    // Prefer the `bunx` the user's PATH resolves (their configured install, e.g. via mise/asdf),
+    // then the hard-coded absolute install locations as a fallback for GUI-launched apps whose PATH
+    // is stripped (there `which/where` returns nothing, so we still land on the known install).
     onPath("bunx", isWindows)?.let {
       return it
     }
@@ -295,24 +266,10 @@ internal class SystemDaemonPackageRunnerResolver(
       ?.let {
         return it
       }
-    // npx needs a reachable Node runtime beside it (or along its symlink chain); a stale npx with
-    // no `node` must not be selected, or it would mask a later working install and still exit 127.
-    onPath("npx", isWindows)
-      ?.takeIf { hasReachableNode(it) }
-      ?.let {
-        return it
-      }
-    nodeAbsoluteCandidates(isWindows)
-      .firstOrNull { executableAt(it) && hasReachableNode(it) }
-      ?.let {
-        return it
-      }
-    // Nothing resolved: emit the legacy npx name so the failure surfaces actionable guidance.
-    return if (isWindows) "npx.cmd" else "npx"
+    // Nothing resolved: emit the bare name so the failure surfaces actionable guidance to install
+    // Bun.
+    return if (isWindows) "bunx.exe" else "bunx"
   }
-
-  private fun hasReachableNode(npx: String): Boolean =
-    resolveRunnerDirectory(npx, fileSystem) != null
 
   private fun bunAbsoluteCandidates(isWindows: Boolean): List<String> =
     if (isWindows) {
@@ -329,60 +286,7 @@ internal class SystemDaemonPackageRunnerResolver(
       }
     }
 
-  /**
-   * Node `npx` fallbacks, highest-precedence first. An nvm-installed Node is resolved by scanning
-   * `~/.nvm/versions/node/<version>/bin` newest-version first — nvm only publishes a `current`
-   * symlink when `NVM_SYMLINK_CURRENT=true` (off by default), and a detached GUI process cannot
-   * observe the shell-active version, so the newest installed version is the deterministic proxy.
-   */
-  private fun nodeAbsoluteCandidates(isWindows: Boolean): List<String> =
-    if (isWindows) {
-      emptyList()
-    } else {
-      buildList {
-        add("/opt/homebrew/bin/npx")
-        add("/usr/local/bin/npx")
-        add("/home/linuxbrew/.linuxbrew/bin/npx")
-        home?.let { add("$it/.linuxbrew/bin/npx") }
-        home?.let { h ->
-          val nvmNodeDir = "$h/.nvm/versions/node"
-          nvmNodeVersionsNewestFirst(nvmNodeDir).forEach { version ->
-            add("$nvmNodeDir/$version/bin/npx")
-          }
-          add("$h/.volta/bin/npx")
-        }
-      }
-    }
-
-  private fun nvmNodeVersionsNewestFirst(nvmNodeDir: String): List<String> {
-    val versions = listDir(nvmNodeDir).filter { it.startsWith("v") }
-    // A prerelease dir (`v20.11.1-rc.1`) must never outrank its stable release: `versionParts`
-    // drops the `rc` identifier but keeps its trailing number, so a naive numeric sort would call
-    // the RC newer. Rank all stable releases ahead of all prereleases; keep prereleases only as a
-    // last resort so a prerelease-only install still resolves. Newest numeric version wins in each.
-    val (stable, prerelease) = versions.partition { !it.contains('-') }
-    return stable.sortedWith(NVM_VERSION_ORDER.reversed()) +
-      prerelease.sortedWith(NVM_VERSION_ORDER.reversed())
-  }
-
   private companion object {
-    /**
-     * Ascending numeric order over dotted version dirs (`v20.11.1`); unparseable parts sort as 0.
-     */
-    val NVM_VERSION_ORDER: Comparator<String> = Comparator { left, right ->
-      val leftParts = versionParts(left)
-      val rightParts = versionParts(right)
-      for (index in 0 until maxOf(leftParts.size, rightParts.size)) {
-        val difference =
-          leftParts.getOrElse(index) { 0 }.compareTo(rightParts.getOrElse(index) { 0 })
-        if (difference != 0) return@Comparator difference
-      }
-      0
-    }
-
-    private fun versionParts(version: String): List<Int> =
-      version.removePrefix("v").split('.', '-').map { it.toIntOrNull() ?: 0 }
-
     fun whichRunner(runner: String, isWindows: Boolean): String? {
       val locator = if (isWindows) "where" else "which"
       return try {
@@ -411,11 +315,10 @@ internal class SystemDaemonPackageRunnerResolver(
 }
 
 /**
- * Picks the runner path from a `where`/`which` listing. On Windows `where npx` lists the
- * extensionless POSIX shell shim before `npx.cmd` (npm's cmd-shim generator emits both a `.cmd` and
- * an `sh` script), and the daemon launch wraps the runner in `cmd.exe /c`, which can only execute a
- * PATHEXT entry — so the first result ending in a PATHEXT extension is chosen, falling back to the
- * first line only if none match. `which` output on POSIX is already an executable path.
+ * Picks the runner path from a `where`/`which` listing. The daemon launch wraps the runner in
+ * `cmd.exe /c` on Windows, which can only execute a PATHEXT entry — so only a result ending in a
+ * PATHEXT extension qualifies there, and `null` is returned when none does so the resolver falls
+ * back to the absolute `bunx.exe`. `which` output on POSIX is already an executable path.
  */
 internal fun selectRunnerFromLookup(
   output: String,
@@ -426,7 +329,7 @@ internal fun selectRunnerFromLookup(
   if (!isWindows) return results.firstOrNull()
   return results.firstOrNull { candidate ->
     executableExtensions.any { candidate.endsWith(it, ignoreCase = true) }
-  } ?: results.firstOrNull()
+  }
 }
 
 internal sealed interface DaemonLifecycleResult {
@@ -437,73 +340,6 @@ internal sealed interface DaemonLifecycleResult {
 
 internal interface DaemonLifecycleEnsurer {
   fun ensureVersionMatchedDaemon(): DaemonLifecycleResult
-}
-
-/**
- * The directory holding the runner's sibling `node`, published onto the child `PATH` for npx so its
- * `#!/usr/bin/env node` launcher resolves under a stripped GUI `PATH`. Returns the first directory
- * that actually contains a `node`, checking the runner's own directory first (Homebrew and a
- * versioned nvm/Volta bin keep `node` beside `npx`) and following at most one symlink hop after
- * that (an npx shim in `/usr/local/bin` that links into another version's bin). It deliberately
- * does NOT fully canonicalize: `npx` is itself a symlink into npm's script dir
- * (`lib/node_modules/npm/bin/npx-cli.js`), which never holds `node`. A bare runner name (the
- * unresolved fallback) has no directory to publish.
- */
-/** Injectable filesystem link operations, so [resolveRunnerDirectory] is testable without real, */
-/** privilege-gated symlinks (Windows requires elevation to create them). Path arithmetic stays */
-/** on `java.nio.file.Path`, which is pure. */
-internal interface RunnerFileSystem {
-  /** True only when [path] is an existing, *executable* file. */
-  fun isExecutable(path: Path): Boolean
-
-  fun isSymbolicLink(path: Path): Boolean
-
-  fun readSymbolicLink(path: Path): Path
-}
-
-internal object SystemRunnerFileSystem : RunnerFileSystem {
-  override fun isExecutable(path: Path): Boolean = Files.isExecutable(path)
-
-  override fun isSymbolicLink(path: Path): Boolean = Files.isSymbolicLink(path)
-
-  override fun readSymbolicLink(path: Path): Path = Files.readSymbolicLink(path)
-}
-
-internal fun resolveRunnerDirectory(
-  runner: String,
-  fileSystem: RunnerFileSystem = SystemRunnerFileSystem,
-): String? {
-  if (File(runner).parent == null) return null // bare name → nothing to publish
-  // Null when no *executable* Node exists along the chain — the caller must NOT publish such a
-  // directory (a missing or non-executable node still fails `env node`); the npx is then treated
-  // as an unusable candidate so the resolver moves on to the next one.
-  return runCatching { nodeBinDirectory(File(runner).toPath(), fileSystem) }.getOrNull()
-}
-
-private const val SYMLINK_HOP_LIMIT = 10
-
-private fun directoryHoldsNode(directory: Path, fileSystem: RunnerFileSystem): Boolean =
-  fileSystem.isExecutable(directory.resolve("node")) ||
-    fileSystem.isExecutable(directory.resolve("node.exe"))
-
-private fun nodeBinDirectory(npx: Path, fileSystem: RunnerFileSystem): String? {
-  // Follow the symlink chain first and collect each resolved target's directory. The directory npx
-  // actually points into holds the Node it was installed against, so it must outrank an unrelated
-  // `node` sitting beside the shim. The shim's own directory is kept only as a fallback — that is
-  // what makes Homebrew and direct-nvm work, where npx links into npm's node-less script dir.
-  val resolvedDirs = mutableListOf<Path>()
-  var current: Path = npx
-  var hops = 0
-  while (hops < SYMLINK_HOP_LIMIT && fileSystem.isSymbolicLink(current)) {
-    val target = fileSystem.readSymbolicLink(current)
-    current =
-      (if (target.isAbsolute) target else current.parent?.resolve(target))?.normalize() ?: break
-    current.parent?.let { resolvedDirs.add(it) }
-    hops++
-  }
-  return (resolvedDirs + listOfNotNull(npx.parent))
-    .firstOrNull { directoryHoldsNode(it, fileSystem) }
-    ?.toString()
 }
 
 /**
@@ -519,7 +355,6 @@ internal class DesktopDaemonLifecycle(
   private val timer: DaemonRetryTimer = SystemDaemonRetryTimer,
   private val packageRunnerResolver: DaemonPackageRunnerResolver =
     SystemDaemonPackageRunnerResolver(),
-  private val runnerDirectoryOf: (String) -> String? = { resolveRunnerDirectory(it) },
   private val verificationAttempts: Int = DEFAULT_VERIFICATION_ATTEMPTS,
 ) : DaemonLifecycleEnsurer {
   override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult =
@@ -562,13 +397,13 @@ internal class DesktopDaemonLifecycle(
       val action = if (daemonAvailable) "restart" else "start"
       val commandResult =
         try {
-          val launch =
+          val command =
             packageDaemonCommand(expectedVersion, action, currentDaemon?.launchArguments.orEmpty())
-          commandExecutor.execute(launch.command, launch.runnerDirectory)
+          commandExecutor.execute(command)
         } catch (error: Exception) {
           return DaemonLifecycleResult.Failure(
             "Could not $action AutoMobile $expectedVersion: ${error.message ?: error.javaClass.simpleName}. " +
-              "Install Bun (recommended) or Node.js so bunx/npx is available, then try again."
+              "Install Bun so bunx is available, then try again."
           )
         }
       if (commandResult.cancelled) {
@@ -610,28 +445,20 @@ internal class DesktopDaemonLifecycle(
     version: String,
     action: String,
     existingOptions: List<String>,
-  ): DaemonLaunchCommand {
+  ): List<String> {
     val osName = System.getProperty("os.name", "")
     val runner = packageRunnerResolver.resolve(osName)
-    val isNpx = usesYesFlag(runner)
-    val runnerArguments = buildList {
-      add(runner)
-      // Bun's `bunx` auto-installs without prompting; only npm's `npx` needs `-y`.
-      if (isNpx) add("-y")
-      add("@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}")
-      add("--daemon")
-      add(action)
-      addAll(existingOptions)
-    }
-    // Publish the runner directory onto PATH only for npx, whose `env node` shebang needs the
-    // sibling `node`. bunx is self-contained, so leave the daemon's inherited PATH order untouched
-    // to avoid shadowing user-configured bare-name tools (e.g. ffmpeg).
-    val runnerDirectory = if (isNpx) runnerDirectoryOf(runner) else null
-    return DaemonLaunchCommand(commandForPlatform(runnerArguments, osName), runnerDirectory)
+    // `bunx` auto-installs the pinned package without prompting, and is a self-contained native
+    // binary, so it needs no `-y` flag and no PATH manipulation.
+    val runnerArguments =
+      listOf(
+        runner,
+        "@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}",
+        "--daemon",
+        action,
+      ) + existingOptions
+    return commandForPlatform(runnerArguments, osName)
   }
-
-  internal fun usesYesFlag(runner: String): Boolean =
-    File(runner).nameWithoutExtension.lowercase() == "npx"
 
   private fun readPidStateWithRetry(): DaemonPidReadResult {
     repeat(PID_READ_ATTEMPTS) { attempt ->

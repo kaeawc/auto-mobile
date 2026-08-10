@@ -365,7 +365,7 @@ internal class SystemDaemonPackageRunnerResolver(
     }
 
     private fun versionParts(version: String): List<Int> =
-      version.removePrefix("v").split('.', '-').mapNotNull { it.toIntOrNull() }
+      version.removePrefix("v").split('.', '-').map { it.toIntOrNull() ?: 0 }
 
     fun whichRunner(runner: String, isWindows: Boolean): String? {
       val locator = if (isWindows) "where" else "which"

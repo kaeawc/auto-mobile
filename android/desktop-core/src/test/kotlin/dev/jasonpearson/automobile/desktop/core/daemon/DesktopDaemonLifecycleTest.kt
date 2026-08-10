@@ -334,6 +334,22 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `prefers a PATH bunx over an absolute npx fallback`() {
+    // Bun supplied on PATH by mise/asdf, npx present only at an absolute Homebrew path.
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        executableAt = { it == "/opt/homebrew/bin/npx" },
+        listDir = { emptyList() },
+        onPath = { runner, _ ->
+          if (runner == "bunx") "/Users/dev/.local/share/mise/shims/bunx" else null
+        },
+      )
+
+    assertEquals("/Users/dev/.local/share/mise/shims/bunx", resolver.resolve("Mac OS X"))
+  }
+
+  @Test
   fun `resolves the newest nvm-installed node before the volta fallback`() {
     val resolver =
       SystemDaemonPackageRunnerResolver(

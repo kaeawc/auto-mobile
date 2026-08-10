@@ -277,26 +277,30 @@ internal class SystemDaemonPackageRunnerResolver(
 ) : DaemonPackageRunnerResolver {
   override fun resolve(osName: String): String {
     val isWindows = osName.lowercase().contains("win")
-    for (candidate in absoluteCandidates(isWindows)) {
-      if (executableAt(candidate)) return candidate
-    }
-    for (runner in listOf("bunx", "npx")) {
-      onPath(runner, isWindows)?.let { resolved ->
-        return resolved
+    // Bun-first: every `bunx` probe — absolute install locations AND the PATH lookup — must rank
+    // ahead of every `npx` probe, so a Bun supplied on PATH by mise/asdf is never passed over for
+    // an absolute npm `npx`. Only after Bun is exhausted do we fall back to Node.
+    bunAbsoluteCandidates(isWindows)
+      .firstOrNull { executableAt(it) }
+      ?.let {
+        return it
       }
+    onPath("bunx", isWindows)?.let {
+      return it
+    }
+    nodeAbsoluteCandidates(isWindows)
+      .firstOrNull { executableAt(it) }
+      ?.let {
+        return it
+      }
+    onPath("npx", isWindows)?.let {
+      return it
     }
     // Nothing resolved: emit the legacy npx name so the failure surfaces actionable guidance.
     return if (isWindows) "npx.cmd" else "npx"
   }
 
-  /**
-   * Ordered highest-precedence first. Bun (`bunx`) always outranks Node (`npx`). Among the Node
-   * fallbacks, an nvm-installed Node is resolved by scanning `~/.nvm/versions/node/<version>/bin`
-   * newest-version first — nvm only publishes a `current` symlink when `NVM_SYMLINK_CURRENT=true`
-   * (off by default), and a detached GUI process cannot observe the shell-active version, so the
-   * newest installed version is the deterministic proxy.
-   */
-  private fun absoluteCandidates(isWindows: Boolean): List<String> =
+  private fun bunAbsoluteCandidates(isWindows: Boolean): List<String> =
     if (isWindows) {
       buildList { home?.let { add("$it\\.bun\\bin\\bunx.exe") } }
     } else {
@@ -304,6 +308,20 @@ internal class SystemDaemonPackageRunnerResolver(
         home?.let { add("$it/.bun/bin/bunx") }
         add("/opt/homebrew/bin/bunx")
         add("/usr/local/bin/bunx")
+      }
+    }
+
+  /**
+   * Node `npx` fallbacks, highest-precedence first. An nvm-installed Node is resolved by scanning
+   * `~/.nvm/versions/node/<version>/bin` newest-version first — nvm only publishes a `current`
+   * symlink when `NVM_SYMLINK_CURRENT=true` (off by default), and a detached GUI process cannot
+   * observe the shell-active version, so the newest installed version is the deterministic proxy.
+   */
+  private fun nodeAbsoluteCandidates(isWindows: Boolean): List<String> =
+    if (isWindows) {
+      emptyList()
+    } else {
+      buildList {
         add("/opt/homebrew/bin/npx")
         add("/usr/local/bin/npx")
         home?.let { h ->

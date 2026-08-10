@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import java.io.File
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.SocketChannel
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -390,15 +392,38 @@ internal interface DaemonLifecycleEnsurer {
 }
 
 /**
- * The directory holding the runner's sibling `node`, published onto the child `PATH` for npx.
- * Symlinks are resolved first — an npx shim such as `/usr/local/bin/npx ->
- * ~/.nvm/versions/node/vX/bin/npx` must publish the real Node bin (`~/.nvm/.../bin`), not the
- * shim's lexical parent (`/usr/local/bin`, which has no `node`), or `env node` still exits 127. A
- * bare runner name (the unresolved fallback) has no directory to publish.
+ * The directory holding the runner's sibling `node`, published onto the child `PATH` for npx so its
+ * `#!/usr/bin/env node` launcher resolves under a stripped GUI `PATH`. Returns the first directory
+ * that actually contains a `node`, checking the runner's own directory first (Homebrew and a
+ * versioned nvm/Volta bin keep `node` beside `npx`) and following at most one symlink hop after
+ * that (an npx shim in `/usr/local/bin` that links into another version's bin). It deliberately
+ * does NOT fully canonicalize: `npx` is itself a symlink into npm's script dir
+ * (`lib/node_modules/npm/bin/npx-cli.js`), which never holds `node`. A bare runner name (the
+ * unresolved fallback) has no directory to publish.
  */
 internal fun resolveRunnerDirectory(runner: String): String? {
-  val lexicalParent = File(runner).parent ?: return null
-  return runCatching { File(runner).canonicalFile.parent }.getOrNull() ?: lexicalParent
+  val start = File(runner)
+  val lexicalParent = start.parent ?: return null // bare name → nothing to publish
+  return runCatching { nodeBinDirectory(start.toPath()) }.getOrNull() ?: lexicalParent
+}
+
+private const val SYMLINK_HOP_LIMIT = 10
+
+private fun directoryHoldsNode(directory: Path): Boolean =
+  Files.exists(directory.resolve("node")) || Files.exists(directory.resolve("node.exe"))
+
+private fun nodeBinDirectory(npx: Path): String? {
+  var current: Path = npx
+  repeat(SYMLINK_HOP_LIMIT) {
+    val parent = current.parent
+    if (parent != null && directoryHoldsNode(parent)) return parent.toString()
+    if (!Files.isSymbolicLink(current)) return null
+    val target = Files.readSymbolicLink(current)
+    current =
+      (if (target.isAbsolute) target else current.parent?.resolve(target))?.normalize()
+        ?: return null
+  }
+  return null
 }
 
 /**

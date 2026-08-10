@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -162,17 +163,34 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
-  fun `resolveRunnerDirectory follows npx symlinks to the real node bin`() {
+  fun `resolveRunnerDirectory resolves npx to the node bin, not npm's script dir`() {
     val temp = Files.createTempDirectory("automobile-runner")
     try {
-      val realBin = Files.createDirectories(temp.resolve("versions/node/v20/bin"))
-      val realNpx = Files.createFile(realBin.resolve("npx"))
-      val shimDir = Files.createDirectories(temp.resolve("shims"))
-      val shimNpx = Files.createSymbolicLink(shimDir.resolve("npx"), realNpx)
+      // Standard nvm layout: node lives in bin, and bin/npx is a symlink into npm's script dir.
+      val nodeBin = Files.createDirectories(temp.resolve("versions/node/v24/bin"))
+      Files.createFile(nodeBin.resolve("node"))
+      val npmBin =
+        Files.createDirectories(temp.resolve("versions/node/v24/lib/node_modules/npm/bin"))
+      val npxCli = Files.createFile(npmBin.resolve("npx-cli.js"))
+      val nvmNpx = Files.createSymbolicLink(nodeBin.resolve("npx"), npxCli)
 
-      // The symlink target's directory holds the sibling `node`; the shim's lexical parent
-      // (shimDir) does not, so publishing that would leave `node` undiscoverable.
-      assertEquals(realBin.toRealPath().toString(), resolveRunnerDirectory(shimNpx.toString()))
+      val expected = nodeBin.toFile().canonicalPath
+
+      // Direct nvm npx: node sits beside it. Must return the node bin, NOT npm/bin (the fully
+      // canonical target's parent), which has no node.
+      assertEquals(
+        expected,
+        resolveRunnerDirectory(nvmNpx.toString())!!.let { File(it).canonicalPath },
+      )
+
+      // A shim in /usr/local/bin that links into the nvm bin resolves to the nvm bin (one hop).
+      val shimDir = Files.createDirectories(temp.resolve("usr/local/bin"))
+      val shimNpx = Files.createSymbolicLink(shimDir.resolve("npx"), nvmNpx)
+      assertEquals(
+        expected,
+        resolveRunnerDirectory(shimNpx.toString())!!.let { File(it).canonicalPath },
+      )
+
       // A bare runner name (unresolved fallback) has no directory to publish.
       assertEquals(null, resolveRunnerDirectory("npx"))
     } finally {

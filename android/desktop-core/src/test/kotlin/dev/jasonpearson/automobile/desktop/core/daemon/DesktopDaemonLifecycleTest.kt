@@ -144,6 +144,7 @@ class DesktopDaemonLifecycleTest {
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
         packageRunnerResolver = FakeDaemonPackageRunnerResolver("/usr/local/bin/npx"),
+        runnerDirectoryOf = { "/usr/local/bin" },
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -155,9 +156,28 @@ class DesktopDaemonLifecycleTest {
       ),
       commands.commands,
     )
-    // The runner's own directory is published onto the child PATH so npx's `env node` shebang
-    // finds the sibling `node` under a GUI-stripped PATH.
+    // The npx directory is published onto the child PATH so npx's `env node` shebang finds the
+    // sibling `node` under a GUI-stripped PATH.
     assertEquals(listOf<String?>("/usr/local/bin"), commands.runnerDirectories)
+  }
+
+  @Test
+  fun `resolveRunnerDirectory follows npx symlinks to the real node bin`() {
+    val temp = Files.createTempDirectory("automobile-runner")
+    try {
+      val realBin = Files.createDirectories(temp.resolve("versions/node/v20/bin"))
+      val realNpx = Files.createFile(realBin.resolve("npx"))
+      val shimDir = Files.createDirectories(temp.resolve("shims"))
+      val shimNpx = Files.createSymbolicLink(shimDir.resolve("npx"), realNpx)
+
+      // The symlink target's directory holds the sibling `node`; the shim's lexical parent
+      // (shimDir) does not, so publishing that would leave `node` undiscoverable.
+      assertEquals(realBin.toRealPath().toString(), resolveRunnerDirectory(shimNpx.toString()))
+      // A bare runner name (unresolved fallback) has no directory to publish.
+      assertEquals(null, resolveRunnerDirectory("npx"))
+    } finally {
+      temp.toFile().deleteRecursively()
+    }
   }
 
   @Test

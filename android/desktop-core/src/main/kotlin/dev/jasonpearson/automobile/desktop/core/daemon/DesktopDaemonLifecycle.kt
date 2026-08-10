@@ -390,6 +390,18 @@ internal interface DaemonLifecycleEnsurer {
 }
 
 /**
+ * The directory holding the runner's sibling `node`, published onto the child `PATH` for npx.
+ * Symlinks are resolved first — an npx shim such as `/usr/local/bin/npx ->
+ * ~/.nvm/versions/node/vX/bin/npx` must publish the real Node bin (`~/.nvm/.../bin`), not the
+ * shim's lexical parent (`/usr/local/bin`, which has no `node`), or `env node` still exits 127. A
+ * bare runner name (the unresolved fallback) has no directory to publish.
+ */
+internal fun resolveRunnerDirectory(runner: String): String? {
+  val lexicalParent = File(runner).parent ?: return null
+  return runCatching { File(runner).canonicalFile.parent }.getOrNull() ?: lexicalParent
+}
+
+/**
  * Ensures the desktop only connects to a daemon that reports the same release version as the
  * desktop jar. The socket protocol gate remains the final authority; this lifecycle makes the UI
  * restart a skewed shared daemon before that gate rejects every ordinary request.
@@ -402,6 +414,7 @@ internal class DesktopDaemonLifecycle(
   private val timer: DaemonRetryTimer = SystemDaemonRetryTimer,
   private val packageRunnerResolver: DaemonPackageRunnerResolver =
     SystemDaemonPackageRunnerResolver(),
+  private val runnerDirectoryOf: (String) -> String? = ::resolveRunnerDirectory,
   private val verificationAttempts: Int = DEFAULT_VERIFICATION_ATTEMPTS,
 ) : DaemonLifecycleEnsurer {
   override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult =
@@ -507,9 +520,8 @@ internal class DesktopDaemonLifecycle(
     }
     // Publish the runner directory onto PATH only for npx, whose `env node` shebang needs the
     // sibling `node`. bunx is self-contained, so leave the daemon's inherited PATH order untouched
-    // to avoid shadowing user-configured bare-name tools (e.g. ffmpeg). A bare runner name (the
-    // unresolved fallback) likewise has no directory to publish.
-    val runnerDirectory = if (isNpx) File(runner).parent else null
+    // to avoid shadowing user-configured bare-name tools (e.g. ffmpeg).
+    val runnerDirectory = if (isNpx) runnerDirectoryOf(runner) else null
     return DaemonLaunchCommand(commandForPlatform(runnerArguments, osName), runnerDirectory)
   }
 

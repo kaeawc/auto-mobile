@@ -473,6 +473,41 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `windows runner lookup skips the POSIX shim for the cmd shell`() {
+    val pathExt = listOf(".COM", ".EXE", ".BAT", ".CMD")
+
+    // `where npx` on stock Node-for-Windows lists the extensionless POSIX shim before npx.cmd;
+    // cmd.exe /c can only run the .cmd, so it must be chosen.
+    assertEquals(
+      "C:\\Program Files\\nodejs\\npx.cmd",
+      selectRunnerFromLookup(
+        "C:\\Program Files\\nodejs\\npx\nC:\\Program Files\\nodejs\\npx.cmd\n",
+        isWindows = true,
+        pathExt,
+      ),
+    )
+    // bunx.exe is chosen over any extensionless shim.
+    assertEquals(
+      "C:\\Users\\dev\\.bun\\bin\\bunx.exe",
+      selectRunnerFromLookup(
+        "C:\\Users\\dev\\.bun\\bin\\bunx\nC:\\Users\\dev\\.bun\\bin\\bunx.exe\n",
+        isWindows = true,
+        pathExt,
+      ),
+    )
+    // POSIX `which` returns an already-executable path; take the first.
+    assertEquals(
+      "/usr/local/bin/npx",
+      selectRunnerFromLookup("/usr/local/bin/npx\n", isWindows = false, pathExt),
+    )
+    // No PATHEXT match (unusual) falls back to the first line rather than returning null.
+    assertEquals(
+      "C:\\weird\\npx",
+      selectRunnerFromLookup("C:\\weird\\npx\n", isWindows = true, pathExt),
+    )
+  }
+
+  @Test
   fun `composes the child PATH with the runner directory first`() {
     val separator = java.io.File.pathSeparator
 

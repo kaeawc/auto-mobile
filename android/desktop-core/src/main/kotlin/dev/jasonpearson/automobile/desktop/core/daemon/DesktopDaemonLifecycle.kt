@@ -384,17 +384,41 @@ internal class SystemDaemonPackageRunnerResolver(
           return null
         }
         if (process.exitValue() != 0) return null
-        process.inputStream
-          .bufferedReader()
-          .readText()
-          .lineSequence()
-          .map { it.trim() }
-          .firstOrNull { it.isNotEmpty() }
+        selectRunnerFromLookup(
+          process.inputStream.bufferedReader().readText(),
+          isWindows,
+          executableExtensions(),
+        )
       } catch (_: Exception) {
         null
       }
     }
+
+    private fun executableExtensions(): List<String> =
+      (System.getenv("PATHEXT") ?: ".COM;.EXE;.BAT;.CMD")
+        .split(';')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
   }
+}
+
+/**
+ * Picks the runner path from a `where`/`which` listing. On Windows `where npx` lists the
+ * extensionless POSIX shell shim before `npx.cmd` (npm's cmd-shim generator emits both a `.cmd` and
+ * an `sh` script), and the daemon launch wraps the runner in `cmd.exe /c`, which can only execute a
+ * PATHEXT entry — so the first result ending in a PATHEXT extension is chosen, falling back to the
+ * first line only if none match. `which` output on POSIX is already an executable path.
+ */
+internal fun selectRunnerFromLookup(
+  output: String,
+  isWindows: Boolean,
+  executableExtensions: List<String>,
+): String? {
+  val results = output.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+  if (!isWindows) return results.firstOrNull()
+  return results.firstOrNull { candidate ->
+    executableExtensions.any { candidate.endsWith(it, ignoreCase = true) }
+  } ?: results.firstOrNull()
 }
 
 internal sealed interface DaemonLifecycleResult {

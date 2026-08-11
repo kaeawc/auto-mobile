@@ -40,6 +40,12 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
  *
  * [sourceFactory] is hoisted so tests inject a fake instead of opening a socket.
  */
+// Frame-rate hint for a workspace-pane live mirror. Low to keep the on-device H.264 encode cheap
+// (it
+// scales with fps); frames are decoupled from input dispatch (issue #3348), so this only bounds how
+// quickly a tap's visual result appears, not the tap itself.
+private const val PANE_MIRROR_FPS = 10
+
 @Composable
 fun DeviceStreamView(
   column: DeviceColumn,
@@ -47,10 +53,18 @@ fun DeviceStreamView(
   // Workspace panes default to the `low` preset (Android: long side capped at 540 + ~2 Mbps;
   // iOS: ~2 Mbps, resolution self-scales to Level 4.2): pane real estate can't show more pixels
   // than that anyway, and decode cost scales with pixel count, which is what makes dozens of
-  // concurrent farm panes affordable. Hoisted so a host that wants a full-resolution mirror can
-  // pass VideoStreamQuality.High or a different source entirely.
+  // concurrent farm panes affordable. A low fps hint ([PANE_MIRROR_FPS]) further caps the device's
+  // H.264 encode load — its cost scales with frame rate, and device control is dispatched
+  // independently of frames (issue #3348), so a low mirror rate no longer adds input latency; it
+  // only delays the visual confirmation of a tap by at most one frame interval. Hoisted so a host
+  // that wants a full-resolution/high-rate mirror can pass VideoStreamQuality.High or a different
+  // source entirely.
   sourceFactory: (deviceId: String) -> VideoStreamSource = {
-    VideoStreamClient(quality = VideoStreamQuality.Low, sessionUuidProvider = sessionUuidProvider)
+    VideoStreamClient(
+      quality = VideoStreamQuality.Low,
+      fps = PANE_MIRROR_FPS,
+      sessionUuidProvider = sessionUuidProvider,
+    )
   },
 ) {
   val source = remember(column.deviceId) { sourceFactory(column.deviceId) }

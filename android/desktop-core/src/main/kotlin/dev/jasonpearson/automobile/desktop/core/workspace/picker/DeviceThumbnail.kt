@@ -49,6 +49,12 @@ private val LOG = LoggerFactory.getLogger("DeviceThumbnail")
 /** Height of a grid device thumbnail; the frame is aspect-fit centered on black inside it. */
 private val THUMBNAIL_HEIGHT = 132.dp
 
+// Frame-rate hint for a grid thumbnail's live mirror. Even lower than a workspace pane: thumbnails
+// are glanceable, non-interactive previews, so a slow rate keeps a farm of dozens of concurrent
+// on-device H.264 encodes cheap. (Captures are shared per device on the daemon and the first
+// subscriber fixes the encode, so a device also open in a higher-rate pane keeps the pane's rate.)
+private const val THUMBNAIL_FPS = 5
+
 /**
  * The static label a non-booted card shows over its black thumbnail: `"Booting"` while a boot is in
  * flight (its id is in the picker's `bootingIds`), `"Shutdown"` for a shut-down device, and null
@@ -93,7 +99,11 @@ fun DeviceThumbnail(
   sessionUuidProvider: () -> String?,
   modifier: Modifier = Modifier,
   videoSourceFactory: (deviceId: String) -> VideoStreamSource = { deviceId ->
-    VideoStreamClient(quality = VideoStreamQuality.Low, sessionUuidProvider = sessionUuidProvider)
+    VideoStreamClient(
+      quality = VideoStreamQuality.Low,
+      fps = THUMBNAIL_FPS,
+      sessionUuidProvider = sessionUuidProvider,
+    )
   },
   screenshotSource: DeviceThumbnailScreenshotSource? = ObservationScreenshotSource,
 ) {

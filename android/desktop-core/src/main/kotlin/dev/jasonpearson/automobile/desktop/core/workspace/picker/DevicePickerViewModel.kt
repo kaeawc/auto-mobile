@@ -12,6 +12,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -127,6 +128,10 @@ class DevicePickerViewModel(
   // never dropped into a stranded Loading.
   private var loadGeneration: Long = 0
 
+  // The load() coroutine currently running, so a background SilentRefresh can coalesce instead of
+  // stacking a fresh generation on top of an in-flight read.
+  private var inFlightLoad: Job? = null
+
   init {
     load()
   }
@@ -154,6 +159,14 @@ class DevicePickerViewModel(
   }
 
   private fun load(silent: Boolean = false) {
+    // Coalesce background polls: while a load — or a boot's reload — is already in flight, a silent
+    // refresh is a no-op, because the running read already produces fresh data. Without this, a
+    // fixed-rate 5s poll slower than the daemon reads would stack up generations, each
+    // SilentRefresh
+    // invalidating the previous in-flight read (emitIfCurrent accepts only the newest generation),
+    // leaving the grid stale or stuck Loading while reads accumulate. Effectively this serializes
+    // polls to at most one read at a time. An explicit Refresh is never coalesced — it supersedes.
+    if (silent && (inFlightLoad?.isActive == true || bootingIds.isNotEmpty())) return
     val generation = ++loadGeneration
     // A silent (background-poll) reload keeps the current Content on screen and swaps the list in
     // on
@@ -163,7 +176,7 @@ class DevicePickerViewModel(
     if (!silent || _state.value !is DevicePickerUiState.Content) {
       _state.value = DevicePickerUiState.Loading
     }
-    scope.launch {
+    inFlightLoad = scope.launch {
       try {
         val devices = fetchDevices()
         emitIfCurrent(generation, devices)

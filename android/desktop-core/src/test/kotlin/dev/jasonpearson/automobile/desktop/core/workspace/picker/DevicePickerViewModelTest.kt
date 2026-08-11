@@ -194,6 +194,27 @@ class DevicePickerViewModelTest {
   }
 
   @Test
+  fun `a silent refresh coalesces while a load is in flight`() = testScope.runTest {
+    val client =
+      ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)
+    val vm =
+      DevicePickerViewModel(client, FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+    assertEquals(1, client.imagesReadCount) // the init load read once
+
+    // Hold the next load in flight on the images gate, then fire extra polls at it.
+    val gate = CompletableDeferred<Unit>()
+    client.imagesGate = gate
+    vm.onAction(DevicePickerAction.SilentRefresh) // starts a load, stalls on the gate
+    vm.onAction(DevicePickerAction.SilentRefresh) // coalesced — a load is already in flight
+    vm.onAction(DevicePickerAction.SilentRefresh) // coalesced
+    // Only the single in-flight load started a read; the fixed-rate poll did NOT stack generations.
+    assertEquals(2, client.imagesReadCount)
+
+    client.imagesGate = null
+    gate.complete(Unit) // release so runTest can finish
+  }
+
+  @Test
   fun `clear filter resets that dimension`() = testScope.runTest {
     val vm =
       DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())
@@ -672,6 +693,7 @@ private class ScriptableResourceClient(var bootedJson: String, private val image
   var imagesGate: CompletableDeferred<Unit>? = null
   var failBooted: Boolean = false
   var failImages: Boolean = false
+  var imagesReadCount: Int = 0
 
   override suspend fun readResource(uri: String): ResourceReadResult =
     when (uri) {
@@ -679,6 +701,7 @@ private class ScriptableResourceClient(var bootedJson: String, private val image
         if (failBooted) ResourceReadResult.Error("transient booted-read failure")
         else ResourceReadResult.Success(bootedJson, "application/json")
       "automobile:devices/images" -> {
+        imagesReadCount++
         imagesGate?.await()
         if (failImages) ResourceReadResult.Error("transient images-read failure")
         else ResourceReadResult.Success(imagesJson, "application/json")

@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -21,6 +23,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.AvailableEmulator
 import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
 import dev.jasonpearson.automobile.desktop.core.mcp.SystemImage
+import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 @Composable
@@ -122,7 +125,7 @@ private fun DeviceManagementPanel(
               EmulatorListItem(
                 name = emulator.name,
                 apiLevel = emulator.apiLevel,
-                icon = "🤖",
+                isIos = false,
                 onClick = { onBootEmulator(emulator.id) },
               )
             }
@@ -139,7 +142,7 @@ private fun DeviceManagementPanel(
               EmulatorListItem(
                 name = simulator.name,
                 apiLevel = null,
-                icon = "🍎",
+                isIos = true,
                 onClick = { onBootEmulator(simulator.id) },
               )
             }
@@ -238,7 +241,7 @@ private fun DeviceListItem(
 private fun EmulatorListItem(
   name: String,
   apiLevel: String?,
-  icon: String,
+  isIos: Boolean,
   onClick: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
@@ -253,7 +256,12 @@ private fun EmulatorListItem(
     horizontalArrangement = Arrangement.spacedBy(8.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Text(icon, fontSize = 14.sp)
+    Icon(
+      imageVector = PlatformIcons.logo(isIos),
+      contentDescription = null,
+      tint = PlatformIcons.tint(isIos),
+      modifier = Modifier.size(16.dp),
+    )
     Column(modifier = Modifier.weight(1f)) {
       Text(name, fontSize = 11.sp, maxLines = 1)
       if (apiLevel != null) {

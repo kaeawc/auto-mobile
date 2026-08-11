@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,6 +26,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 @Composable
@@ -326,7 +328,7 @@ private fun BootedDeviceRow(
   onUpdateService: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
-  val platformIcon = if (device.platform == "android") "🤖" else "🍎"
+  val isIos = device.platform != "android"
   val isPhysical = !device.isVirtual
 
   Column(
@@ -348,7 +350,12 @@ private fun BootedDeviceRow(
       horizontalArrangement = Arrangement.spacedBy(8.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Text(platformIcon, fontSize = 12.sp)
+      Icon(
+        imageVector = PlatformIcons.logo(isIos),
+        contentDescription = null,
+        tint = PlatformIcons.tint(isIos),
+        modifier = Modifier.size(16.dp),
+      )
       Column(modifier = Modifier.weight(1f)) {
         Row(
           horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -509,7 +516,7 @@ private fun DeviceImageRow(
   onBoot: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
-  val platformIcon = if (image.platform == "android") "🤖" else "🍎"
+  val isIos = image.platform != "android"
 
   Row(
     modifier =
@@ -521,7 +528,12 @@ private fun DeviceImageRow(
     horizontalArrangement = Arrangement.spacedBy(8.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Text(platformIcon, fontSize = 12.sp)
+    Icon(
+      imageVector = PlatformIcons.logo(isIos),
+      contentDescription = null,
+      tint = PlatformIcons.tint(isIos),
+      modifier = Modifier.size(16.dp),
+    )
     Column(modifier = Modifier.weight(1f)) {
       Text(
         image.name,

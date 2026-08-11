@@ -102,6 +102,58 @@ class DevicePickerViewModelTest {
   }
 
   @Test
+  fun `observe one emits a single column immediately for a booted device`() = testScope.runTest {
+    val vm =
+      DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+    vm.effect.test {
+      vm.onAction(DevicePickerAction.ObserveOne("emulator-5554"))
+      val columns = (awaitItem() as DevicePickerEffect.Observe).columns
+      assertEquals(listOf("emulator-5554"), columns.map { it.deviceId })
+      assertEquals(Platform.Android, columns.single().platform)
+      cancelAndIgnoreRemainingEvents()
+    }
+  }
+
+  @Test
+  fun `observe one ignores a shut-down device`() = testScope.runTest {
+    val vm =
+      DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+    vm.effect.test {
+      vm.onAction(DevicePickerAction.ObserveOne("iphone-15")) // shut down — no observe
+      expectNoEvents()
+      cancelAndIgnoreRemainingEvents()
+    }
+  }
+
+  @Test
+  fun `a completed boot auto-observes the newly booted device`() = testScope.runTest {
+    val resources = fake()
+    val boot =
+      FakeDeviceBootController().apply {
+        result = Result.success("emulator-5556")
+        onSuccess = {
+          resources.bootedDevicesResponse =
+            """
+            {"totalCount":2,"androidCount":2,"iosCount":0,"virtualCount":2,"physicalCount":0,
+             "lastUpdated":"x","devices":[
+               {"name":"Pixel 8 API 35","platform":"android","deviceId":"emulator-5554",
+                "source":"local","isVirtual":true,"status":"booted"},
+               {"name":"Pixel 6 API 33","platform":"android","deviceId":"emulator-5556",
+                "source":"local","isVirtual":true,"status":"booted"}]}
+            """
+              .trimIndent()
+        }
+      }
+    val v = vm(resourceClient = resources, bootController = boot)
+    v.effect.test {
+      v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
+      val columns = (awaitItem() as DevicePickerEffect.Observe).columns
+      assertEquals(listOf("emulator-5556"), columns.map { it.deviceId })
+      cancelAndIgnoreRemainingEvents()
+    }
+  }
+
+  @Test
   fun `observe selected seeds the column lock state from the booted snapshot`() =
     testScope.runTest {
       val locked =

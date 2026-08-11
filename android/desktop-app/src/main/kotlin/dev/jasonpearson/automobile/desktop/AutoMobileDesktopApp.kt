@@ -240,10 +240,16 @@ fun AutoMobileDesktopApp(
   }
 
   // Window-level ⌘K/Ctrl+K (Main.kt) bumps openPaletteRequest; open the palette in response, but
-  // only while the workspace is showing — onboarding and the device picker own the screen and have
-  // no palette. The `> 0` guard skips the initial composition (the counter starts at 0).
+  // only while the workspace is showing — onboarding and the device grid (shown while nothing is
+  // observed, or when explicitly opened) own the screen and have no palette. The `> 0` guard skips
+  // the initial composition (the counter starts at 0).
   LaunchedEffect(openPaletteRequest) {
-    if (openPaletteRequest > 0 && !showOnboarding && !pickerOpen) {
+    if (
+      openPaletteRequest > 0 &&
+        !showOnboarding &&
+        !pickerOpen &&
+        workspaceState is WorkspaceUiState.Content
+    ) {
       paletteOpen = true
     }
   }
@@ -333,11 +339,18 @@ fun AutoMobileDesktopApp(
               showOnboarding = false
             }
           )
-        pickerOpen ->
+        // The device grid is the home surface whenever nothing is observed (true on launch), and
+        // also whenever "Devices +" explicitly opens it over a live workspace. Observing a device
+        // makes the workspace non-empty, which drops the picker for WorkspaceShell.
+        pickerOpen || workspaceState is WorkspaceUiState.Empty ->
           DevicePicker(
             state = pickerState,
             onAction = pickerViewModel::onAction,
             onClose = { pickerOpen = false },
+            // Authenticates each grid card's live-video subscribe against the daemon session guard.
+            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+            // Only offer Close when there is an observed workspace to return to.
+            canClose = workspaceState is WorkspaceUiState.Content,
           )
         else ->
           Box(Modifier.fillMaxSize()) {

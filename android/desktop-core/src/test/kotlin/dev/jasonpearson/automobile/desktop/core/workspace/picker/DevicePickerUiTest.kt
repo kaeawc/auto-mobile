@@ -1,10 +1,10 @@
 package dev.jasonpearson.automobile.desktop.core.workspace.picker
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -29,34 +29,54 @@ class DevicePickerUiTest {
     bootErrors: Map<String, String> = emptyMap(),
   ) = DevicePickerUiState.Content(devices, PickerFilters(), selected, bootingIds, bootErrors)
 
+  // Stub the hoisted thumbnail so composing the grid never opens a video/observation socket.
+  private fun ComposeUiTest.picker(
+    state: DevicePickerUiState.Content = content(),
+    onAction: (DevicePickerAction) -> Unit = {},
+    onClose: () -> Unit = {},
+    canClose: Boolean = true,
+  ) = setContent {
+    MaterialTheme {
+      DevicePicker(
+        state,
+        onAction = onAction,
+        onClose = onClose,
+        canClose = canClose,
+        thumbnail = { _, _ -> },
+      )
+    }
+  }
+
   @Test
   fun `renders rail options and device cards`() = runComposeUiTest {
-    setContent { MaterialTheme { DevicePicker(content(), onAction = {}, onClose = {}) } }
+    picker()
     onNodeWithContentDescription("Select filter Booted").assertIsDisplayed()
     onNodeWithContentDescription("Select filter Android").assertIsDisplayed()
     onNodeWithText("Pixel 8", substring = true).assertIsDisplayed()
-    onNodeWithContentDescription("Select Pixel 8").assertIsDisplayed()
+    onNodeWithContentDescription("Observe Pixel 8").assertIsDisplayed()
     onNodeWithContentDescription("Boot iPhone 15").assertIsDisplayed()
     onNodeWithText("Click to boot").assertIsDisplayed()
   }
 
   @Test
+  fun `plain-clicking a booted card observes it immediately`() = runComposeUiTest {
+    var action: DevicePickerAction? = null
+    picker(onAction = { action = it })
+    onNodeWithContentDescription("Observe Pixel 8").performClick()
+    assertEquals(DevicePickerAction.ObserveOne("p8"), action)
+  }
+
+  @Test
   fun `clicking a shut-down card dispatches BootDevice`() = runComposeUiTest {
     var action: DevicePickerAction? = null
-    setContent {
-      MaterialTheme { DevicePicker(content(), onAction = { action = it }, onClose = {}) }
-    }
+    picker(onAction = { action = it })
     onNodeWithContentDescription("Boot iPhone 15").performClick()
     assertEquals(DevicePickerAction.BootDevice("i15"), action)
   }
 
   @Test
   fun `a booting card shows Booting and offers no boot affordance`() = runComposeUiTest {
-    setContent {
-      MaterialTheme {
-        DevicePicker(content(bootingIds = setOf("i15")), onAction = {}, onClose = {})
-      }
-    }
+    picker(content(bootingIds = setOf("i15")))
     // No boot/retry affordance while a boot is in flight — the card is a passive "Booting…".
     onNodeWithText("Booting…").assertIsDisplayed()
     onNodeWithText("Click to boot").assertDoesNotExist()
@@ -67,15 +87,7 @@ class DevicePickerUiTest {
   @Test
   fun `a failed card offers a retry that dispatches BootDevice`() = runComposeUiTest {
     var action: DevicePickerAction? = null
-    setContent {
-      MaterialTheme {
-        DevicePicker(
-          content(bootErrors = mapOf("i15" to "boom")),
-          onAction = { action = it },
-          onClose = {},
-        )
-      }
-    }
+    picker(content(bootErrors = mapOf("i15" to "boom")), onAction = { action = it })
     onNodeWithText("Boot failed · Click to retry").assertIsDisplayed()
     onNodeWithContentDescription("Retry boot iPhone 15").performClick()
     assertEquals(DevicePickerAction.BootDevice("i15"), action)
@@ -84,49 +96,37 @@ class DevicePickerUiTest {
   @Test
   fun `clicking a filter option dispatches its toggle`() = runComposeUiTest {
     var action: DevicePickerAction? = null
-    setContent {
-      MaterialTheme { DevicePicker(content(), onAction = { action = it }, onClose = {}) }
-    }
+    picker(onAction = { action = it })
     onNodeWithContentDescription("Select filter Android").performClick()
     assertEquals(DevicePickerAction.TogglePlatform(Platform.Android), action)
   }
 
   @Test
-  fun `clicking a booted card dispatches ToggleSelect`() = runComposeUiTest {
-    var action: DevicePickerAction? = null
-    setContent {
-      MaterialTheme { DevicePicker(content(), onAction = { action = it }, onClose = {}) }
-    }
-    onNodeWithContentDescription("Select Pixel 8").performClick()
-    assertEquals(DevicePickerAction.ToggleSelect("p8"), action)
-  }
-
-  @Test
-  fun `observe is disabled with no selection and enabled + dispatches with a selection`() =
+  fun `the observe-selected button appears only once a selection exists and dispatches`() =
     runComposeUiTest {
       var action: DevicePickerAction? = null
-      setContent {
-        MaterialTheme {
-          DevicePicker(content(selected = setOf("p8")), onAction = { action = it }, onClose = {})
-        }
-      }
+      picker(content(selected = setOf("p8")), onAction = { action = it })
       onNodeWithContentDescription("Observe selected").assertIsEnabled().performClick()
       assertEquals(DevicePickerAction.ObserveSelected, action)
     }
 
   @Test
-  fun `observe is disabled when nothing is selected`() = runComposeUiTest {
-    setContent { MaterialTheme { DevicePicker(content(), onAction = {}, onClose = {}) } }
-    onNodeWithContentDescription("Observe selected").assertIsNotEnabled()
+  fun `no observe-selected button is shown when nothing is selected`() = runComposeUiTest {
+    picker()
+    onNodeWithContentDescription("Observe selected").assertDoesNotExist()
   }
 
   @Test
-  fun `close invokes onClose`() = runComposeUiTest {
+  fun `close invokes onClose when closable`() = runComposeUiTest {
     var closed = false
-    setContent {
-      MaterialTheme { DevicePicker(content(), onAction = {}, onClose = { closed = true }) }
-    }
+    picker(onClose = { closed = true })
     onNodeWithContentDescription("Close picker").performClick()
     assertTrue(closed)
+  }
+
+  @Test
+  fun `close is hidden when the grid is the home surface`() = runComposeUiTest {
+    picker(canClose = false)
+    onNodeWithContentDescription("Close picker").assertDoesNotExist()
   }
 }

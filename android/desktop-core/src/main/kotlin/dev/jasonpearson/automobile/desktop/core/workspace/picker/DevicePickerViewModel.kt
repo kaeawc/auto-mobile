@@ -58,6 +58,12 @@ sealed interface DevicePickerAction {
 
   data class ToggleSelect(val deviceId: String) : DevicePickerAction
 
+  /**
+   * Observe a single already-booted device immediately (a plain click on its card). Emits the
+   * Observe effect for just that device; ignored for non-booted devices.
+   */
+  data class ObserveOne(val deviceId: String) : DevicePickerAction
+
   /** Boot a shut-down device (its card was clicked). Ignored for already-booted/booting devices. */
   data class BootDevice(val deviceId: String) : DevicePickerAction
 
@@ -131,6 +137,7 @@ class DevicePickerViewModel(
       is DevicePickerAction.SetQuery -> updateFilters { it.copy(query = action.query) }
       is DevicePickerAction.ClearFilter -> clearFilter(action.dimension)
       is DevicePickerAction.ToggleSelect -> toggleSelect(action.deviceId)
+      is DevicePickerAction.ObserveOne -> observeDevice(action.deviceId)
       is DevicePickerAction.BootDevice -> bootDevice(action.deviceId)
       is DevicePickerAction.ClearSelection -> clearSelection()
       is DevicePickerAction.ObserveSelected -> observeSelected()
@@ -308,9 +315,11 @@ class DevicePickerViewModel(
         resolveFetchFailure(generation, e)
         return
       }
-    val nowBooted = devices.any { it.id == runtimeDeviceId && it.state == DeviceState.Booted }
+    val bootedRuntime = devices.firstOrNull {
+      it.id == runtimeDeviceId && it.state == DeviceState.Booted
+    }
     bootingIds = bootingIds - bootedDevice.id
-    if (nowBooted) {
+    if (bootedRuntime != null) {
       selectedIds = selectedIds + runtimeDeviceId // recorded before the guard — never lost
       bootErrors = bootErrors - bootedDevice.id
     } else {
@@ -322,6 +331,11 @@ class DevicePickerViewModel(
     // wins.
     syncState()
     emitIfCurrent(generation, devices)
+    // Boot then auto-observe: a completed boot jumps straight into the workspace for that device
+    // (matches the plain-click contract; the host turns the Observe effect into a column).
+    if (bootedRuntime != null) {
+      _effect.send(DevicePickerEffect.Observe(listOf(columnOf(bootedRuntime))))
+    }
   }
 
   private fun toggleSelect(deviceId: String) {
@@ -343,20 +357,35 @@ class DevicePickerViewModel(
     val columns =
       content.devices
         .filter { it.id in selectedIds && it.state == DeviceState.Booted }
-        .map {
-          // Seed the pane's lock state from the booted snapshot; the host's poll keeps it fresh.
-          DeviceColumn(
-            deviceId = it.id,
-            name = it.name,
-            platform = it.platform,
-            locked = it.locked,
-            isVirtual = it.isVirtual,
-          )
-        }
+        .map(::columnOf)
     if (columns.isNotEmpty()) {
       scope.launch { _effect.send(DevicePickerEffect.Observe(columns)) }
     }
   }
+
+  /**
+   * Observe a single booted device immediately — the plain-click path. A non-booted or unknown id
+   * is a no-op (shut-down cards boot instead, and a boot auto-observes on completion).
+   */
+  private fun observeDevice(deviceId: String) {
+    val content = _state.value as? DevicePickerUiState.Content ?: return
+    val device = content.devices.firstOrNull { it.id == deviceId } ?: return
+    if (device.state != DeviceState.Booted) return
+    scope.launch { _effect.send(DevicePickerEffect.Observe(listOf(columnOf(device)))) }
+  }
+
+  /**
+   * Build the observed [DeviceColumn] for a booted picker device, seeding its lock/virtual state.
+   */
+  private fun columnOf(device: PickerDevice): DeviceColumn =
+    // Seed the pane's lock state from the booted snapshot; the host's poll keeps it fresh.
+    DeviceColumn(
+      deviceId = device.id,
+      name = device.name,
+      platform = device.platform,
+      locked = device.locked,
+      isVirtual = device.isVirtual,
+    )
 
   private fun clearFilter(dimension: FilterDimension) {
     updateFilters {

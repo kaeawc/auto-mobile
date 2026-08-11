@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package dev.jasonpearson.automobile.desktop.core.workspace.picker
 
 import androidx.compose.foundation.background
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -21,6 +24,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -28,10 +32,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 
 private val Accent = Color(0xFF4DABF7)
@@ -46,6 +55,23 @@ fun DevicePicker(
   onAction: (DevicePickerAction) -> Unit,
   onClose: () -> Unit,
   modifier: Modifier = Modifier,
+  // Authenticates each card's live-video subscribe against the daemon stream-socket session guard
+  // (#4751); the host supplies it from its DesktopDaemonSession. Null yields no live thumbnails.
+  sessionUuidProvider: () -> String? = { null },
+  // Whether the "Close" affordance is offered. False when the grid is the app's home surface (no
+  // observed workspace to return to); true when opened over an existing workspace ("Devices +").
+  canClose: Boolean = true,
+  // The per-card device thumbnail. Hoisted (default = the live [DeviceThumbnail]) so a test can
+  // stub
+  // it and never open a video/observation socket while composing the grid.
+  thumbnail: @Composable (device: PickerDevice, booting: Boolean) -> Unit = { device, booting ->
+    DeviceThumbnail(
+      device = device,
+      booting = booting,
+      sessionUuidProvider = sessionUuidProvider,
+      modifier = Modifier.fillMaxWidth().height(DeviceThumbnailHeight),
+    )
+  },
 ) {
   Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
     when (state) {
@@ -54,7 +80,7 @@ fun DevicePicker(
         Centered("Couldn't load devices: ${state.message}") {
           Button(onClick = { onAction(DevicePickerAction.Refresh) }) { Text("Retry") }
         }
-      is DevicePickerUiState.Content -> Content(state, onAction, onClose)
+      is DevicePickerUiState.Content -> Content(state, onAction, onClose, canClose, thumbnail)
     }
   }
 }
@@ -79,13 +105,15 @@ private fun Content(
   content: DevicePickerUiState.Content,
   onAction: (DevicePickerAction) -> Unit,
   onClose: () -> Unit,
+  canClose: Boolean,
+  thumbnail: @Composable (PickerDevice, Boolean) -> Unit,
 ) {
   Row(Modifier.fillMaxSize()) {
     FilterRail(content, onAction)
     Column(Modifier.weight(1f).fillMaxHeight()) {
-      HeaderRow(content, onAction, onClose)
+      HeaderRow(content, onAction, onClose, canClose)
       ActiveChips(content.filters, onAction)
-      DeviceGrid(content, onAction)
+      DeviceGrid(content, onAction, thumbnail)
     }
   }
 }
@@ -191,6 +219,7 @@ private fun HeaderRow(
   content: DevicePickerUiState.Content,
   onAction: (DevicePickerAction) -> Unit,
   onClose: () -> Unit,
+  canClose: Boolean,
 ) {
   val count = content.selectedIds.size
   Row(
@@ -203,20 +232,26 @@ private fun HeaderRow(
       fontWeight = FontWeight.SemiBold,
     )
     Spacer(Modifier.weight(1f))
-    Button(
-      onClick = { onAction(DevicePickerAction.ObserveSelected) },
-      enabled = count > 0,
-      modifier = Modifier.semantics { contentDescription = "Observe selected" },
-    ) {
-      Text(if (count > 0) "Observe ($count)" else "Observe")
+    // Multi-select path: the button appears only once a Cmd/Shift-click selection exists; a plain
+    // click observes a single device immediately without touching this button.
+    if (count > 0) {
+      Button(
+        onClick = { onAction(DevicePickerAction.ObserveSelected) },
+        modifier = Modifier.semantics { contentDescription = "Observe selected" },
+      ) {
+        Text("Observe ($count)")
+      }
+      Spacer(Modifier.width(8.dp))
     }
-    Spacer(Modifier.width(8.dp))
-    Text(
-      "Close",
-      color = Accent,
-      modifier =
-        Modifier.clickable(onClick = onClose).semantics { contentDescription = "Close picker" },
-    )
+    // Close is hidden when the grid is the home surface (nothing observed to return to).
+    if (canClose) {
+      Text(
+        "Close",
+        color = Accent,
+        modifier =
+          Modifier.clickable(onClick = onClose).semantics { contentDescription = "Close picker" },
+      )
+    }
   }
 }
 
@@ -224,6 +259,7 @@ private fun HeaderRow(
 private fun DeviceGrid(
   content: DevicePickerUiState.Content,
   onAction: (DevicePickerAction) -> Unit,
+  thumbnail: @Composable (PickerDevice, Boolean) -> Unit,
 ) {
   val devices = filteredDevices(content.devices, content.filters)
   LazyVerticalGrid(
@@ -238,11 +274,15 @@ private fun DeviceGrid(
         selected = device.id in content.selectedIds,
         booting = device.id in content.bootingIds,
         error = content.bootErrors[device.id],
-        onClick = {
-          if (device.state == DeviceState.Booted) {
-            onAction(DevicePickerAction.ToggleSelect(device.id))
-          } else {
-            onAction(DevicePickerAction.BootDevice(device.id))
+        thumbnail = thumbnail,
+        onClick = { multiSelect ->
+          when {
+            // A shut-down card boots on click; the boot auto-observes once it completes.
+            device.state != DeviceState.Booted -> onAction(DevicePickerAction.BootDevice(device.id))
+            // Cmd/Shift-click builds a multi-device selection to observe together.
+            multiSelect -> onAction(DevicePickerAction.ToggleSelect(device.id))
+            // Plain click observes this device immediately.
+            else -> onAction(DevicePickerAction.ObserveOne(device.id))
           }
         },
       )
@@ -256,11 +296,14 @@ private fun DeviceCard(
   selected: Boolean,
   booting: Boolean,
   error: String?,
-  onClick: () -> Unit,
+  thumbnail: @Composable (PickerDevice, Boolean) -> Unit,
+  onClick: (multiSelect: Boolean) -> Unit,
 ) {
   val booted = device.state == DeviceState.Booted
-  // A shut-down card boots on click (unless a boot is already in flight); a booted card selects.
+  // A shut-down card boots on click (unless a boot is already in flight); a booted card observes.
   val clickable = booted || !booting
+  val windowInfo = LocalWindowInfo.current
+  val isIos = device.platform == Platform.Ios
   Column(
     modifier =
       Modifier.fillMaxWidth()
@@ -269,15 +312,35 @@ private fun DeviceCard(
           color = if (selected) Accent else MaterialTheme.colorScheme.outlineVariant,
           shape = RoundedCornerShape(6.dp),
         )
-        .then(if (clickable) Modifier.clickable(onClick = onClick) else Modifier)
+        .then(
+          if (clickable)
+            Modifier.clickable {
+              // Read the live modifier state at click time (mirrors the repo's Meta/Ctrl handling):
+              // Shift or Cmd/Ctrl means "add to selection" rather than "observe now".
+              val mods = windowInfo.keyboardModifiers
+              onClick(mods.isShiftPressed || mods.isMetaPressed || mods.isCtrlPressed)
+            }
+          else Modifier
+        )
         .semantics { contentDescription = cardDescription(device, booted, booting, error) }
         .padding(12.dp)
   ) {
-    Text("${device.platform.emoji}  ${device.name}", style = MaterialTheme.typography.bodyLarge)
+    thumbnail(device, booting)
+    Spacer(Modifier.height(8.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Icon(
+        imageVector = PlatformIcons.logo(isIos),
+        contentDescription = null,
+        tint = PlatformIcons.tint(isIos),
+        modifier = Modifier.size(16.dp),
+      )
+      Spacer(Modifier.width(6.dp))
+      Text(device.name, style = MaterialTheme.typography.bodyLarge)
+    }
     Spacer(Modifier.height(4.dp))
     val meta =
       listOfNotNull(
-          if (device.platform == Platform.Ios) "iOS" else "Android",
+          if (isIos) "iOS" else "Android",
           device.osLabel,
           device.architecture,
           if (booted) "booted" else "Shut down",
@@ -305,7 +368,7 @@ private fun cardDescription(
   error: String?,
 ): String =
   when {
-    booted -> "Select ${device.name}"
+    booted -> "Observe ${device.name}"
     booting -> "Booting ${device.name}"
     error != null -> "Retry boot ${device.name}"
     else -> "Boot ${device.name}"

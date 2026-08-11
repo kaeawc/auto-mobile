@@ -14,8 +14,43 @@ import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../../features/action/DeviceLockStore";
 import type { FormFactor } from "../../models/DeviceMatchCriteria";
 import type { AdbDeviceState } from "./interfaces/AdbExecutor";
+import {
+  AndroidCommandOutputStreamRedactor,
+  redactAndroidCommandOutput,
+} from "./redactAndroidCommandOutput";
 
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
+const MAX_LAUNCH_OUTPUT_LINES = 50;
+const MAX_LAUNCH_OUTPUT_CHARS = 16_384;
+const ACCEL_CHECK_TIMEOUT_MS = 3_000;
+const EARLY_EXIT_DRAIN_TIMEOUT_MS = 1_000;
+
+type LaunchFailureCategory =
+  | "display_initialization_failed"
+  | "hardware_acceleration_unavailable"
+  | "kvm_permission_denied"
+  | "missing_shared_library";
+
+function boundedOutputTail(output: string): string {
+  const lines = output.split(/\r?\n/);
+  const recentLines = lines.slice(-MAX_LAUNCH_OUTPUT_LINES);
+  const recentOutput = recentLines.join("\n");
+  if (recentOutput.length <= MAX_LAUNCH_OUTPUT_CHARS) {
+    return recentOutput;
+  }
+  const marker = "[... launch output truncated ...]\n";
+  return marker + recentOutput.slice(-(MAX_LAUNCH_OUTPUT_CHARS - marker.length));
+}
+
+function outputFromUnknown(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Buffer.isBuffer(value)) {
+    return value.toString();
+  }
+  return "";
+}
 
 /**
  * Interface for Android Emulator (AVD) management
@@ -79,7 +114,7 @@ export interface AndroidEmulator {
    */
   getBootedDevices(
     onlyEmulators?: boolean,
-    options?: { bypassDeviceListCache?: boolean }
+    options?: { bypassDeviceListCache?: boolean },
   ): Promise<BootedDevice[]>;
 
   /**
@@ -107,7 +142,12 @@ export interface AndroidEmulator {
    * @param targetDeviceId - Optional adb device id to require when waiting for an already-running device
    * @returns Promise that resolves with device ID when emulator is ready
    */
-  waitForEmulatorReady(avdName: string, timeoutMs?: number, childProcess?: ChildProcess | null, targetDeviceId?: string): Promise<BootedDevice>;
+  waitForEmulatorReady(
+    avdName: string,
+    timeoutMs?: number,
+    childProcess?: ChildProcess | null,
+    targetDeviceId?: string,
+  ): Promise<BootedDevice>;
 }
 
 /**
@@ -115,15 +155,30 @@ export interface AndroidEmulator {
  * Tablet device names typically contain "tab", "pad", or "nexus_9/10".
  */
 export function inferAndroidFormFactor(deviceName?: string): FormFactor | undefined {
-  if (!deviceName) {return undefined;}
+  if (!deviceName) {
+    return undefined;
+  }
   const lower = deviceName.toLowerCase();
-  if (lower.includes("tab") || lower.includes("pad")) {return "tablet";}
+  if (lower.includes("tab") || lower.includes("pad")) {
+    return "tablet";
+  }
   // Nexus 9 and 10 are tablets
-  if (lower.includes("nexus_9") || lower.includes("nexus_10") || lower.includes("nexus 9") || lower.includes("nexus 10")) {return "tablet";}
+  if (
+    lower.includes("nexus_9") ||
+    lower.includes("nexus_10") ||
+    lower.includes("nexus 9") ||
+    lower.includes("nexus 10")
+  ) {
+    return "tablet";
+  }
   // Pixel Tablet
-  if (lower.includes("pixel_tablet") || lower.includes("pixel tablet")) {return "tablet";}
+  if (lower.includes("pixel_tablet") || lower.includes("pixel tablet")) {
+    return "tablet";
+  }
   // Most other devices (pixel, nexus 5/6, etc.) are phones
-  if (lower.includes("pixel") || lower.includes("phone") || lower.includes("nexus")) {return "phone";}
+  if (lower.includes("pixel") || lower.includes("phone") || lower.includes("nexus")) {
+    return "phone";
+  }
   return undefined;
 }
 
@@ -145,7 +200,7 @@ export function inferAndroidFormFactor(deviceName?: string): FormFactor | undefi
  */
 export function resolveHeadlessMode(
   platform: NodeJS.Platform,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
 ): { headless: boolean; reason: string } {
   const explicit = env.AUTOMOBILE_EMULATOR_HEADLESS;
   if (explicit === "true") {
@@ -156,7 +211,9 @@ export function resolveHeadlessMode(
   }
 
   if (platform === "linux") {
-    const hasDisplay = Boolean((env.DISPLAY && env.DISPLAY.trim()) || (env.WAYLAND_DISPLAY && env.WAYLAND_DISPLAY.trim()));
+    const hasDisplay = Boolean(
+      (env.DISPLAY && env.DISPLAY.trim()) || (env.WAYLAND_DISPLAY && env.WAYLAND_DISPLAY.trim()),
+    );
     if (!hasDisplay) {
       return {
         headless: true,
@@ -182,20 +239,27 @@ export function parseExtraEmulatorArguments(raw: string): string[] {
     parsed = JSON.parse(raw);
   } catch {
     throw new ActionableError(
-      "AUTOMOBILE_EMULATOR_ARGS must be a JSON array of emulator arguments, for example [\"-gpu\", \"swiftshader_indirect\"]"
+      'AUTOMOBILE_EMULATOR_ARGS must be a JSON array of emulator arguments, for example ["-gpu", "swiftshader_indirect"]',
     );
   }
 
-  if (!Array.isArray(parsed) || parsed.some(argument => typeof argument !== "string" || argument.length === 0)) {
+  if (
+    !Array.isArray(parsed) ||
+    parsed.some((argument) => typeof argument !== "string" || argument.length === 0)
+  ) {
     throw new ActionableError(
-      "AUTOMOBILE_EMULATOR_ARGS must be a JSON array containing non-empty string arguments"
+      "AUTOMOBILE_EMULATOR_ARGS must be a JSON array containing non-empty string arguments",
     );
   }
 
   return [...parsed];
 }
 
-const execAsync = async (file: string, args: string[], signal?: AbortSignal): Promise<ExecResult> => {
+const execAsync = async (
+  file: string,
+  args: string[],
+  signal?: AbortSignal,
+): Promise<ExecResult> => {
   // Run the emulator binary via execFile (argv, no shell) rather than exec. This
   // removes the shell entirely — command arguments such as AVD names are passed
   // literally instead of being interpreted/split by a shell (issue #3938) — and
@@ -217,7 +281,7 @@ const execAsync = async (file: string, args: string[], signal?: AbortSignal): Pr
     },
     includes(searchString: string) {
       return this.stdout.includes(searchString);
-    }
+    },
   };
 
   return enhancedResult;
@@ -231,6 +295,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private adbFactory: AdbClientFactory;
   private modelNameCache = new Map<string, string>();
   private avdConfigReader: AvdConfigReader;
+  private platform: NodeJS.Platform;
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
 
@@ -243,17 +308,21 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param avdConfigReader - Reader for AVD config.ini files (for testing)
    */
   constructor(
-    execAsyncFn: ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>) | null = null,
+    execAsyncFn:
+      | ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>)
+      | null = null,
     spawnFn: typeof spawn | null = null,
     timer: Timer = defaultTimer,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    avdConfigReader?: AvdConfigReader
+    avdConfigReader?: AvdConfigReader,
+    platform: NodeJS.Platform = process.platform,
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.spawnFn = spawnFn || spawn;
     this.timer = timer;
     this.adbFactory = adbFactory;
     this.avdConfigReader = avdConfigReader ?? new FileAvdConfigReader();
+    this.platform = platform;
     // Only set a fallback emulator path here; proper detection happens lazily
     this.emulatorPath = this.getFallbackEmulatorPath();
   }
@@ -265,7 +334,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @returns The path to the emulator
    */
   private getFallbackEmulatorPath(): string {
-    const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || process.env.ANDROID_SDK_HOME;
+    const androidHome =
+      process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || process.env.ANDROID_SDK_HOME;
     if (androidHome) {
       return `${androidHome}/emulator/emulator`;
     }
@@ -284,7 +354,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const potentialPaths: string[] = [];
 
     // 1. Check environment variables first (highest priority)
-    const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || process.env.ANDROID_SDK_HOME;
+    const androidHome =
+      process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || process.env.ANDROID_SDK_HOME;
     if (androidHome) {
       potentialPaths.push(`${androidHome}/emulator/emulator`);
       potentialPaths.push(`${androidHome}/emulator/emulator-arm64-v8a`);
@@ -313,7 +384,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       if (bestLocation) {
         // Check various emulator locations relative to SDK root
-        const sdkRoot = bestLocation.path.replace("/cmdline-tools/latest", "").replace("/cmdline-tools", "");
+        const sdkRoot = bestLocation.path
+          .replace("/cmdline-tools/latest", "")
+          .replace("/cmdline-tools", "");
         potentialPaths.push(`${sdkRoot}/emulator/emulator`);
         potentialPaths.push(`${sdkRoot}/emulator/emulator-arm64-v8a`);
 
@@ -358,10 +431,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   private async enrichDeviceInfoList(devices: DeviceInfo[]): Promise<DeviceInfo[]> {
     const enriched = await Promise.all(
-      devices.map(async device => {
+      devices.map(async (device) => {
         try {
           const config = await this.avdConfigReader.readConfig(device.name);
-          if (!config) {return device;}
+          if (!config) {
+            return device;
+          }
           return {
             ...device,
             osVersion: config.osVersion ?? device.osVersion,
@@ -374,7 +449,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           logger.debug(`Failed to enrich AVD ${device.name}: ${error}`);
           return device;
         }
-      })
+      }),
     );
     return enriched;
   }
@@ -440,10 +515,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
 
     const lowerError = errorMsg.toLowerCase();
-    return (lowerError.includes("enoent") && lowerError.includes("spawn"))
-      || lowerError.includes("getcwd")
-      || lowerError.includes("current working directory")
-      || lowerError.includes("current directory");
+    return (
+      (lowerError.includes("enoent") && lowerError.includes("spawn")) ||
+      lowerError.includes("getcwd") ||
+      lowerError.includes("current working directory") ||
+      lowerError.includes("current directory")
+    );
   }
 
   /**
@@ -463,7 +540,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     compatible: boolean;
     hostArch: string;
     avdArch?: string;
-    reason?: string
+    reason?: string;
   }> {
     const hostArch = this.getHostArchitecture();
 
@@ -484,18 +561,28 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       // If we couldn't determine from verbose output, try to infer from common patterns
       if (!avdArch) {
         // This is a fallback - we'll let the actual emulator start attempt reveal the issue
-        return { compatible: true, hostArch, reason: "Could not determine AVD architecture, allowing attempt" };
+        return {
+          compatible: true,
+          hostArch,
+          reason: "Could not determine AVD architecture, allowing attempt",
+        };
       }
 
       // Check compatibility
       const compatible = this.isArchitectureCompatible(hostArch, avdArch);
-      const reason = compatible ? undefined : `Host architecture '${hostArch}' cannot run AVD with architecture '${avdArch}'`;
+      const reason = compatible
+        ? undefined
+        : `Host architecture '${hostArch}' cannot run AVD with architecture '${avdArch}'`;
 
       return { compatible, hostArch, avdArch, reason };
     } catch (error) {
       // If we can't check, we'll let the emulator start attempt proceed and catch errors there
       logger.debug(`Could not check architecture compatibility for ${avdName}: ${error}`);
-      return { compatible: true, hostArch, reason: "Could not verify compatibility, allowing attempt" };
+      return {
+        compatible: true,
+        hostArch,
+        reason: "Could not verify compatibility, allowing attempt",
+      };
     }
   }
 
@@ -507,7 +594,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   private isArchitectureCompatible(hostArch: string, avdArch: string): boolean {
     // ARM64 hosts (Apple Silicon) cannot run x86/x86_64 AVDs
-    if ((hostArch === "arm64" || hostArch === "aarch64") && (avdArch === "x86" || avdArch === "x86_64")) {
+    if (
+      (hostArch === "arm64" || hostArch === "aarch64") &&
+      (avdArch === "x86" || avdArch === "x86_64")
+    ) {
       return false;
     }
 
@@ -525,10 +615,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     isPanic: boolean;
     message?: string;
     hostArch?: string;
-    avdArch?: string
+    avdArch?: string;
   } {
     // Look for the specific PANIC message about architecture compatibility
-    const panicMatch = output.match(/PANIC: Avd's CPU Architecture '(\w+)' is not supported by the QEMU2 emulator on (\w+) host/);
+    const panicMatch = output.match(
+      /PANIC: Avd's CPU Architecture '(\w+)' is not supported by the QEMU2 emulator on (\w+) host/,
+    );
 
     if (panicMatch) {
       const avdArch = panicMatch[1];
@@ -537,12 +629,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         isPanic: true,
         message: `AVD architecture '${avdArch}' is not supported on ${hostArch} host`,
         hostArch,
-        avdArch
+        avdArch,
       };
     }
 
     // Check for other PANIC messages that might be architecture-related
-    if (output.includes("PANIC:") && (output.includes("architecture") || output.includes("CPU") || output.includes("QEMU"))) {
+    if (
+      output.includes("PANIC:") &&
+      (output.includes("architecture") || output.includes("CPU") || output.includes("QEMU"))
+    ) {
       return {
         isPanic: true,
         message: "Emulator PANIC detected (possibly architecture-related)",
@@ -558,8 +653,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     message?: string;
     suggestion?: string;
   } {
-    const mprotectFailure = /qemu_mprotect__osdep:\s*mprotect failed:\s*permission denied/i.test(output);
-    const hvfFailure = /hvf is not enabled on this aarch64 host|HVF error:\s*HV_(?:UNSUPPORTED|ERROR)|failed to initialize HVF:\s*Invalid argument/i.test(output);
+    const mprotectFailure = /qemu_mprotect__osdep:\s*mprotect failed:\s*permission denied/i.test(
+      output,
+    );
+    const hvfFailure =
+      /hvf is not enabled on this aarch64 host|HVF error:\s*HV_(?:UNSUPPORTED|ERROR)|failed to initialize HVF:\s*Invalid argument/i.test(
+        output,
+      );
     if (!mprotectFailure && !hvfFailure) {
       return { isSandboxError: false };
     }
@@ -567,32 +667,46 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return {
       isSandboxError: true,
       message: "Emulator hypervisor initialization failed (mprotect/HVF is unavailable)",
-      suggestion: "Run the emulator outside the restrictive sandbox or grant the host hypervisor/JIT entitlement required by QEMU.",
+      suggestion:
+        "Run the emulator outside the restrictive sandbox or grant the host hypervisor/JIT entitlement required by QEMU.",
     };
   }
 
   private sandboxFailure(output: string): ActionableError | null {
     const result = this.detectSandboxMprotect(output);
-    if (!result.isSandboxError) {return null;}
-    return new ActionableError([
-      `Emulator failed to start: ${result.message}`,
-      result.suggestion ? `Suggestion: ${result.suggestion}` : "",
-    ].filter(Boolean).join("\n\n"));
+    if (!result.isSandboxError) {
+      return null;
+    }
+    return new ActionableError(
+      [
+        `Emulator failed to start: ${result.message}`,
+        result.suggestion ? `Suggestion: ${result.suggestion}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    );
   }
 
   private async validateAvdMemory(avdName: string): Promise<void> {
     const avdConfig = await this.avdConfigReader.readConfig(avdName);
-    if (!avdConfig) {return;}
-    const isModernPlayImage = avdConfig.tag?.toLowerCase().includes("play")
-      && (avdConfig.apiLevel ?? 0) >= MODERN_PLAY_IMAGE_MIN_API_LEVEL;
+    if (!avdConfig) {
+      return;
+    }
+    const isModernPlayImage =
+      avdConfig.tag?.toLowerCase().includes("play") &&
+      (avdConfig.apiLevel ?? 0) >= MODERN_PLAY_IMAGE_MIN_API_LEVEL;
     if (isModernPlayImage && avdConfig.ramSizeInvalid) {
       throw new ActionableError(
-        `Cannot start AVD '${avdName}': hw.ramSize is invalid. Use a whole number in MB or a K, M, or G size suffix and retry.`
+        `Cannot start AVD '${avdName}': hw.ramSize is invalid. Use a whole number in MB or a K, M, or G size suffix and retry.`,
       );
     }
-    if (isModernPlayImage && avdConfig.ramSizeMb !== undefined && avdConfig.ramSizeMb < MIN_AVD_RAM_MB) {
+    if (
+      isModernPlayImage &&
+      avdConfig.ramSizeMb !== undefined &&
+      avdConfig.ramSizeMb < MIN_AVD_RAM_MB
+    ) {
       throw new ActionableError(
-        `Cannot start AVD '${avdName}': hw.ramSize is ${avdConfig.ramSizeMb} MB, below the minimum ${MIN_AVD_RAM_MB} MB needed for a modern system image. Increase hw.ramSize in the AVD config and retry.`
+        `Cannot start AVD '${avdName}': hw.ramSize is ${avdConfig.ramSizeMb} MB, below the minimum ${MIN_AVD_RAM_MB} MB needed for a modern system image. Increase hw.ramSize in the AVD config and retry.`,
       );
     }
   }
@@ -604,10 +718,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   ): Promise<ActionableError | null> {
     let states: AdbDeviceState[];
     try {
-      states = await this.adbFactory.create(null).getDeviceStates?.({ timeoutMs }) ?? [];
+      states = (await this.adbFactory.create(null).getDeviceStates?.({ timeoutMs })) ?? [];
     } catch (error) {
       // Auxiliary diagnostic probe; a failure here must not block readiness polling.
-      logger.debug(`Offline-state probe unavailable during emulator readiness: ${error instanceof Error ? error.message : String(error)}`);
+      logger.debug(
+        `Offline-state probe unavailable during emulator readiness: ${error instanceof Error ? error.message : String(error)}`,
+      );
       tracker.deviceId = null;
       tracker.since = null;
       return null;
@@ -645,26 +761,34 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return {
         isCorrupt: true,
         message: `Disk image is corrupt: ${qcow2Match[1].trim()}`,
-        suggestion: "Delete the corrupt userdata overlay to force a fresh image:\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img.qcow2\nThe emulator will recreate it on next boot. All emulator data (installed apps, settings) will be lost.",
+        suggestion:
+          "Delete the corrupt userdata overlay to force a fresh image:\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img.qcow2\nThe emulator will recreate it on next boot. All emulator data (installed apps, settings) will be lost.",
       };
     }
 
     // Generic disk image errors
-    const diskErrorMatch = output.match(/(cannot open disk image|disk image .* is (?:corrupt|invalid|damaged)|failed to open .*\.img)/i);
+    const diskErrorMatch = output.match(
+      /(cannot open disk image|disk image .* is (?:corrupt|invalid|damaged)|failed to open .*\.img)/i,
+    );
     if (diskErrorMatch) {
       return {
         isCorrupt: true,
         message: `Disk image error: ${diskErrorMatch[1].trim()}`,
-        suggestion: "Try deleting corrupt overlay files in ~/.android/avd/<AVD_NAME>.avd/ and restarting the emulator.",
+        suggestion:
+          "Try deleting corrupt overlay files in ~/.android/avd/<AVD_NAME>.avd/ and restarting the emulator.",
       };
     }
 
     // QEMU abnormal exit with corruption context
-    if (output.includes("QEMU main loop exits abnormally") && (output.includes("corrupt") || output.includes("qcow2"))) {
+    if (
+      output.includes("QEMU main loop exits abnormally") &&
+      (output.includes("corrupt") || output.includes("qcow2"))
+    ) {
       return {
         isCorrupt: true,
         message: "QEMU exited abnormally due to disk image corruption",
-        suggestion: "Delete the corrupt userdata overlay to force a fresh image:\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img.qcow2\nThe emulator will recreate it on next boot.",
+        suggestion:
+          "Delete the corrupt userdata overlay to force a fresh image:\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img.qcow2\nThe emulator will recreate it on next boot.",
       };
     }
 
@@ -690,7 +814,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     if (noDisplay || qtPlugin) {
       return {
         isDisplayError: true,
-        message: "Emulator could not connect to a display (Qt 'xcb' platform plugin failed to load)",
+        message:
+          "Emulator could not connect to a display (Qt 'xcb' platform plugin failed to load)",
         suggestion:
           "Run the emulator headless by setting AUTOMOBILE_EMULATOR_HEADLESS=true " +
           "(adds -no-window -no-audio), or start an X server / export DISPLAY before launching.",
@@ -698,6 +823,102 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
 
     return { isDisplayError: false };
+  }
+
+  private launchFailureCategory(output: string): LaunchFailureCategory | undefined {
+    if (/error while loading shared libraries/i.test(output)) {
+      return "missing_shared_library";
+    }
+    if (
+      /ProbeKVM[\s\S]*(?:permission denied|operation not permitted)/i.test(output) ||
+      /\/dev\/kvm[\s\S]*(?:permission denied|operation not permitted)/i.test(output) ||
+      /permissions? to use KVM/i.test(output)
+    ) {
+      return "kvm_permission_denied";
+    }
+    return undefined;
+  }
+
+  private accelerationCheckCategory(output: string): LaunchFailureCategory | undefined {
+    const kvmCategory = this.launchFailureCategory(output);
+    if (kvmCategory) {
+      return kvmCategory;
+    }
+    if (
+      /(?:acceleration|KVM|hypervisor)/i.test(output) &&
+      /(?:not available|unavailable|not supported|not enabled|cannot use|disabled)/i.test(output)
+    ) {
+      return "hardware_acceleration_unavailable";
+    }
+    return undefined;
+  }
+
+  private appendCategory(error: ActionableError, category: LaunchFailureCategory): ActionableError {
+    return new ActionableError(`${error.message}\n\ncategory=${category}`);
+  }
+
+  private formatEarlyExitError(
+    avdName: string,
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    category: LaunchFailureCategory | undefined,
+    output: string,
+    accelCheckOutput: string,
+  ): ActionableError {
+    const header = [
+      `Emulator process exited with code: ${code}${signal ? ` (signal: ${signal})` : ""} (AVD '${avdName}'`,
+      category ? `; category=${category}` : "",
+      ")",
+    ].join("");
+    const sections = [
+      header,
+      output.trim() ? `Diagnostic:\n${output.trim()}` : "",
+      accelCheckOutput.trim() ? `emulator -accel-check:\n${accelCheckOutput.trim()}` : "",
+    ].filter(Boolean);
+    return new ActionableError(sections.join("\n"));
+  }
+
+  private diagnosticOutputFromError(error: unknown): string {
+    if (typeof error !== "object" || error === null) {
+      return "";
+    }
+    const output = error as { stdout?: unknown; stderr?: unknown };
+    return boundedOutputTail(
+      redactAndroidCommandOutput(
+        [outputFromUnknown(output.stdout), outputFromUnknown(output.stderr)]
+          .filter(Boolean)
+          .join("\n"),
+      ),
+    );
+  }
+
+  private async runAccelerationCheck(): Promise<string> {
+    const controller = new AbortController();
+    let timeout: NodeJS.Timeout | undefined;
+    const probe = Promise.resolve()
+      .then(() => this.execAsync(this.emulatorPath, ["-accel-check"], controller.signal))
+      .then(
+        (result) =>
+          boundedOutputTail(
+            redactAndroidCommandOutput([result.stdout, result.stderr].filter(Boolean).join("\n")),
+          ),
+        (error) => this.diagnosticOutputFromError(error),
+      );
+    const timeoutResult = new Promise<string>((resolve) => {
+      timeout = this.timer.setTimeout(() => {
+        controller.abort();
+        logger.debug(`Emulator acceleration check timed out after ${ACCEL_CHECK_TIMEOUT_MS}ms`);
+        resolve("");
+      }, ACCEL_CHECK_TIMEOUT_MS);
+    });
+
+    try {
+      return await Promise.race([probe, timeoutResult]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
   }
 
   /**
@@ -728,7 +949,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const runPromise = this.execAsync(emulatorPath, args, controller.signal);
       // Once the timeout wins the race the aborted run promise rejects with an
       // AbortError; keep it handled so it can't surface as an unhandledRejection.
-      runPromise.catch(() => { /* settled after timeout; result consumed via race */ });
+      runPromise.catch(() => {
+        /* settled after timeout; result consumed via race */
+      });
 
       try {
         return await Promise.race([runPromise, timeoutPromise]);
@@ -749,28 +972,34 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const result = await this.executeCommand(["-list-avds"]);
       const devices = result.stdout
         .split("\n")
-        .map(line => line.trim())
-        .filter(line => line.length > 0)
-        .map(name => ({ name, platform: "android", isRunning: false, source: "local" } as DeviceInfo));
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map(
+          (name) =>
+            ({ name, platform: "android", isRunning: false, source: "local" }) as DeviceInfo,
+        );
       return this.enrichDeviceInfoList(devices);
     } catch (error) {
       logger.error("Failed to list AVDs:", error);
 
       // Check if the error is because emulator is not found
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const missingEmulator = errorMsg.includes("No such file or directory") || errorMsg.includes("command not found") || errorMsg.includes("ENOENT");
+      const missingEmulator =
+        errorMsg.includes("No such file or directory") ||
+        errorMsg.includes("command not found") ||
+        errorMsg.includes("ENOENT");
       if (missingEmulator && this.isLikelyDaemonWorkingDirectoryFailure(errorMsg)) {
         throw new ActionableError(
           `Android emulator command failed because the daemon working directory is unavailable. ` +
-          `Restart the AutoMobile daemon so it can use a stable working directory. Underlying error: ${errorMsg}`
+            `Restart the AutoMobile daemon so it can use a stable working directory. Underlying error: ${errorMsg}`,
         );
       }
       if (missingEmulator) {
         throw new ActionableError(
           `Android emulator not found.\n${this.describeEmulatorResolution()}\n\n` +
-          `Install the emulator package with: sdkmanager --install "emulator"\n` +
-          `(Android Studio installs it too: https://developer.android.com/studio)\n` +
-          `Or point ANDROID_HOME at an SDK that already has emulator/emulator.`
+            `Install the emulator package with: sdkmanager --install "emulator"\n` +
+            `(Android Studio installs it too: https://developer.android.com/studio)\n` +
+            `Or point ANDROID_HOME at an SDK that already has emulator/emulator.`,
         );
       }
 
@@ -785,10 +1014,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   async isAvdRunning(
     avdName: string,
-    options: { bypassDeviceListCache?: boolean } = {}
+    options: { bypassDeviceListCache?: boolean } = {},
   ): Promise<boolean> {
     const runningEmulators = await this.getBootedDevices(false, options);
-    return runningEmulators.some(emulator => emulator.name === avdName);
+    return runningEmulators.some((emulator) => emulator.name === avdName);
   }
 
   /**
@@ -854,7 +1083,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   async getBootedDevices(
     onlyEmulators: boolean = false,
-    options: { bypassDeviceListCache?: boolean } = {}
+    options: { bypassDeviceListCache?: boolean } = {},
   ): Promise<BootedDevice[]> {
     try {
       return await this.getBootedDevicesChecked(onlyEmulators, options);
@@ -872,7 +1101,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   async getBootedDevicesChecked(
     onlyEmulators: boolean = false,
-    options: { bypassDeviceListCache?: boolean } = {}
+    options: { bypassDeviceListCache?: boolean } = {},
   ): Promise<BootedDevice[]> {
     const perf = createGlobalPerformanceTracker();
     {
@@ -886,8 +1115,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const runningDevices: BootedDevice[] = [];
 
       // Add local emulator devices
-      const emulatorDevices = devices.filter(device => device.deviceId.startsWith("emulator-"));
-      const physicalDevices = devices.filter(device => !device.deviceId.startsWith("emulator-"));
+      const emulatorDevices = devices.filter((device) => device.deviceId.startsWith("emulator-"));
+      const physicalDevices = devices.filter((device) => !device.deviceId.startsWith("emulator-"));
 
       const infoTimeoutMs = 2000;
       perf.startOperation("avdNameResolution");
@@ -896,17 +1125,24 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         try {
           // Try to get the AVD name from the running emulator
           const adbWithDevice = this.adbFactory.create(device);
-          const result = await adbWithDevice.executeCommand("emu avd name", infoTimeoutMs, undefined, true);
+          const result = await adbWithDevice.executeCommand(
+            "emu avd name",
+            infoTimeoutMs,
+            undefined,
+            true,
+          );
           const avdName = result.stdout.trim().replace(/\r?\n.*$/, ""); // Remove any trailing newlines and additional text
 
-          logger.debug(`AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`);
+          logger.debug(
+            `AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`,
+          );
 
           runningDevices.push({
             ...device,
             name: avdName || this.unknownEmulatorName(deviceId),
             platform: "android",
             deviceId: deviceId,
-            source: "local"
+            source: "local",
           });
         } catch (error) {
           // If we can't get the AVD name, just use the device ID
@@ -916,7 +1152,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             name: this.unknownEmulatorName(deviceId),
             platform: "android",
             deviceId: deviceId,
-            source: "local"
+            source: "local",
           });
         }
       }
@@ -935,7 +1171,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
               "shell getprop ro.product.model",
               infoTimeoutMs,
               undefined,
-              true
+              true,
             );
             const modelName = result.stdout.trim();
 
@@ -956,7 +1192,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           name: deviceName,
           platform: "android",
           deviceId: device.deviceId,
-          source: "local"
+          source: "local",
         });
       }
       perf.endOperation("avdNameResolution");
@@ -974,7 +1210,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return (await this.launchEmulator({ avdName })).process;
   }
 
-  async launchEmulator(request: AndroidEmulatorLaunchRequest): Promise<AndroidEmulatorLaunchHandle> {
+  async launchEmulator(
+    request: AndroidEmulatorLaunchRequest,
+  ): Promise<AndroidEmulatorLaunchHandle> {
     if (request.signal?.aborted) {
       throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
     }
@@ -996,7 +1234,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       process = await this.startEmulatorProcess(
         request.avdName,
         request.extraArgs,
-        spawnedProcess => {
+        (spawnedProcess) => {
           process = spawnedProcess;
           if (disposed && !spawnedProcess.killed) {
             spawnedProcess.kill();
@@ -1061,14 +1299,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     perf.startOperation("validateAvd");
     const availableAvds = await this.listAvds();
     perf.endOperation("validateAvd");
-    if (!availableAvds.find(emu => emu.name === avdName)) {
-      throw new ActionableError(`AVD '${avdName}' not found. Available AVDs: ${availableAvds.map(emu => emu.name).join(", ")}`);
+    if (!availableAvds.find((emu) => emu.name === avdName)) {
+      throw new ActionableError(
+        `AVD '${avdName}' not found. Available AVDs: ${availableAvds.map((emu) => emu.name).join(", ")}`,
+      );
     }
 
     // Check if already running or starting
     perf.startOperation("checkAlreadyRunning");
     const alreadyRunning = await this.isAvdRunning(avdName, { bypassDeviceListCache: true });
-    const alreadyStarting = !alreadyRunning && await this.isAvdStarting(avdName);
+    const alreadyStarting = !alreadyRunning && (await this.isAvdStarting(avdName));
     perf.endOperation("checkAlreadyRunning");
 
     if (alreadyRunning) {
@@ -1093,12 +1333,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     perf.endOperation("architectureCheck");
     if (!compatibility.compatible && compatibility.reason) {
       logger.error(`Architecture compatibility check failed: ${compatibility.reason}`);
-      throw new ActionableError(`Cannot start AVD '${avdName}': ${compatibility.reason}. On ${compatibility.hostArch} hosts, use AVDs with compatible architectures (e.g., arm64-v8a for Apple Silicon Macs).`);
+      throw new ActionableError(
+        `Cannot start AVD '${avdName}': ${compatibility.reason}. On ${compatibility.hostArch} hosts, use AVDs with compatible architectures (e.g., arm64-v8a for Apple Silicon Macs).`,
+      );
     }
 
     const args = ["-avd", avdName];
     const headlessMode = resolveHeadlessMode(process.platform, process.env);
-    logger.info(`Emulator display mode: ${headlessMode.headless ? "headless" : "windowed"} (${headlessMode.reason})`);
+    logger.info(
+      `Emulator display mode: ${headlessMode.headless ? "headless" : "windowed"} (${headlessMode.reason})`,
+    );
     if (headlessMode.headless) {
       args.push("-no-window", "-no-audio");
     }
@@ -1118,32 +1362,67 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.endOperation("spawnEmulator");
       onSpawn?.(child);
 
-      // Buffer to collect initial output for PANIC detection
-      let initialOutput = "";
-      const outputBuffer: string[] = [];
-      const maxBufferLines = 50; // Keep last 50 lines for error analysis
+      // Keep only a redacted tail for launch diagnostics and failure classification.
+      const stdoutRedactor = new AndroidCommandOutputStreamRedactor();
+      const stderrRedactor = new AndroidCommandOutputStreamRedactor();
+      let launchOutput = "";
+      let duplicateAvdDetected = false;
+      let earlyExitCategory: LaunchFailureCategory | undefined;
       let startupValidationComplete = false;
+      let exitCode: number | null | undefined;
+      let exitSignal: NodeJS.Signals | null | undefined;
       perf.startOperation("panicDetection");
 
-      // Monitor emulator output for PANIC errors
-      const monitorOutput = (data: any) => {
-        const output = data.toString();
-        initialOutput += output;
-        this.captureLaunchTargetDeviceId(child, initialOutput);
-
-        // Keep a rolling buffer of recent output
-        const lines = output.split("\n");
-        outputBuffer.push(...lines);
-        if (outputBuffer.length > maxBufferLines) {
-          outputBuffer.splice(0, outputBuffer.length - maxBufferLines);
+      const appendRedactedLaunchOutput = (output: string) => {
+        if (output.length > 0) {
+          launchOutput = boundedOutputTail(launchOutput + output);
         }
+      };
+      const currentLaunchOutput = () =>
+        boundedOutputTail(launchOutput + stdoutRedactor.snapshot() + stderrRedactor.snapshot());
+      const flushLaunchOutput = () => {
+        for (const redactor of [stdoutRedactor, stderrRedactor]) {
+          const flushedOutput = redactor.flush();
+          appendRedactedLaunchOutput(flushedOutput);
+          if (flushedOutput.length > 0) {
+            logger.debug(`Emulator output: ${flushedOutput}`);
+          }
+        }
+        return launchOutput;
+      };
+      const recordEarlyExitCategory = (output: string) => {
+        const category = this.launchFailureCategory(output);
+        if (category && (!earlyExitCategory || category === "missing_shared_library")) {
+          earlyExitCategory = category;
+        }
+      };
+
+      // Monitor emulator output for PANIC errors
+      const monitorOutput = (data: any, outputRedactor: AndroidCommandOutputStreamRedactor) => {
+        const output = data.toString();
+        const safeChunk = redactAndroidCommandOutput(output);
+        const redactedOutput = outputRedactor.append(output);
+        appendRedactedLaunchOutput(redactedOutput);
+        if (redactedOutput.length > 0) {
+          logger.debug(`Emulator output: ${redactedOutput}`);
+        }
+        const diagnosticOutput = currentLaunchOutput();
+        this.captureLaunchTargetDeviceId(child, diagnosticOutput);
+        duplicateAvdDetected ||=
+          diagnosticOutput.includes("Running multiple emulators with the same AVD") ||
+          safeChunk.includes("Running multiple emulators with the same AVD");
+        recordEarlyExitCategory(diagnosticOutput);
+        recordEarlyExitCategory(safeChunk);
 
         // Detect sandbox/JIT entitlement failures before generic PANIC handling.
-        const sandboxError = this.sandboxFailure(initialOutput);
+        const sandboxError =
+          this.sandboxFailure(diagnosticOutput) ?? this.sandboxFailure(safeChunk);
         if (sandboxError) {
           logger.error(`Emulator sandbox error detected: ${sandboxError.message}`);
           this.launchErrors.set(child, sandboxError);
-          if (!child.killed) {child.kill();}
+          if (!child.killed) {
+            child.kill();
+          }
           if (!startupValidationComplete) {
             startupValidationComplete = true;
             perf.endOperation("panicDetection");
@@ -1153,18 +1432,27 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }
 
         // Check for PANIC in the output
-        const panicResult = this.detectArchitecturePanic(initialOutput);
-        if (panicResult.isPanic) {
-          logger.error(`Emulator PANIC detected: ${panicResult.message}`);
+        const panicResult = this.detectArchitecturePanic(diagnosticOutput);
+        const directPanicResult = panicResult.isPanic
+          ? panicResult
+          : this.detectArchitecturePanic(safeChunk);
+        if (directPanicResult.isPanic) {
+          logger.error(`Emulator PANIC detected: ${directPanicResult.message}`);
 
           // Create a more helpful error message
-          let errorMessage = `Emulator failed to start: ${panicResult.message}`;
-          if (panicResult.hostArch && panicResult.avdArch) {
-            errorMessage += `\n\nSuggestion: On ${panicResult.hostArch} hosts, create AVDs with compatible architectures:`;
-            if (panicResult.hostArch === "aarch64" || panicResult.hostArch === "arm64") {
+          let errorMessage = `Emulator failed to start: ${directPanicResult.message}`;
+          if (directPanicResult.hostArch && directPanicResult.avdArch) {
+            errorMessage += `\n\nSuggestion: On ${directPanicResult.hostArch} hosts, create AVDs with compatible architectures:`;
+            if (
+              directPanicResult.hostArch === "aarch64" ||
+              directPanicResult.hostArch === "arm64"
+            ) {
               errorMessage += `\n- Use ARM64 system images (arm64-v8a) instead of x86/x86_64`;
               errorMessage += `\n- Example: avdmanager create avd -n MyAVD -k "system-images;android-35;google_apis;arm64-v8a"`;
-            } else if (panicResult.hostArch === "x86" || panicResult.hostArch === "x86_64") {
+            } else if (
+              directPanicResult.hostArch === "x86" ||
+              directPanicResult.hostArch === "x86_64"
+            ) {
               errorMessage += `\n- Use x86/x86_64 system images instead of ARM64`;
               errorMessage += `\n- Example: avdmanager create avd -n MyAVD -k "system-images;android-35;google_apis;x86_64"`;
             }
@@ -1185,13 +1473,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }
 
         // Check for corrupt disk image
-        const corruptResult = this.detectCorruptImage(initialOutput);
-        if (corruptResult.isCorrupt) {
-          logger.error(`Emulator corrupt image detected: ${corruptResult.message}`);
+        const corruptResult = this.detectCorruptImage(diagnosticOutput);
+        const directCorruptResult = corruptResult.isCorrupt
+          ? corruptResult
+          : this.detectCorruptImage(safeChunk);
+        if (directCorruptResult.isCorrupt) {
+          logger.error(`Emulator corrupt image detected: ${directCorruptResult.message}`);
 
-          let errorMessage = `Emulator failed to start: ${corruptResult.message}`;
-          if (corruptResult.suggestion) {
-            errorMessage += `\n\nSuggestion: ${corruptResult.suggestion}`;
+          let errorMessage = `Emulator failed to start: ${directCorruptResult.message}`;
+          if (directCorruptResult.suggestion) {
+            errorMessage += `\n\nSuggestion: ${directCorruptResult.suggestion}`;
           }
 
           if (!child.killed) {
@@ -1207,13 +1498,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }
 
         // Check for display / Qt platform-plugin failure (windowed launch on a headless host)
-        const displayResult = this.detectDisplayError(initialOutput);
-        if (displayResult.isDisplayError) {
-          logger.error(`Emulator display error detected: ${displayResult.message}`);
+        const displayResult = this.detectDisplayError(diagnosticOutput);
+        const directDisplayResult = displayResult.isDisplayError
+          ? displayResult
+          : this.detectDisplayError(safeChunk);
+        if (directDisplayResult.isDisplayError) {
+          logger.error(`Emulator display error detected: ${directDisplayResult.message}`);
 
-          let errorMessage = `Emulator failed to start: ${displayResult.message}`;
-          if (displayResult.suggestion) {
-            errorMessage += `\n\nSuggestion: ${displayResult.suggestion}`;
+          let errorMessage = `Emulator failed to start: ${directDisplayResult.message}`;
+          if (directDisplayResult.suggestion) {
+            errorMessage += `\n\nSuggestion: ${directDisplayResult.suggestion}`;
           }
 
           if (!child.killed) {
@@ -1223,15 +1517,22 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           if (!startupValidationComplete) {
             startupValidationComplete = true;
             perf.endOperation("panicDetection");
-            reject(new ActionableError(errorMessage));
+            reject(
+              this.appendCategory(
+                new ActionableError(errorMessage),
+                "display_initialization_failed",
+              ),
+            );
           }
           return;
         }
 
         // Check for successful startup indicators
-        if (output.includes("INFO         | emuDirName:") ||
+        if (
+          output.includes("INFO         | emuDirName:") ||
           output.includes("Hax is enabled") ||
-          output.includes("Detected GPU type")) {
+          output.includes("Detected GPU type")
+        ) {
           // Emulator has started successfully, resolve with the child process
           if (!startupValidationComplete) {
             startupValidationComplete = true;
@@ -1251,38 +1552,44 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }
       }, 5000);
 
-      // Log emulator output for debugging and monitor for PANIC
-      child.stdout?.on("data", data => {
-        logger.debug(`Emulator stdout: ${data}`);
-        monitorOutput(data);
-      });
+      let exitDrainTimeout: NodeJS.Timeout | undefined;
+      let earlyExitFinalization: Promise<void> | undefined;
+      const clearExitDrainTimeout = () => {
+        if (exitDrainTimeout) {
+          this.timer.clearTimeout(exitDrainTimeout);
+          exitDrainTimeout = undefined;
+        }
+      };
+      const finalizeEarlyExit = () => {
+        if (startupValidationComplete || earlyExitFinalization) {
+          return;
+        }
+        earlyExitFinalization = (async () => {
+          clearExitDrainTimeout();
+          const finalizedOutput = flushLaunchOutput();
+          const completedExitCode = exitCode ?? null;
+          const completedExitSignal = exitSignal ?? null;
 
-      child.stderr?.on("data", data => {
-        logger.debug(`Emulator stderr: ${data}`);
-        monitorOutput(data);
-      });
-
-      child.on("exit", code => {
-        clearTimeout(startupTimeout);
-        if (code !== 0) {
-          logger.error(`Emulator process exited with code: ${code}`);
-
-          // Check if exit was due to "already running" error
-          if (initialOutput.includes("Running multiple emulators with the same AVD")) {
-            logger.info(`AVD '${avdName}' is already starting/running - this is expected, will wait for it to be ready`);
+          // Another emulator already owns this AVD; we hold no process handle
+          // for it. Resolve null rather than a fabricated handle (issue #3938);
+          // the caller waits for readiness regardless.
+          if (
+            duplicateAvdDetected ||
+            finalizedOutput.includes("Running multiple emulators with the same AVD")
+          ) {
+            logger.info(
+              `AVD '${avdName}' is already starting/running - this is expected, will wait for it to be ready`,
+            );
             if (!startupValidationComplete) {
               startupValidationComplete = true;
               perf.endOperation("panicDetection");
-              // Another emulator already owns this AVD; we hold no process handle
-              // for it. Resolve null rather than a fabricated handle (issue #3938);
-              // the caller waits for readiness regardless.
               resolve(null);
             }
             return;
           }
 
           // Check if exit was due to a sandbox/JIT entitlement failure.
-          const sandboxError = this.sandboxFailure(initialOutput);
+          const sandboxError = this.sandboxFailure(finalizedOutput);
           if (sandboxError) {
             logger.error(`Exit was due to emulator sandbox error: ${sandboxError.message}`);
             this.launchErrors.set(child, sandboxError);
@@ -1294,8 +1601,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             return;
           }
 
-          // Check if exit was due to PANIC
-          const panicResult = this.detectArchitecturePanic(initialOutput);
+          // Check if exit was due to PANIC.
+          const panicResult = this.detectArchitecturePanic(finalizedOutput);
           if (panicResult.isPanic) {
             logger.error(`Exit was due to PANIC: ${panicResult.message}`);
             if (!startupValidationComplete) {
@@ -1306,8 +1613,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             return;
           }
 
-          // Check if exit was due to corrupt disk image
-          const corruptResult = this.detectCorruptImage(initialOutput);
+          // Check if exit was due to corrupt disk image.
+          const corruptResult = this.detectCorruptImage(finalizedOutput);
           if (corruptResult.isCorrupt) {
             logger.error(`Exit was due to corrupt image: ${corruptResult.message}`);
             if (!startupValidationComplete) {
@@ -1324,7 +1631,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
           // Check if exit was due to a display / Qt platform-plugin failure.
           // Signal death (e.g. SIGABRT from the failed xcb plugin) arrives as code === null.
-          const displayResult = this.detectDisplayError(initialOutput);
+          const displayResult = this.detectDisplayError(finalizedOutput);
           if (displayResult.isDisplayError) {
             logger.error(`Exit was due to display error: ${displayResult.message}`);
             if (!startupValidationComplete) {
@@ -1334,20 +1641,97 @@ export class AndroidEmulatorClient implements AndroidEmulator {
               if (displayResult.suggestion) {
                 errorMessage += `\n\nSuggestion: ${displayResult.suggestion}`;
               }
-              reject(new ActionableError(errorMessage));
+              reject(
+                this.appendCategory(
+                  new ActionableError(errorMessage),
+                  "display_initialization_failed",
+                ),
+              );
             }
-          } else if (!startupValidationComplete) {
+            return;
+          }
+
+          let category = earlyExitCategory ?? this.launchFailureCategory(finalizedOutput);
+          let accelCheckOutput = "";
+          if (this.platform === "linux" && (!category || category === "kvm_permission_denied")) {
+            accelCheckOutput = await this.runAccelerationCheck();
+            category = category ?? this.accelerationCheckCategory(accelCheckOutput);
+          }
+          if (!startupValidationComplete) {
             startupValidationComplete = true;
             perf.endOperation("panicDetection");
-            reject(new ActionableError(`Emulator process exited with code: ${code}`));
+            reject(
+              this.formatEarlyExitError(
+                avdName,
+                completedExitCode,
+                completedExitSignal,
+                category,
+                finalizedOutput,
+                accelCheckOutput,
+              ),
+            );
+          }
+        })().catch((error) => {
+          logger.error(`Unable to finalize Android emulator early-exit diagnostics: ${error}`);
+          if (!startupValidationComplete) {
+            startupValidationComplete = true;
+            perf.endOperation("panicDetection");
+            reject(
+              this.formatEarlyExitError(
+                avdName,
+                exitCode ?? null,
+                exitSignal ?? null,
+                earlyExitCategory,
+                flushLaunchOutput(),
+                "",
+              ),
+            );
+          }
+        });
+      };
+
+      // Log emulator output through the same buffered redaction path as diagnostics.
+      child.stdout?.on("data", (data) => {
+        monitorOutput(data, stdoutRedactor);
+      });
+
+      child.stderr?.on("data", (data) => {
+        monitorOutput(data, stderrRedactor);
+      });
+
+      child.on("exit", (code, signal) => {
+        this.timer.clearTimeout(startupTimeout);
+        exitCode = code;
+        exitSignal = signal;
+        if (code !== 0) {
+          logger.error(`Emulator process exited with code: ${code}`);
+          if (!startupValidationComplete) {
+            exitDrainTimeout = this.timer.setTimeout(() => {
+              logger.debug(
+                `Emulator stdio did not close within ${EARLY_EXIT_DRAIN_TIMEOUT_MS}ms after an early exit`,
+              );
+              finalizeEarlyExit();
+            }, EARLY_EXIT_DRAIN_TIMEOUT_MS);
           }
         } else {
           logger.info(`Emulator process exited with code: ${code}`);
         }
       });
 
-      child.on("error", error => {
-        clearTimeout(startupTimeout);
+      child.on("close", (code, signal) => {
+        this.timer.clearTimeout(startupTimeout);
+        clearExitDrainTimeout();
+        exitCode ??= code;
+        exitSignal ??= signal;
+        if (exitCode === 0 || startupValidationComplete) {
+          return;
+        }
+        finalizeEarlyExit();
+      });
+
+      child.on("error", (error) => {
+        this.timer.clearTimeout(startupTimeout);
+        clearExitDrainTimeout();
         if (!startupValidationComplete) {
           startupValidationComplete = true;
           perf.endOperation("panicDetection");
@@ -1363,8 +1747,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @returns Promise that resolves when emulator is stopped
    */
   async killDevice(device: BootedDevice): Promise<void> {
-    const runningEmulators = await this.getBootedDevicesChecked(false, { bypassDeviceListCache: true });
-    const emulator = runningEmulators.find(emu => emu.deviceId === device.deviceId);
+    const runningEmulators = await this.getBootedDevicesChecked(false, {
+      bypassDeviceListCache: true,
+    });
+    const emulator = runningEmulators.find((emu) => emu.deviceId === device.deviceId);
 
     if (!emulator || !emulator.deviceId) {
       throw new ActionableError(`Emulator '${device.name}' is not running`);
@@ -1400,8 +1786,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     timeoutMs: number,
     processExitError: ActionableError | null,
   ): ActionableError {
-    return processExitError
-      ?? new ActionableError(`Emulator '${avdName}' failed to become ready within ${timeoutMs}ms`);
+    return (
+      processExitError ??
+      new ActionableError(`Emulator '${avdName}' failed to become ready within ${timeoutMs}ms`)
+    );
   }
 
   private unknownEmulatorName(deviceId: string): string {
@@ -1412,14 +1800,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return name === this.unknownEmulatorName(deviceId);
   }
 
-  private matchesRequestedAvdOrUnknown(emulator: BootedDevice, avdName: string, targetDeviceId?: string): boolean {
+  private matchesRequestedAvdOrUnknown(
+    emulator: BootedDevice,
+    avdName: string,
+    targetDeviceId?: string,
+  ): boolean {
     if (targetDeviceId === emulator.deviceId && !targetDeviceId.startsWith("emulator-")) {
       return true;
     }
 
-    return emulator.name === avdName
-      || this.isUnknownEmulatorName(emulator.name, emulator.deviceId)
-      || (targetDeviceId === emulator.deviceId && this.isUnknownEmulatorName(avdName, targetDeviceId));
+    return (
+      emulator.name === avdName ||
+      this.isUnknownEmulatorName(emulator.name, emulator.deviceId) ||
+      (targetDeviceId === emulator.deviceId && this.isUnknownEmulatorName(avdName, targetDeviceId))
+    );
   }
 
   private detectDeviceIdFromEmulatorOutput(output: string): string | undefined {
@@ -1449,7 +1843,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const targetDeviceId = this.detectDeviceIdFromEmulatorOutput(output);
     if (targetDeviceId) {
       this.launchTargetDeviceIds.set(childProcess, targetDeviceId);
-      logger.debug(`Captured emulator launch target deviceId from process output: ${targetDeviceId}`);
+      logger.debug(
+        `Captured emulator launch target deviceId from process output: ${targetDeviceId}`,
+      );
     }
   }
 
@@ -1469,8 +1865,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const perf = createGlobalPerformanceTracker();
 
     // Read polling interval from environment variable (default: 500ms, minimum: 100ms)
-    const pollingIntervalMs = Math.max(parseInt(process.env.EMULATOR_POLLING_INTERVAL_MS || "500", 10), 100);
-    logger.info(`Waiting for emulator '${avdName}' to be ready... (polling interval: ${pollingIntervalMs}ms)`);
+    const pollingIntervalMs = Math.max(
+      parseInt(process.env.EMULATOR_POLLING_INTERVAL_MS || "500", 10),
+      100,
+    );
+    logger.info(
+      `Waiting for emulator '${avdName}' to be ready... (polling interval: ${pollingIntervalMs}ms)`,
+    );
 
     // Monitor child process for early exit if provided
     let processExitError: ActionableError | null = null;
@@ -1487,7 +1888,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       };
       childProcess.stdout?.on("data", captureOutput);
       childProcess.stderr?.on("data", captureOutput);
-      childProcess.on("exit", code => {
+      childProcess.on("exit", (code) => {
         // A null code means the process was killed by signal (e.g. SIGABRT from a
         // failed Qt xcb plugin on a headless host) — treat that as a failure too.
         if (code !== 0) {
@@ -1514,14 +1915,18 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           } else {
             const panicResult = this.detectArchitecturePanic(combinedOutput);
             if (panicResult.isPanic) {
-              processExitError = new ActionableError(`Emulator failed to start: ${panicResult.message}`);
+              processExitError = new ActionableError(
+                `Emulator failed to start: ${panicResult.message}`,
+              );
             } else {
               processExitError = new ActionableError(
-                `Emulator process exited with code ${code} while waiting for readiness`
+                `Emulator process exited with code ${code} while waiting for readiness`,
               );
             }
           }
-          logger.error(`Emulator process exited during readiness wait: ${processExitError.message}`);
+          logger.error(
+            `Emulator process exited during readiness wait: ${processExitError.message}`,
+          );
         }
       });
     }
@@ -1535,54 +1940,76 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const backgroundPoller = async () => {
       while (pollingActive && !foundDeviceId) {
         try {
-          this.recordLaunchError(childProcess, error => {
+          this.recordLaunchError(childProcess, (error) => {
             processExitError = error;
           });
           logger.debug(`Background polling iteration - checking for emulator '${avdName}'...`);
 
-          const correlatedTargetDeviceId = targetDeviceId ?? this.getLaunchTargetDeviceId(childProcess);
+          const correlatedTargetDeviceId =
+            targetDeviceId ?? this.getLaunchTargetDeviceId(childProcess);
           const remainingTimeoutMs = timeoutMs - (this.timer.now() - startTime);
           if (remainingTimeoutMs <= 0) {
             pollingActive = false;
             break;
           }
-          await this.detectOfflineFailure(correlatedTargetDeviceId, offlineTracker, remainingTimeoutMs);
+          await this.detectOfflineFailure(
+            correlatedTargetDeviceId,
+            offlineTracker,
+            remainingTimeoutMs,
+          );
           if (!pollingActive || this.timer.now() - startTime >= timeoutMs) {
             break;
           }
 
           // For local emulators, check for running devices
           logger.debug(`Checking for running local emulators...`);
-          const runningEmulators = await this.getBootedDevices(false, { bypassDeviceListCache: true });
+          const runningEmulators = await this.getBootedDevices(false, {
+            bypassDeviceListCache: true,
+          });
           logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);
 
           if (runningEmulators.length > 0) {
-            logger.debug(`Found ${runningEmulators.length} running emulators: ${runningEmulators.map(e => `${e.name}(${e.deviceId})`).join(", ")}`);
+            logger.debug(
+              `Found ${runningEmulators.length} running emulators: ${runningEmulators.map((e) => `${e.name}(${e.deviceId})`).join(", ")}`,
+            );
 
             // Prefer an exact deviceId when startDevice already selected or correlated a device.
             let emulator = correlatedTargetDeviceId
-              ? runningEmulators.find(emu => emu.deviceId === correlatedTargetDeviceId)
+              ? runningEmulators.find((emu) => emu.deviceId === correlatedTargetDeviceId)
               : undefined;
             if (correlatedTargetDeviceId) {
-              logger.debug(`Exact deviceId match for '${correlatedTargetDeviceId}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
-              if (emulator && !this.matchesRequestedAvdOrUnknown(emulator, avdName, correlatedTargetDeviceId)) {
-                logger.debug(`Exact deviceId match ${emulator.deviceId} resolved as '${emulator.name}', not requested AVD '${avdName}'`);
+              logger.debug(
+                `Exact deviceId match for '${correlatedTargetDeviceId}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`,
+              );
+              if (
+                emulator &&
+                !this.matchesRequestedAvdOrUnknown(emulator, avdName, correlatedTargetDeviceId)
+              ) {
+                logger.debug(
+                  `Exact deviceId match ${emulator.deviceId} resolved as '${emulator.name}', not requested AVD '${avdName}'`,
+                );
                 emulator = undefined;
               }
             }
 
             // Look for emulator by name next.
             if (!emulator && !correlatedTargetDeviceId) {
-              emulator = runningEmulators.find(emu => emu.name === avdName);
-              logger.debug(`Exact name match for '${avdName}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`);
+              emulator = runningEmulators.find((emu) => emu.name === avdName);
+              logger.debug(
+                `Exact name match for '${avdName}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`,
+              );
             }
 
             if (emulator && emulator.deviceId) {
-              logger.debug(`Target emulator found: ${emulator.name} (${emulator.deviceId}) - starting readiness checks`);
+              logger.debug(
+                `Target emulator found: ${emulator.name} (${emulator.deviceId}) - starting readiness checks`,
+              );
 
               // Check if the device is online and ready.
               // Run ADB state, package manager, and boot-complete checks in parallel for faster detection.
-              logger.debug(`[PARALLEL] Running device state, package manager, and boot-complete checks for ${emulator.deviceId}...`);
+              logger.debug(
+                `[PARALLEL] Running device state, package manager, and boot-complete checks for ${emulator.deviceId}...`,
+              );
               const adb = this.adbFactory.create(emulator);
               try {
                 perf.startOperation("adbParallelChecks");
@@ -1608,35 +2035,63 @@ export class AndroidEmulatorClient implements AndroidEmulator {
                 ) {
                   logger.debug(
                     `[PARALLEL] Checks not yet complete: deviceStatus: ${deviceStateResult.status}, ` +
-                    `packageManager: ${packageManagerResult.status}, ` +
-                    `sysBootCompleted: ${sysBootCompletedResult.status}, bootAnimation: ${bootAnimationResult.status}`,
+                      `packageManager: ${packageManagerResult.status}, ` +
+                      `sysBootCompleted: ${sysBootCompletedResult.status}, bootAnimation: ${bootAnimationResult.status}`,
                   );
                 } else {
                   const stateOutput = deviceStateResult.value.stdout.trim();
                   const sysBootCompleted = sysBootCompletedResult.value.stdout.trim();
                   const bootAnimationState = bootAnimationResult.value.stdout.trim();
-                  logger.debug(`[PARALLEL] Package manager command completed for ${emulator.deviceId} - output: ${packageManagerResult.value.stdout.length} bytes`);
+                  logger.debug(
+                    `[PARALLEL] Package manager command completed for ${emulator.deviceId} - output: ${packageManagerResult.value.stdout.length} bytes`,
+                  );
                   if (!stateOutput.includes("device")) {
-                    logger.debug(`[PARALLEL] ❌ Device state check failed for ${emulator.deviceId}: state="${stateOutput}"`);
-                  } else if (!packageManagerResult.value.stdout || !packageManagerResult.value.stdout.includes("package:")) {
-                    logger.debug(`[PARALLEL] ❌ Package manager returned no packages for ${emulator.deviceId} (${packageManagerResult.value.stdout.length} bytes output)`);
-                  } else if (packageManagerResult.value.stderr || packageManagerResult.value.stderr.includes("Failure")) {
-                    logger.debug(`[PARALLEL] ❌ Package manager returned failure for ${emulator.deviceId}: ${packageManagerResult.value.stderr}`);
+                    logger.debug(
+                      `[PARALLEL] ❌ Device state check failed for ${emulator.deviceId}: state="${stateOutput}"`,
+                    );
+                  } else if (
+                    !packageManagerResult.value.stdout ||
+                    !packageManagerResult.value.stdout.includes("package:")
+                  ) {
+                    logger.debug(
+                      `[PARALLEL] ❌ Package manager returned no packages for ${emulator.deviceId} (${packageManagerResult.value.stdout.length} bytes output)`,
+                    );
+                  } else if (
+                    packageManagerResult.value.stderr ||
+                    packageManagerResult.value.stderr.includes("Failure")
+                  ) {
+                    logger.debug(
+                      `[PARALLEL] ❌ Package manager returned failure for ${emulator.deviceId}: ${packageManagerResult.value.stderr}`,
+                    );
                   } else if (sysBootCompleted !== "1") {
-                    logger.debug(`[PARALLEL] ❌ sys.boot_completed is not set for ${emulator.deviceId}: "${sysBootCompleted}"`);
+                    logger.debug(
+                      `[PARALLEL] ❌ sys.boot_completed is not set for ${emulator.deviceId}: "${sysBootCompleted}"`,
+                    );
                   } else if (bootAnimationState && bootAnimationState !== "stopped") {
-                    logger.debug(`[PARALLEL] ❌ boot animation is still active for ${emulator.deviceId}: "${bootAnimationState}"`);
+                    logger.debug(
+                      `[PARALLEL] ❌ boot animation is still active for ${emulator.deviceId}: "${bootAnimationState}"`,
+                    );
                   } else {
-                    logger.debug(`[PARALLEL] ✅ Device state check passed for ${emulator.deviceId}`);
-                    logger.debug(`[PARALLEL] ✅ Package manager is responsive for ${emulator.deviceId} - emulator is ready!`);
-                    logger.debug(`[PARALLEL] ✅ Android boot-complete signals are ready for ${emulator.deviceId}`);
-                    logger.debug(`[PARALLEL] ✅ No package manager errors detected - marking emulator as ready`);
+                    logger.debug(
+                      `[PARALLEL] ✅ Device state check passed for ${emulator.deviceId}`,
+                    );
+                    logger.debug(
+                      `[PARALLEL] ✅ Package manager is responsive for ${emulator.deviceId} - emulator is ready!`,
+                    );
+                    logger.debug(
+                      `[PARALLEL] ✅ Android boot-complete signals are ready for ${emulator.deviceId}`,
+                    );
+                    logger.debug(
+                      `[PARALLEL] ✅ No package manager errors detected - marking emulator as ready`,
+                    );
                     foundDeviceId = emulator.deviceId;
                     return;
                   }
                 }
               } catch (parallelError) {
-                logger.debug(`[PARALLEL] ❌ Parallel checks failed for ${emulator.deviceId}: ${parallelError}`);
+                logger.debug(
+                  `[PARALLEL] ❌ Parallel checks failed for ${emulator.deviceId}: ${parallelError}`,
+                );
               }
             } else {
               logger.debug(`No suitable emulator found for '${avdName}' - will continue polling`);
@@ -1649,10 +2104,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }
 
         // Always wait at least the minimum polling interval
-        logger.debug(`Background polling cycle complete - sleeping ${pollingIntervalMs}ms before next check`);
+        logger.debug(
+          `Background polling cycle complete - sleeping ${pollingIntervalMs}ms before next check`,
+        );
         await this.sleep(pollingIntervalMs);
       }
-      logger.debug(`Background polling stopped - pollingActive: ${pollingActive}, foundDeviceId: ${foundDeviceId}`);
+      logger.debug(
+        `Background polling stopped - pollingActive: ${pollingActive}, foundDeviceId: ${foundDeviceId}`,
+      );
     };
 
     // Start background polling immediately
@@ -1672,7 +2131,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         pollingActive = false;
         perf.endOperation("devicePolling");
         logger.info(`Emulator '${avdName}' is ready! Device ID: ${foundDeviceId}`);
-        const bootedDevice = { name: avdName, platform: "android", deviceId: foundDeviceId } as BootedDevice;
+        const bootedDevice = {
+          name: avdName,
+          platform: "android",
+          deviceId: foundDeviceId,
+        } as BootedDevice;
         perf.startOperation("wakeAndUnlock");
         await this.wakeAndUnlock(bootedDevice);
         perf.endOperation("wakeAndUnlock");
@@ -1690,7 +2153,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     if (foundDeviceId) {
       logger.info(`Emulator '${avdName}' is ready! Device ID: ${foundDeviceId}`);
-      const bootedDevice = { name: avdName, platform: "android", deviceId: foundDeviceId } as BootedDevice;
+      const bootedDevice = {
+        name: avdName,
+        platform: "android",
+        deviceId: foundDeviceId,
+      } as BootedDevice;
       perf.startOperation("wakeAndUnlock");
       await this.wakeAndUnlock(bootedDevice);
       perf.endOperation("wakeAndUnlock");
@@ -1715,16 +2182,18 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     try {
       const wakeAndUnlock = new WakeAndUnlock(device, this.adbFactory, {
         timer: this.timer,
-        credentialStore: new DeviceLockStore()
+        credentialStore: new DeviceLockStore(),
       });
       const result = await wakeAndUnlock.execute();
       if (!result.unlocked && result.secure) {
         logger.info(
           `[WakeAndUnlock] Device ${device.deviceId} is secure-locked and no PIN is remembered; ` +
-          "leaving it locked. Unlock it once with the wakeAndUnlock tool (passing a pin) to remember it."
+            "leaving it locked. Unlock it once with the wakeAndUnlock tool (passing a pin) to remember it.",
         );
       } else {
-        logger.info(`[WakeAndUnlock] Device ${device.deviceId} wake/unlock: ${JSON.stringify(result)}`);
+        logger.info(
+          `[WakeAndUnlock] Device ${device.deviceId} wake/unlock: ${JSON.stringify(result)}`,
+        );
       }
     } catch (error) {
       // Log but don't fail - the device is still ready, just might need manual interaction.

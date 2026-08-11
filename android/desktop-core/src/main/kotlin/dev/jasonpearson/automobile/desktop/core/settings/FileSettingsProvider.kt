@@ -2,6 +2,9 @@ package dev.jasonpearson.automobile.desktop.core.settings
 
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.Properties
 
 private val LOG = LoggerFactory.getLogger("FileSettingsProvider")
@@ -42,11 +45,34 @@ class FileSettingsProvider(private val file: File = defaultSettingsFile()) : Set
 
   private fun save() {
     try {
-      file.parentFile?.mkdirs()
-      file.outputStream().use { props.store(it, "AutoMobile desktop settings") }
+      val dir = file.parentFile ?: File(".")
+      dir.mkdirs()
+      // Write to a temp file in the SAME directory and atomically replace the target, so a crash or
+      // disk-full mid-write can never leave the canonical file truncated — which would blank
+      // hasSeenOnboarding and re-show onboarding on the next launch. Same dir keeps the move on one
+      // filesystem so ATOMIC_MOVE applies.
+      val tmp = File.createTempFile("desktop-settings", ".tmp", dir)
+      try {
+        tmp.outputStream().use { props.store(it, "AutoMobile desktop settings") }
+        try {
+          Files.move(
+            tmp.toPath(),
+            file.toPath(),
+            StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING,
+          )
+        } catch (atomicUnsupported: AtomicMoveNotSupportedException) {
+          // Rare filesystem without atomic rename: a plain replace is still safer than truncating
+          // the target in place, and the fully-written temp is the source either way.
+          LOG.debug("Atomic settings move unsupported, falling back to replace: $atomicUnsupported")
+          Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+      } finally {
+        tmp.delete() // no-op once the move has consumed it; cleans up if the write/move threw
+      }
     } catch (error: Exception) {
-      // Best-effort: a failed write keeps the value in memory for this session; the next set
-      // retries.
+      // Best-effort: a failed write keeps the value in memory for this session (the previous file
+      // survives intact); the next set retries.
       LOG.warn("Failed to persist desktop settings to ${file.path}: ${error.message}", error)
     }
   }

@@ -35,7 +35,6 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import java.util.Base64
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -193,20 +192,19 @@ private fun liveHint(state: VideoStreamState): String =
 internal val DeviceThumbnailHeight = THUMBNAIL_HEIGHT
 
 /**
- * Screenshot fallback backed by a one-shot [ObservationStream] observation, cached per device for
- * the process lifetime so a card that scrolls off and back does not re-capture. System-touching, so
- * (like the workspace's screenshot capture) it is exercised only in manual/production runs; tests
- * inject a fake [DeviceThumbnailScreenshotSource].
+ * Screenshot fallback backed by a one-shot [ObservationStream] observation. Deliberately does NOT
+ * cache across calls: the caller ([LiveThumbnail]) already holds the captured still in per-deviceId
+ * composition state, and a booted card unmounts through the "Shutdown"/"Booting" placeholder on a
+ * reboot — so a rebooted device (same AVD/simulator id) captures a fresh still rather than showing
+ * the previous boot's screen indefinitely (which a process-lifetime cache keyed only by deviceId
+ * would do). System-touching, so (like the workspace's screenshot capture) it is exercised only in
+ * manual/production runs; tests inject a fake [DeviceThumbnailScreenshotSource].
  */
 object ObservationScreenshotSource : DeviceThumbnailScreenshotSource {
   private const val CAPTURE_TIMEOUT_MS = 5_000L
-  private val cache = ConcurrentHashMap<String, ImageBitmap>()
   private val streamFactory: () -> ObservationStream = { ObservationStreamClient() }
 
   override suspend fun latest(deviceId: String): ImageBitmap? {
-    cache[deviceId]?.let {
-      return it
-    }
     val stream = streamFactory()
     return try {
       val base64 =
@@ -219,12 +217,9 @@ object ObservationScreenshotSource : DeviceThumbnailScreenshotSource {
         }
       base64?.let {
         val bytes = Base64.getDecoder().decode(it)
-        val bitmap =
-          withContext(Dispatchers.Default) {
-            SkiaImage.makeFromEncoded(bytes).toComposeImageBitmap()
-          }
-        cache[deviceId] = bitmap
-        bitmap
+        withContext(Dispatchers.Default) {
+          SkiaImage.makeFromEncoded(bytes).toComposeImageBitmap()
+        }
       }
     } catch (cancellation: CancellationException) {
       throw cancellation

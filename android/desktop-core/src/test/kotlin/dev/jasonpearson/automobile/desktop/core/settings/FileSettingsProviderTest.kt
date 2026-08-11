@@ -52,4 +52,19 @@ class FileSettingsProviderTest {
     FileSettingsProvider(file).hasSeenOnboarding = true
     assertTrue(file.exists())
   }
+
+  @Test
+  fun `saving replaces atomically and leaves no stray temp files`() {
+    val file = tempSettingsFile()
+    val settings = FileSettingsProvider(file)
+    settings.hasSeenOnboarding = true
+    settings.themeMode = "light"
+    // The atomic temp-then-move write cleans up its temp — only the settings file remains.
+    val dir = requireNotNull(file.parentFile)
+    assertEquals(listOf(file.name), dir.list().orEmpty().sorted())
+    // And the fully-written file reads back intact.
+    val reloaded = FileSettingsProvider(file)
+    assertTrue(reloaded.hasSeenOnboarding)
+    assertEquals("light", reloaded.themeMode)
+  }
 }

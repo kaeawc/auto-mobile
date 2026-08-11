@@ -328,7 +328,7 @@ private fun BootedDeviceRow(
   onUpdateService: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
-  val isIos = device.platform != "android"
+  val isIos = device.platform.equals("ios", ignoreCase = true)
   val isPhysical = !device.isVirtual
 
   Column(
@@ -352,7 +352,7 @@ private fun BootedDeviceRow(
     ) {
       Icon(
         imageVector = PlatformIcons.logo(isIos),
-        contentDescription = null,
+        contentDescription = PlatformIcons.contentDescription(isIos),
         tint = PlatformIcons.tint(isIos),
         modifier = Modifier.size(16.dp),
       )
@@ -516,7 +516,7 @@ private fun DeviceImageRow(
   onBoot: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
-  val isIos = image.platform != "android"
+  val isIos = image.platform.equals("ios", ignoreCase = true)
 
   Row(
     modifier =
@@ -530,7 +530,7 @@ private fun DeviceImageRow(
   ) {
     Icon(
       imageVector = PlatformIcons.logo(isIos),
-      contentDescription = null,
+      contentDescription = PlatformIcons.contentDescription(isIos),
       tint = PlatformIcons.tint(isIos),
       modifier = Modifier.size(16.dp),
     )

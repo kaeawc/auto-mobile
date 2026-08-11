@@ -2852,7 +2852,7 @@ private fun GlobalShellHeader(
                 ) {
                   Icon(
                     imageVector = PlatformIcons.logo(deviceIsIos),
-                    contentDescription = null,
+                    contentDescription = PlatformIcons.contentDescription(deviceIsIos),
                     tint = PlatformIcons.tint(deviceIsIos),
                     modifier = Modifier.size(16.dp),
                   )

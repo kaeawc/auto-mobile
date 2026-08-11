@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.settings
 
 import java.io.File
 import java.nio.file.Files
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -9,8 +10,19 @@ import org.junit.Test
 
 class FileSettingsProviderTest {
 
-  private fun tempSettingsFile(): File =
-    Files.createTempDirectory("am-settings").resolve("desktop-settings.properties").toFile()
+  private val tempDirs = mutableListOf<File>()
+
+  private fun tempSettingsFile(): File {
+    val dir = Files.createTempDirectory("am-settings").toFile()
+    tempDirs += dir
+    return File(dir, "desktop-settings.properties")
+  }
+
+  @After
+  fun cleanUpTempDirs() {
+    tempDirs.forEach { it.deleteRecursively() }
+    tempDirs.clear()
+  }
 
   @Test
   fun `returns defaults when the file is absent`() {

@@ -258,7 +258,7 @@ private fun EmulatorListItem(
   ) {
     Icon(
       imageVector = PlatformIcons.logo(isIos),
-      contentDescription = null,
+      contentDescription = PlatformIcons.contentDescription(isIos),
       tint = PlatformIcons.tint(isIos),
       modifier = Modifier.size(16.dp),
     )

@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
@@ -19,9 +20,13 @@ import androidx.compose.ui.unit.dp
 object PlatformIcons {
 
   /**
-   * Android brand green; legible on both light and dark surfaces, so it needs no theme override.
+   * The bright Android brand green used on dark surfaces (see [tint] for the light-surface value).
    */
   val AndroidGreen: Color = Color(0xFF3DDC84)
+
+  // Darker Android green (Material Green 800) for light surfaces, where #3DDC84 dips to ~1.8:1 on
+  // white — below the 3:1 non-text contrast target; this reads ~4.4:1 on white.
+  private val AndroidGreenOnLight: Color = Color(0xFF2E7D32)
 
   /** The Android robot mark (24dp viewport). */
   val Android: ImageVector by lazy { vector("AndroidLogo", ANDROID_PATH) }
@@ -32,13 +37,22 @@ object PlatformIcons {
   /** The logo for a platform, keyed on whether it is iOS (Apple) or Android. */
   fun logo(isIos: Boolean): ImageVector = if (isIos) Apple else Android
 
+  /** Accessibility label naming the platform for an otherwise-decorative logo icon. */
+  fun contentDescription(isIos: Boolean): String = if (isIos) "iOS" else "Android"
+
   /**
-   * Tint for a platform logo: Android keeps its brand green; Apple takes the theme's on-surface
-   * color so the mark stays legible in both light and dark.
+   * Tint for a platform logo: Apple takes the theme's on-surface color so it stays legible in both
+   * light and dark; Android keeps its bright brand green on dark surfaces but darkens on light
+   * ones, where the bright green would drop below the 3:1 non-text contrast target on white.
    */
   @Composable
   @ReadOnlyComposable
-  fun tint(isIos: Boolean): Color = if (isIos) MaterialTheme.colorScheme.onSurface else AndroidGreen
+  fun tint(isIos: Boolean): Color =
+    when {
+      isIos -> MaterialTheme.colorScheme.onSurface
+      MaterialTheme.colorScheme.surface.luminance() > 0.5f -> AndroidGreenOnLight
+      else -> AndroidGreen
+    }
 
   private fun vector(name: String, pathData: String): ImageVector =
     ImageVector.Builder(

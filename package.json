@@ -1,6 +1,6 @@
 {
   "name": "@kaeawc/auto-mobile",
-  "version": "0.0.52",
+  "version": "0.0.53",
   "description": "Mobile device interaction automation via MCP",
   "scripts": {
     "test": "bun test --isolate",

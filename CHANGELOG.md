@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.53] - 2026-08-11
+### Fixed
+- bug(android): preserve Android emulator launch diagnostics on early exit ([#5209](https://github.com/kaeawc/auto-mobile/issues/5209)) (android, ci)
+
 ## [v0.0.52] - 2026-08-10
 ### Other
 - fix(android): support unit-suffixed AVD RAM settings ([#5194](https://github.com/kaeawc/auto-mobile/issues/5194))

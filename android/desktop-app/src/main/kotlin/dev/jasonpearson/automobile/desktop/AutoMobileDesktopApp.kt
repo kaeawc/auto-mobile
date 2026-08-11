@@ -51,10 +51,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.parseDeviceLockStates
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAction
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
-import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
-import dev.jasonpearson.automobile.desktop.core.workspace.picker.DeviceState
-import dev.jasonpearson.automobile.desktop.core.workspace.picker.PickerDevice
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootController
 import dev.jasonpearson.automobile.desktop.core.workspace.wireName
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
@@ -92,31 +89,6 @@ private const val LOCK_STATE_POLL_MS = 4_000L
 // started/killed by another client appear without a manual refresh. Matches AutoMobileContent's
 // booted-devices poll cadence.
 private const val GRID_REFRESH_POLL_MS = 5_000L
-
-/**
- * The device whose id registers the desktop daemon session against the stream-socket auth guard.
- */
-internal data class SessionBinding(val deviceId: String, val platform: String)
-
-/**
- * Resolve which device should register the desktop daemon session (via a main-socket
- * `setActiveDevice`) so stream subscriptions authenticate. Prefers the focused workspace column;
- * when no device is observed — the device grid is the home surface — falls back to the first booted
- * picker device so the grid's live thumbnails aren't rejected as an unknown session (their
- * subscribes then pass owned/unowned auth). Null when nothing is booted to stream, so every card is
- * a shut-down placeholder that needs no session. `internal` so a pure test pins the selection.
- */
-internal fun resolveSessionBinding(
-  focused: DeviceColumn?,
-  pickerDevices: List<PickerDevice>,
-): SessionBinding? =
-  when {
-    focused != null -> SessionBinding(focused.deviceId, focused.platform.wireName())
-    else ->
-      pickerDevices
-        .firstOrNull { it.state == DeviceState.Booted }
-        ?.let { SessionBinding(it.id, it.platform.wireName()) }
-  }
 
 /**
  * Live daemon connectivity as a [ConnectionState], polled from [AutoMobileClient.getDaemonStatus].
@@ -232,37 +204,36 @@ fun AutoMobileDesktopApp(
     (workspaceState as? WorkspaceUiState.Content)?.let { content ->
       content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
     }
-  // Which device registers the session: the focused workspace column, or — when the device grid is
-  // home (empty workspace) — the first booted grid device, so the grid's live thumbnails also
-  // authenticate. Without this, an empty workspace left the session unregistered and the stream
-  // sockets rejected every home-grid thumbnail subscribe as an unknown session (Codex P1).
-  val sessionBinding =
-    resolveSessionBinding(
-      focused = focusedColumn,
-      pickerDevices = (pickerState as? DevicePickerUiState.Content)?.devices.orEmpty(),
-    )
-  // A binding change cancels this effect, but the cancellation cannot interrupt an in-flight
+  // Bind the session to the FOCUSED (observed) device ONLY. setActiveDevice is allocation-bearing —
+  // it reserves the device for this session — so it must never run for a device the user isn't
+  // observing: registering the session by reserving a booted grid device would hold that device
+  // hostage from CLI/MCP sessions for as long as the app sits on the home grid (Codex P1). The
+  // daemon has no registration-only session path today (a session is created only by allocating a
+  // device, and daemon/heartbeat rejects unknown sessions), so the pristine home grid's live
+  // thumbnails are left to authenticate via the first observe — until then they degrade to the
+  // screenshot fallback. Once any device is observed the session is registered, and the reopened
+  // grid's other (unowned) devices then pass the stream auth's unowned-device branch.
+  // A focus change cancels this effect, but the cancellation cannot interrupt an in-flight
   // synchronous setActiveDevice on Dispatchers.IO. Serialize binds through a mutex and gate each on
   // a generation token so a stale bind that finishes after its replacement cannot leave the session
-  // pinned to the previously-selected device (mirrors AutoMobileContent's binding path).
+  // pinned to the previously-focused device (mirrors AutoMobileContent's binding path).
   val bindingMutex = remember(desktopDaemonSession) { Mutex() }
   val bindingGeneration = remember(desktopDaemonSession) { AtomicLong(0L) }
-  LaunchedEffect(desktopDaemonSession, sessionBinding?.deviceId, sessionBinding?.platform) {
+  LaunchedEffect(desktopDaemonSession, focusedColumn?.deviceId, focusedColumn?.platform) {
     val session = desktopDaemonSession ?: return@LaunchedEffect
-    val binding = sessionBinding ?: return@LaunchedEffect
+    val column = focusedColumn ?: return@LaunchedEffect
+    val platform = column.platform.wireName()
     val generation = bindingGeneration.incrementAndGet()
     while (isActive) {
       val registered = runCatching {
         bindingMutex.withLock {
-          // A newer binding superseded us while we waited for the lock — abandon quietly.
+          // A newer focus superseded us while we waited for the lock — abandon quietly.
           if (bindingGeneration.get() != generation) return@LaunchedEffect
-          withContext(Dispatchers.IO) {
-            session.client.setActiveDevice(binding.deviceId, binding.platform)
-          }
+          withContext(Dispatchers.IO) { session.client.setActiveDevice(column.deviceId, platform) }
         }
       }
         .onFailure {
-          LOG.warn("Failed to bind desktop session to ${binding.deviceId}: ${it.message}")
+          LOG.warn("Failed to bind desktop session to ${column.deviceId}: ${it.message}")
         }
         .isSuccess
       // Do not keep or heartbeat a binding a newer focus already replaced.

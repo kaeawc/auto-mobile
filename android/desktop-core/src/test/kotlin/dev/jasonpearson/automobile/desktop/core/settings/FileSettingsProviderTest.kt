@@ -54,6 +54,18 @@ class FileSettingsProviderTest {
   }
 
   @Test
+  fun `a malformed settings file falls back to clean defaults, not a partial mix`() {
+    val file = tempSettingsFile()
+    // A valid onboarding line followed by a malformed \u escape: Properties.load reads the first
+    // entry and then throws, so a naive load would retain hasSeenOnboarding=true. The atomic load
+    // must discard the whole parse and leave defaults.
+    file.writeText("hasSeenOnboarding=true\nthemeMode=\\uZZZZ\n")
+    val settings = FileSettingsProvider(file)
+    assertFalse(settings.hasSeenOnboarding)
+    assertEquals("dark", settings.themeMode)
+  }
+
+  @Test
   fun `saving replaces atomically and leaves no stray temp files`() {
     val file = tempSettingsFile()
     val settings = FileSettingsProvider(file)

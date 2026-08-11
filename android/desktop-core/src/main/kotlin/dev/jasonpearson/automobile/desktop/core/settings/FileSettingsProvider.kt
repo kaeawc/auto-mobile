@@ -35,7 +35,14 @@ class FileSettingsProvider(private val file: File = defaultSettingsFile()) : Set
   private fun load() {
     try {
       if (file.exists()) {
-        file.inputStream().use { props.load(it) }
+        // Parse into a throwaway Properties first and adopt it only after the WHOLE file loaded:
+        // Properties.load can populate earlier entries and then throw on a malformed/truncated
+        // line,
+        // which would otherwise leave `props` as an order-dependent mix of persisted values and
+        // defaults. A failed parse leaves clean defaults instead.
+        val loaded = Properties()
+        file.inputStream().use { loaded.load(it) }
+        props.putAll(loaded)
       }
     } catch (error: Exception) {
       // Best-effort: an unreadable settings file leaves defaults in place rather than crashing.

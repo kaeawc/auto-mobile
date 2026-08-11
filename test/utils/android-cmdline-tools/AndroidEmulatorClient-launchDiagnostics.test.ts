@@ -19,7 +19,7 @@ function execResult(stdout = "", stderr = ""): ExecResult {
     stderr,
     toString: () => stdout,
     trim: () => stdout.trim(),
-    includes: value => stdout.includes(value),
+    includes: (value) => stdout.includes(value),
   };
 }
 
@@ -65,7 +65,11 @@ function createClient(
   const executor = new FakeAdbExecutor();
   const factory = new TestAdbClientFactory(executor);
   const avdConfigReader = new FakeAvdConfigReader();
-  const execAsync = async (_file: string, args: string[], signal?: AbortSignal): Promise<ExecResult> => {
+  const execAsync = async (
+    _file: string,
+    args: string[],
+    signal?: AbortSignal,
+  ): Promise<ExecResult> => {
     calls.push(args);
     if (args[0] === "-list-avds") {
       return execResult(`${avdName}\n`);
@@ -87,11 +91,12 @@ function createClient(
     avdConfigReader,
     "linux",
   );
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath = async () => "emulator";
+  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
+    async () => "emulator";
 
   return {
     client,
-    accelChecks: () => calls.filter(args => args[0] === "-accel-check").length,
+    accelChecks: () => calls.filter((args) => args[0] === "-accel-check").length,
     timer,
   };
 }
@@ -147,16 +152,68 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     expect(error.message).toContain("category=missing_shared_library");
   });
 
+  test("preserves a split failure signature while redacting a multiline credential", async () => {
+    const child = createChild();
+    const { client } = createClient(child, () => {
+      child.stderr!.emit(
+        "data",
+        Buffer.from('token="redaction-canary\nsecret-tail"\nemulator: error while loading shared '),
+      );
+      child.stderr!.emit(
+        "data",
+        Buffer.from("libraries: libxkbfile.so.1: cannot open shared object file\n"),
+      );
+      child.emit("exit", 1, null);
+      child.emit("close", 1, null);
+    });
+
+    const error = await expectRejection(client.startEmulator(avdName));
+
+    expect(error.message).toContain("category=missing_shared_library");
+    expect(error.message).toContain("libxkbfile.so.1");
+    expect(error.message).toContain("token=[REDACTED]");
+    expect(error.message).not.toContain("redaction-canary");
+    expect(error.message).not.toContain("secret-tail");
+  });
+
+  test("does not combine credential state between stdout and stderr", async () => {
+    const child = createChild();
+    const { client } = createClient(child, () => {
+      child.stderr!.emit("data", Buffer.from("token="));
+      child.stdout!.emit("data", Buffer.from("diagnostic output\n"));
+      child.stderr!.emit(
+        "data",
+        Buffer.from(
+          "actual-secret\nemulator: error while loading shared libraries: libxkbfile.so.1\n",
+        ),
+      );
+      child.emit("exit", 1, null);
+      child.emit("close", 1, null);
+    });
+
+    const error = await expectRejection(client.startEmulator(avdName));
+
+    expect(error.message).toContain("category=missing_shared_library");
+    expect(error.message).toContain("token=[REDACTED]");
+    expect(error.message).toContain("diagnostic output");
+    expect(error.message).not.toContain("actual-secret");
+  });
+
   test("preserves rejected acceleration-check output for KVM permission denial", async () => {
     const child = createChild();
     const { client, accelChecks } = createClient(
       child,
-      () => emitFailure(child, "ProbeKVM: Could not open /dev/kvm: Permission denied\n", "stderr-before-exit"),
+      () =>
+        emitFailure(
+          child,
+          "ProbeKVM: Could not open /dev/kvm: Permission denied\n",
+          "stderr-before-exit",
+        ),
       async () => {
-        throw Object.assign(
-          new Error("emulator -accel-check failed"),
-          { stdout: "", stderr: "This user does not have permissions to use KVM.\n" },
-        );
+        throw Object.assign(new Error("emulator -accel-check failed"), {
+          stdout: "",
+          stderr: "This user does not have permissions to use KVM.\n",
+        });
       },
     );
 
@@ -184,6 +241,45 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     expect(accelChecks()).toBe(1);
   });
 
+  test("keeps duplicate-AVD detection after later output overflows the diagnostic tail", async () => {
+    const child = createChild();
+    const { client, accelChecks } = createClient(child, () => {
+      child.stderr!.emit(
+        "data",
+        Buffer.from(
+          [
+            "Running multiple emulators with the same AVD is an experimental feature.",
+            ...Array.from({ length: 60 }, (_, index) => `later line ${index}`),
+          ].join("\n"),
+        ),
+      );
+      child.emit("exit", 1, null);
+      child.emit("close", 1, null);
+    });
+
+    await expect(client.startEmulator(avdName)).resolves.toBeNull();
+    expect(accelChecks()).toBe(0);
+  });
+
+  test("keeps corrupt-image detection when a noisy chunk exceeds the diagnostic tail", async () => {
+    const child = createChild();
+    const { client } = createClient(child, () => {
+      child.stderr!.emit(
+        "data",
+        Buffer.from(
+          [
+            "qcow2: Image is corrupt; cannot be opened read/write",
+            ...Array.from({ length: 60 }, (_, index) => `later line ${index}`),
+          ].join("\n"),
+        ),
+      );
+    });
+
+    const error = await expectRejection(client.startEmulator(avdName));
+
+    expect(error.message).toContain("Disk image is corrupt");
+  });
+
   test("does not run an acceleration check for a successful launch", async () => {
     const child = createChild();
     const { client, accelChecks } = createClient(child, () => {
@@ -200,7 +296,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const { client, timer } = createClient(
       child,
       () => emitFailure(child, "emulator initialization failed\n", "stderr-before-exit"),
-      signal => {
+      (signal) => {
         probeSignal = signal;
         return new Promise<ExecResult>(() => {});
       },
@@ -215,6 +311,25 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const error = await expectRejection(start);
 
     expect(probeSignal.aborted).toBe(true);
+    expect(error.message).toContain("exited with code: 1");
+  });
+
+  test("bounds the wait for close after a nonzero exit", async () => {
+    const child = createChild();
+    let exited = false;
+    const { client, timer } = createClient(child, () => {
+      child.emit("exit", 1, null);
+      exited = true;
+    });
+
+    const start = client.startEmulator(avdName);
+    while (!exited) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(1_000);
+
+    const error = await expectRejection(start);
+
     expect(error.message).toContain("exited with code: 1");
   });
 

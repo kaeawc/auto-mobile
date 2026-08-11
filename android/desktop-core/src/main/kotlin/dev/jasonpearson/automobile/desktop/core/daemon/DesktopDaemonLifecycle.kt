@@ -237,6 +237,121 @@ internal object SystemDaemonRetryTimer : DaemonRetryTimer {
   }
 }
 
+/**
+ * Resolves the `bunx` runner used to launch the pinned daemon package. AutoMobile runs exclusively
+ * on Bun. It prefers the `bunx` the user's PATH resolves (their configured install) and falls back
+ * to known absolute install locations for GUI-launched apps (Finder, Dock) whose PATH is stripped —
+ * otherwise `ProcessBuilder` fails with "Cannot run program" even when Bun is installed.
+ */
+internal interface DaemonPackageRunnerResolver {
+  fun resolve(osName: String): String
+}
+
+internal class SystemDaemonPackageRunnerResolver(
+  private val home: String? =
+    System.getProperty("user.home")?.takeIf { it.isNotEmpty() } ?: System.getenv("HOME"),
+  private val executableAt: (String) -> Boolean = { File(it).canExecute() },
+  private val onPath: (String, Boolean) -> String? = ::whichRunner,
+) : DaemonPackageRunnerResolver {
+  override fun resolve(osName: String): String {
+    val isWindows = osName.lowercase().contains("win")
+    // Prefer the `bunx` the user's PATH resolves (their configured install, e.g. via mise/asdf),
+    // then the hard-coded absolute install locations as a fallback for GUI-launched apps whose PATH
+    // is stripped (there `which/where` returns nothing, so we still land on the known install).
+    onPath("bunx", isWindows)?.let {
+      return it
+    }
+    bunAbsoluteCandidates(isWindows)
+      .firstOrNull { executableAt(it) }
+      ?.let {
+        return it
+      }
+    // Nothing resolved: emit the bare name so the failure surfaces actionable guidance to install
+    // Bun.
+    return if (isWindows) "bunx.exe" else "bunx"
+  }
+
+  private fun bunAbsoluteCandidates(isWindows: Boolean): List<String> =
+    if (isWindows) {
+      buildList { home?.let { add("$it\\.bun\\bin\\bunx.exe") } }
+    } else {
+      buildList {
+        home?.let { add("$it/.bun/bin/bunx") }
+        add("/opt/homebrew/bin/bunx")
+        add("/usr/local/bin/bunx")
+        // Homebrew on Linux (Linuxbrew): the desktop ships a Linux Deb, and a desktop-session PATH
+        // often omits Linuxbrew, so probe its default multi-user and per-user prefixes.
+        add("/home/linuxbrew/.linuxbrew/bin/bunx")
+        home?.let { add("$it/.linuxbrew/bin/bunx") }
+        // Version-manager shims (mise, asdf) at their default roots — a stripped GUI PATH omits
+        // these too, so a Bun installed only through mise/asdf would otherwise be missed.
+        home?.let {
+          add("$it/.local/share/mise/shims/bunx")
+          add("$it/.asdf/shims/bunx")
+        }
+      }
+    }
+
+  private companion object {
+    fun whichRunner(runner: String, isWindows: Boolean): String? {
+      val locator = if (isWindows) "where" else "which"
+      val process =
+        try {
+          ProcessBuilder(locator, runner).redirectErrorStream(true).start()
+        } catch (_: Exception) {
+          return null
+        }
+      return try {
+        if (!process.waitFor(2, TimeUnit.SECONDS)) return null
+        if (process.exitValue() != 0) return null
+        selectRunnerFromLookup(
+          process.inputStream.bufferedReader().readText(),
+          isWindows,
+          executableExtensions(),
+        )
+      } catch (interrupted: InterruptedException) {
+        // Preserve cancellation: don't swallow the interrupt and fall through to spawning bunx.
+        // Restore the flag and rethrow so a cancelled lifecycle call launches no daemon.
+        Thread.currentThread().interrupt()
+        throw interrupted
+      } catch (_: Exception) {
+        null
+      } finally {
+        // Terminate the locator and close its streams on every path — otherwise the timeout,
+        // cancellation, and non-zero-exit branches leak file descriptors until GC.
+        process.destroy()
+        runCatching { process.inputStream.close() }
+        runCatching { process.outputStream.close() }
+        runCatching { process.errorStream.close() }
+      }
+    }
+
+    private fun executableExtensions(): List<String> =
+      (System.getenv("PATHEXT") ?: ".COM;.EXE;.BAT;.CMD")
+        .split(';')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+  }
+}
+
+/**
+ * Picks the runner path from a `where`/`which` listing. The daemon launch wraps the runner in
+ * `cmd.exe /c` on Windows, which can only execute a PATHEXT entry — so only a result ending in a
+ * PATHEXT extension qualifies there, and `null` is returned when none does so the resolver falls
+ * back to the absolute `bunx.exe`. `which` output on POSIX is already an executable path.
+ */
+internal fun selectRunnerFromLookup(
+  output: String,
+  isWindows: Boolean,
+  executableExtensions: List<String>,
+): String? {
+  val results = output.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+  if (!isWindows) return results.firstOrNull()
+  return results.firstOrNull { candidate ->
+    executableExtensions.any { candidate.endsWith(it, ignoreCase = true) }
+  }
+}
+
 internal sealed interface DaemonLifecycleResult {
   data class Ready(val restarted: Boolean) : DaemonLifecycleResult
 
@@ -258,6 +373,8 @@ internal class DesktopDaemonLifecycle(
   private val pidFileReader: DaemonPidFileReader = JsonDaemonPidFileReader(),
   private val commandExecutor: DaemonCommandExecutor = SystemDaemonCommandExecutor,
   private val timer: DaemonRetryTimer = SystemDaemonRetryTimer,
+  private val packageRunnerResolver: DaemonPackageRunnerResolver =
+    SystemDaemonPackageRunnerResolver(),
   private val verificationAttempts: Int = DEFAULT_VERIFICATION_ATTEMPTS,
 ) : DaemonLifecycleEnsurer {
   override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult =
@@ -306,7 +423,7 @@ internal class DesktopDaemonLifecycle(
         } catch (error: Exception) {
           return DaemonLifecycleResult.Failure(
             "Could not $action AutoMobile $expectedVersion: ${error.message ?: error.javaClass.simpleName}. " +
-              "Install Node.js with npx available, then try again."
+              "Install Bun so bunx is available, then try again."
           )
         }
       if (commandResult.cancelled) {
@@ -348,17 +465,20 @@ internal class DesktopDaemonLifecycle(
     version: String,
     action: String,
     existingOptions: List<String>,
-  ): List<String> =
-    commandForPlatform(
+  ): List<String> {
+    val osName = System.getProperty("os.name", "")
+    val runner = packageRunnerResolver.resolve(osName)
+    // `bunx` auto-installs the pinned package without prompting, and is a self-contained native
+    // binary, so it needs no `-y` flag and no PATH manipulation.
+    val runnerArguments =
       listOf(
-        npxExecutable(System.getProperty("os.name", "")),
-        "-y",
+        runner,
         "@kaeawc/auto-mobile@${DaemonSocketPaths.releaseVersion(version)}",
         "--daemon",
         action,
-      ) + existingOptions,
-      System.getProperty("os.name", ""),
-    )
+      ) + existingOptions
+    return commandForPlatform(runnerArguments, osName)
+  }
 
   private fun readPidStateWithRetry(): DaemonPidReadResult {
     repeat(PID_READ_ATTEMPTS) { attempt ->
@@ -413,9 +533,6 @@ internal class DesktopDaemonLifecycle(
 
   private fun declaresFullVersion(version: String): Boolean =
     DaemonSocketPaths.releaseVersion(version) != version
-
-  internal fun npxExecutable(osName: String): String =
-    if (osName.lowercase().contains("win")) "npx.cmd" else "npx"
 
   internal fun commandForPlatform(command: List<String>, osName: String): List<String> {
     if (!osName.lowercase().contains("win")) return command

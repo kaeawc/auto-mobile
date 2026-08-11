@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DesktopDaemonLifecycleTest {
@@ -43,6 +44,7 @@ class DesktopDaemonLifecycleTest {
           ),
         commandExecutor = commands,
         timer = timer,
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -51,14 +53,7 @@ class DesktopDaemonLifecycleTest {
     assertTrue(result.restarted)
     assertEquals(
       listOf(
-        listOf(
-          "npx",
-          "-y",
-          "@kaeawc/auto-mobile@0.0.40",
-          "--daemon",
-          "start",
-          "--network-mockable",
-        )
+        listOf("bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "start", "--network-mockable")
       ),
       commands.commands,
     )
@@ -115,6 +110,7 @@ class DesktopDaemonLifecycleTest {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.39", "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("/opt/homebrew/bin/bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -122,7 +118,7 @@ class DesktopDaemonLifecycleTest {
     assertIs<DaemonLifecycleResult.Ready>(result)
     assertTrue(result.restarted)
     assertEquals(
-      listOf(listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
+      listOf(listOf("/opt/homebrew/bin/bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
       commands.commands,
     )
   }
@@ -141,6 +137,7 @@ class DesktopDaemonLifecycleTest {
           ),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -149,8 +146,7 @@ class DesktopDaemonLifecycleTest {
     assertEquals(
       listOf(
         listOf(
-          "npx",
-          "-y",
+          "bunx",
           "@kaeawc/auto-mobile@0.0.40",
           "--daemon",
           "restart",
@@ -173,6 +169,7 @@ class DesktopDaemonLifecycleTest {
         pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -180,7 +177,7 @@ class DesktopDaemonLifecycleTest {
     assertIs<DaemonLifecycleResult.Ready>(result)
     assertTrue(result.restarted)
     assertEquals(
-      listOf(listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
+      listOf(listOf("bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "restart")),
       commands.commands,
     )
   }
@@ -214,6 +211,7 @@ class DesktopDaemonLifecycleTest {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.39", "0.0.39")),
         commandExecutor = FakeDaemonCommandExecutor(),
         timer = timer,
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
         verificationAttempts = 2,
       )
 
@@ -234,12 +232,31 @@ class DesktopDaemonLifecycleTest {
         pidFileReader = FakeDaemonPidFileReader(listOf(null)),
         commandExecutor = FakeDaemonCommandExecutor(exitCode = 1, output = ""),
         timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
 
     assertIs<DaemonLifecycleResult.Failure>(result)
     assertTrue(result.message.contains("Install @kaeawc/auto-mobile@0.0.40"))
+  }
+
+  @Test
+  fun `reports actionable guidance when bunx cannot be run`() {
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(false)),
+        pidFileReader = FakeDaemonPidFileReader(listOf(null)),
+        commandExecutor = ThrowingDaemonCommandExecutor("Cannot run program \"bunx\""),
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Failure>(result)
+    assertTrue(result.message.contains("Install Bun so bunx is available"))
   }
 
   @Test
@@ -251,6 +268,7 @@ class DesktopDaemonLifecycleTest {
         pidFileReader = FakeDaemonPidFileReader(listOf(null)),
         commandExecutor = FakeDaemonCommandExecutor(exitCode = -1, timedOut = true),
         timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -260,15 +278,106 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
-  fun `uses the Windows npm command shim`() {
+  fun `wraps the resolved runner in the Windows command shim`() {
     val lifecycle = DesktopDaemonLifecycle()
 
-    assertEquals("npx.cmd", lifecycle.npxExecutable("Windows 11"))
-    assertEquals("npx", lifecycle.npxExecutable("Mac OS X"))
     assertEquals(
-      listOf("cmd.exe", "/d", "/v:off", "/s", "/c", "\"\"npx.cmd\" \"-y\"\""),
-      lifecycle.commandForPlatform(listOf("npx.cmd", "-y"), "Windows 11"),
+      listOf("cmd.exe", "/d", "/v:off", "/s", "/c", "\"\"bunx.exe\" \"restart\"\""),
+      lifecycle.commandForPlatform(listOf("bunx.exe", "restart"), "Windows 11"),
     )
+  }
+
+  @Test
+  fun `prefers the PATH bunx over a hard-coded install`() {
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        // A stale hard-coded ~/.bun/bin/bunx lingers, but the user has migrated to mise.
+        executableAt = { it == "/Users/dev/.bun/bin/bunx" },
+        onPath = { runner, _ ->
+          if (runner == "bunx") "/Users/dev/.local/share/mise/shims/bunx" else null
+        },
+      )
+
+    // The PATH-configured runner wins over the hard-coded install.
+    assertEquals("/Users/dev/.local/share/mise/shims/bunx", resolver.resolve("Mac OS X"))
+  }
+
+  @Test
+  fun `falls back to a probed bun install when PATH is stripped`() {
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        executableAt = { it == "/Users/dev/.bun/bin/bunx" },
+        // GUI-launched app: where/which resolves nothing against the stripped PATH.
+        onPath = { _, _ -> null },
+      )
+
+    assertEquals("/Users/dev/.bun/bin/bunx", resolver.resolve("Mac OS X"))
+  }
+
+  @Test
+  fun `discovers a linuxbrew bun install when PATH omits it`() {
+    val linuxbrewBunx = "/home/linuxbrew/.linuxbrew/bin/bunx"
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/home/dev",
+        // Bun is only under Linuxbrew, and the desktop-session PATH omits it.
+        executableAt = { it == linuxbrewBunx },
+        onPath = { _, _ -> null },
+      )
+
+    assertEquals(linuxbrewBunx, resolver.resolve("Linux"))
+  }
+
+  @Test
+  fun `discovers a mise-shimmed bun when PATH is stripped`() {
+    val miseBunx = "/Users/dev/.local/share/mise/shims/bunx"
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        // Bun is installed only through mise's shims, and the GUI-session PATH omits them.
+        executableAt = { it == miseBunx },
+        onPath = { _, _ -> null },
+      )
+
+    assertEquals(miseBunx, resolver.resolve("Mac OS X"))
+  }
+
+  @Test
+  fun `emits the bare bunx name when nothing resolves`() {
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        executableAt = { false },
+        onPath = { _, _ -> null },
+      )
+
+    assertEquals("bunx", resolver.resolve("Mac OS X"))
+    assertEquals("bunx.exe", resolver.resolve("Windows 11"))
+  }
+
+  @Test
+  fun `windows runner lookup selects a PATHEXT-executable bunx`() {
+    val pathExt = listOf(".COM", ".EXE", ".BAT", ".CMD")
+
+    // `where bunx` may list an extensionless entry before bunx.exe; cmd.exe /c can only run the
+    // PATHEXT entry, so it must be chosen.
+    assertEquals(
+      "C:\\Users\\dev\\.bun\\bin\\bunx.exe",
+      selectRunnerFromLookup(
+        "C:\\Users\\dev\\.bun\\bin\\bunx\nC:\\Users\\dev\\.bun\\bin\\bunx.exe\n",
+        isWindows = true,
+        pathExt,
+      ),
+    )
+    // POSIX `which` returns an already-executable path; take the first.
+    assertEquals(
+      "/Users/dev/.bun/bin/bunx",
+      selectRunnerFromLookup("/Users/dev/.bun/bin/bunx\n", isWindows = false, pathExt),
+    )
+    // No PATHEXT match on Windows → null, so the resolver falls back to the absolute bunx.exe.
+    assertNull(selectRunnerFromLookup("C:\\weird\\bunx\n", isWindows = true, pathExt))
   }
 
   @Test
@@ -407,6 +516,16 @@ class DesktopDaemonLifecycleTest {
       commands += command
       return DaemonCommandResult(exitCode = exitCode, output = output, timedOut = timedOut)
     }
+  }
+
+  private class ThrowingDaemonCommandExecutor(private val message: String) : DaemonCommandExecutor {
+    override fun execute(command: List<String>): DaemonCommandResult =
+      throw java.io.IOException(message)
+  }
+
+  private class FakeDaemonPackageRunnerResolver(private val runner: String) :
+    DaemonPackageRunnerResolver {
+    override fun resolve(osName: String): String = runner
   }
 
   private class FakeDaemonRetryTimer : DaemonRetryTimer {

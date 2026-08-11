@@ -125,13 +125,21 @@ private fun LiveThumbnail(
   val state by source.state.collectAsState()
   val bitmap = liveFrame?.bitmap
 
-  // Fetch the screenshot fallback lazily, only once the relay is unavailable and no live frame has
-  // arrived — so a daemon that predates the relay still shows a still, without paying for an
-  // observation stream while live video is working.
+  // Fetch the screenshot fallback lazily the first time the relay reports Unavailable, and keep it
+  // —
+  // so a daemon that predates the relay still shows a still, without paying for an observation
+  // stream
+  // while live video is working. Keyed on deviceId only (NOT the live stream state): auto-reconnect
+  // cycles Connecting<->Unavailable, and keying on the full state would cancel and restart the
+  // capture on every flip — the 1s reconnect backoff would abort it before its own 5s timeout could
+  // ever complete. Waiting on the source flow here lets one capture run to completion; the `when`
+  // below still prefers a live frame if one arrives.
   var screenshot by remember(deviceId) { mutableStateOf<ImageBitmap?>(null) }
-  LaunchedEffect(deviceId, state, bitmap == null) {
-    if (bitmap == null && screenshot == null && state is VideoStreamState.Unavailable) {
-      screenshot = screenshotSource?.latest(deviceId)
+  LaunchedEffect(deviceId, screenshotSource) {
+    if (screenshotSource == null) return@LaunchedEffect
+    source.state.first { it is VideoStreamState.Unavailable }
+    if (screenshot == null) {
+      screenshot = screenshotSource.latest(deviceId)
     }
   }
 

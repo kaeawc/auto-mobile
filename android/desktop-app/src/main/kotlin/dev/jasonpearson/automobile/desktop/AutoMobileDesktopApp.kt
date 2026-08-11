@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
@@ -35,7 +36,6 @@ import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NetworkFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
 import dev.jasonpearson.automobile.desktop.core.workspace.PerformanceFacet
-import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.Tool
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceAction
@@ -51,8 +51,12 @@ import dev.jasonpearson.automobile.desktop.core.workspace.parseDeviceLockStates
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAction
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.DeviceState
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.PickerDevice
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootController
+import dev.jasonpearson.automobile.desktop.core.workspace.wireName
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
@@ -83,6 +87,31 @@ private const val DAEMON_STATUS_POLL_MS = 5_000L
 // probe for every booted device — not a free read. A lighter dedicated lock-state feed is a
 // follow-up (see #4694); until then this cadence trades adb load for Unlock responsiveness.
 private const val LOCK_STATE_POLL_MS = 4_000L
+
+/**
+ * The device whose id registers the desktop daemon session against the stream-socket auth guard.
+ */
+internal data class SessionBinding(val deviceId: String, val platform: String)
+
+/**
+ * Resolve which device should register the desktop daemon session (via a main-socket
+ * `setActiveDevice`) so stream subscriptions authenticate. Prefers the focused workspace column;
+ * when no device is observed — the device grid is the home surface — falls back to the first booted
+ * picker device so the grid's live thumbnails aren't rejected as an unknown session (their
+ * subscribes then pass owned/unowned auth). Null when nothing is booted to stream, so every card is
+ * a shut-down placeholder that needs no session. `internal` so a pure test pins the selection.
+ */
+internal fun resolveSessionBinding(
+  focused: DeviceColumn?,
+  pickerDevices: List<PickerDevice>,
+): SessionBinding? =
+  when {
+    focused != null -> SessionBinding(focused.deviceId, focused.platform.wireName())
+    else ->
+      pickerDevices
+        .firstOrNull { it.state == DeviceState.Booted }
+        ?.let { SessionBinding(it.id, it.platform.wireName()) }
+  }
 
 /**
  * Live daemon connectivity as a [ConnectionState], polled from [AutoMobileClient.getDaemonStatus].
@@ -198,27 +227,37 @@ fun AutoMobileDesktopApp(
     (workspaceState as? WorkspaceUiState.Content)?.let { content ->
       content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
     }
-  // A focus change cancels this effect, but the cancellation cannot interrupt an in-flight
+  // Which device registers the session: the focused workspace column, or — when the device grid is
+  // home (empty workspace) — the first booted grid device, so the grid's live thumbnails also
+  // authenticate. Without this, an empty workspace left the session unregistered and the stream
+  // sockets rejected every home-grid thumbnail subscribe as an unknown session (Codex P1).
+  val sessionBinding =
+    resolveSessionBinding(
+      focused = focusedColumn,
+      pickerDevices = (pickerState as? DevicePickerUiState.Content)?.devices.orEmpty(),
+    )
+  // A binding change cancels this effect, but the cancellation cannot interrupt an in-flight
   // synchronous setActiveDevice on Dispatchers.IO. Serialize binds through a mutex and gate each on
   // a generation token so a stale bind that finishes after its replacement cannot leave the session
-  // pinned to the previously-focused device (mirrors AutoMobileContent's binding path).
+  // pinned to the previously-selected device (mirrors AutoMobileContent's binding path).
   val bindingMutex = remember(desktopDaemonSession) { Mutex() }
   val bindingGeneration = remember(desktopDaemonSession) { AtomicLong(0L) }
-  LaunchedEffect(desktopDaemonSession, focusedColumn?.deviceId, focusedColumn?.platform) {
+  LaunchedEffect(desktopDaemonSession, sessionBinding?.deviceId, sessionBinding?.platform) {
     val session = desktopDaemonSession ?: return@LaunchedEffect
-    val column = focusedColumn ?: return@LaunchedEffect
-    val platform = if (column.platform == Platform.Ios) "ios" else "android"
+    val binding = sessionBinding ?: return@LaunchedEffect
     val generation = bindingGeneration.incrementAndGet()
     while (isActive) {
       val registered = runCatching {
         bindingMutex.withLock {
-          // A newer focus superseded us while we waited for the lock — abandon quietly.
+          // A newer binding superseded us while we waited for the lock — abandon quietly.
           if (bindingGeneration.get() != generation) return@LaunchedEffect
-          withContext(Dispatchers.IO) { session.client.setActiveDevice(column.deviceId, platform) }
+          withContext(Dispatchers.IO) {
+            session.client.setActiveDevice(binding.deviceId, binding.platform)
+          }
         }
       }
         .onFailure {
-          LOG.warn("Failed to bind desktop session to ${column.deviceId}: ${it.message}")
+          LOG.warn("Failed to bind desktop session to ${binding.deviceId}: ${it.message}")
         }
         .isSuccess
       // Do not keep or heartbeat a binding a newer focus already replaced.
@@ -321,6 +360,22 @@ fun AutoMobileDesktopApp(
         pickerOpen = false
       }
     }
+  }
+  // Returning to the home grid (the last workspace column closed) refreshes the picker so it
+  // reflects
+  // devices started/killed externally during the workspace session — otherwise the picker only
+  // loads
+  // on init and via OpenPicker, so a stale grid could dispatch the wrong observe/boot (Codex P2).
+  // Only the Content -> Empty transition refreshes; the initial Empty is already covered by the
+  // VM's
+  // init load.
+  LaunchedEffect(pickerViewModel) {
+    var wasContent = false
+    snapshotFlow { workspaceState is WorkspaceUiState.Empty }
+      .collect { empty ->
+        if (empty && wasContent) pickerViewModel.onAction(DevicePickerAction.Refresh)
+        wasContent = !empty
+      }
   }
 
   AutoMobileTheme(themeMode = settings.themeMode) {

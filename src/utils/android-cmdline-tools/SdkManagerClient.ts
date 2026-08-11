@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
+import { redactAndroidCommandOutput } from "./redactAndroidCommandOutput";
 import {
   detectAndroidCommandLineTools,
   getAndroidHomeWithSystemImages,
@@ -69,13 +70,6 @@ function defaults(): SdkManagerClientDependencies {
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, "/");
-}
-
-function redact(value: string): string {
-  return value.replace(
-    /\b(token|password|secret|api[_-]?key)\s*=\s*[^\s]+/gi,
-    (_match, key: string) => `${key}=[REDACTED]`,
-  );
 }
 
 function appendBounded(current: string, next: string, maximum: number): { value: string; truncated: boolean } {
@@ -266,7 +260,12 @@ export class SdkManagerClient {
       });
       child.on("close", code => settle(() => {
         if (terminationError) {reject(terminationError); return;}
-        resolvePromise({ stdout: redact(stdout), stderr: redact(stderr), exitCode: code, outputTruncated });
+        resolvePromise({
+          stdout: redactAndroidCommandOutput(stdout),
+          stderr: redactAndroidCommandOutput(stderr),
+          exitCode: code,
+          outputTruncated,
+        });
       }));
       child.on("error", error => settle(() => reject(new Error(`Failed to spawn command: sdkmanager: ${error.message}`))));
       if (inputOptions.input) {child.stdin?.write(inputOptions.input); child.stdin?.end();}

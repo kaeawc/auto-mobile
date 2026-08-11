@@ -140,6 +140,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     child.kill = (() => {
       child.killed = true;
       child.emit("exit", null);
+      child.emit("close", null);
       return true;
     }) as ChildProcess["kill"];
     let spawned = false;

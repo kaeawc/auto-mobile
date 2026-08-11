@@ -244,6 +244,7 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
         fakeChild.stderr!.emit("data", Buffer.from('Info: Could not load the Qt platform plugin "xcb" in "" even though it was found.\n'));
         // Signal death surfaces as a null exit code from Node.
         fakeChild.emit("exit", null);
+        fakeChild.emit("close", null);
       });
       return fakeChild;
     }) as any;

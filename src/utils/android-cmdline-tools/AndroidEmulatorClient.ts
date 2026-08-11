@@ -14,8 +14,39 @@ import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../../features/action/DeviceLockStore";
 import type { FormFactor } from "../../models/DeviceMatchCriteria";
 import type { AdbDeviceState } from "./interfaces/AdbExecutor";
+import { redactAndroidCommandOutput } from "./redactAndroidCommandOutput";
 
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
+const MAX_LAUNCH_OUTPUT_LINES = 50;
+const MAX_LAUNCH_OUTPUT_CHARS = 16_384;
+const ACCEL_CHECK_TIMEOUT_MS = 3_000;
+
+type LaunchFailureCategory =
+  | "display_initialization_failed"
+  | "hardware_acceleration_unavailable"
+  | "kvm_permission_denied"
+  | "missing_shared_library";
+
+function boundedOutputTail(output: string): string {
+  const lines = output.split(/\r?\n/);
+  const recentLines = lines.slice(-MAX_LAUNCH_OUTPUT_LINES);
+  const recentOutput = recentLines.join("\n");
+  if (recentOutput.length <= MAX_LAUNCH_OUTPUT_CHARS) {
+    return recentOutput;
+  }
+  const marker = "[... launch output truncated ...]\n";
+  return marker + recentOutput.slice(-(MAX_LAUNCH_OUTPUT_CHARS - marker.length));
+}
+
+function outputFromUnknown(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Buffer.isBuffer(value)) {
+    return value.toString();
+  }
+  return "";
+}
 
 /**
  * Interface for Android Emulator (AVD) management
@@ -231,6 +262,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private adbFactory: AdbClientFactory;
   private modelNameCache = new Map<string, string>();
   private avdConfigReader: AvdConfigReader;
+  private platform: NodeJS.Platform;
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
 
@@ -247,13 +279,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     spawnFn: typeof spawn | null = null,
     timer: Timer = defaultTimer,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    avdConfigReader?: AvdConfigReader
+    avdConfigReader?: AvdConfigReader,
+    platform: NodeJS.Platform = process.platform,
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.spawnFn = spawnFn || spawn;
     this.timer = timer;
     this.adbFactory = adbFactory;
     this.avdConfigReader = avdConfigReader ?? new FileAvdConfigReader();
+    this.platform = platform;
     // Only set a fallback emulator path here; proper detection happens lazily
     this.emulatorPath = this.getFallbackEmulatorPath();
   }
@@ -700,6 +734,102 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return { isDisplayError: false };
   }
 
+  private appendLaunchOutput(outputBuffer: string[], output: string): string {
+    outputBuffer.push(...redactAndroidCommandOutput(output).split(/\r?\n/));
+    const boundedOutput = boundedOutputTail(outputBuffer.join("\n"));
+    outputBuffer.splice(0, outputBuffer.length, ...boundedOutput.split("\n"));
+    return boundedOutput;
+  }
+
+  private launchFailureCategory(output: string): LaunchFailureCategory | undefined {
+    if (/error while loading shared libraries/i.test(output)) {
+      return "missing_shared_library";
+    }
+    if (
+      /ProbeKVM[\s\S]*(?:permission denied|operation not permitted)/i.test(output)
+      || /\/dev\/kvm[\s\S]*(?:permission denied|operation not permitted)/i.test(output)
+      || /permissions? to use KVM/i.test(output)
+    ) {
+      return "kvm_permission_denied";
+    }
+    return undefined;
+  }
+
+  private accelerationCheckCategory(output: string): LaunchFailureCategory | undefined {
+    const kvmCategory = this.launchFailureCategory(output);
+    if (kvmCategory) {
+      return kvmCategory;
+    }
+    if (
+      /(?:acceleration|KVM|hypervisor)/i.test(output)
+      && /(?:not available|unavailable|not supported|not enabled|cannot use|disabled)/i.test(output)
+    ) {
+      return "hardware_acceleration_unavailable";
+    }
+    return undefined;
+  }
+
+  private appendCategory(error: ActionableError, category: LaunchFailureCategory): ActionableError {
+    return new ActionableError(`${error.message}\n\ncategory=${category}`);
+  }
+
+  private formatEarlyExitError(
+    avdName: string,
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    category: LaunchFailureCategory | undefined,
+    output: string,
+    accelCheckOutput: string,
+  ): ActionableError {
+    const header = [
+      `Emulator process exited with code: ${code}${signal ? ` (signal: ${signal})` : ""} (AVD '${avdName}'`,
+      category ? `; category=${category}` : "",
+      ")",
+    ].join("");
+    const sections = [
+      header,
+      output.trim() ? `Diagnostic:\n${output.trim()}` : "",
+      accelCheckOutput.trim() ? `emulator -accel-check:\n${accelCheckOutput.trim()}` : "",
+    ].filter(Boolean);
+    return new ActionableError(sections.join("\n"));
+  }
+
+  private diagnosticOutputFromError(error: unknown): string {
+    if (typeof error !== "object" || error === null) {
+      return "";
+    }
+    const output = error as { stdout?: unknown; stderr?: unknown };
+    return boundedOutputTail(
+      redactAndroidCommandOutput([outputFromUnknown(output.stdout), outputFromUnknown(output.stderr)].filter(Boolean).join("\n")),
+    );
+  }
+
+  private async runAccelerationCheck(): Promise<string> {
+    const controller = new AbortController();
+    let timeout: NodeJS.Timeout | undefined;
+    const probe = Promise.resolve()
+      .then(() => this.execAsync(this.emulatorPath, ["-accel-check"], controller.signal))
+      .then(
+        result => boundedOutputTail(redactAndroidCommandOutput([result.stdout, result.stderr].filter(Boolean).join("\n"))),
+        error => this.diagnosticOutputFromError(error),
+      );
+    const timeoutResult = new Promise<string>(resolve => {
+      timeout = this.timer.setTimeout(() => {
+        controller.abort();
+        logger.debug(`Emulator acceleration check timed out after ${ACCEL_CHECK_TIMEOUT_MS}ms`);
+        resolve("");
+      }, ACCEL_CHECK_TIMEOUT_MS);
+    });
+
+    try {
+      return await Promise.race([probe, timeoutResult]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
+  }
+
   /**
    * Execute an emulator command
    * @param command - The command to execute
@@ -1118,28 +1248,21 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.endOperation("spawnEmulator");
       onSpawn?.(child);
 
-      // Buffer to collect initial output for PANIC detection
-      let initialOutput = "";
+      // Keep only a redacted tail for launch diagnostics and failure classification.
       const outputBuffer: string[] = [];
-      const maxBufferLines = 50; // Keep last 50 lines for error analysis
       let startupValidationComplete = false;
+      let exitCode: number | null | undefined;
+      let exitSignal: NodeJS.Signals | null | undefined;
       perf.startOperation("panicDetection");
 
       // Monitor emulator output for PANIC errors
       const monitorOutput = (data: any) => {
         const output = data.toString();
-        initialOutput += output;
-        this.captureLaunchTargetDeviceId(child, initialOutput);
-
-        // Keep a rolling buffer of recent output
-        const lines = output.split("\n");
-        outputBuffer.push(...lines);
-        if (outputBuffer.length > maxBufferLines) {
-          outputBuffer.splice(0, outputBuffer.length - maxBufferLines);
-        }
+        const launchOutput = this.appendLaunchOutput(outputBuffer, output);
+        this.captureLaunchTargetDeviceId(child, launchOutput);
 
         // Detect sandbox/JIT entitlement failures before generic PANIC handling.
-        const sandboxError = this.sandboxFailure(initialOutput);
+        const sandboxError = this.sandboxFailure(launchOutput);
         if (sandboxError) {
           logger.error(`Emulator sandbox error detected: ${sandboxError.message}`);
           this.launchErrors.set(child, sandboxError);
@@ -1153,7 +1276,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }
 
         // Check for PANIC in the output
-        const panicResult = this.detectArchitecturePanic(initialOutput);
+        const panicResult = this.detectArchitecturePanic(launchOutput);
         if (panicResult.isPanic) {
           logger.error(`Emulator PANIC detected: ${panicResult.message}`);
 
@@ -1185,7 +1308,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }
 
         // Check for corrupt disk image
-        const corruptResult = this.detectCorruptImage(initialOutput);
+        const corruptResult = this.detectCorruptImage(launchOutput);
         if (corruptResult.isCorrupt) {
           logger.error(`Emulator corrupt image detected: ${corruptResult.message}`);
 
@@ -1207,7 +1330,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         }
 
         // Check for display / Qt platform-plugin failure (windowed launch on a headless host)
-        const displayResult = this.detectDisplayError(initialOutput);
+        const displayResult = this.detectDisplayError(launchOutput);
         if (displayResult.isDisplayError) {
           logger.error(`Emulator display error detected: ${displayResult.message}`);
 
@@ -1223,7 +1346,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           if (!startupValidationComplete) {
             startupValidationComplete = true;
             perf.endOperation("panicDetection");
-            reject(new ActionableError(errorMessage));
+            reject(this.appendCategory(new ActionableError(errorMessage), "display_initialization_failed"));
           }
           return;
         }
@@ -1253,22 +1376,39 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       // Log emulator output for debugging and monitor for PANIC
       child.stdout?.on("data", data => {
-        logger.debug(`Emulator stdout: ${data}`);
+        logger.debug(`Emulator stdout: ${redactAndroidCommandOutput(data.toString())}`);
         monitorOutput(data);
       });
 
       child.stderr?.on("data", data => {
-        logger.debug(`Emulator stderr: ${data}`);
+        logger.debug(`Emulator stderr: ${redactAndroidCommandOutput(data.toString())}`);
         monitorOutput(data);
       });
 
-      child.on("exit", code => {
-        clearTimeout(startupTimeout);
+      child.on("exit", (code, signal) => {
+        this.timer.clearTimeout(startupTimeout);
+        exitCode = code;
+        exitSignal = signal;
         if (code !== 0) {
           logger.error(`Emulator process exited with code: ${code}`);
+        } else {
+          logger.info(`Emulator process exited with code: ${code}`);
+        }
+      });
 
-          // Check if exit was due to "already running" error
-          if (initialOutput.includes("Running multiple emulators with the same AVD")) {
+      child.on("close", (code, signal) => {
+        this.timer.clearTimeout(startupTimeout);
+        const completedExitCode = exitCode ?? code;
+        const completedExitSignal = exitSignal ?? signal;
+        if (completedExitCode === 0 || startupValidationComplete) {
+          return;
+        }
+
+        void (async () => {
+          const launchOutput = boundedOutputTail(outputBuffer.join("\n"));
+
+          // Check if exit was due to "already running" error.
+          if (launchOutput.includes("Running multiple emulators with the same AVD")) {
             logger.info(`AVD '${avdName}' is already starting/running - this is expected, will wait for it to be ready`);
             if (!startupValidationComplete) {
               startupValidationComplete = true;
@@ -1282,7 +1422,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           }
 
           // Check if exit was due to a sandbox/JIT entitlement failure.
-          const sandboxError = this.sandboxFailure(initialOutput);
+          const sandboxError = this.sandboxFailure(launchOutput);
           if (sandboxError) {
             logger.error(`Exit was due to emulator sandbox error: ${sandboxError.message}`);
             this.launchErrors.set(child, sandboxError);
@@ -1295,7 +1435,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           }
 
           // Check if exit was due to PANIC
-          const panicResult = this.detectArchitecturePanic(initialOutput);
+          const panicResult = this.detectArchitecturePanic(launchOutput);
           if (panicResult.isPanic) {
             logger.error(`Exit was due to PANIC: ${panicResult.message}`);
             if (!startupValidationComplete) {
@@ -1307,7 +1447,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           }
 
           // Check if exit was due to corrupt disk image
-          const corruptResult = this.detectCorruptImage(initialOutput);
+          const corruptResult = this.detectCorruptImage(launchOutput);
           if (corruptResult.isCorrupt) {
             logger.error(`Exit was due to corrupt image: ${corruptResult.message}`);
             if (!startupValidationComplete) {
@@ -1324,7 +1464,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
           // Check if exit was due to a display / Qt platform-plugin failure.
           // Signal death (e.g. SIGABRT from the failed xcb plugin) arrives as code === null.
-          const displayResult = this.detectDisplayError(initialOutput);
+          const displayResult = this.detectDisplayError(launchOutput);
           if (displayResult.isDisplayError) {
             logger.error(`Exit was due to display error: ${displayResult.message}`);
             if (!startupValidationComplete) {
@@ -1334,20 +1474,34 @@ export class AndroidEmulatorClient implements AndroidEmulator {
               if (displayResult.suggestion) {
                 errorMessage += `\n\nSuggestion: ${displayResult.suggestion}`;
               }
-              reject(new ActionableError(errorMessage));
+              reject(this.appendCategory(new ActionableError(errorMessage), "display_initialization_failed"));
             }
-          } else if (!startupValidationComplete) {
+            return;
+          }
+
+          let category = this.launchFailureCategory(launchOutput);
+          let accelCheckOutput = "";
+          if (this.platform === "linux" && (!category || category === "kvm_permission_denied")) {
+            accelCheckOutput = await this.runAccelerationCheck();
+            category = category ?? this.accelerationCheckCategory(accelCheckOutput);
+          }
+          if (!startupValidationComplete) {
             startupValidationComplete = true;
             perf.endOperation("panicDetection");
-            reject(new ActionableError(`Emulator process exited with code: ${code}`));
+            reject(this.formatEarlyExitError(
+              avdName,
+              completedExitCode,
+              completedExitSignal,
+              category,
+              launchOutput,
+              accelCheckOutput,
+            ));
           }
-        } else {
-          logger.info(`Emulator process exited with code: ${code}`);
-        }
+        })();
       });
 
       child.on("error", error => {
-        clearTimeout(startupTimeout);
+        this.timer.clearTimeout(startupTimeout);
         if (!startupValidationComplete) {
           startupValidationComplete = true;
           perf.endOperation("panicDetection");

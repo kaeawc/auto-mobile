@@ -243,6 +243,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
         fakeChild.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; cannot be opened read/write\n"));
         fakeChild.stderr!.emit("data", Buffer.from("WARNING | QEMU main loop exits abnormally with code 1\n"));
         fakeChild.emit("exit", 1);
+        fakeChild.emit("close", 1);
       });
       return fakeChild;
     }) as any;
@@ -274,6 +275,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       process.nextTick(() => {
         fakeChild.stderr!.emit("data", Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\nhvf is not enabled on this aarch64 host\n"));
         fakeChild.emit("exit", 1);
+        fakeChild.emit("close", 1);
       });
       return fakeChild;
     }) as any;
@@ -320,6 +322,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
         // not a fabricated `{} as ChildProcess`.
         fakeChild.stderr!.emit("data", Buffer.from("ERROR | Running multiple emulators with the same AVD is an experimental feature.\n"));
         fakeChild.emit("exit", 1);
+        fakeChild.emit("close", 1);
       });
       return fakeChild;
     }) as any;
@@ -346,6 +349,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       process.nextTick(() => {
         fakeChild.stderr!.emit("data", Buffer.from("some random error\n"));
         fakeChild.emit("exit", 1);
+        fakeChild.emit("close", 1);
       });
       return fakeChild;
     }) as any;

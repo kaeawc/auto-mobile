@@ -28,7 +28,7 @@ build-java-target = "21"                   # Used in root build.gradle.kts and p
 # Gradle plugin versions (currently unused but available for future use)
 build-gradle-doctor = "0.10.0"
 build-gradle-sortDependencies = "0.14"
-detekt = "2.0.0-alpha.5"
+detekt = "2.0.0-alpha.6"
 
 # AndroidX versions
 androidx-core = "1.19.0"

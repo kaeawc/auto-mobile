@@ -153,6 +153,7 @@ private fun LiveThumbnail(
     }
   }
 
+  val fallback = screenshot
   when {
     bitmap != null ->
       Image(
@@ -161,9 +162,9 @@ private fun LiveThumbnail(
         modifier = Modifier.fillMaxSize(),
         contentScale = ContentScale.Fit,
       )
-    screenshot != null ->
+    fallback != null ->
       Image(
-        bitmap = screenshot!!,
+        bitmap = fallback,
         contentDescription = "Screenshot of $deviceName",
         modifier = Modifier.fillMaxSize(),
         contentScale = ContentScale.Fit,

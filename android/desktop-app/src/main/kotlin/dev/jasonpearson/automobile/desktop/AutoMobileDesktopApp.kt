@@ -88,6 +88,11 @@ private const val DAEMON_STATUS_POLL_MS = 5_000L
 // follow-up (see #4694); until then this cadence trades adb load for Unlock responsiveness.
 private const val LOCK_STATE_POLL_MS = 4_000L
 
+// How often the device grid re-reads the device list while it is the visible surface, so devices
+// started/killed by another client appear without a manual refresh. Matches AutoMobileContent's
+// booted-devices poll cadence.
+private const val GRID_REFRESH_POLL_MS = 5_000L
+
 /**
  * The device whose id registers the desktop daemon session against the stream-socket auth guard.
  */
@@ -376,6 +381,19 @@ fun AutoMobileDesktopApp(
         if (empty && wasContent) pickerViewModel.onAction(DevicePickerAction.Refresh)
         wasContent = !empty
       }
+  }
+  // While the device grid is the visible surface — nothing observed, or the picker opened over a
+  // workspace — poll for device changes so devices started/killed by another client appear while
+  // the
+  // user sits on the grid (Codex P2: the stationary-Empty launch path had no refresh after the init
+  // load). A silent reload keeps the grid on screen between polls; the workspace-active case skips.
+  LaunchedEffect(pickerViewModel) {
+    while (true) {
+      delay(GRID_REFRESH_POLL_MS)
+      val gridVisible =
+        !showOnboarding && (pickerOpen || workspaceViewModel.state.value is WorkspaceUiState.Empty)
+      if (gridVisible) pickerViewModel.onAction(DevicePickerAction.SilentRefresh)
+    }
   }
 
   AutoMobileTheme(themeMode = settings.themeMode) {

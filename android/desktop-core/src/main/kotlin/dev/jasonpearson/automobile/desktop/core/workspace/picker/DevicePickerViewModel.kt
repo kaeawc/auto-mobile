@@ -72,6 +72,13 @@ sealed interface DevicePickerAction {
   data object ObserveSelected : DevicePickerAction
 
   data object Refresh : DevicePickerAction
+
+  /**
+   * Reload the device list WITHOUT flashing the Loading state — for a background poll while the
+   * grid stays open, so a poll doesn't blank the grid to "Loading…" every interval. The current
+   * content stays on screen and is replaced only when the fresh list resolves.
+   */
+  data object SilentRefresh : DevicePickerAction
 }
 
 sealed interface DevicePickerEffect {
@@ -142,12 +149,20 @@ class DevicePickerViewModel(
       is DevicePickerAction.ClearSelection -> clearSelection()
       is DevicePickerAction.ObserveSelected -> observeSelected()
       is DevicePickerAction.Refresh -> load()
+      is DevicePickerAction.SilentRefresh -> load(silent = true)
     }
   }
 
-  private fun load() {
+  private fun load(silent: Boolean = false) {
     val generation = ++loadGeneration
-    _state.value = DevicePickerUiState.Loading
+    // A silent (background-poll) reload keeps the current Content on screen and swaps the list in
+    // on
+    // success, so the grid doesn't blank to "Loading…" every poll interval; an explicit refresh
+    // (Retry / open) still shows Loading. A first load (state not yet Content) always shows
+    // Loading.
+    if (!silent || _state.value !is DevicePickerUiState.Content) {
+      _state.value = DevicePickerUiState.Loading
+    }
     scope.launch {
       try {
         val devices = fetchDevices()

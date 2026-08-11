@@ -179,6 +179,21 @@ class DevicePickerViewModelTest {
     }
 
   @Test
+  fun `silent refresh does not flash the Loading state`() = testScope.runTest {
+    val vm =
+      DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+    assertTrue(vm.state.value is DevicePickerUiState.Content) // init load resolved
+    vm.state.test {
+      assertTrue(awaitItem() is DevicePickerUiState.Content) // current value
+      // The unchanged device list reloads without ever passing through Loading — so with identical
+      // content there is no further emission at all (a Loading flash would emit here).
+      vm.onAction(DevicePickerAction.SilentRefresh)
+      expectNoEvents()
+      cancelAndIgnoreRemainingEvents()
+    }
+  }
+
+  @Test
   fun `clear filter resets that dimension`() = testScope.runTest {
     val vm =
       DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())

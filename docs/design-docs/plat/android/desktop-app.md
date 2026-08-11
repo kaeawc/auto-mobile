@@ -84,7 +84,7 @@ interface AutoMobileGraph {
 | Binding | Provider |
 |---------|----------|
 | `AutoMobileClient` | `McpClientFactory.createPreferred(null)` -- selects the best available transport |
-| `SettingsProvider` | `FakeSettingsProvider()` (placeholder until persistent settings are wired) |
+| `SettingsProvider` | `FileSettingsProvider()` -- persists to `~/.auto-mobile/desktop-settings.properties`, so the first-run onboarding flag and theme survive restarts (`FakeSettingsProvider` remains the in-memory implementation used by tests) |
 
 Scope annotations `@SingleIn(AppScope::class)` ensure singletons live for the app lifecycle.
 

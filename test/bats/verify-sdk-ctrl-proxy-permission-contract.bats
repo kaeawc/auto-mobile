@@ -74,6 +74,8 @@ fi
   send_command='adb shell am broadcast -a dev.jasonpearson.automobile.ctrlproxy.action.TEST_SEND_NETWORK_CONTROL -p dev.jasonpearson.automobile.ctrlproxy'
   [ "$(grep -cFx "$send_command" "$COMMAND_LOG")" -eq 2 ]
 
+  root_line="$(grep -nFx 'adb root' "$COMMAND_LOG" | cut -d: -f1)"
+  wait_for_device_line="$(grep -nFx 'adb wait-for-device' "$COMMAND_LOG" | cut -d: -f1)"
   host_first="$(grep -n "adb install ${HOST_APK}" "$COMMAND_LOG" | head -n 1 | cut -d: -f1)"
   proxy_after_host="$(grep -n "adb install ${CTRL_PROXY_APK}" "$COMMAND_LOG" | head -n 1 | cut -d: -f1)"
   proxy_first="$(grep -n "adb install ${CTRL_PROXY_APK}" "$COMMAND_LOG" | tail -n 1 | cut -d: -f1)"
@@ -81,6 +83,8 @@ fi
   first_send="$(grep -nF "$send_command" "$COMMAND_LOG" | head -n 1 | cut -d: -f1)"
   second_send="$(grep -nF "$send_command" "$COMMAND_LOG" | tail -n 1 | cut -d: -f1)"
 
+  [ "$root_line" -lt "$wait_for_device_line" ]
+  [ "$wait_for_device_line" -lt "$host_first" ]
   [ "$host_first" -lt "$proxy_after_host" ]
   [ "$proxy_after_host" -lt "$first_send" ]
   [ "$first_send" -lt "$proxy_first" ]

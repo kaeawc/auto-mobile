@@ -9,5 +9,13 @@
         <action android:name="dev.jasonpearson.automobile.playground.action.TEST_PROBE_NETWORK_CONTROL" />
       </intent-filter>
     </receiver>
+    <receiver
+      android:name=".NavigationGraphContractReceiver"
+      android:exported="true"
+      android:permission="android.permission.DUMP">
+      <intent-filter>
+        <action android:name="dev.jasonpearson.automobile.playground.action.TEST_EMIT_SDK_NAVIGATION" />
+      </intent-filter>
+    </receiver>
   </application>
 </manifest>

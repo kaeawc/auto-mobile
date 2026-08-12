@@ -2174,8 +2174,10 @@ jobs:
 
       # Run AutoMobile tests that require emulator
       - uses: ./.github/actions/android-emulator
+        env:
+          AUTOMOBILE_TOOLSET_NAVIGATION_MODELING: "1"
         with:
-          script: "../scripts/android/verify-sdk-ctrl-proxy-permission-contract.sh control-proxy/build/outputs/apk/debug/control-proxy-debug.apk && ./gradlew :playground:app:test --stacktrace --info"
+          script: "../scripts/android/verify-sdk-ctrl-proxy-permission-contract.sh control-proxy/build/outputs/apk/debug/control-proxy-debug.apk && ../scripts/android/navigation-graph-sdk-event-integration.sh && ./gradlew :playground:app:test --stacktrace --info"
           working-directory: './android/'
           accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
           gradle-home-directory: "~/.gradle/${{ github.job }}"

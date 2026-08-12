@@ -26,7 +26,9 @@ internal class SdkEventBatchProcessor(
     ) : QueuedEvent
   }
 
-  private val queuedEvents = Channel<QueuedEvent>(Channel.UNLIMITED)
+  // BroadcastReceiver.onReceive cannot suspend. Keep a bounded handoff queue so a stalled
+  // WebSocket client cannot retain arbitrary SDK event batches in the CtrlProxy process.
+  private val queuedEvents = Channel<QueuedEvent>(QUEUE_CAPACITY)
 
   init {
     scope.launch {
@@ -38,7 +40,8 @@ internal class SdkEventBatchProcessor(
 
   /**
    * Queues a batch from the broadcast receiver before asynchronous dispatch so the actor preserves
-   * receiver arrival order without dropping navigation updates under backpressure.
+   * receiver arrival order. Returns false when the bounded queue is full; callers must log that
+   * overload because the broadcast cannot be retried synchronously.
    */
   fun enqueue(batch: SdkEventBatch): Boolean =
     queuedEvents.trySend(QueuedEvent.Batch(batch)).isSuccess
@@ -92,5 +95,9 @@ internal class SdkEventBatchProcessor(
         broadcastSdkEvent(event)
       }
     }
+  }
+
+  private companion object {
+    const val QUEUE_CAPACITY = 64
   }
 }

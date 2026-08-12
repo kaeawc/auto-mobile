@@ -77,6 +77,13 @@ class NetworkControlPermissionManifestTest {
         ".NetworkControlContractProbeReceiver",
       ),
     )
+    assertEquals(
+      PLATFORM_DUMP_PERMISSION,
+      receiverPermission(
+        readManifest("playground/app", "debug"),
+        ".NavigationGraphContractReceiver",
+      ),
+    )
   }
 
   private fun readManifest(module: String, sourceSet: String = "main"): Document =

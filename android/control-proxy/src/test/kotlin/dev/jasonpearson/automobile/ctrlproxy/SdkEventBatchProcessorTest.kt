@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -47,7 +48,7 @@ class SdkEventBatchProcessorTest {
     }
 
   @Test
-  fun `preserves queued batches while a navigation broadcast suspends`() = runTest {
+  fun `rejects batches when the bounded queue is full while a navigation broadcast suspends`() = runTest {
     val firstBroadcastStarted = CompletableDeferred<Unit>()
     val allowFirstBroadcastToFinish = CompletableDeferred<Unit>()
     val finalBroadcastFinished = CompletableDeferred<Unit>()
@@ -61,7 +62,7 @@ class SdkEventBatchProcessorTest {
           if (event.destination == "first") {
             firstBroadcastStarted.complete(Unit)
             allowFirstBroadcastToFinish.await()
-          } else if (event.destination == "queued-65") {
+          } else if (event.destination == "queued-64") {
             finalBroadcastFinished.complete(Unit)
           }
         },
@@ -71,10 +72,11 @@ class SdkEventBatchProcessorTest {
     assertTrue(processor.enqueue(batch("first")))
     firstBroadcastStarted.await()
 
-    val queuedDestinations = (1..65).map { "queued-$it" }
+    val queuedDestinations = (1..64).map { "queued-$it" }
     for (destination in queuedDestinations) {
       assertTrue(processor.enqueue(batch(destination)))
     }
+    assertFalse(processor.enqueue(batch("dropped-when-full")))
 
     allowFirstBroadcastToFinish.complete(Unit)
     finalBroadcastFinished.await()

@@ -139,6 +139,11 @@ host_digest="$(certificate_digest "$host_apk")"
   exit 1
 }
 
+# The debug-only probe receivers require android.permission.DUMP. Restart adbd
+# as root before installing either package so their broadcasts execute with it.
+"$adb_bin" root >/dev/null
+"$adb_bin" wait-for-device
+
 install_in_order "$host_apk" "$ctrl_proxy_apk"
 verify_control_broadcast_delivery "installing the SDK host before CtrlProxy"
 install_in_order "$ctrl_proxy_apk" "$host_apk"

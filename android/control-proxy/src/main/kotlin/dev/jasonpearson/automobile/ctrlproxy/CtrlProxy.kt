@@ -499,14 +499,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 TAG,
                 "Received navigation event (protocol): ${event.destination} from ${event.source} (app: ${event.applicationId})",
               )
-              sdkEventBatchProcessor.enqueueNavigationEvent(
-                destination = event.destination,
-                source = event.source.name,
-                arguments = event.arguments ?: emptyMap(),
-                metadata = event.metadata ?: emptyMap(),
-                applicationId = event.applicationId,
-                timestamp = event.timestamp,
-              )
+              if (
+                !sdkEventBatchProcessor.enqueueNavigationEvent(
+                  destination = event.destination,
+                  source = event.source.name,
+                  arguments = event.arguments ?: emptyMap(),
+                  metadata = event.metadata ?: emptyMap(),
+                  applicationId = event.applicationId,
+                  timestamp = event.timestamp,
+                )
+              ) {
+                Log.w(TAG, "Dropping navigation event because the SDK event queue is full")
+              }
               return
             }
           }
@@ -539,14 +543,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             TAG,
             "Received navigation event (legacy): $destination from $source (app: $applicationId)",
           )
-          sdkEventBatchProcessor.enqueueNavigationEvent(
-            destination = destination,
-            source = source,
-            arguments = arguments,
-            metadata = metadata,
-            applicationId = applicationId,
-            timestamp = System.currentTimeMillis(),
-          )
+          if (
+            !sdkEventBatchProcessor.enqueueNavigationEvent(
+              destination = destination,
+              source = source,
+              arguments = arguments,
+              metadata = metadata,
+              applicationId = applicationId,
+              timestamp = System.currentTimeMillis(),
+            )
+          ) {
+            Log.w(TAG, "Dropping navigation event because the SDK event queue is full")
+          }
         } catch (e: Exception) {
           Log.e(TAG, "Error handling navigation event broadcast", e)
         }
@@ -882,7 +890,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           Log.d(TAG, "Received event batch with ${batch.events.size} events")
 
-          sdkEventBatchProcessor.enqueue(batch)
+          if (!sdkEventBatchProcessor.enqueue(batch)) {
+            Log.w(
+              TAG,
+              "Dropping SDK event batch with ${batch.events.size} events because the queue is full",
+            )
+          }
         } catch (e: Exception) {
           Log.e(TAG, "Error handling event batch broadcast", e)
         }
@@ -926,18 +939,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         @SuppressLint("UnspecifiedRegisterReceiverFlag")
         registerReceiver(commandReceiver, commandFilter)
       }
-
-      // Register broadcast receiver for navigation events
-      val navigationFilter =
-        IntentFilter().apply { addAction(AutoMobileSDK.ACTION_NAVIGATION_EVENT) }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(navigationEventReceiver, navigationFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(navigationEventReceiver, navigationFilter)
-      }
-      Log.d(TAG, "Navigation event receiver registered")
 
       // Register broadcast receiver for recomposition snapshots
       val recompositionFilter =
@@ -1013,18 +1014,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
       Log.d(TAG, "ANR receiver registered")
 
-      // Register broadcast receiver for SDK event batches
-      val eventBatchFilter =
-        IntentFilter().apply { addAction(SdkEventSerializer.ACTION_SDK_EVENT_BATCH) }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(eventBatchReceiver, eventBatchFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(eventBatchReceiver, eventBatchFilter)
-      }
-      Log.d(TAG, "Event batch receiver registered")
-
       val screenStateFilter =
         IntentFilter().apply {
           addAction(Intent.ACTION_SCREEN_ON)
@@ -1032,21 +1021,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       registerReceiver(screenStateReceiver, screenStateFilter)
       Log.d(TAG, "Screen state receiver registered")
-
-      // Initialize the navigation event accumulator
-      navigationEventAccumulator.initialize()
-      Log.d(TAG, "Navigation event accumulator initialized")
-
-      // Subscribe to navigation events and broadcast them
-      navigationEventJob =
-        navigationEventAccumulator.latestEvent
-          .onEach { event ->
-            if (event != null) {
-              Log.d(TAG, "Navigation event: ${event.destination} at ${event.timestamp}")
-              broadcastNavigationEvent(event)
-            }
-          }
-          .launchIn(serviceScope)
 
       // Initialize the smart hierarchy debouncer with structural hash comparison
       hierarchyDebouncer =
@@ -1142,6 +1116,40 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
       webSocketServer.start()
       Log.d(TAG, "WebSocket server started on port 8765")
+
+      // Start every navigation-ingestion path only after the WebSocket is ready. SDK batch
+      // events suppress latestEvent replay, so receiving one before this point would lose it.
+      navigationEventAccumulator.initialize()
+      Log.d(TAG, "Navigation event accumulator initialized")
+      navigationEventJob =
+        navigationEventAccumulator.latestEvent
+          .onEach { event ->
+            if (event != null) {
+              Log.d(TAG, "Navigation event: ${event.destination} at ${event.timestamp}")
+              broadcastNavigationEvent(event)
+            }
+          }
+          .launchIn(serviceScope)
+
+      val navigationFilter =
+        IntentFilter().apply { addAction(AutoMobileSDK.ACTION_NAVIGATION_EVENT) }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        registerReceiver(navigationEventReceiver, navigationFilter, RECEIVER_EXPORTED)
+      } else {
+        @SuppressLint("UnspecifiedRegisterReceiverFlag")
+        registerReceiver(navigationEventReceiver, navigationFilter)
+      }
+      Log.d(TAG, "Navigation event receiver registered")
+
+      val eventBatchFilter =
+        IntentFilter().apply { addAction(SdkEventSerializer.ACTION_SDK_EVENT_BATCH) }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        registerReceiver(eventBatchReceiver, eventBatchFilter, RECEIVER_EXPORTED)
+      } else {
+        @SuppressLint("UnspecifiedRegisterReceiverFlag")
+        registerReceiver(eventBatchReceiver, eventBatchFilter)
+      }
+      Log.d(TAG, "Event batch receiver registered")
 
       // Start logcat reader for automatic log capture
       logcatReader = LogcatReader { response ->

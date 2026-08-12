@@ -95,8 +95,10 @@ internal fun parseLatestRelease(body: String): ReleaseInfo {
       ?: throw ReleaseFetchException("Release JSON is missing tag_name")
   val assets =
     release.assets.mapNotNull { asset ->
-      val name = asset.name ?: return@mapNotNull null
-      val url = asset.browser_download_url ?: return@mapNotNull null
+      // Drop assets missing OR blank a name/URL — a blank download URL would otherwise become an
+      // UpdateAvailable with nothing to download.
+      val name = asset.name?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+      val url = asset.browser_download_url?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
       ReleaseAsset(name = name, downloadUrl = url, sizeBytes = asset.size)
     }
   return ReleaseInfo(

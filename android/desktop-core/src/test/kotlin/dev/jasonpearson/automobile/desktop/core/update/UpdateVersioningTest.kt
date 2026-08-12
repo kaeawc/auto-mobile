@@ -79,6 +79,16 @@ class UpdateVersioningTest {
   }
 
   @Test
+  fun `numeric identifiers above Int MAX_VALUE compare numerically, not lexically`() {
+    // Core segments beyond Int.MAX_VALUE (2147483647) must not overflow or reject.
+    assertTrue(isNewerVersion("2147483648.0.0", "2147483647.0.0"))
+    assertTrue(isNewerVersion("100000000000.0.0", "1.0.0"))
+    // Oversized numeric prerelease identifiers: "10000000000" > "9999999999" numerically.
+    assertTrue(isNewerVersion("1.0.0-10000000000", "1.0.0-9999999999"))
+    assertFalse(isNewerVersion("1.0.0-9999999999", "1.0.0-10000000000"))
+  }
+
+  @Test
   fun `resolveAsset matches the platform suffix and returns null when absent`() {
     val assets =
       listOf(

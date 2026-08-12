@@ -12,8 +12,9 @@ interface UpdateController {
   val status: StateFlow<UpdateStatus>
 
   /**
-   * Runs one update check, transitioning [status]. Never throws — failures land in
-   * [UpdateStatus.Failed].
+   * Runs one update check, transitioning [status]. A release-fetch failure transitions [status] to
+   * [UpdateStatus.Failed] rather than throwing; coroutine cancellation propagates to the caller,
+   * leaving [status] at its prior stable value.
    */
   suspend fun checkForUpdate()
 }

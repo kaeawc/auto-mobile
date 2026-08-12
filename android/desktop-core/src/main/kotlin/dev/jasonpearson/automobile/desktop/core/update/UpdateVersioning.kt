@@ -1,10 +1,13 @@
 package dev.jasonpearson.automobile.desktop.core.update
 
+import java.math.BigInteger
+
 /**
  * True when [candidate] is a strictly newer release than [current]. Both may carry a leading `v`
  * and a `-prerelease` / `+build` suffix. Numeric core segments compare left to right; when cores
- * are equal a final release outranks a prerelease, and two prereleases compare lexically. Anything
- * unparseable in a segment is treated as 0 so a malformed tag never reads as "newer".
+ * are equal a final release outranks a prerelease. A version that is not valid SemVer never reads
+ * as newer. Numeric identifiers compare as arbitrary-precision integers, so a value that would
+ * overflow a machine `Int` still orders correctly.
  */
 internal fun isNewerVersion(candidate: String, current: String): Boolean {
   // A version we cannot fully parse (e.g. "v1.bad.0", "nightly") must never read as newer, or a
@@ -13,9 +16,10 @@ internal fun isNewerVersion(candidate: String, current: String): Boolean {
   val b = parseVersion(current) ?: return false
   val segments = maxOf(a.numbers.size, b.numbers.size)
   for (i in 0 until segments) {
-    val left = a.numbers.getOrElse(i) { 0 }
-    val right = b.numbers.getOrElse(i) { 0 }
-    if (left != right) return left > right
+    val left = a.numbers.getOrElse(i) { BigInteger.ZERO }
+    val right = b.numbers.getOrElse(i) { BigInteger.ZERO }
+    val comparison = left.compareTo(right)
+    if (comparison != 0) return comparison > 0
   }
   // Numeric cores are equal: order by prerelease precedence (release outranks any prerelease).
   return comparePrerelease(a.prerelease, b.prerelease) > 0
@@ -23,9 +27,9 @@ internal fun isNewerVersion(candidate: String, current: String): Boolean {
 
 /**
  * SemVer prerelease precedence. A null prerelease (a final release) outranks any prerelease.
- * Otherwise dot-separated identifiers compare left to right: numeric identifiers numerically,
- * numeric below alphanumeric, alphanumeric lexically; a larger set of identifiers outranks a prefix
- * of it. So `rc.10` > `rc.9` (numeric), not the lexical `"rc.10" < "rc.9"`.
+ * Otherwise dot-separated identifiers compare left to right: numeric identifiers numerically (as
+ * [BigInteger], so arbitrarily large values order correctly), numeric below alphanumeric,
+ * alphanumeric lexically; a larger set of identifiers outranks a prefix of it. So `rc.10` > `rc.9`.
  */
 private fun comparePrerelease(a: String?, b: String?): Int {
   if (a == null && b == null) return 0
@@ -36,8 +40,8 @@ private fun comparePrerelease(a: String?, b: String?): Int {
   for (i in 0 until maxOf(aIds.size, bIds.size)) {
     val x = aIds.getOrNull(i) ?: return -1
     val y = bIds.getOrNull(i) ?: return 1
-    val xn = x.toIntOrNull()
-    val yn = y.toIntOrNull()
+    val xn = x.toBigIntegerOrNull()
+    val yn = y.toBigIntegerOrNull()
     val cmp =
       when {
         xn != null && yn != null -> xn.compareTo(yn)
@@ -58,7 +62,7 @@ internal fun resolveAsset(assets: List<ReleaseAsset>, platform: HostPlatform): R
     it.name.endsWith(platform.assetSuffix, ignoreCase = true)
   }
 
-private data class ParsedVersion(val numbers: List<Int>, val prerelease: String?)
+private data class ParsedVersion(val numbers: List<BigInteger>, val prerelease: String?)
 
 /**
  * The canonical SemVer 2.0.0 grammar (semver.org). Validates the whole string in one place —
@@ -81,11 +85,12 @@ private fun parseVersion(raw: String): ParsedVersion? {
   val normalized = raw.trim().removePrefix("v").removePrefix("V")
   val match = SEMVER.matchEntire(normalized) ?: return null
   val (major, minor, patch, prerelease) = match.destructured
+  // The regex already constrained these to digit strings; BigInteger avoids any Int overflow.
   val numbers =
     listOf(
-      major.toIntOrNull() ?: return null,
-      minor.toIntOrNull() ?: return null,
-      patch.toIntOrNull() ?: return null,
+      major.toBigIntegerOrNull() ?: return null,
+      minor.toBigIntegerOrNull() ?: return null,
+      patch.toBigIntegerOrNull() ?: return null,
     )
   return ParsedVersion(numbers, prerelease.ifEmpty { null })
 }

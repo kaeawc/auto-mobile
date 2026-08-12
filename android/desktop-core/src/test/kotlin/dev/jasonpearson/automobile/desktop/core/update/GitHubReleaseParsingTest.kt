@@ -40,12 +40,14 @@ class GitHubReleaseParsingTest {
   }
 
   @Test
-  fun `drops assets missing a name or download url`() {
+  fun `drops assets missing or blank a name or download url`() {
     val partial =
       """
       {"tag_name":"v1.0.0","assets":[
         {"name":"only-name.dmg"},
         {"browser_download_url":"https://x/nameless"},
+        {"name":"blank-url.dmg","browser_download_url":"","size":1},
+        {"name":"","browser_download_url":"https://x/blank-name","size":2},
         {"name":"AutoMobile-1.0.0-linux.deb","browser_download_url":"https://x/deb","size":9}
       ]}
       """

@@ -82,6 +82,48 @@ class SdkEventBatchProcessorTest {
     assertEquals(listOf("first") + queuedDestinations, broadcasts)
   }
 
+  @Test
+  fun `processes legacy navigation before a later batch through the same actor`() = runTest {
+    val legacyBroadcastStarted = CompletableDeferred<Unit>()
+    val allowLegacyBroadcastToFinish = CompletableDeferred<Unit>()
+    val batchBroadcastFinished = CompletableDeferred<Unit>()
+    val broadcasts = mutableListOf<TimestampedNavigationEvent>()
+    val processor =
+      SdkEventBatchProcessor(
+        scope = backgroundScope,
+        navigationEventAccumulator = NavigationEventAccumulator(),
+        broadcastNavigationEvent = { event ->
+          broadcasts.add(event)
+          if (event.destination == "legacy") {
+            legacyBroadcastStarted.complete(Unit)
+            allowLegacyBroadcastToFinish.await()
+          } else if (event.destination == "batched") {
+            batchBroadcastFinished.complete(Unit)
+          }
+        },
+        broadcastSdkEvent = { error("Unexpected SDK event: $it") },
+      )
+
+    assertTrue(
+      processor.enqueueNavigationEvent(
+        destination = "legacy",
+        source = "legacy",
+        arguments = emptyMap(),
+        metadata = emptyMap(),
+        applicationId = null,
+        timestamp = 0L,
+      )
+    )
+    legacyBroadcastStarted.await()
+    assertTrue(processor.enqueue(batch("batched")))
+
+    allowLegacyBroadcastToFinish.complete(Unit)
+    batchBroadcastFinished.await()
+
+    assertEquals(listOf("legacy", "batched"), broadcasts.map { it.destination })
+    assertEquals(listOf(0L, 1L), broadcasts.map { it.sequenceNumber })
+  }
+
   private fun batch(vararg destinations: String): SdkEventBatch =
     SdkEventBatch(
       timestamp = 0L,

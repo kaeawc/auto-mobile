@@ -499,13 +499,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 TAG,
                 "Received navigation event (protocol): ${event.destination} from ${event.source} (app: ${event.applicationId})",
               )
-              navigationEventAccumulator.addEvent(
-                event.destination,
-                event.source.name,
-                event.arguments ?: emptyMap(),
-                event.metadata ?: emptyMap(),
-                event.applicationId,
-                event.timestamp,
+              sdkEventBatchProcessor.enqueueNavigationEvent(
+                destination = event.destination,
+                source = event.source.name,
+                arguments = event.arguments ?: emptyMap(),
+                metadata = event.metadata ?: emptyMap(),
+                applicationId = event.applicationId,
+                timestamp = event.timestamp,
               )
               return
             }
@@ -539,12 +539,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             TAG,
             "Received navigation event (legacy): $destination from $source (app: $applicationId)",
           )
-          navigationEventAccumulator.addEvent(
-            destination,
-            source,
-            arguments,
-            metadata,
-            applicationId,
+          sdkEventBatchProcessor.enqueueNavigationEvent(
+            destination = destination,
+            source = source,
+            arguments = arguments,
+            metadata = metadata,
+            applicationId = applicationId,
+            timestamp = System.currentTimeMillis(),
           )
         } catch (e: Exception) {
           Log.e(TAG, "Error handling navigation event broadcast", e)

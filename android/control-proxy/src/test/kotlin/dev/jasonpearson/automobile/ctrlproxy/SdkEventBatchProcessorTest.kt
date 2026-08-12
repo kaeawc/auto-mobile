@@ -52,6 +52,7 @@ class SdkEventBatchProcessorTest {
     runTest {
       val firstBroadcastStarted = CompletableDeferred<Unit>()
       val allowFirstBroadcastToFinish = CompletableDeferred<Unit>()
+      val secondBroadcastFinished = CompletableDeferred<Unit>()
       val processor =
         SdkEventBatchProcessor(
           scope = backgroundScope,
@@ -60,6 +61,8 @@ class SdkEventBatchProcessorTest {
             if (event.destination == "first") {
               firstBroadcastStarted.complete(Unit)
               allowFirstBroadcastToFinish.await()
+            } else if (event.destination == "second") {
+              secondBroadcastFinished.complete(Unit)
             }
           },
           broadcastSdkEvent = { error("Unexpected SDK event: $it") },
@@ -74,6 +77,7 @@ class SdkEventBatchProcessorTest {
       assertEquals(1L, processor.droppedBatchCount)
 
       allowFirstBroadcastToFinish.complete(Unit)
+      secondBroadcastFinished.await()
     }
 
   private fun batch(vararg destinations: String): SdkEventBatch =

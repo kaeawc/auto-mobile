@@ -13,7 +13,9 @@ class NetworkControlPermissionManifestTest {
 
   @Test
   fun `SDK manifest does not define network control permission`() {
-    val permissions = permissionDefinitions(readManifest("auto-mobile-sdk"))
+    val document = readManifest("auto-mobile-sdk")
+    val permissions = permissionDefinitions(document)
+    val requestedPermissions = usesPermissions(document)
 
     assertFalse(
       "The SDK library must not define $NETWORK_CONTROL_PERMISSION because every SDK host would " +
@@ -23,6 +25,14 @@ class NetworkControlPermissionManifestTest {
     assertFalse(
       "The SDK library must not retain the legacy permission because released SDK hosts own it.",
       permissions.any { it.name == LEGACY_NETWORK_CONTROL_PERMISSION },
+    )
+    assertFalse(
+      "The SDK library must not request $NETWORK_CONTROL_PERMISSION.",
+      requestedPermissions.contains(NETWORK_CONTROL_PERMISSION),
+    )
+    assertFalse(
+      "The SDK library must not retain the legacy permission request.",
+      requestedPermissions.contains(LEGACY_NETWORK_CONTROL_PERMISSION),
     )
   }
 

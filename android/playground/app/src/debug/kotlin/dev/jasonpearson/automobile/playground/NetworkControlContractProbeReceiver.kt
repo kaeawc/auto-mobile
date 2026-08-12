@@ -10,7 +10,8 @@ class NetworkControlContractProbeReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
     if (intent.action != ACTION_PROBE_NETWORK_CONTROL) return
 
-    val errorType = NetworkMockRuleStore.getInstance().getActiveErrorSimulation()?.errorType.orEmpty()
+    val errorType =
+      NetworkMockRuleStore.getInstance().getActiveErrorSimulation()?.errorType.orEmpty()
     context.openFileOutput(RESULT_FILE, Context.MODE_PRIVATE).bufferedWriter().use { writer ->
       writer.write(errorType)
     }

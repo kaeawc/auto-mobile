@@ -12,7 +12,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -128,9 +127,12 @@ class DevicePickerViewModel(
   // never dropped into a stranded Loading.
   private var loadGeneration: Long = 0
 
-  // The load() coroutine currently running, so a background SilentRefresh can coalesce instead of
-  // stacking a fresh generation on top of an in-flight read.
-  private var inFlightLoad: Job? = null
+  // Count of load() coroutines currently in flight — ALL of them, not just the newest: overlapping
+  // explicit Refreshes are not cancelled, so a newer one can finish while an older read is still
+  // blocked. A background SilentRefresh coalesces while any load remains active, instead of
+  // stacking
+  // a fresh generation on top. Decremented in each load's finally.
+  private var activeLoads: Int = 0
 
   init {
     load()
@@ -166,7 +168,7 @@ class DevicePickerViewModel(
     // invalidating the previous in-flight read (emitIfCurrent accepts only the newest generation),
     // leaving the grid stale or stuck Loading while reads accumulate. Effectively this serializes
     // polls to at most one read at a time. An explicit Refresh is never coalesced — it supersedes.
-    if (silent && (inFlightLoad?.isActive == true || bootingIds.isNotEmpty())) return
+    if (silent && (activeLoads > 0 || bootingIds.isNotEmpty())) return
     val generation = ++loadGeneration
     // A silent (background-poll) reload keeps the current Content on screen and swaps the list in
     // on
@@ -176,7 +178,8 @@ class DevicePickerViewModel(
     if (!silent || _state.value !is DevicePickerUiState.Content) {
       _state.value = DevicePickerUiState.Loading
     }
-    inFlightLoad = scope.launch {
+    activeLoads++
+    scope.launch {
       try {
         val devices = fetchDevices()
         emitIfCurrent(generation, devices)
@@ -185,6 +188,8 @@ class DevicePickerViewModel(
       } catch (e: Exception) {
         LOG.warn("Failed to load picker devices: ${e.message}", e)
         resolveFetchFailure(generation, e)
+      } finally {
+        activeLoads--
       }
     }
   }

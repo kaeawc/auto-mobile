@@ -247,6 +247,36 @@ class DevicePickerViewModelTest {
   }
 
   @Test
+  fun `a silent refresh coalesces while an older overlapping load is still in flight`() =
+    testScope.runTest {
+      val client =
+        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)
+      val vm =
+        DevicePickerViewModel(client, FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+      assertEquals(1, client.imagesReadCount) // init load
+
+      // Two overlapping EXPLICIT refreshes, each blocked on its own gate. Explicit refreshes are
+      // never coalesced, so both start a read.
+      val older = CompletableDeferred<Unit>()
+      client.imagesGate = older
+      vm.onAction(DevicePickerAction.Refresh) // load #1, blocks on `older`
+      val newer = CompletableDeferred<Unit>()
+      client.imagesGate = newer
+      vm.onAction(DevicePickerAction.Refresh) // load #2, blocks on `newer`
+      client.imagesGate = null
+      assertEquals(3, client.imagesReadCount) // init + #1 + #2
+
+      // The NEWER load finishes first, leaving the older one still in flight.
+      newer.complete(Unit)
+
+      // A poll now must still coalesce — an older read is active even though the newest is done.
+      vm.onAction(DevicePickerAction.SilentRefresh)
+      assertEquals(3, client.imagesReadCount) // no extra read — coalesced against the older load
+
+      older.complete(Unit) // release so runTest can finish
+    }
+
+  @Test
   fun `clear filter resets that dimension`() = testScope.runTest {
     val vm =
       DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())

@@ -420,7 +420,6 @@ jobs:
           if-no-files-found: warn
 
       - name: Publish Android Libraries to Maven Central
-        continue-on-error: true
         env:
           VERSION: ${{ steps.version.outputs.version }}
           ORG_GRADLE_PROJECT_mavenCentralUsername:

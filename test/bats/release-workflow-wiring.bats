@@ -382,6 +382,26 @@
   [ "$preflight" -lt "$publish" ]
 }
 
+@test "release.yml blocks the GitHub Release when Android Maven publication fails (#5215)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/release.yml"
+
+  run yq -r '.jobs."verify-and-release".steps[]
+    | select(.name == "Publish Android Libraries to Maven Central")
+    | ."continue-on-error" // false' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "false" ]
+
+  local names publish release
+  names="$(yq -r '.jobs."verify-and-release".steps[].name' "$workflow")"
+  publish="$(printf '%s\n' "$names" \
+    | grep -nxF 'Publish Android Libraries to Maven Central' | cut -d: -f1)"
+  release="$(printf '%s\n' "$names" | grep -nxF 'Create GitHub Release' | cut -d: -f1)"
+  [ -n "$publish" ]
+  [ -n "$release" ]
+  [ "$publish" -lt "$release" ]
+}
+
 @test "release.yml preflight step calls the extracted preflight script (#4853)" {
   wiring_requires_yq
   local script

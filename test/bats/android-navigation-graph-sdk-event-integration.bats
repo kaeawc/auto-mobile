@@ -5,6 +5,8 @@ SCRIPT="scripts/android/navigation-graph-sdk-event-integration.sh"
 setup() {
   MOCK_BIN="$(mktemp -d)"
   ORIGINAL_PATH="$PATH"
+  ORIGINAL_HOME="$HOME"
+  export HOME="${MOCK_BIN}/home"
   export ADB_LOG="${MOCK_BIN}/adb.log"
   export AUTO_MOBILE_LOG="${MOCK_BIN}/auto-mobile.log"
   export SESSION_BOUND_FILE="${MOCK_BIN}/session-bound"
@@ -15,20 +17,26 @@ setup() {
 }
 
 teardown() {
-  find "$MOCK_BIN" -type f -exec unlink {} \;
-  rmdir "$MOCK_BIN"
+  find "$MOCK_BIN" -depth -type f -exec unlink {} \;
+  find "$MOCK_BIN" -depth -type l -exec unlink {} \;
+  find "$MOCK_BIN" -depth -type d -exec rmdir {} \;
   export PATH="$ORIGINAL_PATH"
+  export HOME="$ORIGINAL_HOME"
 }
 
-make_mock() {
-  local name="$1"
+make_executable() {
+  local path="$1"
   local body="$2"
-  cat > "${MOCK_BIN}/${name}" <<SCRIPT
+  cat > "${path}" <<SCRIPT
 #!/usr/bin/env bash
 set -euo pipefail
 ${body}
 SCRIPT
-  chmod +x "${MOCK_BIN}/${name}"
+  chmod +x "${path}"
+}
+
+make_mock() {
+  make_executable "${MOCK_BIN}/$1" "$2"
 }
 
 @test "binds the Android graph session before emitting and polling an SDK navigation event" {
@@ -115,4 +123,51 @@ exit 1
   first_observe_line="$(grep -n -- "observe --platform android --deviceId emulator-5554" "$AUTO_MOBILE_LOG" | head -n 1 | cut -d: -f1)"
   [ "$root_line" -lt "$wait_for_device_line" ]
   [ "$launch_line" -lt "$first_observe_line" ]
+}
+
+@test "uses the workspace CLI entrypoint when the global auto-mobile install is unavailable" {
+  export GITHUB_WORKSPACE="${MOCK_BIN}/workspace"
+
+  make_mock adb '
+if [ "$1" = "devices" ]; then
+  printf "List of devices attached\nemulator-5554\tdevice\n"
+  exit 0
+fi
+if [ "$*" = "-s emulator-5554 root" ] || [ "$*" = "-s emulator-5554 wait-for-device" ]; then
+  exit 0
+fi
+if [[ "$*" == *"TEST_EMIT_SDK_NAVIGATION"* ]]; then
+  touch "$EVENT_TRIGGERED_FILE"
+fi
+'
+  make_mock sleep 'exit 0'
+  make_mock jq 'exit 0'
+  mkdir -p "${GITHUB_WORKSPACE}/dist/src"
+  mkdir -p "${HOME}/.bun/bin"
+  ln -s "${HOME}/.bun/bin/missing-auto-mobile" "${HOME}/.bun/bin/auto-mobile"
+  make_executable "${GITHUB_WORKSPACE}/dist/src/index.js" '
+printf "%s\n" "$*" >> "$AUTO_MOBILE_LOG"
+case "$6" in
+  launchApp)
+    exit 0
+    ;;
+  observe)
+    exit 0
+    ;;
+  getNavigationGraph)
+    [ -f "$EVENT_TRIGGERED_FILE" ]
+    printf "{}\n"
+    exit 0
+    ;;
+esac
+exit 1
+'
+
+  run env PATH="${MOCK_BIN}:/bin:/usr/bin" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" HOME="$HOME" bash "$SCRIPT" "emulator-5554"
+
+  [ "$status" -eq 0 ]
+  [ -L "${HOME}/.bun/bin/auto-mobile" ]
+  [ "$(readlink "${HOME}/.bun/bin/auto-mobile")" = "${GITHUB_WORKSPACE}/dist/src/index.js" ]
+  [[ "$output" == *"linking ${HOME}/.bun/bin/auto-mobile -> ${GITHUB_WORKSPACE}/dist/src/index.js"* ]]
+  grep -q -- 'getNavigationGraph --platform android --deviceId emulator-5554' "$AUTO_MOBILE_LOG"
 }

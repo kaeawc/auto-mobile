@@ -6,6 +6,10 @@
 set -euo pipefail
 
 adb_bin="${ADB_BIN:-adb}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="${GITHUB_WORKSPACE:-$(cd -- "${script_dir}/../.." && pwd)}"
+dist_entry="${repo_root}/dist/src/index.js"
+bun_bin_dir="${HOME}/.bun/bin"
 device_id="${1:-}"
 package_id="dev.jasonpearson.automobile.playground"
 emit_action="dev.jasonpearson.automobile.playground.action.TEST_EMIT_SDK_NAVIGATION"
@@ -21,8 +25,26 @@ require_command() {
   }
 }
 
+resolve_auto_mobile_cli() {
+  export PATH="${bun_bin_dir}:${PATH}"
+  hash -r 2>/dev/null || true
+
+  if command -v auto-mobile >/dev/null 2>&1; then
+    return
+  fi
+
+  if [[ -x "${dist_entry}" ]]; then
+    echo "auto-mobile not resolvable from global install; linking ${bun_bin_dir}/auto-mobile -> ${dist_entry}"
+    mkdir -p "${bun_bin_dir}"
+    ln -sf "${dist_entry}" "${bun_bin_dir}/auto-mobile"
+    hash -r 2>/dev/null || true
+  fi
+
+  require_command auto-mobile
+}
+
 require_command "$adb_bin"
-require_command auto-mobile
+resolve_auto_mobile_cli
 require_command jq
 
 if [[ -z "$device_id" ]]; then

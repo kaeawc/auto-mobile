@@ -313,24 +313,6 @@ jobs:
       - name: Build TypeScript package
         run: bun run build
 
-      - name: Publish to npm
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          # npm publish is not idempotent: without this, a failure anywhere later
-          # in the job makes the whole release unrerunnable.
-          #
-          # Assign first, then test. Under set -e a failing command substitution
-          # inside an `if` condition does NOT abort, so testing it inline would
-          # turn the guard's fail-closed error into a silent "not published".
-          state=$(scripts/release/already-published.sh npm "$VERSION")
-          if [ "$state" = published ]; then
-            echo "npm already has $VERSION; skipping publish"
-            exit 0
-          fi
-          npm publish --provenance --access public
-
       - name: Publish Homebrew formula
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -458,6 +440,24 @@ jobs:
           ./gradlew :junit-runner:publish :auto-mobile-sdk:publish \
             -PVERSION_NAME=${{ steps.version.outputs.version }} \
             --no-configuration-cache
+
+      - name: Publish to npm
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # npm publish is not idempotent: without this, a failure anywhere later
+          # in the job makes the whole release unrerunnable.
+          #
+          # Assign first, then test. Under set -e a failing command substitution
+          # inside an `if` condition does NOT abort, so testing it inline would
+          # turn the guard's fail-closed error into a silent "not published".
+          state=$(scripts/release/already-published.sh npm "$VERSION")
+          if [ "$state" = published ]; then
+            echo "npm already has $VERSION; skipping publish"
+            exit 0
+          fi
+          npm publish --provenance --access public
 
       - name: Free Disk Space
         continue-on-error: true

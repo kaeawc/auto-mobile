@@ -382,7 +382,7 @@
   [ "$preflight" -lt "$publish" ]
 }
 
-@test "release.yml blocks the GitHub Release when Android Maven publication fails (#5215)" {
+@test "release.yml publishes Android libraries before exposing the matching npm version (#5215)" {
   wiring_requires_yq
   local workflow=".github/workflows/release.yml"
 
@@ -392,13 +392,16 @@
   [ "$status" -eq 0 ]
   [ "$output" = "false" ]
 
-  local names publish release
+  local names publish npm release
   names="$(yq -r '.jobs."verify-and-release".steps[].name' "$workflow")"
   publish="$(printf '%s\n' "$names" \
     | grep -nxF 'Publish Android Libraries to Maven Central' | cut -d: -f1)"
+  npm="$(printf '%s\n' "$names" | grep -nxF 'Publish to npm' | cut -d: -f1)"
   release="$(printf '%s\n' "$names" | grep -nxF 'Create GitHub Release' | cut -d: -f1)"
   [ -n "$publish" ]
+  [ -n "$npm" ]
   [ -n "$release" ]
+  [ "$publish" -lt "$npm" ]
   [ "$publish" -lt "$release" ]
 }
 

@@ -297,6 +297,10 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       // Replay the parameter sets so a late joiner can decode immediately instead of waiting for
       // the encoder's next key frame.
       this.replayParameterSets(capture, socket);
+      // Startup can synchronously emit an IDR before the acknowledgement makes this socket
+      // eligible for binary data. Gate the subscriber and ask for a post-ack keyframe so it
+      // never begins on an undecodable inter-frame.
+      capture.source?.requestKeyFrame?.();
     } catch (error) {
       logger.warn(`[VideoStream] subscribe failed: ${error}`);
       this.detach(socket);
@@ -397,7 +401,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     })();
 
     await capture.startup;
-    this.promoteSubscriber(capture, socket, false);
+    this.promoteSubscriber(capture, socket, true);
     return capture;
   }
 

@@ -30,6 +30,7 @@ class FakeCaptureSource implements H264CaptureSource {
   startError: Error | null = null;
   startGate: Promise<void> | null = null;
   onStart: (() => void) | null = null;
+  keyFrameRequests = 0;
 
   async start(): Promise<void> {
     await this.startGate;
@@ -42,6 +43,11 @@ class FakeCaptureSource implements H264CaptureSource {
 
   async stop(): Promise<void> {
     this.stopped = true;
+  }
+
+  requestKeyFrame(): boolean {
+    this.keyFrameRequests++;
+    return true;
   }
 }
 
@@ -318,7 +324,7 @@ describe("VideoStreamSocketServer", () => {
     const { binary } = await subscribe(h.socketPath);
     await waitFor(() => binary().length >= 12);
 
-    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01, 0xaa, 0xbb, 0x00, 0x00, 0x00, 0x01, 0x01]));
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0xbb, 0x00, 0x00, 0x00, 0x01, 0x01]));
     await waitFor(() => binary().length > 12);
 
     expect(h.sources).toHaveLength(1);
@@ -326,7 +332,7 @@ describe("VideoStreamSocketServer", () => {
 
     const packet = binary().subarray(12);
     expect(packet.readInt32BE(8)).toBe(7); // payload length
-    expect(packet.subarray(12, 19)).toEqual(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01, 0xaa, 0xbb]));
+    expect(packet.subarray(12, 19)).toEqual(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0xbb]));
   });
 
   test("does not mistake arbitrary source chunks for complete H.264 NAL units", async () => {
@@ -378,6 +384,29 @@ describe("VideoStreamSocketServer", () => {
       await waitFor(() => response.binary().length >= 12);
       expect(response.binary().readInt32BE(0)).toBe(CODEC_ID_H264);
     }
+  });
+
+  test("gates the initial subscriber until a post-ack keyframe after startup media", async () => {
+    const sps = Buffer.from([0, 0, 0, 1, 0x07, 0x64]);
+    const pps = Buffer.from([0, 0, 0, 1, 0x08, 0xee]);
+    const startupIdr = Buffer.from([0, 0, 0, 1, 0x05, 0xaa]);
+    const interFrame = Buffer.from([0, 0, 0, 1, 0x01, 0xbb]);
+    const freshIdr = Buffer.from([0, 0, 0, 1, 0x05, 0xcc]);
+    const h = await startHarness({
+      // All three NALs flush during source.start(), before the acknowledgement is written.
+      startData: Buffer.concat([sps, pps, startupIdr, Buffer.from([0, 0, 0, 1, 0x01])]),
+    });
+
+    const client = await subscribe(h.socketPath);
+    await waitFor(() => client.binary().length >= 12);
+
+    expect(h.sources[0].keyFrameRequests).toBe(1);
+    expect(client.binary().includes(startupIdr)).toBe(false);
+
+    h.emit(Buffer.concat([interFrame, freshIdr, Buffer.from([0, 0, 0, 1, 0x01])]));
+    await waitFor(() => client.binary().includes(freshIdr));
+
+    expect(client.binary().includes(interFrame)).toBe(false);
   });
 
   test("stops a capture source that resolves after its only subscriber disconnects", async () => {

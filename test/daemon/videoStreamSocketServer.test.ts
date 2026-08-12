@@ -28,8 +28,10 @@ class FakeCaptureSource implements H264CaptureSource {
   started = false;
   stopped = false;
   startError: Error | null = null;
+  startGate: Promise<void> | null = null;
 
   async start(): Promise<void> {
+    await this.startGate;
     if (this.startError) {
       throw this.startError;
     }
@@ -60,6 +62,7 @@ const allowAllAuthenticator: StreamSocketAuthenticator = { authorize: () => {} }
 async function startHarness(
   options: {
     startError?: Error;
+    startGate?: Promise<void>;
     resolveError?: Error;
     authenticator?: StreamSocketAuthenticator;
   } = {}
@@ -85,6 +88,7 @@ async function startHarness(
         captureOptions.push(opts);
         const source = new FakeCaptureSource();
         source.startError = options.startError ?? null;
+        source.startGate = options.startGate ?? null;
         sources.push(source);
         return source;
       },
@@ -588,6 +592,34 @@ describe("VideoStreamSocketServer", () => {
     expect(ack.error).toBe(
       "Screen Recording permission is required to discover and observe iOS Simulator windows."
     );
+    expect(h.server.activeDeviceIds()).toHaveLength(0);
+  });
+
+  test("reports a pending Screen Recording denial to every subscriber", async () => {
+    let releaseStart: () => void;
+    const startGate = new Promise<void>(resolve => {
+      releaseStart = resolve;
+    });
+    const h = await startHarness({
+      startError: new ScreenRecordingPermissionError(),
+      startGate,
+    });
+
+    const first = subscribe(h.socketPath);
+    await waitFor(() => h.sources.length === 1);
+    const second = subscribe(h.socketPath);
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 2);
+    releaseStart!();
+
+    const responses = await Promise.all([first, second]);
+    for (const { ack } of responses) {
+      expect(ack.success).toBe(false);
+      expect(ack.permission).toEqual({
+        kind: "screen_recording",
+        status: "needs_approval",
+        approvalTarget: "AutoMobile",
+      });
+    }
     expect(h.server.activeDeviceIds()).toHaveLength(0);
   });
 

@@ -51,6 +51,8 @@ export interface VideoStreamSocketServerDependencies {
 /** One capture shared by every subscriber watching the same device. */
 interface DeviceCapture {
   source: H264CaptureSource | null;
+  /** Resolves only after the shared source has started, so late subscribers share startup failures. */
+  startup: Promise<void>;
   subscribers: Set<Socket>;
   backpressuredSubscribers: Set<Socket>;
   waitingForKeyFrame: Set<Socket>;
@@ -294,6 +296,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.replayParameterSets(capture, socket);
     } catch (error) {
       logger.warn(`[VideoStream] subscribe failed: ${error}`);
+      this.detach(socket);
       this.sendJson(socket, subscribeFailureResponse(request.id, error));
       socket.end();
     }
@@ -320,11 +323,13 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       // A client that joins part way through a GOP must not consume inter frames before an IDR.
       existing.waitingForKeyFrame.add(socket);
       this.socketDeviceIds.set(socket, deviceId);
+      await existing.startup;
       return existing;
     }
 
     const capture: DeviceCapture = {
       source: null,
+      startup: Promise.resolve(),
       subscribers: new Set([socket]),
       backpressuredSubscribers: new Set(),
       waitingForKeyFrame: new Set(),
@@ -338,55 +343,57 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     this.captures.set(deviceId, capture);
     this.socketDeviceIds.set(socket, deviceId);
 
-    try {
-      const source = await this.deps.createCaptureSource({
-        device,
-        onData: chunk => this.broadcast(deviceId, chunk),
-        // Record the source's attested rotation so the next config packet re-attests it to
-        // subscribers, including a late joiner via replayParameterSets (issue #4786).
-        onRotation: rotation => {
-          const current = this.captures.get(deviceId);
-          if (current) {
-            current.rotation = rotation;
-          }
-        },
-        onError: error => {
-          logger.warn(`[VideoStream] capture failed for ${deviceId}: ${error}`);
-          void this.stopCapture(deviceId);
-        },
-        bitrateBps: request.bitrateKbps ? request.bitrateKbps * 1000 : undefined,
-        size: request.size,
-        quality: request.quality,
-        // Pin the observation rate explicitly when the client sent no hint. This
-        // relay borrows the WebRTC capture sources, so without this it would
-        // silently inherit whatever the *WebRTC* iOS Simulator default happens
-        // to be — a knob that is tuned for an interactive WHEP feed. A client
-        // hint wins so farm viewers can lower the rate across many streams.
-        fps: request.fps ?? SIMULATOR_FPS_DEFAULT,
-      });
-      // The final subscriber may disconnect while source construction is in
-      // flight. Do not attach an unreachable capture process to a removed entry.
-      if (this.captures.get(deviceId) !== capture || capture.subscribers.size === 0) {
-        await source.stop().catch(() => {});
-        throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
+    capture.startup = (async () => {
+      try {
+        const source = await this.deps.createCaptureSource({
+          device,
+          onData: chunk => this.broadcast(deviceId, chunk),
+          // Record the source's attested rotation so the next config packet re-attests it to
+          // subscribers, including a late joiner via replayParameterSets (issue #4786).
+          onRotation: rotation => {
+            const current = this.captures.get(deviceId);
+            if (current) {
+              current.rotation = rotation;
+            }
+          },
+          onError: error => {
+            logger.warn(`[VideoStream] capture failed for ${deviceId}: ${error}`);
+            void this.stopCapture(deviceId);
+          },
+          bitrateBps: request.bitrateKbps ? request.bitrateKbps * 1000 : undefined,
+          size: request.size,
+          quality: request.quality,
+          // Pin the observation rate explicitly when the client sent no hint. This
+          // relay borrows the WebRTC capture sources, so without this it would
+          // silently inherit whatever the *WebRTC* iOS Simulator default happens
+          // to be — a knob that is tuned for an interactive WHEP feed. A client
+          // hint wins so farm viewers can lower the rate across many streams.
+          fps: request.fps ?? SIMULATOR_FPS_DEFAULT,
+        });
+        // The final subscriber may disconnect while source construction is in
+        // flight. Do not attach an unreachable capture process to a removed entry.
+        if (this.captures.get(deviceId) !== capture || capture.subscribers.size === 0) {
+          await source.stop().catch(() => {});
+          throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
+        }
+        capture.source = source;
+        await source.start();
+        if (this.captures.get(deviceId) !== capture || capture.subscribers.size === 0) {
+          capture.source = null;
+          await source.stop().catch(() => {});
+          throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
+        }
+      } catch (error) {
+        // A replacement subscriber may have installed a new capture while this
+        // asynchronous start was unwinding. Never remove that newer capture.
+        if (this.captures.get(deviceId) === capture) {
+          this.captures.delete(deviceId);
+        }
+        throw toActionableError(error, `Failed to start video capture for ${deviceId}`);
       }
-      capture.source = source;
-      await source.start();
-      if (this.captures.get(deviceId) !== capture || capture.subscribers.size === 0) {
-        capture.source = null;
-        await source.stop().catch(() => {});
-        throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
-      }
-    } catch (error) {
-      // A replacement subscriber may have installed a new capture while this
-      // asynchronous start was unwinding. Never remove that newer capture.
-      if (this.captures.get(deviceId) === capture) {
-        this.captures.delete(deviceId);
-      }
-      this.socketDeviceIds.delete(socket);
-      throw toActionableError(error, `Failed to start video capture for ${deviceId}`);
-    }
+    })();
 
+    await capture.startup;
     return capture;
   }
 

@@ -38,6 +38,8 @@ import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -53,6 +55,38 @@ private val THUMBNAIL_HEIGHT = 132.dp
 // on-device H.264 encodes cheap. (Captures are shared per device on the daemon and the first
 // subscriber fixes the encode, so a device also open in a higher-rate pane keeps the pane's rate.)
 private const val THUMBNAIL_FPS = 5
+
+// Backoff bounds for the screenshot-fallback capture retry (see captureScreenshotWithRetry).
+private const val SCREENSHOT_RETRY_INITIAL_MS = 1_000L
+private const val SCREENSHOT_RETRY_MAX_MS = 15_000L
+
+/**
+ * Capture a fallback still, retrying with bounded exponential backoff until one succeeds. Each
+ * attempt first waits for the live relay to be [VideoStreamState.Unavailable] — there is no point
+ * capturing an observation still while live video works (the caller prefers the frame), so a
+ * recovered relay pauses retries. A single timed-out or too-early capture therefore no longer
+ * leaves the card stuck on "No preview": when the observation service becomes ready, the next
+ * attempt succeeds. The caller cancels this by leaving the composition. [delayMs] is injectable so
+ * a test can drive the cadence without real time.
+ */
+internal suspend fun captureScreenshotWithRetry(
+  state: StateFlow<VideoStreamState>,
+  deviceId: String,
+  source: DeviceThumbnailScreenshotSource,
+  initialBackoffMs: Long = SCREENSHOT_RETRY_INITIAL_MS,
+  maxBackoffMs: Long = SCREENSHOT_RETRY_MAX_MS,
+  delayMs: suspend (Long) -> Unit = { delay(it) },
+): ImageBitmap {
+  var backoff = initialBackoffMs
+  while (true) {
+    state.first { it is VideoStreamState.Unavailable }
+    source.latest(deviceId)?.let {
+      return it
+    }
+    delayMs(backoff)
+    backoff = (backoff * 2).coerceAtMost(maxBackoffMs)
+  }
+}
 
 /**
  * The static label a non-booted card shows over its black thumbnail: `"Booting"` while a boot is in
@@ -134,21 +168,20 @@ private fun LiveThumbnail(
   val state by source.state.collectAsState()
   val bitmap = liveFrame?.bitmap
 
-  // Fetch the screenshot fallback lazily the first time the relay reports Unavailable, and keep it
-  // —
-  // so a daemon that predates the relay still shows a still, without paying for an observation
-  // stream
-  // while live video is working. Keyed on deviceId only (NOT the live stream state): auto-reconnect
-  // cycles Connecting<->Unavailable, and keying on the full state would cancel and restart the
-  // capture on every flip — the 1s reconnect backoff would abort it before its own 5s timeout could
-  // ever complete. Waiting on the source flow here lets one capture run to completion; the `when`
-  // below still prefers a live frame if one arrives.
+  // Fetch the screenshot fallback while the relay is Unavailable, retrying with backoff until it
+  // yields a still — so a daemon that predates the relay (or the pristine home grid before a
+  // session
+  // is registered) still shows a frame, and a single timed-out/early capture doesn't leave the card
+  // stuck on "No preview" once the observation service recovers. Keyed on deviceId only (NOT the
+  // live
+  // stream state): auto-reconnect cycles Connecting<->Unavailable, and keying on the full state
+  // would
+  // cancel and restart the capture on every flip. The retry pauses while live video works, and the
+  // `when` below still prefers a live frame if one arrives.
   var screenshot by remember(deviceId) { mutableStateOf<ImageBitmap?>(null) }
   LaunchedEffect(deviceId, screenshotSource) {
-    if (screenshotSource == null) return@LaunchedEffect
-    source.state.first { it is VideoStreamState.Unavailable }
-    if (screenshot == null) {
-      screenshot = screenshotSource.latest(deviceId)
+    if (screenshotSource != null && screenshot == null) {
+      screenshot = captureScreenshotWithRetry(source.state, deviceId, screenshotSource)
     }
   }
 

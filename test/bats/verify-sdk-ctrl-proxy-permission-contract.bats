@@ -87,3 +87,49 @@ fi
   [ "$proxy_first" -lt "$host_after_proxy" ]
   [ "$host_after_proxy" -lt "$second_send" ]
 }
+
+@test "retries the V2 control broadcast until the SDK host receiver is ready" {
+  make_mock keytool '
+for ((index = 1; index <= $#; index++)); do
+  if [[ "${!index}" == "-keystore" ]]; then
+    next=$((index + 1))
+    touch "${!next}"
+  fi
+done
+'
+  make_mock gradlew '
+mkdir -p playground/app/build/outputs/apk/debug
+touch playground/app/build/outputs/apk/debug/app-debug.apk
+'
+  make_mock apksigner '
+apk="${!#}"
+if [[ "$apk" == *control-proxy.apk ]]; then
+  printf "Signer #1 certificate SHA-256 digest: ctrl-proxy\n"
+else
+  printf "Signer #1 certificate SHA-256 digest: sdk-host\n"
+fi
+'
+  make_mock adb '
+printf "adb %s\n" "$*" >> "$COMMAND_LOG"
+if [[ "$*" == *"run-as dev.jasonpearson.automobile.playground cat files/automobile-network-control-contract-result"* ]]; then
+  send_command="adb shell am broadcast -a dev.jasonpearson.automobile.ctrlproxy.action.TEST_SEND_NETWORK_CONTROL -p dev.jasonpearson.automobile.ctrlproxy"
+  if [[ "$(grep -cFx "$send_command" "$COMMAND_LOG")" -ge 2 ]]; then
+    printf "ctrlproxy-v2\n"
+  fi
+fi
+'
+  make_mock sleep ':'
+
+  run env \
+    ADB_BIN="${MOCK_BIN}/adb" \
+    APKSIGNER_BIN="${MOCK_BIN}/apksigner" \
+    GRADLE_CMD="${MOCK_BIN}/gradlew" \
+    KEYTOOL_BIN="${MOCK_BIN}/keytool" \
+    SLEEP_BIN="${MOCK_BIN}/sleep" \
+    COMMAND_LOG="$COMMAND_LOG" \
+    bash "$SCRIPT" "$CTRL_PROXY_APK"
+
+  [ "$status" -eq 0 ]
+  send_command='adb shell am broadcast -a dev.jasonpearson.automobile.ctrlproxy.action.TEST_SEND_NETWORK_CONTROL -p dev.jasonpearson.automobile.ctrlproxy'
+  [ "$(grep -cFx "$send_command" "$COMMAND_LOG")" -ge 3 ]
+}

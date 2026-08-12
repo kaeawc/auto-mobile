@@ -71,10 +71,10 @@ verify_control_broadcast_delivery() {
 
   "$adb_bin" shell am start -W -n "${host_package}/.MainActivity" >/dev/null
   "$adb_bin" shell run-as "$host_package" rm -f "$result_file"
-  "$adb_bin" shell am broadcast -a "$send_action" -p "$ctrl_proxy_package" >/dev/null
 
   local attempt result
   for ((attempt = 0; attempt < 20; attempt++)); do
+    "$adb_bin" shell am broadcast -a "$send_action" -p "$ctrl_proxy_package" >/dev/null
     "$adb_bin" shell am broadcast -a "$probe_action" -p "$host_package" >/dev/null
     result="$("$adb_bin" shell run-as "$host_package" cat "$result_file" 2>/dev/null || true)"
     if [[ "$result" == "$expected_error_type" ]]; then

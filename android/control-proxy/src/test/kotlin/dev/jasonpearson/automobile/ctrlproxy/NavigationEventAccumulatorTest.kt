@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.NavigationSourceType
+import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -9,6 +11,62 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NavigationEventAccumulatorTest {
+
+  @Test
+  fun `SDK navigation event retains its original event data without updating latest value`() {
+    val acc = NavigationEventAccumulator()
+    val event =
+      SdkNavigationEvent(
+        timestamp = 1234L,
+        applicationId = "com.example.app",
+        destination = "profile",
+        source = NavigationSourceType.COMPOSE_NAVIGATION,
+        arguments = mapOf("userId" to "42"),
+        metadata = mapOf("origin" to "deep-link"),
+      )
+
+    val timestampedEvent = acc.addSdkNavigationEvent(event)
+
+    assertEquals(
+      TimestampedNavigationEvent(
+        destination = "profile",
+        source = "COMPOSE_NAVIGATION",
+        arguments = mapOf("userId" to "42"),
+        metadata = mapOf("origin" to "deep-link"),
+        timestamp = 1234L,
+        sequenceNumber = 0L,
+        applicationId = "com.example.app",
+      ),
+      timestampedEvent,
+    )
+    assertEquals(listOf(timestampedEvent), acc.getAllEvents())
+    assertEquals(null, acc.latestEvent.value)
+  }
+
+  @Test
+  fun `SDK navigation batch yields every event for sequential forwarding`() {
+    val acc = NavigationEventAccumulator()
+    val events =
+      listOf(
+        SdkNavigationEvent(
+          timestamp = 100L,
+          destination = "first",
+          source = NavigationSourceType.COMPOSE_NAVIGATION,
+        ),
+        SdkNavigationEvent(
+          timestamp = 200L,
+          destination = "second",
+          source = NavigationSourceType.NAVIGATION_COMPONENT,
+        ),
+      )
+
+    val forwarded = events.map(acc::addSdkNavigationEvent)
+
+    assertEquals(listOf("first", "second"), forwarded.map { it.destination })
+    assertEquals(listOf(0L, 1L), forwarded.map { it.sequenceNumber })
+    assertEquals(forwarded, acc.getAllEvents())
+    assertEquals(null, acc.latestEvent.value)
+  }
 
   @Test
   fun `single-threaded add assigns monotonic sequences and bounds the buffer`() {

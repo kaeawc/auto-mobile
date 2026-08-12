@@ -7,5 +7,5 @@ internal object SdkConstants {
 
   /** Signature-level permission for controlling SDK broadcast receivers. */
   const val PERMISSION_NETWORK_CONTROL =
-    "dev.jasonpearson.automobile.sdk.permission.NETWORK_CONTROL"
+    "dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2"
 }

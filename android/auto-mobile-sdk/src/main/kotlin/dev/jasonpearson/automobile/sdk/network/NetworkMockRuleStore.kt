@@ -1,13 +1,11 @@
 package dev.jasonpearson.automobile.sdk.network
 
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Build
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
-import dev.jasonpearson.automobile.sdk.SdkConstants
+import dev.jasonpearson.automobile.sdk.NetworkControlReceiverRegistrar
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.builtins.ListSerializer
@@ -31,8 +29,6 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     const val EXTRA_ERROR_SIM_TYPE = "error_type"
     const val EXTRA_ERROR_SIM_LIMIT = "limit"
     const val EXTRA_ERROR_SIM_EXPIRES_AT = "expires_at"
-    private const val PERMISSION_NETWORK_CONTROL = SdkConstants.PERMISSION_NETWORK_CONTROL
-
     @Volatile private var instance: NetworkMockRuleStore? = null
 
     fun getInstance(): NetworkMockRuleStore {
@@ -48,11 +44,6 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
       getInstance().unregisterReceiver(context)
     }
   }
-
-  // Guards against double-registration on re-init and ensures unregister runs at
-  // most once — the receiver is a process singleton, so a leaked/duplicate
-  // registration would double-handle every broadcast (#3599).
-  private var receiverRegistered = false
 
   /** Interface for the interceptor to query rules without depending on the full store. */
   interface RuleMatcher {
@@ -93,6 +84,9 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
   @Volatile private var errorSimulation: ErrorSimulationConfig? = null
 
   private val json = Json { ignoreUnknownKeys = true }
+  private val controlReceiverRegistrar = NetworkControlReceiverRegistrar { _, intent ->
+    handleControlBroadcast(intent)
+  }
 
   val ruleMatcher: RuleMatcher =
     object : RuleMatcher {
@@ -206,68 +200,48 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
 
   @Synchronized
   fun registerReceiver(context: Context) {
-    if (receiverRegistered) return
-    val filter =
+    controlReceiverRegistrar.register(context) {
       IntentFilter().apply {
         addAction(ACTION_NETWORK_MOCK_RULES)
         addAction(ACTION_NETWORK_ERROR_SIMULATION)
       }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      context.registerReceiver(
-        receiver,
-        filter,
-        PERMISSION_NETWORK_CONTROL,
-        null,
-        Context.RECEIVER_EXPORTED,
-      )
-    } else {
-      context.registerReceiver(receiver, filter, PERMISSION_NETWORK_CONTROL, null)
     }
-    receiverRegistered = true
     AutoMobileSDK.logger.d(TAG) {
-      "Registered broadcast receiver for network mock rules (permission-gated)"
+      "Registered broadcast receivers for network mock rules (permission-gated)"
     }
   }
 
   @Synchronized
   fun unregisterReceiver(context: Context) {
-    if (!receiverRegistered) return
-    try {
-      context.unregisterReceiver(receiver)
-    } catch (_: Exception) {}
-    receiverRegistered = false
+    controlReceiverRegistrar.unregister(context)
   }
 
-  private val receiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null) return
-        when (intent.action) {
-          ACTION_NETWORK_MOCK_RULES -> {
-            val rulesJson = intent.getStringExtra(EXTRA_RULES_JSON) ?: return
-            try {
-              val dtos =
-                json.decodeFromString(
-                  ListSerializer(NetworkMockRuleDto.serializer()),
-                  rulesJson,
-                )
-              setRules(dtos)
-            } catch (e: Exception) {
-              AutoMobileSDK.logger.e(TAG) { "Failed to parse mock rules: ${e.message}" }
-            }
-          }
-          ACTION_NETWORK_ERROR_SIMULATION -> {
-            val enabled = intent.getBooleanExtra(EXTRA_ERROR_SIM_ENABLED, false)
-            val errorType = intent.getStringExtra(EXTRA_ERROR_SIM_TYPE)
-            val limit =
-              intent.getIntExtra(EXTRA_ERROR_SIM_LIMIT, -1).let { if (it == -1) null else it }
-            val expiresAt =
-              intent.getLongExtra(EXTRA_ERROR_SIM_EXPIRES_AT, -1).let {
-                if (it == -1L) null else it
-              }
-            setErrorSimulation(enabled, errorType, limit, expiresAt)
-          }
+  private fun handleControlBroadcast(intent: Intent?) {
+    if (intent == null) return
+    when (intent.action) {
+      ACTION_NETWORK_MOCK_RULES -> {
+        val rulesJson = intent.getStringExtra(EXTRA_RULES_JSON) ?: return
+        try {
+          val dtos =
+            json.decodeFromString(
+              ListSerializer(NetworkMockRuleDto.serializer()),
+              rulesJson,
+            )
+          setRules(dtos)
+        } catch (e: Exception) {
+          AutoMobileSDK.logger.e(TAG) { "Failed to parse mock rules: ${e.message}" }
         }
       }
+      ACTION_NETWORK_ERROR_SIMULATION -> {
+        val enabled = intent.getBooleanExtra(EXTRA_ERROR_SIM_ENABLED, false)
+        val errorType = intent.getStringExtra(EXTRA_ERROR_SIM_TYPE)
+        val limit = intent.getIntExtra(EXTRA_ERROR_SIM_LIMIT, -1).let { if (it == -1) null else it }
+        val expiresAt =
+          intent.getLongExtra(EXTRA_ERROR_SIM_EXPIRES_AT, -1).let {
+            if (it == -1L) null else it
+          }
+        setErrorSimulation(enabled, errorType, limit, expiresAt)
+      }
     }
+  }
 }

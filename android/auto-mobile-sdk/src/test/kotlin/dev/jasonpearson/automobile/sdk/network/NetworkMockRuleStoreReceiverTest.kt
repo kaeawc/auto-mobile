@@ -4,9 +4,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
 import android.os.Build
+import dev.jasonpearson.automobile.sdk.SdkConstants
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -16,22 +19,27 @@ import org.robolectric.annotation.Config
 @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
 class NetworkMockRuleStoreReceiverTest {
 
-  /**
-   * The receiver must register at most once and unregister must allow a later re-register — without
-   * the idempotency guard, re-init leaked/double-registered it so every broadcast was handled twice
-   * (#3599).
-   */
+  @Test
+  fun `network control receiver accepts only CtrlProxy owned V2 permission`() {
+    assertEquals(
+      "dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2",
+      SdkConstants.PERMISSION_NETWORK_CONTROL,
+    )
+  }
+
+  /** Repeat initialization remains a no-op and teardown unregisters the receiver (#3599). */
   @Test
   fun `registerReceiver is idempotent and unregister allows re-register`() {
     val store = NetworkMockRuleStore()
     val context = mockk<Context>(relaxed = true)
+    val receiver = slot<BroadcastReceiver>()
     every {
       context.registerReceiver(
         any<BroadcastReceiver>(),
         any<IntentFilter>(),
-        any<String>(),
-        any(),
-        any<Int>(),
+        SdkConstants.PERMISSION_NETWORK_CONTROL,
+        null,
+        Context.RECEIVER_EXPORTED,
       )
     } returns null
 
@@ -40,26 +48,27 @@ class NetworkMockRuleStoreReceiverTest {
 
     verify(exactly = 1) {
       context.registerReceiver(
-        any<BroadcastReceiver>(),
+        capture(receiver),
         any<IntentFilter>(),
-        any<String>(),
-        any(),
-        any<Int>(),
+        SdkConstants.PERMISSION_NETWORK_CONTROL,
+        null,
+        Context.RECEIVER_EXPORTED,
       )
     }
 
     store.unregisterReceiver(context)
-    verify(exactly = 1) { context.unregisterReceiver(any<BroadcastReceiver>()) }
+    store.unregisterReceiver(context) // guarded no-op
+    verify(exactly = 1) { context.unregisterReceiver(receiver.captured) }
 
-    // After unregister, register works again (total of two registrations).
+    // After unregister, registration can be restored.
     store.registerReceiver(context)
     verify(exactly = 2) {
       context.registerReceiver(
         any<BroadcastReceiver>(),
         any<IntentFilter>(),
-        any<String>(),
-        any(),
-        any<Int>(),
+        SdkConstants.PERMISSION_NETWORK_CONTROL,
+        null,
+        Context.RECEIVER_EXPORTED,
       )
     }
   }

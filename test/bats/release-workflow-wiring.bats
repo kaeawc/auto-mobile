@@ -98,6 +98,34 @@
   [[ "$output" != *"verify-release-integrity.sh"* ]]
 }
 
+@test "release CtrlProxy APK is built from the release variant" {
+  wiring_requires_yq
+  local workflow=".github/workflows/build-control-proxy-apk.yml"
+
+  run yq -r '.jobs.build.steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = ":control-proxy:assembleRelease" ]
+
+  run yq -r '.jobs.build.steps[] | select(.id == "checksum") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"apk/release/control-proxy-release.apk"* ]]
+
+  run yq -r '.jobs.build.steps[] | select(.name == "Copy APK to /tmp") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"apk/release/control-proxy-release.apk"* ]]
+  [[ "$output" == *"/tmp/control-proxy-debug.apk"* ]]
+}
+
+@test "pull request CtrlProxy build compiles the release variant" {
+  wiring_requires_yq
+  local workflow=".github/workflows/pull_request.yml"
+
+  run yq -r '.jobs."build-android-control-proxy".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *":control-proxy:assembleDebug"* ]]
+  [[ "$output" == *":control-proxy:assembleRelease"* ]]
+}
+
 @test "prepare-release verifies and tags the single prepared artifact set before dispatching release (#4686)" {
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"
@@ -380,6 +408,36 @@
   [ -n "$preflight" ]
   [ -n "$publish" ]
   [ "$preflight" -lt "$publish" ]
+}
+
+@test "release.yml publishes the CtrlProxy release before compatible SDK distributions (#5215)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/release.yml"
+
+  run yq -r '.jobs."verify-and-release".steps[]
+    | select(.name == "Publish Android Libraries to Maven Central")
+    | ."continue-on-error" // false' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "false" ]
+
+  local names publish npm mcp brew release
+  names="$(yq -r '.jobs."verify-and-release".steps[].name' "$workflow")"
+  publish="$(printf '%s\n' "$names" \
+    | grep -nxF 'Publish Android Libraries to Maven Central' | cut -d: -f1)"
+  npm="$(printf '%s\n' "$names" | grep -nxF 'Publish to npm' | cut -d: -f1)"
+  mcp="$(printf '%s\n' "$names" | grep -nxF 'Publish to MCP Registry' | cut -d: -f1)"
+  brew="$(printf '%s\n' "$names" | grep -nxF 'Publish Homebrew formula' | cut -d: -f1)"
+  release="$(printf '%s\n' "$names" | grep -nxF 'Create GitHub Release' | cut -d: -f1)"
+  [ -n "$publish" ]
+  [ -n "$npm" ]
+  [ -n "$mcp" ]
+  [ -n "$brew" ]
+  [ -n "$release" ]
+  [ "$release" -lt "$publish" ]
+  [ "$publish" -lt "$npm" ]
+  [ "$npm" -lt "$mcp" ]
+  [ "$mcp" -lt "$brew" ]
+  [ "$npm" -lt "$brew" ]
 }
 
 @test "release.yml preflight step calls the extracted preflight script (#4853)" {

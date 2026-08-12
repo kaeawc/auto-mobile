@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.NavigationEvent
 import java.util.concurrent.CopyOnWriteArrayList
@@ -65,8 +66,9 @@ class NavigationEventAccumulator {
     arguments: Map<String, String>,
     metadata: Map<String, String>,
     applicationId: String? = null,
-  ) {
-    val timestamp = System.currentTimeMillis()
+    timestamp: Long = System.currentTimeMillis(),
+    publishLatestEvent: Boolean = true,
+  ): TimestampedNavigationEvent {
     val sequence = sequenceNumber.getAndIncrement()
 
     val timestampedEvent =
@@ -80,8 +82,26 @@ class NavigationEventAccumulator {
         applicationId = applicationId,
       )
 
-    appendEvent(timestampedEvent)
+    appendEvent(timestampedEvent, publishLatestEvent)
+    return timestampedEvent
   }
+
+  /**
+   * Records a navigation event emitted by the SDK's batched cross-process protocol.
+   *
+   * CtrlProxy forwards the returned event sequentially because [latestEvent] is intentionally
+   * conflating and cannot preserve every event in one batch.
+   */
+  fun addSdkNavigationEvent(event: SdkNavigationEvent): TimestampedNavigationEvent =
+    addEvent(
+      destination = event.destination,
+      source = event.source.name,
+      arguments = event.arguments ?: emptyMap(),
+      metadata = event.metadata ?: emptyMap(),
+      applicationId = event.applicationId,
+      timestamp = event.timestamp,
+      publishLatestEvent = false,
+    )
 
   /** Handle incoming navigation event from AutoMobileSDK. */
   private fun onNavigationEvent(event: NavigationEvent) {
@@ -115,14 +135,16 @@ class NavigationEventAccumulator {
   }
 
   /** Append an event and trim the circular buffer atomically, then emit updates. */
-  private fun appendEvent(event: TimestampedNavigationEvent) {
+  private fun appendEvent(event: TimestampedNavigationEvent, publishLatestEvent: Boolean = true) {
     synchronized(bufferLock) {
       events.add(event)
       if (events.size > maxEvents) {
         events.removeAt(0)
       }
     }
-    _latestEvent.value = event
+    if (publishLatestEvent) {
+      _latestEvent.value = event
+    }
     _eventCount.value = events.size
   }
 

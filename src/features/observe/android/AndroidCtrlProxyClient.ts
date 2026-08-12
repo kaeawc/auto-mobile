@@ -963,6 +963,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Hierarchy navigation detector
   private hierarchyNavigationDetector: HierarchyNavigationDetector | null = null;
   private sdkNavigationAppIds: Set<string> = new Set();
+  private navigationWriteTail: Promise<void> = Promise.resolve();
 
   // Screenshot backoff scheduler
   private screenshotBackoffScheduler: ScreenshotBackoffScheduler | null = null;
@@ -2983,7 +2984,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           // (issue #2885). If the write is still in flight when the drain window
           // closes, Part 1's dialect reject-on-closed drops the row cleanly
           // (issue #2792).
-          const navWrite = this.getNavigationGraphManager().recordNavigationEvent(event);
+          const navWrite = this.enqueueNavigationGraphWrite(event);
           void getDbWriteBarrier().trackExisting(navWrite);
           await navWrite;
 
@@ -3567,6 +3568,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to apply package event: ${error}`);
     }
+  }
+
+  private enqueueNavigationGraphWrite(event: NavigationEvent): Promise<void> {
+    const navigationGraphManager = this.getNavigationGraphManager();
+    const navWrite = this.navigationWriteTail.then(
+      () => navigationGraphManager.recordNavigationEvent(event),
+      () => navigationGraphManager.recordNavigationEvent(event),
+    );
+    // A failed event remains observable to its handler, but cannot permanently block later
+    // navigation frames from reaching the graph.
+    this.navigationWriteTail = navWrite.catch(() => undefined);
+    return navWrite;
   }
 
   private async handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {

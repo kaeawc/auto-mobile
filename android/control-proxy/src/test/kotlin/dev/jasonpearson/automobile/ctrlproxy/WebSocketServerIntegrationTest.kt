@@ -18,6 +18,7 @@ import io.ktor.websocket.readText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -162,6 +163,9 @@ class WebSocketServerIntegrationTest {
   fun `client can connect to server`() = runBlocking {
     // Given
     server.start()
+    val firstClientConnection = async { server.awaitFirstClientConnection() }
+
+    assertFalse("No client should be ready before the handshake", firstClientConnection.isCompleted)
 
     // When
     val client = HttpClient(CIO) { install(WebSockets) }
@@ -175,6 +179,7 @@ class WebSocketServerIntegrationTest {
       ) {
         // Then - connection established
         waitFor { server.getConnectionCount() == 1 }
+        withTimeout(1000) { firstClientConnection.await() }
         assertEquals(1, server.getConnectionCount())
 
         // Receive connection message
@@ -354,6 +359,97 @@ class WebSocketServerIntegrationTest {
 
       // Then - connection should be cleaned up
       assertEquals("Connection should be cleaned up", 0, server.getConnectionCount())
+    }
+  }
+
+  @Test
+  fun `await client connection waits for a replacement client after disconnect`() = runBlocking {
+    server.start()
+
+    val client = HttpClient(CIO) { install(WebSockets) }
+    client.use { client ->
+      val firstClient = launch {
+        client.webSocket(
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = getServerPort(),
+          path = "/ws",
+        ) {
+          incoming.receive()
+          delay(Long.MAX_VALUE)
+        }
+      }
+
+      waitFor { server.getConnectionCount() == 1 }
+      withTimeout(1000) { server.awaitClientConnection() }
+
+      firstClient.cancel()
+      firstClient.join()
+      waitFor { server.getConnectionCount() == 0 }
+
+      val reconnectWait = async { server.awaitClientConnection() }
+      assertFalse(
+        "A disconnected client must not satisfy the delivery gate",
+        reconnectWait.isCompleted,
+      )
+
+      val replacementClient = launch {
+        client.webSocket(
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = getServerPort(),
+          path = "/ws",
+        ) {
+          incoming.receive()
+          delay(Long.MAX_VALUE)
+        }
+      }
+
+      waitFor { server.getConnectionCount() == 1 }
+      withTimeout(1000) { reconnectWait.await() }
+
+      replacementClient.cancel()
+      replacementClient.join()
+    }
+  }
+
+  @Test
+  fun `sync broadcast waits for a client and delivers after it connects`() = runBlocking {
+    server.start()
+    val response =
+      SettingsGetResult(
+        timestamp = 1234L,
+        success = true,
+        namespace = "secure",
+        key = "setting",
+        value = "value",
+        found = true,
+        totalTimeMs = 1L,
+      )
+    val delivery = async {
+      server.broadcast(
+        response,
+        mode = WebSocketServer.BroadcastMode.Sync,
+        waitForClient = true,
+      )
+    }
+    assertFalse("Delivery must wait until a client is connected", delivery.isCompleted)
+
+    val client = HttpClient(CIO) { install(WebSockets) }
+    client.use { client ->
+      client.webSocket(
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
+      ) {
+        incoming.receive()
+        val delivered = withTimeout(1000) { incoming.receive() } as Frame.Text
+        val payload = json.parseToJsonElement(delivered.readText()).jsonObject
+
+        assertEquals("settings_get_result", payload["type"]?.jsonPrimitive?.content)
+        withTimeout(1000) { delivery.await() }
+      }
     }
   }
 

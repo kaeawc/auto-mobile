@@ -118,6 +118,8 @@ class WebSocketServer(
   private val connections = mutableSetOf<DefaultWebSocketSession>()
   private val requestConnections = mutableMapOf<String, DefaultWebSocketSession>()
   private val connectionCount = AtomicInteger(0)
+  private val firstClientConnection = CompletableDeferred<Unit>()
+  private var activeClientConnection = CompletableDeferred<Unit>()
 
   // Flow to broadcast messages to all connected clients
   private val _messageFlow = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 10)
@@ -180,7 +182,11 @@ class WebSocketServer(
                     )
                   )
 
-                  synchronized(connections) { connections.add(this) }
+                  synchronized(connections) {
+                    connections.add(this)
+                    activeClientConnection.complete(Unit)
+                  }
+                  firstClientConnection.complete(Unit)
 
                   // Listen for incoming messages
                   for (frame in incoming) {
@@ -210,6 +216,9 @@ class WebSocketServer(
                   synchronized(connections) {
                     connections.remove(this)
                     requestConnections.values.removeAll { it == this }
+                    if (connections.isEmpty()) {
+                      activeClientConnection = CompletableDeferred()
+                    }
                   }
                   Log.d(
                     TAG,
@@ -255,6 +264,7 @@ class WebSocketServer(
         }
         connections.clear()
         requestConnections.clear()
+        activeClientConnection = CompletableDeferred()
       }
 
       server?.stop(1000, 2000)
@@ -323,7 +333,11 @@ class WebSocketServer(
    * @param response The typed response object to broadcast
    * @param mode Broadcast mode - Async (default) or Sync for ordering guarantees
    */
-  suspend fun broadcast(response: WebSocketResponse, mode: BroadcastMode = BroadcastMode.Async) {
+  suspend fun broadcast(
+    response: WebSocketResponse,
+    mode: BroadcastMode = BroadcastMode.Async,
+    waitForClient: Boolean = false,
+  ) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
     val requestId = extractRequestId(message)
     if (response is ErrorResponse) {
@@ -341,9 +355,13 @@ class WebSocketServer(
       forgetRequestConnection(requestId)
     }
 
-    when (mode) {
-      BroadcastMode.Async -> _messageFlow.emit(message)
-      BroadcastMode.Sync -> broadcastToClients(message)
+    if (waitForClient) {
+      broadcastToClientsWhenClientConnected(message)
+    } else {
+      when (mode) {
+        BroadcastMode.Async -> _messageFlow.emit(message)
+        BroadcastMode.Sync -> broadcastToClients(message)
+      }
     }
   }
 
@@ -353,37 +371,65 @@ class WebSocketServer(
    * @param event The SDK event to broadcast
    * @param mode Broadcast mode - Async (default) or Sync for ordering guarantees
    */
-  suspend fun broadcast(event: SdkEvent, mode: BroadcastMode = BroadcastMode.Async) {
+  suspend fun broadcast(
+    event: SdkEvent,
+    mode: BroadcastMode = BroadcastMode.Async,
+    waitForClient: Boolean = false,
+  ) {
     val message = responseJson.encodeToString(SdkEvent.serializer(), event)
-    when (mode) {
-      BroadcastMode.Async -> _messageFlow.emit(message)
-      BroadcastMode.Sync -> broadcastToClients(message)
+    if (waitForClient) {
+      broadcastToClientsWhenClientConnected(message)
+    } else {
+      when (mode) {
+        BroadcastMode.Async -> _messageFlow.emit(message)
+        BroadcastMode.Sync -> broadcastToClients(message)
+      }
     }
   }
 
-  /** Internal method to send message to all connected clients */
-  private suspend fun broadcastToClients(message: String) {
-    val deadConnections = mutableListOf<DefaultWebSocketSession>()
+  /**
+   * Sends only after at least one current client accepts the message.
+   *
+   * A client can disconnect after a caller observes it but before the send begins. Retrying from
+   * the synchronized connection snapshot keeps queued SDK events available for a replacement.
+   */
+  private suspend fun broadcastToClientsWhenClientConnected(message: String) {
+    while (!broadcastToClients(message)) {
+      awaitClientConnection()
+    }
+  }
 
-    synchronized(connections) { connections.toList() }
-      .forEach { connection ->
-        try {
-          connection.send(Frame.Text(message))
-        } catch (e: CancellationException) {
-          // The broadcast collector is cancelled when `scope` shuts down mid-send; let it unwind
-          // rather than mis-marking a live connection as dead and continuing the loop (#3130).
-          throw e
-        } catch (e: Exception) {
-          Log.w(TAG, "Failed to send to connection, marking as dead", e)
-          deadConnections.add(connection)
-        }
+  /** Internal method to send message to all connected clients. */
+  private suspend fun broadcastToClients(message: String): Boolean {
+    val deadConnections = mutableListOf<DefaultWebSocketSession>()
+    var delivered = false
+
+    val currentConnections = synchronized(connections) { connections.toList() }
+    currentConnections.forEach { connection ->
+      try {
+        connection.send(Frame.Text(message))
+        delivered = true
+      } catch (e: CancellationException) {
+        // The broadcast collector is cancelled when `scope` shuts down mid-send; let it unwind
+        // rather than mis-marking a live connection as dead and continuing the loop (#3130).
+        throw e
+      } catch (e: Exception) {
+        Log.w(TAG, "Failed to send to connection, marking as dead", e)
+        deadConnections.add(connection)
       }
+    }
 
     // Remove dead connections
     if (deadConnections.isNotEmpty()) {
-      synchronized(connections) { connections.removeAll(deadConnections.toSet()) }
+      synchronized(connections) {
+        connections.removeAll(deadConnections.toSet())
+        if (connections.isEmpty()) {
+          activeClientConnection = CompletableDeferred()
+        }
+      }
       Log.d(TAG, "Removed ${deadConnections.size} dead connections. Active: ${connections.size}")
     }
+    return delivered
   }
 
   /** Internal method to send a message to a single client connection. */
@@ -399,6 +445,9 @@ class WebSocketServer(
       synchronized(connections) {
         connections.remove(connection)
         requestConnections.values.removeAll { it == connection }
+        if (connections.isEmpty()) {
+          activeClientConnection = CompletableDeferred()
+        }
       }
     }
   }
@@ -442,6 +491,20 @@ class WebSocketServer(
   /** Get the number of active connections */
   fun getConnectionCount(): Int {
     return synchronized(connections) { connections.size }
+  }
+
+  /** Suspends until a client has completed the WebSocket handshake. */
+  suspend fun awaitFirstClientConnection() {
+    firstClientConnection.await()
+  }
+
+  /** Suspends until a client is currently connected, including after a reconnect. */
+  suspend fun awaitClientConnection() {
+    val connection =
+      synchronized(connections) {
+        if (connections.isEmpty()) activeClientConnection else null
+      }
+    connection?.await()
   }
 
   /** Check if server is running */

@@ -1,13 +1,10 @@
 package dev.jasonpearson.automobile.sdk
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Application
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
@@ -48,6 +45,11 @@ internal object FrameMetricsCollector {
 
   private val enabled = AtomicBoolean(false)
   private val mainHandler = Handler(Looper.getMainLooper())
+  private val controlReceiverRegistrar = NetworkControlReceiverRegistrar { _, intent ->
+    if (intent?.action == AutoMobileSDK.ACTION_FRAME_METRICS_CONTROL) {
+      setEnabled(intent.getBooleanExtra(AutoMobileSDK.EXTRA_FRAME_METRICS_ENABLED, false))
+    }
+  }
   private var context: Context? = null
   private var application: Application? = null
 
@@ -79,11 +81,7 @@ internal object FrameMetricsCollector {
     setEnabled(false)
     val ctx = context
     if (ctx != null) {
-      try {
-        ctx.unregisterReceiver(controlReceiver)
-      } catch (_: IllegalArgumentException) {
-        // Receiver was never registered or already unregistered — safe to ignore.
-      }
+      controlReceiverRegistrar.unregister(ctx)
     }
     context = null
     application = null
@@ -247,31 +245,8 @@ internal object FrameMetricsCollector {
   // ---- remote enable/disable control --------------------------------------
 
   private fun registerControlReceiver(context: Context) {
-    val filter = IntentFilter().apply { addAction(AutoMobileSDK.ACTION_FRAME_METRICS_CONTROL) }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      context.registerReceiver(
-        controlReceiver,
-        filter,
-        SdkConstants.PERMISSION_NETWORK_CONTROL,
-        null,
-        Context.RECEIVER_EXPORTED,
-      )
-    } else {
-      @SuppressLint("UnspecifiedRegisterReceiverFlag")
-      context.registerReceiver(
-        controlReceiver,
-        filter,
-        SdkConstants.PERMISSION_NETWORK_CONTROL,
-        null,
-      )
+    controlReceiverRegistrar.register(context) {
+      IntentFilter().apply { addAction(AutoMobileSDK.ACTION_FRAME_METRICS_CONTROL) }
     }
   }
-
-  private val controlReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent?.action != AutoMobileSDK.ACTION_FRAME_METRICS_CONTROL) return
-        setEnabled(intent.getBooleanExtra(AutoMobileSDK.EXTRA_FRAME_METRICS_ENABLED, false))
-      }
-    }
 }

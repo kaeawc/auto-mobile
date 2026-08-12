@@ -313,37 +313,10 @@ jobs:
       - name: Build TypeScript package
         run: bun run build
 
-      - name: Publish to npm
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          # npm publish is not idempotent: without this, a failure anywhere later
-          # in the job makes the whole release unrerunnable.
-          #
-          # Assign first, then test. Under set -e a failing command substitution
-          # inside an `if` condition does NOT abort, so testing it inline would
-          # turn the guard's fail-closed error into a silent "not published".
-          state=$(scripts/release/already-published.sh npm "$VERSION")
-          if [ "$state" = published ]; then
-            echo "npm already has $VERSION; skipping publish"
-            exit 0
-          fi
-          npm publish --provenance --access public
-
-      - name: Publish Homebrew formula
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-          REPO: ${{ github.repository }}
-        run: bash scripts/release/update-brew-formula.sh
-
-      # MCP Registry, Maven Central, and the Docker image are best-effort
-      # distribution channels: a failure in any of them must not block the
-      # canonical GitHub Release (and its artifacts) that runs after them.
-      # continue-on-error neutralizes their failures so `success()` stays true
-      # for the GitHub Release step, while the failed step still shows red in the
-      # UI so the drift is visible and fixable.
+      # Publish the prepared CtrlProxy assets before any SDK distribution. Maven
+      # Central automatically releases its deployment, so a later npm/Homebrew
+      # failure must never make a new SDK selectable without its matching APK.
+      # The MCP Registry and Docker image are best-effort distribution channels.
       - name: Install mcp-publisher
         continue-on-error: true
         run: |
@@ -352,21 +325,55 @@ jobs:
           URL="$URL/mcp-publisher_linux_amd64.tar.gz"
           curl -L "$URL" | tar xz mcp-publisher
 
-      - name: Publish to MCP Registry
-        continue-on-error: true
+      - name: Create GitHub Release
+        shell: bash
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.validate-release-tag.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          # Assign first, then test — see the npm step for why.
-          state=$(scripts/release/already-published.sh mcp "$VERSION")
-          if [ "$state" = published ]; then
-            echo "MCP Registry already has $VERSION; skipping publish"
-            exit 0
+          files=(
+            /tmp/control-proxy-debug.apk
+            /tmp/control-proxy.ipa
+            /tmp/automobile-video.jar
+            /tmp/screen-capture-helper-macos-universal.zip
+            /tmp/desktop/AutoMobile-${VERSION}-macos.dmg
+            /tmp/desktop/AutoMobile-${VERSION}-windows.msi
+            /tmp/desktop/AutoMobile-${VERSION}-linux.deb
+          )
+
+          # Use the GitHub Release API directly through gh. `gh release create`
+          # uploads through a draft before publishing, so a failed first attempt
+          # can leave a mutable draft. Only that draft is safe to repair with
+          # --clobber; never delete assets from an already-published release.
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            release_json="$(gh release view "$TAG" --repo "$REPO" --json isDraft,assets)"
+            if [ "$(jq -r '.isDraft' <<<"$release_json")" = "true" ]; then
+              gh release upload "$TAG" "${files[@]}" --repo "$REPO" --clobber
+              gh release edit "$TAG" --repo "$REPO" --title "$VERSION" \
+                --notes-file release_notes.txt --draft=false
+            else
+              missing=0
+              for file in "${files[@]}"; do
+                asset_name="${file##*/}"
+                if ! jq -e --arg name "$asset_name" \
+                  '.assets[] | select(.name == $name)' <<<"$release_json" >/dev/null; then
+                  echo "Published release $TAG is missing expected asset: $asset_name" >&2
+                  missing=1
+                fi
+              done
+              if [ "$missing" -ne 0 ]; then
+                echo "Refusing to overwrite assets on a published release." >&2
+                exit 1
+              fi
+              gh release edit "$TAG" --repo "$REPO" --title "$VERSION" --notes-file release_notes.txt
+            fi
+          else
+            gh release create "$TAG" "${files[@]}" --repo "$REPO" \
+              --title "$VERSION" --notes-file release_notes.txt --verify-tag
           fi
-          ./mcp-publisher login dns --domain jasonpearson.dev \
-            --private-key "${{ secrets.MCP_DNS_PRIVATE_KEY }}"
-          ./mcp-publisher publish
 
       - name: Set up Java
         continue-on-error: true
@@ -420,7 +427,6 @@ jobs:
           if-no-files-found: warn
 
       - name: Publish Android Libraries to Maven Central
-        continue-on-error: true
         env:
           VERSION: ${{ steps.version.outputs.version }}
           ORG_GRADLE_PROJECT_mavenCentralUsername:
@@ -459,6 +465,47 @@ jobs:
           ./gradlew :junit-runner:publish :auto-mobile-sdk:publish \
             -PVERSION_NAME=${{ steps.version.outputs.version }} \
             --no-configuration-cache
+
+      - name: Publish to npm
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # npm publish is not idempotent: without this, a failure anywhere later
+          # in the job makes the whole release unrerunnable.
+          #
+          # Assign first, then test. Under set -e a failing command substitution
+          # inside an `if` condition does NOT abort, so testing it inline would
+          # turn the guard's fail-closed error into a silent "not published".
+          state=$(scripts/release/already-published.sh npm "$VERSION")
+          if [ "$state" = published ]; then
+            echo "npm already has $VERSION; skipping publish"
+            exit 0
+          fi
+          npm publish --provenance --access public
+
+      - name: Publish to MCP Registry
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Assign first, then test — see the npm step for why.
+          state=$(scripts/release/already-published.sh mcp "$VERSION")
+          if [ "$state" = published ]; then
+            echo "MCP Registry already has $VERSION; skipping publish"
+            exit 0
+          fi
+          ./mcp-publisher login dns --domain jasonpearson.dev \
+            --private-key "${{ secrets.MCP_DNS_PRIVATE_KEY }}"
+          ./mcp-publisher publish
+
+      - name: Publish Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: bash scripts/release/update-brew-formula.sh
 
       - name: Free Disk Space
         continue-on-error: true
@@ -514,56 +561,6 @@ jobs:
           labels: ${{ steps.docker_meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Create GitHub Release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ needs.validate-release-tag.outputs.tag }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          files=(
-            /tmp/control-proxy-debug.apk
-            /tmp/control-proxy.ipa
-            /tmp/automobile-video.jar
-            /tmp/screen-capture-helper-macos-universal.zip
-            /tmp/desktop/AutoMobile-${VERSION}-macos.dmg
-            /tmp/desktop/AutoMobile-${VERSION}-windows.msi
-            /tmp/desktop/AutoMobile-${VERSION}-linux.deb
-          )
-
-          # Use the GitHub Release API directly through gh. `gh release create`
-          # uploads through a draft before publishing, so a failed first attempt
-          # can leave a mutable draft. Only that draft is safe to repair with
-          # --clobber; never delete assets from an already-published release.
-          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            release_json="$(gh release view "$TAG" --repo "$REPO" --json isDraft,assets)"
-            if [ "$(jq -r '.isDraft' <<<"$release_json")" = "true" ]; then
-              gh release upload "$TAG" "${files[@]}" --repo "$REPO" --clobber
-              gh release edit "$TAG" --repo "$REPO" --title "$VERSION" \
-                --notes-file release_notes.txt --draft=false
-            else
-              missing=0
-              for file in "${files[@]}"; do
-                asset_name="${file##*/}"
-                if ! jq -e --arg name "$asset_name" \
-                  '.assets[] | select(.name == $name)' <<<"$release_json" >/dev/null; then
-                  echo "Published release $TAG is missing expected asset: $asset_name" >&2
-                  missing=1
-                fi
-              done
-              if [ "$missing" -ne 0 ]; then
-                echo "Refusing to overwrite assets on a published release." >&2
-                exit 1
-              fi
-              gh release edit "$TAG" --repo "$REPO" --title "$VERSION" --notes-file release_notes.txt
-            fi
-          else
-            gh release create "$TAG" "${files[@]}" --repo "$REPO" \
-              --title "$VERSION" --notes-file release_notes.txt --verify-tag
-          fi
 
       - name: Summary
         env:

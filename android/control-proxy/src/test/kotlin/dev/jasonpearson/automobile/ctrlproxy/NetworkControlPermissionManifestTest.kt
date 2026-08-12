@@ -51,10 +51,28 @@ class NetworkControlPermissionManifestTest {
     )
   }
 
-  private fun readManifest(module: String): Document =
+  @Test
+  fun `emulator contract receivers require the platform dump permission`() {
+    assertEquals(
+      PLATFORM_DUMP_PERMISSION,
+      receiverPermission(
+        readManifest("control-proxy", "debug"),
+        ".NetworkControlContractReceiver",
+      ),
+    )
+    assertEquals(
+      PLATFORM_DUMP_PERMISSION,
+      receiverPermission(
+        readManifest("playground/app", "debug"),
+        ".NetworkControlContractProbeReceiver",
+      ),
+    )
+  }
+
+  private fun readManifest(module: String, sourceSet: String = "main"): Document =
     DocumentBuilderFactory.newInstance().run {
       isNamespaceAware = true
-      newDocumentBuilder().parse(locateManifest(module))
+      newDocumentBuilder().parse(locateManifest(module, sourceSet))
     }
 
   private fun permissionDefinitions(document: Document): List<PermissionDefinition> =
@@ -68,6 +86,11 @@ class NetworkControlPermissionManifestTest {
   private fun usesPermissions(document: Document): List<String> =
     elements(document, "uses-permission").map { it.androidAttribute("name") }
 
+  private fun receiverPermission(document: Document, name: String): String =
+    elements(document, "receiver")
+      .single { it.androidAttribute("name") == name }
+      .androidAttribute("permission")
+
   private fun elements(document: Document, tagName: String): List<Element> {
     val nodes = document.getElementsByTagName(tagName)
     return (0 until nodes.length).map { nodes.item(it) as Element }
@@ -76,8 +99,8 @@ class NetworkControlPermissionManifestTest {
   private fun Element.androidAttribute(name: String): String =
     getAttributeNS(ANDROID_NAMESPACE, name)
 
-  private fun locateManifest(module: String): File {
-    val rel = "$module/src/main/AndroidManifest.xml"
+  private fun locateManifest(module: String, sourceSet: String): File {
+    val rel = "$module/src/$sourceSet/AndroidManifest.xml"
     val direct = listOf(File("../$rel"), File(rel), File("android/$rel")).firstOrNull { it.isFile }
     if (direct != null) return direct
 
@@ -99,5 +122,6 @@ class NetworkControlPermissionManifestTest {
       "dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2"
     const val LEGACY_NETWORK_CONTROL_PERMISSION =
       "dev.jasonpearson.automobile.sdk.permission.NETWORK_CONTROL"
+    const val PLATFORM_DUMP_PERMISSION = "android.permission.DUMP"
   }
 }

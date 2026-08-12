@@ -6,6 +6,8 @@ import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SdkEventBatchProcessorTest {
@@ -43,6 +45,35 @@ class SdkEventBatchProcessorTest {
       thirdBroadcastFinished.await()
 
       assertEquals(listOf("first", "second", "third"), broadcasts)
+    }
+
+  @Test
+  fun `drops batches beyond bounded queue capacity while a navigation broadcast suspends`() =
+    runTest {
+      val firstBroadcastStarted = CompletableDeferred<Unit>()
+      val allowFirstBroadcastToFinish = CompletableDeferred<Unit>()
+      val processor =
+        SdkEventBatchProcessor(
+          scope = backgroundScope,
+          navigationEventAccumulator = NavigationEventAccumulator(),
+          broadcastNavigationEvent = { event ->
+            if (event.destination == "first") {
+              firstBroadcastStarted.complete(Unit)
+              allowFirstBroadcastToFinish.await()
+            }
+          },
+          broadcastSdkEvent = { error("Unexpected SDK event: $it") },
+          queueCapacity = 1,
+        )
+
+      assertTrue(processor.enqueue(batch("first")))
+      firstBroadcastStarted.await()
+
+      assertTrue(processor.enqueue(batch("second")))
+      assertFalse(processor.enqueue(batch("third")))
+      assertEquals(1L, processor.droppedBatchCount)
+
+      allowFirstBroadcastToFinish.complete(Unit)
     }
 
   private fun batch(vararg destinations: String): SdkEventBatch =

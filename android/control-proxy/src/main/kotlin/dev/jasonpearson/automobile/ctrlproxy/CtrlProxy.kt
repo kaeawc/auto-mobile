@@ -882,7 +882,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           Log.d(TAG, "Received event batch with ${batch.events.size} events")
 
           if (!sdkEventBatchProcessor.enqueue(batch)) {
-            Log.w(TAG, "Dropping SDK event batch because CtrlProxy is shutting down")
+            Log.w(
+              TAG,
+              "Dropping SDK event batch because the processing queue is full " +
+                "(dropped=${sdkEventBatchProcessor.droppedBatchCount})",
+            )
           }
         } catch (e: Exception) {
           Log.e(TAG, "Error handling event batch broadcast", e)

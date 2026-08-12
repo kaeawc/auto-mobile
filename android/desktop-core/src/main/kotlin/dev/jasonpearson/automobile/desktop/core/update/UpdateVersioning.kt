@@ -60,8 +60,13 @@ internal fun resolveAsset(assets: List<ReleaseAsset>, platform: HostPlatform): R
 
 private data class ParsedVersion(val numbers: List<Int>, val prerelease: String?)
 
+/** A SemVer prerelease identifier: one or more ASCII alphanumerics or hyphens. */
+private val PRERELEASE_IDENTIFIER = Regex("[0-9A-Za-z-]+")
+
 /**
- * Parses `[v]MAJOR.MINOR.PATCH[-prerelease][+build]`, or null if any core segment is non-numeric.
+ * Parses `[v]MAJOR.MINOR.PATCH[-prerelease][+build]`, or null if any core segment is non-numeric or
+ * the prerelease contains an empty/invalid identifier (`1.0.1-`, `1.0.1-alpha..1`). Rejecting
+ * rather than best-effort-parsing keeps a malformed tag from ever reading as newer.
  */
 private fun parseVersion(raw: String): ParsedVersion? {
   val withoutPrefix = raw.trim().removePrefix("v").removePrefix("V")
@@ -74,5 +79,10 @@ private fun parseVersion(raw: String): ParsedVersion? {
     // A non-numeric core segment means we cannot trust the version — reject the whole string.
     numbers.add(segment.toIntOrNull() ?: return null)
   }
+  if (prerelease != null && !isValidPrerelease(prerelease)) return null
   return ParsedVersion(numbers, prerelease)
 }
+
+/** True when every dot-separated prerelease identifier is non-empty and uses the SemVer charset. */
+private fun isValidPrerelease(prerelease: String): Boolean =
+  prerelease.split('.').all { it.isNotEmpty() && PRERELEASE_IDENTIFIER.matches(it) }

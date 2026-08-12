@@ -7,7 +7,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -17,9 +17,11 @@ private val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(20)
 
 /**
  * [ReleaseSource] backed by the GitHub REST API `releases/latest` endpoint (unauthenticated — the
- * repo is public). Uses the JDK [HttpClient] already used elsewhere in this module; the blocking
- * `send` is confined to [Dispatchers.IO]. Non-2xx responses (notably 403 rate-limit) and malformed
- * bodies are converted to [ReleaseFetchException].
+ * repo is public). Uses the JDK [HttpClient] already used elsewhere in this module. The blocking
+ * `send` runs inside [runInterruptible] on [Dispatchers.IO], so coroutine cancellation interrupts
+ * the request promptly (rather than waiting out the request timeout while holding the check's
+ * lock). Non-2xx responses (notably 403 rate-limit) and malformed bodies become
+ * [ReleaseFetchException].
  */
 class GitHubReleaseSource(
   private val repo: String = "kaeawc/auto-mobile",
@@ -27,35 +29,35 @@ class GitHubReleaseSource(
     HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build(),
 ) : ReleaseSource {
 
-  override suspend fun fetchLatestRelease(): ReleaseInfo =
-    withContext(Dispatchers.IO) {
-      val uri = URI.create("https://api.github.com/repos/$repo/releases/latest")
-      val request =
-        HttpRequest.newBuilder(uri)
-          .header("Accept", "application/vnd.github+json")
-          .header("X-GitHub-Api-Version", "2022-11-28")
-          // Bound the request so a stalled/blackholed connection surfaces as a timeout (an
-          // IOException → ReleaseFetchException → Failed) instead of pinning status at Checking.
-          .timeout(REQUEST_TIMEOUT)
-          .GET()
-          .build()
+  override suspend fun fetchLatestRelease(): ReleaseInfo {
+    val uri = URI.create("https://api.github.com/repos/$repo/releases/latest")
+    val request =
+      HttpRequest.newBuilder(uri)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        // Bound the request so a stalled/blackholed connection surfaces as a timeout (an
+        // IOException → ReleaseFetchException → Failed) instead of pinning status at Checking.
+        .timeout(REQUEST_TIMEOUT)
+        .GET()
+        .build()
 
-      val response =
-        try {
+    val response =
+      try {
+        // runInterruptible converts coroutine cancellation into a thread interrupt, so a cancelled
+        // check aborts the blocking send at once instead of holding the mutex until the timeout.
+        runInterruptible(Dispatchers.IO) {
           httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-        } catch (error: IOException) {
-          throw ReleaseFetchException("Failed to reach GitHub: ${error.message}", error)
-        } catch (error: InterruptedException) {
-          Thread.currentThread().interrupt()
-          throw ReleaseFetchException("Update check was interrupted", error)
         }
-
-      when (val code = response.statusCode()) {
-        in 200..299 -> parseLatestRelease(response.body())
-        403 -> throw ReleaseFetchException("GitHub API rate limit or access forbidden (403)")
-        else -> throw ReleaseFetchException("GitHub API returned HTTP $code")
+      } catch (error: IOException) {
+        throw ReleaseFetchException("Failed to reach GitHub: ${error.message}", error)
       }
+
+    return when (val code = response.statusCode()) {
+      in 200..299 -> parseLatestRelease(response.body())
+      403 -> throw ReleaseFetchException("GitHub API rate limit or access forbidden (403)")
+      else -> throw ReleaseFetchException("GitHub API returned HTTP $code")
     }
+  }
 }
 
 private val releaseJson = Json { ignoreUnknownKeys = true }

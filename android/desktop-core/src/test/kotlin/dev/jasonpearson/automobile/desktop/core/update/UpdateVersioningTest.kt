@@ -55,6 +55,15 @@ class UpdateVersioningTest {
   }
 
   @Test
+  fun `a malformed prerelease suffix is rejected, not treated as newer`() {
+    // Empty prerelease identifiers: "1.0.1-" and "1.0.1-alpha..1" are not valid SemVer.
+    assertFalse(isNewerVersion("1.0.1-", "1.0.0"))
+    assertFalse(isNewerVersion("1.0.1-alpha..1", "1.0.0"))
+    // A well-formed prerelease on a higher core is still newer.
+    assertTrue(isNewerVersion("0.0.53-rc.1", "0.0.52"))
+  }
+
+  @Test
   fun `resolveAsset matches the platform suffix and returns null when absent`() {
     val assets =
       listOf(

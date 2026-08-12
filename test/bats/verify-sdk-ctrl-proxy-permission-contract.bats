@@ -7,8 +7,10 @@ setup() {
   ORIGINAL_PATH="$PATH"
   COMMAND_LOG="${MOCK_BIN}/commands"
   CTRL_PROXY_APK="${MOCK_BIN}/control-proxy.apk"
-  HOST_APK="$(pwd)/android/playground/app/build/outputs/apk/debug/playground-app-debug.apk"
+  HOST_APK="$(pwd)/android/playground/app/build/outputs/apk/debug/app-debug.apk"
+  LEGACY_HOST_APK="$(pwd)/android/playground/app/build/outputs/apk/debug/playground-app-debug.apk"
   touch "$CTRL_PROXY_APK"
+  unlink "$LEGACY_HOST_APK" 2>/dev/null || true
 }
 
 teardown() {
@@ -40,7 +42,7 @@ done
   make_mock gradlew '
 printf "gradlew RELEASE_KEYSTORE_PATH=%s %s\n" "${RELEASE_KEYSTORE_PATH:-}" "$*" >> "$COMMAND_LOG"
 mkdir -p playground/app/build/outputs/apk/debug
-touch playground/app/build/outputs/apk/debug/playground-app-debug.apk
+touch playground/app/build/outputs/apk/debug/app-debug.apk
 '
   make_mock apksigner '
 apk="${!#}"

@@ -9,7 +9,7 @@ ctrl_proxy_apk="$(cd "$(dirname "$ctrl_proxy_apk_input")" && pwd)/$(basename "$c
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
 android_dir="${repo_root}/android"
-host_apk="${android_dir}/playground/app/build/outputs/apk/debug/playground-app-debug.apk"
+host_apk="${android_dir}/playground/app/build/outputs/apk/debug/app-debug.apk"
 
 adb_bin="${ADB_BIN:-adb}"
 gradle_cmd="${GRADLE_CMD:-${android_dir}/gradlew}"

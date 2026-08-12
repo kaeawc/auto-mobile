@@ -65,6 +65,37 @@ val desktopMacPackageVersion: String =
     "${if (major == 0) 1 else major}.$minor.$patch"
   }
 
+// --- Expose the app version to the running app (issue #5223) -------------------
+// The app needs its own version at runtime to check GitHub Releases for updates.
+// Two classpath-global carriers are written, both from the same `desktopReleaseVersion`:
+//   1) a generated `automobile-version.properties` resource (the deterministic primary source —
+//      jpackage's runtime image always includes it), and
+//   2) the jar manifest's Implementation-Version/Title (a belt-and-suspenders fallback).
+// `PackagedVersionSource` (in :desktop-core) reads the resource first, then scans manifests for
+// the one titled "AutoMobile". Neither affects the installer identity below.
+val generateVersionResource by tasks.registering {
+  val versionValue = desktopReleaseVersion
+  val outputDir = layout.buildDirectory.dir("generated/version/resources")
+  inputs.property("version", versionValue)
+  outputs.dir(outputDir)
+  doLast {
+    val file = outputDir.get().file("automobile-version.properties").asFile
+    file.parentFile.mkdirs()
+    file.writeText("version=$versionValue\ntitle=AutoMobile\n", Charsets.UTF_8)
+  }
+}
+
+sourceSets { named("main") { resources.srcDir(generateVersionResource) } }
+
+tasks.named<Jar>("jar") {
+  manifest {
+    attributes(
+      "Implementation-Title" to "AutoMobile",
+      "Implementation-Version" to desktopReleaseVersion,
+    )
+  }
+}
+
 // --- Strip bundled ffmpeg/ffprobe program executables --------------------------
 // The org.bytedeco:ffmpeg:<ver>:<platform> classifier jar ships the ffmpeg and
 // ffprobe CLI programs alongside the libav*/libjni* JNI libraries. The desktop

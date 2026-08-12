@@ -216,11 +216,11 @@ internal const val LIVE_RECONNECT_MAX_MS = 15_000L
  * a frame that raced the relay's death must not restore a dead mirror. A refused or unavailable
  * relay clears the frame, allowing [DeviceScreenView] to continue rendering screenshot updates.
  *
- * With [autoReconnect] on, an `Unavailable` state (relay dropped, "Live mirroring stopped", or a
- * transient subscribe rejection while the daemon session re-registers) triggers a bounded
+ * With [autoReconnect] on, an `Unavailable` or recoverable permission state triggers a bounded
  * exponential-backoff [VideoStreamSource.connect] retry rather than staying dead until the pane is
- * torn down and rebuilt. Off (the default) preserves the original clear-and-stop behavior for the
- * IDE-plugin/`AutoMobileContent` path, which blends in screenshot updates instead.
+ * torn down and rebuilt. This rechecks Screen Recording after the user returns from System Settings.
+ * Off (the default) preserves the original clear-and-stop behavior for the IDE-plugin/
+ * `AutoMobileContent` path, which blends in screenshot updates instead.
  */
 @Composable
 internal fun rememberLiveVideoFrame(
@@ -256,7 +256,10 @@ internal fun rememberLiveVideoFrame(
     // a successful connect, or disposal), so a stuck-Unavailable stream keeps retrying on its own
     // timer while a recovered one stops cleanly.
     source.state.collectLatest { state ->
-      if (state is VideoStreamState.Unavailable) {
+      if (
+        state is VideoStreamState.Unavailable ||
+          state is VideoStreamState.PermissionRequired
+      ) {
         liveFrame = null
         if (autoReconnect && deviceId != null) {
           var backoffMs = reconnectInitialMs

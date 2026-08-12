@@ -35,6 +35,21 @@ func logError(_ message: String) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
 }
 
+func logScreenRecordingPermissionRequired() {
+    logError(CapturePermissionMarker.line(.screenRecording))
+    logError(CapturePermissionTargetMarker.line(screenRecordingApprovalTarget()))
+    logError("error: Screen Recording permission is required to discover and observe iOS Simulator windows.")
+}
+
+let screenRecordingPermissionAccess = ScreenRecordingPermissionAccess()
+
+func screenRecordingApprovalTarget() -> String {
+    ScreenRecordingApprovalTarget.resolve(
+        bundleDisplayName: Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String,
+        bundleName: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+    )
+}
+
 private final class FrameMetricsReporter {
     private static let linePrefix = "automobile-frame-metrics:"
 
@@ -150,6 +165,10 @@ case .listDevices:
     exit(0)
 
 case .listSimulators:
+    guard screenRecordingPermissionAccess.requestIfNeeded() else {
+        logScreenRecordingPermissionRequired()
+        exit(1)
+    }
     switch runBlocking({ try await SimulatorWindowDiscovery.discover() }) {
     case .success(let windows):
         writeJSON(SimulatorWindowListResponse(windows: windows))
@@ -161,10 +180,8 @@ case .listSimulators:
     }
 
 case .captureSimulator(let windowID, let fps, let audio, let encode):
-    guard CGPreflightScreenCaptureAccess() else {
-        logError(
-            "error: Screen Recording permission is required. Grant Screen Recording to your terminal/IDE in System Settings > Privacy & Security > Screen Recording."
-        )
+    guard screenRecordingPermissionAccess.requestIfNeeded() else {
+        logScreenRecordingPermissionRequired()
         exit(1)
     }
     logError(CaptureStartupMarker.line(.permissionReady))
@@ -256,8 +273,7 @@ case .captureSimulator(let windowID, let fps, let audio, let encode):
         if !firstFrameSignal.hasReceivedFrame {
             logError(
                 "warn: no frames received within \(simulatorPermissionTimeoutSeconds)s. "
-                + "Grant 'Screen Recording' to your terminal/IDE in "
-                + "System Settings → Privacy & Security → Screen Recording."
+                + "Screen Recording may be required to observe the iOS Simulator window."
             )
         }
     }

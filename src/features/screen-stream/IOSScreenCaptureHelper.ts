@@ -34,6 +34,15 @@ export const NATIVE_FRAME_METRICS_PREFIX = "automobile-frame-metrics:";
 export const CAPTURE_CAPABILITY_PREFIX = "capture-capability:";
 /** Capability token advertising in-helper H.264 encoded output (issue #4787). */
 export const ENCODED_VIDEO_CAPABILITY = "encoded-video-h264";
+/**
+ * Prefix of a stable macOS privacy-permission marker emitted by the helper.
+ * The companion error line is human-readable, while this token is the
+ * cross-process contract used for recovery UI.
+ */
+export const CAPTURE_PERMISSION_PREFIX = "capture-permission:";
+/** Runtime process identity that macOS presents for a capture permission prompt. */
+export const CAPTURE_PERMISSION_TARGET_PREFIX = "capture-permission-target:";
+export type CapturePermission = "screen-recording";
 
 export type HelperSpawner = (
   command: string,
@@ -121,6 +130,8 @@ export interface IosScreenCaptureHelperEvents {
   audio: (audio: DecodedAudio) => void;
   encodedVideo: (video: DecodedEncodedVideo) => void;
   capability: (token: string) => void;
+  permission: (permission: CapturePermission) => void;
+  permissionTarget: (target: string) => void;
   malformed: (error: MalformedFrameError) => void;
   stderr: (line: string) => void;
   readiness: (status: IosScreenCaptureReadiness) => void;
@@ -361,6 +372,16 @@ export class IOSScreenCaptureHelper extends EventEmitter {
       this.emit("capability", capability);
       return;
     }
+    const permission = parsePermissionMarker(line);
+    if (permission !== null) {
+      this.emit("permission", permission);
+      return;
+    }
+    const permissionTarget = parsePermissionTargetMarker(line);
+    if (permissionTarget !== null) {
+      this.emit("permissionTarget", permissionTarget);
+      return;
+    }
     this.emit("stderr", line);
     this.emitReadinessFromMarker(line);
   }
@@ -484,6 +505,24 @@ function parseCapabilityMarker(line: string): string | null {
   }
   const token = trimmed.slice(CAPTURE_CAPABILITY_PREFIX.length).trim();
   return token.length > 0 ? token : null;
+}
+
+function parsePermissionMarker(line: string): CapturePermission | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith(CAPTURE_PERMISSION_PREFIX)) {
+    return null;
+  }
+  const token = trimmed.slice(CAPTURE_PERMISSION_PREFIX.length).trim();
+  return token === "screen-recording" ? token : null;
+}
+
+function parsePermissionTargetMarker(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith(CAPTURE_PERMISSION_TARGET_PREFIX)) {
+    return null;
+  }
+  const target = trimmed.slice(CAPTURE_PERMISSION_TARGET_PREFIX.length).trim();
+  return target.length > 0 ? target : null;
 }
 
 function parseNativeFrameMetrics(line: string): NativeFrameMetrics | null {

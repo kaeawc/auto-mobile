@@ -4,6 +4,8 @@ import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
 import {
+  CAPTURE_PERMISSION_PREFIX,
+  CAPTURE_PERMISSION_TARGET_PREFIX,
   encodeFrameHeader,
   IOS_HELPER_STOP_GRACE_MS,
   IOSScreenCaptureHelper,
@@ -363,6 +365,36 @@ describe("IOSScreenCaptureHelper", () => {
       "capture-started",
       "first-frame",
     ]);
+  });
+
+  test("emits a structured Screen Recording permission marker", async () => {
+    const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 42 });
+    const permissions: string[] = [];
+    const stderr: string[] = [];
+    helper.on("permission", permission => permissions.push(permission));
+    helper.on("stderr", line => stderr.push(line));
+    helper.start();
+
+    fake.stderr.push(Buffer.from(`${CAPTURE_PERMISSION_PREFIX} screen-recording\n`));
+    await flush();
+
+    expect(permissions).toEqual(["screen-recording"]);
+    expect(stderr).toEqual([]);
+  });
+
+  test("emits the Screen Recording approval target separately from permission kind", async () => {
+    const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 42 });
+    const targets: string[] = [];
+    const stderr: string[] = [];
+    helper.on("permissionTarget", target => targets.push(target));
+    helper.on("stderr", line => stderr.push(line));
+    helper.start();
+
+    fake.stderr.push(Buffer.from(`${CAPTURE_PERMISSION_TARGET_PREFIX} AutoMobile\n`));
+    await flush();
+
+    expect(targets).toEqual(["AutoMobile"]);
+    expect(stderr).toEqual([]);
   });
 
   test("isRunning reflects process lifecycle", async () => {

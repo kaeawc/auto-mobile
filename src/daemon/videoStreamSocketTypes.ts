@@ -14,6 +14,14 @@
 
 export type VideoStreamAction = "subscribe" | "unsubscribe";
 
+/** A recoverable host permission required before a stream can start. */
+export interface VideoStreamPermission {
+  kind: "screen_recording";
+  status: "needs_approval";
+  /** User-facing app or process label shown by the matching macOS permission prompt. */
+  approvalTarget: string;
+}
+
 export interface VideoStreamSocketRequest {
   id?: string;
   action: VideoStreamAction;
@@ -62,5 +70,7 @@ export interface VideoStreamSocketResponse {
    * plus 12-byte packet headers; audio muxing is not offered by this relay.
    */
   framing?: "h264";
+  /** Structured recovery state; present instead of raw diagnostics for known permissions. */
+  permission?: VideoStreamPermission;
   error?: string;
 }

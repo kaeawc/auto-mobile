@@ -7,6 +7,7 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { BootedDevice } from "../../src/models";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
 import { VideoStreamSocketServer } from "../../src/daemon/videoStreamSocketServer";
+import { ScreenRecordingPermissionError } from "../../src/features/webrtc";
 import {
   SessionScopedStreamAuthenticator,
   type StreamAuthSessionManager,
@@ -570,6 +571,21 @@ describe("VideoStreamSocketServer", () => {
 
     expect(ack.success).toBe(false);
     expect(String(ack.error)).toContain("adb: device offline");
+    expect(h.server.activeDeviceIds()).toHaveLength(0);
+  });
+
+  test("reports a Screen Recording denial as structured permission state", async () => {
+    const h = await startHarness({ startError: new ScreenRecordingPermissionError() });
+
+    const { ack } = await subscribe(h.socketPath);
+
+    expect(ack.success).toBe(false);
+    expect(ack.permission).toEqual({
+      kind: "screen_recording",
+      status: "needs_approval",
+      approvalTarget: "AutoMobile",
+    });
+    expect(ack.error).toBeUndefined();
     expect(h.server.activeDeviceIds()).toHaveLength(0);
   });
 

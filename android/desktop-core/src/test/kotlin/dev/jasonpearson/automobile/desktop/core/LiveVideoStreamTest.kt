@@ -83,6 +83,19 @@ class LiveVideoStreamTest {
   }
 
   @Test
+  fun `auto-reconnect resumes after Screen Recording is granted`() = runComposeUiTest {
+    val source = FakeVideoStreamSource(screenRecordingRequired = true)
+    setContent {
+      rememberLiveVideoFrame(source, "ios-simulator", autoReconnect = true, reconnectInitialMs = 10)
+    }
+    waitUntil { source.state.value is VideoStreamState.PermissionRequired }
+
+    source.grantScreenRecording()
+
+    waitUntil(timeoutMillis = 2_000) { source.state.value is VideoStreamState.Streaming }
+  }
+
+  @Test
   fun `without auto-reconnect a dropped relay stays unavailable`() = runComposeUiTest {
     val source = FakeVideoStreamSource()
     setContent { rememberLiveVideoFrame(source, "emulator-5554") }

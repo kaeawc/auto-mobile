@@ -17,6 +17,7 @@ import {
   IOS_ENCODER_RESTART_GRACE_MS,
   IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS,
   IosH264Source,
+  ScreenRecordingPermissionError,
   defaultIosBitrateBps,
   resolveIosEncoderScale,
   resolveIosScreenCaptureHelperPath,
@@ -83,6 +84,10 @@ class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelp
 
   emitCapability(token: string): void {
     this.emit("capability", token);
+  }
+
+  emitPermission(permission: string): void {
+    this.emit("permission", permission);
   }
 
   emitMalformed(reason: string): void {
@@ -449,6 +454,76 @@ describe("IosH264Source", () => {
     expect(helperTargets).toEqual([
       { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
     ]);
+  });
+
+  test("classifies a marked Screen Recording denial while discovering Simulator windows", async () => {
+    const helper = new FakeFrameCaptureHelper();
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      createHelper: () => helper,
+      forceRawPipeline: true,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: async (command, args) => {
+        if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
+          return {
+            stdout: "",
+            stderr:
+              "capture-permission: screen-recording\n" +
+              "capture-permission-target: AutoMobile\n" +
+              "error: Screen Recording permission is required.",
+            exitCode: 1,
+            signal: null,
+          };
+        }
+        return successfulCommandRunner(command, args);
+      },
+    });
+
+    const error = await source.start().then(
+      () => null,
+      reason => reason as ScreenRecordingPermissionError
+    );
+    expect(error).toBeInstanceOf(ScreenRecordingPermissionError);
+    expect(error?.approvalTarget).toBe("AutoMobile");
+    expect(helper.started).toBe(false);
+  });
+
+  test("classifies the released helper's TCC denial while discovering Simulator windows", async () => {
+    const helper = new FakeFrameCaptureHelper();
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      createHelper: () => helper,
+      forceRawPipeline: true,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      commandRunner: async (command, args) => {
+        if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
+          return {
+            stdout: "",
+            stderr:
+              "error: failed to query simulator windows: Error Domain=com.apple.ScreenCaptureKit.SCStreamErrorDomain Code=-3801\n" +
+              '"The user declined TCCs for application, window, display capture"\n' +
+              "hint: grant Screen Recording permission to your terminal/IDE.",
+            exitCode: 1,
+            signal: null,
+          };
+        }
+        return successfulCommandRunner(command, args);
+      },
+    });
+
+    const error = await source.start().then(
+      () => null,
+      reason => reason as ScreenRecordingPermissionError
+    );
+    expect(error).toBeInstanceOf(ScreenRecordingPermissionError);
+    expect(error?.approvalTarget).toBe("AutoMobile");
+    expect(helper.started).toBe(false);
   });
 
   test("fails target resolution within two seconds instead of waiting for capture startup", async () => {
@@ -865,7 +940,7 @@ describe("IosH264Source", () => {
     await pool.shutdown();
   });
 
-  test("does not retry a direct Screen Recording denial from a pooled Simulator helper", async () => {
+  test("classifies the released helper's Screen Recording denial from a pooled Simulator helper", async () => {
     const helpers: FakeFrameCaptureHelper[] = [];
     const pool = new IOSSimulatorCaptureHelperPool({
       createHelper: () => {
@@ -891,15 +966,18 @@ describe("IosH264Source", () => {
       error => error as Error
     );
     await flush();
+    helpers[0].emitPermission("screen-recording");
+    helpers[0].emit("permissionTarget", "Custom Capture Helper");
     helpers[0].emitStderr(
       "error: Screen Recording permission is required. Grant Screen Recording to your terminal/IDE."
     );
 
     const error = await started;
-    expect(error).toBeInstanceOf(Error);
+    expect(error).toBeInstanceOf(ScreenRecordingPermissionError);
     expect(error?.message).toBe(
-      "Failed to start iOS screen capture: screen-capture-helper reported an error: error: Screen Recording permission is required. Grant Screen Recording to your terminal/IDE."
+      "Screen Recording permission is required to discover and observe iOS Simulator windows."
     );
+    expect((error as ScreenRecordingPermissionError | null)?.approvalTarget).toBe("Custom Capture Helper");
     expect(helpers).toHaveLength(1);
     expect(helpers[0].stopped).toBe(true);
     await pool.shutdown();

@@ -3,7 +3,10 @@ import { logger } from "../utils/logger";
 import { toActionableError } from "../models/ActionableError";
 import { ActionableError } from "../models";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
-import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFactory";
+import {
+  createH264CaptureSource,
+} from "../features/webrtc/h264CaptureSourceFactory";
+import { ScreenRecordingPermissionError } from "../features/webrtc/IosH264Source";
 import { resolveVideoServerJar } from "../features/webrtc/videoServerJar";
 import { SIMULATOR_FPS_DEFAULT } from "../features/screen-stream/IOSScreenCaptureHelper";
 import type { BootedDevice } from "../models";
@@ -143,6 +146,30 @@ export function validateCaptureHints(request: VideoStreamSocketRequest): string 
   );
 }
 
+function subscribeFailureResponse(
+  requestId: string | undefined,
+  error: unknown
+): VideoStreamSocketResponse {
+  if (error instanceof ScreenRecordingPermissionError) {
+    return {
+      id: requestId,
+      type: "video_stream_response",
+      success: false,
+      permission: {
+        kind: "screen_recording",
+        status: "needs_approval",
+        approvalTarget: error.approvalTarget,
+      },
+    };
+  }
+  return {
+    id: requestId,
+    type: "video_stream_response",
+    success: false,
+    error: error instanceof Error ? error.message : String(error),
+  };
+}
+
 /**
  * Relays a device's live H.264 stream to local clients over `~/.auto-mobile/video-stream.sock`.
  *
@@ -265,12 +292,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.replayParameterSets(capture, socket);
     } catch (error) {
       logger.warn(`[VideoStream] subscribe failed: ${error}`);
-      this.sendJson(socket, {
-        id: request.id,
-        type: "video_stream_response",
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      } satisfies VideoStreamSocketResponse);
+      this.sendJson(socket, subscribeFailureResponse(request.id, error));
       socket.end();
     }
   }

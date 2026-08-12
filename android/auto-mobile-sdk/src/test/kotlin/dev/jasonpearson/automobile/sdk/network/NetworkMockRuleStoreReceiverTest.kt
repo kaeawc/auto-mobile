@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
 import android.os.Build
+import dev.jasonpearson.automobile.sdk.SdkConstants
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -29,7 +30,7 @@ class NetworkMockRuleStoreReceiverTest {
       context.registerReceiver(
         any<BroadcastReceiver>(),
         any<IntentFilter>(),
-        any<String>(),
+        SdkConstants.PERMISSION_NETWORK_CONTROL,
         any(),
         any<Int>(),
       )
@@ -42,7 +43,7 @@ class NetworkMockRuleStoreReceiverTest {
       context.registerReceiver(
         any<BroadcastReceiver>(),
         any<IntentFilter>(),
-        any<String>(),
+        SdkConstants.PERMISSION_NETWORK_CONTROL,
         any(),
         any<Int>(),
       )
@@ -57,7 +58,7 @@ class NetworkMockRuleStoreReceiverTest {
       context.registerReceiver(
         any<BroadcastReceiver>(),
         any<IntentFilter>(),
-        any<String>(),
+        SdkConstants.PERMISSION_NETWORK_CONTROL,
         any(),
         any<Int>(),
       )

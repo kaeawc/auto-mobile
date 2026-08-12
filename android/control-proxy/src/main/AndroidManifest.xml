@@ -12,6 +12,11 @@
   <uses-permission
       android:name="android.permission.QUERY_ALL_PACKAGES"
       tools:ignore="QueryAllPackagesPermission" />
+
+  <!-- CtrlProxy owns this signature permission; SDK hosts only consume it. -->
+  <permission
+      android:name="dev.jasonpearson.automobile.sdk.permission.NETWORK_CONTROL"
+      android:protectionLevel="signature" />
   <uses-permission android:name="dev.jasonpearson.automobile.sdk.permission.NETWORK_CONTROL" />
 
   <!-- Permissions required for accessibility service -->

@@ -159,6 +159,20 @@ internal fun nodeActionId(action: String): Int? =
     else -> null
   }
 
+internal fun navigationEventResponse(event: TimestampedNavigationEvent): NavigationEventResponse =
+  NavigationEventResponse(
+    timestamp = event.timestamp,
+    event =
+      NavigationEventData(
+        destination = event.destination,
+        source = event.source,
+        arguments = event.arguments.takeIf { it.isNotEmpty() },
+        metadata = event.metadata.takeIf { it.isNotEmpty() },
+        applicationId = event.applicationId,
+        sequenceNumber = event.sequenceNumber,
+      ),
+  )
+
 /**
  * Main AutoMobile Accessibility Service that provides view hierarchy extraction capabilities for
  * automated testing and UI interaction.
@@ -483,6 +497,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 event.arguments ?: emptyMap(),
                 event.metadata ?: emptyMap(),
                 event.applicationId,
+                event.timestamp,
               )
               return
             }
@@ -860,7 +875,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           serviceScope.launch {
             for (event in batch.events) {
-              broadcastSdkEvent(event)
+              if (event is SdkNavigationEvent) {
+                val navigationEvent = navigationEventAccumulator.addSdkNavigationEvent(event)
+                broadcastNavigationEvent(navigationEvent)
+              } else {
+                broadcastSdkEvent(event)
+              }
             }
           }
         } catch (e: Exception) {
@@ -5571,19 +5591,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
-      val response =
-        NavigationEventResponse(
-          timestamp = System.currentTimeMillis(),
-          event =
-            NavigationEventData(
-              destination = event.destination,
-              source = event.source,
-              arguments = event.arguments.takeIf { it.isNotEmpty() },
-              metadata = event.metadata.takeIf { it.isNotEmpty() },
-              applicationId = event.applicationId,
-              sequenceNumber = event.sequenceNumber,
-            ),
-        )
+      val response = navigationEventResponse(event)
 
       webSocketServer.broadcast(response)
       Log.d(

@@ -271,10 +271,7 @@ case .captureSimulator(let windowID, let fps, let audio, let encode):
     let permissionHintTimer = DispatchSource.makeTimerSource(queue: permissionHintQueue)
     permissionHintTimer.setEventHandler {
         if !firstFrameSignal.hasReceivedFrame {
-            logError(
-                "warn: no frames received within \(simulatorPermissionTimeoutSeconds)s. "
-                + "Screen Recording may be required to observe the iOS Simulator window."
-            )
+            logScreenRecordingPermissionRequired()
         }
     }
 

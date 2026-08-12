@@ -313,7 +313,18 @@ export interface ScreenCaptureHelperEnsurer {
   ensure(): Promise<string | null>;
 }
 
-class NoFirstFrameError extends ActionableError {}
+class NoFirstFrameError extends ActionableError {
+  finalStartupError(_approvalTarget: string | null): Error {
+    return this;
+  }
+}
+
+/** A legacy helper's "no frames" warning that may indicate Screen Recording was denied. */
+class ScreenRecordingPermissionHintError extends NoFirstFrameError {
+  override finalStartupError(approvalTarget: string | null): Error {
+    return new ScreenRecordingPermissionError(approvalTarget ?? "AutoMobile");
+  }
+}
 
 /**
  * A helper that advertised no encoded-video capability failed to start encoded
@@ -835,7 +846,7 @@ export class IosH264Source implements H264CaptureSource {
           return;
         }
         if (attempt !== 0) {
-          throw toActionableError(error, "Failed to start iOS screen capture");
+          throw error.finalStartupError(this.requiredPermissionTarget);
         }
         // The failed lease is invalidated above, so one new ScreenCaptureKit session
         // can recover a transient no-frame startup without surfacing a warning.
@@ -945,7 +956,7 @@ export class IosH264Source implements H264CaptureSource {
           return;
         }
         if (isNoFramesPermissionWarning(line)) {
-          finish(() => reject(makeNoFramesError(target, this.lastReadinessPhase)));
+          finish(() => reject(makeScreenRecordingPermissionHintError(target, this.lastReadinessPhase)));
         } else if (isHelperError(line)) {
           finish(() => reject(this.helperFailureFor(line)));
         }
@@ -1064,7 +1075,7 @@ export class IosH264Source implements H264CaptureSource {
           return;
         }
         if (isNoFramesPermissionWarning(line)) {
-          finish(() => reject(makeNoFramesError(target, this.lastReadinessPhase)));
+          finish(() => reject(makeScreenRecordingPermissionHintError(target, this.lastReadinessPhase)));
         } else if (isHelperError(line)) {
           rejectStartupFailure(this.helperFailureFor(line));
         }
@@ -1756,6 +1767,13 @@ function makeNoFramesError(
   return new NoFirstFrameError(
     `iOS screen capture did not produce a first frame${stage}.${hint}`
   );
+}
+
+function makeScreenRecordingPermissionHintError(
+  target: CaptureTarget,
+  lastPhase: IosScreenCaptureReadinessPhase | null
+): ScreenRecordingPermissionHintError {
+  return new ScreenRecordingPermissionHintError(makeNoFramesError(target, lastPhase).message);
 }
 
 // Map the furthest startup stage reached to a targeted hint so the surfaced

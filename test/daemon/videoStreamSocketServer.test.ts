@@ -29,9 +29,11 @@ class FakeCaptureSource implements H264CaptureSource {
   stopped = false;
   startError: Error | null = null;
   startGate: Promise<void> | null = null;
+  onStart: (() => void) | null = null;
 
   async start(): Promise<void> {
     await this.startGate;
+    this.onStart?.();
     if (this.startError) {
       throw this.startError;
     }
@@ -63,6 +65,7 @@ async function startHarness(
   options: {
     startError?: Error;
     startGate?: Promise<void>;
+    startData?: Buffer;
     resolveError?: Error;
     authenticator?: StreamSocketAuthenticator;
   } = {}
@@ -89,6 +92,11 @@ async function startHarness(
         const source = new FakeCaptureSource();
         source.startError = options.startError ?? null;
         source.startGate = options.startGate ?? null;
+        source.onStart = () => {
+          if (options.startData) {
+            onData?.(options.startData);
+          }
+        };
         sources.push(source);
         return source;
       },
@@ -345,6 +353,31 @@ describe("VideoStreamSocketServer", () => {
     await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 2);
 
     expect(h.sources).toHaveLength(1);
+  });
+
+  test("keeps startup media behind every pending subscriber acknowledgement", async () => {
+    let releaseStart: () => void;
+    const startGate = new Promise<void>(resolve => {
+      releaseStart = resolve;
+    });
+    const h = await startHarness({
+      startGate,
+      // Two NALs flush the IDR through the incremental parser while start() is still pending.
+      startData: Buffer.from([0, 0, 0, 1, 0x05, 0xaa, 0xbb, 0, 0, 0, 1, 0x01]),
+    });
+
+    const first = subscribe(h.socketPath);
+    await waitFor(() => h.sources.length === 1);
+    const second = subscribe(h.socketPath);
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 2);
+    releaseStart!();
+
+    const responses = await Promise.all([first, second]);
+    for (const response of responses) {
+      expect(response.ack.success).toBe(true);
+      await waitFor(() => response.binary().length >= 12);
+      expect(response.binary().readInt32BE(0)).toBe(CODEC_ID_H264);
+    }
   });
 
   test("stops a capture source that resolves after its only subscriber disconnects", async () => {

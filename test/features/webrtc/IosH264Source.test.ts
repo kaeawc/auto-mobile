@@ -728,7 +728,7 @@ describe("IosH264Source", () => {
     await pool.shutdown();
   });
 
-  test("reports the existing no-frame error after a second silent pooled Simulator attempt", async () => {
+  test("reports a typed Screen Recording denial after a second legacy no-frame warning", async () => {
     const helpers: FakeFrameCaptureHelper[] = [];
     const pool = new IOSSimulatorCaptureHelperPool({
       createHelper: () => {
@@ -765,8 +765,10 @@ describe("IosH264Source", () => {
     );
 
     const error = await started;
-    expect(error).toBeInstanceOf(Error);
-    expect(error?.message).toContain("Screen Recording permission");
+    expect(error).toBeInstanceOf(ScreenRecordingPermissionError);
+    expect(error?.message).toBe(
+      "Screen Recording permission is required to discover and observe iOS Simulator windows."
+    );
     expect(helpers[0].stopped).toBe(true);
     expect(helpers[1].stopped).toBe(true);
     await pool.shutdown();

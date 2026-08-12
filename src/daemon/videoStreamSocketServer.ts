@@ -53,6 +53,8 @@ interface DeviceCapture {
   source: H264CaptureSource | null;
   /** Resolves only after the shared source has started, so late subscribers share startup failures. */
   startup: Promise<void>;
+  /** Sockets waiting for startup, kept off the binary broadcast path until their acknowledgement. */
+  pendingSubscribers: Set<Socket>;
   subscribers: Set<Socket>;
   backpressuredSubscribers: Set<Socket>;
   waitingForKeyFrame: Set<Socket>;
@@ -216,7 +218,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
   /** Subscriber count for a device, for diagnostics and tests. */
   subscriberCount(deviceId: string): number {
-    return this.captures.get(deviceId)?.subscribers.size ?? 0;
+    const capture = this.captures.get(deviceId);
+    return capture ? capture.pendingSubscribers.size + capture.subscribers.size : 0;
   }
 
   override async close(): Promise<void> {
@@ -319,18 +322,18 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     const existing = this.captures.get(deviceId);
     if (existing) {
       logIgnoredLateHints(deviceId, request);
-      existing.subscribers.add(socket);
-      // A client that joins part way through a GOP must not consume inter frames before an IDR.
-      existing.waitingForKeyFrame.add(socket);
+      existing.pendingSubscribers.add(socket);
       this.socketDeviceIds.set(socket, deviceId);
       await existing.startup;
+      this.promoteSubscriber(existing, socket, true);
       return existing;
     }
 
     const capture: DeviceCapture = {
       source: null,
       startup: Promise.resolve(),
-      subscribers: new Set([socket]),
+      pendingSubscribers: new Set([socket]),
+      subscribers: new Set(),
       backpressuredSubscribers: new Set(),
       waitingForKeyFrame: new Set(),
       sps: null,
@@ -372,13 +375,13 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         });
         // The final subscriber may disconnect while source construction is in
         // flight. Do not attach an unreachable capture process to a removed entry.
-        if (this.captures.get(deviceId) !== capture || capture.subscribers.size === 0) {
+        if (this.captures.get(deviceId) !== capture || !this.hasSubscribers(capture)) {
           await source.stop().catch(() => {});
           throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
         }
         capture.source = source;
         await source.start();
-        if (this.captures.get(deviceId) !== capture || capture.subscribers.size === 0) {
+        if (this.captures.get(deviceId) !== capture || !this.hasSubscribers(capture)) {
           capture.source = null;
           await source.stop().catch(() => {});
           throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
@@ -394,7 +397,23 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     })();
 
     await capture.startup;
+    this.promoteSubscriber(capture, socket, false);
     return capture;
+  }
+
+  private hasSubscribers(capture: DeviceCapture): boolean {
+    return capture.pendingSubscribers.size > 0 || capture.subscribers.size > 0;
+  }
+
+  private promoteSubscriber(capture: DeviceCapture, socket: Socket, waitForKeyFrame: boolean): void {
+    if (socket.destroyed || !capture.pendingSubscribers.delete(socket)) {
+      return;
+    }
+    capture.subscribers.add(socket);
+    if (waitForKeyFrame) {
+      // A client that joins part way through a GOP must not consume inter frames before an IDR.
+      capture.waitingForKeyFrame.add(socket);
+    }
   }
 
   private broadcast(deviceId: string, chunk: Buffer): void {
@@ -493,10 +512,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     if (!capture) {
       return;
     }
+    capture.pendingSubscribers.delete(socket);
     capture.subscribers.delete(socket);
     capture.backpressuredSubscribers.delete(socket);
     capture.waitingForKeyFrame.delete(socket);
-    if (capture.subscribers.size === 0) {
+    if (!this.hasSubscribers(capture)) {
       void this.stopCapture(deviceId);
     }
   }
@@ -508,10 +528,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
     this.captures.delete(deviceId);
 
-    for (const subscriber of capture.subscribers) {
+    for (const subscriber of [...capture.pendingSubscribers, ...capture.subscribers]) {
       this.socketDeviceIds.delete(subscriber);
       subscriber.end();
     }
+    capture.pendingSubscribers.clear();
     capture.subscribers.clear();
     capture.backpressuredSubscribers.clear();
     capture.waitingForKeyFrame.clear();

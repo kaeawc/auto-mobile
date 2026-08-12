@@ -84,7 +84,7 @@ fun DeviceStreamView(
   // until the pane is torn down.
   val liveFrame = rememberLiveVideoFrame(source, column.deviceId, autoReconnect = true)
   val state by source.state.collectAsState()
-  var settingsLaunchFailure by remember { mutableStateOf(false) }
+  var settingsLaunchFailure by remember(column.deviceId) { mutableStateOf(false) }
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
     val bitmap = liveFrame?.bitmap
     if (bitmap != null) {

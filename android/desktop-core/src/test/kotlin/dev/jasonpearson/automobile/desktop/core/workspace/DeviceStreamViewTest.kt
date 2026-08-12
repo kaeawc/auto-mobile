@@ -3,8 +3,10 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -94,6 +96,36 @@ class DeviceStreamViewTest {
       onNodeWithText("Check again").performClick()
       waitUntil { source.connectCalls > connectsBeforeRetry }
     }
+
+  @Test
+  fun `clears a settings launch failure when the pane changes devices`() = runComposeUiTest {
+    val source = FakeVideoStreamSource(screenRecordingRequired = true)
+    val column = mutableStateOf(iosCol())
+    val launcher = ScreenRecordingSettingsLauncher {
+      Result.failure(IllegalStateException("unavailable"))
+    }
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          column.value,
+          sourceFactory = { source },
+          screenRecordingSettingsLauncher = launcher,
+        )
+      }
+    }
+
+    onNodeWithText("Open System Settings").performClick()
+    onNodeWithText("Open Privacy & Security > Screen Recording and enable AutoMobile.")
+      .assertIsDisplayed()
+
+    runOnUiThread {
+      column.value =
+        DeviceColumn(deviceId = "ios-simulator-2", name = "iPhone 16 Pro", platform = Platform.Ios)
+    }
+
+    onAllNodesWithText("Open Privacy & Security > Screen Recording and enable AutoMobile.")
+      .assertCountEquals(0)
+  }
 
   @Test
   fun `disposes the source when the pane leaves the composition`() = runComposeUiTest {

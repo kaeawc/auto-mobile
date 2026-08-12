@@ -7,6 +7,9 @@ import dev.jasonpearson.automobile.desktop.core.platform.PackagedVersionSource
 import dev.jasonpearson.automobile.desktop.core.platform.RuntimeAppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FileSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.update.GitHubReleaseSource
+import dev.jasonpearson.automobile.desktop.core.update.RealUpdateController
+import dev.jasonpearson.automobile.desktop.core.update.UpdateController
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
 
@@ -36,6 +39,14 @@ interface ApplicationModule {
       // Reads the build-generated version resource (falling back to the jar manifest); yields
       // AppVersion.Dev for unpackaged runs so update checks no-op in development (#5223).
       return RuntimeAppVersionProvider(PackagedVersionSource())
+    }
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun provideUpdateController(appVersionProvider: AppVersionProvider): UpdateController {
+      // Checks GitHub Releases against the running version (#5224). Purely reactive — nothing
+      // fetches until a caller invokes checkForUpdate().
+      return RealUpdateController(GitHubReleaseSource(), appVersionProvider)
     }
   }
 }

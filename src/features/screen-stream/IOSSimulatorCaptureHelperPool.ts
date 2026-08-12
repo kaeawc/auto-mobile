@@ -3,6 +3,7 @@ import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   IOSScreenCaptureHelper,
+  type CapturePermission,
   type CaptureTarget,
   type FrameQueueMetrics,
   type IosScreenCaptureHelperEvents,
@@ -31,6 +32,8 @@ export interface IosSimulatorCaptureHelperLease {
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
   on(event: "encodedVideo", listener: (video: DecodedEncodedVideo) => void): this;
   on(event: "capability", listener: (token: string) => void): this;
+  on(event: "permission", listener: (permission: CapturePermission) => void): this;
+  on(event: "permissionTarget", listener: (target: string) => void): this;
   on(event: "frameMetrics", listener: (metrics: FrameQueueMetrics) => void): this;
   on(event: "captureMetrics", listener: (metrics: NativeFrameMetrics) => void): this;
   on(event: "audio", listener: (audio: DecodedAudio) => void): this;
@@ -282,6 +285,8 @@ export class IOSSimulatorCaptureHelperPool {
     });
     entry.helper.on("encodedVideo", video => this.broadcast(entry, "encodedVideo", video));
     entry.helper.on("capability", token => this.broadcast(entry, "capability", token));
+    entry.helper.on("permission", permission => this.broadcast(entry, "permission", permission));
+    entry.helper.on("permissionTarget", target => this.broadcast(entry, "permissionTarget", target));
     entry.helper.on("frameMetrics", metrics => this.broadcast(entry, "frameMetrics", metrics));
     entry.helper.on("captureMetrics", metrics => this.broadcast(entry, "captureMetrics", metrics));
     entry.helper.on("audio", audio => this.broadcast(entry, "audio", audio));

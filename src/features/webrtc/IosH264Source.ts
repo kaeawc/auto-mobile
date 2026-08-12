@@ -1,9 +1,13 @@
 import { existsSync } from "node:fs";
+import { basename } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { ActionableError, toActionableError, type BootedDevice } from "../../models";
 import {
+  CAPTURE_PERMISSION_PREFIX,
+  CAPTURE_PERMISSION_TARGET_PREFIX,
   ENCODED_VIDEO_CAPABILITY,
   IOSScreenCaptureHelper,
+  type CapturePermission,
 } from "../screen-stream/IOSScreenCaptureHelper";
 import type {
   CaptureTarget,
@@ -183,6 +187,8 @@ export interface IosFrameCaptureHelper {
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
   on(event: "encodedVideo", listener: (video: DecodedEncodedVideo) => void): this;
   on(event: "capability", listener: (token: string) => void): this;
+  on(event: "permission", listener: (permission: CapturePermission) => void): this;
+  on(event: "permissionTarget", listener: (target: string) => void): this;
   on(event: "frameMetrics", listener: (metrics: FrameQueueMetrics) => void): this;
   on(event: "captureMetrics", listener: (metrics: NativeFrameMetrics) => void): this;
   on(event: "audio", listener: (audio: DecodedAudio) => void): this;
@@ -307,7 +313,18 @@ export interface ScreenCaptureHelperEnsurer {
   ensure(): Promise<string | null>;
 }
 
-class NoFirstFrameError extends ActionableError {}
+class NoFirstFrameError extends ActionableError {
+  finalStartupError(_approvalTarget: string | null): Error {
+    return this;
+  }
+}
+
+/** A legacy helper's "no frames" warning that may indicate Screen Recording was denied. */
+class ScreenRecordingPermissionHintError extends NoFirstFrameError {
+  override finalStartupError(approvalTarget: string | null): Error {
+    return new ScreenRecordingPermissionError(approvalTarget ?? "AutoMobile");
+  }
+}
 
 /**
  * A helper that advertised no encoded-video capability failed to start encoded
@@ -316,6 +333,20 @@ class NoFirstFrameError extends ActionableError {}
  * (issue #4789).
  */
 class EncodedUnsupportedError extends ActionableError {}
+
+/**
+ * Stable capture-startup failure for a denied macOS Screen Recording grant.
+ * Socket consumers can classify this without exposing ScreenCaptureKit/TCC text
+ * as their primary user guidance.
+ */
+export class ScreenRecordingPermissionError extends ActionableError {
+  readonly approvalTarget: string;
+
+  constructor(approvalTarget = "AutoMobile") {
+    super("Screen Recording permission is required to discover and observe iOS Simulator windows.");
+    this.approvalTarget = approvalTarget;
+  }
+}
 
 export class IosH264Source implements H264CaptureSource {
   private readonly helperPath?: string;
@@ -374,6 +405,8 @@ export class IosH264Source implements H264CaptureSource {
   private encoderIdrParser = new H264AnnexBParser();
   private encoderHasProducedIdr = false;
   private phase: IosH264SourcePhase = "idle";
+  private requiredPermission: CapturePermission | null = null;
+  private requiredPermissionTarget: string | null = null;
   /**
    * True once `start()` has fully resolved (first frame — and, when enabled,
    * first audio — delivered). Running-phase reconnect only covers steady-state
@@ -813,7 +846,7 @@ export class IosH264Source implements H264CaptureSource {
           return;
         }
         if (attempt !== 0) {
-          throw toActionableError(error, "Failed to start iOS screen capture");
+          throw error.finalStartupError(this.requiredPermissionTarget);
         }
         // The failed lease is invalidated above, so one new ScreenCaptureKit session
         // can recover a transient no-frame startup without surfacing a warning.
@@ -856,6 +889,8 @@ export class IosH264Source implements H264CaptureSource {
   private async startCaptureAttempt(helperPath: string, target: CaptureTarget): Promise<void> {
     logger.info(`[IosH264Source] starting screen-capture-helper for ${describeCaptureTarget(target)}`);
     this.lastReadinessPhase = null;
+    this.requiredPermission = null;
+    this.requiredPermissionTarget = defaultScreenRecordingApprovalTarget(helperPath);
     const helper = this.createCaptureHelper({ binaryPath: helperPath, target });
     this.helper = helper;
     if (this.mode === "encoded") {
@@ -921,9 +956,9 @@ export class IosH264Source implements H264CaptureSource {
           return;
         }
         if (isNoFramesPermissionWarning(line)) {
-          finish(() => reject(makeNoFramesError(target, this.lastReadinessPhase)));
+          finish(() => reject(makeScreenRecordingPermissionHintError(target, this.lastReadinessPhase)));
         } else if (isHelperError(line)) {
-          finish(() => reject(new Error(`screen-capture-helper reported an error: ${line}`)));
+          finish(() => reject(this.helperFailureFor(line)));
         }
       });
       helper.on("error", error => {
@@ -1040,9 +1075,9 @@ export class IosH264Source implements H264CaptureSource {
           return;
         }
         if (isNoFramesPermissionWarning(line)) {
-          finish(() => reject(makeNoFramesError(target, this.lastReadinessPhase)));
+          finish(() => reject(makeScreenRecordingPermissionHintError(target, this.lastReadinessPhase)));
         } else if (isHelperError(line)) {
-          rejectStartupFailure(new Error(`screen-capture-helper reported an error: ${line}`));
+          rejectStartupFailure(this.helperFailureFor(line));
         }
       });
       helper.on("error", error => {
@@ -1137,6 +1172,16 @@ export class IosH264Source implements H264CaptureSource {
         this.options.onAudioData?.(audio.pcm16le);
       }
     });
+    helper.on("permission", permission => {
+      if (this.helper === helper) {
+        this.requiredPermission = permission;
+      }
+    });
+    helper.on("permissionTarget", target => {
+      if (this.helper === helper) {
+        this.requiredPermissionTarget = target;
+      }
+    });
     helper.on("stderr", line => {
       if (line.length > 0) {
         this.lastHelperStderr = line.slice(-2_048);
@@ -1147,7 +1192,7 @@ export class IosH264Source implements H264CaptureSource {
       if (isHelperError(line)) {
         this.failIfCurrentHelper(
           helper,
-          new Error(`screen-capture-helper reported an error: ${line}`)
+          this.helperFailureFor(line)
         );
       }
     });
@@ -1161,6 +1206,12 @@ export class IosH264Source implements H264CaptureSource {
         `[IosH264Source] capture readiness phase=${status.phase} atMs=${status.atMs}${status.detail ? ` detail=${status.detail}` : ""}`
       );
     });
+  }
+
+  private helperFailureFor(line: string): Error {
+    return this.requiredPermission === "screen-recording" || hasScreenRecordingPermissionDenial(line)
+      ? new ScreenRecordingPermissionError(this.requiredPermissionTarget ?? "AutoMobile")
+      : new Error(`screen-capture-helper reported an error: ${line}`);
   }
 
   private handleFrame(frame: DecodedFrame): void {
@@ -1718,6 +1769,13 @@ function makeNoFramesError(
   );
 }
 
+function makeScreenRecordingPermissionHintError(
+  target: CaptureTarget,
+  lastPhase: IosScreenCaptureReadinessPhase | null
+): ScreenRecordingPermissionHintError {
+  return new ScreenRecordingPermissionHintError(makeNoFramesError(target, lastPhase).message);
+}
+
 // Map the furthest startup stage reached to a targeted hint so the surfaced
 // error distinguishes a permission stall from window discovery vs a hung start
 // (issue #4766).
@@ -1726,7 +1784,7 @@ function hintForNoFrames(
   lastPhase: IosScreenCaptureReadinessPhase | null
 ): string {
   const permissionHint =
-    " Grant Screen Recording permission to your terminal/IDE in System Settings > Privacy & Security > Screen Recording.";
+    " Screen Recording permission may be required to observe the iOS Simulator window.";
   switch (lastPhase) {
     case null:
     case "helper-executable-found":
@@ -1881,6 +1939,11 @@ async function defaultResolveSimulatorWindowId(
 ): Promise<number> {
   const result = await commandRunner(helperPath, ["--list-simulators"], signal);
   if (result.exitCode !== 0) {
+    if (hasScreenRecordingPermissionDenial(result.stderr)) {
+      throw new ScreenRecordingPermissionError(
+        screenRecordingApprovalTarget(result.stderr) ?? defaultScreenRecordingApprovalTarget(helperPath)
+      );
+    }
     throw new ActionableError(
       `Unable to list iOS Simulator windows: ${result.stderr.trim() || `exited with code ${result.exitCode}`}`
     );
@@ -1927,6 +1990,36 @@ async function defaultResolveSimulatorWindowId(
   throw new ActionableError(
     `Multiple iOS Simulator windows matched ${device.name}; close extras or use a more specific device.`
   );
+}
+
+function hasScreenRecordingPermissionDenial(stderr: string): boolean {
+  return stderr.split(/\r?\n/).some(line => {
+    const normalized = line.trim().toLowerCase();
+    return (
+      normalized === `${CAPTURE_PERMISSION_PREFIX} screen-recording` ||
+      normalized.startsWith("error: screen recording permission is required.") ||
+      normalized.includes("the user declined tccs for application, window, display capture")
+    );
+  });
+}
+
+function screenRecordingApprovalTarget(stderr: string): string | null {
+  for (const line of stderr.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith(CAPTURE_PERMISSION_TARGET_PREFIX)) {
+      continue;
+    }
+    const target = trimmed.slice(CAPTURE_PERMISSION_TARGET_PREFIX.length).trim();
+    if (target.length > 0) {
+      return target;
+    }
+  }
+  return null;
+}
+
+function defaultScreenRecordingApprovalTarget(helperPath: string): string {
+  const target = basename(helperPath).trim();
+  return target === "screen-capture-helper" || target.length === 0 ? "AutoMobile" : target;
 }
 
 /**

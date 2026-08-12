@@ -46,8 +46,19 @@ sealed class VideoStreamState {
 
   data class Streaming(val width: Int, val height: Int) : VideoStreamState()
 
+  /** A named host permission blocked the current subscribe attempt. */
+  data class PermissionRequired(
+    val permission: VideoStreamPermission,
+    val approvalTarget: String,
+  ) : VideoStreamState()
+
   /** Terminal for this attempt; [reason] is safe to show a user. */
   data class Unavailable(val reason: String) : VideoStreamState()
+}
+
+/** Recoverable permission state decoded from the local relay protocol. */
+enum class VideoStreamPermission {
+  ScreenRecordingNeedsApproval
 }
 
 /**
@@ -233,7 +244,9 @@ class VideoStreamClient(
         val ackLine = readAckLine(input)
         val ack = json.decodeFromString(serializer<VideoStreamResponse>(), ackLine)
         if (!ack.success) {
-          _state.value = VideoStreamState.Unavailable(ack.error ?: "Live mirroring was refused")
+          _state.value =
+            ack.permission.toPermissionState()
+              ?: VideoStreamState.Unavailable(ack.error ?: "Live mirroring was refused")
           return
         }
 
@@ -360,13 +373,34 @@ internal data class VideoStreamResponse(
   val success: Boolean = false,
   val deviceId: String? = null,
   val framing: String? = null,
+  val permission: VideoStreamPermissionResponse? = null,
   val error: String? = null,
 )
+
+@Serializable
+internal data class VideoStreamPermissionResponse(
+  val kind: String,
+  val status: String,
+  val approvalTarget: String? = null,
+)
+
+private fun VideoStreamPermissionResponse?.toPermissionState():
+  VideoStreamState.PermissionRequired? =
+  when {
+    this?.kind == "screen_recording" && this.status == "needs_approval" ->
+      VideoStreamState.PermissionRequired(
+        permission = VideoStreamPermission.ScreenRecordingNeedsApproval,
+        approvalTarget = this.approvalTarget?.takeIf(String::isNotBlank) ?: "AutoMobile",
+      )
+    else -> null
+  }
 
 /** In-memory [VideoStreamSource] for previews and tests. */
 class FakeVideoStreamSource(
   private val available: Boolean = true,
   private val refuseWith: String? = null,
+  private var screenRecordingRequired: Boolean = false,
+  private val screenRecordingApprovalTarget: String = "AutoMobile",
   private val nowMs: () -> Long = { 0L },
 ) : VideoStreamSource {
   private val fakeSequence = java.util.concurrent.atomic.AtomicLong(0L)
@@ -385,13 +419,22 @@ class FakeVideoStreamSource(
   var connectedDeviceId: String? = null
     private set
 
+  var connectCalls: Int = 0
+    private set
+
   override fun isAvailable(): Boolean = available
 
   override fun connect(deviceId: String?) {
+    connectCalls++
     connectedDeviceId = deviceId
     _state.value =
       when {
         !available -> VideoStreamState.Unavailable("Live mirroring is unavailable on this daemon")
+        screenRecordingRequired ->
+          VideoStreamState.PermissionRequired(
+            VideoStreamPermission.ScreenRecordingNeedsApproval,
+            screenRecordingApprovalTarget,
+          )
         refuseWith != null -> VideoStreamState.Unavailable(refuseWith)
         else -> VideoStreamState.Streaming(1080, 2400)
       }
@@ -409,6 +452,11 @@ class FakeVideoStreamSource(
   /** Simulates an unavailable relay after a stream has started. */
   fun becomeUnavailable(reason: String = "Live mirroring is unavailable on this daemon") {
     _state.value = VideoStreamState.Unavailable(reason)
+  }
+
+  /** Simulates granting the macOS permission after the Settings flow. */
+  fun grantScreenRecording() {
+    screenRecordingRequired = false
   }
 
   /** Publishes a ready-to-draw frame to collectors, as the real client would. */

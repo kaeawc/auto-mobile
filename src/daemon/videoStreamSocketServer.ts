@@ -3,7 +3,10 @@ import { logger } from "../utils/logger";
 import { toActionableError } from "../models/ActionableError";
 import { ActionableError } from "../models";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
-import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFactory";
+import {
+  createH264CaptureSource,
+} from "../features/webrtc/h264CaptureSourceFactory";
+import { ScreenRecordingPermissionError } from "../features/webrtc/IosH264Source";
 import { resolveVideoServerJar } from "../features/webrtc/videoServerJar";
 import { SIMULATOR_FPS_DEFAULT } from "../features/screen-stream/IOSScreenCaptureHelper";
 import type { BootedDevice } from "../models";
@@ -48,6 +51,10 @@ export interface VideoStreamSocketServerDependencies {
 /** One capture shared by every subscriber watching the same device. */
 interface DeviceCapture {
   source: H264CaptureSource | null;
+  /** Resolves only after the shared source has started, so late subscribers share startup failures. */
+  startup: Promise<void>;
+  /** Sockets waiting for startup, kept off the binary broadcast path until their acknowledgement. */
+  pendingSubscribers: Set<Socket>;
   subscribers: Set<Socket>;
   backpressuredSubscribers: Set<Socket>;
   waitingForKeyFrame: Set<Socket>;
@@ -143,6 +150,32 @@ export function validateCaptureHints(request: VideoStreamSocketRequest): string 
   );
 }
 
+function subscribeFailureResponse(
+  requestId: string | undefined,
+  error: unknown
+): VideoStreamSocketResponse {
+  if (error instanceof ScreenRecordingPermissionError) {
+    return {
+      id: requestId,
+      type: "video_stream_response",
+      success: false,
+      permission: {
+        kind: "screen_recording",
+        status: "needs_approval",
+        approvalTarget: error.approvalTarget,
+      },
+      // Keep pre-permission desktop clients actionable during rolling updates.
+      error: error.message,
+    };
+  }
+  return {
+    id: requestId,
+    type: "video_stream_response",
+    success: false,
+    error: error instanceof Error ? error.message : String(error),
+  };
+}
+
 /**
  * Relays a device's live H.264 stream to local clients over `~/.auto-mobile/video-stream.sock`.
  *
@@ -185,7 +218,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
   /** Subscriber count for a device, for diagnostics and tests. */
   subscriberCount(deviceId: string): number {
-    return this.captures.get(deviceId)?.subscribers.size ?? 0;
+    const capture = this.captures.get(deviceId);
+    return capture ? capture.pendingSubscribers.size + capture.subscribers.size : 0;
   }
 
   override async close(): Promise<void> {
@@ -263,14 +297,14 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       // Replay the parameter sets so a late joiner can decode immediately instead of waiting for
       // the encoder's next key frame.
       this.replayParameterSets(capture, socket);
+      // Startup can synchronously emit an IDR before the acknowledgement makes this socket
+      // eligible for binary data. Gate the subscriber and ask for a post-ack keyframe so it
+      // never begins on an undecodable inter-frame.
+      capture.source?.requestKeyFrame?.();
     } catch (error) {
       logger.warn(`[VideoStream] subscribe failed: ${error}`);
-      this.sendJson(socket, {
-        id: request.id,
-        type: "video_stream_response",
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      } satisfies VideoStreamSocketResponse);
+      this.detach(socket);
+      this.sendJson(socket, subscribeFailureResponse(request.id, error));
       socket.end();
     }
   }
@@ -292,16 +326,18 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     const existing = this.captures.get(deviceId);
     if (existing) {
       logIgnoredLateHints(deviceId, request);
-      existing.subscribers.add(socket);
-      // A client that joins part way through a GOP must not consume inter frames before an IDR.
-      existing.waitingForKeyFrame.add(socket);
+      existing.pendingSubscribers.add(socket);
       this.socketDeviceIds.set(socket, deviceId);
+      await existing.startup;
+      this.promoteSubscriber(existing, socket, true);
       return existing;
     }
 
     const capture: DeviceCapture = {
       source: null,
-      subscribers: new Set([socket]),
+      startup: Promise.resolve(),
+      pendingSubscribers: new Set([socket]),
+      subscribers: new Set(),
       backpressuredSubscribers: new Set(),
       waitingForKeyFrame: new Set(),
       sps: null,
@@ -314,56 +350,74 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     this.captures.set(deviceId, capture);
     this.socketDeviceIds.set(socket, deviceId);
 
-    try {
-      const source = await this.deps.createCaptureSource({
-        device,
-        onData: chunk => this.broadcast(deviceId, chunk),
-        // Record the source's attested rotation so the next config packet re-attests it to
-        // subscribers, including a late joiner via replayParameterSets (issue #4786).
-        onRotation: rotation => {
-          const current = this.captures.get(deviceId);
-          if (current) {
-            current.rotation = rotation;
-          }
-        },
-        onError: error => {
-          logger.warn(`[VideoStream] capture failed for ${deviceId}: ${error}`);
-          void this.stopCapture(deviceId);
-        },
-        bitrateBps: request.bitrateKbps ? request.bitrateKbps * 1000 : undefined,
-        size: request.size,
-        quality: request.quality,
-        // Pin the observation rate explicitly when the client sent no hint. This
-        // relay borrows the WebRTC capture sources, so without this it would
-        // silently inherit whatever the *WebRTC* iOS Simulator default happens
-        // to be — a knob that is tuned for an interactive WHEP feed. A client
-        // hint wins so farm viewers can lower the rate across many streams.
-        fps: request.fps ?? SIMULATOR_FPS_DEFAULT,
-      });
-      // The final subscriber may disconnect while source construction is in
-      // flight. Do not attach an unreachable capture process to a removed entry.
-      if (this.captures.get(deviceId) !== capture || capture.subscribers.size === 0) {
-        await source.stop().catch(() => {});
-        throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
+    capture.startup = (async () => {
+      try {
+        const source = await this.deps.createCaptureSource({
+          device,
+          onData: chunk => this.broadcast(deviceId, chunk),
+          // Record the source's attested rotation so the next config packet re-attests it to
+          // subscribers, including a late joiner via replayParameterSets (issue #4786).
+          onRotation: rotation => {
+            const current = this.captures.get(deviceId);
+            if (current) {
+              current.rotation = rotation;
+            }
+          },
+          onError: error => {
+            logger.warn(`[VideoStream] capture failed for ${deviceId}: ${error}`);
+            void this.stopCapture(deviceId);
+          },
+          bitrateBps: request.bitrateKbps ? request.bitrateKbps * 1000 : undefined,
+          size: request.size,
+          quality: request.quality,
+          // Pin the observation rate explicitly when the client sent no hint. This
+          // relay borrows the WebRTC capture sources, so without this it would
+          // silently inherit whatever the *WebRTC* iOS Simulator default happens
+          // to be — a knob that is tuned for an interactive WHEP feed. A client
+          // hint wins so farm viewers can lower the rate across many streams.
+          fps: request.fps ?? SIMULATOR_FPS_DEFAULT,
+        });
+        // The final subscriber may disconnect while source construction is in
+        // flight. Do not attach an unreachable capture process to a removed entry.
+        if (this.captures.get(deviceId) !== capture || !this.hasSubscribers(capture)) {
+          await source.stop().catch(() => {});
+          throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
+        }
+        capture.source = source;
+        await source.start();
+        if (this.captures.get(deviceId) !== capture || !this.hasSubscribers(capture)) {
+          capture.source = null;
+          await source.stop().catch(() => {});
+          throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
+        }
+      } catch (error) {
+        // A replacement subscriber may have installed a new capture while this
+        // asynchronous start was unwinding. Never remove that newer capture.
+        if (this.captures.get(deviceId) === capture) {
+          this.captures.delete(deviceId);
+        }
+        throw toActionableError(error, `Failed to start video capture for ${deviceId}`);
       }
-      capture.source = source;
-      await source.start();
-      if (this.captures.get(deviceId) !== capture || capture.subscribers.size === 0) {
-        capture.source = null;
-        await source.stop().catch(() => {});
-        throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
-      }
-    } catch (error) {
-      // A replacement subscriber may have installed a new capture while this
-      // asynchronous start was unwinding. Never remove that newer capture.
-      if (this.captures.get(deviceId) === capture) {
-        this.captures.delete(deviceId);
-      }
-      this.socketDeviceIds.delete(socket);
-      throw toActionableError(error, `Failed to start video capture for ${deviceId}`);
-    }
+    })();
 
+    await capture.startup;
+    this.promoteSubscriber(capture, socket, true);
     return capture;
+  }
+
+  private hasSubscribers(capture: DeviceCapture): boolean {
+    return capture.pendingSubscribers.size > 0 || capture.subscribers.size > 0;
+  }
+
+  private promoteSubscriber(capture: DeviceCapture, socket: Socket, waitForKeyFrame: boolean): void {
+    if (socket.destroyed || !capture.pendingSubscribers.delete(socket)) {
+      return;
+    }
+    capture.subscribers.add(socket);
+    if (waitForKeyFrame) {
+      // A client that joins part way through a GOP must not consume inter frames before an IDR.
+      capture.waitingForKeyFrame.add(socket);
+    }
   }
 
   private broadcast(deviceId: string, chunk: Buffer): void {
@@ -462,10 +516,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     if (!capture) {
       return;
     }
+    capture.pendingSubscribers.delete(socket);
     capture.subscribers.delete(socket);
     capture.backpressuredSubscribers.delete(socket);
     capture.waitingForKeyFrame.delete(socket);
-    if (capture.subscribers.size === 0) {
+    if (!this.hasSubscribers(capture)) {
       void this.stopCapture(deviceId);
     }
   }
@@ -477,10 +532,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
     this.captures.delete(deviceId);
 
-    for (const subscriber of capture.subscribers) {
+    for (const subscriber of [...capture.pendingSubscribers, ...capture.subscribers]) {
       this.socketDeviceIds.delete(subscriber);
       subscriber.end();
     }
+    capture.pendingSubscribers.clear();
     capture.subscribers.clear();
     capture.backpressuredSubscribers.clear();
     capture.waitingForKeyFrame.clear();

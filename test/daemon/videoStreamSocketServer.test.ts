@@ -7,6 +7,7 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { BootedDevice } from "../../src/models";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
 import { VideoStreamSocketServer } from "../../src/daemon/videoStreamSocketServer";
+import { ScreenRecordingPermissionError } from "../../src/features/webrtc";
 import {
   SessionScopedStreamAuthenticator,
   type StreamAuthSessionManager,
@@ -27,8 +28,13 @@ class FakeCaptureSource implements H264CaptureSource {
   started = false;
   stopped = false;
   startError: Error | null = null;
+  startGate: Promise<void> | null = null;
+  onStart: (() => void) | null = null;
+  keyFrameRequests = 0;
 
   async start(): Promise<void> {
+    await this.startGate;
+    this.onStart?.();
     if (this.startError) {
       throw this.startError;
     }
@@ -37,6 +43,11 @@ class FakeCaptureSource implements H264CaptureSource {
 
   async stop(): Promise<void> {
     this.stopped = true;
+  }
+
+  requestKeyFrame(): boolean {
+    this.keyFrameRequests++;
+    return true;
   }
 }
 
@@ -59,6 +70,8 @@ const allowAllAuthenticator: StreamSocketAuthenticator = { authorize: () => {} }
 async function startHarness(
   options: {
     startError?: Error;
+    startGate?: Promise<void>;
+    startData?: Buffer;
     resolveError?: Error;
     authenticator?: StreamSocketAuthenticator;
   } = {}
@@ -84,6 +97,12 @@ async function startHarness(
         captureOptions.push(opts);
         const source = new FakeCaptureSource();
         source.startError = options.startError ?? null;
+        source.startGate = options.startGate ?? null;
+        source.onStart = () => {
+          if (options.startData) {
+            onData?.(options.startData);
+          }
+        };
         sources.push(source);
         return source;
       },
@@ -305,7 +324,7 @@ describe("VideoStreamSocketServer", () => {
     const { binary } = await subscribe(h.socketPath);
     await waitFor(() => binary().length >= 12);
 
-    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01, 0xaa, 0xbb, 0x00, 0x00, 0x00, 0x01, 0x01]));
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0xbb, 0x00, 0x00, 0x00, 0x01, 0x01]));
     await waitFor(() => binary().length > 12);
 
     expect(h.sources).toHaveLength(1);
@@ -313,7 +332,7 @@ describe("VideoStreamSocketServer", () => {
 
     const packet = binary().subarray(12);
     expect(packet.readInt32BE(8)).toBe(7); // payload length
-    expect(packet.subarray(12, 19)).toEqual(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01, 0xaa, 0xbb]));
+    expect(packet.subarray(12, 19)).toEqual(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0xbb]));
   });
 
   test("does not mistake arbitrary source chunks for complete H.264 NAL units", async () => {
@@ -340,6 +359,54 @@ describe("VideoStreamSocketServer", () => {
     await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 2);
 
     expect(h.sources).toHaveLength(1);
+  });
+
+  test("keeps startup media behind every pending subscriber acknowledgement", async () => {
+    let releaseStart: () => void;
+    const startGate = new Promise<void>(resolve => {
+      releaseStart = resolve;
+    });
+    const h = await startHarness({
+      startGate,
+      // Two NALs flush the IDR through the incremental parser while start() is still pending.
+      startData: Buffer.from([0, 0, 0, 1, 0x05, 0xaa, 0xbb, 0, 0, 0, 1, 0x01]),
+    });
+
+    const first = subscribe(h.socketPath);
+    await waitFor(() => h.sources.length === 1);
+    const second = subscribe(h.socketPath);
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 2);
+    releaseStart!();
+
+    const responses = await Promise.all([first, second]);
+    for (const response of responses) {
+      expect(response.ack.success).toBe(true);
+      await waitFor(() => response.binary().length >= 12);
+      expect(response.binary().readInt32BE(0)).toBe(CODEC_ID_H264);
+    }
+  });
+
+  test("gates the initial subscriber until a post-ack keyframe after startup media", async () => {
+    const sps = Buffer.from([0, 0, 0, 1, 0x07, 0x64]);
+    const pps = Buffer.from([0, 0, 0, 1, 0x08, 0xee]);
+    const startupIdr = Buffer.from([0, 0, 0, 1, 0x05, 0xaa]);
+    const interFrame = Buffer.from([0, 0, 0, 1, 0x01, 0xbb]);
+    const freshIdr = Buffer.from([0, 0, 0, 1, 0x05, 0xcc]);
+    const h = await startHarness({
+      // All three NALs flush during source.start(), before the acknowledgement is written.
+      startData: Buffer.concat([sps, pps, startupIdr, Buffer.from([0, 0, 0, 1, 0x01])]),
+    });
+
+    const client = await subscribe(h.socketPath);
+    await waitFor(() => client.binary().length >= 12);
+
+    expect(h.sources[0].keyFrameRequests).toBe(1);
+    expect(client.binary().includes(startupIdr)).toBe(false);
+
+    h.emit(Buffer.concat([interFrame, freshIdr, Buffer.from([0, 0, 0, 1, 0x01])]));
+    await waitFor(() => client.binary().includes(freshIdr));
+
+    expect(client.binary().includes(interFrame)).toBe(false);
   });
 
   test("stops a capture source that resolves after its only subscriber disconnects", async () => {
@@ -570,6 +637,51 @@ describe("VideoStreamSocketServer", () => {
 
     expect(ack.success).toBe(false);
     expect(String(ack.error)).toContain("adb: device offline");
+    expect(h.server.activeDeviceIds()).toHaveLength(0);
+  });
+
+  test("reports a Screen Recording denial as structured permission state with a legacy fallback", async () => {
+    const h = await startHarness({ startError: new ScreenRecordingPermissionError() });
+
+    const { ack } = await subscribe(h.socketPath);
+
+    expect(ack.success).toBe(false);
+    expect(ack.permission).toEqual({
+      kind: "screen_recording",
+      status: "needs_approval",
+      approvalTarget: "AutoMobile",
+    });
+    expect(ack.error).toBe(
+      "Screen Recording permission is required to discover and observe iOS Simulator windows."
+    );
+    expect(h.server.activeDeviceIds()).toHaveLength(0);
+  });
+
+  test("reports a pending Screen Recording denial to every subscriber", async () => {
+    let releaseStart: () => void;
+    const startGate = new Promise<void>(resolve => {
+      releaseStart = resolve;
+    });
+    const h = await startHarness({
+      startError: new ScreenRecordingPermissionError(),
+      startGate,
+    });
+
+    const first = subscribe(h.socketPath);
+    await waitFor(() => h.sources.length === 1);
+    const second = subscribe(h.socketPath);
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 2);
+    releaseStart!();
+
+    const responses = await Promise.all([first, second]);
+    for (const { ack } of responses) {
+      expect(ack.success).toBe(false);
+      expect(ack.permission).toEqual({
+        kind: "screen_recording",
+        status: "needs_approval",
+        approvalTarget: "AutoMobile",
+      });
+    }
     expect(h.server.activeDeviceIds()).toHaveLength(0);
   });
 

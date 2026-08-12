@@ -3,11 +3,15 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import org.junit.Assert.assertEquals
@@ -19,6 +23,9 @@ class DeviceStreamViewTest {
 
   private fun col(id: String = "emulator-5554", name: String = "Pixel 8") =
     DeviceColumn(deviceId = id, name = name, platform = Platform.Android)
+
+  private fun iosCol() =
+    DeviceColumn(deviceId = "ios-simulator", name = "iPhone 16", platform = Platform.Ios)
 
   @Test
   fun `connects the source for the pane's device`() = runComposeUiTest {
@@ -52,6 +59,72 @@ class DeviceStreamViewTest {
     val source = FakeVideoStreamSource()
     setContent { MaterialTheme { DeviceStreamView(col(), sourceFactory = { source }) } }
     onNodeWithText("Waiting for the first frame…").assertIsDisplayed()
+  }
+
+  @Test
+  fun `guides iOS Screen Recording approval and exposes settings and retry actions`() =
+    runComposeUiTest {
+      val source =
+        FakeVideoStreamSource(
+          screenRecordingRequired = true,
+          screenRecordingApprovalTarget = "Custom Capture Helper",
+        )
+      var openSettingsCalls = 0
+      val launcher = ScreenRecordingSettingsLauncher {
+        openSettingsCalls++
+        Result.success(Unit)
+      }
+      setContent {
+        MaterialTheme {
+          DeviceStreamView(
+            iosCol(),
+            sourceFactory = { source },
+            screenRecordingSettingsLauncher = launcher,
+          )
+        }
+      }
+
+      onNodeWithText("Screen Recording needs approval").assertIsDisplayed()
+      onNodeWithText(
+          "Enable Custom Capture Helper in System Settings to discover and observe iOS Simulator windows."
+        )
+        .assertIsDisplayed()
+      onNodeWithText("Open System Settings").performClick()
+      assertEquals(1, openSettingsCalls)
+
+      val connectsBeforeRetry = source.connectCalls
+      onNodeWithText("Check again").performClick()
+      waitUntil { source.connectCalls > connectsBeforeRetry }
+    }
+
+  @Test
+  fun `clears a settings launch failure when the pane changes devices`() = runComposeUiTest {
+    val source = FakeVideoStreamSource(screenRecordingRequired = true)
+    val column = mutableStateOf(iosCol())
+    val launcher = ScreenRecordingSettingsLauncher {
+      Result.failure(IllegalStateException("unavailable"))
+    }
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          column.value,
+          sourceFactory = { source },
+          screenRecordingSettingsLauncher = launcher,
+        )
+      }
+    }
+
+    onNodeWithText("Open System Settings").performClick()
+    onNodeWithText("Open Privacy & Security > Screen Recording and enable AutoMobile.")
+      .assertIsDisplayed()
+
+    runOnUiThread {
+      column.value =
+        DeviceColumn(deviceId = "ios-simulator-2", name = "iPhone 16 Pro", platform = Platform.Ios)
+    }
+
+    onAllNodesWithText("Open Privacy & Security > Screen Recording and enable AutoMobile.")
+      .assertCountEquals(0)
   }
 
   @Test

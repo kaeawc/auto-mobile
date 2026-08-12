@@ -46,10 +46,12 @@ class VideoStreamClientTest {
   private fun relay(
     success: Boolean = true,
     error: String? = null,
+    permissionJson: String? = null,
     payload: ByteArray? = null,
     keepOpen: Boolean = false,
     rotation: Int? = null,
-  ): FakeRelay = FakeRelay(success, error, payload, keepOpen, rotation).also { servers.add(it) }
+  ): FakeRelay =
+    FakeRelay(success, error, permissionJson, payload, keepOpen, rotation).also { servers.add(it) }
 
   @Test
   fun `subscribes with the device id and decodes frames`() = runBlocking {
@@ -214,6 +216,30 @@ class VideoStreamClientTest {
   }
 
   @Test
+  fun `a Screen Recording denial becomes structured permission state`() = runBlocking {
+    val server =
+      relay(
+        success = false,
+        permissionJson =
+          """{"kind":"screen_recording","status":"needs_approval","approvalTarget":"AutoMobile"}""",
+      )
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+
+    client.connect("ios-simulator")
+
+    waitUntil { client.state.value is VideoStreamState.PermissionRequired }
+    assertEquals(
+      VideoStreamPermission.ScreenRecordingNeedsApproval,
+      (client.state.value as VideoStreamState.PermissionRequired).permission,
+    )
+    assertEquals(
+      "AutoMobile",
+      (client.state.value as VideoStreamState.PermissionRequired).approvalTarget,
+    )
+    client.dispose()
+  }
+
+  @Test
   fun `a missing socket reports unavailable instead of throwing`() = runBlocking {
     val client = VideoStreamClient(socketPathValue = "/tmp/no-video-stream-am.sock")
 
@@ -291,6 +317,7 @@ class VideoStreamClientTest {
   private inner class FakeRelay(
     private val success: Boolean,
     private val error: String?,
+    private val permissionJson: String?,
     private val payload: ByteArray?,
     private val keepOpen: Boolean,
     // When set, the framed packet is flagged CONFIG and attests this rotation (issue #4786), as the
@@ -320,7 +347,12 @@ class VideoStreamClientTest {
             if (success) {
               """{"id":"1","type":"video_stream_response","success":true,"framing":"h264"}"""
             } else {
-              """{"id":"1","type":"video_stream_response","success":false,"error":"$error"}"""
+              buildString {
+                append("""{"id":"1","type":"video_stream_response","success":false""")
+                if (error != null) append(""","error":"$error"""")
+                if (permissionJson != null) append(""","permission":$permissionJson""")
+                append("}")
+              }
             }
           out.write((ack + "\n").toByteArray(StandardCharsets.UTF_8))
           out.flush()

@@ -1,20 +1,29 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.platform.MacScreenRecordingSettingsLauncher
+import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.rememberLiveVideoFrame
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
@@ -66,6 +75,8 @@ fun DeviceStreamView(
       sessionUuidProvider = sessionUuidProvider,
     )
   },
+  screenRecordingSettingsLauncher: ScreenRecordingSettingsLauncher =
+    MacScreenRecordingSettingsLauncher(),
 ) {
   val source = remember(column.deviceId) { sourceFactory(column.deviceId) }
   // Farm panes auto-reconnect: a dropped relay or a subscribe rejected while the workspace daemon
@@ -73,6 +84,7 @@ fun DeviceStreamView(
   // until the pane is torn down.
   val liveFrame = rememberLiveVideoFrame(source, column.deviceId, autoReconnect = true)
   val state by source.state.collectAsState()
+  var settingsLaunchFailure by remember(column.deviceId) { mutableStateOf(false) }
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
     val bitmap = liveFrame?.bitmap
     if (bitmap != null) {
@@ -82,6 +94,18 @@ fun DeviceStreamView(
         modifier = Modifier.fillMaxSize(),
         contentScale = ContentScale.Fit,
       )
+    } else if (state is VideoStreamState.PermissionRequired) {
+      ScreenRecordingPermissionSurface(
+        approvalTarget = (state as VideoStreamState.PermissionRequired).approvalTarget,
+        settingsLaunchFailure = settingsLaunchFailure,
+        onOpenSettings = {
+          settingsLaunchFailure = screenRecordingSettingsLauncher.openScreenRecording().isFailure
+        },
+        onRetry = {
+          source.disconnect()
+          source.connect(column.deviceId)
+        },
+      )
     } else {
       Text(
         streamStatusHint(state),
@@ -89,6 +113,53 @@ fun DeviceStreamView(
         style = MaterialTheme.typography.bodySmall,
         textAlign = TextAlign.Center,
         modifier = Modifier.padding(12.dp),
+      )
+    }
+  }
+}
+
+@Composable
+private fun ScreenRecordingPermissionSurface(
+  approvalTarget: String,
+  settingsLaunchFailure: Boolean,
+  onOpenSettings: () -> Unit,
+  onRetry: () -> Unit,
+) {
+  Column(
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+    modifier = Modifier.padding(24.dp),
+  ) {
+    Text(
+      "Screen Recording needs approval",
+      style = MaterialTheme.typography.titleSmall,
+    )
+    Text(
+      "Enable $approvalTarget in System Settings to discover and observe iOS Simulator windows.",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.bodySmall,
+      textAlign = TextAlign.Center,
+    )
+    Text(
+      "AutoMobile will check again automatically after approval.",
+      color = MaterialTheme.colorScheme.outline,
+      style = MaterialTheme.typography.bodySmall,
+      textAlign = TextAlign.Center,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      Button(onClick = onOpenSettings) {
+        Text("Open System Settings")
+      }
+      OutlinedButton(onClick = onRetry) {
+        Text("Check again")
+      }
+    }
+    if (settingsLaunchFailure) {
+      Text(
+        "Open Privacy & Security > Screen Recording and enable $approvalTarget.",
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.bodySmall,
+        textAlign = TextAlign.Center,
       )
     }
   }
@@ -104,5 +175,6 @@ internal fun streamStatusHint(state: VideoStreamState): String =
     is VideoStreamState.Connecting -> "Connecting to live mirror…"
     // Streaming with no frame yet: the subscribe was accepted but nothing has decoded.
     is VideoStreamState.Streaming -> "Waiting for the first frame…"
+    is VideoStreamState.PermissionRequired -> "Screen Recording needs approval"
     is VideoStreamState.Unavailable -> state.reason
   }

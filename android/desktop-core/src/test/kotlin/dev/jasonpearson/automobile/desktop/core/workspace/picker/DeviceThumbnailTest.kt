@@ -9,11 +9,13 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamPermission
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -50,6 +52,26 @@ class DeviceThumbnailTest {
     assertEquals(3, attempts)
     assertEquals(listOf(1_000L, 2_000L), delays) // exponential backoff between the failed attempts
   }
+
+  @Test
+  fun `screenshot capture uses the fallback while Screen Recording approval is pending`() =
+    runTest {
+      val state =
+        MutableStateFlow<VideoStreamState>(
+          VideoStreamState.PermissionRequired(
+            VideoStreamPermission.ScreenRecordingNeedsApproval,
+            "AutoMobile",
+          )
+        )
+      val source =
+        object : DeviceThumbnailScreenshotSource {
+          override suspend fun latest(deviceId: String): ImageBitmap = ImageBitmap(1, 1)
+        }
+
+      val shot = withTimeout(100) { captureScreenshotWithRetry(state, "d", source) }
+
+      assertNotNull(shot)
+    }
 
   @Test
   fun `placeholder label reflects device state`() {
@@ -110,6 +132,24 @@ class DeviceThumbnailTest {
         .isNotEmpty()
     }
     onNodeWithContentDescription("Live thumbnail of Pixel 8").assertIsDisplayed()
+  }
+
+  @Test
+  fun `a booted iOS device names a pending Screen Recording approval`() = runComposeUiTest {
+    val source = FakeVideoStreamSource(screenRecordingRequired = true)
+    setContent {
+      MaterialTheme {
+        DeviceThumbnail(
+          PickerDevice("ios-simulator", "iPhone 16", Platform.Ios, DeviceState.Booted),
+          booting = false,
+          sessionUuidProvider = { null },
+          videoSourceFactory = { source },
+          screenshotSource = null,
+        )
+      }
+    }
+
+    onNodeWithText("Screen Recording needs approval").assertIsDisplayed()
   }
 
   @Test

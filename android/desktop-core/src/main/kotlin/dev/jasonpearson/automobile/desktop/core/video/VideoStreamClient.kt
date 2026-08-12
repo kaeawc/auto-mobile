@@ -297,7 +297,8 @@ class VideoStreamClient(
       if (read <= 0) return
 
       parser.onBytes(
-        buffer.copyOf(read),
+        buffer,
+        read,
         onHeader = { header ->
           LOG.info("Live mirroring started (${header.width}x${header.height} advertised)")
         },

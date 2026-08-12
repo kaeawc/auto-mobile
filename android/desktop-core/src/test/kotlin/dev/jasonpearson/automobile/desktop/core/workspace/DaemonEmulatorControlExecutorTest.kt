@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -9,6 +10,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -167,10 +169,31 @@ class DaemonEmulatorControlExecutorTest {
   }
 
   @Test
-  fun `pressButton sets the active device then calls pressButton`() = runTest {
-    val client = FakeAutoMobileClient()
+  fun `pressButton sends a single inputPressButton without setActiveDevice`() = runTest {
+    // The fast path is Unix-transport only (the direct input/* helpers live there).
+    val client = FakeAutoMobileClient().apply { transportName = "Unix Socket" }
     executor(client).pressButton("emulator-5554", Platform.Android, DeviceButton.Home)
 
+    // The fast path: no setActiveDevice pre-call, no heavier pressButton MCP tool — one direct
+    // input/pressButton round-trip, exactly like the video-pane tap path.
+    assertTrue("setActiveDevice" !in client.calls)
+    assertTrue(client.toolCalls.none { it.name == "pressButton" })
+    val call = client.inputPressButtonCalls.single()
+    assertEquals("home", call.button)
+    assertEquals("android", call.platform)
+    assertEquals("emulator-5554", call.deviceId)
+    assertNull(call.frameContext)
+  }
+
+  @Test
+  fun `a non-Unix transport routes pressButton through the pressButton MCP tool`() = runTest {
+    // MCP HTTP/STDIO transports don't serve the direct input/* helpers, so the command bar must
+    // fall back to the transport-agnostic pressButton tool (its pre-fast-path behavior) instead of
+    // failing every button. transportName != "Unix Socket" selects the fallback.
+    val client = FakeAutoMobileClient().apply { transportName = "MCP HTTP" }
+    executor(client).pressButton("emulator-5554", Platform.Android, DeviceButton.Home)
+
+    assertTrue(client.inputPressButtonCalls.isEmpty())
     assertEquals("setActiveDevice", client.calls.first())
     assertTrue(
       client.toolCalls.any {
@@ -186,13 +209,14 @@ class DaemonEmulatorControlExecutorTest {
   }
 
   @Test
-  fun `tool-level failure is propagated from pressButton`() = runTest {
+  fun `an input-pressButton failure is propagated`() = runTest {
     val client =
       FakeAutoMobileClient().apply {
-        callToolResult =
-          toolResponse(
+        transportName = "Unix Socket"
+        inputPressButtonResult =
+          InputActionResult(
+            action = "input/pressButton",
             success = false,
-            message = "Pressed button home",
             error = "Unsupported button",
           )
       }
@@ -200,7 +224,7 @@ class DaemonEmulatorControlExecutorTest {
     var failureMessage: String? = null
     try {
       executor(client).pressButton("emulator-5554", Platform.Android, DeviceButton.Home)
-      fail("Expected tool failure")
+      fail("Expected input failure")
     } catch (error: McpConnectionException) {
       failureMessage = error.message
     }
@@ -285,12 +309,15 @@ class DaemonEmulatorControlExecutorTest {
           )
       }
 
+    // run() controls still bind the active device first; a bind failure must block the tool call.
+    // (pressButton no longer sets the active device — it targets deviceId directly.)
     try {
-      executor(client).pressButton("emulator-5554", Platform.Android, DeviceButton.Home)
+      executor(client)
+        .run("emulator-5554", Platform.Android, EmulatorControl.Rotate, Orientation.Landscape)
       fail("Expected active-device failure")
     } catch (error: McpConnectionException) {
       assertEquals("Device is unavailable", error.message)
-      assertTrue(client.toolCalls.none { it.name == "pressButton" })
+      assertTrue(client.toolCalls.none { it.name == "rotate" })
     }
   }
 

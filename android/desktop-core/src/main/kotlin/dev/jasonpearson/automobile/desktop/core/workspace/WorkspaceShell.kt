@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,7 +35,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -559,10 +564,29 @@ private fun DeviceColumnView(
 ) {
   Column(
     modifier =
-      modifier.border(
-        width = if (focused) 2.dp else 1.dp,
-        color = if (focused) Accent else MaterialTheme.colorScheme.outlineVariant,
-      )
+      modifier
+        // Click anywhere in an UNFOCUSED pane to make it the focused (and thus interactive) device.
+        // Control is focus-gated — only the focused pane arms, streams High-fps, and takes keyboard
+        // focus — so without a way to move focus by clicking, every non-focused video pane would be
+        // a dead mirror (the command palette was the only focus setter). This is a two-step
+        // interaction by design: an unfocused pane renders the inert video mirror, so this focusing
+        // click only SWITCHES focus (it cannot actuate a device tap — the DeviceScreenView tap
+        // surface mounts once the pane is focused); the next click drives the device. Observed on
+        // the INITIAL pass and never consumed, so it doesn't swallow the pane's always-mounted
+        // controls (the command bar's Screenshot/nav buttons still fire on that same click). Gated
+        // on !focused so clicking the already-focused pane emits nothing.
+        .pointerInput(column.deviceId, focused) {
+          if (!focused) {
+            awaitEachGesture {
+              awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+              onAction(WorkspaceAction.FocusDevice(column.deviceId))
+            }
+          }
+        }
+        .border(
+          width = if (focused) 2.dp else 1.dp,
+          color = if (focused) Accent else MaterialTheme.colorScheme.outlineVariant,
+        )
   ) {
     DeviceColumnHeader(column, onAction)
     val tool = column.activeTool
@@ -695,11 +719,11 @@ private fun StreamArea(
     contentAlignment = Alignment.Center,
   ) {
     streamContent(column)
-    EmulatorControls(
+    DeviceCommandBar(
       column = column,
       onAction = onAction,
       onCaptureScreenshot = { captureRequest++ },
-      modifier = Modifier.align(Alignment.TopCenter).padding(6.dp),
+      modifier = Modifier.align(Alignment.CenterEnd).padding(6.dp),
     )
     val notice = savedNotice
     if (notice != null) {
@@ -803,41 +827,93 @@ fun WorkspaceStreamPlaceholder() {
  * pane as a confirmation) rather than being a fire-and-forget device mutation.
  */
 @Composable
-private fun EmulatorControls(
+private fun DeviceCommandBar(
   column: DeviceColumn,
   onAction: (WorkspaceAction) -> Unit,
   onCaptureScreenshot: () -> Unit,
   modifier: Modifier,
 ) {
-  Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-    // Unlock is gated on the pane's lock state; the rest always show. Rotate/Snapshot/Unlock are
-    // one-shot device calls; Screenshot captures to disk; Locale/More open menus.
+  Column(
+    modifier =
+      modifier
+        .clip(RoundedCornerShape(18.dp))
+        .background(Color.Black.copy(alpha = 0.32f))
+        .padding(4.dp),
+    verticalArrangement = Arrangement.spacedBy(2.dp),
+  ) {
+    // Device navigation: Back / Home / Recent.
+    listOf(DeviceButton.Back, DeviceButton.Home, DeviceButton.Recent)
+      .filter { it.isSupportedOn(column.platform, column.isVirtual) }
+      .forEach { button ->
+        CrayonButton(button.crayon(), "${button.label} ${column.name}") {
+          onAction(WorkspaceAction.PressDeviceButton(column.deviceId, button))
+        }
+      }
+    // Emulator controls: Unlock is gated on lock state; Screenshot captures to disk; Locale opens a
+    // picker; the rest are one-shot device calls. More is dropped — every device button is surfaced
+    // in this bar directly.
     EmulatorControl.entries
+      .filter { it != EmulatorControl.More }
       .filter { it != EmulatorControl.Unlock || column.locked }
       .filter { it.isSupportedOn(column.platform, column.isVirtual) }
       .forEach { control ->
         when (control) {
           EmulatorControl.Screenshot ->
-            Glyph(control.icon, "${control.label} ${column.name}", false, onCaptureScreenshot)
+            CrayonButton(
+              control.crayon(),
+              "${control.label} ${column.name}",
+              onClick = onCaptureScreenshot,
+            )
           EmulatorControl.Locale -> LocaleControl(column, onAction)
-          EmulatorControl.More -> MoreControl(column, onAction)
           else ->
-            Glyph(control.icon, "${control.label} ${column.name}", false) {
+            CrayonButton(control.crayon(), "${control.label} ${column.name}") {
               onAction(WorkspaceAction.RunControl(column.deviceId, control))
             }
         }
       }
+    // Power, at the foot of the bar.
+    if (DeviceButton.Power.isSupportedOn(column.platform, column.isVirtual)) {
+      CrayonButton(DeviceButton.Power.crayon(), "${DeviceButton.Power.label} ${column.name}") {
+        onAction(WorkspaceAction.PressDeviceButton(column.deviceId, DeviceButton.Power))
+      }
+    }
+  }
+}
+
+/** An outline crayon icon button for the device command bar — white glyph, no fill. */
+@Composable
+private fun CrayonButton(
+  glyph: CrayonGlyph,
+  description: String,
+  active: Boolean = false,
+  onClick: () -> Unit,
+) {
+  Box(
+    modifier =
+      Modifier.size(30.dp)
+        .clip(CircleShape)
+        .then(if (active) Modifier.background(Color.White.copy(alpha = 0.16f)) else Modifier)
+        .clickable(onClick = onClick)
+        .semantics { contentDescription = description }
+        .padding(6.dp),
+    contentAlignment = Alignment.Center,
+  ) {
+    CrayonIcon(glyph, tint = Color.White, modifier = Modifier.fillMaxSize())
   }
 }
 
 /**
- * 🌐 Locale control: a glyph that opens a dropdown of [COMMON_LOCALES]; a pick sets that locale.
+ * Locale control: a crayon globe that opens a dropdown of [COMMON_LOCALES]; a pick sets the locale.
  */
 @Composable
 private fun LocaleControl(column: DeviceColumn, onAction: (WorkspaceAction) -> Unit) {
   var open by remember { mutableStateOf(false) }
   Box {
-    Glyph(EmulatorControl.Locale.icon, "${EmulatorControl.Locale.label} ${column.name}", open) {
+    CrayonButton(
+      EmulatorControl.Locale.crayon(),
+      "${EmulatorControl.Locale.label} ${column.name}",
+      open,
+    ) {
       open = true
     }
     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -852,31 +928,6 @@ private fun LocaleControl(column: DeviceColumn, onAction: (WorkspaceAction) -> U
           },
         )
       }
-    }
-  }
-}
-
-/** ⋯ More control: a glyph that opens a dropdown of [DeviceButton]s; a pick presses that button. */
-@Composable
-private fun MoreControl(column: DeviceColumn, onAction: (WorkspaceAction) -> Unit) {
-  var open by remember { mutableStateOf(false) }
-  Box {
-    Glyph(EmulatorControl.More.icon, "${EmulatorControl.More.label} ${column.name}", open) {
-      open = true
-    }
-    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-      DeviceButton.entries
-        .filter { it.isSupportedOn(column.platform, column.isVirtual) }
-        .forEach { button ->
-          DropdownMenuItem(
-            text = { Text("${button.icon}  ${button.label}") },
-            modifier = Modifier.semantics { contentDescription = "${button.label} ${column.name}" },
-            onClick = {
-              open = false
-              onAction(WorkspaceAction.PressDeviceButton(column.deviceId, button))
-            },
-          )
-        }
     }
   }
 }

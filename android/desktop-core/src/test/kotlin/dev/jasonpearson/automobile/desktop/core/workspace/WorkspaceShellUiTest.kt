@@ -92,6 +92,26 @@ class WorkspaceShellUiTest {
   }
 
   @Test
+  fun `clicking a pane emits FocusDevice for that column`() = runComposeUiTest {
+    // Device control is focus-gated (only the focused pane arms + accepts input), so the user must
+    // be able to move focus by clicking a pane. Clicking anywhere in the unfocused pane 'b' focuses
+    // it; without this every non-focused video pane would be a dead mirror (#5221 review).
+    val actions = mutableListOf<WorkspaceAction>()
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel 8"), col("b", "iPhone 15", Platform.Ios)),
+        focusedDeviceId = "a",
+      )
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(state = state, onAction = { actions += it }, onOpenPicker = {})
+      }
+    }
+    onNodeWithText("iPhone 15").performClick()
+    assertTrue(WorkspaceAction.FocusDevice("b") in actions)
+  }
+
+  @Test
   fun `two devices render both chips`() = runComposeUiTest {
     val state =
       WorkspaceUiState.Content(
@@ -208,25 +228,24 @@ class WorkspaceShellUiTest {
     }
 
   @Test
-  fun `More control opens a menu and selecting a button dispatches PressDeviceButton`() =
-    runComposeUiTest {
-      var action: WorkspaceAction? = null
-      val state =
-        WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
-      setContent {
-        MaterialTheme {
-          WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {})
-        }
+  fun `a device nav button in the command bar dispatches PressDeviceButton`() = runComposeUiTest {
+    var action: WorkspaceAction? = null
+    val state =
+      WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(state = state, onAction = { action = it }, onOpenPicker = {})
       }
-      onNodeWithContentDescription("More Pixel 8").performClick()
-      // Power shows on Android — a hardware key adb can press.
-      onNodeWithContentDescription("Power Pixel 8").assertIsDisplayed()
-      onNodeWithContentDescription("Home Pixel 8").performClick()
-      assertEquals(WorkspaceAction.PressDeviceButton("a", DeviceButton.Home), action)
     }
+    // Buttons are surfaced directly in the command bar now (no More overflow menu).
+    // Power shows on Android — a hardware key adb can press.
+    onNodeWithContentDescription("Power Pixel 8").assertIsDisplayed()
+    onNodeWithContentDescription("Home Pixel 8").performClick()
+    assertEquals(WorkspaceAction.PressDeviceButton("a", DeviceButton.Home), action)
+  }
 
   @Test
-  fun `More menu on iOS offers the navigation buttons but hides simulator-incompatible Power`() =
+  fun `iOS command bar offers the navigation buttons but hides simulator-incompatible Power`() =
     runComposeUiTest {
       val state =
         WorkspaceUiState.Content(
@@ -236,7 +255,6 @@ class WorkspaceShellUiTest {
       setContent {
         MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
       }
-      onNodeWithContentDescription("More iPhone 15").performClick()
       // Home/Back/Recent route through CtrlProxy on iOS; Power is physical-device-only.
       onNodeWithContentDescription("Home iPhone 15").assertIsDisplayed()
       onNodeWithContentDescription("Back iPhone 15").assertIsDisplayed()
@@ -256,7 +274,6 @@ class WorkspaceShellUiTest {
     }
 
     onNodeWithContentDescription("Locale iPhone 15").assertDoesNotExist()
-    onNodeWithContentDescription("More iPhone 15").performClick()
     onNodeWithContentDescription("Power iPhone 15").assertIsDisplayed()
   }
 
@@ -272,7 +289,6 @@ class WorkspaceShellUiTest {
     }
 
     onNodeWithContentDescription("Locale iPhone 15").assertIsDisplayed()
-    onNodeWithContentDescription("More iPhone 15").performClick()
     onNodeWithContentDescription("Power iPhone 15").assertDoesNotExist()
   }
 

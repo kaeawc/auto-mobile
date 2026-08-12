@@ -59,6 +59,39 @@ class VideoStreamParserTest {
   }
 
   @Test
+  fun `honors length and ignores stale bytes past it in a reused buffer`() {
+    // The reader hands its fixed 64KB buffer with only `read` bytes valid; the rest is last read's
+    // stale data. The parser must treat only the first `length` bytes as live.
+    val valid = streamHeader(720, 1280) + packet(byteArrayOf(9, 8, 7))
+    val reused = valid + ByteArray(64) { 0x5a } // trailing garbage that must never be parsed
+    val out = Collected()
+
+    VideoStreamParser().onBytes(reused, valid.size, out.headers::add, out.packets::add)
+
+    assertEquals(listOf(VideoStreamHeader(720, 1280)), out.headers)
+    assertEquals(1, out.packets.size)
+    assertContentEquals(byteArrayOf(9, 8, 7), out.packets[0].payload)
+  }
+
+  @Test
+  fun `a partial packet within length is buffered and completed on the next feed`() {
+    val parser = VideoStreamParser()
+    val whole = streamHeader() + packet(byteArrayOf(1, 2, 3, 4))
+    val out = Collected()
+    // First feed carries the header plus only part of the packet (valid length stops mid-payload);
+    // the trailing bytes of the reused buffer are the rest but must be ignored until fed as live.
+    val firstValid = whole.size - 2
+    parser.onBytes(whole, firstValid, out.headers::add, out.packets::add)
+    assertEquals(1, out.headers.size)
+    assertTrue(out.packets.isEmpty())
+
+    // Feed the final 2 bytes as their own live chunk; the buffered remainder completes the packet.
+    parser.onBytes(whole.copyOfRange(firstValid, whole.size), 2, out.headers::add, out.packets::add)
+    assertEquals(1, out.packets.size)
+    assertContentEquals(byteArrayOf(1, 2, 3, 4), out.packets[0].payload)
+  }
+
+  @Test
   fun `reads the stream header then packets`() {
     val out =
       feed(

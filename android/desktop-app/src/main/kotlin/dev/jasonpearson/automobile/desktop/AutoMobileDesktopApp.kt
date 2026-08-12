@@ -17,7 +17,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
+import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
@@ -53,6 +55,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAct
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootController
+import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceDeviceControl
 import dev.jasonpearson.automobile.desktop.core.workspace.wireName
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 import java.util.concurrent.atomic.AtomicLong
@@ -173,6 +176,18 @@ fun AutoMobileDesktopApp(
           .getOrNull()
       } else {
         null
+      }
+    }
+  // Per-tap client factory for workspace device control. The DeviceControlSession closes the client
+  // it mints per action, so this MUST return a fresh McpDaemonClient each call, never the shared
+  // graph.autoMobileClient. Non-Unix transports don't support device input, so they yield null and
+  // the pane stays a display-only mirror.
+  val workspaceControlClientProvider: () -> AutoMobileClient? =
+    remember(graph) {
+      if (graph.autoMobileClient.transportName == "Unix Socket") {
+        { McpDaemonClient(DaemonSocketPaths.socketPath()) }
+      } else {
+        { null }
       }
     }
   val sessionCleanupScope =
@@ -424,9 +439,31 @@ fun AutoMobileDesktopApp(
               // bind failed) the provider yields null and the pane shows the auth refusal, with
               // AUTOMOBILE_DAEMON_STREAM_AUTH=0 as the operator escape hatch.
               streamContent = { column ->
+                // Tap-to-control is armed ONLY for the FOCUSED pane on a Unix daemon.
+                //  - Unix: the other transports (MCP HTTP/STDIO) don't serve the direct `input/*`
+                //    helpers, so `workspaceControlClientProvider` yields null there and a tap could
+                //    never reach the device — arming would only pay for a High-fps stream + an
+                //    observation stream that drive nothing.
+                //  - Focused: only one pane is being driven at a time. Gating on focus keeps the
+                //    unfocused farm panes as cheap Low-fps mirrors (no per-pane observation stream)
+                //    and means only the focused pane requests Compose keyboard focus, so a second
+                //    pane arming can't silently steal keystrokes mid-type (#5217). Click a pane to
+                //    focus (and thus drive) it; the single-device case is always focused.
+                val controlActive =
+                  graph.autoMobileClient.transportName == "Unix Socket" &&
+                    (workspaceState as? WorkspaceUiState.Content)?.focusedDeviceId ==
+                      column.deviceId
+                val control =
+                  rememberWorkspaceDeviceControl(
+                    column = column,
+                    clientProvider = workspaceControlClientProvider,
+                    enabled = controlActive,
+                  )
                 DeviceStreamView(
                   column,
                   sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                  enableDeviceControl = controlActive,
+                  control = control,
                 )
               },
             )

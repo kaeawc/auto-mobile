@@ -10,21 +10,29 @@ display mode based on the host and a small set of environment variables.
 
 ## Display mode auto-detection
 
-By default the emulator launches **windowed**. On a headless Linux host (a CI
-runner with no X server, a container, an SSH session with no `DISPLAY`) a
-windowed launch cannot connect to the display, fails to load the Qt `xcb`
-platform plugin, and is killed by signal in a few hundred milliseconds. Node
-reports the signal death as `code: null`, which previously collapsed into an
-opaque `Emulator process exited with code: null`.
+AutoMobile observes and streams the device screen itself, so the emulator's own
+window is never the interaction surface — it only ever adds cost or crash surface.
+Two hosts default to **headless** for that reason:
 
-To avoid this, AutoMobile resolves the display mode as follows:
+- **macOS** — the emulator's Qt window backing store segfaults on repaint under
+  CoreAnimation (`EXC_BAD_ACCESS` in `QCALayerBackingStore::beginPaint`), which
+  recurs across launches and takes the whole guest down (it reads as "input
+  stuck"). Dropping the window removes the crash surface entirely.
+- **Headless Linux** (a CI runner with no X server, a container, an SSH session
+  with no `DISPLAY`) — a windowed launch cannot connect to the display, fails to
+  load the Qt `xcb` platform plugin, and is killed by signal in a few hundred
+  milliseconds. Node reports the signal death as `code: null`, which previously
+  collapsed into an opaque `Emulator process exited with code: null`.
+
+AutoMobile resolves the display mode as follows (first matching row wins):
 
 | Condition | Mode |
 |-----------|------|
 | `AUTOMOBILE_EMULATOR_HEADLESS=true` | **headless** (any platform) |
-| `AUTOMOBILE_EMULATOR_HEADLESS=false` | **windowed** (forced, even on a Linux host with no display) |
+| `AUTOMOBILE_EMULATOR_HEADLESS=false` | **windowed** (forced, even on macOS or a Linux host with no display) |
+| macOS | **headless** (auto; opt back in with `AUTOMOBILE_EMULATOR_HEADLESS=false`) |
 | Linux with no `DISPLAY` and no `WAYLAND_DISPLAY` | **headless** (auto) |
-| Linux with `DISPLAY`/`WAYLAND_DISPLAY`, macOS, Windows | **windowed** |
+| Linux with `DISPLAY`/`WAYLAND_DISPLAY`, Windows | **windowed** |
 
 In headless mode AutoMobile appends `-no-window -no-audio` to the `emulator`
 invocation. The chosen mode and the reason are logged at `INFO`.

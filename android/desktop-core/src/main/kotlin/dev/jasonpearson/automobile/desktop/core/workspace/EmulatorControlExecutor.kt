@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.MONOTONIC_NOW_MS
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -10,6 +12,10 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 private val LOG = LoggerFactory.getLogger("EmulatorControlExecutor")
+
+// Matches [McpDaemonClient.transportName]; the only transport that serves the direct `input/*`
+// daemon helpers the fast button path uses.
+private const val UNIX_TRANSPORT_NAME = "Unix Socket"
 
 /**
  * Runs a device-mutating emulator control (Rotate, Snapshot, Unlock) against a real device. This is
@@ -126,16 +132,48 @@ class DaemonEmulatorControlExecutor(
   }
 
   override suspend fun pressButton(deviceId: String, platform: Platform, button: DeviceButton) {
-    withContext(ioDispatcher) {
-      val wire = platform.wireName()
-      client.setActiveDeviceChecked(deviceId, wire)
-      client.callToolChecked(
-        "pressButton",
-        buildJsonObject {
-          put("button", button.toolValue)
-          put("platform", wire)
-          put("deviceId", deviceId)
-        },
+    val wire = platform.wireName()
+    // Non-Unix transports (MCP HTTP/STDIO) don't implement the direct `input/*` daemon helpers, so
+    // the fast path below would always report `unsupportedInputAction`. Route those through the
+    // `pressButton` MCP tool instead — the transport-agnostic path the command bar used before the
+    // fast path landed — so Back/Home/Recent/Power keep working off a remote daemon.
+    if (client.transportName != UNIX_TRANSPORT_NAME) {
+      withContext(ioDispatcher) {
+        client.setActiveDeviceChecked(deviceId, wire)
+        client.callToolChecked(
+          "pressButton",
+          buildJsonObject {
+            put("button", button.toolValue)
+            put("platform", wire)
+            put("deviceId", deviceId)
+          },
+        )
+      }
+      return
+    }
+    // Unix fast path: single lightweight round-trip, matching the video-pane tap path.
+    // `input/pressButton` targets the deviceId directly, so the old `setActiveDeviceChecked`
+    // pre-call was redundant — and it was a whole extra (sometimes slow) daemon round-trip that
+    // dominated command-bar button latency. Dropping it and the heavier `pressButton` MCP-tool
+    // dispatch in favor of the direct `inputPressButton` wire method halves the round-trips.
+    val startMs = MONOTONIC_NOW_MS()
+    val result =
+      withContext(ioDispatcher) {
+        client.inputPressButton(
+          button = button.toolValue,
+          platform = wire,
+          deviceId = deviceId,
+          frameContext = null,
+        )
+      }
+    // Perf span for the command-bar path (previously unmeasured): click → daemon ack, including the
+    // dispatcher hop. Lets us compare button latency against the video-pane tap tracer.
+    LOG.info(
+      "button ${button.toolValue} $deviceId: dispatch=${MONOTONIC_NOW_MS() - startMs}ms success=${result.success}"
+    )
+    if (!result.success) {
+      throw McpConnectionException(
+        result.error ?: "input/pressButton failed for ${button.toolValue} on $deviceId"
       )
     }
   }

@@ -3,7 +3,8 @@ import net from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { defaultTimer } from "../../src/utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
+import { FakeTimer } from "../fakes/FakeTimer";
 import type { BootedDevice } from "../../src/models";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
 import { VideoStreamSocketServer } from "../../src/daemon/videoStreamSocketServer";
@@ -31,6 +32,9 @@ class FakeCaptureSource implements H264CaptureSource {
   startGate: Promise<void> | null = null;
   onStart: (() => void) | null = null;
   keyFrameRequests = 0;
+  // When > 0, requestKeyFrame() reports the source is throttling (returns false) this many times
+  // before it honors one — modeling the real Android/iOS key-frame rate limiter.
+  keyFrameRejectionsRemaining = 0;
 
   async start(): Promise<void> {
     await this.startGate;
@@ -47,6 +51,10 @@ class FakeCaptureSource implements H264CaptureSource {
 
   requestKeyFrame(): boolean {
     this.keyFrameRequests++;
+    if (this.keyFrameRejectionsRemaining > 0) {
+      this.keyFrameRejectionsRemaining--;
+      return false;
+    }
     return true;
   }
 }
@@ -74,6 +82,7 @@ async function startHarness(
     startData?: Buffer;
     resolveError?: Error;
     authenticator?: StreamSocketAuthenticator;
+    timer?: Timer;
   } = {}
 ): Promise<Harness> {
   const dir = mkdtempSync(path.join(tmpdir(), "amvs-"));
@@ -109,7 +118,7 @@ async function startHarness(
       nowUs: () => 1_000n,
     },
     socketPath,
-    defaultTimer,
+    options.timer ?? defaultTimer,
     options.authenticator ?? allowAllAuthenticator
   );
   await server.start();
@@ -628,6 +637,86 @@ describe("VideoStreamSocketServer", () => {
 
     expect(late.binary().includes(pps)).toBe(true);
     expect(late.binary().includes(idr)).toBe(true);
+  });
+
+  test("a drained backpressured subscriber is handed an immediate key frame, not a GOP-long freeze", async () => {
+    const h = await startHarness();
+    const client = await subscribe(h.socketPath);
+    await waitFor(() => h.sources.length > 0);
+    const source = h.sources[0];
+
+    // A fresh subscriber starts waiting-for-key-frame, so inter frames are skipped until an IDR
+    // arrives. Send one so the subscriber is actually streaming and the inter-frame flood below can
+    // reach write() and trigger backpressure.
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0x00, 0x00, 0x00, 0x01, 0x01]));
+    await waitFor(() => client.binary().includes(Buffer.from([0x05, 0xaa])));
+
+    // Stop reading so the server's write buffer fills and the subscriber is marked "behind".
+    client.socket.pause();
+
+    // Emit far more than any socket high-water mark, as large inter (non-key) frames, so a
+    // write() reports backpressure and the subscriber is parked waiting for the next key frame.
+    // Each NAL is flushed by the leading start code of the following emit; a trailing start code
+    // flushes the last.
+    const frame = Buffer.concat([
+      Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01]),
+      Buffer.alloc(64 * 1024, 0xab),
+    ]);
+    for (let i = 0; i < 40; i++) {
+      h.emit(frame);
+    }
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01]));
+
+    // Baseline AFTER the subscribe-time IDR request: while the subscriber is still stuck (no drain
+    // yet) the count must not climb further.
+    const before = source.keyFrameRequests;
+
+    // Resume reading: the socket drains, and the drain handler asks the encoder for an immediate IDR
+    // rather than leaving this subscriber frozen until the next natural key frame (a whole GOP away).
+    client.socket.resume();
+    await waitFor(() => source.keyFrameRequests > before);
+
+    expect(source.keyFrameRequests).toBeGreaterThan(before);
+  });
+
+  test("a key frame throttled at drain time is retried until the source honors one", async () => {
+    // The real capture sources rate-limit key-frame requests (Android + raw iOS ~3s, encoded iOS
+    // ~500ms), so a drain landing inside that window gets a `false` from requestKeyFrame(). Without
+    // a retry the subscriber stays in waitingForKeyFrame and drops every inter frame until the
+    // natural GOP — the multi-second freeze this recovery exists to prevent. Auto-advance lets the
+    // injected timer's retries fire promptly.
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const h = await startHarness({ timer: fakeTimer });
+    const client = await subscribe(h.socketPath);
+    await waitFor(() => h.sources.length > 0);
+    const source = h.sources[0];
+
+    // Get the subscriber actually streaming (as in the drain test above).
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0x00, 0x00, 0x00, 0x01, 0x01]));
+    await waitFor(() => client.binary().includes(Buffer.from([0x05, 0xaa])));
+
+    // Throttle the NEXT two key-frame requests before the source honors one. Set after the
+    // subscribe-time request so only the drain-recovery path meets the throttle.
+    source.keyFrameRejectionsRemaining = 2;
+    const before = source.keyFrameRequests;
+
+    // Backpressure, then drain the subscriber.
+    client.socket.pause();
+    const frame = Buffer.concat([
+      Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01]),
+      Buffer.alloc(64 * 1024, 0xab),
+    ]);
+    for (let i = 0; i < 40; i++) {
+      h.emit(frame);
+    }
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01]));
+    client.socket.resume();
+
+    // The drain handler's first request is rejected; the timer-driven retries keep asking until the
+    // source finally honors one — 2 rejections + 1 success — instead of leaving playback frozen.
+    await waitFor(() => source.keyFrameRequests >= before + 3);
+    expect(source.keyFrameRejectionsRemaining).toBe(0);
   });
 
   test("a failed capture start is reported and starts nothing", async () => {

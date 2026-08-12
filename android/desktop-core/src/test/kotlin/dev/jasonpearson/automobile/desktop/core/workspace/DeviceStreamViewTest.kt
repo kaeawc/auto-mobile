@@ -11,9 +11,13 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.control.testSnapshot
 import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -95,6 +99,45 @@ class DeviceStreamViewTest {
       val connectsBeforeRetry = source.connectCalls
       onNodeWithText("Check again").performClick()
       waitUntil { source.connectCalls > connectsBeforeRetry }
+    }
+
+  @Test
+  fun `an armed iOS pane still surfaces Screen Recording approval over the control view`() =
+    runComposeUiTest {
+      // Regression: a refused iOS relay (PermissionRequired) must win even when device control is
+      // armed. On iOS the observation stream can hand the pane a snapshot (arming it) while the
+      // video relay is still refused; taking the armed branch there rendered a frozen fallback
+      // screenshot and hid the approval UI, stranding the user with no way to recover (#5221).
+      val source = FakeVideoStreamSource(screenRecordingRequired = true)
+      val scope = CoroutineScope(Dispatchers.Unconfined)
+      val control =
+        WorkspaceDeviceControlState(
+          dispatcher =
+            VideoInputDispatcher(
+              scope = scope,
+              clientProvider = { null },
+              platform = { "ios" },
+              deviceId = "ios-simulator",
+              tracer = InteractionLatencyTracer(),
+            ),
+          interactionSnapshot = testSnapshot(), // armed
+          renderSnapshot = testSnapshot(),
+          tapError = null,
+          tracer = InteractionLatencyTracer(),
+        )
+      setContent {
+        MaterialTheme {
+          DeviceStreamView(
+            iosCol(),
+            enableDeviceControl = true,
+            control = control,
+            sourceFactory = { source },
+          )
+        }
+      }
+
+      onNodeWithText("Screen Recording needs approval").assertIsDisplayed()
+      scope.cancel()
     }
 
   @Test

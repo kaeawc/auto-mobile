@@ -15,15 +15,19 @@ class AppVersionProviderTest {
   private fun provider(raw: String?) = RuntimeAppVersionProvider(VersionSource { raw })
 
   @Test
-  fun `packaged version is preserved verbatim and marked non-development`() {
-    val version = provider("0.0.52-SNAPSHOT").current()
-    assertEquals("0.0.52-SNAPSHOT", version.raw)
-    assertFalse(version.isDevelopment, "a resolved packaged version is not a development run")
+  fun `a plain unsuffixed version is a real installed build eligible for updates`() {
+    val version = provider("0.0.52").current()
+    assertEquals("0.0.52", version.raw)
+    assertFalse(version.isDevelopment, "a packaged release version is not a development run")
   }
 
   @Test
-  fun `release version without a suffix is preserved`() {
-    assertEquals("0.0.52", provider("0.0.52").current().raw)
+  fun `a SNAPSHOT version is a source build and marked development`() {
+    // The generated version resource is present even in Gradle/IDE runs, so the SNAPSHOT qualifier
+    // — not the resource's absence — is the reliable source-build signal (#5224 review).
+    val version = provider("0.0.53-SNAPSHOT").current()
+    assertEquals("0.0.53-SNAPSHOT", version.raw, "raw is preserved for diagnostics")
+    assertTrue(version.isDevelopment, "a -SNAPSHOT build must never self-update")
   }
 
   @Test

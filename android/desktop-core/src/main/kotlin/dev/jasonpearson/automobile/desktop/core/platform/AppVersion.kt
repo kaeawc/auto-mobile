@@ -11,19 +11,30 @@ package dev.jasonpearson.automobile.desktop.core.platform
 data class AppVersion(val raw: String, val isDevelopment: Boolean) {
   companion object {
     /**
-     * Sentinel for runs where no packaged version can be resolved — a Gradle `run`, the IDE, and
-     * Compose hot-reload all lack the generated version resource and the packaged jar manifest.
-     * Update checks treat [isDevelopment] as "never self-update" so development never triggers an
-     * installer download against itself.
+     * Sentinel for runs where no version string can be resolved at all. Update checks treat
+     * [isDevelopment] as "never self-update" so development never triggers an installer download
+     * against itself.
      */
     val Dev: AppVersion = AppVersion(raw = "dev", isDevelopment = true)
 
     /**
-     * Maps a raw version string to an [AppVersion]. A null or blank string (the unpackaged case)
-     * yields [Dev]; otherwise the trimmed string is preserved verbatim as a packaged version.
+     * Marks source/local builds. Release installers are packaged with a plain, unsuffixed semver.
      */
-    fun of(raw: String?): AppVersion =
-      raw?.trim()?.takeIf { it.isNotEmpty() }?.let { AppVersion(raw = it, isDevelopment = false) }
-        ?: Dev
+    private const val SNAPSHOT_SUFFIX = "-SNAPSHOT"
+
+    /**
+     * Maps a raw version string to an [AppVersion]. A null or blank string yields [Dev]. A
+     * `-SNAPSHOT` version is a source/local build (the generated version resource is present in
+     * ordinary Gradle/IDE runs, so absence of the resource is *not* a reliable dev signal — the
+     * SNAPSHOT qualifier is), so it is marked `isDevelopment = true` while preserving [raw]. Only a
+     * plain, unsuffixed version — what the release workflow packages — is treated as a real
+     * installed build eligible for updates.
+     */
+    fun of(raw: String?): AppVersion {
+      val trimmed = raw?.trim()
+      if (trimmed.isNullOrEmpty()) return Dev
+      val isSnapshot = trimmed.endsWith(SNAPSHOT_SUFFIX, ignoreCase = true)
+      return AppVersion(raw = trimmed, isDevelopment = isSnapshot)
+    }
   }
 }

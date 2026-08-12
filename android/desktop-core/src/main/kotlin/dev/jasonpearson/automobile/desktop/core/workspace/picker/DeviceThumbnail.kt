@@ -62,12 +62,12 @@ private const val SCREENSHOT_RETRY_MAX_MS = 15_000L
 
 /**
  * Capture a fallback still, retrying with bounded exponential backoff until one succeeds. Each
- * attempt first waits for the live relay to be [VideoStreamState.Unavailable] — there is no point
- * capturing an observation still while live video works (the caller prefers the frame), so a
- * recovered relay pauses retries. A single timed-out or too-early capture therefore no longer
- * leaves the card stuck on "No preview": when the observation service becomes ready, the next
- * attempt succeeds. The caller cancels this by leaving the composition. [delayMs] is injectable so
- * a test can drive the cadence without real time.
+ * attempt first waits for the live relay to be unavailable or need Screen Recording approval —
+ * there is no point capturing an observation still while live video works (the caller prefers the
+ * frame), so a recovered relay pauses retries. A single timed-out or too-early capture therefore no
+ * longer leaves the card stuck on "No preview": when the observation service becomes ready, the
+ * next attempt succeeds. The caller cancels this by leaving the composition. [delayMs] is
+ * injectable so a test can drive the cadence without real time.
  */
 internal suspend fun captureScreenshotWithRetry(
   state: StateFlow<VideoStreamState>,
@@ -79,7 +79,9 @@ internal suspend fun captureScreenshotWithRetry(
 ): ImageBitmap {
   var backoff = initialBackoffMs
   while (true) {
-    state.first { it is VideoStreamState.Unavailable }
+    state.first {
+      it is VideoStreamState.Unavailable || it is VideoStreamState.PermissionRequired
+    }
     source.latest(deviceId)?.let {
       return it
     }
@@ -168,16 +170,14 @@ private fun LiveThumbnail(
   val state by source.state.collectAsState()
   val bitmap = liveFrame?.bitmap
 
-  // Fetch the screenshot fallback while the relay is Unavailable, retrying with backoff until it
-  // yields a still — so a daemon that predates the relay (or the pristine home grid before a
-  // session
-  // is registered) still shows a frame, and a single timed-out/early capture doesn't leave the card
-  // stuck on "No preview" once the observation service recovers. Keyed on deviceId only (NOT the
-  // live
-  // stream state): auto-reconnect cycles Connecting<->Unavailable, and keying on the full state
-  // would
-  // cancel and restart the capture on every flip. The retry pauses while live video works, and the
-  // `when` below still prefers a live frame if one arrives.
+  // Fetch the screenshot fallback while the relay is unavailable or needs Screen Recording
+  // approval, retrying with backoff until it yields a still — so a daemon that predates the relay
+  // (or the pristine home grid before a session is registered) still shows a frame, and a single
+  // timed-out/early capture doesn't leave the card stuck on "No preview" once the observation
+  // service recovers. Keyed on deviceId only (NOT the live stream state): auto-reconnect cycles
+  // Connecting<->Unavailable, and keying on the full state would cancel and restart the capture on
+  // every flip. The retry pauses while live video works, and the `when` below still prefers a live
+  // frame if one arrives.
   var screenshot by remember(deviceId) { mutableStateOf<ImageBitmap?>(null) }
   LaunchedEffect(deviceId, screenshotSource) {
     if (screenshotSource != null && screenshot == null) {

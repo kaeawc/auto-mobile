@@ -194,6 +194,38 @@ class DevicePickerViewModelTest {
   }
 
   @Test
+  fun `a superseded boot reload does not auto-observe a device the newer state dropped`() =
+    testScope.runTest {
+      val client =
+        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)
+      val boot =
+        FakeDeviceBootController().apply {
+          autoComplete = false
+          result = Result.success("emulator-5556")
+          onSuccess = { client.bootedJson = TWO_BOOTED_PIXEL8_AND_6 }
+        }
+      val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
+      v.effect.test {
+        v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // boot in flight (held)
+
+        // Let the boot resolve so its reload reads the (now-booted) list, then stall it on the
+        // gate.
+        val reloadGate = CompletableDeferred<Unit>()
+        client.imagesGate = reloadGate
+        boot.complete()
+        client.imagesGate = null
+
+        // Another client kills emulator-5556, then a newer refresh supersedes the stalled reload.
+        client.bootedJson = SINGLE_BOOTED_PIXEL8
+        v.onAction(DevicePickerAction.Refresh) // gen N+1 emits Content without emulator-5556
+
+        reloadGate.complete(Unit) // stale reload resumes: auto-observe must see the device is gone
+        expectNoEvents() // no Observe effect for the now-dead device
+        cancelAndIgnoreRemainingEvents()
+      }
+    }
+
+  @Test
   fun `a silent refresh coalesces while a load is in flight`() = testScope.runTest {
     val client =
       ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)

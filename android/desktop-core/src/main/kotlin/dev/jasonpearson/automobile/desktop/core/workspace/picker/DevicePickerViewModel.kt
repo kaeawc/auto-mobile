@@ -359,10 +359,20 @@ class DevicePickerViewModel(
     // wins.
     syncState()
     emitIfCurrent(generation, devices)
-    // Boot then auto-observe: a completed boot jumps straight into the workspace for that device
-    // (matches the plain-click contract; the host turns the Observe effect into a column).
-    if (bootedRuntime != null) {
-      _effect.send(DevicePickerEffect.Observe(listOf(columnOf(bootedRuntime))))
+    // Boot then auto-observe — but observe from the CURRENT (winning) state, not this reload's own
+    // (possibly stale) list. If a newer refresh superseded this stalled reload, emitIfCurrent
+    // dropped
+    // its list; sending straight from `bootedRuntime` could open a pane — and start
+    // binding/streaming
+    // — for a device the newer refresh has since removed (e.g. killed by another client while this
+    // reload was stalled). Re-checking the live Content re-observes only a device that is still
+    // present-and-booted, with its fresh lock/virtual state (Codex).
+    val stillBooted =
+      (_state.value as? DevicePickerUiState.Content)?.devices?.firstOrNull {
+        it.id == runtimeDeviceId && it.state == DeviceState.Booted
+      }
+    if (stillBooted != null) {
+      _effect.send(DevicePickerEffect.Observe(listOf(columnOf(stillBooted))))
     }
   }
 

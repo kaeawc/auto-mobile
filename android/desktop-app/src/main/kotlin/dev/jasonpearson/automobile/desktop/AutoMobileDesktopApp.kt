@@ -356,14 +356,16 @@ fun AutoMobileDesktopApp(
   // While the device grid is the visible surface — nothing observed, or the picker opened over a
   // workspace — poll for device changes so devices started/killed by another client appear while
   // the
-  // user sits on the grid (Codex P2: the stationary-Empty launch path had no refresh after the init
-  // load). A silent reload keeps the grid on screen between polls; the workspace-active case skips.
-  LaunchedEffect(pickerViewModel) {
+  // user sits on the grid. Keyed on the DERIVED visibility (recomputed each recomposition), so the
+  // loop starts when the grid appears and stops when it hides, instead of reading state captured at
+  // launch: onboarding→grid and Devices+→overlay transitions both (re)start polling (Codex P2). A
+  // silent reload keeps the grid on screen between polls.
+  val gridVisible = !showOnboarding && (pickerOpen || workspaceState is WorkspaceUiState.Empty)
+  LaunchedEffect(pickerViewModel, gridVisible) {
+    if (!gridVisible) return@LaunchedEffect
     while (true) {
       delay(GRID_REFRESH_POLL_MS)
-      val gridVisible =
-        !showOnboarding && (pickerOpen || workspaceViewModel.state.value is WorkspaceUiState.Empty)
-      if (gridVisible) pickerViewModel.onAction(DevicePickerAction.SilentRefresh)
+      pickerViewModel.onAction(DevicePickerAction.SilentRefresh)
     }
   }
 

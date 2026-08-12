@@ -8,17 +8,4 @@ internal object SdkConstants {
   /** Signature-level permission for controlling SDK broadcast receivers. */
   const val PERMISSION_NETWORK_CONTROL =
     "dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2"
-
-  /** Permission held by released CtrlProxy versions before [PERMISSION_NETWORK_CONTROL]. */
-  const val LEGACY_PERMISSION_NETWORK_CONTROL =
-    "dev.jasonpearson.automobile.sdk.permission.NETWORK_CONTROL"
-
-  /**
-   * Permissions accepted from CtrlProxy control broadcasts, newest first.
-   *
-   * Dynamic receivers accept one sender permission per registration, so each permission requires a
-   * distinct receiver registration.
-   */
-  val NETWORK_CONTROL_PERMISSIONS =
-    listOf(PERMISSION_NETWORK_CONTROL, LEGACY_PERMISSION_NETWORK_CONTROL)
 }

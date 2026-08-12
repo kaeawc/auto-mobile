@@ -357,6 +357,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val navigationEventAccumulator = NavigationEventAccumulator()
   private val sdkEventBatchProcessor by lazy {
     SdkEventBatchProcessor(
+      scope = serviceScope,
       navigationEventAccumulator = navigationEventAccumulator,
       broadcastNavigationEvent = ::broadcastNavigationEvent,
       broadcastSdkEvent = ::broadcastSdkEvent,
@@ -880,8 +881,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           Log.d(TAG, "Received event batch with ${batch.events.size} events")
 
-          serviceScope.launch {
-            sdkEventBatchProcessor.process(batch)
+          if (!sdkEventBatchProcessor.enqueue(batch)) {
+            Log.w(TAG, "Dropping SDK event batch because CtrlProxy is shutting down")
           }
         } catch (e: Exception) {
           Log.e(TAG, "Error handling event batch broadcast", e)

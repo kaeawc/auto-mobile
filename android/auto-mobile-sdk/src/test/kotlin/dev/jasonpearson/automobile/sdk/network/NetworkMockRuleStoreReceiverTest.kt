@@ -10,7 +10,6 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotSame
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -21,40 +20,24 @@ import org.robolectric.annotation.Config
 class NetworkMockRuleStoreReceiverTest {
 
   @Test
-  fun `network control receiver accepts current and legacy CtrlProxy permissions`() {
+  fun `network control receiver accepts only CtrlProxy owned V2 permission`() {
     assertEquals(
-      listOf(
-        "dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2",
-        "dev.jasonpearson.automobile.sdk.permission.NETWORK_CONTROL",
-      ),
-      SdkConstants.NETWORK_CONTROL_PERMISSIONS,
+      "dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2",
+      SdkConstants.PERMISSION_NETWORK_CONTROL,
     )
   }
 
-  /**
-   * Each permission needs a distinct receiver registration, while repeat initialization remains a
-   * no-op and teardown unregisters every registration (#3599).
-   */
+  /** Repeat initialization remains a no-op and teardown unregisters the receiver (#3599). */
   @Test
-  fun `registerReceiver is idempotent and unregisters both permission receivers`() {
+  fun `registerReceiver is idempotent and unregister allows re-register`() {
     val store = NetworkMockRuleStore()
     val context = mockk<Context>(relaxed = true)
-    val currentReceiver = slot<BroadcastReceiver>()
-    val legacyReceiver = slot<BroadcastReceiver>()
+    val receiver = slot<BroadcastReceiver>()
     every {
       context.registerReceiver(
         any<BroadcastReceiver>(),
         any<IntentFilter>(),
         SdkConstants.PERMISSION_NETWORK_CONTROL,
-        null,
-        Context.RECEIVER_EXPORTED,
-      )
-    } returns null
-    every {
-      context.registerReceiver(
-        any<BroadcastReceiver>(),
-        any<IntentFilter>(),
-        SdkConstants.LEGACY_PERMISSION_NETWORK_CONTROL,
         null,
         Context.RECEIVER_EXPORTED,
       )
@@ -65,45 +48,25 @@ class NetworkMockRuleStoreReceiverTest {
 
     verify(exactly = 1) {
       context.registerReceiver(
-        capture(currentReceiver),
+        capture(receiver),
         any<IntentFilter>(),
         SdkConstants.PERMISSION_NETWORK_CONTROL,
         null,
         Context.RECEIVER_EXPORTED,
       )
     }
-    verify(exactly = 1) {
-      context.registerReceiver(
-        capture(legacyReceiver),
-        any<IntentFilter>(),
-        SdkConstants.LEGACY_PERMISSION_NETWORK_CONTROL,
-        null,
-        Context.RECEIVER_EXPORTED,
-      )
-    }
-    assertNotSame(currentReceiver.captured, legacyReceiver.captured)
 
     store.unregisterReceiver(context)
     store.unregisterReceiver(context) // guarded no-op
-    verify(exactly = 1) { context.unregisterReceiver(currentReceiver.captured) }
-    verify(exactly = 1) { context.unregisterReceiver(legacyReceiver.captured) }
+    verify(exactly = 1) { context.unregisterReceiver(receiver.captured) }
 
-    // After unregister, both registrations can be restored.
+    // After unregister, registration can be restored.
     store.registerReceiver(context)
     verify(exactly = 2) {
       context.registerReceiver(
         any<BroadcastReceiver>(),
         any<IntentFilter>(),
         SdkConstants.PERMISSION_NETWORK_CONTROL,
-        null,
-        Context.RECEIVER_EXPORTED,
-      )
-    }
-    verify(exactly = 2) {
-      context.registerReceiver(
-        any<BroadcastReceiver>(),
-        any<IntentFilter>(),
-        SdkConstants.LEGACY_PERMISSION_NETWORK_CONTROL,
         null,
         Context.RECEIVER_EXPORTED,
       )

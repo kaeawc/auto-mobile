@@ -64,6 +64,21 @@ class UpdateVersioningTest {
   }
 
   @Test
+  fun `build metadata is validated then ignored for precedence`() {
+    // Malformed build metadata (empty identifier) rejects the whole version.
+    assertFalse(isNewerVersion("0.0.54+bad..meta", "0.0.53"))
+    // Well-formed build metadata is ignored: 0.0.54 is still newer than 0.0.53.
+    assertTrue(isNewerVersion("0.0.54+build.1", "0.0.53"))
+    // Build metadata does not affect precedence between two otherwise-equal versions.
+    assertFalse(isNewerVersion("0.0.54+build.2", "0.0.54+build.1"))
+  }
+
+  @Test
+  fun `versions with leading-zero segments are rejected`() {
+    assertFalse(isNewerVersion("01.0.0", "0.0.52"))
+  }
+
+  @Test
   fun `resolveAsset matches the platform suffix and returns null when absent`() {
     val assets =
       listOf(

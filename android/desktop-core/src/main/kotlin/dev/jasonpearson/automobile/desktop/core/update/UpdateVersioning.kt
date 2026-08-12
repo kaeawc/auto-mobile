@@ -60,29 +60,32 @@ internal fun resolveAsset(assets: List<ReleaseAsset>, platform: HostPlatform): R
 
 private data class ParsedVersion(val numbers: List<Int>, val prerelease: String?)
 
-/** A SemVer prerelease identifier: one or more ASCII alphanumerics or hyphens. */
-private val PRERELEASE_IDENTIFIER = Regex("[0-9A-Za-z-]+")
+/**
+ * The canonical SemVer 2.0.0 grammar (semver.org). Validates the whole string in one place —
+ * numeric core (no leading zeros), prerelease identifiers, and build metadata — so a malformed tag
+ * in any portion (`1.bad.0`, `1.0.1-`, `1.0.1-alpha..1`, `0.0.54+bad..meta`) fails to match rather
+ * than being best-effort-parsed into something that could read as newer.
+ */
+private val SEMVER =
+  Regex(
+    "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)" +
+      "(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?" +
+      "(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+  )
 
 /**
- * Parses `[v]MAJOR.MINOR.PATCH[-prerelease][+build]`, or null if any core segment is non-numeric or
- * the prerelease contains an empty/invalid identifier (`1.0.1-`, `1.0.1-alpha..1`). Rejecting
- * rather than best-effort-parsing keeps a malformed tag from ever reading as newer.
+ * Parses `[v]MAJOR.MINOR.PATCH[-prerelease][+build]`, or null if the string is not valid SemVer.
+ * Build metadata is validated then discarded (it never affects precedence, per the spec).
  */
 private fun parseVersion(raw: String): ParsedVersion? {
-  val withoutPrefix = raw.trim().removePrefix("v").removePrefix("V")
-  val withoutBuild = withoutPrefix.substringBefore('+')
-  val dash = withoutBuild.indexOf('-')
-  val core = if (dash >= 0) withoutBuild.substring(0, dash) else withoutBuild
-  val prerelease = if (dash >= 0) withoutBuild.substring(dash + 1) else null
-  val numbers = ArrayList<Int>()
-  for (segment in core.split('.')) {
-    // A non-numeric core segment means we cannot trust the version — reject the whole string.
-    numbers.add(segment.toIntOrNull() ?: return null)
-  }
-  if (prerelease != null && !isValidPrerelease(prerelease)) return null
-  return ParsedVersion(numbers, prerelease)
+  val normalized = raw.trim().removePrefix("v").removePrefix("V")
+  val match = SEMVER.matchEntire(normalized) ?: return null
+  val (major, minor, patch, prerelease) = match.destructured
+  val numbers =
+    listOf(
+      major.toIntOrNull() ?: return null,
+      minor.toIntOrNull() ?: return null,
+      patch.toIntOrNull() ?: return null,
+    )
+  return ParsedVersion(numbers, prerelease.ifEmpty { null })
 }
-
-/** True when every dot-separated prerelease identifier is non-empty and uses the SemVer charset. */
-private fun isValidPrerelease(prerelease: String): Boolean =
-  prerelease.split('.').all { it.isNotEmpty() && PRERELEASE_IDENTIFIER.matches(it) }

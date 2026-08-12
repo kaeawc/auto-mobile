@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.update
 
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -12,6 +13,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 
 /** State-machine behavior of the update check (AC1–AC5) against a fake release source. */
 class RealUpdateControllerTest {
@@ -156,6 +158,31 @@ class RealUpdateControllerTest {
     // Previous stable state was Idle; a cancelled check must not leave collectors stuck at
     // Checking.
     assertEquals(UpdateStatus.Idle, controller.status.value)
+  }
+
+  @Test
+  fun `overlapping checks are serialized, never running the fetch concurrently`() = runTest {
+    val inFlight = AtomicInteger(0)
+    val maxConcurrent = AtomicInteger(0)
+    val source =
+      object : ReleaseSource {
+        override suspend fun fetchLatestRelease(): ReleaseInfo {
+          val now = inFlight.incrementAndGet()
+          maxConcurrent.updateAndGet { maxOf(it, now) }
+          yield() // give any overlapping check a chance to enter before we finish
+          inFlight.decrementAndGet()
+          return release("v0.0.53")
+        }
+      }
+    val controller = RealUpdateController(source, versionProvider(packaged), HostPlatform.MAC)
+
+    val first = launch { controller.checkForUpdate() }
+    val second = launch { controller.checkForUpdate() }
+    first.join()
+    second.join()
+
+    assertEquals(1, maxConcurrent.get(), "the fetch must never run for two checks at once")
+    assertIs<UpdateStatus.UpdateAvailable>(controller.status.value)
   }
 
   @Test

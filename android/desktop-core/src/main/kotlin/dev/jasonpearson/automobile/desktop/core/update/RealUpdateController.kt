@@ -6,6 +6,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private val LOG = LoggerFactory.getLogger("UpdateController")
 
@@ -24,7 +26,16 @@ class RealUpdateController(
   private val mutableStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
   override val status: StateFlow<UpdateStatus> = mutableStatus.asStateFlow()
 
-  override suspend fun checkForUpdate() {
+  // Serializes checks so overlapping callers (a startup check racing a manual one) never interleave
+  // their status writes — the previous-state capture below is only correct with one check in
+  // flight.
+  private val checkMutex = Mutex()
+
+  override suspend fun checkForUpdate(): Unit = checkMutex.withLock {
+    runCheck()
+  }
+
+  private suspend fun runCheck() {
     val appVersion = appVersionProvider.current()
     // A development build (no packaged version) and an OS we don't ship an installer for both mean
     // "there is nothing we could apply" — resolve without any network work so dev never

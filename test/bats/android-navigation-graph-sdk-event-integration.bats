@@ -11,6 +11,7 @@ setup() {
   export AUTO_MOBILE_LOG="${MOCK_BIN}/auto-mobile.log"
   export SESSION_BOUND_FILE="${MOCK_BIN}/session-bound"
   export EVENT_TRIGGERED_FILE="${MOCK_BIN}/event-triggered"
+  export EVENT_DESTINATION_FILE="${MOCK_BIN}/event-destination"
   export GRAPH_ATTEMPTS_FILE="${MOCK_BIN}/graph-attempts"
   export ROOTED_FILE="${MOCK_BIN}/rooted"
   export DEVICE_READY_FILE="${MOCK_BIN}/device-ready"
@@ -63,14 +64,23 @@ if [[ "$*" == *"TEST_EMIT_SDK_NAVIGATION"* ]]; then
     echo "SDK event emitted before graph session binding" >&2
     exit 1
   fi
+  for ((index = 1; index <= $#; index++)); do
+    if [ "${!index}" = "destination" ]; then
+      next_index=$((index + 1))
+      printf "%s\n" "${!next_index}" > "$EVENT_DESTINATION_FILE"
+      break
+    fi
+  done
   touch "$EVENT_TRIGGERED_FILE"
 fi
 '
   make_mock sleep 'exit 0'
   make_mock jq '
-if [ "$1" = "-e" ]; then
+if [ "$1" = "-e" ] && [ "$2" = "--arg" ] && [ "$3" = "destination" ] &&
+  grep -Fq -- "$4"; then
   exit 0
 fi
+exit 1
 '
   make_mock auto-mobile '
 printf "%s\n" "$*" >> "$AUTO_MOBILE_LOG"
@@ -102,7 +112,8 @@ if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && 
       if [ "$attempts" -eq 1 ]; then
         exit 1
       fi
-      printf "{}\n"
+      destination="$(cat "$EVENT_DESTINATION_FILE")"
+      printf "{\"screens\":[{\"name\":\"%s\"}]}\n" "$destination"
       exit 0
       ;;
   esac
@@ -137,11 +148,24 @@ if [ "$*" = "-s emulator-5554 root" ] || [ "$*" = "-s emulator-5554 wait-for-dev
   exit 0
 fi
 if [[ "$*" == *"TEST_EMIT_SDK_NAVIGATION"* ]]; then
+  for ((index = 1; index <= $#; index++)); do
+    if [ "${!index}" = "destination" ]; then
+      next_index=$((index + 1))
+      printf "%s\n" "${!next_index}" > "$EVENT_DESTINATION_FILE"
+      break
+    fi
+  done
   touch "$EVENT_TRIGGERED_FILE"
 fi
 '
   make_mock sleep 'exit 0'
-  make_mock jq 'exit 0'
+  make_mock jq '
+if [ "$1" = "-e" ] && [ "$2" = "--arg" ] && [ "$3" = "destination" ] &&
+  grep -Fq -- "$4"; then
+  exit 0
+fi
+exit 1
+'
   mkdir -p "${GITHUB_WORKSPACE}/dist/src"
   mkdir -p "${HOME}/.bun/bin"
   ln -s "${HOME}/.bun/bin/missing-auto-mobile" "${HOME}/.bun/bin/auto-mobile"
@@ -156,7 +180,8 @@ case "$6" in
     ;;
   getNavigationGraph)
     [ -f "$EVENT_TRIGGERED_FILE" ]
-    printf "{}\n"
+    destination="$(cat "$EVENT_DESTINATION_FILE")"
+    printf "{\"screens\":[{\"name\":\"%s\"}]}\n" "$destination"
     exit 0
     ;;
 esac

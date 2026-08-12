@@ -359,8 +359,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     SdkEventBatchProcessor(
       scope = serviceScope,
       navigationEventAccumulator = navigationEventAccumulator,
-      broadcastNavigationEvent = ::broadcastNavigationEvent,
-      broadcastSdkEvent = ::broadcastSdkEvent,
+      broadcastNavigationEvent = { event ->
+        broadcastNavigationEvent(event, WebSocketServer.BroadcastMode.Sync)
+      },
+      broadcastSdkEvent = { event -> broadcastSdkEvent(event, WebSocketServer.BroadcastMode.Sync) },
     )
   }
   private lateinit var overlayManager: OverlayManager
@@ -1153,8 +1155,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             }
           }
           .launchIn(serviceScope)
-      sdkEventBatchProcessor.start()
-      Log.d(TAG, "SDK event batch processor started")
+      serviceScope.launch {
+        webSocketServer.awaitFirstClientConnection()
+        sdkEventBatchProcessor.start()
+        Log.d(TAG, "SDK event batch processor started after first WebSocket client connected")
+      }
 
       // Start logcat reader for automatic log capture
       logcatReader = LogcatReader { response ->
@@ -5597,7 +5602,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Broadcast navigation event to WebSocket clients using typed protocol */
-  private suspend fun broadcastNavigationEvent(event: TimestampedNavigationEvent) {
+  private suspend fun broadcastNavigationEvent(
+    event: TimestampedNavigationEvent,
+    mode: WebSocketServer.BroadcastMode = WebSocketServer.BroadcastMode.Async,
+  ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping navigation event broadcast")
       return
@@ -5606,7 +5614,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     try {
       val response = navigationEventResponse(event)
 
-      webSocketServer.broadcast(response)
+      webSocketServer.broadcast(response, mode)
       Log.d(
         TAG,
         "Broadcasted navigation event to ${webSocketServer.getConnectionCount()} clients: ${event.destination}",
@@ -5788,7 +5796,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Broadcast an individual SDK event from a batch to WebSocket clients. */
-  private suspend fun broadcastSdkEvent(event: SdkEvent) {
+  private suspend fun broadcastSdkEvent(
+    event: SdkEvent,
+    mode: WebSocketServer.BroadcastMode = WebSocketServer.BroadcastMode.Async,
+  ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
 
     try {
@@ -5864,7 +5875,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           is SdkEventBatch -> null
         }
 
-      response?.let { webSocketServer.broadcast(it) }
+      response?.let { webSocketServer.broadcast(it, mode) }
     } catch (e: CancellationException) {
       // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
       throw e

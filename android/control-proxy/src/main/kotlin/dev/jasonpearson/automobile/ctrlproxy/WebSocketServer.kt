@@ -118,6 +118,7 @@ class WebSocketServer(
   private val connections = mutableSetOf<DefaultWebSocketSession>()
   private val requestConnections = mutableMapOf<String, DefaultWebSocketSession>()
   private val connectionCount = AtomicInteger(0)
+  private val firstClientConnection = CompletableDeferred<Unit>()
 
   // Flow to broadcast messages to all connected clients
   private val _messageFlow = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 10)
@@ -181,6 +182,7 @@ class WebSocketServer(
                   )
 
                   synchronized(connections) { connections.add(this) }
+                  firstClientConnection.complete(Unit)
 
                   // Listen for incoming messages
                   for (frame in incoming) {
@@ -442,6 +444,11 @@ class WebSocketServer(
   /** Get the number of active connections */
   fun getConnectionCount(): Int {
     return synchronized(connections) { connections.size }
+  }
+
+  /** Suspends until a client has completed the WebSocket handshake. */
+  suspend fun awaitFirstClientConnection() {
+    firstClientConnection.await()
   }
 
   /** Check if server is running */

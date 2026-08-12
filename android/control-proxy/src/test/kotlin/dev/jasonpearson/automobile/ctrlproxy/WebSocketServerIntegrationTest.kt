@@ -18,6 +18,7 @@ import io.ktor.websocket.readText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -162,6 +163,9 @@ class WebSocketServerIntegrationTest {
   fun `client can connect to server`() = runBlocking {
     // Given
     server.start()
+    val firstClientConnection = async { server.awaitFirstClientConnection() }
+
+    assertFalse("No client should be ready before the handshake", firstClientConnection.isCompleted)
 
     // When
     val client = HttpClient(CIO) { install(WebSockets) }
@@ -175,6 +179,7 @@ class WebSocketServerIntegrationTest {
       ) {
         // Then - connection established
         waitFor { server.getConnectionCount() == 1 }
+        withTimeout(1000) { firstClientConnection.await() }
         assertEquals(1, server.getConnectionCount())
 
         // Receive connection message

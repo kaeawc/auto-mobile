@@ -39,11 +39,15 @@ class RealUpdateController(
       return
     }
 
+    // Captured so a cancelled check restores the last stable state rather than pinning the shared
+    // singleton StateFlow at Checking for every collector.
+    val previousStatus = mutableStatus.value
     mutableStatus.value = UpdateStatus.Checking
     val release =
       try {
         releaseSource.fetchLatestRelease()
       } catch (cancellation: CancellationException) {
+        mutableStatus.value = previousStatus
         throw cancellation
       } catch (error: Exception) {
         // Typed failure surfaced to the UI; the check is best-effort and must never crash the app.

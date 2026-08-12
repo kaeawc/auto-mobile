@@ -5,11 +5,15 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.time.Duration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+
+private val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(10)
+private val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(20)
 
 /**
  * [ReleaseSource] backed by the GitHub REST API `releases/latest` endpoint (unauthenticated — the
@@ -19,7 +23,8 @@ import kotlinx.serialization.json.Json
  */
 class GitHubReleaseSource(
   private val repo: String = "kaeawc/auto-mobile",
-  private val httpClient: HttpClient = HttpClient.newBuilder().build(),
+  private val httpClient: HttpClient =
+    HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build(),
 ) : ReleaseSource {
 
   override suspend fun fetchLatestRelease(): ReleaseInfo =
@@ -29,6 +34,9 @@ class GitHubReleaseSource(
         HttpRequest.newBuilder(uri)
           .header("Accept", "application/vnd.github+json")
           .header("X-GitHub-Api-Version", "2022-11-28")
+          // Bound the request so a stalled/blackholed connection surfaces as a timeout (an
+          // IOException → ReleaseFetchException → Failed) instead of pinning status at Checking.
+          .timeout(REQUEST_TIMEOUT)
           .GET()
           .build()
 

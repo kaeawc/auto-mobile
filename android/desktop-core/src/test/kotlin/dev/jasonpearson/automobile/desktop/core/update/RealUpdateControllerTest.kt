@@ -7,6 +7,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 
 /** State-machine behavior of the update check (AC1–AC5) against a fake release source. */
@@ -129,6 +133,29 @@ class RealUpdateControllerTest {
       )
     pre.checkForUpdate()
     assertEquals(UpdateStatus.UpToDate, pre.status.value)
+  }
+
+  @Test
+  fun `a cancelled check restores the previous status instead of pinning Checking`() = runTest {
+    val entered = CompletableDeferred<Unit>()
+    val source =
+      object : ReleaseSource {
+        override suspend fun fetchLatestRelease(): ReleaseInfo {
+          entered.complete(Unit)
+          awaitCancellation()
+        }
+      }
+    val controller = RealUpdateController(source, versionProvider(packaged), HostPlatform.MAC)
+
+    val job = launch { controller.checkForUpdate() }
+    entered.await()
+    assertEquals(UpdateStatus.Checking, controller.status.value)
+
+    job.cancelAndJoin()
+
+    // Previous stable state was Idle; a cancelled check must not leave collectors stuck at
+    // Checking.
+    assertEquals(UpdateStatus.Idle, controller.status.value)
   }
 
   @Test

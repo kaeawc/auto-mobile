@@ -38,6 +38,23 @@ class UpdateVersioningTest {
   }
 
   @Test
+  fun `prerelease numeric identifiers compare numerically, not lexically`() {
+    // "rc.10" vs "rc.9": lexical compare would wrongly rank rc.10 below rc.9.
+    assertTrue(isNewerVersion("1.0.0-rc.10", "1.0.0-rc.9"))
+    assertFalse(isNewerVersion("1.0.0-rc.9", "1.0.0-rc.10"))
+    // Alphanumeric identifiers still compare lexically; numeric ranks below alphanumeric.
+    assertTrue(isNewerVersion("1.0.0-beta", "1.0.0-alpha"))
+    assertTrue(isNewerVersion("1.0.0-rc", "1.0.0-1"))
+  }
+
+  @Test
+  fun `a malformed candidate is never considered newer`() {
+    assertFalse(isNewerVersion("v1.bad.0", "0.0.52"))
+    assertFalse(isNewerVersion("nightly", "0.0.52"))
+    assertFalse(isNewerVersion("", "0.0.52"))
+  }
+
+  @Test
   fun `resolveAsset matches the platform suffix and returns null when absent`() {
     val assets =
       listOf(

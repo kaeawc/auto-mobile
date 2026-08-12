@@ -7,22 +7,47 @@ package dev.jasonpearson.automobile.desktop.core.update
  * unparseable in a segment is treated as 0 so a malformed tag never reads as "newer".
  */
 internal fun isNewerVersion(candidate: String, current: String): Boolean {
-  val a = parseVersion(candidate)
-  val b = parseVersion(current)
+  // A version we cannot fully parse (e.g. "v1.bad.0", "nightly") must never read as newer, or a
+  // malformed tag could surface a bogus update. parseVersion returns null for such input.
+  val a = parseVersion(candidate) ?: return false
+  val b = parseVersion(current) ?: return false
   val segments = maxOf(a.numbers.size, b.numbers.size)
   for (i in 0 until segments) {
     val left = a.numbers.getOrElse(i) { 0 }
     val right = b.numbers.getOrElse(i) { 0 }
     if (left != right) return left > right
   }
-  // Numeric cores are equal: a final release outranks a prerelease; two prereleases compare
-  // lexically.
-  return when {
-    a.prerelease == null && b.prerelease == null -> false
-    a.prerelease == null -> true
-    b.prerelease == null -> false
-    else -> a.prerelease > b.prerelease
+  // Numeric cores are equal: order by prerelease precedence (release outranks any prerelease).
+  return comparePrerelease(a.prerelease, b.prerelease) > 0
+}
+
+/**
+ * SemVer prerelease precedence. A null prerelease (a final release) outranks any prerelease.
+ * Otherwise dot-separated identifiers compare left to right: numeric identifiers numerically,
+ * numeric below alphanumeric, alphanumeric lexically; a larger set of identifiers outranks a prefix
+ * of it. So `rc.10` > `rc.9` (numeric), not the lexical `"rc.10" < "rc.9"`.
+ */
+private fun comparePrerelease(a: String?, b: String?): Int {
+  if (a == null && b == null) return 0
+  if (a == null) return 1
+  if (b == null) return -1
+  val aIds = a.split('.')
+  val bIds = b.split('.')
+  for (i in 0 until maxOf(aIds.size, bIds.size)) {
+    val x = aIds.getOrNull(i) ?: return -1
+    val y = bIds.getOrNull(i) ?: return 1
+    val xn = x.toIntOrNull()
+    val yn = y.toIntOrNull()
+    val cmp =
+      when {
+        xn != null && yn != null -> xn.compareTo(yn)
+        xn != null -> -1
+        yn != null -> 1
+        else -> x.compareTo(y)
+      }
+    if (cmp != 0) return cmp
   }
+  return 0
 }
 
 /**
@@ -35,12 +60,19 @@ internal fun resolveAsset(assets: List<ReleaseAsset>, platform: HostPlatform): R
 
 private data class ParsedVersion(val numbers: List<Int>, val prerelease: String?)
 
-private fun parseVersion(raw: String): ParsedVersion {
+/**
+ * Parses `[v]MAJOR.MINOR.PATCH[-prerelease][+build]`, or null if any core segment is non-numeric.
+ */
+private fun parseVersion(raw: String): ParsedVersion? {
   val withoutPrefix = raw.trim().removePrefix("v").removePrefix("V")
   val withoutBuild = withoutPrefix.substringBefore('+')
   val dash = withoutBuild.indexOf('-')
   val core = if (dash >= 0) withoutBuild.substring(0, dash) else withoutBuild
   val prerelease = if (dash >= 0) withoutBuild.substring(dash + 1) else null
-  val numbers = core.split('.').map { it.toIntOrNull() ?: 0 }
+  val numbers = ArrayList<Int>()
+  for (segment in core.split('.')) {
+    // A non-numeric core segment means we cannot trust the version — reject the whole string.
+    numbers.add(segment.toIntOrNull() ?: return null)
+  }
   return ParsedVersion(numbers, prerelease)
 }

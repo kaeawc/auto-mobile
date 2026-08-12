@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 internal class SdkEventBatchProcessor(
   private val scope: CoroutineScope,
   private val navigationEventAccumulator: NavigationEventAccumulator,
+  private val awaitClientConnection: suspend () -> Unit = {},
   private val broadcastNavigationEvent: suspend (TimestampedNavigationEvent) -> Unit,
   private val broadcastSdkEvent: suspend (SdkEvent) -> Unit,
 ) {
@@ -32,11 +33,11 @@ internal class SdkEventBatchProcessor(
   private var started = false
 
   /**
-   * Begins draining batches after CtrlProxy's WebSocket is ready.
+   * Begins draining queued SDK events.
    *
    * Receivers can enqueue before this point while the accessibility service completes its remaining
-   * initialization. The bounded queue retains those startup events until a client can receive their
-   * WebSocket broadcasts.
+   * initialization. Each delivery waits for an active WebSocket client, so startup and reconnect
+   * gaps retain queued events instead of discarding them.
    */
   @Synchronized
   fun start() {
@@ -83,7 +84,7 @@ internal class SdkEventBatchProcessor(
     when (event) {
       is QueuedEvent.Batch -> process(event.batch)
       is QueuedEvent.Navigation -> {
-        broadcastNavigationEvent(
+        deliverNavigationEvent(
           navigationEventAccumulator.addEvent(
             destination = event.destination,
             source = event.source,
@@ -101,11 +102,17 @@ internal class SdkEventBatchProcessor(
   private suspend fun process(batch: SdkEventBatch) {
     for (event in batch.events) {
       if (event is SdkNavigationEvent) {
-        broadcastNavigationEvent(navigationEventAccumulator.addSdkNavigationEvent(event))
+        deliverNavigationEvent(navigationEventAccumulator.addSdkNavigationEvent(event))
       } else {
+        awaitClientConnection()
         broadcastSdkEvent(event)
       }
     }
+  }
+
+  private suspend fun deliverNavigationEvent(event: TimestampedNavigationEvent) {
+    awaitClientConnection()
+    broadcastNavigationEvent(event)
   }
 
   private companion object {

@@ -119,6 +119,7 @@ class WebSocketServer(
   private val requestConnections = mutableMapOf<String, DefaultWebSocketSession>()
   private val connectionCount = AtomicInteger(0)
   private val firstClientConnection = CompletableDeferred<Unit>()
+  private var activeClientConnection = CompletableDeferred<Unit>()
 
   // Flow to broadcast messages to all connected clients
   private val _messageFlow = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 10)
@@ -181,7 +182,10 @@ class WebSocketServer(
                     )
                   )
 
-                  synchronized(connections) { connections.add(this) }
+                  synchronized(connections) {
+                    connections.add(this)
+                    activeClientConnection.complete(Unit)
+                  }
                   firstClientConnection.complete(Unit)
 
                   // Listen for incoming messages
@@ -212,6 +216,9 @@ class WebSocketServer(
                   synchronized(connections) {
                     connections.remove(this)
                     requestConnections.values.removeAll { it == this }
+                    if (connections.isEmpty()) {
+                      activeClientConnection = CompletableDeferred()
+                    }
                   }
                   Log.d(
                     TAG,
@@ -257,6 +264,7 @@ class WebSocketServer(
         }
         connections.clear()
         requestConnections.clear()
+        activeClientConnection = CompletableDeferred()
       }
 
       server?.stop(1000, 2000)
@@ -449,6 +457,15 @@ class WebSocketServer(
   /** Suspends until a client has completed the WebSocket handshake. */
   suspend fun awaitFirstClientConnection() {
     firstClientConnection.await()
+  }
+
+  /** Suspends until a client is currently connected, including after a reconnect. */
+  suspend fun awaitClientConnection() {
+    val connection =
+      synchronized(connections) {
+        if (connections.isEmpty()) activeClientConnection else null
+      }
+    connection?.await()
   }
 
   /** Check if server is running */

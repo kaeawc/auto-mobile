@@ -98,6 +98,24 @@
   [[ "$output" != *"verify-release-integrity.sh"* ]]
 }
 
+@test "release CtrlProxy APK is built from the release variant" {
+  wiring_requires_yq
+  local workflow=".github/workflows/build-control-proxy-apk.yml"
+
+  run yq -r '.jobs.build.steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = ":control-proxy:assembleRelease" ]
+
+  run yq -r '.jobs.build.steps[] | select(.id == "checksum") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"apk/release/control-proxy-release.apk"* ]]
+
+  run yq -r '.jobs.build.steps[] | select(.name == "Copy APK to /tmp") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"apk/release/control-proxy-release.apk"* ]]
+  [[ "$output" == *"/tmp/control-proxy-debug.apk"* ]]
+}
+
 @test "prepare-release verifies and tags the single prepared artifact set before dispatching release (#4686)" {
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"

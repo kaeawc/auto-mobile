@@ -363,6 +363,57 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
+  fun `await client connection waits for a replacement client after disconnect`() = runBlocking {
+    server.start()
+
+    val client = HttpClient(CIO) { install(WebSockets) }
+    client.use { client ->
+      val firstClient = launch {
+        client.webSocket(
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = getServerPort(),
+          path = "/ws",
+        ) {
+          incoming.receive()
+          delay(Long.MAX_VALUE)
+        }
+      }
+
+      waitFor { server.getConnectionCount() == 1 }
+      withTimeout(1000) { server.awaitClientConnection() }
+
+      firstClient.cancel()
+      firstClient.join()
+      waitFor { server.getConnectionCount() == 0 }
+
+      val reconnectWait = async { server.awaitClientConnection() }
+      assertFalse(
+        "A disconnected client must not satisfy the delivery gate",
+        reconnectWait.isCompleted,
+      )
+
+      val replacementClient = launch {
+        client.webSocket(
+          method = HttpMethod.Get,
+          host = "localhost",
+          port = getServerPort(),
+          path = "/ws",
+        ) {
+          incoming.receive()
+          delay(Long.MAX_VALUE)
+        }
+      }
+
+      waitFor { server.getConnectionCount() == 1 }
+      withTimeout(1000) { reconnectWait.await() }
+
+      replacementClient.cancel()
+      replacementClient.join()
+    }
+  }
+
+  @Test
   fun `add_highlight returns highlight response`() = runBlocking {
     server.start()
 

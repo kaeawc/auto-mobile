@@ -156,6 +156,42 @@ class SdkEventBatchProcessorTest {
     assertEquals(listOf(0L, 1L), broadcasts.map { it.sequenceNumber })
   }
 
+  @Test
+  fun `holds later queued events until a replacement client connects`() = runTest {
+    var clientConnection = CompletableDeferred<Unit>().also { it.complete(Unit) }
+    val firstBroadcastFinished = CompletableDeferred<Unit>()
+    val secondBroadcastFinished = CompletableDeferred<Unit>()
+    val broadcasts = mutableListOf<String>()
+    val processor =
+      SdkEventBatchProcessor(
+        scope = backgroundScope,
+        navigationEventAccumulator = NavigationEventAccumulator(),
+        awaitClientConnection = { clientConnection.await() },
+        broadcastNavigationEvent = { event ->
+          broadcasts.add(event.destination)
+          if (event.destination == "first") {
+            clientConnection = CompletableDeferred()
+            firstBroadcastFinished.complete(Unit)
+          } else if (event.destination == "second") {
+            secondBroadcastFinished.complete(Unit)
+          }
+        },
+        broadcastSdkEvent = { error("Unexpected SDK event: $it") },
+      )
+
+    processor.start()
+    assertTrue(processor.enqueue(batch("first", "second")))
+    firstBroadcastFinished.await()
+    advanceUntilIdle()
+
+    assertEquals(listOf("first"), broadcasts)
+
+    clientConnection.complete(Unit)
+    secondBroadcastFinished.await()
+
+    assertEquals(listOf("first", "second"), broadcasts)
+  }
+
   private fun batch(vararg destinations: String): SdkEventBatch =
     SdkEventBatch(
       timestamp = 0L,

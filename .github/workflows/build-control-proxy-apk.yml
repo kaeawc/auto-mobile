@@ -50,7 +50,7 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:assembleDebug"
+          gradle-tasks: ":control-proxy:assembleRelease"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/build-control-proxy-apk"
           reuse-configuration-cache: true
@@ -65,13 +65,14 @@ jobs:
         run: |
           # pipefail so a failing sha256sum is not masked by a succeeding cut (#4684).
           set -euo pipefail
-          APK_PATH="android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
+          APK_PATH="android/control-proxy/build/outputs/apk/release/control-proxy-release.apk"
           SHA256=$(sha256sum "$APK_PATH" | cut -d' ' -f1)
           echo "sha256=$SHA256" >> $GITHUB_OUTPUT
           echo "APK SHA256: $SHA256"
 
       - name: "Copy APK to /tmp"
-        run: cp android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk /tmp/control-proxy-debug.apk
+        # Preserve the public asset name while excluding debug-only manifest components.
+        run: cp android/control-proxy/build/outputs/apk/release/control-proxy-release.apk /tmp/control-proxy-debug.apk
 
       - name: "Upload CtrlProxy APK"
         if: ${{ inputs.upload-artifact }}

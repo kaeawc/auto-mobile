@@ -359,6 +359,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     SdkEventBatchProcessor(
       scope = serviceScope,
       navigationEventAccumulator = navigationEventAccumulator,
+      awaitClientConnection = { webSocketServer.awaitClientConnection() },
       broadcastNavigationEvent = { event ->
         broadcastNavigationEvent(event, WebSocketServer.BroadcastMode.Sync)
       },
@@ -1155,11 +1156,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             }
           }
           .launchIn(serviceScope)
-      serviceScope.launch {
-        webSocketServer.awaitFirstClientConnection()
-        sdkEventBatchProcessor.start()
-        Log.d(TAG, "SDK event batch processor started after first WebSocket client connected")
-      }
+      sdkEventBatchProcessor.start()
+      Log.d(TAG, "SDK event batch processor started")
 
       // Start logcat reader for automatic log capture
       logcatReader = LogcatReader { response ->

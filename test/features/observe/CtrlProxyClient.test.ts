@@ -1468,6 +1468,66 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
+    test("serializes navigation graph writes when WebSocket frames arrive back-to-back", async function() {
+      NavigationGraphManager.resetInstance();
+      const navHarness = await installInMemoryNavManager();
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      let allowFirstWrite: (() => void) | undefined;
+      const firstWriteAllowed = new Promise<void>(resolve => {
+        allowFirstWrite = resolve;
+      });
+      const recordNavigationEvent = navHarness.manager.recordNavigationEvent.bind(navHarness.manager);
+      const recordNavigationEventSpy = spyOn(navHarness.manager, "recordNavigationEvent")
+        .mockImplementation(async event => {
+          if (event.destination === "First") {
+            await firstWriteAllowed;
+          }
+          await recordNavigationEvent(event);
+        });
+
+      try {
+        const resultPromise = testClient.getLatestHierarchy(true, 2000);
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "navigation_event",
+          event: {
+            destination: "First", source: "Start", arguments: {}, metadata: {},
+            timestamp: testTimer.now(), sequenceNumber: 1, applicationId: "com.example.app",
+          }
+        }));
+        socket!.simulateMessage(JSON.stringify({
+          type: "navigation_event",
+          event: {
+            destination: "Second", source: "First", arguments: {}, metadata: {},
+            timestamp: testTimer.now(), sequenceNumber: 2, applicationId: "com.example.app",
+          }
+        }));
+
+        await flushPromises();
+        expect(recordNavigationEventSpy).toHaveBeenCalledTimes(1);
+
+        allowFirstWrite!();
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: { updatedAt: testTimer.now(), packageName: "com.example.app", hierarchy: { "text": "Second" } }
+        }));
+        await resultPromise;
+        await settleNavigationHierarchyInterleaving(testTimer);
+
+        expect(recordNavigationEventSpy).toHaveBeenCalledTimes(2);
+      } finally {
+        recordNavigationEventSpy.mockRestore();
+        await testClient.close();
+        await navHarness.dispose();
+      }
+    });
+
     test("clears resolved build contexts on connection close so the next event re-resolves (#4984)", async function() {
       // While the WS has no client, a package_event has zero listeners, so an app can be
       // replaced unobserved. onConnectionClosed must invalidate cached contexts so the

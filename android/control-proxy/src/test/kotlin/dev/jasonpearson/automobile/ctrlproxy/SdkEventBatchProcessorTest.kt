@@ -6,7 +6,6 @@ import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -48,37 +47,40 @@ class SdkEventBatchProcessorTest {
     }
 
   @Test
-  fun `drops batches beyond bounded queue capacity while a navigation broadcast suspends`() =
-    runTest {
-      val firstBroadcastStarted = CompletableDeferred<Unit>()
-      val allowFirstBroadcastToFinish = CompletableDeferred<Unit>()
-      val secondBroadcastFinished = CompletableDeferred<Unit>()
-      val processor =
-        SdkEventBatchProcessor(
-          scope = backgroundScope,
-          navigationEventAccumulator = NavigationEventAccumulator(),
-          broadcastNavigationEvent = { event ->
-            if (event.destination == "first") {
-              firstBroadcastStarted.complete(Unit)
-              allowFirstBroadcastToFinish.await()
-            } else if (event.destination == "second") {
-              secondBroadcastFinished.complete(Unit)
-            }
-          },
-          broadcastSdkEvent = { error("Unexpected SDK event: $it") },
-          queueCapacity = 1,
-        )
+  fun `preserves queued batches while a navigation broadcast suspends`() = runTest {
+    val firstBroadcastStarted = CompletableDeferred<Unit>()
+    val allowFirstBroadcastToFinish = CompletableDeferred<Unit>()
+    val finalBroadcastFinished = CompletableDeferred<Unit>()
+    val broadcasts = mutableListOf<String>()
+    val processor =
+      SdkEventBatchProcessor(
+        scope = backgroundScope,
+        navigationEventAccumulator = NavigationEventAccumulator(),
+        broadcastNavigationEvent = { event ->
+          broadcasts.add(event.destination)
+          if (event.destination == "first") {
+            firstBroadcastStarted.complete(Unit)
+            allowFirstBroadcastToFinish.await()
+          } else if (event.destination == "queued-65") {
+            finalBroadcastFinished.complete(Unit)
+          }
+        },
+        broadcastSdkEvent = { error("Unexpected SDK event: $it") },
+      )
 
-      assertTrue(processor.enqueue(batch("first")))
-      firstBroadcastStarted.await()
+    assertTrue(processor.enqueue(batch("first")))
+    firstBroadcastStarted.await()
 
-      assertTrue(processor.enqueue(batch("second")))
-      assertFalse(processor.enqueue(batch("third")))
-      assertEquals(1L, processor.droppedBatchCount)
-
-      allowFirstBroadcastToFinish.complete(Unit)
-      secondBroadcastFinished.await()
+    val queuedDestinations = (1..65).map { "queued-$it" }
+    for (destination in queuedDestinations) {
+      assertTrue(processor.enqueue(batch(destination)))
     }
+
+    allowFirstBroadcastToFinish.complete(Unit)
+    finalBroadcastFinished.await()
+
+    assertEquals(listOf("first") + queuedDestinations, broadcasts)
+  }
 
   private fun batch(vararg destinations: String): SdkEventBatch =
     SdkEventBatch(

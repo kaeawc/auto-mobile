@@ -359,11 +359,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     SdkEventBatchProcessor(
       scope = serviceScope,
       navigationEventAccumulator = navigationEventAccumulator,
-      awaitClientConnection = { webSocketServer.awaitClientConnection() },
       broadcastNavigationEvent = { event ->
-        broadcastNavigationEvent(event, WebSocketServer.BroadcastMode.Sync)
+        broadcastNavigationEvent(
+          event,
+          mode = WebSocketServer.BroadcastMode.Sync,
+          waitForClient = true,
+        )
       },
-      broadcastSdkEvent = { event -> broadcastSdkEvent(event, WebSocketServer.BroadcastMode.Sync) },
+      broadcastSdkEvent = { event ->
+        broadcastSdkEvent(
+          event,
+          mode = WebSocketServer.BroadcastMode.Sync,
+          waitForClient = true,
+        )
+      },
     )
   }
   private lateinit var overlayManager: OverlayManager
@@ -5603,6 +5612,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private suspend fun broadcastNavigationEvent(
     event: TimestampedNavigationEvent,
     mode: WebSocketServer.BroadcastMode = WebSocketServer.BroadcastMode.Async,
+    waitForClient: Boolean = false,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping navigation event broadcast")
@@ -5612,7 +5622,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     try {
       val response = navigationEventResponse(event)
 
-      webSocketServer.broadcast(response, mode)
+      webSocketServer.broadcast(response, mode, waitForClient)
       Log.d(
         TAG,
         "Broadcasted navigation event to ${webSocketServer.getConnectionCount()} clients: ${event.destination}",
@@ -5797,6 +5807,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private suspend fun broadcastSdkEvent(
     event: SdkEvent,
     mode: WebSocketServer.BroadcastMode = WebSocketServer.BroadcastMode.Async,
+    waitForClient: Boolean = false,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
 
@@ -5873,7 +5884,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           is SdkEventBatch -> null
         }
 
-      response?.let { webSocketServer.broadcast(it, mode) }
+      response?.let { webSocketServer.broadcast(it, mode, waitForClient) }
     } catch (e: CancellationException) {
       // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
       throw e

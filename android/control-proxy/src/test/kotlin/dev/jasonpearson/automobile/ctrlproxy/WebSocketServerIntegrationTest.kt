@@ -414,6 +414,46 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
+  fun `sync broadcast waits for a client and delivers after it connects`() = runBlocking {
+    server.start()
+    val response =
+      SettingsGetResult(
+        timestamp = 1234L,
+        success = true,
+        namespace = "secure",
+        key = "setting",
+        value = "value",
+        found = true,
+        totalTimeMs = 1L,
+      )
+    val delivery = async {
+      server.broadcast(
+        response,
+        mode = WebSocketServer.BroadcastMode.Sync,
+        waitForClient = true,
+      )
+    }
+    assertFalse("Delivery must wait until a client is connected", delivery.isCompleted)
+
+    val client = HttpClient(CIO) { install(WebSockets) }
+    client.use { client ->
+      client.webSocket(
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
+      ) {
+        incoming.receive()
+        val delivered = withTimeout(1000) { incoming.receive() } as Frame.Text
+        val payload = json.parseToJsonElement(delivered.readText()).jsonObject
+
+        assertEquals("settings_get_result", payload["type"]?.jsonPrimitive?.content)
+        withTimeout(1000) { delivery.await() }
+      }
+    }
+  }
+
+  @Test
   fun `add_highlight returns highlight response`() = runBlocking {
     server.start()
 

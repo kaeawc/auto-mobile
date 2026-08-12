@@ -116,6 +116,16 @@
   [[ "$output" == *"/tmp/control-proxy-debug.apk"* ]]
 }
 
+@test "pull request CtrlProxy build compiles the release variant" {
+  wiring_requires_yq
+  local workflow=".github/workflows/pull_request.yml"
+
+  run yq -r '.jobs."build-android-control-proxy".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *":control-proxy:assembleDebug"* ]]
+  [[ "$output" == *":control-proxy:assembleRelease"* ]]
+}
+
 @test "prepare-release verifies and tags the single prepared artifact set before dispatching release (#4686)" {
   wiring_requires_yq
   local workflow=".github/workflows/prepare-release.yml"

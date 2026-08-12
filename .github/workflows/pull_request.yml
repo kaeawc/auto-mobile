@@ -2252,7 +2252,7 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:assembleDebug"
+          gradle-tasks: ":control-proxy:assembleDebug :control-proxy:assembleRelease"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

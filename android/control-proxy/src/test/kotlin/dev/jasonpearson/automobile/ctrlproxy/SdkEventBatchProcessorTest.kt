@@ -166,8 +166,8 @@ class SdkEventBatchProcessorTest {
       SdkEventBatchProcessor(
         scope = backgroundScope,
         navigationEventAccumulator = NavigationEventAccumulator(),
-        awaitClientConnection = { clientConnection.await() },
         broadcastNavigationEvent = { event ->
+          clientConnection.await()
           broadcasts.add(event.destination)
           if (event.destination == "first") {
             clientConnection = CompletableDeferred()

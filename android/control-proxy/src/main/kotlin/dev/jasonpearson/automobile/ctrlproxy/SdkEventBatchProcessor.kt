@@ -10,7 +10,6 @@ import kotlinx.coroutines.launch
 internal class SdkEventBatchProcessor(
   private val scope: CoroutineScope,
   private val navigationEventAccumulator: NavigationEventAccumulator,
-  private val awaitClientConnection: suspend () -> Unit = {},
   private val broadcastNavigationEvent: suspend (TimestampedNavigationEvent) -> Unit,
   private val broadcastSdkEvent: suspend (SdkEvent) -> Unit,
 ) {
@@ -36,8 +35,8 @@ internal class SdkEventBatchProcessor(
    * Begins draining queued SDK events.
    *
    * Receivers can enqueue before this point while the accessibility service completes its remaining
-   * initialization. Each delivery waits for an active WebSocket client, so startup and reconnect
-   * gaps retain queued events instead of discarding them.
+   * initialization. Delivery callbacks retain queued events until a WebSocket client accepts them,
+   * so startup and reconnect gaps do not discard events.
    */
   @Synchronized
   fun start() {
@@ -104,14 +103,12 @@ internal class SdkEventBatchProcessor(
       if (event is SdkNavigationEvent) {
         deliverNavigationEvent(navigationEventAccumulator.addSdkNavigationEvent(event))
       } else {
-        awaitClientConnection()
         broadcastSdkEvent(event)
       }
     }
   }
 
   private suspend fun deliverNavigationEvent(event: TimestampedNavigationEvent) {
-    awaitClientConnection()
     broadcastNavigationEvent(event)
   }
 

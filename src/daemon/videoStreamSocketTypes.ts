@@ -70,7 +70,7 @@ export interface VideoStreamSocketResponse {
    * plus 12-byte packet headers; audio muxing is not offered by this relay.
    */
   framing?: "h264";
-  /** Structured recovery state; present instead of raw diagnostics for known permissions. */
+  /** Structured recovery state; accompanied by a concise legacy error for older clients. */
   permission?: VideoStreamPermission;
   error?: string;
 }

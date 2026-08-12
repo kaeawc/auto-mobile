@@ -218,8 +218,8 @@ internal const val LIVE_RECONNECT_MAX_MS = 15_000L
  *
  * With [autoReconnect] on, an `Unavailable` or recoverable permission state triggers a bounded
  * exponential-backoff [VideoStreamSource.connect] retry rather than staying dead until the pane is
- * torn down and rebuilt. This rechecks Screen Recording after the user returns from System Settings.
- * Off (the default) preserves the original clear-and-stop behavior for the IDE-plugin/
+ * torn down and rebuilt. This rechecks Screen Recording after the user returns from System
+ * Settings. Off (the default) preserves the original clear-and-stop behavior for the IDE-plugin/
  * `AutoMobileContent` path, which blends in screenshot updates instead.
  */
 @Composable
@@ -256,10 +256,7 @@ internal fun rememberLiveVideoFrame(
     // a successful connect, or disposal), so a stuck-Unavailable stream keeps retrying on its own
     // timer while a recovered one stops cleanly.
     source.state.collectLatest { state ->
-      if (
-        state is VideoStreamState.Unavailable ||
-          state is VideoStreamState.PermissionRequired
-      ) {
+      if (state is VideoStreamState.Unavailable || state is VideoStreamState.PermissionRequired) {
         liveFrame = null
         if (autoReconnect && deviceId != null) {
           var backoffMs = reconnectInitialMs

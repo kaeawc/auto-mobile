@@ -50,7 +50,8 @@ class VideoStreamClientTest {
     payload: ByteArray? = null,
     keepOpen: Boolean = false,
     rotation: Int? = null,
-  ): FakeRelay = FakeRelay(success, error, permissionJson, payload, keepOpen, rotation).also { servers.add(it) }
+  ): FakeRelay =
+    FakeRelay(success, error, permissionJson, payload, keepOpen, rotation).also { servers.add(it) }
 
   @Test
   fun `subscribes with the device id and decodes frames`() = runBlocking {

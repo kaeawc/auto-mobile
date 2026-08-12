@@ -218,6 +218,7 @@ private fun liveHint(state: VideoStreamState): String =
     is VideoStreamState.Idle,
     is VideoStreamState.Connecting -> "Connecting…"
     is VideoStreamState.Streaming -> "Waiting for frame…"
+    is VideoStreamState.PermissionRequired -> "Screen Recording needs approval"
     is VideoStreamState.Unavailable -> "No preview"
   }
 

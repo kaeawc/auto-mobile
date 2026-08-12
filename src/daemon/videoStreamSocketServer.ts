@@ -160,6 +160,8 @@ function subscribeFailureResponse(
         status: "needs_approval",
         approvalTarget: error.approvalTarget,
       },
+      // Keep pre-permission desktop clients actionable during rolling updates.
+      error: error.message,
     };
   }
   return {

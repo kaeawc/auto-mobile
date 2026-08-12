@@ -60,37 +60,40 @@ class DeviceStreamViewTest {
   }
 
   @Test
-  fun `guides iOS Screen Recording approval and exposes settings and retry actions`() = runComposeUiTest {
-    val source =
-      FakeVideoStreamSource(
-        screenRecordingRequired = true,
-        screenRecordingApprovalTarget = "Custom Capture Helper",
-      )
-    var openSettingsCalls = 0
-    val launcher = ScreenRecordingSettingsLauncher {
-      openSettingsCalls++
-      Result.success(Unit)
-    }
-    setContent {
-      MaterialTheme {
-        DeviceStreamView(
-          iosCol(),
-          sourceFactory = { source },
-          screenRecordingSettingsLauncher = launcher,
+  fun `guides iOS Screen Recording approval and exposes settings and retry actions`() =
+    runComposeUiTest {
+      val source =
+        FakeVideoStreamSource(
+          screenRecordingRequired = true,
+          screenRecordingApprovalTarget = "Custom Capture Helper",
         )
+      var openSettingsCalls = 0
+      val launcher = ScreenRecordingSettingsLauncher {
+        openSettingsCalls++
+        Result.success(Unit)
       }
+      setContent {
+        MaterialTheme {
+          DeviceStreamView(
+            iosCol(),
+            sourceFactory = { source },
+            screenRecordingSettingsLauncher = launcher,
+          )
+        }
+      }
+
+      onNodeWithText("Screen Recording needs approval").assertIsDisplayed()
+      onNodeWithText(
+          "Enable Custom Capture Helper in System Settings to discover and observe iOS Simulator windows."
+        )
+        .assertIsDisplayed()
+      onNodeWithText("Open System Settings").performClick()
+      assertEquals(1, openSettingsCalls)
+
+      val connectsBeforeRetry = source.connectCalls
+      onNodeWithText("Check again").performClick()
+      waitUntil { source.connectCalls > connectsBeforeRetry }
     }
-
-    onNodeWithText("Screen Recording needs approval").assertIsDisplayed()
-    onNodeWithText("Enable Custom Capture Helper in System Settings to discover and observe iOS Simulator windows.")
-      .assertIsDisplayed()
-    onNodeWithText("Open System Settings").performClick()
-    assertEquals(1, openSettingsCalls)
-
-    val connectsBeforeRetry = source.connectCalls
-    onNodeWithText("Check again").performClick()
-    waitUntil { source.connectCalls > connectsBeforeRetry }
-  }
 
   @Test
   fun `disposes the source when the pane leaves the composition`() = runComposeUiTest {

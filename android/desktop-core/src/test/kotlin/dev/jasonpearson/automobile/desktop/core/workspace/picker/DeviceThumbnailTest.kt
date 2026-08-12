@@ -113,6 +113,24 @@ class DeviceThumbnailTest {
   }
 
   @Test
+  fun `a booted iOS device names a pending Screen Recording approval`() = runComposeUiTest {
+    val source = FakeVideoStreamSource(screenRecordingRequired = true)
+    setContent {
+      MaterialTheme {
+        DeviceThumbnail(
+          PickerDevice("ios-simulator", "iPhone 16", Platform.Ios, DeviceState.Booted),
+          booting = false,
+          sessionUuidProvider = { null },
+          videoSourceFactory = { source },
+          screenshotSource = null,
+        )
+      }
+    }
+
+    onNodeWithText("Screen Recording needs approval").assertIsDisplayed()
+  }
+
+  @Test
   fun `a booted device falls back to the last screenshot when the relay is unavailable`() =
     runComposeUiTest {
       val screenshot =

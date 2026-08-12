@@ -9,8 +9,8 @@ fun interface ScreenRecordingSettingsLauncher {
 }
 
 /**
- * Production macOS settings launcher. [isMacOs] and [startProcess] are injected
- * so the platform behavior remains deterministic in unit tests.
+ * Production macOS settings launcher. [isMacOs] and [startProcess] are injected so the platform
+ * behavior remains deterministic in unit tests.
  */
 class MacScreenRecordingSettingsLauncher(
   private val isMacOs: () -> Boolean = {

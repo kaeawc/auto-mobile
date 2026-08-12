@@ -574,7 +574,7 @@ describe("VideoStreamSocketServer", () => {
     expect(h.server.activeDeviceIds()).toHaveLength(0);
   });
 
-  test("reports a Screen Recording denial as structured permission state", async () => {
+  test("reports a Screen Recording denial as structured permission state with a legacy fallback", async () => {
     const h = await startHarness({ startError: new ScreenRecordingPermissionError() });
 
     const { ack } = await subscribe(h.socketPath);
@@ -585,7 +585,9 @@ describe("VideoStreamSocketServer", () => {
       status: "needs_approval",
       approvalTarget: "AutoMobile",
     });
-    expect(ack.error).toBeUndefined();
+    expect(ack.error).toBe(
+      "Screen Recording permission is required to discover and observe iOS Simulator windows."
+    );
     expect(h.server.activeDeviceIds()).toHaveLength(0);
   });
 

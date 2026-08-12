@@ -58,7 +58,7 @@ sealed class VideoStreamState {
 
 /** Recoverable permission state decoded from the local relay protocol. */
 enum class VideoStreamPermission {
-  ScreenRecordingNeedsApproval,
+  ScreenRecordingNeedsApproval
 }
 
 /**
@@ -384,7 +384,8 @@ internal data class VideoStreamPermissionResponse(
   val approvalTarget: String? = null,
 )
 
-private fun VideoStreamPermissionResponse?.toPermissionState(): VideoStreamState.PermissionRequired? =
+private fun VideoStreamPermissionResponse?.toPermissionState():
+  VideoStreamState.PermissionRequired? =
   when {
     this?.kind == "screen_recording" && this.status == "needs_approval" ->
       VideoStreamState.PermissionRequired(

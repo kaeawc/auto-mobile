@@ -66,6 +66,28 @@ install_in_order() {
   "$adb_bin" install "$second_apk" >/dev/null
 }
 
+verify_control_broadcast_delivery() {
+  local installation_order="$1"
+
+  "$adb_bin" shell am start -W -n "${host_package}/.MainActivity" >/dev/null
+  "$adb_bin" shell run-as "$host_package" rm -f "$result_file"
+  "$adb_bin" shell am broadcast -a "$send_action" -p "$ctrl_proxy_package" >/dev/null
+
+  local attempt result
+  for ((attempt = 0; attempt < 20; attempt++)); do
+    "$adb_bin" shell am broadcast -a "$probe_action" -p "$host_package" >/dev/null
+    result="$("$adb_bin" shell run-as "$host_package" cat "$result_file" 2>/dev/null || true)"
+    if [[ "$result" == "$expected_error_type" ]]; then
+      echo "verified V2 control broadcast delivery after $installation_order"
+      return
+    fi
+    "$sleep_bin" 1
+  done
+
+  echo "error: CtrlProxy V2 control broadcast did not reach SDK host after $installation_order" >&2
+  return 1
+}
+
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/auto-mobile-sdk-host.XXXXXX")"
 host_keystore="${tmp_dir}/host.keystore"
 # shellcheck disable=SC2317,SC2329 # Invoked by the EXIT trap below.
@@ -118,21 +140,6 @@ host_digest="$(certificate_digest "$host_apk")"
 }
 
 install_in_order "$host_apk" "$ctrl_proxy_apk"
+verify_control_broadcast_delivery "installing the SDK host before CtrlProxy"
 install_in_order "$ctrl_proxy_apk" "$host_apk"
-
-"$adb_bin" shell am start -W -n "${host_package}/.MainActivity" >/dev/null
-"$adb_bin" shell run-as "$host_package" rm -f "$result_file"
-"$adb_bin" shell am broadcast -a "$send_action" -p "$ctrl_proxy_package" >/dev/null
-
-for ((attempt = 0; attempt < 20; attempt++)); do
-  "$adb_bin" shell am broadcast -a "$probe_action" -p "$host_package" >/dev/null
-  result="$("$adb_bin" shell run-as "$host_package" cat "$result_file" 2>/dev/null || true)"
-  if [[ "$result" == "$expected_error_type" ]]; then
-    echo "verified V2 control broadcast delivery to separately signed SDK host"
-    exit 0
-  fi
-  "$sleep_bin" 1
-done
-
-echo "error: CtrlProxy V2 control broadcast did not reach SDK host" >&2
-exit 1
+verify_control_broadcast_delivery "installing CtrlProxy before the SDK host"

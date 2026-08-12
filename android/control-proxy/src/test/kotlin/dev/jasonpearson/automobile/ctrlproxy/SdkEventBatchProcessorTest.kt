@@ -48,41 +48,42 @@ class SdkEventBatchProcessorTest {
     }
 
   @Test
-  fun `rejects batches when the bounded queue is full while a navigation broadcast suspends`() = runTest {
-    val firstBroadcastStarted = CompletableDeferred<Unit>()
-    val allowFirstBroadcastToFinish = CompletableDeferred<Unit>()
-    val finalBroadcastFinished = CompletableDeferred<Unit>()
-    val broadcasts = mutableListOf<String>()
-    val processor =
-      SdkEventBatchProcessor(
-        scope = backgroundScope,
-        navigationEventAccumulator = NavigationEventAccumulator(),
-        broadcastNavigationEvent = { event ->
-          broadcasts.add(event.destination)
-          if (event.destination == "first") {
-            firstBroadcastStarted.complete(Unit)
-            allowFirstBroadcastToFinish.await()
-          } else if (event.destination == "queued-64") {
-            finalBroadcastFinished.complete(Unit)
-          }
-        },
-        broadcastSdkEvent = { error("Unexpected SDK event: $it") },
-      )
+  fun `rejects batches when the bounded queue is full while a navigation broadcast suspends`() =
+    runTest {
+      val firstBroadcastStarted = CompletableDeferred<Unit>()
+      val allowFirstBroadcastToFinish = CompletableDeferred<Unit>()
+      val finalBroadcastFinished = CompletableDeferred<Unit>()
+      val broadcasts = mutableListOf<String>()
+      val processor =
+        SdkEventBatchProcessor(
+          scope = backgroundScope,
+          navigationEventAccumulator = NavigationEventAccumulator(),
+          broadcastNavigationEvent = { event ->
+            broadcasts.add(event.destination)
+            if (event.destination == "first") {
+              firstBroadcastStarted.complete(Unit)
+              allowFirstBroadcastToFinish.await()
+            } else if (event.destination == "queued-64") {
+              finalBroadcastFinished.complete(Unit)
+            }
+          },
+          broadcastSdkEvent = { error("Unexpected SDK event: $it") },
+        )
 
-    assertTrue(processor.enqueue(batch("first")))
-    firstBroadcastStarted.await()
+      assertTrue(processor.enqueue(batch("first")))
+      firstBroadcastStarted.await()
 
-    val queuedDestinations = (1..64).map { "queued-$it" }
-    for (destination in queuedDestinations) {
-      assertTrue(processor.enqueue(batch(destination)))
+      val queuedDestinations = (1..64).map { "queued-$it" }
+      for (destination in queuedDestinations) {
+        assertTrue(processor.enqueue(batch(destination)))
+      }
+      assertFalse(processor.enqueue(batch("dropped-when-full")))
+
+      allowFirstBroadcastToFinish.complete(Unit)
+      finalBroadcastFinished.await()
+
+      assertEquals(listOf("first") + queuedDestinations, broadcasts)
     }
-    assertFalse(processor.enqueue(batch("dropped-when-full")))
-
-    allowFirstBroadcastToFinish.complete(Unit)
-    finalBroadcastFinished.await()
-
-    assertEquals(listOf("first") + queuedDestinations, broadcasts)
-  }
 
   @Test
   fun `processes legacy navigation before a later batch through the same actor`() = runTest {

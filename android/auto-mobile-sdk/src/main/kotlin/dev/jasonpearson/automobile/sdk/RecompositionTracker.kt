@@ -1,11 +1,8 @@
 package dev.jasonpearson.automobile.sdk
 
-import android.annotation.SuppressLint
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import java.util.concurrent.ConcurrentHashMap
@@ -33,6 +30,11 @@ internal object RecompositionTracker {
   private val touchSequence = AtomicLong(0)
   private val enabled = AtomicBoolean(false)
   private val handler = Handler(Looper.getMainLooper())
+  private val controlReceiverRegistrar = NetworkControlReceiverRegistrar { _, intent ->
+    if (intent?.action == AutoMobileSDK.ACTION_RECOMPOSITION_CONTROL) {
+      setEnabled(intent.getBooleanExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_ENABLED, false))
+    }
+  }
   private var context: Context? = null
 
   fun initialize(context: Context) {
@@ -46,11 +48,7 @@ internal object RecompositionTracker {
     setEnabled(false)
     val ctx = context
     if (ctx != null) {
-      try {
-        ctx.unregisterReceiver(controlReceiver)
-      } catch (_: IllegalArgumentException) {
-        // Receiver was never registered or already unregistered — safe to ignore.
-      }
+      controlReceiverRegistrar.unregister(ctx)
     }
     context = null
   }
@@ -161,35 +159,10 @@ internal object RecompositionTracker {
   }
 
   private fun registerControlReceiver(context: Context) {
-    val filter = IntentFilter().apply { addAction(AutoMobileSDK.ACTION_RECOMPOSITION_CONTROL) }
-
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      context.registerReceiver(
-        controlReceiver,
-        filter,
-        SdkConstants.PERMISSION_NETWORK_CONTROL,
-        null,
-        Context.RECEIVER_EXPORTED,
-      )
-    } else {
-      @SuppressLint("UnspecifiedRegisterReceiverFlag")
-      context.registerReceiver(
-        controlReceiver,
-        filter,
-        SdkConstants.PERMISSION_NETWORK_CONTROL,
-        null,
-      )
+    controlReceiverRegistrar.register(context) {
+      IntentFilter().apply { addAction(AutoMobileSDK.ACTION_RECOMPOSITION_CONTROL) }
     }
   }
-
-  private val controlReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent?.action != AutoMobileSDK.ACTION_RECOMPOSITION_CONTROL) return
-        val enabledFlag = intent.getBooleanExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_ENABLED, false)
-        setEnabled(enabledFlag)
-      }
-    }
 
   private class Entry(val id: String) {
     /** LRU tick of the last record; read during eviction without the entry lock. */

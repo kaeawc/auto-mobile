@@ -55,15 +55,20 @@ fi
   make_mock adb '
 printf "adb %s\n" "$*" >> "$COMMAND_LOG"
 if [[ "$*" == *"run-as dev.jasonpearson.automobile.playground cat files/automobile-network-control-contract-result"* ]]; then
-  printf "ctrlproxy-v2\n"
+  send_command="adb shell am broadcast --include-stopped-packages -a dev.jasonpearson.automobile.ctrlproxy.action.TEST_SEND_NETWORK_CONTROL -p dev.jasonpearson.automobile.ctrlproxy"
+  if [[ "$(grep -cFx "$send_command" "$COMMAND_LOG")" -ge 1 ]]; then
+    printf "ctrlproxy-v2\n"
+  fi
 fi
 '
+  make_mock sleep ':'
 
   run env \
     ADB_BIN="${MOCK_BIN}/adb" \
     APKSIGNER_BIN="${MOCK_BIN}/apksigner" \
     GRADLE_CMD="${MOCK_BIN}/gradlew" \
     KEYTOOL_BIN="${MOCK_BIN}/keytool" \
+    SLEEP_BIN="${MOCK_BIN}/sleep" \
     COMMAND_LOG="$COMMAND_LOG" \
     bash "$SCRIPT" "$CTRL_PROXY_APK"
 
@@ -71,7 +76,7 @@ fi
   [[ "$output" == *"verified V2 control broadcast delivery"* ]]
   grep -Eq '^gradlew RELEASE_KEYSTORE_PATH=.+ :playground:app:assembleDebug --console=plain$' \
     "$COMMAND_LOG"
-  send_command='adb shell am broadcast -a dev.jasonpearson.automobile.ctrlproxy.action.TEST_SEND_NETWORK_CONTROL -p dev.jasonpearson.automobile.ctrlproxy'
+  send_command='adb shell am broadcast --include-stopped-packages -a dev.jasonpearson.automobile.ctrlproxy.action.TEST_SEND_NETWORK_CONTROL -p dev.jasonpearson.automobile.ctrlproxy'
   [ "$(grep -cFx "$send_command" "$COMMAND_LOG")" -eq 2 ]
 
   root_line="$(grep -nFx 'adb root' "$COMMAND_LOG" | cut -d: -f1)"
@@ -116,7 +121,7 @@ fi
   make_mock adb '
 printf "adb %s\n" "$*" >> "$COMMAND_LOG"
 if [[ "$*" == *"run-as dev.jasonpearson.automobile.playground cat files/automobile-network-control-contract-result"* ]]; then
-  send_command="adb shell am broadcast -a dev.jasonpearson.automobile.ctrlproxy.action.TEST_SEND_NETWORK_CONTROL -p dev.jasonpearson.automobile.ctrlproxy"
+  send_command="adb shell am broadcast --include-stopped-packages -a dev.jasonpearson.automobile.ctrlproxy.action.TEST_SEND_NETWORK_CONTROL -p dev.jasonpearson.automobile.ctrlproxy"
   if [[ "$(grep -cFx "$send_command" "$COMMAND_LOG")" -ge 2 ]]; then
     printf "ctrlproxy-v2\n"
   fi
@@ -134,6 +139,6 @@ fi
     bash "$SCRIPT" "$CTRL_PROXY_APK"
 
   [ "$status" -eq 0 ]
-  send_command='adb shell am broadcast -a dev.jasonpearson.automobile.ctrlproxy.action.TEST_SEND_NETWORK_CONTROL -p dev.jasonpearson.automobile.ctrlproxy'
+  send_command='adb shell am broadcast --include-stopped-packages -a dev.jasonpearson.automobile.ctrlproxy.action.TEST_SEND_NETWORK_CONTROL -p dev.jasonpearson.automobile.ctrlproxy'
   [ "$(grep -cFx "$send_command" "$COMMAND_LOG")" -ge 3 ]
 }

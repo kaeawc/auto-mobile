@@ -68,7 +68,7 @@ install_in_order() {
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/auto-mobile-sdk-host.XXXXXX")"
 host_keystore="${tmp_dir}/host.keystore"
-# shellcheck disable=SC2329 # Invoked by the EXIT trap below.
+# shellcheck disable=SC2317,SC2329 # Invoked by the EXIT trap below.
 cleanup() {
   unlink "$host_keystore" 2>/dev/null || true
   rmdir "$tmp_dir" 2>/dev/null || true

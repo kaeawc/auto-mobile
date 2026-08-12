@@ -27,7 +27,7 @@ class NetworkControlPermissionManifestTest {
   }
 
   @Test
-  fun `CtrlProxy owns and requests network control permission`() {
+  fun `CtrlProxy owns V2 and requests V2 plus legacy network control permissions`() {
     val document = readManifest("control-proxy")
     val definitions = permissionDefinitions(document)
 
@@ -39,6 +39,10 @@ class NetworkControlPermissionManifestTest {
     assertTrue(
       "CtrlProxy must request $NETWORK_CONTROL_PERMISSION to send protected control broadcasts.",
       usesPermissions(document).contains(NETWORK_CONTROL_PERMISSION),
+    )
+    assertTrue(
+      "CtrlProxy must retain $LEGACY_NETWORK_CONTROL_PERMISSION for compatible legacy SDK hosts.",
+      usesPermissions(document).contains(LEGACY_NETWORK_CONTROL_PERMISSION),
     )
     assertFalse(
       "CtrlProxy must not claim the legacy permission that released SDK hosts already own.",

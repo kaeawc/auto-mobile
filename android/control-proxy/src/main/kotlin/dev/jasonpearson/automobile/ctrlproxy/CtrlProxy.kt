@@ -355,6 +355,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private lateinit var rotationProvenance: RotationProvenanceTracker
   private var hierarchyBroadcastThrottler: BroadcastThrottler? = null
   private val navigationEventAccumulator = NavigationEventAccumulator()
+  private val sdkEventBatchProcessor by lazy {
+    SdkEventBatchProcessor(
+      navigationEventAccumulator = navigationEventAccumulator,
+      broadcastNavigationEvent = ::broadcastNavigationEvent,
+      broadcastSdkEvent = ::broadcastSdkEvent,
+    )
+  }
   private lateinit var overlayManager: OverlayManager
   private val permissionManager by lazy { PermissionManager(this) }
   private lateinit var overlayDrawer: OverlayDrawer
@@ -874,14 +881,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           Log.d(TAG, "Received event batch with ${batch.events.size} events")
 
           serviceScope.launch {
-            for (event in batch.events) {
-              if (event is SdkNavigationEvent) {
-                val navigationEvent = navigationEventAccumulator.addSdkNavigationEvent(event)
-                broadcastNavigationEvent(navigationEvent)
-              } else {
-                broadcastSdkEvent(event)
-              }
-            }
+            sdkEventBatchProcessor.process(batch)
           }
         } catch (e: Exception) {
           Log.e(TAG, "Error handling event batch broadcast", e)

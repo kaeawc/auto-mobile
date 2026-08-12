@@ -20,6 +20,10 @@ class NetworkControlPermissionManifestTest {
         "become its owner after manifest merging.",
       permissions.any { it.name == NETWORK_CONTROL_PERMISSION },
     )
+    assertFalse(
+      "The SDK library must not retain the legacy permission because released SDK hosts own it.",
+      permissions.any { it.name == LEGACY_NETWORK_CONTROL_PERMISSION },
+    )
   }
 
   @Test
@@ -35,6 +39,10 @@ class NetworkControlPermissionManifestTest {
     assertTrue(
       "CtrlProxy must request $NETWORK_CONTROL_PERMISSION to send protected control broadcasts.",
       usesPermissions(document).contains(NETWORK_CONTROL_PERMISSION),
+    )
+    assertFalse(
+      "CtrlProxy must not claim the legacy permission that released SDK hosts already own.",
+      definitions.any { it.name == LEGACY_NETWORK_CONTROL_PERMISSION },
     )
   }
 
@@ -83,6 +91,8 @@ class NetworkControlPermissionManifestTest {
   private companion object {
     const val ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android"
     const val NETWORK_CONTROL_PERMISSION =
+      "dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2"
+    const val LEGACY_NETWORK_CONTROL_PERMISSION =
       "dev.jasonpearson.automobile.sdk.permission.NETWORK_CONTROL"
   }
 }

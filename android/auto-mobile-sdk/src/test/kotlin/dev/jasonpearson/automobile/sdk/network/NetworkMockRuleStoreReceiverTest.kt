@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.sdk.SdkConstants
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -16,6 +17,14 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
 class NetworkMockRuleStoreReceiverTest {
+
+  @Test
+  fun `network control receiver uses CtrlProxy owned versioned permission`() {
+    assertEquals(
+      "dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2",
+      SdkConstants.PERMISSION_NETWORK_CONTROL,
+    )
+  }
 
   /**
    * The receiver must register at most once and unregister must allow a later re-register — without

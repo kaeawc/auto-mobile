@@ -15,9 +15,9 @@
 
   <!-- CtrlProxy owns this signature permission; SDK hosts only consume it. -->
   <permission
-      android:name="dev.jasonpearson.automobile.sdk.permission.NETWORK_CONTROL"
+      android:name="dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2"
       android:protectionLevel="signature" />
-  <uses-permission android:name="dev.jasonpearson.automobile.sdk.permission.NETWORK_CONTROL" />
+  <uses-permission android:name="dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2" />
 
   <!-- Permissions required for accessibility service -->
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />

@@ -8,7 +8,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 
 internal class SdkEventBatchProcessor(
-  scope: CoroutineScope,
+  private val scope: CoroutineScope,
   private val navigationEventAccumulator: NavigationEventAccumulator,
   private val broadcastNavigationEvent: suspend (TimestampedNavigationEvent) -> Unit,
   private val broadcastSdkEvent: suspend (SdkEvent) -> Unit,
@@ -29,8 +29,19 @@ internal class SdkEventBatchProcessor(
   // BroadcastReceiver.onReceive cannot suspend. Keep a bounded handoff queue so a stalled
   // WebSocket client cannot retain arbitrary SDK event batches in the CtrlProxy process.
   private val queuedEvents = Channel<QueuedEvent>(QUEUE_CAPACITY)
+  private var started = false
 
-  init {
+  /**
+   * Begins draining batches after CtrlProxy's WebSocket is ready.
+   *
+   * Receivers can enqueue before this point while the accessibility service completes its remaining
+   * initialization. The bounded queue retains those startup events until a client can receive their
+   * WebSocket broadcasts.
+   */
+  @Synchronized
+  fun start() {
+    if (started) return
+    started = true
     scope.launch {
       for (event in queuedEvents) {
         process(event)

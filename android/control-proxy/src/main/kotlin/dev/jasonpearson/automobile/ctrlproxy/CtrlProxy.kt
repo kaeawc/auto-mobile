@@ -940,6 +940,29 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         registerReceiver(commandReceiver, commandFilter)
       }
 
+      // Register SDK event receivers before the slower service initialization below. The SDK
+      // sender cannot detect an absent dynamic receiver, while SdkEventBatchProcessor retains
+      // accepted events until the WebSocket starts.
+      val navigationFilter =
+        IntentFilter().apply { addAction(AutoMobileSDK.ACTION_NAVIGATION_EVENT) }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        registerReceiver(navigationEventReceiver, navigationFilter, RECEIVER_EXPORTED)
+      } else {
+        @SuppressLint("UnspecifiedRegisterReceiverFlag")
+        registerReceiver(navigationEventReceiver, navigationFilter)
+      }
+      Log.d(TAG, "Navigation event receiver registered")
+
+      val eventBatchFilter =
+        IntentFilter().apply { addAction(SdkEventSerializer.ACTION_SDK_EVENT_BATCH) }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        registerReceiver(eventBatchReceiver, eventBatchFilter, RECEIVER_EXPORTED)
+      } else {
+        @SuppressLint("UnspecifiedRegisterReceiverFlag")
+        registerReceiver(eventBatchReceiver, eventBatchFilter)
+      }
+      Log.d(TAG, "Event batch receiver registered")
+
       // Register broadcast receiver for recomposition snapshots
       val recompositionFilter =
         IntentFilter().apply { addAction(AutoMobileSDK.ACTION_RECOMPOSITION_SNAPSHOT) }
@@ -1130,26 +1153,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             }
           }
           .launchIn(serviceScope)
-
-      val navigationFilter =
-        IntentFilter().apply { addAction(AutoMobileSDK.ACTION_NAVIGATION_EVENT) }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(navigationEventReceiver, navigationFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(navigationEventReceiver, navigationFilter)
-      }
-      Log.d(TAG, "Navigation event receiver registered")
-
-      val eventBatchFilter =
-        IntentFilter().apply { addAction(SdkEventSerializer.ACTION_SDK_EVENT_BATCH) }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(eventBatchReceiver, eventBatchFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(eventBatchReceiver, eventBatchFilter)
-      }
-      Log.d(TAG, "Event batch receiver registered")
+      sdkEventBatchProcessor.start()
+      Log.d(TAG, "SDK event batch processor started")
 
       // Start logcat reader for automatic log capture
       logcatReader = LogcatReader { response ->

@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.protocol.NavigationSourceType
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +12,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SdkEventBatchProcessorTest {
+
+  @Test
+  fun `holds a startup batch until WebSocket processing begins`() = runTest {
+    val startupBroadcastFinished = CompletableDeferred<Unit>()
+    val broadcasts = mutableListOf<String>()
+    val processor =
+      SdkEventBatchProcessor(
+        scope = backgroundScope,
+        navigationEventAccumulator = NavigationEventAccumulator(),
+        broadcastNavigationEvent = { event ->
+          broadcasts.add(event.destination)
+          startupBroadcastFinished.complete(Unit)
+        },
+        broadcastSdkEvent = { error("Unexpected SDK event: $it") },
+      )
+
+    assertTrue(processor.enqueue(batch("startup")))
+    advanceUntilIdle()
+
+    assertTrue("startup batch must wait for WebSocket readiness", broadcasts.isEmpty())
+    processor.start()
+    startupBroadcastFinished.await()
+
+    assertEquals(listOf("startup"), broadcasts)
+  }
 
   @Test
   fun `processes queued batches in broadcast arrival order while a navigation broadcast suspends`() =
@@ -35,6 +61,7 @@ class SdkEventBatchProcessorTest {
           broadcastSdkEvent = { error("Unexpected SDK event: $it") },
         )
 
+      processor.start()
       processor.enqueue(batch("first", "second"))
       firstBroadcastStarted.await()
       processor.enqueue(batch("third"))
@@ -70,6 +97,7 @@ class SdkEventBatchProcessorTest {
           broadcastSdkEvent = { error("Unexpected SDK event: $it") },
         )
 
+      processor.start()
       assertTrue(processor.enqueue(batch("first")))
       firstBroadcastStarted.await()
 
@@ -107,6 +135,7 @@ class SdkEventBatchProcessorTest {
         broadcastSdkEvent = { error("Unexpected SDK event: $it") },
       )
 
+    processor.start()
     assertTrue(
       processor.enqueueNavigationEvent(
         destination = "legacy",

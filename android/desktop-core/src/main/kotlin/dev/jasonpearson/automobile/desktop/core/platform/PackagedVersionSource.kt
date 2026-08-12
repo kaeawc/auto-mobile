@@ -45,12 +45,27 @@ class PackagedVersionSource(
 
   private fun fromManifests(): String? =
     try {
-      classLoader.getResources("META-INF/MANIFEST.MF").asSequence().firstNotNullOfOrNull { url ->
-        url.openStream().use { versionFromManifest(Manifest(it)) }
-      }
+      classLoader
+        .getResources("META-INF/MANIFEST.MF")
+        .asSequence()
+        .firstNotNullOfOrNull(::readManifestVersion)
     } catch (error: Exception) {
       // Best-effort: manifest enumeration failures leave us at the Dev sentinel, never a crash.
       LOG.warn("Failed to scan classpath manifests for app version: ${error.message}", error)
+      null
+    }
+
+  /**
+   * Reads one manifest's AutoMobile version. A single malformed manifest anywhere on the classpath
+   * must not abort the scan (a later jar may be ours), so its failure is swallowed here rather than
+   * by the enumeration's catch.
+   */
+  private fun readManifestVersion(url: java.net.URL): String? =
+    try {
+      url.openStream().use { versionFromManifest(Manifest(it)) }
+    } catch (error: Exception) {
+      // A broken third-party manifest is expected noise; keep scanning.
+      LOG.debug("Skipping unreadable manifest at $url: ${error.message}")
       null
     }
 }

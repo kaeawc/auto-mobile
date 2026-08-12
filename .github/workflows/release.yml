@@ -313,19 +313,9 @@ jobs:
       - name: Build TypeScript package
         run: bun run build
 
-      - name: Publish Homebrew formula
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-          REPO: ${{ github.repository }}
-        run: bash scripts/release/update-brew-formula.sh
-
-      # MCP Registry, Maven Central, and the Docker image are best-effort
-      # distribution channels: a failure in any of them must not block the
-      # canonical GitHub Release (and its artifacts) that runs after them.
-      # continue-on-error neutralizes their failures so `success()` stays true
-      # for the GitHub Release step, while the failed step still shows red in the
-      # UI so the drift is visible and fixable.
+      # The MCP Registry and Docker image are best-effort distribution channels.
+      # Maven Central and npm are blocking because the released CtrlProxy and SDK
+      # artifacts must remain compatible, and Homebrew consumes npm's tarball.
       - name: Install mcp-publisher
         continue-on-error: true
         run: |
@@ -458,6 +448,13 @@ jobs:
             exit 0
           fi
           npm publish --provenance --access public
+
+      - name: Publish Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: bash scripts/release/update-brew-formula.sh
 
       - name: Free Disk Space
         continue-on-error: true

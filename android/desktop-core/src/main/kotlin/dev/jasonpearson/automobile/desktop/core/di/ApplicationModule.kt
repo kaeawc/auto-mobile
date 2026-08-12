@@ -2,7 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.di
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory
-import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
+import dev.jasonpearson.automobile.desktop.core.settings.FileSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
@@ -22,7 +22,9 @@ interface ApplicationModule {
     @Provides
     @SingleIn(AppScope::class)
     fun provideSettingsProvider(): SettingsProvider {
-      return FakeSettingsProvider()
+      // Persistent (file-backed) so the first-run onboarding flag and theme survive restarts.
+      // FakeSettingsProvider remains the in-memory implementation used by tests.
+      return FileSettingsProvider()
     }
   }
 }

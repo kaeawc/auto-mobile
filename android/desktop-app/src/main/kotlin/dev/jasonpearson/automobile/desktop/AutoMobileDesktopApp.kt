@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
@@ -35,7 +36,6 @@ import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NetworkFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
 import dev.jasonpearson.automobile.desktop.core.workspace.PerformanceFacet
-import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.Tool
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceAction
@@ -53,6 +53,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAct
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootController
+import dev.jasonpearson.automobile.desktop.core.workspace.wireName
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
@@ -83,6 +84,11 @@ private const val DAEMON_STATUS_POLL_MS = 5_000L
 // probe for every booted device — not a free read. A lighter dedicated lock-state feed is a
 // follow-up (see #4694); until then this cadence trades adb load for Unlock responsiveness.
 private const val LOCK_STATE_POLL_MS = 4_000L
+
+// How often the device grid re-reads the device list while it is the visible surface, so devices
+// started/killed by another client appear without a manual refresh. Matches AutoMobileContent's
+// booted-devices poll cadence.
+private const val GRID_REFRESH_POLL_MS = 5_000L
 
 /**
  * Live daemon connectivity as a [ConnectionState], polled from [AutoMobileClient.getDaemonStatus].
@@ -198,6 +204,15 @@ fun AutoMobileDesktopApp(
     (workspaceState as? WorkspaceUiState.Content)?.let { content ->
       content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
     }
+  // Bind the session to the FOCUSED (observed) device ONLY. setActiveDevice is allocation-bearing —
+  // it reserves the device for this session — so it must never run for a device the user isn't
+  // observing: registering the session by reserving a booted grid device would hold that device
+  // hostage from CLI/MCP sessions for as long as the app sits on the home grid (Codex P1). The
+  // daemon has no registration-only session path today (a session is created only by allocating a
+  // device, and daemon/heartbeat rejects unknown sessions), so the pristine home grid's live
+  // thumbnails are left to authenticate via the first observe — until then they degrade to the
+  // screenshot fallback. Once any device is observed the session is registered, and the reopened
+  // grid's other (unowned) devices then pass the stream auth's unowned-device branch.
   // A focus change cancels this effect, but the cancellation cannot interrupt an in-flight
   // synchronous setActiveDevice on Dispatchers.IO. Serialize binds through a mutex and gate each on
   // a generation token so a stale bind that finishes after its replacement cannot leave the session
@@ -207,7 +222,7 @@ fun AutoMobileDesktopApp(
   LaunchedEffect(desktopDaemonSession, focusedColumn?.deviceId, focusedColumn?.platform) {
     val session = desktopDaemonSession ?: return@LaunchedEffect
     val column = focusedColumn ?: return@LaunchedEffect
-    val platform = if (column.platform == Platform.Ios) "ios" else "android"
+    val platform = column.platform.wireName()
     val generation = bindingGeneration.incrementAndGet()
     while (isActive) {
       val registered = runCatching {
@@ -240,10 +255,16 @@ fun AutoMobileDesktopApp(
   }
 
   // Window-level ⌘K/Ctrl+K (Main.kt) bumps openPaletteRequest; open the palette in response, but
-  // only while the workspace is showing — onboarding and the device picker own the screen and have
-  // no palette. The `> 0` guard skips the initial composition (the counter starts at 0).
+  // only while the workspace is showing — onboarding and the device grid (shown while nothing is
+  // observed, or when explicitly opened) own the screen and have no palette. The `> 0` guard skips
+  // the initial composition (the counter starts at 0).
   LaunchedEffect(openPaletteRequest) {
-    if (openPaletteRequest > 0 && !showOnboarding && !pickerOpen) {
+    if (
+      openPaletteRequest > 0 &&
+        !showOnboarding &&
+        !pickerOpen &&
+        workspaceState is WorkspaceUiState.Content
+    ) {
       paletteOpen = true
     }
   }
@@ -316,6 +337,37 @@ fun AutoMobileDesktopApp(
       }
     }
   }
+  // Returning to the home grid (the last workspace column closed) refreshes the picker so it
+  // reflects
+  // devices started/killed externally during the workspace session — otherwise the picker only
+  // loads
+  // on init and via OpenPicker, so a stale grid could dispatch the wrong observe/boot (Codex P2).
+  // Only the Content -> Empty transition refreshes; the initial Empty is already covered by the
+  // VM's
+  // init load.
+  LaunchedEffect(pickerViewModel) {
+    var wasContent = false
+    snapshotFlow { workspaceState is WorkspaceUiState.Empty }
+      .collect { empty ->
+        if (empty && wasContent) pickerViewModel.onAction(DevicePickerAction.Refresh)
+        wasContent = !empty
+      }
+  }
+  // While the device grid is the visible surface — nothing observed, or the picker opened over a
+  // workspace — poll for device changes so devices started/killed by another client appear while
+  // the
+  // user sits on the grid. Keyed on the DERIVED visibility (recomputed each recomposition), so the
+  // loop starts when the grid appears and stops when it hides, instead of reading state captured at
+  // launch: onboarding→grid and Devices+→overlay transitions both (re)start polling (Codex P2). A
+  // silent reload keeps the grid on screen between polls.
+  val gridVisible = !showOnboarding && (pickerOpen || workspaceState is WorkspaceUiState.Empty)
+  LaunchedEffect(pickerViewModel, gridVisible) {
+    if (!gridVisible) return@LaunchedEffect
+    while (true) {
+      delay(GRID_REFRESH_POLL_MS)
+      pickerViewModel.onAction(DevicePickerAction.SilentRefresh)
+    }
+  }
 
   AutoMobileTheme(themeMode = settings.themeMode) {
     Surface(
@@ -333,11 +385,18 @@ fun AutoMobileDesktopApp(
               showOnboarding = false
             }
           )
-        pickerOpen ->
+        // The device grid is the home surface whenever nothing is observed (true on launch), and
+        // also whenever "Devices +" explicitly opens it over a live workspace. Observing a device
+        // makes the workspace non-empty, which drops the picker for WorkspaceShell.
+        pickerOpen || workspaceState is WorkspaceUiState.Empty ->
           DevicePicker(
             state = pickerState,
             onAction = pickerViewModel::onAction,
             onClose = { pickerOpen = false },
+            // Authenticates each grid card's live-video subscribe against the daemon session guard.
+            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+            // Only offer Close when there is an observed workspace to return to.
+            canClose = workspaceState is WorkspaceUiState.Content,
           )
         else ->
           Box(Modifier.fillMaxSize()) {

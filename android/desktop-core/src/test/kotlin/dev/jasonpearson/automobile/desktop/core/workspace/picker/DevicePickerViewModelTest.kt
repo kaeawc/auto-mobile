@@ -102,6 +102,58 @@ class DevicePickerViewModelTest {
   }
 
   @Test
+  fun `observe one emits a single column immediately for a booted device`() = testScope.runTest {
+    val vm =
+      DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+    vm.effect.test {
+      vm.onAction(DevicePickerAction.ObserveOne("emulator-5554"))
+      val columns = (awaitItem() as DevicePickerEffect.Observe).columns
+      assertEquals(listOf("emulator-5554"), columns.map { it.deviceId })
+      assertEquals(Platform.Android, columns.single().platform)
+      cancelAndIgnoreRemainingEvents()
+    }
+  }
+
+  @Test
+  fun `observe one ignores a shut-down device`() = testScope.runTest {
+    val vm =
+      DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+    vm.effect.test {
+      vm.onAction(DevicePickerAction.ObserveOne("iphone-15")) // shut down — no observe
+      expectNoEvents()
+      cancelAndIgnoreRemainingEvents()
+    }
+  }
+
+  @Test
+  fun `a completed boot auto-observes the newly booted device`() = testScope.runTest {
+    val resources = fake()
+    val boot =
+      FakeDeviceBootController().apply {
+        result = Result.success("emulator-5556")
+        onSuccess = {
+          resources.bootedDevicesResponse =
+            """
+            {"totalCount":2,"androidCount":2,"iosCount":0,"virtualCount":2,"physicalCount":0,
+             "lastUpdated":"x","devices":[
+               {"name":"Pixel 8 API 35","platform":"android","deviceId":"emulator-5554",
+                "source":"local","isVirtual":true,"status":"booted"},
+               {"name":"Pixel 6 API 33","platform":"android","deviceId":"emulator-5556",
+                "source":"local","isVirtual":true,"status":"booted"}]}
+            """
+              .trimIndent()
+        }
+      }
+    val v = vm(resourceClient = resources, bootController = boot)
+    v.effect.test {
+      v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
+      val columns = (awaitItem() as DevicePickerEffect.Observe).columns
+      assertEquals(listOf("emulator-5556"), columns.map { it.deviceId })
+      cancelAndIgnoreRemainingEvents()
+    }
+  }
+
+  @Test
   fun `observe selected seeds the column lock state from the booted snapshot`() =
     testScope.runTest {
       val locked =
@@ -124,6 +176,104 @@ class DevicePickerViewModelTest {
         assertTrue("column should be seeded locked", columns.single().locked)
         cancelAndIgnoreRemainingEvents()
       }
+    }
+
+  @Test
+  fun `silent refresh does not flash the Loading state`() = testScope.runTest {
+    val vm =
+      DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+    assertTrue(vm.state.value is DevicePickerUiState.Content) // init load resolved
+    vm.state.test {
+      assertTrue(awaitItem() is DevicePickerUiState.Content) // current value
+      // The unchanged device list reloads without ever passing through Loading — so with identical
+      // content there is no further emission at all (a Loading flash would emit here).
+      vm.onAction(DevicePickerAction.SilentRefresh)
+      expectNoEvents()
+      cancelAndIgnoreRemainingEvents()
+    }
+  }
+
+  @Test
+  fun `a superseded boot reload does not auto-observe a device the newer state dropped`() =
+    testScope.runTest {
+      val client =
+        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)
+      val boot =
+        FakeDeviceBootController().apply {
+          autoComplete = false
+          result = Result.success("emulator-5556")
+          onSuccess = { client.bootedJson = TWO_BOOTED_PIXEL8_AND_6 }
+        }
+      val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
+      v.effect.test {
+        v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // boot in flight (held)
+
+        // Let the boot resolve so its reload reads the (now-booted) list, then stall it on the
+        // gate.
+        val reloadGate = CompletableDeferred<Unit>()
+        client.imagesGate = reloadGate
+        boot.complete()
+        client.imagesGate = null
+
+        // Another client kills emulator-5556, then a newer refresh supersedes the stalled reload.
+        client.bootedJson = SINGLE_BOOTED_PIXEL8
+        v.onAction(DevicePickerAction.Refresh) // gen N+1 emits Content without emulator-5556
+
+        reloadGate.complete(Unit) // stale reload resumes: auto-observe must see the device is gone
+        expectNoEvents() // no Observe effect for the now-dead device
+        cancelAndIgnoreRemainingEvents()
+      }
+    }
+
+  @Test
+  fun `a silent refresh coalesces while a load is in flight`() = testScope.runTest {
+    val client =
+      ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)
+    val vm =
+      DevicePickerViewModel(client, FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+    assertEquals(1, client.imagesReadCount) // the init load read once
+
+    // Hold the next load in flight on the images gate, then fire extra polls at it.
+    val gate = CompletableDeferred<Unit>()
+    client.imagesGate = gate
+    vm.onAction(DevicePickerAction.SilentRefresh) // starts a load, stalls on the gate
+    vm.onAction(DevicePickerAction.SilentRefresh) // coalesced — a load is already in flight
+    vm.onAction(DevicePickerAction.SilentRefresh) // coalesced
+    // Only the single in-flight load started a read; the fixed-rate poll did NOT stack generations.
+    assertEquals(2, client.imagesReadCount)
+
+    client.imagesGate = null
+    gate.complete(Unit) // release so runTest can finish
+  }
+
+  @Test
+  fun `a silent refresh coalesces while an older overlapping load is still in flight`() =
+    testScope.runTest {
+      val client =
+        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)
+      val vm =
+        DevicePickerViewModel(client, FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+      assertEquals(1, client.imagesReadCount) // init load
+
+      // Two overlapping EXPLICIT refreshes, each blocked on its own gate. Explicit refreshes are
+      // never coalesced, so both start a read.
+      val older = CompletableDeferred<Unit>()
+      client.imagesGate = older
+      vm.onAction(DevicePickerAction.Refresh) // load #1, blocks on `older`
+      val newer = CompletableDeferred<Unit>()
+      client.imagesGate = newer
+      vm.onAction(DevicePickerAction.Refresh) // load #2, blocks on `newer`
+      client.imagesGate = null
+      assertEquals(3, client.imagesReadCount) // init + #1 + #2
+
+      // The NEWER load finishes first, leaving the older one still in flight.
+      newer.complete(Unit)
+
+      // A poll now must still coalesce — an older read is active even though the newest is done.
+      vm.onAction(DevicePickerAction.SilentRefresh)
+      assertEquals(3, client.imagesReadCount) // no extra read — coalesced against the older load
+
+      older.complete(Unit) // release so runTest can finish
     }
 
   @Test
@@ -605,6 +755,7 @@ private class ScriptableResourceClient(var bootedJson: String, private val image
   var imagesGate: CompletableDeferred<Unit>? = null
   var failBooted: Boolean = false
   var failImages: Boolean = false
+  var imagesReadCount: Int = 0
 
   override suspend fun readResource(uri: String): ResourceReadResult =
     when (uri) {
@@ -612,6 +763,7 @@ private class ScriptableResourceClient(var bootedJson: String, private val image
         if (failBooted) ResourceReadResult.Error("transient booted-read failure")
         else ResourceReadResult.Success(bootedJson, "application/json")
       "automobile:devices/images" -> {
+        imagesReadCount++
         imagesGate?.await()
         if (failImages) ResourceReadResult.Error("transient images-read failure")
         else ResourceReadResult.Success(imagesJson, "application/json")

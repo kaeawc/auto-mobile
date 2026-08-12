@@ -28,6 +28,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -147,6 +148,7 @@ import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import dev.jasonpearson.automobile.desktop.core.telemetry.matchesSearch
 import dev.jasonpearson.automobile.desktop.core.test.TestDashboard
 import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
+import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import dev.jasonpearson.automobile.desktop.core.timeline.TimelineCanvas
 import dev.jasonpearson.automobile.desktop.core.timeline.TimelineCategory
@@ -2809,13 +2811,8 @@ private fun GlobalShellHeader(
             // Show device buttons next to "Devices:" using emojis with tooltips
             devices.forEach { device ->
               val isActive = device.id == activeDeviceId
-              val deviceEmoji =
-                when (device.type) {
-                  DeviceType.AndroidEmulator,
-                  DeviceType.AndroidPhysical -> "\uD83E\uDD16" // 🤖
-                  DeviceType.iOSSimulator,
-                  DeviceType.iOSPhysical -> "\uD83C\uDF4E" // 🍎
-                }
+              val deviceIsIos =
+                device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical
               Tooltip(
                 tooltip = {
                   Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -2853,9 +2850,11 @@ private fun GlobalShellHeader(
                       .pointerHoverIcon(PointerIcon.Hand)
                       .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                  Text(
-                    deviceEmoji,
-                    fontSize = 14.sp,
+                  Icon(
+                    imageVector = PlatformIcons.logo(deviceIsIos),
+                    contentDescription = PlatformIcons.contentDescription(deviceIsIos),
+                    tint = PlatformIcons.tint(deviceIsIos),
+                    modifier = Modifier.size(16.dp),
                   )
                 }
               }

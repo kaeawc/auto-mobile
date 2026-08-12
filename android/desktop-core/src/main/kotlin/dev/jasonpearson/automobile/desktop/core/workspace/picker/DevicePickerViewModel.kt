@@ -58,6 +58,12 @@ sealed interface DevicePickerAction {
 
   data class ToggleSelect(val deviceId: String) : DevicePickerAction
 
+  /**
+   * Observe a single already-booted device immediately (a plain click on its card). Emits the
+   * Observe effect for just that device; ignored for non-booted devices.
+   */
+  data class ObserveOne(val deviceId: String) : DevicePickerAction
+
   /** Boot a shut-down device (its card was clicked). Ignored for already-booted/booting devices. */
   data class BootDevice(val deviceId: String) : DevicePickerAction
 
@@ -66,6 +72,13 @@ sealed interface DevicePickerAction {
   data object ObserveSelected : DevicePickerAction
 
   data object Refresh : DevicePickerAction
+
+  /**
+   * Reload the device list WITHOUT flashing the Loading state — for a background poll while the
+   * grid stays open, so a poll doesn't blank the grid to "Loading…" every interval. The current
+   * content stays on screen and is replaced only when the fresh list resolves.
+   */
+  data object SilentRefresh : DevicePickerAction
 }
 
 sealed interface DevicePickerEffect {
@@ -114,6 +127,13 @@ class DevicePickerViewModel(
   // never dropped into a stranded Loading.
   private var loadGeneration: Long = 0
 
+  // Count of load() coroutines currently in flight — ALL of them, not just the newest: overlapping
+  // explicit Refreshes are not cancelled, so a newer one can finish while an older read is still
+  // blocked. A background SilentRefresh coalesces while any load remains active, instead of
+  // stacking
+  // a fresh generation on top. Decremented in each load's finally.
+  private var activeLoads: Int = 0
+
   init {
     load()
   }
@@ -131,16 +151,34 @@ class DevicePickerViewModel(
       is DevicePickerAction.SetQuery -> updateFilters { it.copy(query = action.query) }
       is DevicePickerAction.ClearFilter -> clearFilter(action.dimension)
       is DevicePickerAction.ToggleSelect -> toggleSelect(action.deviceId)
+      is DevicePickerAction.ObserveOne -> observeDevice(action.deviceId)
       is DevicePickerAction.BootDevice -> bootDevice(action.deviceId)
       is DevicePickerAction.ClearSelection -> clearSelection()
       is DevicePickerAction.ObserveSelected -> observeSelected()
       is DevicePickerAction.Refresh -> load()
+      is DevicePickerAction.SilentRefresh -> load(silent = true)
     }
   }
 
-  private fun load() {
+  private fun load(silent: Boolean = false) {
+    // Coalesce background polls: while a load — or a boot's reload — is already in flight, a silent
+    // refresh is a no-op, because the running read already produces fresh data. Without this, a
+    // fixed-rate 5s poll slower than the daemon reads would stack up generations, each
+    // SilentRefresh
+    // invalidating the previous in-flight read (emitIfCurrent accepts only the newest generation),
+    // leaving the grid stale or stuck Loading while reads accumulate. Effectively this serializes
+    // polls to at most one read at a time. An explicit Refresh is never coalesced — it supersedes.
+    if (silent && (activeLoads > 0 || bootingIds.isNotEmpty())) return
     val generation = ++loadGeneration
-    _state.value = DevicePickerUiState.Loading
+    // A silent (background-poll) reload keeps the current Content on screen and swaps the list in
+    // on
+    // success, so the grid doesn't blank to "Loading…" every poll interval; an explicit refresh
+    // (Retry / open) still shows Loading. A first load (state not yet Content) always shows
+    // Loading.
+    if (!silent || _state.value !is DevicePickerUiState.Content) {
+      _state.value = DevicePickerUiState.Loading
+    }
+    activeLoads++
     scope.launch {
       try {
         val devices = fetchDevices()
@@ -150,6 +188,8 @@ class DevicePickerViewModel(
       } catch (e: Exception) {
         LOG.warn("Failed to load picker devices: ${e.message}", e)
         resolveFetchFailure(generation, e)
+      } finally {
+        activeLoads--
       }
     }
   }
@@ -308,9 +348,11 @@ class DevicePickerViewModel(
         resolveFetchFailure(generation, e)
         return
       }
-    val nowBooted = devices.any { it.id == runtimeDeviceId && it.state == DeviceState.Booted }
+    val bootedRuntime = devices.firstOrNull {
+      it.id == runtimeDeviceId && it.state == DeviceState.Booted
+    }
     bootingIds = bootingIds - bootedDevice.id
-    if (nowBooted) {
+    if (bootedRuntime != null) {
       selectedIds = selectedIds + runtimeDeviceId // recorded before the guard — never lost
       bootErrors = bootErrors - bootedDevice.id
     } else {
@@ -322,6 +364,21 @@ class DevicePickerViewModel(
     // wins.
     syncState()
     emitIfCurrent(generation, devices)
+    // Boot then auto-observe — but observe from the CURRENT (winning) state, not this reload's own
+    // (possibly stale) list. If a newer refresh superseded this stalled reload, emitIfCurrent
+    // dropped
+    // its list; sending straight from `bootedRuntime` could open a pane — and start
+    // binding/streaming
+    // — for a device the newer refresh has since removed (e.g. killed by another client while this
+    // reload was stalled). Re-checking the live Content re-observes only a device that is still
+    // present-and-booted, with its fresh lock/virtual state (Codex).
+    val stillBooted =
+      (_state.value as? DevicePickerUiState.Content)?.devices?.firstOrNull {
+        it.id == runtimeDeviceId && it.state == DeviceState.Booted
+      }
+    if (stillBooted != null) {
+      _effect.send(DevicePickerEffect.Observe(listOf(columnOf(stillBooted))))
+    }
   }
 
   private fun toggleSelect(deviceId: String) {
@@ -343,20 +400,35 @@ class DevicePickerViewModel(
     val columns =
       content.devices
         .filter { it.id in selectedIds && it.state == DeviceState.Booted }
-        .map {
-          // Seed the pane's lock state from the booted snapshot; the host's poll keeps it fresh.
-          DeviceColumn(
-            deviceId = it.id,
-            name = it.name,
-            platform = it.platform,
-            locked = it.locked,
-            isVirtual = it.isVirtual,
-          )
-        }
+        .map(::columnOf)
     if (columns.isNotEmpty()) {
       scope.launch { _effect.send(DevicePickerEffect.Observe(columns)) }
     }
   }
+
+  /**
+   * Observe a single booted device immediately — the plain-click path. A non-booted or unknown id
+   * is a no-op (shut-down cards boot instead, and a boot auto-observes on completion).
+   */
+  private fun observeDevice(deviceId: String) {
+    val content = _state.value as? DevicePickerUiState.Content ?: return
+    val device = content.devices.firstOrNull { it.id == deviceId } ?: return
+    if (device.state != DeviceState.Booted) return
+    scope.launch { _effect.send(DevicePickerEffect.Observe(listOf(columnOf(device)))) }
+  }
+
+  /**
+   * Build the observed [DeviceColumn] for a booted picker device, seeding its lock/virtual state.
+   */
+  private fun columnOf(device: PickerDevice): DeviceColumn =
+    // Seed the pane's lock state from the booted snapshot; the host's poll keeps it fresh.
+    DeviceColumn(
+      deviceId = device.id,
+      name = device.name,
+      platform = device.platform,
+      locked = device.locked,
+      isVirtual = device.isVirtual,
+    )
 
   private fun clearFilter(dimension: FilterDimension) {
     updateFilters {

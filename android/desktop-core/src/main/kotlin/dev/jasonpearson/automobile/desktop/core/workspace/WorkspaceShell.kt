@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,6 +47,7 @@ import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
+import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -889,7 +891,13 @@ private fun DeviceColumnHeader(column: DeviceColumn, onAction: (WorkspaceAction)
         .padding(horizontal = 8.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Text(column.platform.emoji)
+    val isIos = column.platform == Platform.Ios
+    Icon(
+      imageVector = PlatformIcons.logo(isIos),
+      contentDescription = PlatformIcons.contentDescription(isIos),
+      tint = PlatformIcons.tint(isIos),
+      modifier = Modifier.size(16.dp),
+    )
     Spacer(Modifier.width(6.dp))
     Text(column.name, style = MaterialTheme.typography.labelLarge)
     Spacer(Modifier.width(10.dp))

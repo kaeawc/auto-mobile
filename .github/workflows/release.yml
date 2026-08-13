@@ -75,6 +75,13 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - validate-release-tag
+    env:
+      # Maven Central publishing is temporarily disabled. The signing key id secret
+      # (ORG_GRADLE_PROJECT_SIGNINGINMEMORYKEYID) holds a malformed GPG key id, so
+      # `signMavenPublication` fails and aborts the whole release before npm ever
+      # runs (release run 31707895940). Skip Maven so npm keeps shipping; flip this
+      # to "true" once the signing key is fixed to re-enable Maven Central.
+      PUBLISH_TO_MAVEN: "false"
 
     steps:
       - name: Checkout code
@@ -406,6 +413,7 @@ jobs:
       # the artifact-reduction work (#4851, #4852) a before/after regression
       # oracle.
       - name: Maven Central publication manifest preflight
+        if: ${{ env.PUBLISH_TO_MAVEN == 'true' }}
         continue-on-error: true
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -419,6 +427,7 @@ jobs:
         run: scripts/release/maven-publication-manifest-preflight.sh
 
       - name: Upload Maven publication manifest
+        if: ${{ env.PUBLISH_TO_MAVEN == 'true' }}
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
@@ -427,6 +436,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Publish Android Libraries to Maven Central
+        if: ${{ env.PUBLISH_TO_MAVEN == 'true' }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
           ORG_GRADLE_PROJECT_mavenCentralUsername:

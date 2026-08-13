@@ -6,6 +6,14 @@ import { hasEventAllMarkersCliOverride, parseEventAllMarkersConfig } from "../ut
 import { parseOutputReductionFlags } from "../utils/outputReductionFlags";
 import { parseToolOutputsDirConfig } from "../utils/toolOutputArtifacts";
 import { resolveDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+import {
+  DEFAULT_RUNNER_READINESS_TIMEOUT_MS,
+  MAX_RUNNER_READINESS_TIMEOUT_MS,
+  MIN_RUNNER_READINESS_TIMEOUT_MS,
+  RUNNER_READINESS_TIMEOUT_ENV,
+  RUNNER_READINESS_TIMEOUT_FLAG,
+  parseRunnerReadinessTimeout,
+} from "../utils/runnerReadinessConfig";
 
 export interface ParseLogger {
   warn(message: string): void;
@@ -26,7 +34,11 @@ const booleanOptions = Object.fromEntries(
 // The existing option surface is intentionally preserved during this extraction.
 // A declarative parser migration is separate behavior-changing work.
 // eslint-disable-next-line complexity
-export function parseArgs(args: string[], log: ParseLogger) {
+export function parseArgs(
+  args: string[],
+  log: ParseLogger,
+  environment: NodeJS.ProcessEnv = process.env,
+) {
   const { values } = parseNodeArgs({
     args,
     options: booleanOptions,
@@ -72,6 +84,18 @@ export function parseArgs(args: string[], log: ParseLogger) {
   const noOcclusion = hasFlag("no-occlusion");
   const outputReduction = parseOutputReductionFlags(args, process.env);
   const toolOutputsDir = parseToolOutputsDirConfig(args, process.env, resolveDaemonLaunchWorkingDirectory());
+  const runnerReadinessEnv =
+    environment[RUNNER_READINESS_TIMEOUT_ENV] ??
+    environment.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS;
+  const parsedRunnerReadinessEnv = parseRunnerReadinessTimeout(runnerReadinessEnv);
+  let runnerReadinessTimeoutMs =
+    parsedRunnerReadinessEnv ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
+  if (runnerReadinessEnv !== undefined && parsedRunnerReadinessEnv === undefined) {
+    log.warn(
+      `Invalid ${RUNNER_READINESS_TIMEOUT_ENV}: ${runnerReadinessEnv}; expected an integer ` +
+      `from ${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
+    );
+  }
   let planExecutionLockScope: PlanExecutionLockScope = "session";
   const videoRecordingDefaults: VideoRecordingConfigInput = {};
 
@@ -146,6 +170,17 @@ export function parseArgs(args: string[], log: ParseLogger) {
     } else if (arg === "--plan-execution-lock-scope") {
       const scope = args[++i];
       if (scope === "global" || scope === "session") {planExecutionLockScope = scope;} else {log.warn(`Invalid plan execution lock scope: ${scope}. Using default: ${planExecutionLockScope}`);}
+    } else if (arg === RUNNER_READINESS_TIMEOUT_FLAG) {
+      const raw = args[++i];
+      const parsed = parseRunnerReadinessTimeout(raw);
+      if (parsed !== undefined) {
+        runnerReadinessTimeoutMs = parsed;
+      } else {
+        log.warn(
+          `Invalid runner readiness timeout: ${raw}; expected an integer from ` +
+          `${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
+        );
+      }
     } else if (arg === "--video-quality" || arg === "--video-quality-preset") {applyQualityPreset(args[++i], "cli");} else if (arg === "--video-target-bitrate-kbps") {
       const value = parsePositiveNumber(args[++i], "video target bitrate", false); if (value !== undefined) {videoRecordingDefaults.targetBitrateKbps = value;}
     } else if (arg === "--video-max-throughput-mbps") {
@@ -156,5 +191,5 @@ export function parseArgs(args: string[], log: ParseLogger) {
       const value = parsePositiveNumber(args[++i], "video max archive size", true); if (value !== undefined) {videoRecordingDefaults.maxArchiveSizeMb = value;}
     }
   }
-  return { cliMode, cliArgs, daemonPort, daemonHost, initialSessionUuid, debugPerf, debug, uiPerfMode, memPerfAuditMode, a11yAuditMode, a11yLevel, a11yFailureMode, a11yMinSeverity, a11yUseBaseline, predictiveUi, rawElementSearch, planExecutionLockScope, videoRecordingDefaults, daemonMode, daemonCommand, daemonArgs, skipCtrlProxyDownload, embeddedSdk, networkMockable, dismissKeyboardAfterInput, eventAllMarkers, eventAllMarkersCliOverride, mcpRecording, navigationScreenshots, noWaitForPollingOverhead, noProxy, noDaemon, noA11yIncludeNotImportantViews, noA11yReportViewIds, noA11yRetrieveInteractiveWindows, noOcclusion, outputReduction, toolOutputsDir };
+  return { cliMode, cliArgs, daemonPort, daemonHost, initialSessionUuid, debugPerf, debug, uiPerfMode, memPerfAuditMode, a11yAuditMode, a11yLevel, a11yFailureMode, a11yMinSeverity, a11yUseBaseline, predictiveUi, rawElementSearch, planExecutionLockScope, videoRecordingDefaults, runnerReadinessTimeoutMs, daemonMode, daemonCommand, daemonArgs, skipCtrlProxyDownload, embeddedSdk, networkMockable, dismissKeyboardAfterInput, eventAllMarkers, eventAllMarkersCliOverride, mcpRecording, navigationScreenshots, noWaitForPollingOverhead, noProxy, noDaemon, noA11yIncludeNotImportantViews, noA11yReportViewIds, noA11yRetrieveInteractiveWindows, noOcclusion, outputReduction, toolOutputsDir };
 }

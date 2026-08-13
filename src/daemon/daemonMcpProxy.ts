@@ -243,6 +243,10 @@ const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "toolOutputsDir",
 ];
 
+const REUSE_CRITICAL_NUMBER_OPTION_KEYS: (keyof DaemonOptions)[] = [
+  "runnerReadinessTimeoutMs",
+];
+
 /** The value of a startup option when it is a string, else undefined. */
 function stringOption(
   options: DaemonOptions | undefined,
@@ -250,6 +254,14 @@ function stringOption(
 ): string | undefined {
   const value = options?.[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function numberOption(
+  options: DaemonOptions | undefined,
+  key: keyof DaemonOptions
+): number | undefined {
+  const value = options?.[key];
+  return typeof value === "number" ? value : undefined;
 }
 
 function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
@@ -283,6 +295,13 @@ function startupOptionDeficits(
   for (const key of REUSE_CRITICAL_STRING_OPTION_KEYS) {
     const want = stringOption(requested, key);
     const have = stringOption(running, key);
+    if (want !== undefined && want !== have) {
+      deficits.push(`${key} (requested=${want}, running=${have ?? "unset"})`);
+    }
+  }
+  for (const key of REUSE_CRITICAL_NUMBER_OPTION_KEYS) {
+    const want = numberOption(requested, key);
+    const have = numberOption(running, key);
     if (want !== undefined && want !== have) {
       deficits.push(`${key} (requested=${want}, running=${have ?? "unset"})`);
     }

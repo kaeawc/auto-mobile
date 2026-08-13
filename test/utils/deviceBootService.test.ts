@@ -5,6 +5,8 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import type { DeviceInfo } from "../../src/models";
 import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import type { DeviceBootRecovery } from "../../src/utils/deviceBootRecovery";
+import type { Timer } from "../../src/utils/SystemTimer";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const image: DeviceInfo = {
   name: "Pixel_9_API_35",
@@ -13,7 +15,12 @@ const image: DeviceInfo = {
   osVersion: "35",
 };
 
-function service(deviceManager: FakeDeviceUtils, matcher = new FakeDeviceMatcher(), bootRecovery?: DeviceBootRecovery): DeviceBootService {
+function service(
+  deviceManager: FakeDeviceUtils,
+  matcher = new FakeDeviceMatcher(),
+  bootRecovery?: DeviceBootRecovery,
+  timer?: Pick<Timer, "now">,
+): DeviceBootService {
   return new DeviceBootService({
     deviceManager,
     deviceMatcher: matcher,
@@ -21,6 +28,7 @@ function service(deviceManager: FakeDeviceUtils, matcher = new FakeDeviceMatcher
     deviceProvisioner: { provision: async () => { throw new Error("unexpected provision"); } },
     matchingStrategy: "LATEST",
     bootRecovery,
+    timer: timer ?? new FakeTimer(),
   });
 }
 
@@ -43,6 +51,29 @@ describe("DeviceBootService", () => {
       "startDevice:Pixel_9_API_35:12345",
       "waitForDeviceReady:Pixel_9_API_35:12345",
     ]);
+  });
+
+  it("passes only the remaining total budget to readiness after device start", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const timer = new FakeTimer();
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    const originalStartDevice = devices.startDevice.bind(devices);
+    devices.startDevice = async (...args) => {
+      const handle = await originalStartDevice(...args);
+      timer.advanceTime(4_000);
+      return handle;
+    };
+
+    await service(devices, matcher, undefined, timer).boot({
+      platform: "android",
+      timeoutMs: 10_000,
+    });
+
+    expect(devices.getExecutedOperations()).toContain(
+      "waitForDeviceReady:Pixel_9_API_35:6000",
+    );
   });
 
   it("adopts and awaits a matching running device", async () => {

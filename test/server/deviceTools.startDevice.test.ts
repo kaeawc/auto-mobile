@@ -50,6 +50,7 @@ describe("startDevice handler", () => {
       deviceMatcherFactory: () => fakeMatcher,
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
+      timer: new FakeTimer(),
     });
 
     registerDeviceTools();
@@ -139,6 +140,7 @@ describe("startDevice handler", () => {
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
       notifyResourcesChanged: async () => {},
+      timer: new FakeTimer(),
       // deliberately no ensureCtrlProxyReady -> default closure with the check
     });
     registerDeviceTools();
@@ -424,6 +426,72 @@ describe("startDevice handler", () => {
     );
   });
 
+  it("rejects a running-device identity mismatch before runner readiness", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeDeviceUtils.waitForDeviceReady = async () => ({
+      ...androidDevice,
+      deviceId: "emulator-5556",
+    });
+
+    await expect(callStartDevice({
+      platform: "android",
+      deviceId: "emulator-5554",
+    })).rejects.toThrow(/requested=.*emulator-5554.*resolved=.*emulator-5556/);
+  });
+
+  it("rejects an iOS cold-boot UDID mismatch before binding a session", async () => {
+    const image: DeviceInfo = {
+      name: "iPhone 15",
+      platform: "ios",
+      deviceId: "REQUESTED-UDID",
+      isRunning: false,
+    };
+    fakeDeviceUtils.setDeviceImages("ios", [image]);
+    fakeMatcher.setImageResult(image);
+    fakeDeviceUtils.waitForDeviceReady = async () => ({
+      name: image.name,
+      platform: "ios",
+      deviceId: "OTHER-UDID",
+    });
+
+    await expect(callStartDevice({
+      platform: "ios",
+      deviceId: "REQUESTED-UDID",
+    })).rejects.toThrow(/phase=pool-match.*UDID differs/);
+  });
+
+  it("passes the request runner budget and shared total deadline to readiness", async () => {
+    const readinessRequests: Array<{
+      totalDeadlineMs: number;
+      readinessTimeoutMs: number;
+      requestedIdentity: string;
+    }> = [];
+    const timer = new FakeTimer();
+    timer.advanceTime(1_000);
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async request => {
+        readinessRequests.push(request);
+      },
+    });
+    registerDeviceTools();
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    await callStartDevice({
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+      timeoutMs: 60_000,
+      runnerReadinessTimeoutMs: 15_000,
+    });
+
+    expect(readinessRequests).toEqual([expect.objectContaining({
+      totalDeadlineMs: 61_000,
+      readinessTimeoutMs: 15_000,
+      requestedIdentity: "platform=android deviceId=emulator-5554",
+    })]);
+  });
+
   it("boots image when deviceId matches an image name", async () => {
     fakeDeviceUtils.setBootedDevices("android", []);
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
@@ -560,6 +628,17 @@ describe("startDevice handler", () => {
     expect(parsed.name).toBe("Pixel_7_API_34");
   });
 
+  it("bounds runner readiness timeout overrides", () => {
+    expect(() => startDeviceSchema.parse({
+      platform: "android",
+      runnerReadinessTimeoutMs: 999,
+    })).toThrow();
+    expect(() => startDeviceSchema.parse({
+      platform: "android",
+      runnerReadinessTimeoutMs: 120_001,
+    })).toThrow();
+  });
+
   it("prefers deviceId over name when enriching booted device metadata", async () => {
     const bootedDuplicateName: BootedDevice = {
       name: "iPhone 15",
@@ -613,6 +692,31 @@ describe("startDevice handler", () => {
 
     expect(typeof result.sessionId).toBe("string");
     expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(result.sessionId);
+  });
+
+  it("rejects stale pooled platform metadata before session binding", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([{
+      ...iosDevice,
+      deviceId: androidDevice.deviceId,
+    }]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    await expect(callStartDevice({
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+    })).rejects.toThrow(/phase=pool-match.*stale pool platform conflicts/);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
   });
 
   it("reuses the returned sessionId for repeated startDevice calls when autolock is disabled", async () => {

@@ -154,6 +154,7 @@ async function main() {
       predictiveUi,
       rawElementSearch,
       planExecutionLockScope,
+      runnerReadinessTimeoutMs,
       videoRecordingDefaults,
       daemonMode,
       daemonCommand,
@@ -182,6 +183,7 @@ async function main() {
     }
 
     serverConfig.setPlanExecutionLockScope(planExecutionLockScope);
+    serverConfig.setRunnerReadinessTimeoutMs(runnerReadinessTimeoutMs);
     serverConfig.setVideoRecordingDefaults(videoRecordingDefaults);
     serverConfig.setToolOutputsDir(toolOutputsDir);
     serverConfig.setSkipCtrlProxyDownload(skipCtrlProxyDownload);
@@ -365,6 +367,7 @@ async function main() {
         debug,
         debugPerf,
         planExecutionLockScope,
+        runnerReadinessTimeoutMs,
         videoQualityPreset: videoRecordingDefaults.qualityPreset,
         videoTargetBitrateKbps: videoRecordingDefaults.targetBitrateKbps,
         videoMaxThroughputMbps: videoRecordingDefaults.maxThroughputMbps,
@@ -419,6 +422,7 @@ async function main() {
       debug,
       debugPerf,
       planExecutionLockScope,
+      runnerReadinessTimeoutMs,
       mcpRecording,
       videoQualityPreset: videoRecordingDefaults.qualityPreset,
       videoTargetBitrateKbps: videoRecordingDefaults.targetBitrateKbps,

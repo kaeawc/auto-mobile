@@ -17,6 +17,7 @@ export const MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS = 600_000;
  * host performance (especially under emulation/Rosetta).
  */
 export const MIN_START_DEVICE_MCP_TIMEOUT_MS = 180_000;
+export const START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS = 5_000;
 
 /**
  * Floor for `launchApp` — an iOS cold launch waits for CtrlProxy to deliver the
@@ -93,6 +94,21 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
   }
 }
 
+function resolveStartDeviceToolBudgetMs(request: DaemonRequest): number | undefined {
+  if (request.method !== "tools/call" || request.params?.name !== "startDevice") {
+    return undefined;
+  }
+  const toolArguments = request.params?.arguments;
+  if (!toolArguments || typeof toolArguments !== "object" || Array.isArray(toolArguments)) {
+    return undefined;
+  }
+  const timeoutMs = (toolArguments as Record<string, unknown>).timeoutMs;
+  if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return undefined;
+  }
+  return timeoutMs + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
+}
+
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const raw = request.timeoutMs;
   const base =
@@ -102,5 +118,6 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const floor = request.method === "tools/call"
     ? resolveToolTimeoutFloorMs(request.params?.name)
     : undefined;
-  return floor ? Math.max(base, floor) : base;
+  const startDeviceBudget = resolveStartDeviceToolBudgetMs(request);
+  return Math.max(base, floor ?? 0, startDeviceBudget ?? 0);
 }

@@ -6,6 +6,7 @@ import type {
   DeviceSnapshotConfigInput,
   AppearanceConfigInput,
 } from "../models";
+import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "./runnerReadinessConfig";
 
 export type PlanExecutionLockScope = "session" | "global";
 
@@ -42,6 +43,7 @@ class ServerConfig {
   private _actionsDiffObserve: boolean = false;
   private _actionsNoObserve: boolean = false;
   private _toolOutputsDir: string | undefined;
+  private _runnerReadinessTimeoutMs = DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
 
   private constructor() {}
 
@@ -146,6 +148,14 @@ class ServerConfig {
 
   isSkipCtrlProxyDownloadEnabled(): boolean {
     return this._skipCtrlProxyDownload;
+  }
+
+  setRunnerReadinessTimeoutMs(timeoutMs: number): void {
+    this._runnerReadinessTimeoutMs = timeoutMs;
+  }
+
+  getRunnerReadinessTimeoutMs(): number {
+    return this._runnerReadinessTimeoutMs;
   }
 
   setEmbeddedSdkEnabled(enabled: boolean): void {

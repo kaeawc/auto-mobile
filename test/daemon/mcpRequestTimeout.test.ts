@@ -10,6 +10,7 @@ import {
   MIN_START_DEVICE_MCP_TIMEOUT_MS,
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
+  START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
   resolveMcpRequestTimeoutMs
 } from "../../src/daemon/mcpRequestTimeout";
 import type { DaemonRequest } from "../../src/daemon/types";
@@ -137,5 +138,21 @@ describe("resolveMcpRequestTimeoutMs", () => {
     expect(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS).toBe(90_000);
     expect(DEFAULT_OBSERVE_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
     expect(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  test("keeps transport alive beyond the startDevice tool budget", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "startDevice",
+        arguments: { timeoutMs: 300_000 },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      300_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
   });
 });

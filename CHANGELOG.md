@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.0.54] - 2026-08-13
+### Added
+- feat(desktop): UpdateController — detect newer GitHub release (no UI, no side effects) ([#5224](https://github.com/kaeawc/auto-mobile/issues/5224)) (desktop)
+- feat(desktop): expose the app's own version at runtime (auto-update prerequisite) ([#5223](https://github.com/kaeawc/auto-mobile/issues/5223)) (desktop)
+### Fixed
+- startDevice should enforce automation runner readiness and report setup failures ([#5237](https://github.com/kaeawc/auto-mobile/issues/5237))
+- bug(desktop): make iOS automation permission setup guided and recoverable ([#5216](https://github.com/kaeawc/auto-mobile/issues/5216)) (ios, desktop)
+- bug(android): prevent SDK hosts and CtrlProxy from defining the same signature permission ([#5215](https://github.com/kaeawc/auto-mobile/issues/5215)) (android)
+
 ## [v0.0.53] - 2026-08-11
 ### Fixed
 - bug(android): preserve Android emulator launch diagnostics on early exit ([#5209](https://github.com/kaeawc/auto-mobile/issues/5209)) (android, ci)

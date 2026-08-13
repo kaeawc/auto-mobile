@@ -10,8 +10,9 @@ import {
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { logger } from "../utils/logger";
-import { resolveMcpRequestTimeoutMs, MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS } from "./mcpRequestTimeout";
+import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
+import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import {
   DaemonNotification,
   DaemonRequest,
@@ -88,8 +89,6 @@ import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice, ImeAction, ScreenScaleMetadata } from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
-/** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
-const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
 
 /**

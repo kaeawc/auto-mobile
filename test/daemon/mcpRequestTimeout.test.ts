@@ -14,7 +14,10 @@ import {
   resolveMcpRequestTimeoutMs
 } from "../../src/daemon/mcpRequestTimeout";
 import type { DaemonRequest } from "../../src/daemon/types";
-import { MAX_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
+import {
+  DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
+  MAX_DEVICE_READY_TIMEOUT_MS,
+} from "../../src/utils/deviceTimeouts";
 
 describe("resolveMcpRequestTimeoutMs", () => {
   const timeoutEnvVars = [
@@ -173,7 +176,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     );
   });
 
-  test("caps oversized startDevice budgets below the Node timer ceiling", () => {
+  test("caps oversized startDevice budgets below the daemon socket idle timeout", () => {
     const request: DaemonRequest = {
       id: "1",
       type: "mcp_request",
@@ -184,8 +187,10 @@ describe("resolveMcpRequestTimeoutMs", () => {
       },
     };
 
-    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(
       MAX_DEVICE_READY_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
+    expect(resolved).toBeLessThan(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
   });
 });

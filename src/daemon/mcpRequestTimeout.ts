@@ -1,5 +1,7 @@
 import type { DaemonRequest } from "./types";
-import { MAX_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
+import { MAX_DEVICE_READY_TIMEOUT_MS, START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS } from "../utils/deviceTimeouts";
+
+export { START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS };
 
 export const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -18,7 +20,6 @@ export const MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS = 600_000;
  * host performance (especially under emulation/Rosetta).
  */
 export const MIN_START_DEVICE_MCP_TIMEOUT_MS = 180_000;
-export const START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS = 5_000;
 
 /**
  * Floor for `launchApp` — an iOS cold launch waits for CtrlProxy to deliver the

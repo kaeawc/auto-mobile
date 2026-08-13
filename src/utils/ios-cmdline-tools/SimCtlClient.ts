@@ -810,7 +810,9 @@ export class SimCtlClient implements SimCtl {
     return {
       pid: undefined,
       kill: (): boolean => {
-        void this.executeCommandArgs(["shutdown", udid]).catch((error) => {
+        // Cancellation cleanup must not inherit an already-aborted request signal.
+        const cleanupSignal = new AbortController().signal;
+        void this.executeCommandArgs(["shutdown", udid], 10_000, cleanupSignal).catch((error) => {
           logger.debug(`[iOS] handle.kill() shutdown failed for ${udid}: ${error}`);
         });
         return true;

@@ -15,6 +15,7 @@ interface Harness {
   timer: FakeTimer;
   calls: string[];
   commandTimeouts: Map<string, boolean[]>;
+  commandSignals: Map<string, Array<AbortSignal | undefined>>;
   /**
    * States reported by successive `simctl list devices --json` calls. The last
    * entry sticks once the sequence is exhausted.
@@ -32,6 +33,7 @@ interface Harness {
 function createHarness(bootOptions: SimCtlBootOptions): Harness {
   const calls: string[] = [];
   const commandTimeouts = new Map<string, boolean[]>();
+  const commandSignals = new Map<string, Array<AbortSignal | undefined>>();
   const timer = new FakeTimer();
   let states = ["Shutdown"];
   let bootStatusFailures: Array<Error | null> = [];
@@ -48,6 +50,9 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
     const timeoutUsage = commandTimeouts.get(command) ?? [];
     timeoutUsage.push(signal !== undefined);
     commandTimeouts.set(command, timeoutUsage);
+    const signals = commandSignals.get(command) ?? [];
+    signals.push(signal);
+    commandSignals.set(command, signals);
 
     if (command === "xcrun simctl --version") {
       return createExecResult("simctl version 1.0.0", "");
@@ -97,6 +102,7 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
     timer,
     calls,
     commandTimeouts,
+    commandSignals,
     setStates: (next) => {
       states = [...next];
     },
@@ -157,6 +163,23 @@ describe("SimCtlClient boot self-verification", () => {
 
     await expect(start).rejects.toThrow("request cancelled");
     expect(shutdownCalls(calls)).toEqual([`xcrun simctl shutdown ${UDID}`]);
+  });
+
+  test("handle.kill shutdown does not inherit an aborted request signal", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 10 });
+    harness.setStates(["Booted"]);
+    const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5_000));
+    const controller = new AbortController();
+    controller.abort(new Error("request cancelled"));
+
+    await runWithAbortSignal(controller.signal, async () => {
+      expect(handle.kill()).toBe(true);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+
+    const shutdownSignal = harness.commandSignals.get(`xcrun simctl shutdown ${UDID}`)?.[0];
+    expect(shutdownSignal).toBeDefined();
+    expect(shutdownSignal?.aborted).toBe(false);
   });
 
   test("a wedged boot (bootstatus exit 0, device Shutdown) fails with an actionable error", async () => {

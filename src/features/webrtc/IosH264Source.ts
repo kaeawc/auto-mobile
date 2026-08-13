@@ -78,8 +78,30 @@ const DEFAULT_IOS_WEBRTC_FPS = WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
  * value plus encoder startup. See test/scripts/mediamtxConfig.test.ts (#4345).
  */
 export const IOS_FIRST_FRAME_TIMEOUT_MS = 15_000;
-/** Fail target lookup quickly instead of consuming the capture startup budget. */
-export const IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS = 2_000;
+/** Env override for {@link IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS}. */
+export const IOS_SIMULATOR_WINDOW_TIMEOUT_ENV = "AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS";
+
+function resolveSimulatorWindowTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env[IOS_SIMULATOR_WINDOW_TIMEOUT_ENV];
+  if (raw !== undefined) {
+    const parsed = Number.parseInt(raw.trim(), 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return 2_000;
+}
+
+/**
+ * Deadline for resolving the target Simulator window at capture start. Kept short
+ * in production so a failed lookup fails fast instead of consuming the capture
+ * startup budget. Overridable via {@link IOS_SIMULATOR_WINDOW_TIMEOUT_ENV} for the
+ * hosted macos-26 lane, where ScreenCaptureKit window enumeration under load
+ * intermittently exceeds 2s even though the window is already discoverable (the
+ * CI boot step waits up to 30s for exactly that) — an unmasked flake once the
+ * pipeline actually runs.
+ */
+export const IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS = resolveSimulatorWindowTimeoutMs();
 const NO_FRAMES_PERMISSION_WARNING = "warn: no frames received";
 /** Target seconds between IDRs in the ffmpeg GOP (see buildFfmpegArgs). */
 const IOS_KEYFRAME_INTERVAL_SECONDS = 2;

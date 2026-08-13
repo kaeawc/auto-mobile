@@ -137,7 +137,7 @@ class DeviceScreenViewControlTest {
     setContent {
       MaterialTheme {
         controlView(
-          onSwipe = { s, a, b -> swipes.add(Triple(s, a, b)) },
+          onSwipe = { s, a, b, _ -> swipes.add(Triple(s, a, b)) },
           onTap = { controlTaps.add(it) },
         )
       }
@@ -165,7 +165,7 @@ class DeviceScreenViewControlTest {
     setContent {
       MaterialTheme {
         controlView(
-          onSwipe = { s, a, b -> swipes.add(Triple(s, a, b)) },
+          onSwipe = { s, a, b, _ -> swipes.add(Triple(s, a, b)) },
           onTap = { controlTaps.add(it) },
         )
       }
@@ -207,7 +207,7 @@ class DeviceScreenViewControlTest {
             controlMode = DeviceScreenControlMode.Control,
             controlSnapshot = current,
             onControlTap = { _, _ -> true },
-            onControlSwipe = { s, a, b -> reported = Triple(s, a, b) },
+            onControlSwipe = { s, a, b, _ -> reported = Triple(s, a, b) },
           )
         }
       }
@@ -398,7 +398,7 @@ class DeviceScreenViewControlTest {
     var tapped: DevicePoint? = null
     runComposeUiTest {
       setContent {
-        MaterialTheme { controlView(onSwipe = { _, _, _ -> }, onTap = { tapped = it }) }
+        MaterialTheme { controlView(onSwipe = { _, _, _, _ -> }, onTap = { tapped = it }) }
       }
       onRoot().performTouchInput { click(at(this)) }
       waitForIdle()
@@ -413,7 +413,7 @@ class DeviceScreenViewControlTest {
     var start: DevicePoint? = null
     runComposeUiTest {
       setContent {
-        MaterialTheme { controlView(onSwipe = { _, a, _ -> start = a }, onTap = {}) }
+        MaterialTheme { controlView(onSwipe = { _, a, _, _ -> start = a }, onTap = {}) }
       }
       onRoot().performTouchInput { swipe(center + Offset(0f, 80f), center - Offset(0f, 80f)) }
       waitForIdle()
@@ -436,7 +436,7 @@ class DeviceScreenViewControlTest {
       MaterialTheme {
         controlView(
           mode = DeviceScreenControlMode.Inspector,
-          onSwipe = { s, a, b -> swipes.add(Triple(s, a, b)) },
+          onSwipe = { s, a, b, _ -> swipes.add(Triple(s, a, b)) },
           onTap = {},
         )
       }
@@ -453,7 +453,7 @@ class DeviceScreenViewControlTest {
   @Composable
   private fun controlView(
     mode: DeviceScreenControlMode = DeviceScreenControlMode.Control,
-    onSwipe: (DeviceFrameSnapshot, DevicePoint, DevicePoint) -> Unit,
+    onSwipe: (DeviceFrameSnapshot, DevicePoint, DevicePoint, Int) -> Unit,
     onTap: (DevicePoint) -> Unit,
   ) {
     DeviceScreenView(

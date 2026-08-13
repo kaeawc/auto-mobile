@@ -22,6 +22,30 @@ function diffState(n: ViewHierarchyNode | undefined): unknown {
 }
 
 describe("annotateHierarchyDiff", () => {
+  test("tolerates a single child serialized as a bare object, not an array", () => {
+    // The on-device XML→JSON emits `node` as an array for 2+ children but a bare object for a
+    // single child (and can surface an empty `{}`). This once threw "{} is not iterable" and killed
+    // the whole hierarchy push — leaving the interactive pane unable to arm on some devices.
+    const singleChild = { $: { class: "Root" }, node: { $: { class: "OnlyChild" } } } as unknown as ViewHierarchyNode;
+    const empty = { $: { class: "Root" }, node: {} } as unknown as ViewHierarchyNode;
+
+    // Both forms must be walked without throwing (across a first frame and a diff).
+    expect(() => annotateHierarchyDiff(null, { hierarchy: { node: singleChild } })).not.toThrow();
+    expect(() => annotateHierarchyDiff(null, { hierarchy: { node: empty } })).not.toThrow();
+
+    // And they must be walked CORRECTLY: against a childless baseline, the single-child object is one
+    // real added node, while the empty `{}` placeholder is ZERO children — not a phantom add.
+    const childlessBaseline = {
+      hierarchy: { node: { $: { class: "Root" } } as unknown as ViewHierarchyNode },
+    };
+    expect(
+      annotateHierarchyDiff(childlessBaseline, { hierarchy: { node: singleChild } }).summary.added
+    ).toBe(1);
+    expect(
+      annotateHierarchyDiff(childlessBaseline, { hierarchy: { node: empty } }).summary.added
+    ).toBe(0);
+  });
+
   test("first frame has no baseline and annotates nothing", () => {
     const current = hierarchy(node({ class: "Root" }, [node({ class: "Child", text: "a" })]));
 

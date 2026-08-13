@@ -188,11 +188,18 @@ export function inferAndroidFormFactor(deviceName?: string): FormFactor | undefi
  * Resolution order:
  * 1. `AUTOMOBILE_EMULATOR_HEADLESS=true`  → always headless.
  * 2. `AUTOMOBILE_EMULATOR_HEADLESS=false` → always windowed (honor the explicit
- *    opt-out even on a Linux host with no display).
- * 3. Linux with no usable display server (`DISPLAY`/`WAYLAND_DISPLAY` unset or
+ *    opt-out on any host, e.g. someone who wants the native emulator window).
+ * 3. macOS → headless. The emulator's Qt window backing store segfaults on
+ *    repaint under CoreAnimation (`EXC_BAD_ACCESS` in
+ *    `QCALayerBackingStore::beginPaint` → `QPainter` → `QBrush`), which recurs
+ *    across launches and takes the whole guest down. AutoMobile observes and
+ *    streams the device screen, so the emulator's own window is never used —
+ *    dropping it removes the crash surface entirely. Opt back in with
+ *    `AUTOMOBILE_EMULATOR_HEADLESS=false`.
+ * 4. Linux with no usable display server (`DISPLAY`/`WAYLAND_DISPLAY` unset or
  *    blank) → headless, because a windowed launch aborts on the Qt `xcb`
  *    platform plugin (see issue #2722).
- * 4. Otherwise → windowed (macOS/Windows have a native display; Linux has one).
+ * 5. Otherwise → windowed (Windows has a native display; Linux has one).
  *
  * @param platform - `process.platform` value
  * @param env - environment variables to read
@@ -208,6 +215,13 @@ export function resolveHeadlessMode(
   }
   if (explicit === "false") {
     return { headless: false, reason: "AUTOMOBILE_EMULATOR_HEADLESS=false (windowed forced)" };
+  }
+
+  if (platform === "darwin") {
+    return {
+      headless: true,
+      reason: "macOS defaults to -no-window; the emulator's Qt/CoreAnimation window segfaults on repaint and AutoMobile streams the screen instead",
+    };
   }
 
   if (platform === "linux") {

@@ -67,18 +67,42 @@ public object DeviceDragGesturePolicy {
     }
 
   /**
-   * The duration handed to `input/swipe`, in milliseconds.
-   *
-   * A fixed value keeps the same gesture independent of host pointer speed and remains inside the
-   * daemon's accepted `[1, 60000]` range.
+   * The duration handed to `input/swipe`, in milliseconds, when the client did not measure the
+   * gesture's speed. A neutral mid value; overridden whenever a real flick duration is available.
    */
   public const val SWIPE_DURATION_MS: Int = 300
+
+  /**
+   * Floor for a measured swipe duration. A flick faster than this is clamped up so the daemon still
+   * injects enough motion events to register a velocity (and to stay inside its `[1, 60000]`
+   * range), while keeping the swipe short enough to read as a strong fling.
+   */
+  public const val MIN_SWIPE_DURATION_MS: Int = 40
+
+  /**
+   * Ceiling for a measured swipe duration. Past this a gesture is a deliberate slow drag, not a
+   * fling; capping keeps a very long drag from producing an unnaturally languid device swipe.
+   */
+  public const val MAX_SWIPE_DURATION_MS: Int = 1_000
+
+  /**
+   * Resolve the `input/swipe` duration from the host gesture.
+   *
+   * Fling strength on the device is governed by the swipe's velocity — roughly distance over
+   * duration — so replaying the swipe over *the wall-clock time the user's flick actually took*
+   * reproduces the user's intent: a fast flick becomes a short, high-velocity swipe (a strong
+   * fling), a slow drag a gentle one. A missing measurement falls back to [SWIPE_DURATION_MS].
+   */
+  public fun swipeDurationMs(gestureDurationMs: Int?): Int =
+    gestureDurationMs?.coerceIn(MIN_SWIPE_DURATION_MS, MAX_SWIPE_DURATION_MS) ?: SWIPE_DURATION_MS
 
   /**
    * Decide whether a drag should become a swipe.
    *
    * [coordinateSpace] and [nativeScale] must come from the snapshot used to map both endpoints.
-   * Missing canonical-pixel scale metadata fails closed.
+   * Missing canonical-pixel scale metadata fails closed. [gestureDurationMs] is how long the host
+   * pointer was down for this gesture; when supplied it sets the swipe's velocity (see
+   * [swipeDurationMs]), otherwise a fixed [SWIPE_DURATION_MS] is used.
    */
   public fun evaluate(
     start: DevicePoint,
@@ -87,6 +111,7 @@ public object DeviceDragGesturePolicy {
     deviceHeight: Int,
     coordinateSpace: CoordinateSpace? = null,
     nativeScale: Double? = null,
+    gestureDurationMs: Int? = null,
   ): DeviceDragDecision {
     if (deviceWidth <= 0 || deviceHeight <= 0) {
       return DeviceDragDecision.Ignored(DeviceDragRejection.NoAddressableScreen)
@@ -102,7 +127,7 @@ public object DeviceDragGesturePolicy {
     return DeviceDragDecision.Swipe(
       start = start,
       end = clampedEnd,
-      durationMs = SWIPE_DURATION_MS,
+      durationMs = swipeDurationMs(gestureDurationMs),
     )
   }
 }

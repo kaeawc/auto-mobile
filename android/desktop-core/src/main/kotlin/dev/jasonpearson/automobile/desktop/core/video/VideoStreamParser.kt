@@ -79,22 +79,54 @@ class VideoStreamParser {
   private var headerSeen = false
 
   /**
-   * Feeds bytes, invoking [onHeader] once for the stream header and [onPacket] for each complete
-   * packet. Both may be called zero or many times per chunk.
+   * Feeds the first [length] bytes of [chunk], invoking [onHeader] once for the stream header and
+   * [onPacket] for each complete packet. Both may be called zero or many times per chunk.
+   *
+   * [length] lets a caller pass a reused read buffer without slicing it first (the reader fills a
+   * fixed 64KB buffer and only `read` bytes are valid). When there is no buffered remainder from a
+   * previous call — the common case, where a read lands on packet boundaries — this parses straight
+   * out of [chunk] and copies nothing but the per-packet payloads and any partial-packet tail. That
+   * removes two full-buffer copies per read on the 60fps hot path (the caller's slice and this
+   * parser's old `buffer + chunk` accumulation), which was steady heap churn feeding GC.
    */
   fun onBytes(
     chunk: ByteArray,
     onHeader: (VideoStreamHeader) -> Unit,
     onPacket: (VideoPacket) -> Unit,
+  ) = onBytes(chunk, chunk.size, onHeader, onPacket)
+
+  fun onBytes(
+    chunk: ByteArray,
+    length: Int,
+    onHeader: (VideoStreamHeader) -> Unit,
+    onPacket: (VideoPacket) -> Unit,
   ) {
-    if (chunk.isEmpty()) return
-    buffer = if (buffer.isEmpty()) chunk.copyOf() else buffer + chunk
+    if (length <= 0) return
+
+    // Parse source: the incoming bytes directly when nothing is buffered, otherwise the buffered
+    // remainder with the new bytes appended. `src` may be the caller's reused buffer, so every
+    // bound below is `srcLen` (valid bytes), never `src.size`.
+    val src: ByteArray
+    val srcLen: Int
+    if (buffer.isEmpty()) {
+      src = chunk
+      srcLen = length
+    } else {
+      src = ByteArray(buffer.size + length)
+      System.arraycopy(buffer, 0, src, 0, buffer.size)
+      System.arraycopy(chunk, 0, src, buffer.size, length)
+      srcLen = src.size
+      buffer = EMPTY
+    }
 
     var offset = 0
 
     if (!headerSeen) {
-      if (buffer.size - offset < STREAM_HEADER_BYTES) return
-      val view = ByteBuffer.wrap(buffer, offset, STREAM_HEADER_BYTES).order(ByteOrder.BIG_ENDIAN)
+      if (srcLen - offset < STREAM_HEADER_BYTES) {
+        buffer = src.copyOfRange(offset, srcLen)
+        return
+      }
+      val view = ByteBuffer.wrap(src, offset, STREAM_HEADER_BYTES).order(ByteOrder.BIG_ENDIAN)
       val codecId = view.int
       if (codecId != CODEC_ID_H264) {
         throw VideoStreamFormatException(
@@ -106,14 +138,14 @@ class VideoStreamParser {
       offset += STREAM_HEADER_BYTES
     }
 
-    while (buffer.size - offset >= PACKET_HEADER_BYTES) {
-      val view = ByteBuffer.wrap(buffer, offset, PACKET_HEADER_BYTES).order(ByteOrder.BIG_ENDIAN)
+    while (srcLen - offset >= PACKET_HEADER_BYTES) {
+      val view = ByteBuffer.wrap(src, offset, PACKET_HEADER_BYTES).order(ByteOrder.BIG_ENDIAN)
       val ptsAndFlags = view.long
       val size = view.int
       if (size < 0) {
         throw VideoStreamFormatException("Packet declares a negative length ($size)")
       }
-      if (buffer.size - offset - PACKET_HEADER_BYTES < size) {
+      if (srcLen - offset - PACKET_HEADER_BYTES < size) {
         // The payload has not fully arrived yet.
         break
       }
@@ -122,7 +154,7 @@ class VideoStreamParser {
       val isConfig = (ptsAndFlags and FLAG_CONFIG) != 0L
       onPacket(
         VideoPacket(
-          payload = buffer.copyOfRange(start, start + size),
+          payload = src.copyOfRange(start, start + size),
           // Bit 63 makes the int64 negative, so mask before reading the timestamp.
           presentationTimeUs = ptsAndFlags and PTS_MASK,
           isConfig = isConfig,
@@ -139,6 +171,11 @@ class VideoStreamParser {
       offset = start + size
     }
 
-    buffer = if (offset == 0) buffer else buffer.copyOfRange(offset, buffer.size)
+    // Keep only the unconsumed tail. Empty in the common case, so nothing is retained from `src`.
+    buffer = if (offset >= srcLen) EMPTY else src.copyOfRange(offset, srcLen)
+  }
+
+  private companion object {
+    val EMPTY = ByteArray(0)
   }
 }

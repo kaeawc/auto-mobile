@@ -237,7 +237,7 @@ private suspend fun PointerInputScope.deviceScreenDragGestures(
   controlMode: DeviceScreenControlMode,
   controlFrame: () -> Pair<DeviceFrameSnapshot, DeviceScreenGeometry>?,
   onPan: (Offset) -> Unit,
-  onSwipe: (DeviceFrameSnapshot, DevicePoint, DevicePoint) -> Unit,
+  onSwipe: (DeviceFrameSnapshot, DevicePoint, DevicePoint, Int) -> Unit,
 ) {
   awaitEachGesture {
     val down = awaitFirstDown(requireUnconsumed = false)
@@ -260,6 +260,10 @@ private suspend fun PointerInputScope.deviceScreenDragGestures(
     // it neither needs nor is affected by this delta.
     if (panning) onPan(overSlop)
     var lastPosition = change.position
+    // Track the pointer's own event timestamps so a swipe can be replayed at the speed the user
+    // flicked (issue: fling strength). `uptimeMillis` is the toolkit's monotonic event clock, so
+    // last-minus-down is the real gesture duration regardless of how many move events arrived.
+    var lastUptimeMs = change.uptimeMillis
     val completed =
       drag(change.id) { dragged ->
         // Read the delta BEFORE consuming: `positionChange()` reports Offset.Zero once the change
@@ -268,9 +272,11 @@ private suspend fun PointerInputScope.deviceScreenDragGestures(
         dragged.consume()
         if (panning) onPan(delta)
         lastPosition = dragged.position
+        lastUptimeMs = dragged.uptimeMillis
       }
     if (!completed || frame == null) return@awaitEachGesture
     val (snapshot, geometry) = frame
+    val gestureDurationMs = (lastUptimeMs - down.uptimeMillis).coerceAtLeast(0L).toInt()
     onSwipe(
       snapshot,
       DeviceScreenCoordinateMapper.viewportToDevice(
@@ -281,6 +287,7 @@ private suspend fun PointerInputScope.deviceScreenDragGestures(
         ViewportPoint(lastPosition.x, lastPosition.y),
         geometry,
       ),
+      gestureDurationMs,
     )
   }
 }
@@ -363,8 +370,12 @@ fun DeviceScreenView(
    * client shares the policy rather than reimplementing it. A null default makes control-mode drag
    * inert until a caller wires it; in inspector mode a drag still pans the viewport and this is
    * never called.
+   *
+   * The trailing `Int` is the gesture's duration in milliseconds (host pointer-down to release),
+   * which the caller feeds to the policy so the device swipe replays at the speed the user flicked
+   * — that is what makes a fast flick produce a strong fling rather than a fixed, gentle glide.
    */
-  onControlSwipe: ((DeviceFrameSnapshot, DevicePoint, DevicePoint) -> Unit)? = null,
+  onControlSwipe: ((DeviceFrameSnapshot, DevicePoint, DevicePoint, Int) -> Unit)? = null,
   /**
    * Called in [DeviceScreenControlMode.Control] for each key press this view receives **while it
    * holds keyboard focus**, with the snapshot the keystroke belongs to and the toolkit-free
@@ -815,8 +826,8 @@ fun DeviceScreenView(
                   offsetX += delta.x
                   offsetY += delta.y
                 },
-                onSwipe = { snapshot, start, end ->
-                  currentOnControlSwipe?.invoke(snapshot, start, end)
+                onSwipe = { snapshot, start, end, durationMs ->
+                  currentOnControlSwipe?.invoke(snapshot, start, end, durationMs)
                 },
               )
             }

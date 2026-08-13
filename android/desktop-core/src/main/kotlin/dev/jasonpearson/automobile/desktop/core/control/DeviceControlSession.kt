@@ -548,7 +548,12 @@ class DeviceControlSession(
    * ran off the frame is clamped by that policy rather than dropped. False is also returned when
    * the bounded queue is full, in which case an overload error has already been published.
    */
-  fun swipe(snapshot: DeviceFrameSnapshot, start: DevicePoint, end: DevicePoint): Boolean {
+  fun swipe(
+    snapshot: DeviceFrameSnapshot,
+    start: DevicePoint,
+    end: DevicePoint,
+    gestureDurationMs: Int? = null,
+  ): Boolean {
     if (!coordinatesAreStillDispatchable(snapshot)) return false
     val decision =
       DeviceDragGesturePolicy.evaluate(
@@ -560,6 +565,9 @@ class DeviceControlSession(
         // endpoints are in. Read from the clicked snapshot, never from current stream state.
         coordinateSpace = snapshot.coordinateSpace,
         nativeScale = snapshot.nativeScale,
+        // Replay the swipe at the speed the user flicked, so an inspector swipe flings like a real
+        // one; null (an older caller) keeps the fixed fallback duration.
+        gestureDurationMs = gestureDurationMs,
       )
     // Ignored is not a failure: it means the gesture was never a swipe. Nothing is sent, nothing is
     // surfaced, and the refresh tracker is left alone.

@@ -37,6 +37,41 @@ class DeviceDragGesturePolicyTest {
   }
 
   @Test
+  fun `a measured flick duration becomes the swipe duration (fling velocity)`() {
+    val swipe =
+      assertIs<DeviceDragDecision.Swipe>(
+        DeviceDragGesturePolicy.evaluate(
+          at(100, 200),
+          at(100, 1400),
+          width,
+          height,
+          gestureDurationMs = 80,
+        )
+      )
+    // A fast flick (80ms over a long distance) replays as a short, high-velocity swipe → strong
+    // fling, not the fixed fallback.
+    assertEquals(80, swipe.durationMs)
+  }
+
+  @Test
+  fun `a flick faster than the floor is clamped up, a drag slower than the ceiling clamped down`() {
+    fun durationFor(gesture: Int) =
+      assertIs<DeviceDragDecision.Swipe>(
+          DeviceDragGesturePolicy.evaluate(
+            at(100, 200),
+            at(100, 1400),
+            width,
+            height,
+            gestureDurationMs = gesture,
+          )
+        )
+        .durationMs
+
+    assertEquals(DeviceDragGesturePolicy.MIN_SWIPE_DURATION_MS, durationFor(1))
+    assertEquals(DeviceDragGesturePolicy.MAX_SWIPE_DURATION_MS, durationFor(100_000))
+  }
+
+  @Test
   fun `a drag shorter than the threshold sends nothing`() {
     val decision =
       evaluate(at(100, 200), at(100, 200 + DeviceDragGesturePolicy.MIN_SWIPE_DISTANCE - 1))

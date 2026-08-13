@@ -1882,8 +1882,8 @@ fun AutoMobileContent(
               // tap-then-swipe sequence reaches the device in the order the user made it. The
               // threshold and out-of-bounds rules live in the session's pure drag policy, not
               // here.
-              onControlSwipe = { snapshot, start, end ->
-                deviceControlSession.swipe(snapshot, start, end)
+              onControlSwipe = { snapshot, start, end, durationMs ->
+                deviceControlSession.swipe(snapshot, start, end, durationMs)
               },
               // Keyboard, text and device buttons (issue #3351) travel that SAME session too, so a
               // tap-then-type sequence reaches the device in order. The session answers whether it

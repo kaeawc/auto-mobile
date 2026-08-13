@@ -89,6 +89,13 @@ const MAX_FPS_HINT = 60;
 // cannot silently lose integer precision downstream.
 const MAX_BITRATE_KBPS = 1_000_000;
 
+// A key-frame request can be rejected when the capture source is rate-limiting them (Android and
+// raw iOS gate requests for ~3s, encoded iOS for ~500ms). When one is throttled we retry on the
+// injected timer instead of leaving the subscriber frozen until the encoder's natural GOP. The
+// interval × attempts span the widest (~3s) throttle window with headroom.
+const KEY_FRAME_RETRY_INTERVAL_MS = 500;
+const KEY_FRAME_RETRY_MAX_ATTEMPTS = 8;
+
 /**
  * Captures are shared per device and the FIRST subscriber's hints fixed the encode; a late
  * joiner's differing quality/fps/bitrate hints are silently ignored, so leave a trace for the
@@ -416,6 +423,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     capture.subscribers.add(socket);
     if (waitForKeyFrame) {
       // A client that joins part way through a GOP must not consume inter frames before an IDR.
+      // The immediate key-frame request that unfreezes it lives in the subscribe-ack path (which
+      // runs for late joiners too); the backpressure-drain recovery is handled in the drain handler.
       capture.waitingForKeyFrame.add(socket);
     }
   }
@@ -486,9 +495,47 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       capture.waitingForKeyFrame.add(subscriber);
       subscriber.once("drain", () => {
         const current = this.captures.get(deviceId);
-        current?.backpressuredSubscribers.delete(subscriber);
+        if (!current) {return;}
+        current.backpressuredSubscribers.delete(subscriber);
+        // The subscriber caught up, but it is still waiting for an IDR to resync — every inter
+        // frame is skipped until one arrives. The natural GOP can be seconds away
+        // (KEY_I_FRAME_INTERVAL), which would freeze this subscriber's video that whole time even
+        // though it is ready to receive. Ask the encoder for an immediate key frame so recovery
+        // takes ~one round-trip instead. Idempotent enough: a burst of drains just coalesces into
+        // one IDR at the encoder.
+        this.requestKeyFrameForWaitingSubscriber(deviceId, subscriber);
       });
     }
+  }
+
+  /**
+   * Ask the capture source for an immediate key frame on behalf of a subscriber waiting to resync,
+   * retrying through the injected timer while the request is throttled.
+   *
+   * `requestKeyFrame()` returns false when the source is rate-limiting requests (Android + raw iOS
+   * gate them for ~3s, encoded iOS ~500ms). Ignoring that rejection leaves the subscriber in
+   * `waitingForKeyFrame`, dropping every inter frame until the encoder's natural GOP — seconds of
+   * frozen video, the very symptom this drain recovery exists to prevent. The retry self-terminates:
+   * each attempt stops once the subscriber has resynced (left `waitingForKeyFrame`), disconnected,
+   * or the capture is gone, and attempts are bounded so a source that never honors one cannot loop.
+   */
+  private requestKeyFrameForWaitingSubscriber(
+    deviceId: string,
+    subscriber: Socket,
+    attemptsLeft: number = KEY_FRAME_RETRY_MAX_ATTEMPTS
+  ): void {
+    const capture = this.captures.get(deviceId);
+    if (!capture) {return;}
+    // Nothing to do once the subscriber left or already resynced on a key frame.
+    if (subscriber.destroyed || !capture.waitingForKeyFrame.has(subscriber)) {return;}
+    const source = capture.source;
+    // A source without requestKeyFrame can't force one; only the natural GOP recovers it.
+    if (!source?.requestKeyFrame) {return;}
+    if (source.requestKeyFrame() || attemptsLeft <= 0) {return;}
+    this.timer.setTimeout(
+      () => this.requestKeyFrameForWaitingSubscriber(deviceId, subscriber, attemptsLeft - 1),
+      KEY_FRAME_RETRY_INTERVAL_MS
+    );
   }
 
   private replayParameterSets(capture: DeviceCapture, socket: Socket): void {

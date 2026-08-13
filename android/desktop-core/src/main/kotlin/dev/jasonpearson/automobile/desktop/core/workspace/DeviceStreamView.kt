@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
 import dev.jasonpearson.automobile.desktop.core.platform.MacScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.rememberLiveVideoFrame
@@ -29,6 +31,7 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
+import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 
 /**
  * Live device mirror for a workspace pane's stream area: subscribes to the daemon's video-stream
@@ -49,71 +52,145 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
  *
  * [sourceFactory] is hoisted so tests inject a fake instead of opening a socket.
  */
-// Frame-rate hint for a workspace-pane live mirror. Low to keep the on-device H.264 encode cheap
-// (it
-// scales with fps); frames are decoupled from input dispatch (issue #3348), so this only bounds how
-// quickly a tap's visual result appears, not the tap itself.
-private const val PANE_MIRROR_FPS = 10
+// Frame-rate + quality hints the pane sends the relay on subscribe.
+//
+// An actively-CONTROLLED pane is one the user is driving, so it streams at [CONTROL_PANE_FPS] with
+// the High preset for the tightest, sharpest tap→visible-response. A display-only mirror instead
+// uses the cheap farm defaults — the Low preset (Android: long side ~540 + ~2 Mbps; a pane can't
+// show more pixels than that anyway, and decode cost scales with pixel count) and [MIRROR_PANE_FPS]
+// — which is what keeps dozens of concurrent farm panes affordable (#5217). Frames are decoupled
+// from input dispatch (issue #3348), so the mirror rate only bounds how quickly a tap's visual
+// result appears, never the tap itself. The relay validates the hint in [5, 60]; the first
+// subscriber's hint fixes the shared per-device encode.
+private const val CONTROL_PANE_FPS = 30
+private const val MIRROR_PANE_FPS = 10
 
 @Composable
 fun DeviceStreamView(
   column: DeviceColumn,
   sessionUuidProvider: () -> String? = { null },
-  // Workspace panes default to the `low` preset (Android: long side capped at 540 + ~2 Mbps;
-  // iOS: ~2 Mbps, resolution self-scales to Level 4.2): pane real estate can't show more pixels
-  // than that anyway, and decode cost scales with pixel count, which is what makes dozens of
-  // concurrent farm panes affordable. A low fps hint ([PANE_MIRROR_FPS]) further caps the device's
-  // H.264 encode load — its cost scales with frame rate, and device control is dispatched
-  // independently of frames (issue #3348), so a low mirror rate no longer adds input latency; it
-  // only delays the visual confirmation of a tap by at most one frame interval. Hoisted so a host
-  // that wants a full-resolution/high-rate mirror can pass VideoStreamQuality.High or a different
-  // source entirely.
+  // Device control (tap-to-input): when [control] is armed (a paired observation snapshot exists),
+  // the pane stays a live video mirror but becomes clickable — a click is mapped through the
+  // in-memory observation snapshot (device dims) and dispatched as a device tap with no
+  // frameContext. The video keeps playing; only the coordinate mapping uses the snapshot.
+  // Null/disabled ⇒ plain video mirror.
+  enableDeviceControl: Boolean = false,
+  control: WorkspaceDeviceControlState? = null,
+  // Hoisted so a host or test can pass a different quality/rate or a fake source entirely.
   sourceFactory: (deviceId: String) -> VideoStreamSource = {
-    VideoStreamClient(
-      quality = VideoStreamQuality.Low,
-      fps = PANE_MIRROR_FPS,
-      sessionUuidProvider = sessionUuidProvider,
-    )
+    if (enableDeviceControl) {
+      VideoStreamClient(
+        quality = VideoStreamQuality.High,
+        fps = CONTROL_PANE_FPS,
+        sessionUuidProvider = sessionUuidProvider,
+      )
+    } else {
+      VideoStreamClient(
+        quality = VideoStreamQuality.Low,
+        fps = MIRROR_PANE_FPS,
+        sessionUuidProvider = sessionUuidProvider,
+      )
+    }
   },
   screenRecordingSettingsLauncher: ScreenRecordingSettingsLauncher =
     MacScreenRecordingSettingsLauncher(),
 ) {
+  // The live video mirror always streams — it's what the user watches in both modes. Farm panes
+  // auto-reconnect so a dropped relay heals instead of staying "stopped" until the pane is torn
+  // down. Keyed on deviceId ONLY (not enableDeviceControl): the rate/quality preset is fixed at
+  // subscribe. Re-keying on control state to "downgrade" an unfocused pane doesn't reliably work —
+  // the daemon's per-device capture is shared and its encode is fixed by the FIRST subscriber's
+  // hint, so a fresh client that re-subscribes to a still-live capture has its new hint ignored
+  // (VideoStreamSocketServer.attach). Changing an armed pane's live rate needs server-side capture
+  // reconfiguration (follow-up); re-keying only added reconnect churn for no reliable effect.
   val source = remember(column.deviceId) { sourceFactory(column.deviceId) }
-  // Farm panes auto-reconnect: a dropped relay or a subscribe rejected while the workspace daemon
-  // session re-registers (e.g. after a daemon restart) heals itself instead of staying "stopped"
-  // until the pane is torn down.
   val liveFrame = rememberLiveVideoFrame(source, column.deviceId, autoReconnect = true)
   val state by source.state.collectAsState()
+  val controlSnapshot = control?.interactionSnapshot
   var settingsLaunchFailure by remember(column.deviceId) { mutableStateOf(false) }
-  Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-    val bitmap = liveFrame?.bitmap
-    if (bitmap != null) {
-      Image(
-        bitmap = bitmap,
-        contentDescription = "Live stream of ${column.name}",
-        modifier = Modifier.fillMaxSize(),
-        contentScale = ContentScale.Fit,
-      )
-    } else if (state is VideoStreamState.PermissionRequired) {
-      ScreenRecordingPermissionSurface(
-        approvalTarget = (state as VideoStreamState.PermissionRequired).approvalTarget,
-        settingsLaunchFailure = settingsLaunchFailure,
-        onOpenSettings = {
-          settingsLaunchFailure = screenRecordingSettingsLauncher.openScreenRecording().isFailure
-        },
-        onRetry = {
-          source.disconnect()
-          source.connect(column.deviceId)
-        },
-      )
-    } else {
-      Text(
-        streamStatusHint(state),
-        color = MaterialTheme.colorScheme.outline,
-        style = MaterialTheme.typography.bodySmall,
-        textAlign = TextAlign.Center,
-        modifier = Modifier.padding(12.dp),
-      )
+  // Perf span T3: mark each newly rendered video frame so the tracer can time the first frame after
+  // a tap (the visual-response latency). Cheap no-op unless a dispatched tap is pending.
+  LaunchedEffect(liveFrame?.sequence) {
+    if (liveFrame != null) control?.tracer?.videoFrameRendered(column.deviceId)
+  }
+  if (state is VideoStreamState.PermissionRequired) {
+    // iOS screen-recording permission gate: the relay refused the capture until the user approves
+    // Screen Recording, so there is NO live video to drive. Check this BEFORE the armed branch: on
+    // iOS the observation stream can still hand us a snapshot (arming the pane) while the video
+    // relay is refused, and taking the armed branch there would render a frozen fallback screenshot
+    // and swallow the approval UI, stranding the user with no way to recover. Android never reaches
+    // PermissionRequired (no screen-recording gate), so this reorder does not change its behavior.
+    ScreenRecordingPermissionSurface(
+      approvalTarget = (state as VideoStreamState.PermissionRequired).approvalTarget,
+      settingsLaunchFailure = settingsLaunchFailure,
+      onOpenSettings = {
+        settingsLaunchFailure = screenRecordingSettingsLauncher.openScreenRecording().isFailure
+      },
+      onRetry = {
+        source.disconnect()
+        source.connect(column.deviceId)
+      },
+    )
+  } else if (enableDeviceControl && controlSnapshot != null) {
+    // Armed: keep the SMOOTH LIVE VIDEO on screen, but map clicks through the in-memory
+    // observation
+    // snapshot (its real device dimensions + frameContext). The video and the observation
+    // screenshot
+    // are the same screen at the same aspect ratio, so a click normalized against the displayed
+    // video maps to the same device pixel. DeviceScreenView already renders a live bitmap while
+    // mapping through separate device dims — that's exactly its inspector-mode configuration,
+    // reused
+    // here with Control mode so the click dispatches instead of selecting an element.
+    val renderSnapshot = control.renderSnapshot
+    DeviceScreenView(
+      // Fallback pixels only until the first video frame decodes; liveFrame renders instead when
+      // set.
+      screenshotData = renderSnapshot?.screenshotData,
+      liveFrame = liveFrame?.bitmap,
+      screenWidth = renderSnapshot?.deviceWidth ?: 0,
+      screenHeight = renderSnapshot?.deviceHeight ?: 0,
+      rotation = renderSnapshot?.rotation ?: 0,
+      hierarchy = renderSnapshot?.hierarchy?.root,
+      selectedElementId = null,
+      hoveredElementId = null,
+      onElementSelected = {},
+      onElementHovered = {},
+      elementMap = renderSnapshot?.hierarchy?.elementMap?.takeIf { it.isNotEmpty() },
+      modifier = Modifier.fillMaxSize(),
+      controlMode = DeviceScreenControlMode.Control,
+      controlSnapshot = controlSnapshot,
+      // The view maps a click through `snapshot`'s geometry and hands back the device-mapped
+      // `point`; the dispatcher sends it to the daemon input/tap helper off the UI thread with NO
+      // frameContext, so it can never be rejected as stale (the wedge). Perf spans T0 (tap
+      // initiated) and the frame-age baseline (`capturedAtMs`) are stamped here, at the click.
+      onControlTap = { snapshot, point ->
+        control.tracer.tapInitiated(column.deviceId, snapshot.capturedAtMs)
+        control.dispatcher.tap(point)
+      },
+      onControlSwipe = { snapshot, start, end, durationMs ->
+        control.dispatcher.swipe(snapshot, start, end, durationMs)
+      },
+      onControlKey = { snapshot, stroke -> control.dispatcher.key(stroke) },
+    )
+  } else {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+      val bitmap = liveFrame?.bitmap
+      if (bitmap != null) {
+        Image(
+          bitmap = bitmap,
+          contentDescription = "Live stream of ${column.name}",
+          modifier = Modifier.fillMaxSize(),
+          contentScale = ContentScale.Fit,
+        )
+      } else {
+        Text(
+          streamStatusHint(state),
+          color = MaterialTheme.colorScheme.outline,
+          style = MaterialTheme.typography.bodySmall,
+          textAlign = TextAlign.Center,
+          modifier = Modifier.padding(12.dp),
+        )
+      }
     }
   }
 }

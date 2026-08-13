@@ -109,8 +109,12 @@ function scaleNodeBounds(node: ViewHierarchyNode, nativeScale: number): void {
 /** Depth-first scale every node's bounds under [node] in place. */
 function scaleTreeBounds(node: ViewHierarchyNode, nativeScale: number): void {
   scaleNodeBounds(node, nativeScale);
-  if (node.node) {
-    for (const child of node.node) {
+  // `node.node` is an array for 2+ children but a bare object for a single child (the on-device
+  // XML→JSON quirk), so normalize before iterating — a raw `for..of` over the object form throws
+  // "{} is not iterable" and aborts the canonical-pixel conversion.
+  const kids = node.node;
+  if (kids) {
+    for (const child of Array.isArray(kids) ? kids : [kids]) {
       scaleTreeBounds(child, nativeScale);
     }
   }

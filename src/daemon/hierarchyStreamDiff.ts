@@ -69,7 +69,23 @@ function nodeSignature(node: ViewHierarchyNode): string {
 }
 
 function children(node: ViewHierarchyNode): ViewHierarchyNode[] {
-  return node.node ?? [];
+  // A node's children arrive as an array for 2+, but the on-device XML→JSON serializes a SINGLE
+  // child as a bare object (and a childless node can even surface an empty `{}`). Left unnormalized,
+  // `for (const c of node.node)` throws "{} is not iterable" — which silently killed the whole
+  // hierarchy push on some devices, so the layout inspector and interactive-pane arming never got a
+  // frame. Match the array-or-single normalization used across the Android converter.
+  const kids = node.node;
+  if (!kids) {
+    return [];
+  }
+  if (Array.isArray(kids)) {
+    return kids;
+  }
+  // A non-array object is a SINGLE child — unless it is the empty `{}` childless placeholder, which
+  // must be zero children. Wrapping `{}` as one child would make markSubtreeAdded/countSubtree
+  // report and annotate a node that does not exist (a phantom add/remove between two otherwise
+  // identical childless frames).
+  return Object.keys(kids).length > 0 ? [kids] : [];
 }
 
 function markState(node: ViewHierarchyNode, state: HierarchyNodeDiffState): void {

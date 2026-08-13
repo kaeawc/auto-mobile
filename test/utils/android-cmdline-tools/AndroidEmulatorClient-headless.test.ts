@@ -61,6 +61,11 @@ describe("resolveHeadlessMode", () => {
     expect(result.headless).toBe(false);
   });
 
+  test("AUTOMOBILE_EMULATOR_HEADLESS=false forces windowed on macOS (opt back into the native window)", () => {
+    const result = resolveHeadlessMode("darwin", { AUTOMOBILE_EMULATOR_HEADLESS: "false" });
+    expect(result.headless).toBe(false);
+  });
+
   test("Linux without DISPLAY or WAYLAND_DISPLAY defaults to headless", () => {
     const result = resolveHeadlessMode("linux", {});
     expect(result.headless).toBe(true);
@@ -82,8 +87,10 @@ describe("resolveHeadlessMode", () => {
     expect(resolveHeadlessMode("linux", { DISPLAY: "   " }).headless).toBe(true);
   });
 
-  test("macOS without DISPLAY runs windowed (native display always available)", () => {
-    expect(resolveHeadlessMode("darwin", {}).headless).toBe(false);
+  test("macOS defaults to headless (the Qt/CoreAnimation window backing store segfaults on repaint)", () => {
+    const result = resolveHeadlessMode("darwin", {});
+    expect(result.headless).toBe(true);
+    expect(result.reason.toLowerCase()).toContain("macos");
   });
 
   test("Windows without DISPLAY runs windowed", () => {

@@ -325,6 +325,32 @@ implemented across `desktop-domain` (pure policies) and `desktop-core` (the
 User-facing docs: [Controlling a Device from the Desktop App](../../../using/screen-control.md).
 Client-author docs: [third-party client guide](../../mcp/daemon/client-screen-control.md).
 
+### Workspace video pane (second control entry point)
+
+The Layout dashboard mirror above pairs each tap with the observation screenshot it was mapped
+through (capture identity + `frameContext`). The **workspace pane** exposes a second, distinct
+control surface: the user clicks the *live H.264 video*, not the observation screenshot. That path
+deliberately **decouples input from the video frame** — a click maps only through the retained
+device geometry (width/height/rotation) and dispatches through `VideoInputDispatcher` with **no
+`frameContext`**, so the daemon can never reject a video-pane tap as stale (the "one tap works, then
+it freezes" wedge). Wiring lives in `desktop-core`'s `WorkspaceDeviceControl` +
+`VideoInputDispatcher`; the pane keeps playing smooth live video while only the click coordinate
+uses the snapshot.
+
+- **Armed only for the FOCUSED pane on a Unix daemon.** Non-Unix transports (MCP HTTP/STDIO) don't
+  serve the direct `input/*` helpers, and only one pane is driven at a time — so a workspace pane is
+  interactive only when it is both focused and Unix-backed. Click a farm pane to focus (and thus
+  drive) it; an unfocused pane runs no observation stream and no input dispatcher (its warm dispatch
+  thread is retired), and only the focused pane requests keyboard focus (so a second pane can't steal
+  keystrokes mid-type). The per-device video encode rate is fixed by the first subscriber's hint and
+  shared, so focus does NOT change a live stream's fps — doing that would need server-side capture
+  reconfiguration (follow-up).
+- **Keystrokes are coalesced** into batched `inputTypeText` (append mode) and any device key / tap /
+  swipe flushes pending text first, preserving the order the user typed.
+- **Command bar** (Back/Home/Recent/Power + emulator controls) takes the single-round-trip
+  `input/pressButton` fast path on a Unix daemon, falling back to the `pressButton` MCP tool on
+  other transports.
+
 ## See Also
 
 - [Android Overview](index.md)

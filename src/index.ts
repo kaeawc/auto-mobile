@@ -1,10 +1,7 @@
 #!/usr/bin/env bun
 import "./runtime/reflectMetadata";
 import { bootstrapEnvironment } from "./utils/envBootstrap";
-import {
-  DAEMON_LAUNCH_CWD_ENV,
-  safeProcessCwd,
-} from "./utils/workingDirectory";
+import { DAEMON_LAUNCH_CWD_ENV, safeProcessCwd } from "./utils/workingDirectory";
 
 // Run before any other imports that may resolve tool paths at module load time.
 bootstrapEnvironment();
@@ -66,7 +63,7 @@ if (versionOutput !== undefined) {
 }
 
 installProcessLifecycleHandlers();
-setFatalProcessHandler(event => {
+setFatalProcessHandler((event) => {
   if (event.type === "uncaughtException") {
     logFatal("Uncaught exception", event.error);
     return;
@@ -116,13 +113,16 @@ async function main() {
   const { IOSCtrlProxyManager } = await import("./utils/IOSCtrlProxyManager");
   startupBenchmark.endPhase("moduleImports");
 
-  const { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } = videoRecordingSocketServer;
-  const { startTestRecordingSocketServer, stopTestRecordingSocketServer } = testRecordingSocketServer;
-  const { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } = deviceSnapshotSocketServer;
+  const { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } =
+    videoRecordingSocketServer;
+  const { startTestRecordingSocketServer, stopTestRecordingSocketServer } =
+    testRecordingSocketServer;
+  const { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } =
+    deviceSnapshotSocketServer;
   const { startAppearanceSocketServer, stopAppearanceSocketServer } = appearanceSocketServer;
   const { startWebRtcStreamSocketServer, stopWebRtcStreamSocketServer } = webrtcStreamSocketServer;
   const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
-  setProcessShutdownHandler(async signal => {
+  setProcessShutdownHandler(async (signal) => {
     logger.info(`Received ${signal} signal, shutting down`);
     await stopVideoRecordingSocketServer();
     await stopTestRecordingSocketServer();
@@ -154,6 +154,7 @@ async function main() {
       predictiveUi,
       rawElementSearch,
       planExecutionLockScope,
+      runnerReadinessTimeoutMs,
       videoRecordingDefaults,
       daemonMode,
       daemonCommand,
@@ -182,6 +183,9 @@ async function main() {
     }
 
     serverConfig.setPlanExecutionLockScope(planExecutionLockScope);
+    if (runnerReadinessTimeoutMs !== undefined) {
+      serverConfig.setRunnerReadinessTimeoutMs(runnerReadinessTimeoutMs);
+    }
     serverConfig.setVideoRecordingDefaults(videoRecordingDefaults);
     serverConfig.setToolOutputsDir(toolOutputsDir);
     serverConfig.setSkipCtrlProxyDownload(skipCtrlProxyDownload);
@@ -198,7 +202,9 @@ async function main() {
       startIosReap: () => IOSCtrlProxyManager.startOrphanRunnerReapOnStartup(),
     });
     if (skipCtrlProxyDownload) {
-      logger.info(`CtrlProxy downloads disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`);
+      logger.info(
+        `CtrlProxy downloads disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`,
+      );
       startupBenchmark.recordPhase("androidCtrlProxyPrefetch", 0);
     } else {
       // Start prefetching the accessibility service APK in the background
@@ -213,7 +219,9 @@ async function main() {
     // use. Runner cleanup above is also asynchronous and bounded.
     if (process.platform === "darwin") {
       if (skipCtrlProxyDownload) {
-        logger.info(`CtrlProxy iOS prefetch disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`);
+        logger.info(
+          `CtrlProxy iOS prefetch disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`,
+        );
         startupBenchmark.recordPhase("iosCtrlProxyPrefetch", 0);
       } else {
         startupBenchmark.startPhase("iosCtrlProxyPrefetch");
@@ -234,26 +242,34 @@ async function main() {
       !process.env.AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER &&
       !process.env.AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER
     ) {
-      void ScreenCaptureHelperProvider.getInstance().ensure().catch(error => {
-        logger.warn(
-          `[SCREEN_CAPTURE_HELPER] Background prefetch failed: ${error instanceof Error ? error.message : String(error)}`
-        );
-      });
+      void ScreenCaptureHelperProvider.getInstance()
+        .ensure()
+        .catch((error) => {
+          logger.warn(
+            `[SCREEN_CAPTURE_HELPER] Background prefetch failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
     }
 
     const featureFlagService = FeatureFlagService.getInstance();
 
     const accessibilityConfig = a11yAuditMode
       ? {
-        level: (a11yLevel as "A" | "AA" | "AAA" | undefined) || "AA",
-        failureMode: (a11yFailureMode as "report" | "threshold" | "strict" | undefined) || "report",
-        minSeverity: (a11yMinSeverity as "error" | "warning" | "info" | undefined) ||
-            ((a11yFailureMode as "report" | "threshold" | "strict" | undefined) === "strict" ? "error" : "warning"),
-        useBaseline: a11yUseBaseline,
-      }
+          level: (a11yLevel as "A" | "AA" | "AAA" | undefined) || "AA",
+          failureMode:
+            (a11yFailureMode as "report" | "threshold" | "strict" | undefined) || "report",
+          minSeverity:
+            (a11yMinSeverity as "error" | "warning" | "info" | undefined) ||
+            ((a11yFailureMode as "report" | "threshold" | "strict" | undefined) === "strict"
+              ? "error"
+              : "warning"),
+          useBaseline: a11yUseBaseline,
+        }
       : null;
 
-    const cliOverrides: Array<[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]> = [
+    const cliOverrides: Array<
+      [FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]
+    > = [
       ["debug", debug, "--debug"],
       ["debug-perf", debugPerf, "--debug-perf/--ui-perf-debug"],
       ["ui-perf-mode", uiPerfMode, "--ui-perf-mode"],
@@ -263,13 +279,13 @@ async function main() {
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
       ["mcp-recording", mcpRecording, "--mcp-recording"],
       ...OUTPUT_REDUCTION_FLAG_SPECS.map(
-        spec =>
+        (spec) =>
           [spec.featureFlagKey, outputReduction[spec.field], spec.label, undefined] as [
             FeatureFlagKey,
             boolean,
             string,
-            Record<string, unknown> | null | undefined
-          ]
+            Record<string, unknown> | null | undefined,
+          ],
       ),
     ];
 
@@ -327,19 +343,33 @@ async function main() {
 
     if (noWaitForPollingOverhead) {
       serverConfig.setWaitForPollingOverheadEnabled(false);
-      logger.info("WaitFor polling overhead disabled (--no-waitfor-polling-overhead): screenshots and back stack skipped during observe waitFor polling");
+      logger.info(
+        "WaitFor polling overhead disabled (--no-waitfor-polling-overhead): screenshots and back stack skipped during observe waitFor polling",
+      );
     }
 
     // Log-only echoes for daemon CLI flags whose side effects are applied
     // downstream via startDaemon(). Surfacing them at startup makes CI logs
     // grep-verifiable so a missing flag is visible without re-running.
     const silentDaemonFlags: Array<[boolean, string]> = [
-      [!uiPerfMode, "UI perf mode disabled (--no-ui-perf-mode): skipping selection-state visual capture on taps and UI perf auditing"],
+      [
+        !uiPerfMode,
+        "UI perf mode disabled (--no-ui-perf-mode): skipping selection-state visual capture on taps and UI perf auditing",
+      ],
       [embeddedSdk, "Embedded SDK tools enabled (--embedded-sdk)"],
-      [dismissKeyboardAfterInput, "Dismiss keyboard after inputText enabled (--dismiss-keyboard-after-input)"],
-      [noA11yIncludeNotImportantViews, "Accessibility includeNotImportantViews disabled (--no-include-not-important-views)"],
+      [
+        dismissKeyboardAfterInput,
+        "Dismiss keyboard after inputText enabled (--dismiss-keyboard-after-input)",
+      ],
+      [
+        noA11yIncludeNotImportantViews,
+        "Accessibility includeNotImportantViews disabled (--no-include-not-important-views)",
+      ],
       [noA11yReportViewIds, "Accessibility reportViewIds disabled (--no-report-view-ids)"],
-      [noA11yRetrieveInteractiveWindows, "Accessibility retrieveInteractiveWindows disabled (--no-retrieve-interactive-windows)"],
+      [
+        noA11yRetrieveInteractiveWindows,
+        "Accessibility retrieveInteractiveWindows disabled (--no-retrieve-interactive-windows)",
+      ],
       [noOcclusion, "Observe occlusion pass disabled (--no-occlusion)"],
     ];
     for (const [active, message] of silentDaemonFlags) {
@@ -348,12 +378,23 @@ async function main() {
       }
     }
     if (eventAllMarkers.length > 0) {
-      logger.info(`inputText eventAll auto-promotion markers configured (--event-all-markers): ${JSON.stringify(eventAllMarkers)}`);
-    } else if (process.argv.slice(2).some(a => a === EVENT_ALL_MARKERS_FLAG || a.startsWith(`${EVENT_ALL_MARKERS_FLAG}=`))) {
-      logger.warn(`${EVENT_ALL_MARKERS_FLAG} was provided but resolved to no markers; inputText eventAll auto-promotion stays disabled`);
+      logger.info(
+        `inputText eventAll auto-promotion markers configured (--event-all-markers): ${JSON.stringify(eventAllMarkers)}`,
+      );
+    } else if (
+      process.argv
+        .slice(2)
+        .some((a) => a === EVENT_ALL_MARKERS_FLAG || a.startsWith(`${EVENT_ALL_MARKERS_FLAG}=`))
+    ) {
+      logger.warn(
+        `${EVENT_ALL_MARKERS_FLAG} was provided but resolved to no markers; inputText eventAll auto-promotion stays disabled`,
+      );
     }
 
-    const eventAllMarkerDaemonOptions: Pick<DaemonOptions, "eventAllMarkers" | "eventAllMarkersCliOverride"> =
+    const eventAllMarkerDaemonOptions: Pick<
+      DaemonOptions,
+      "eventAllMarkers" | "eventAllMarkersCliOverride"
+    > =
       eventAllMarkers.length > 0 || eventAllMarkersCliOverride
         ? { eventAllMarkers, eventAllMarkersCliOverride }
         : {};
@@ -365,6 +406,7 @@ async function main() {
         debug,
         debugPerf,
         planExecutionLockScope,
+        ...(runnerReadinessTimeoutMs !== undefined ? { runnerReadinessTimeoutMs } : {}),
         videoQualityPreset: videoRecordingDefaults.qualityPreset,
         videoTargetBitrateKbps: videoRecordingDefaults.targetBitrateKbps,
         videoMaxThroughputMbps: videoRecordingDefaults.maxThroughputMbps,
@@ -419,6 +461,7 @@ async function main() {
       debug,
       debugPerf,
       planExecutionLockScope,
+      ...(runnerReadinessTimeoutMs !== undefined ? { runnerReadinessTimeoutMs } : {}),
       mcpRecording,
       videoQualityPreset: videoRecordingDefaults.qualityPreset,
       videoTargetBitrateKbps: videoRecordingDefaults.targetBitrateKbps,
@@ -503,7 +546,7 @@ async function main() {
               autoStartDaemon: !noDaemon,
               daemonOptions: daemonStartupOptions,
               initialSessionUuid,
-            }
+            },
           });
           server = result.server;
           stdioProxy = result.proxy;
@@ -520,8 +563,13 @@ async function main() {
         await server.connect(stdioTransport);
         startupBenchmark.endPhase("serverListening");
         logger.info("MCP server connected to stdio transport");
-        logger.info(`AutoMobile MCP server running on stdio (${useProxyMode ? "proxy" : "direct"} mode)`);
-        startupBenchmark.emit("mcp-server", { transport: "stdio", mode: useProxyMode ? "proxy" : "direct" });
+        logger.info(
+          `AutoMobile MCP server running on stdio (${useProxyMode ? "proxy" : "direct"} mode)`,
+        );
+        startupBenchmark.emit("mcp-server", {
+          transport: "stdio",
+          mode: useProxyMode ? "proxy" : "direct",
+        });
 
         // Register cleanup for proxy mode
         if (stdioProxy) {
@@ -544,7 +592,7 @@ async function main() {
 // Bun sets import.meta.main on the entrypoint module; under `module: ESNext`
 // this type-checks without a suppression.
 if (import.meta.main) {
-  main().catch(async err => {
+  main().catch(async (err) => {
     console.error("Fatal error in main():", err);
     fatalLogger?.error("Fatal error in main():", err);
     fatalLogger?.close();

@@ -11,7 +11,15 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceUtils";
+import {
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  MAX_DEVICE_READY_TIMEOUT_MS,
+} from "../../src/utils/deviceTimeouts";
+import {
+  MAX_RUNNER_READINESS_TIMEOUT_MS,
+  MIN_RUNNER_READINESS_TIMEOUT_MS,
+} from "../../src/utils/runnerReadinessConfig";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import * as os from "os";
 
 const AUTOLOCK_ENV_KEYS = [
@@ -50,6 +58,7 @@ describe("startDevice handler", () => {
       deviceMatcherFactory: () => fakeMatcher,
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
+      timer: new FakeTimer(),
     });
 
     registerDeviceTools();
@@ -139,6 +148,7 @@ describe("startDevice handler", () => {
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
       notifyResourcesChanged: async () => {},
+      timer: new FakeTimer(),
       // deliberately no ensureCtrlProxyReady -> default closure with the check
     });
     registerDeviceTools();
@@ -293,6 +303,83 @@ describe("startDevice handler", () => {
     }
   });
 
+  it("reserves a pooled device while runner readiness is in flight", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    daemonSessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.initializeWithDevices([androidDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    let releaseReadiness!: () => void;
+    const readinessGate = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    let readinessStarted!: () => void;
+    const waitForReadiness = new Promise<void>((resolve) => {
+      readinessStarted = resolve;
+    });
+    setDeviceToolsDependencies({
+      timer,
+      idGenerator: new CountingIdGenerator("session"),
+      ensureCtrlProxyReady: async () => {
+        readinessStarted();
+        await readinessGate;
+      },
+    });
+    registerDeviceTools();
+
+    const start = callStartDevice({ platform: "android" });
+    await waitForReadiness;
+    expect(pool.getIdleDevices()).toEqual([]);
+    await expect(pool.assignDeviceToSession("competing-session", "android")).rejects.toThrow(
+      /Timed out waiting for device/,
+    );
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
+
+    releaseReadiness();
+    const result = await start;
+    expect(result.sessionId).toBe("session-1");
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("session-1");
+  });
+
+  it("releases a pooled-device reservation when runner readiness fails", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([androidDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        throw new Error("runner unavailable");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow("runner unavailable");
+
+    expect(pool.getIdleDevices().map((device) => device.id)).toEqual([androidDevice.deviceId]);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
+  });
+
   it("cold-boots without a process handle (adopted device: startDevice returns null)", async () => {
     fakeDeviceUtils.setBootedDevices("android", []);
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
@@ -341,6 +428,32 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setWaitForDeviceReadyError(new Error("readiness timeout"));
 
     await expect(callStartDevice({ platform: "android" })).rejects.toThrow("readiness timeout");
+  });
+
+  it("cancels an unowned cold boot when runner readiness fails", async () => {
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(androidImage);
+    let killed = false;
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, {
+      kill: (): boolean => {
+        killed = true;
+        return true;
+      },
+      pid: 4242,
+    } as any);
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        throw new Error("runner unavailable");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
+      "runner unavailable",
+    );
+    expect(killed).toBe(true);
   });
 
   it("passes timeout to the cold boot start operation", async () => {
@@ -422,6 +535,72 @@ describe("startDevice handler", () => {
     expect(fakeDeviceUtils.getExecutedOperations()).toContain(
       "waitForDeviceReady:iPhone 15:30000",
     );
+  });
+
+  it("rejects a running-device identity mismatch before runner readiness", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeDeviceUtils.waitForDeviceReady = async () => ({
+      ...androidDevice,
+      deviceId: "emulator-5556",
+    });
+
+    await expect(callStartDevice({
+      platform: "android",
+      deviceId: "emulator-5554",
+    })).rejects.toThrow(/requested=.*emulator-5554.*resolved=.*emulator-5556/);
+  });
+
+  it("rejects an iOS cold-boot UDID mismatch before binding a session", async () => {
+    const image: DeviceInfo = {
+      name: "iPhone 15",
+      platform: "ios",
+      deviceId: "REQUESTED-UDID",
+      isRunning: false,
+    };
+    fakeDeviceUtils.setDeviceImages("ios", [image]);
+    fakeMatcher.setImageResult(image);
+    fakeDeviceUtils.waitForDeviceReady = async () => ({
+      name: image.name,
+      platform: "ios",
+      deviceId: "OTHER-UDID",
+    });
+
+    await expect(callStartDevice({
+      platform: "ios",
+      deviceId: "REQUESTED-UDID",
+    })).rejects.toThrow(/phase=pool-match.*UDID differs/);
+  });
+
+  it("passes the request runner budget and shared total deadline to readiness", async () => {
+    const readinessRequests: Array<{
+      totalDeadlineMs: number;
+      readinessTimeoutMs: number;
+      requestedIdentity: string;
+    }> = [];
+    const timer = new FakeTimer();
+    timer.advanceTime(1_000);
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async request => {
+        readinessRequests.push(request);
+      },
+    });
+    registerDeviceTools();
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    await callStartDevice({
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+      timeoutMs: 60_000,
+      runnerReadinessTimeoutMs: 15_000,
+    });
+
+    expect(readinessRequests).toEqual([expect.objectContaining({
+      totalDeadlineMs: 61_000,
+      readinessTimeoutMs: 15_000,
+      requestedIdentity: "platform=android deviceId=emulator-5554",
+    })]);
   });
 
   it("boots image when deviceId matches an image name", async () => {
@@ -560,6 +739,21 @@ describe("startDevice handler", () => {
     expect(parsed.name).toBe("Pixel_7_API_34");
   });
 
+  it("bounds runner readiness timeout overrides", () => {
+    expect(() => startDeviceSchema.parse({
+      platform: "android",
+      runnerReadinessTimeoutMs: MIN_RUNNER_READINESS_TIMEOUT_MS - 1,
+    })).toThrow();
+    expect(() => startDeviceSchema.parse({
+      platform: "android",
+      runnerReadinessTimeoutMs: MAX_RUNNER_READINESS_TIMEOUT_MS + 1,
+    })).toThrow();
+    expect(() => startDeviceSchema.parse({
+      platform: "android",
+      timeoutMs: MAX_DEVICE_READY_TIMEOUT_MS + 1,
+    })).toThrow();
+  });
+
   it("prefers deviceId over name when enriching booted device metadata", async () => {
     const bootedDuplicateName: BootedDevice = {
       name: "iPhone 15",
@@ -613,6 +807,65 @@ describe("startDevice handler", () => {
 
     expect(typeof result.sessionId).toBe("string");
     expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(result.sessionId);
+  });
+
+  it("rejects stale pooled platform metadata before session binding", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([{
+      ...iosDevice,
+      deviceId: androidDevice.deviceId,
+    }]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    await expect(callStartDevice({
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+    })).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
+  });
+
+  it("rejects a stale same-platform pool identity before session reuse", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    fakeDeviceUtils.setBootedDevices("android", [{
+      ...androidDevice,
+      name: "Old_Pixel_AVD",
+    }]);
+    await pool.initializeWithDevices([{
+      ...androidDevice,
+      name: "Old_Pixel_AVD",
+    }]);
+    await pool.bindOrReuseDeviceSession(
+      "stale-session",
+      androidDevice.deviceId,
+      "android",
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    await expect(callStartDevice({
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+    })).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("stale-session");
   });
 
   it("reuses the returned sessionId for repeated startDevice calls when autolock is disabled", async () => {

@@ -6,6 +6,7 @@ import https from "https";
 import * as path from "path";
 import { promisify } from "util";
 import { logger } from "./logger";
+import { getAbortSignal } from "./AbortContext";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +16,7 @@ export interface FileDownloader {
 
 export class DefaultFileDownloader implements FileDownloader {
   public async download(url: string, destination: string, signal?: AbortSignal): Promise<void> {
+    signal ??= getAbortSignal();
     if (signal?.aborted) {
       throw new Error(`Download aborted before starting: ${url}`);
     }

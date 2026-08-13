@@ -35,19 +35,19 @@ export interface ProvisionedDevice {
 
 /** Exactly the SimCtlClient surface provisioning needs. */
 export interface IosSimulatorCreator {
-  getDeviceTypes(): Promise<AppleDeviceType[]>;
-  resolveRuntimeIdentifier(requestedVersion?: string): Promise<string>;
-  createSimulator(name: string, deviceType: string, runtime: string): Promise<string>;
+  getDeviceTypes(signal?: AbortSignal): Promise<AppleDeviceType[]>;
+  resolveRuntimeIdentifier(requestedVersion?: string, signal?: AbortSignal): Promise<string>;
+  createSimulator(name: string, deviceType: string, runtime: string, signal?: AbortSignal): Promise<string>;
 }
 
 /** Exactly the avdmanager surface provisioning needs. */
 export interface AndroidAvdCreator {
-  listInstalledSystemImages(): Promise<SystemImage[]>;
-  createAvd(params: CreateAvdParams): Promise<{ success: boolean; message: string; avdName?: string }>;
+  listInstalledSystemImages(signal?: AbortSignal): Promise<SystemImage[]>;
+  createAvd(params: CreateAvdParams, signal?: AbortSignal): Promise<{ success: boolean; message: string; avdName?: string }>;
 }
 
 export interface DeviceProvisioner {
-  provision(criteria: DeviceMatchCriteria): Promise<ProvisionedDevice>;
+  provision(criteria: DeviceMatchCriteria, signal?: AbortSignal): Promise<ProvisionedDevice>;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,19 +259,19 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     this.architecture = dependencies.architecture ?? process.arch;
   }
 
-  async provision(criteria: DeviceMatchCriteria): Promise<ProvisionedDevice> {
+  async provision(criteria: DeviceMatchCriteria, signal?: AbortSignal): Promise<ProvisionedDevice> {
     if (criteria.platform === "ios") {
-      return this.provisionIos(criteria);
+      return this.provisionIos(criteria, signal);
     }
     if (criteria.platform === "android") {
-      return this.provisionAndroid(criteria);
+      return this.provisionAndroid(criteria, signal);
     }
     throw new ActionableError(
       `Device creation requires an explicit platform; got '${criteria.platform}'.`
     );
   }
 
-  private async provisionIos(criteria: DeviceMatchCriteria): Promise<ProvisionedDevice> {
+  private async provisionIos(criteria: DeviceMatchCriteria, signal?: AbortSignal): Promise<ProvisionedDevice> {
     const simctl = this.dependencies.iosCreator();
     if (!simctl) {
       throw new ActionableError(
@@ -279,14 +279,14 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
       );
     }
 
-    const deviceTypes = await simctl.getDeviceTypes();
+    const deviceTypes = await simctl.getDeviceTypes(signal);
     const deviceType = pickIosDeviceType(deviceTypes, criteria);
-    const runtime = await simctl.resolveRuntimeIdentifier(criteria.minOsVersion);
+    const runtime = await simctl.resolveRuntimeIdentifier(criteria.minOsVersion, signal);
     const name = this.dependencies.createdDeviceName?.(deviceType.name) ?? buildCreatedDeviceName(deviceType.name, this.idGenerator);
 
     let deviceId: string;
     try {
-      deviceId = await simctl.createSimulator(name, deviceType.identifier, runtime);
+      deviceId = await simctl.createSimulator(name, deviceType.identifier, runtime, signal);
     } catch (error) {
       throw toActionableError(
         error,
@@ -303,12 +303,12 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     return { platform: "ios", name, deviceId, deviceType: deviceType.identifier, runtime };
   }
 
-  private async provisionAndroid(criteria: DeviceMatchCriteria): Promise<ProvisionedDevice> {
+  private async provisionAndroid(criteria: DeviceMatchCriteria, signal?: AbortSignal): Promise<ProvisionedDevice> {
     const avdManager = this.dependencies.androidCreator();
 
     let installed: SystemImage[];
     try {
-      installed = await avdManager.listInstalledSystemImages();
+      installed = await avdManager.listInstalledSystemImages(signal);
     } catch (error) {
       throw toActionableError(error, "Failed to list installed Android system images for AVD creation");
     }
@@ -316,7 +316,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     const image = pickAndroidSystemImage(installed, criteria, this.architecture);
     const name = buildCreatedDeviceName(criteria.name ?? `android-${image.apiLevel}`, this.idGenerator);
 
-    const result = await avdManager.createAvd({ name, package: image.packageName });
+    const result = await avdManager.createAvd({ name, package: image.packageName }, signal);
     if (!result.success) {
       throw new ActionableError(
         `Failed to create Android AVD '${name}' from ${image.packageName}: ${result.message}`
@@ -341,8 +341,8 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
 /** The avdmanager functional API, adapted to the narrow creator interface. */
 export function createDefaultAndroidAvdCreator(): AndroidAvdCreator {
   return {
-    listInstalledSystemImages: () => listInstalledSystemImages(),
-    createAvd: params => createAvd(params),
+    listInstalledSystemImages: signal => listInstalledSystemImages(undefined, undefined, signal),
+    createAvd: (params, signal) => createAvd(params, undefined, signal),
   };
 }
 

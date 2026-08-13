@@ -1,4 +1,7 @@
 import type { DaemonRequest } from "./types";
+import { MAX_DEVICE_READY_TIMEOUT_MS, START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS } from "../utils/deviceTimeouts";
+
+export { START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS };
 
 export const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -93,6 +96,37 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function positiveFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
+function resolveStartDeviceToolBudgetMs(request: DaemonRequest): number | undefined {
+  if (request.method !== "tools/call" || request.params?.name !== "startDevice") {
+    return undefined;
+  }
+  const argumentsRecord = asRecord(request.params?.arguments);
+  if (!argumentsRecord) {
+    return undefined;
+  }
+  const legacyTimeoutMs = asRecord(argumentsRecord.device)?.timeoutMs;
+  // Match startDeviceSchema's legacy normalization: an explicit top-level value
+  // wins over the nested device payload.
+  const timeoutMs = positiveFiniteNumber(argumentsRecord.timeoutMs ?? legacyTimeoutMs);
+  if (timeoutMs === undefined) {
+    return undefined;
+  }
+  return Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) +
+    START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
+}
+
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const raw = request.timeoutMs;
   const base =
@@ -102,5 +136,6 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const floor = request.method === "tools/call"
     ? resolveToolTimeoutFloorMs(request.params?.name)
     : undefined;
-  return floor ? Math.max(base, floor) : base;
+  const startDeviceBudget = resolveStartDeviceToolBudgetMs(request);
+  return Math.max(base, floor ?? 0, startDeviceBudget ?? 0);
 }

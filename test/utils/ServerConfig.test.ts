@@ -1,5 +1,9 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import {
+  MAX_RUNNER_READINESS_TIMEOUT_MS,
+  MIN_RUNNER_READINESS_TIMEOUT_MS,
+} from "../../src/utils/runnerReadinessConfig";
 
 describe("ServerConfig", () => {
   describe("tool output artifacts", () => {
@@ -48,6 +52,22 @@ describe("ServerConfig", () => {
       serverConfig.setDismissKeyboardAfterInputEnabled(true);
       serverConfig.setDismissKeyboardAfterInputEnabled(false);
       expect(serverConfig.isDismissKeyboardAfterInputEnabled()).toBe(false);
+    });
+  });
+
+  describe("runner readiness timeout", () => {
+    test("accepts bounded values and rejects invalid programmatic options", () => {
+      const original = serverConfig.getRunnerReadinessTimeoutMs();
+      try {
+        serverConfig.setRunnerReadinessTimeoutMs(MIN_RUNNER_READINESS_TIMEOUT_MS);
+        expect(serverConfig.getRunnerReadinessTimeoutMs()).toBe(MIN_RUNNER_READINESS_TIMEOUT_MS);
+        expect(() => serverConfig.setRunnerReadinessTimeoutMs(Number.NaN)).toThrow(RangeError);
+        expect(() =>
+          serverConfig.setRunnerReadinessTimeoutMs(MAX_RUNNER_READINESS_TIMEOUT_MS + 1),
+        ).toThrow(RangeError);
+      } finally {
+        serverConfig.setRunnerReadinessTimeoutMs(original);
+      }
     });
   });
 });

@@ -66,6 +66,11 @@ import {
   type DaemonLaunchCommand,
   type DaemonProcessSpawner,
 } from "./DaemonLauncher";
+import {
+  RUNNER_READINESS_TIMEOUT_ENV,
+  RUNNER_READINESS_TIMEOUT_FLAG,
+  parseRunnerReadinessTimeout,
+} from "../utils/runnerReadinessConfig";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 
@@ -662,6 +667,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.planExecutionLockScope) {
       args.push("--plan-execution-lock-scope", options.planExecutionLockScope);
     }
+    if (options.runnerReadinessTimeoutMs !== undefined) {
+      args.push(RUNNER_READINESS_TIMEOUT_FLAG, options.runnerReadinessTimeoutMs.toString());
+    }
     if (options.videoQualityPreset) {
       args.push("--video-quality", options.videoQualityPreset);
     }
@@ -1135,6 +1143,12 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
     options.eventAllMarkers = eventAllMarkers;
     options.eventAllMarkersCliOverride = eventAllMarkersCliOverride;
   }
+  const envRunnerReadinessTimeout = parseRunnerReadinessTimeout(
+    env[RUNNER_READINESS_TIMEOUT_ENV] ?? env.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS,
+  );
+  if (envRunnerReadinessTimeout !== undefined) {
+    options.runnerReadinessTimeoutMs = envRunnerReadinessTimeout;
+  }
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port") {
       options.port = parseInt(args[i + 1], 10);
@@ -1155,6 +1169,12 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
         options.planExecutionLockScope = scope;
       }
       i++;
+    } else if (args[i] === RUNNER_READINESS_TIMEOUT_FLAG) {
+      const timeoutMs = parseRunnerReadinessTimeout(args[i + 1]);
+      if (timeoutMs !== undefined) {
+        options.runnerReadinessTimeoutMs = timeoutMs;
+        i++;
+      }
     } else if (args[i] === "--video-quality" || args[i] === "--video-quality-preset") {
       options.videoQualityPreset = args[i + 1];
       i++;

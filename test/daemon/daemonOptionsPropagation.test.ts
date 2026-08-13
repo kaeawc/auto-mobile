@@ -85,6 +85,20 @@ describe("daemon startup-option propagation", () => {
       expect(parsed[field]).toBeUndefined();
     }
   });
+
+  test("runner readiness timeout round-trips and the CLI value overrides the environment", () => {
+    const args = serialize({ runnerReadinessTimeoutMs: 45_000 });
+    expect(args).toContain("--runner-readiness-timeout-ms");
+    expect(parseDaemonArgs(args, {
+      AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS: "20000",
+    })).toMatchObject({ runnerReadinessTimeoutMs: 45_000 });
+  });
+
+  test("a missing runner readiness value does not consume the following flag", () => {
+    const parsed = parseDaemonArgs(["--runner-readiness-timeout-ms", "--debug"]);
+    expect(parsed.debug).toBe(true);
+    expect(parsed.runnerReadinessTimeoutMs).toBeUndefined();
+  });
 });
 
 describe("reuse-critical drift guard", () => {

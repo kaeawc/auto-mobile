@@ -182,6 +182,8 @@ export interface DaemonOptions {
   debugPerf?: boolean;
   /** Plan execution lock scope (session or global) */
   planExecutionLockScope?: "session" | "global";
+  /** Default per-device automation runner readiness budget */
+  runnerReadinessTimeoutMs?: number;
   /** Default video quality preset */
   videoQualityPreset?: string;
   /** Default video target bitrate in Kbps */

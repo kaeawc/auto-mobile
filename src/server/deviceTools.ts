@@ -11,8 +11,6 @@ import { DEVICE_IMAGE_RESOURCE_URIS, notifyDeviceImageResourcesUpdated } from ".
 import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
-import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { platformSchema } from "./toolSchemaHelpers";
@@ -21,10 +19,24 @@ import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poo
 import { DEVICE_CREATE_ENV_VAR, getDeviceCreationGate, type DeviceCreationGate } from "../utils/deviceCreationGate";
 import { createDefaultDeviceProvisioner, type DeviceProvisioner } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
-import { DeviceBootService } from "../utils/deviceBootService";
+import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import {
+  createDefaultRunnerReadinessService,
+  type RunnerReadinessRequest,
+} from "../utils/RunnerReadinessService";
+import {
+  MAX_RUNNER_READINESS_TIMEOUT_MS,
+  MIN_RUNNER_READINESS_TIMEOUT_MS,
+} from "../utils/runnerReadinessConfig";
+import { serverConfig } from "../utils/ServerConfig";
+import {
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  MAX_DEVICE_READY_TIMEOUT_MS,
+} from "../utils/deviceTimeouts";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -47,7 +59,21 @@ const startDeviceParametersSchema = z.object({
   }).optional().describe("Desired screen dimensions"),
   deviceId: z.string().optional(),
   preferRunning: z.boolean().optional().describe("Prefer already-booted device (default true)"),
-  timeoutMs: z.number().optional().describe("Boot timeout in ms"),
+  timeoutMs: z.number()
+    .int()
+    .positive()
+    .max(MAX_DEVICE_READY_TIMEOUT_MS)
+    .optional()
+    .describe("Total device boot and automation-readiness timeout in ms"),
+  runnerReadinessTimeoutMs: z.number()
+    .int()
+    .min(MIN_RUNNER_READINESS_TIMEOUT_MS)
+    .max(MAX_RUNNER_READINESS_TIMEOUT_MS)
+    .optional()
+    .describe(
+      "Runner-readiness budget in ms within timeoutMs; overrides the daemon default " +
+      `(${MIN_RUNNER_READINESS_TIMEOUT_MS}-${MAX_RUNNER_READINESS_TIMEOUT_MS})`
+    ),
   createIfMissing: z.boolean().optional().describe(
     `Create a device when nothing matches (CLI: --create-if-missing). Default off; ` +
     `${DEVICE_CREATE_ENV_VAR}=1 enables it when this flag is not supplied, and the flag wins.`
@@ -149,6 +175,7 @@ export interface StartDeviceArgs {
   deviceId?: string;
   preferRunning?: boolean;
   timeoutMs?: number;
+  runnerReadinessTimeoutMs?: number;
   createIfMissing?: boolean;
   __mcpSessionId?: string;
 }
@@ -169,11 +196,12 @@ export interface DeviceToolsDependencies {
   deviceManagerFactory: () => PlatformDeviceManager;
   deviceMatcherFactory: () => DeviceMatcher;
   notifyResourcesChanged: () => Promise<void>;
-  ensureCtrlProxyReady?: (device: BootedDevice, perf: ReturnType<typeof createPerformanceTracker>) => Promise<void>;
+  ensureCtrlProxyReady?: (request: RunnerReadinessRequest) => Promise<void>;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
   clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
   idGenerator: IdGenerator;
+  timer: Timer;
 }
 
 async function defaultNotifyResourcesChanged(): Promise<void> {
@@ -226,6 +254,7 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       idGenerator: defaultIdGenerator,
+      timer: defaultTimer,
     };
   }
   return moduleDependencies;
@@ -243,11 +272,101 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     clearInstalledAppsForDevice:
       deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
+    timer: deps.timer ?? currentDeps.timer,
   };
 }
 
 export function resetDeviceToolsDependencies(): void {
   moduleDependencies = null;
+}
+
+function describeStartDeviceRequest(args: StartDeviceArgs): string {
+  return [
+    `platform=${args.platform}`,
+    args.deviceId ? `deviceId=${args.deviceId}` : undefined,
+    args.name ? `name=${args.name}` : undefined,
+    args.minOsVersion ? `minOsVersion=${args.minOsVersion}` : undefined,
+    args.maxOsVersion ? `maxOsVersion=${args.maxOsVersion}` : undefined,
+    args.formFactor ? `formFactor=${args.formFactor}` : undefined,
+  ].filter((value): value is string => value !== undefined).join(" ");
+}
+
+function validateBootIdentity(
+  args: StartDeviceArgs,
+  device: BootedDevice,
+  source: "booted" | "cold-boot",
+  sourceImage?: DeviceInfo,
+): void {
+  const requested = describeStartDeviceRequest(args);
+  const resolved = `${device.platform} ${device.name} (${device.deviceId})`;
+  if (device.platform !== args.platform) {
+    throw new ActionableError(
+      `startDevice identity mismatch: requested=[${requested}] resolved=[${resolved}] ` +
+      "phase=pool-match: resolved platform differs from requested platform",
+    );
+  }
+  if (source === "booted" && args.deviceId && device.deviceId !== args.deviceId) {
+    throw new ActionableError(
+      `startDevice identity mismatch: requested=[${requested}] resolved=[${resolved}] ` +
+      "phase=pool-match: running device ID differs from the requested device ID",
+    );
+  }
+  if (
+    source === "cold-boot" &&
+    device.platform === "ios" &&
+    sourceImage?.deviceId &&
+    sourceImage.deviceId !== device.deviceId
+  ) {
+    throw new ActionableError(
+      `startDevice identity mismatch: requested=[${requested}] selected=[${sourceImage.name} ` +
+      `(${sourceImage.deviceId})] resolved=[${resolved}] phase=pool-match: ` +
+      "iOS runtime UDID differs from the selected simulator UDID",
+    );
+  }
+}
+
+function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: string): void {
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return;
+  }
+  const pooled = daemonState.getDevicePool().getDevice(device.deviceId);
+  if (pooled && (pooled.platform !== device.platform || pooled.name !== device.name)) {
+    throw new ActionableError(
+      `startDevice identity mismatch: requested=[${requestedIdentity}] ` +
+      `resolved=[${device.name} (${device.deviceId}) platform=${device.platform}] ` +
+      `pooled=[${pooled.name} (${pooled.id}) platform=${pooled.platform}] ` +
+      "phase=pool-match: stale pool identity conflicts with the resolved runtime",
+    );
+  }
+}
+
+function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): void {
+  if (boot?.source !== "cold-boot" || !boot.processHandle) {
+    return;
+  }
+  try {
+    boot.processHandle.kill();
+  } catch (error) {
+    logger.warn(
+      `[DeviceTools] Failed to cancel unowned cold boot ${boot.device.deviceId}: ${error}`,
+      error,
+    );
+  }
+}
+
+function clearColdBootShutdownMarker(source: "booted" | "cold-boot", deviceId: string): void {
+  const daemonState = DaemonState.getInstance();
+  if (source === "cold-boot" && daemonState.isInitialized()) {
+    daemonState.getDevicePool().clearIntentionalShutdown(deviceId);
+  }
+}
+
+function publishWarmDeviceReady(source: "booted" | "cold-boot", deviceId: string): void {
+  const daemonState = DaemonState.getInstance();
+  if (source === "booted" && daemonState.isInitialized()) {
+    daemonState.getDevicePool().notifyDeviceReady(deviceId);
+  }
 }
 
 export function registerDeviceTools() {
@@ -300,11 +419,26 @@ export function registerDeviceTools() {
   };
 
   // Start device handler — matches criteria against booted devices and images
-  const startDeviceHandler = async (args: StartDeviceArgs, progress?: ProgressCallback) => {
+  const startDeviceHandler = async (
+    args: StartDeviceArgs,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    const internalSessionId = args.__mcpSessionId;
+    args = {
+      ...startDeviceSchema.parse(args),
+      __mcpSessionId: internalSessionId,
+    };
     const perf = createPerformanceTracker(true);
     perf.serial("startDevice");
     const deps = getDeviceToolsDependencies();
     const deviceUtils = deps.deviceManagerFactory();
+    const totalTimeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    const totalDeadlineMs = deps.timer.now() + totalTimeoutMs;
+    const requestedIdentity = describeStartDeviceRequest(args);
+    let boot: DeviceBootResult | undefined;
+    let ownershipTransferred = false;
+    let releaseReadinessReservation: (() => Promise<void>) | undefined;
 
     try {
       const bootService = new DeviceBootService({
@@ -313,30 +447,52 @@ export function registerDeviceTools() {
         deviceCreationGate: deps.deviceCreationGateFactory(),
         deviceProvisioner: deps.deviceProvisionerFactory(),
         matchingStrategy: DEVICE_POOL_MATCHING,
+        timer: deps.timer,
       });
       perf.startOperation("bootDevice");
-      const boot = await bootService.boot(args, progress ? { report: progress } : undefined);
+      boot = await bootService.boot(
+        { ...args, totalDeadlineMs, signal },
+        progress ? { report: progress } : undefined,
+      );
       perf.endOperation("bootDevice");
-
-      // A ready device may reuse an existing serial. Invalidate daemon-side
-      // per-device state before any later await lets socket traffic reach it.
-      if (DaemonState.getInstance().isInitialized()) {
-        const pool = DaemonState.getInstance().getDevicePool();
-        if (boot.source === "cold-boot") {
-          pool.clearIntentionalShutdown(boot.device.deviceId);
-        } else {
-          pool.notifyDeviceReady(boot.device.deviceId);
-        }
+      validateBootIdentity(args, boot.device, boot.source, boot.sourceImage);
+      validatePooledDeviceMapping(boot.device, requestedIdentity);
+      const daemonState = DaemonState.getInstance();
+      if (daemonState.isInitialized()) {
+        releaseReadinessReservation = await daemonState
+          .getDevicePool()
+          .reserveDeviceForReadiness(boot.device.deviceId, boot.device);
       }
 
+      // A new incarnation must not inherit a prior intentional-shutdown marker
+      // while its per-device runner setup is in flight.
+      clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
+
       const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
-      await ctrlProxySetup(boot.device, perf);
+      await ctrlProxySetup({
+        device: boot.device,
+        requestedIdentity,
+        totalDeadlineMs,
+        readinessTimeoutMs:
+          args.runnerReadinessTimeoutMs ?? serverConfig.getRunnerReadinessTimeoutMs(),
+        skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
+        perf,
+        signal,
+      });
+      // Re-check under the later binding lock because pool identity can change
+      // while runner setup is in flight.
+      validatePooledDeviceMapping(boot.device, requestedIdentity);
+
+      // Publish only after runner health passes. Readiness remains per-device,
+      // so 20-40 concurrent emulators do not serialize on a host-wide gate.
+      publishWarmDeviceReady(boot.source, boot.device.deviceId);
       const sessionId = await bindBootedDeviceSession(
         boot.device,
         args,
         boot.sourceImage,
         boot.processHandle
       );
+      ownershipTransferred = true;
 
       if (boot.source === "cold-boot" || boot.provisioned) {
         perf.startOperation("notifyResources");
@@ -352,68 +508,28 @@ export function registerDeviceTools() {
       );
     } catch (error) {
       perf.end();
+      if (!ownershipTransferred) {
+        cancelUnownedColdBoot(boot);
+      }
       if (error instanceof ActionableError) {
         throw error;
       }
       throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
+    } finally {
+      await releaseReadinessReservation?.();
     }
   };
 
 
-  async function ensureCtrlProxyReady(
-    device: BootedDevice,
-    perf: ReturnType<typeof createPerformanceTracker>,
-  ) {
-    if (device.platform !== "ios") {
-      return;
-    }
-
-    // Fail closed on an unusable runner override before any warm-path return.
-    // startDevice has its own enforcement here, and it returns early when the
-    // CtrlProxy client is already connected -- skipping the builder that would
-    // validate the override -- so a directory- or typo-valued
-    // AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH would otherwise silently reuse the
-    // cached released runner (#4221).
-    const iosOverride = await checkIosCtrlProxyOverride();
-    if (iosOverride.present && !iosOverride.usable) {
-      throw new ActionableError(
-        `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`
-      );
-    }
-
-    perf.startOperation("ensureCtrlProxy");
+  async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
+    request.perf?.startOperation("ensureCtrlProxy");
     try {
-      await IOSCtrlProxyManager.awaitStartupOrphanRunnerReap();
-      const manager = IOSCtrlProxyManager.getInstance(device);
-      const xcTestClient = IOSCtrlProxyClient.getInstance(device, manager.getServicePort());
-
-      // If WebSocket already connected and responsive, nothing to do
-      if (xcTestClient.isConnected()) {
-        const isReady = await xcTestClient.verifyServiceReady(2, 200, 2000);
-        if (isReady) {
-          logger.info(`[startDevice] CtrlProxy iOS already ready for ${device.deviceId}`);
-          perf.endOperation("ensureCtrlProxy");
-          return;
-        }
-      }
-
-      // Setup: download bundle if needed, start xcodebuild, wait for service
-      const setupResult = await manager.setup(false, perf);
-      if (!setupResult.success) {
-        logger.warn(`[startDevice] CtrlProxy iOS setup failed for ${device.deviceId}: ${setupResult.error ?? setupResult.message}`);
-        perf.endOperation("ensureCtrlProxy");
-        return;
-      }
-
-      // Wait for WebSocket connection and verify responsiveness
-      const connected = await xcTestClient.waitForConnection(5, 1000);
-      if (connected) {
-        await xcTestClient.verifyServiceReady(5, 1000, 5000);
-      }
-    } catch (error) {
-      logger.warn(`[startDevice] CtrlProxy iOS setup failed (non-fatal): ${error}`);
+      await createDefaultRunnerReadinessService(
+        getDeviceToolsDependencies().timer,
+      ).ensureReady(request);
+    } finally {
+      request.perf?.endOperation("ensureCtrlProxy");
     }
-    perf.endOperation("ensureCtrlProxy");
   }
 
   async function bindBootedDeviceSession(
@@ -431,7 +547,8 @@ export function registerDeviceTools() {
         device.platform,
         args.__mcpSessionId,
         sourceImage,
-        childProcess
+        childProcess,
+        device,
       );
       if (autolockSessionId) {
         return autolockSessionId;
@@ -447,7 +564,8 @@ export function registerDeviceTools() {
       device.deviceId,
       device.platform,
       sourceImage,
-      childProcess
+      childProcess,
+      device,
     );
   }
 

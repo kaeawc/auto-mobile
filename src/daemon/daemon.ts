@@ -277,6 +277,9 @@ export class Daemon {
     if (options.skipCtrlProxyDownload) {
       serverConfig.setSkipCtrlProxyDownload(true);
     }
+    if (options.runnerReadinessTimeoutMs !== undefined) {
+      serverConfig.setRunnerReadinessTimeoutMs(options.runnerReadinessTimeoutMs);
+    }
     if (options.noA11yIncludeNotImportantViews) {
       serverConfig.setA11yIncludeNotImportantViews(false);
     }

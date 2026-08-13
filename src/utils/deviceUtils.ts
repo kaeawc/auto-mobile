@@ -6,6 +6,7 @@ import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import { logger } from "./logger";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
+import { getAbortSignal } from "./AbortContext";
 
 export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 
@@ -319,6 +320,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         return (await this.emulator.launchEmulator({
           avdName: device.name,
           deviceId: device.deviceId,
+          signal: getAbortSignal(),
         })).process;
       case "ios":
         return this.simctl.startSimulator(device.deviceId ?? device.name, timeoutMs);

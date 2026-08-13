@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { SimCtlClient, type SimCtlBootOptions } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import {
+  SimCtlClient,
+  type SimCtlBootOptions,
+} from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError } from "../../../src/models";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 
 const UDID = "11111111-2222-3333-4444-555555555555";
 
@@ -11,6 +15,7 @@ interface Harness {
   timer: FakeTimer;
   calls: string[];
   commandTimeouts: Map<string, boolean[]>;
+  commandSignals: Map<string, Array<AbortSignal | undefined>>;
   /**
    * States reported by successive `simctl list devices --json` calls. The last
    * entry sticks once the sequence is exhausted.
@@ -28,17 +33,26 @@ interface Harness {
 function createHarness(bootOptions: SimCtlBootOptions): Harness {
   const calls: string[] = [];
   const commandTimeouts = new Map<string, boolean[]>();
+  const commandSignals = new Map<string, Array<AbortSignal | undefined>>();
   const timer = new FakeTimer();
   let states = ["Shutdown"];
   let bootStatusFailures: Array<Error | null> = [];
   const nextState = (): string => (states.length > 1 ? states.shift()! : states[0]);
 
-  const execAsync = async (file: string, args: string[], _maxBuffer?: number, signal?: AbortSignal) => {
+  const execAsync = async (
+    file: string,
+    args: string[],
+    _maxBuffer?: number,
+    signal?: AbortSignal,
+  ) => {
     const command = `${file} ${args.join(" ")}`;
     calls.push(command);
     const timeoutUsage = commandTimeouts.get(command) ?? [];
     timeoutUsage.push(signal !== undefined);
     commandTimeouts.set(command, timeoutUsage);
+    const signals = commandSignals.get(command) ?? [];
+    signals.push(signal);
+    commandSignals.set(command, signals);
 
     if (command === "xcrun simctl --version") {
       return createExecResult("simctl version 1.0.0", "");
@@ -53,19 +67,22 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
       return createExecResult("Device already booted. Status=4294967295", "");
     }
     if (command === "xcrun simctl list devices --json") {
-      return createExecResult(JSON.stringify({
-        devices: {
-          "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
-            {
-              udid: UDID,
-              name: "iPhone 17",
-              state: nextState(),
-              isAvailable: true,
-              deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17"
-            }
-          ]
-        }
-      }), "");
+      return createExecResult(
+        JSON.stringify({
+          devices: {
+            "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
+              {
+                udid: UDID,
+                name: "iPhone 17",
+                state: nextState(),
+                isAvailable: true,
+                deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+              },
+            ],
+          },
+        }),
+        "",
+      );
     }
     return createExecResult("", "");
   };
@@ -77,7 +94,7 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
     "darwin",
     undefined,
     undefined,
-    bootOptions
+    bootOptions,
   );
 
   return {
@@ -85,16 +102,21 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
     timer,
     calls,
     commandTimeouts,
-    setStates: next => { states = [...next]; },
-    failBootStatusWith: error => { bootStatusFailures = [error]; }
+    commandSignals,
+    setStates: (next) => {
+      states = [...next];
+    },
+    failBootStatusWith: (error) => {
+      bootStatusFailures = [error];
+    },
   };
 }
 
 const bootstatusCalls = (calls: string[]): string[] =>
-  calls.filter(call => call.includes("bootstatus"));
+  calls.filter((call) => call.includes("bootstatus"));
 
 const shutdownCalls = (calls: string[]): string[] =>
-  calls.filter(call => call === `xcrun simctl shutdown ${UDID}`);
+  calls.filter((call) => call === `xcrun simctl shutdown ${UDID}`);
 
 const ALREADY_BOOTED_405 =
   "Device boot failed\n" +
@@ -113,14 +135,61 @@ const commandTimeouts = (harness: Harness, command: string): boolean[] =>
   harness.commandTimeouts.get(command) ?? [];
 
 describe("SimCtlClient boot self-verification", () => {
+  test("shuts down a simulator when its start request is aborted", async () => {
+    const calls: string[] = [];
+    const simctl = new SimCtlClient(
+      null,
+      async (file, args, _maxBuffer, signal) => {
+        const command = `${file} ${args.join(" ")}`;
+        calls.push(command);
+        if (command === "xcrun simctl --version" || command === `xcrun simctl shutdown ${UDID}`) {
+          return createExecResult("", "");
+        }
+        if (command === `xcrun simctl bootstatus ${UDID} -b`) {
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        }
+        return createExecResult("", "");
+      },
+      new FakeTimer(),
+      "darwin",
+    );
+    const controller = new AbortController();
+    const start = runWithAbortSignal(controller.signal, () => simctl.startSimulator(UDID, 5_000));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    controller.abort(new Error("request cancelled"));
+
+    await expect(start).rejects.toThrow("request cancelled");
+    expect(shutdownCalls(calls)).toEqual([`xcrun simctl shutdown ${UDID}`]);
+  });
+
+  test("handle.kill shutdown does not inherit an aborted request signal", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 10 });
+    harness.setStates(["Booted"]);
+    const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5_000));
+    const controller = new AbortController();
+    controller.abort(new Error("request cancelled"));
+
+    await runWithAbortSignal(controller.signal, async () => {
+      expect(handle.kill()).toBe(true);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+
+    const shutdownSignal = harness.commandSignals.get(`xcrun simctl shutdown ${UDID}`)?.[0];
+    expect(shutdownSignal).toBeDefined();
+    expect(shutdownSignal?.aborted).toBe(false);
+  });
+
   test("a wedged boot (bootstatus exit 0, device Shutdown) fails with an actionable error", async () => {
     const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 10 });
 
     const error = await harness.timer.resolvePromise(
       harness.simctl.startSimulator(UDID, 5000).then(
         () => null,
-        (err: unknown) => err
-      )
+        (err: unknown) => err,
+      ),
     );
 
     expect(error).toBeInstanceOf(ActionableError);
@@ -183,17 +252,25 @@ describe("SimCtlClient boot self-verification", () => {
       code: 1,
       stderr: "unrelated failure",
     });
-    const simctl = new SimCtlClient(null, async (file, args) => {
-      const command = `${file} ${args.join(" ")}`;
-      calls.push(command);
-      if (command === "xcrun simctl --version") {
-        return createExecResult("simctl version 1.0.0", "");
-      }
-      if (args[1] === "bootstatus") {
-        throw error;
-      }
-      return createExecResult("", "");
-    }, new FakeTimer(), "darwin", undefined, undefined, { maxAttempts: 2, retryBackoffMs: 10 });
+    const simctl = new SimCtlClient(
+      null,
+      async (file, args) => {
+        const command = `${file} ${args.join(" ")}`;
+        calls.push(command);
+        if (command === "xcrun simctl --version") {
+          return createExecResult("simctl version 1.0.0", "");
+        }
+        if (args[1] === "bootstatus") {
+          throw error;
+        }
+        return createExecResult("", "");
+      },
+      new FakeTimer(),
+      "darwin",
+      undefined,
+      undefined,
+      { maxAttempts: 2, retryBackoffMs: 10 },
+    );
 
     await expect(simctl.startSimulator(craftedUdid, 5000)).rejects.toBe(error);
     expect(calls).not.toContain("xcrun simctl list devices --json");
@@ -228,11 +305,11 @@ describe("SimCtlClient boot self-verification", () => {
     const harness = createHarness({ maxAttempts: 3, retryBackoffMs: 10_000 });
     const boot = harness.simctl.startSimulator(UDID, 5000).then(
       () => null,
-      (error: unknown) => error
+      (error: unknown) => error,
     );
 
     // Set up the first retry before advancing fake time so its deadline starts at zero.
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
     const error = await harness.timer.resolvePromise(boot);
 
     expect(error).toBeInstanceOf(Error);
@@ -248,8 +325,8 @@ describe("SimCtlClient boot self-verification", () => {
     const error = await harness.timer.resolvePromise(
       harness.simctl.startSimulator(UDID, 5000).then(
         () => null,
-        (err: unknown) => err
-      )
+        (err: unknown) => err,
+      ),
     );
 
     expect((error as Error).message).toContain("after 3 boot attempt(s)");
@@ -265,8 +342,8 @@ describe("SimCtlClient boot self-verification", () => {
     const error = await harness.timer.resolvePromise(
       harness.simctl.startSimulator(UDID, 5000).then(
         () => null,
-        (err: unknown) => err
-      )
+        (err: unknown) => err,
+      ),
     );
 
     expect((error as Error).message).toContain("Invalid device");
@@ -301,7 +378,11 @@ describe("SimCtlClient boot self-verification", () => {
     expect(bootstatusCalls(harness.calls).length).toBe(2);
     expect(shutdownCalls(harness.calls).length).toBe(1);
     expect(commandTimeouts(harness, `xcrun simctl bootstatus ${UDID} -b`)).toEqual([true, true]);
-    expect(commandTimeouts(harness, "xcrun simctl list devices --json")).toEqual([true, true, true]);
+    expect(commandTimeouts(harness, "xcrun simctl list devices --json")).toEqual([
+      true,
+      true,
+      true,
+    ]);
   });
 
   test("waitForSimulatorReady rejects a wedged boot instead of returning a device", async () => {
@@ -310,8 +391,8 @@ describe("SimCtlClient boot self-verification", () => {
     const error = await harness.timer.resolvePromise(
       harness.simctl.waitForSimulatorReady(UDID, 5000).then(
         () => null,
-        (err: unknown) => err
-      )
+        (err: unknown) => err,
+      ),
     );
 
     expect(error).toBeInstanceOf(ActionableError);

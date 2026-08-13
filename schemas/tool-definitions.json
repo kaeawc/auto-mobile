@@ -8512,8 +8512,16 @@
           "type": "boolean"
         },
         "timeoutMs": {
-          "description": "Boot timeout in ms",
-          "type": "number"
+          "description": "Total device boot and automation-readiness timeout in ms",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 890000
+        },
+        "runnerReadinessTimeoutMs": {
+          "description": "Runner-readiness budget in ms within timeoutMs; overrides the daemon default (1000-120000)",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000
         },
         "createIfMissing": {
           "description": "Create a device when nothing matches (CLI: --create-if-missing). Default off; AUTOMOBILE_ALLOW_DEVICE_CREATE=1 enables it when this flag is not supplied, and the flag wins.",

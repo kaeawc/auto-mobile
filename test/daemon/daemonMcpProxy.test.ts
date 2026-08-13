@@ -5,7 +5,11 @@ import {
   DaemonBuildMismatchError,
   DaemonToolUnavailableError,
 } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, DaemonUnavailableError, type DaemonClientLike } from "../../src/daemon/client";
+import {
+  DaemonClient,
+  DaemonUnavailableError,
+  type DaemonClientLike,
+} from "../../src/daemon/client";
 import { ActionableError } from "../../src/models";
 import {
   DAEMON_VERSION,
@@ -57,7 +61,7 @@ class ScriptedDaemonClient implements DaemonClientLike {
       resourceError?: Error;
       daemonMethodResults?: Map<string, any>;
       daemonMethodError?: Error;
-    }
+    },
   ) {}
 
   async connect(): Promise<void> {
@@ -109,8 +113,8 @@ describe("DaemonMcpProxy", () => {
     test("connects to daemon on first request", async () => {
       const fakeClient = new FakeDaemonClient({
         daemonMethodResults: new Map([
-          ["tools/list", { tools: [{ name: "testTool", inputSchema: {} }] }]
-        ])
+          ["tools/list", { tools: [{ name: "testTool", inputSchema: {} }] }],
+        ]),
       });
       const fakeManager = new FakeDaemonManager();
       fakeManager.statusResult = {
@@ -127,7 +131,7 @@ describe("DaemonMcpProxy", () => {
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
         daemonManager: fakeManager,
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -170,10 +174,7 @@ describe("DaemonMcpProxy", () => {
       });
 
       try {
-        await Promise.all([
-          firstProxy.listTools(),
-          secondProxy.listTools(),
-        ]);
+        await Promise.all([firstProxy.listTools(), secondProxy.listTools()]);
         await Promise.all([
           firstProxy.callTool("observe", { deviceId: "device-a" }),
           secondProxy.callTool("observe", { deviceId: "device-b" }),
@@ -186,10 +187,16 @@ describe("DaemonMcpProxy", () => {
           { method: "tools/list", params: { sessionUuid: "device-session-b" } },
         ]);
         expect(firstClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "device-session-a" } },
+          {
+            toolName: "observe",
+            params: { deviceId: "device-a", sessionUuid: "device-session-a" },
+          },
         ]);
         expect(secondClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { deviceId: "device-b", sessionUuid: "device-session-b" } },
+          {
+            toolName: "observe",
+            params: { deviceId: "device-b", sessionUuid: "device-session-b" },
+          },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -200,9 +207,7 @@ describe("DaemonMcpProxy", () => {
 
     test("auto-starts daemon when not running", async () => {
       const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([
-          ["tools/list", { tools: [] }]
-        ])
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
       });
       const fakeManager = new FakeDaemonManager();
       fakeManager.statusResult = { running: false };
@@ -217,7 +222,7 @@ describe("DaemonMcpProxy", () => {
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
         daemonManager: fakeManager,
-        autoStartDaemon: true
+        autoStartDaemon: true,
       });
 
       try {
@@ -231,18 +236,20 @@ describe("DaemonMcpProxy", () => {
     });
 
     describe("version-mismatch handling", () => {
-      function makeProxy(opts: {
-        runningVersion?: string;
-        startedAt?: number;
-        autoStartDaemon?: boolean;
-        waitForReadyResult?: boolean;
-        daemonOptions?: { debug?: boolean; port?: number };
-        statusAfterRestartVersion?: string;
-        clientVersion?: string;
-        daemonBuildId?: string;
-        daemonEntryScript?: string;
-        clientBuild?: { buildId: string; entryScript: string };
-      } = {}) {
+      function makeProxy(
+        opts: {
+          runningVersion?: string;
+          startedAt?: number;
+          autoStartDaemon?: boolean;
+          waitForReadyResult?: boolean;
+          daemonOptions?: { debug?: boolean; port?: number };
+          statusAfterRestartVersion?: string;
+          clientVersion?: string;
+          daemonBuildId?: string;
+          daemonEntryScript?: string;
+          clientBuild?: { buildId: string; entryScript: string };
+        } = {},
+      ) {
         const timer = new FakeTimer();
         timer.advanceTime(100_000);
         const fakeClient = new FakeDaemonClient({
@@ -288,7 +295,9 @@ describe("DaemonMcpProxy", () => {
         return { fakeClient, fakeManager, isAvailableSpy, proxy };
       }
 
-      async function expectVersionMismatch(promise: Promise<unknown>): Promise<DaemonVersionMismatchError> {
+      async function expectVersionMismatch(
+        promise: Promise<unknown>,
+      ): Promise<DaemonVersionMismatchError> {
         try {
           await promise;
         } catch (error) {
@@ -360,9 +369,7 @@ describe("DaemonMcpProxy", () => {
         try {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(false);
-          expect(fakeClient.callDaemonMethodCalls).toEqual([
-            { method: "tools/list", params: {} },
-          ]);
+          expect(fakeClient.callDaemonMethodCalls).toEqual([{ method: "tools/list", params: {} }]);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();
@@ -529,7 +536,9 @@ describe("DaemonMcpProxy", () => {
           statusAfterRestartVersion: OLDER_VERSION,
         });
         try {
-          await expect(proxy.listTools()).rejects.toThrow("daemon restart completed but version still differs");
+          await expect(proxy.listTools()).rejects.toThrow(
+            "daemon restart completed but version still differs",
+          );
           expect(fakeManager.restartCalled).toBe(true);
         } finally {
           isAvailableSpy.mockRestore();
@@ -565,6 +574,7 @@ describe("DaemonMcpProxy", () => {
         toolOutputsDir?: string;
         eventAllMarkers?: string[];
         eventAllMarkersCliOverride?: boolean;
+        runnerReadinessTimeoutMs?: number;
       }) {
         return {
           running: true,
@@ -859,13 +869,29 @@ describe("DaemonMcpProxy", () => {
           daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
         });
         const fakeManager = new FakeDaemonManager();
-        // Daemon is running with output-reduction + embedded-SDK flags on; the
+        // Daemon is running with output-reduction + embedded-SDK flags and a
+        // custom readiness budget; the
         // connecting client is bare (no daemonOptions) and must NOT trigger a
-        // restart that strips those flags.
+        // restart that strips those settings.
         fakeManager.statusResults = [
-          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true, eventAllMarkers: ["@"] }), // ensureVersionMatches
-          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true, eventAllMarkers: ["@"] }), // ensureBuildMatches
-          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true, eventAllMarkers: ["@"] }), // ensureStartupOptionsMatch
+          runningStatus({
+            embeddedSdk: true,
+            toolResultsNoStructuredContent: true,
+            eventAllMarkers: ["@"],
+            runnerReadinessTimeoutMs: 45_000,
+          }), // ensureVersionMatches
+          runningStatus({
+            embeddedSdk: true,
+            toolResultsNoStructuredContent: true,
+            eventAllMarkers: ["@"],
+            runnerReadinessTimeoutMs: 45_000,
+          }), // ensureBuildMatches
+          runningStatus({
+            embeddedSdk: true,
+            toolResultsNoStructuredContent: true,
+            eventAllMarkers: ["@"],
+            runnerReadinessTimeoutMs: 45_000,
+          }), // ensureStartupOptionsMatch
         ];
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
         const proxy = new DaemonMcpProxy({
@@ -892,10 +918,14 @@ describe("DaemonMcpProxy", () => {
         // toolResultsNoStructuredContent. The restart must ADD the requested
         // flag while PRESERVING the daemon's existing one, not reset to bare.
         fakeManager.statusResults = [
-          runningStatus({ embeddedSdk: true }), // ensureVersionMatches
-          runningStatus({ embeddedSdk: true }), // ensureBuildMatches
-          runningStatus({ embeddedSdk: true }), // ensureStartupOptionsMatch (deficit)
-          runningStatus({ embeddedSdk: true, toolResultsNoStructuredContent: true }), // post-restart verify
+          runningStatus({ embeddedSdk: true, runnerReadinessTimeoutMs: 45_000 }), // ensureVersionMatches
+          runningStatus({ embeddedSdk: true, runnerReadinessTimeoutMs: 45_000 }), // ensureBuildMatches
+          runningStatus({ embeddedSdk: true, runnerReadinessTimeoutMs: 45_000 }), // ensureStartupOptionsMatch (deficit)
+          runningStatus({
+            embeddedSdk: true,
+            toolResultsNoStructuredContent: true,
+            runnerReadinessTimeoutMs: 45_000,
+          }), // post-restart verify
         ];
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
         const proxy = new DaemonMcpProxy({
@@ -910,6 +940,7 @@ describe("DaemonMcpProxy", () => {
           expect(fakeManager.restartOptions).toEqual({
             embeddedSdk: true,
             toolResultsNoStructuredContent: true,
+            runnerReadinessTimeoutMs: 45_000,
           });
         } finally {
           isAvailableSpy.mockRestore();
@@ -1000,7 +1031,7 @@ describe("DaemonMcpProxy", () => {
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
         daemonManager: fakeManager,
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -1016,19 +1047,17 @@ describe("DaemonMcpProxy", () => {
     test("listTools returns tools from daemon", async () => {
       const expectedTools = [
         { name: "tapOn", description: "Tap on element", inputSchema: {} },
-        { name: "observe", description: "Observe screen", inputSchema: {} }
+        { name: "observe", description: "Observe screen", inputSchema: {} },
       ];
       const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([
-          ["tools/list", { tools: expectedTools }]
-        ])
+        daemonMethodResults: new Map([["tools/list", { tools: expectedTools }]]),
       });
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
         daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -1037,7 +1066,7 @@ describe("DaemonMcpProxy", () => {
         expect(tools).toEqual(expectedTools);
         expect(fakeClient.callDaemonMethodCalls).toContainEqual({
           method: "tools/list",
-          params: {}
+          params: {},
         });
       } finally {
         isAvailableSpy.mockRestore();
@@ -1047,16 +1076,14 @@ describe("DaemonMcpProxy", () => {
 
     test("listTools caches results", async () => {
       const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([
-          ["tools/list", { tools: [{ name: "test" }] }]
-        ])
+        daemonMethodResults: new Map([["tools/list", { tools: [{ name: "test" }] }]]),
       });
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
         daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -1080,7 +1107,7 @@ describe("DaemonMcpProxy", () => {
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
         daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -1089,7 +1116,7 @@ describe("DaemonMcpProxy", () => {
         expect(result).toEqual(expectedResult);
         expect(fakeClient.callToolCalls).toContainEqual({
           toolName: "tapOn",
-          params: { text: "Button" }
+          params: { text: "Button" },
         });
       } finally {
         isAvailableSpy.mockRestore();
@@ -1111,7 +1138,7 @@ describe("DaemonMcpProxy", () => {
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
         daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -1121,11 +1148,11 @@ describe("DaemonMcpProxy", () => {
         expect(staleClient.connectCallCount).toBe(1);
         expect(staleClient.closeCallCount).toBe(1);
         expect(staleClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { deviceId: "device-1" } }
+          { toolName: "observe", params: { deviceId: "device-1" } },
         ]);
         expect(freshClient.connectCallCount).toBe(1);
         expect(freshClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { deviceId: "device-1" } }
+          { toolName: "observe", params: { deviceId: "device-1" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -1146,7 +1173,7 @@ describe("DaemonMcpProxy", () => {
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
         daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -1170,7 +1197,7 @@ describe("DaemonMcpProxy", () => {
       const proxy = new DaemonMcpProxy({
         clientFactory: () => client,
         daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -1186,13 +1213,13 @@ describe("DaemonMcpProxy", () => {
     test("callTool recovery invalidates cached daemon definitions", async () => {
       const staleClient = new ScriptedDaemonClient({
         daemonMethodResults: new Map([
-          ["tools/list", { tools: [{ name: "oldTool", inputSchema: {} }] }]
+          ["tools/list", { tools: [{ name: "oldTool", inputSchema: {} }] }],
         ]),
         toolError: new Error("Session not found"),
       });
       const freshClient = new ScriptedDaemonClient({
         daemonMethodResults: new Map([
-          ["tools/list", { tools: [{ name: "newTool", inputSchema: {} }] }]
+          ["tools/list", { tools: [{ name: "newTool", inputSchema: {} }] }],
         ]),
       });
       const clients = [staleClient, freshClient];
@@ -1201,7 +1228,7 @@ describe("DaemonMcpProxy", () => {
       const proxy = new DaemonMcpProxy({
         clientFactory: () => clients.shift()!,
         daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -1212,9 +1239,7 @@ describe("DaemonMcpProxy", () => {
         expect(staleClient.closeCallCount).toBe(1);
         expect(staleClient.callDaemonMethodCalls).toHaveLength(1);
         expect(freshClient.callToolCalls).toHaveLength(1);
-        expect(freshClient.callDaemonMethodCalls).toEqual([
-          { method: "tools/list", params: {} }
-        ]);
+        expect(freshClient.callDaemonMethodCalls).toEqual([{ method: "tools/list", params: {} }]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
@@ -1224,20 +1249,16 @@ describe("DaemonMcpProxy", () => {
 
   describe("resource operations", () => {
     test("listResources returns resources from daemon", async () => {
-      const expectedResources = [
-        { uri: "automobile:devices/booted", name: "Booted devices" }
-      ];
+      const expectedResources = [{ uri: "automobile:devices/booted", name: "Booted devices" }];
       const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([
-          ["resources/list", { resources: expectedResources }]
-        ])
+        daemonMethodResults: new Map([["resources/list", { resources: expectedResources }]]),
       });
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
         daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -1259,7 +1280,7 @@ describe("DaemonMcpProxy", () => {
         initialSessionUuid: " session-a ",
         clientFactory: () => fakeClient,
         daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -1277,7 +1298,9 @@ describe("DaemonMcpProxy", () => {
     test("readResource reconnects and retries once with its initial session binding", async () => {
       const recoveredResult = { contents: [{ uri: "automobile:devices/booted", text: "[]" }] };
       const staleClient = new ScriptedDaemonClient({
-        resourceError: new Error("MCP error -32603: Failed to read resource from daemon: Session not found"),
+        resourceError: new Error(
+          "MCP error -32603: Failed to read resource from daemon: Session not found",
+        ),
       });
       const freshClient = new ScriptedDaemonClient({
         resourceResult: recoveredResult,
@@ -1289,7 +1312,7 @@ describe("DaemonMcpProxy", () => {
         initialSessionUuid: "session-a",
         clientFactory: () => clients.shift()!,
         daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -1502,7 +1525,9 @@ describe("DaemonMcpProxy", () => {
 
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
-        await expect(proxy.callTool("executePlan", { deviceId: "device-a" })).rejects.toThrow("plan boom");
+        await expect(proxy.callTool("executePlan", { deviceId: "device-a" })).rejects.toThrow(
+          "plan boom",
+        );
         await proxy.callTool("observe", { deviceId: "device-a" });
 
         // The third call is still rewritten to session-a: the binding survived the
@@ -1669,7 +1694,9 @@ describe("DaemonMcpProxy", () => {
         // An admitted-then-rejected implicit call within the TTL. It must renew the
         // lease off the injected UUID even though it throws.
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
-        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toThrow("tap failed after admission");
+        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toThrow(
+          "tap failed after admission",
+        );
         // Cumulatively past one TTL from the initial bind; only the refreshed lease
         // keeps the binding alive for this final implicit call.
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
@@ -1709,7 +1736,9 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
-        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toBeInstanceOf(DaemonUnavailableError);
+        await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toBeInstanceOf(
+          DaemonUnavailableError,
+        );
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await proxy.callTool("observe", { deviceId: "device-a" });
 
@@ -1739,8 +1768,14 @@ describe("DaemonMcpProxy", () => {
 
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
-        await proxy.callTool("observe", { deviceId: "device-a", sessionUuid: null as unknown as string });
-        await proxy.callTool("observe", { deviceId: "device-a", sessionUuid: 42 as unknown as string });
+        await proxy.callTool("observe", {
+          deviceId: "device-a",
+          sessionUuid: null as unknown as string,
+        });
+        await proxy.callTool("observe", {
+          deviceId: "device-a",
+          sessionUuid: 42 as unknown as string,
+        });
 
         expect(client.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
@@ -1756,7 +1791,9 @@ describe("DaemonMcpProxy", () => {
     test("readResource recovers when a sibling's socket dropped", async () => {
       const recoveredResult = { contents: [{ uri: "automobile:devices/booted", text: "[]" }] };
       const staleClient = new ScriptedDaemonClient({
-        resourceError: new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
+        resourceError: new DaemonUnavailableError(
+          "Daemon socket connection lost: connection closed",
+        ),
       });
       const freshClient = new ScriptedDaemonClient({ resourceResult: recoveredResult });
       const clients = [staleClient, freshClient];
@@ -1816,7 +1853,7 @@ describe("DaemonMcpProxy", () => {
       // real cause. It must be surfaced, not classified as a recoverable session.
       const client = new ScriptedDaemonClient({
         toolError: new ActionableError(
-          "Emulator console connection to 127.0.0.1:5554 failed: connect ECONNREFUSED 127.0.0.1:5554"
+          "Emulator console connection to 127.0.0.1:5554 failed: connect ECONNREFUSED 127.0.0.1:5554",
         ),
       });
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -2001,7 +2038,7 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
         await expect(proxy.callTool("tapOn", { deviceId: "device-a" })).rejects.toThrow(
-          "handler rejected the admitted call"
+          "handler rejected the admitted call",
         );
         // The admitted-failure refresh must not resurrect the released UUID's lease.
         await proxy.callTool("observe", { deviceId: "device-a" });
@@ -2123,7 +2160,9 @@ describe("DaemonMcpProxy", () => {
       });
 
       try {
-        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow("Session not found");
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow(
+          "Session not found",
+        );
         await proxy.close();
         await proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" });
 
@@ -2144,10 +2183,8 @@ describe("DaemonMcpProxy", () => {
       // response must NOT be cached, so the next listTools() refetches.
       let methodCallCount = 0;
       const fakeClient: FakeDaemonClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([
-          ["tools/list", { tools: [{ name: "t", inputSchema: {} }] }],
-        ]),
-        onCallDaemonMethod: method => {
+        daemonMethodResults: new Map([["tools/list", { tools: [{ name: "t", inputSchema: {} }] }]]),
+        onCallDaemonMethod: (method) => {
           if (method === "tools/list") {
             methodCallCount += 1;
             if (methodCallCount === 1) {
@@ -2180,9 +2217,7 @@ describe("DaemonMcpProxy", () => {
       // The discovery guard must not over-fire: with no push during the pending
       // call, the response is cached and the second listTools() serves the cache.
       const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([
-          ["tools/list", { tools: [{ name: "t", inputSchema: {} }] }],
-        ]),
+        daemonMethodResults: new Map([["tools/list", { tools: [{ name: "t", inputSchema: {} }] }]]),
       });
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
       const proxy = new DaemonMcpProxy({
@@ -2234,15 +2269,15 @@ describe("DaemonMcpProxy", () => {
       const fakeClient = new FakeDaemonClient({
         daemonMethodResults: new Map([
           ["tools/list", { tools: [{ name: "test" }] }],
-          ["resources/list", { resources: [{ uri: "test" }] }]
-        ])
+          ["resources/list", { resources: [{ uri: "test" }] }],
+        ]),
       });
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
         daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false
+        autoStartDaemon: false,
       });
 
       try {
@@ -2271,17 +2306,19 @@ describe("DaemonMcpProxy", () => {
     const CLIENT_BUILD = { entryScript: "/client/dist/index.js", buildId: "clientbuild" };
     const DAEMON_BUILD = { entryScript: "/daemon/dist/index.js", buildId: "daemonbuild" };
 
-    function makeBuildProxy(opts: {
-      // Identity reported by the running daemon before any restart.
-      daemonBuildId?: string | null;
-      daemonEntryScript?: string | null;
-      // Identity reported after a restart (defaults to the client's identity = match).
-      restartedBuildId?: string;
-      restartedEntryScript?: string;
-      startedAt?: number;
-      autoStartDaemon?: boolean;
-      waitForReadyResult?: boolean;
-    } = {}) {
+    function makeBuildProxy(
+      opts: {
+        // Identity reported by the running daemon before any restart.
+        daemonBuildId?: string | null;
+        daemonEntryScript?: string | null;
+        // Identity reported after a restart (defaults to the client's identity = match).
+        restartedBuildId?: string;
+        restartedEntryScript?: string;
+        startedAt?: number;
+        autoStartDaemon?: boolean;
+        waitForReadyResult?: boolean;
+      } = {},
+    ) {
       const timer = new FakeTimer();
       timer.advanceTime(100_000);
       const fakeClient = new FakeDaemonClient({
@@ -2296,8 +2333,12 @@ describe("DaemonMcpProxy", () => {
         socketPath: "/tmp/test.sock",
         version: DAEMON_VERSION, // versions match so only the build differs
         startedAt: opts.startedAt ?? ANCIENT_TIMESTAMP,
-        ...(opts.daemonBuildId === null ? {} : { buildId: opts.daemonBuildId ?? DAEMON_BUILD.buildId }),
-        ...(opts.daemonEntryScript === null ? {} : { entryScript: opts.daemonEntryScript ?? DAEMON_BUILD.entryScript }),
+        ...(opts.daemonBuildId === null
+          ? {}
+          : { buildId: opts.daemonBuildId ?? DAEMON_BUILD.buildId }),
+        ...(opts.daemonEntryScript === null
+          ? {}
+          : { entryScript: opts.daemonEntryScript ?? DAEMON_BUILD.entryScript }),
       };
       const restartedStatus = {
         ...mismatchStatus,
@@ -2326,7 +2367,9 @@ describe("DaemonMcpProxy", () => {
       return { fakeClient, fakeManager, isAvailableSpy, proxy };
     }
 
-    async function expectBuildMismatch(promise: Promise<unknown>): Promise<DaemonBuildMismatchError> {
+    async function expectBuildMismatch(
+      promise: Promise<unknown>,
+    ): Promise<DaemonBuildMismatchError> {
       try {
         await promise;
       } catch (error) {
@@ -2445,11 +2488,15 @@ describe("DaemonMcpProxy", () => {
     test("reconnects and retries once when daemon reports an advertised tool as unknown", async () => {
       const recoveredResult = { content: [{ type: "text", text: "set after reconnect" }] };
       const staleClient = new ScriptedDaemonClient({
-        daemonMethodResults: new Map([["tools/list", { tools: [{ name: "setPreference", inputSchema: {} }] }]]),
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "setPreference", inputSchema: {} }] }],
+        ]),
         toolError: new Error("MCP error -32603: Unknown tool: setPreference"),
       });
       const freshClient = new ScriptedDaemonClient({
-        daemonMethodResults: new Map([["tools/list", { tools: [{ name: "setPreference", inputSchema: {} }] }]]),
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "setPreference", inputSchema: {} }] }],
+        ]),
         toolResult: recoveredResult,
       });
       const clients = [staleClient, freshClient];
@@ -2550,7 +2597,12 @@ describe("DaemonMcpProxy", () => {
     test("keeps an omitted capability update on the connection profile after device routing binds", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: {
-          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a", capability: "clipboard" }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ sessionUuid: "profile-a", capability: "clipboard" }),
+            },
+          ],
         },
       });
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -2570,7 +2622,10 @@ describe("DaemonMcpProxy", () => {
           { toolName: "setToolCapability", params: { capability: "clipboard" } },
           {
             toolName: "setToolCapability",
-            params: { capability: "test-authoring", [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a" },
+            params: {
+              capability: "test-authoring",
+              [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a",
+            },
           },
         ]);
       } finally {
@@ -2582,7 +2637,12 @@ describe("DaemonMcpProxy", () => {
     test("replays a generated profile for discovery and explicit device calls without turning it into a device session", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: {
-          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a", capability: "test-authoring" }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ sessionUuid: "profile-a", capability: "test-authoring" }),
+            },
+          ],
         },
         daemonMethodResults: new Map([["tools/list", { tools: [{ name: "executePlan" }] }]]),
       });
@@ -2611,10 +2671,12 @@ describe("DaemonMcpProxy", () => {
             },
           },
         ]);
-        expect(client.callDaemonMethodCalls).toEqual([{
-          method: "tools/list",
-          params: { [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a" },
-        }]);
+        expect(client.callDaemonMethodCalls).toEqual([
+          {
+            method: "tools/list",
+            params: { [DAEMON_CAPABILITY_PROFILE_PARAM]: "profile-a" },
+          },
+        ]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
@@ -2624,7 +2686,12 @@ describe("DaemonMcpProxy", () => {
     test("does not replace a retained device session when updating an explicit capability profile", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: {
-          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a", capability: "clipboard" }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ sessionUuid: "profile-a", capability: "clipboard" }),
+            },
+          ],
         },
       });
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);

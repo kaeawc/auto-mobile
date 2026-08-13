@@ -859,6 +859,14 @@ than aborting work that is still in progress.
 | `launchApp` | 90 000 ms | — |
 | `openLink` | 90 000 ms | `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS` (legacy alias: `AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS`) |
 
+For `startDevice`, 180 000 ms is only the minimum transport floor. When the
+tool arguments specify a larger total `timeoutMs` (either at the top level or
+in the legacy `device` object), the daemon keeps the transport alive for that
+budget plus 5 000 ms of response overhead. Runner readiness has its own bounded
+budget inside that total: `runnerReadinessTimeoutMs` overrides the daemon's
+`AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS` / `--runner-readiness-timeout-ms`
+default (30 000 ms; accepted range 1 000–120 000 ms).
+
 `openLink`'s floor is configurable because a deeplink can launch the app and then
 block on a backend round-trip (sign-in / token exchange). Set
 `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS` to a higher millisecond value on the daemon

@@ -28,4 +28,24 @@ describe("parseArgs (#4277)", () => {
 
     expect(parsed.initialSessionUuid).toBe("device-session-a");
   });
+
+  test("uses the runner readiness environment default and lets CLI override it", () => {
+    const fromEnvironment = parseArgs([], logger, {
+      AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS: "20000",
+    });
+    const fromCli = parseArgs(
+      ["--runner-readiness-timeout-ms", "45000"],
+      logger,
+      { AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS: "20000" },
+    );
+
+    expect(fromEnvironment.runnerReadinessTimeoutMs).toBe(20_000);
+    expect(fromCli.runnerReadinessTimeoutMs).toBe(45_000);
+  });
+
+  test("leaves runner readiness unset when a bare client has no override", () => {
+    const parsed = parseArgs([], logger, {});
+
+    expect(parsed.runnerReadinessTimeoutMs).toBeUndefined();
+  });
 });

@@ -10,9 +10,14 @@ import {
   MIN_START_DEVICE_MCP_TIMEOUT_MS,
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
+  START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
   resolveMcpRequestTimeoutMs
 } from "../../src/daemon/mcpRequestTimeout";
 import type { DaemonRequest } from "../../src/daemon/types";
+import {
+  DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
+  MAX_DEVICE_READY_TIMEOUT_MS,
+} from "../../src/utils/deviceTimeouts";
 
 describe("resolveMcpRequestTimeoutMs", () => {
   const timeoutEnvVars = [
@@ -137,5 +142,55 @@ describe("resolveMcpRequestTimeoutMs", () => {
     expect(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS).toBe(90_000);
     expect(DEFAULT_OBSERVE_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
     expect(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  test("keeps transport alive beyond the startDevice tool budget", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "startDevice",
+        arguments: { timeoutMs: 300_000 },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      300_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("keeps transport alive for the legacy nested startDevice timeout", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "startDevice",
+        arguments: { device: { platform: "android", timeoutMs: 300_000 } },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      300_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("caps oversized startDevice budgets below the daemon socket idle timeout", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "startDevice",
+        arguments: { timeoutMs: Number.MAX_SAFE_INTEGER },
+      },
+    };
+
+    const resolved = resolveMcpRequestTimeoutMs(request);
+    expect(resolved).toBe(
+      MAX_DEVICE_READY_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+    expect(resolved).toBeLessThan(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
   });
 });

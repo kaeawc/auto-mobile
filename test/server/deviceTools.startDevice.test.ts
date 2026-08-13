@@ -11,7 +11,14 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceUtils";
+import {
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  MAX_DEVICE_READY_TIMEOUT_MS,
+} from "../../src/utils/deviceTimeouts";
+import {
+  MAX_RUNNER_READINESS_TIMEOUT_MS,
+  MIN_RUNNER_READINESS_TIMEOUT_MS,
+} from "../../src/utils/runnerReadinessConfig";
 import * as os from "os";
 
 const AUTOLOCK_ENV_KEYS = [
@@ -345,6 +352,32 @@ describe("startDevice handler", () => {
     await expect(callStartDevice({ platform: "android" })).rejects.toThrow("readiness timeout");
   });
 
+  it("cancels an unowned cold boot when runner readiness fails", async () => {
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(null);
+    fakeMatcher.setImageResult(androidImage);
+    let killed = false;
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, {
+      kill: (): boolean => {
+        killed = true;
+        return true;
+      },
+      pid: 4242,
+    } as any);
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        throw new Error("runner unavailable");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
+      "runner unavailable",
+    );
+    expect(killed).toBe(true);
+  });
+
   it("passes timeout to the cold boot start operation", async () => {
     fakeDeviceUtils.setBootedDevices("ios", []);
     fakeDeviceUtils.setDeviceImages("ios", [{
@@ -631,11 +664,15 @@ describe("startDevice handler", () => {
   it("bounds runner readiness timeout overrides", () => {
     expect(() => startDeviceSchema.parse({
       platform: "android",
-      runnerReadinessTimeoutMs: 999,
+      runnerReadinessTimeoutMs: MIN_RUNNER_READINESS_TIMEOUT_MS - 1,
     })).toThrow();
     expect(() => startDeviceSchema.parse({
       platform: "android",
-      runnerReadinessTimeoutMs: 120_001,
+      runnerReadinessTimeoutMs: MAX_RUNNER_READINESS_TIMEOUT_MS + 1,
+    })).toThrow();
+    expect(() => startDeviceSchema.parse({
+      platform: "android",
+      timeoutMs: MAX_DEVICE_READY_TIMEOUT_MS + 1,
     })).toThrow();
   });
 
@@ -715,8 +752,42 @@ describe("startDevice handler", () => {
     await expect(callStartDevice({
       platform: "android",
       deviceId: androidDevice.deviceId,
-    })).rejects.toThrow(/phase=pool-match.*stale pool platform conflicts/);
+    })).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
     expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
+  });
+
+  it("rejects a stale same-platform pool identity before session reuse", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    fakeDeviceUtils.setBootedDevices("android", [{
+      ...androidDevice,
+      name: "Old_Pixel_AVD",
+    }]);
+    await pool.initializeWithDevices([{
+      ...androidDevice,
+      name: "Old_Pixel_AVD",
+    }]);
+    await pool.bindOrReuseDeviceSession(
+      "stale-session",
+      androidDevice.deviceId,
+      "android",
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    await expect(callStartDevice({
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+    })).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("stale-session");
   });
 
   it("reuses the returned sessionId for repeated startDevice calls when autolock is disabled", async () => {

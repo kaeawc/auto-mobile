@@ -42,4 +42,10 @@ describe("parseArgs (#4277)", () => {
     expect(fromEnvironment.runnerReadinessTimeoutMs).toBe(20_000);
     expect(fromCli.runnerReadinessTimeoutMs).toBe(45_000);
   });
+
+  test("leaves runner readiness unset when a bare client has no override", () => {
+    const parsed = parseArgs([], logger, {});
+
+    expect(parsed.runnerReadinessTimeoutMs).toBeUndefined();
+  });
 });

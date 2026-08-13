@@ -79,8 +79,9 @@ export async function listSystemImages(
 export async function listInstalledSystemImages(
   filter?: SystemImageFilter,
   dependencies = createDefaultDependencies(),
+  signal?: AbortSignal,
 ): Promise<SystemImage[]> {
-  const result = await createSdkManagerClient(dependencies).list();
+  const result = await createSdkManagerClient(dependencies).list({ signal });
   if (result.exitCode !== 0) {
     throw new Error(`Failed to list installed system images: ${failureDiagnostics(result)}`);
   }
@@ -115,8 +116,9 @@ export async function listDeviceImages(dependencies = createDefaultDependencies(
 export async function createAvd(
   params: CreateAvdParams,
   dependencies = createDefaultDependencies(),
+  signal?: AbortSignal,
 ): Promise<{ success: boolean; message: string; avdName?: string }> {
-  return createAvdManagerClient(dependencies).createAvd(params);
+  return createAvdManagerClient(dependencies).createAvd(params, { signal });
 }
 
 /** Delete an AVD through the dedicated avdmanager boundary. */

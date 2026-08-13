@@ -1,4 +1,9 @@
-import { DaemonClient, DaemonUnavailableError, type DaemonClientLike, type DaemonClientFactory } from "./client";
+import {
+  DaemonClient,
+  DaemonUnavailableError,
+  type DaemonClientLike,
+  type DaemonClientFactory,
+} from "./client";
 import { DaemonManager, type DaemonManagerLike } from "./manager";
 import { logger } from "../utils/logger";
 import {
@@ -14,7 +19,10 @@ import {
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
-import { capabilityProfileUuidFromToolResponse, SET_TOOL_CAPABILITY_TOOL_NAME } from "../features/toolCapabilities/toolCapabilityControl";
+import {
+  capabilityProfileUuidFromToolResponse,
+  SET_TOOL_CAPABILITY_TOOL_NAME,
+} from "../features/toolCapabilities/toolCapabilityControl";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
@@ -35,10 +43,7 @@ export type VersionMismatchReason =
   | "nonNumeric"
   | "restartMismatch";
 
-export type BuildMismatchReason =
-  | "autoStartDisabled"
-  | "cooldown"
-  | "restartMismatch";
+export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMismatch";
 
 /**
  * Raised before connecting when the running daemon and MCP client package
@@ -60,15 +65,17 @@ export class DaemonVersionMismatchError extends DaemonUnavailableError {
     // The git-SHA build metadata on dev builds is not an installable npm tag,
     // so the bunx hint must point at the plain published version.
     const installableVersion = releaseVersion(params.clientVersion);
-    const restartCommand = installableVersion.length > 0 && installableVersion !== "unknown"
-      ? `bunx @kaeawc/auto-mobile@${installableVersion} --daemon restart`
-      : "the same installed auto-mobile package";
-    const retryGuidance = params.retryAfterMs !== undefined
-      ? ` Retry after ${params.retryAfterMs}ms or restart the daemon with: ${restartCommand}`
-      : ` Restart the daemon with: ${restartCommand}`;
+    const restartCommand =
+      installableVersion.length > 0 && installableVersion !== "unknown"
+        ? `bunx @kaeawc/auto-mobile@${installableVersion} --daemon restart`
+        : "the same installed auto-mobile package";
+    const retryGuidance =
+      params.retryAfterMs !== undefined
+        ? ` Retry after ${params.retryAfterMs}ms or restart the daemon with: ${restartCommand}`
+        : ` Restart the daemon with: ${restartCommand}`;
     super(
       `AutoMobile daemon version mismatch: daemon=${params.daemonVersion}, client=${params.clientVersion} ` +
-      `(${params.detail}).${retryGuidance}`
+        `(${params.detail}).${retryGuidance}`,
     );
     this.name = "DaemonVersionMismatchError";
     this.clientVersion = params.clientVersion;
@@ -99,13 +106,12 @@ export class DaemonBuildMismatchError extends DaemonUnavailableError {
     detail: string;
     retryAfterMs?: number;
   }) {
-    const retryGuidance = params.retryAfterMs !== undefined
-      ? ` Retry after ${params.retryAfterMs}ms.`
-      : "";
+    const retryGuidance =
+      params.retryAfterMs !== undefined ? ` Retry after ${params.retryAfterMs}ms.` : "";
     super(
       `AutoMobile daemon build mismatch: the running daemon is a different build than this client ` +
-      `(${params.detail}). daemon build=${describeBuildIdentity(params.daemon)}, ` +
-      `client build=${describeBuildIdentity(params.client)}.${retryGuidance}`
+        `(${params.detail}). daemon build=${describeBuildIdentity(params.daemon)}, ` +
+        `client build=${describeBuildIdentity(params.client)}.${retryGuidance}`,
     );
     this.name = "DaemonBuildMismatchError";
     this.clientBuildId = params.client.buildId;
@@ -124,8 +130,8 @@ export class DaemonAssetVersionMismatchError extends DaemonUnavailableError {
   constructor(clientAssetVersion: string, daemonAssetVersion: string) {
     super(
       `AutoMobile AUTOMOBILE_VERSION mismatch: caller requested ${clientAssetVersion}, ` +
-      `but the shared daemon was started with ${daemonAssetVersion}. Restart the daemon ` +
-      `from the caller's environment (for example, run auto-mobile --daemon restart) before reusing it.`
+        `but the shared daemon was started with ${daemonAssetVersion}. Restart the daemon ` +
+        `from the caller's environment (for example, run auto-mobile --daemon restart) before reusing it.`,
     );
     this.name = "DaemonAssetVersionMismatchError";
     this.clientAssetVersion = clientAssetVersion;
@@ -143,18 +149,14 @@ export class DaemonToolUnavailableError extends Error {
   readonly clientBuildId: string;
   readonly daemonBuildId: string;
 
-  constructor(params: {
-    toolName: string;
-    client: BuildIdentity;
-    daemon: BuildIdentity;
-  }) {
+  constructor(params: { toolName: string; client: BuildIdentity; daemon: BuildIdentity }) {
     super(
       `Tool "${params.toolName}" is advertised by this AutoMobile client but the connected daemon ` +
-      `does not provide it, even after restarting and refreshing the tool list. This usually means a ` +
-      `wrong-build daemon is serving this frontend. ` +
-      `client build=${describeBuildIdentity(params.client)}, ` +
-      `daemon build=${describeBuildIdentity(params.daemon)}. ` +
-      `Restart the daemon from this checkout to resolve the skew.`
+        `does not provide it, even after restarting and refreshing the tool list. This usually means a ` +
+        `wrong-build daemon is serving this frontend. ` +
+        `client build=${describeBuildIdentity(params.client)}, ` +
+        `daemon build=${describeBuildIdentity(params.daemon)}. ` +
+        `Restart the daemon from this checkout to resolve the skew.`,
     );
     this.name = "DaemonToolUnavailableError";
     this.toolName = params.toolName;
@@ -236,21 +238,17 @@ export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "debug",
   "embeddedSdk",
   "networkMockable",
-  ...OUTPUT_REDUCTION_FLAG_SPECS.map(spec => spec.field),
+  ...OUTPUT_REDUCTION_FLAG_SPECS.map((spec) => spec.field),
 ];
 
-const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = [
-  "toolOutputsDir",
-];
+const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = ["toolOutputsDir"];
 
-const REUSE_CRITICAL_NUMBER_OPTION_KEYS: (keyof DaemonOptions)[] = [
-  "runnerReadinessTimeoutMs",
-];
+const REUSE_CRITICAL_NUMBER_OPTION_KEYS: (keyof DaemonOptions)[] = ["runnerReadinessTimeoutMs"];
 
 /** The value of a startup option when it is a string, else undefined. */
 function stringOption(
   options: DaemonOptions | undefined,
-  key: keyof DaemonOptions
+  key: keyof DaemonOptions,
 ): string | undefined {
   const value = options?.[key];
   return typeof value === "string" ? value : undefined;
@@ -258,7 +256,7 @@ function stringOption(
 
 function numberOption(
   options: DaemonOptions | undefined,
-  key: keyof DaemonOptions
+  key: keyof DaemonOptions,
 ): number | undefined {
   const value = options?.[key];
   return typeof value === "number" ? value : undefined;
@@ -282,7 +280,7 @@ function arraysEqual(left: readonly string[], right: readonly string[]): boolean
  */
 function startupOptionDeficits(
   requested: DaemonOptions | undefined,
-  running: DaemonOptions | undefined
+  running: DaemonOptions | undefined,
 ): string[] {
   const deficits: string[] = [];
   for (const key of REUSE_CRITICAL_OPTION_KEYS) {
@@ -311,7 +309,7 @@ function startupOptionDeficits(
     const runningEventAllMarkers = running?.eventAllMarkers ?? [];
     if (!arraysEqual(requestedEventAllMarkers, runningEventAllMarkers)) {
       deficits.push(
-        `eventAllMarkers (requested=${JSON.stringify(requestedEventAllMarkers)}, running=${JSON.stringify(runningEventAllMarkers)})`
+        `eventAllMarkers (requested=${JSON.stringify(requestedEventAllMarkers)}, running=${JSON.stringify(runningEventAllMarkers)})`,
       );
     }
   }
@@ -330,7 +328,7 @@ function startupOptionDeficits(
  */
 function mergeDaemonOptions(
   running: DaemonOptions | undefined,
-  requested: DaemonOptions | undefined
+  requested: DaemonOptions | undefined,
 ): DaemonOptions {
   const merged: DaemonOptions = { ...(running ?? {}), ...(requested ?? {}) };
   const mergedRecord = merged as Record<string, unknown>;
@@ -343,6 +341,12 @@ function mergeDaemonOptions(
     const runningString = stringOption(running, key);
     if (stringOption(requested, key) === undefined && runningString !== undefined) {
       mergedRecord[key] = runningString;
+    }
+  }
+  for (const key of REUSE_CRITICAL_NUMBER_OPTION_KEYS) {
+    const runningNumber = numberOption(running, key);
+    if (numberOption(requested, key) === undefined && runningNumber !== undefined) {
+      mergedRecord[key] = runningNumber;
     }
   }
   return merged;
@@ -426,21 +430,21 @@ export class DaemonMcpProxy {
       ...config,
     };
     this.daemonManager = config.daemonManager ?? new DaemonManager();
-    this.clientFactory = config.clientFactory ?? (() => new DaemonClient(
-      this.config.socketPath,
-      this.config.connectionTimeoutMs
-    ));
+    this.clientFactory =
+      config.clientFactory ??
+      (() => new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs));
     this.timer = config.timer ?? defaultTimer;
-    if (typeof config.initialSessionUuid === "string" && config.initialSessionUuid.trim().length > 0) {
+    if (
+      typeof config.initialSessionUuid === "string" &&
+      config.initialSessionUuid.trim().length > 0
+    ) {
       this.boundSessionUuid = config.initialSessionUuid.trim();
       this.boundSessionUuidAt = this.timer.now();
       this.initialSessionBindingConfigured = true;
     }
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
     this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
-    this.clientAssetVersion = isExplicitPin()
-      ? resolveAssetVersion(resolvePinnedVersion())
-      : null;
+    this.clientAssetVersion = isExplicitPin() ? resolveAssetVersion(resolvePinnedVersion()) : null;
   }
 
   /**
@@ -472,9 +476,7 @@ export class DaemonMcpProxy {
 
     if (!isAvailable) {
       if (!this.config.autoStartDaemon) {
-        throw new DaemonUnavailableError(
-          "Daemon is not running and auto-start is disabled"
-        );
+        throw new DaemonUnavailableError("Daemon is not running and auto-start is disabled");
       }
       logger.info("[DaemonMcpProxy] Daemon not available, starting daemon...");
       await this.startDaemon();
@@ -500,8 +502,8 @@ export class DaemonMcpProxy {
       typeof client.subscribeToNotifications === "function";
     if (supportsNotifications) {
       this.notificationUnsubscribe?.();
-      this.notificationUnsubscribe = client.onNotification!(
-        notification => this.handleDaemonNotification(notification)
+      this.notificationUnsubscribe = client.onNotification!((notification) =>
+        this.handleDaemonNotification(notification),
       );
     }
     await client.connect();
@@ -547,10 +549,7 @@ export class DaemonMcpProxy {
       if (typeof notification.sessionId === "string" && notification.sessionId.length > 0) {
         this.recordSessionReleased(notification.sessionId);
       }
-      if (
-        this.boundSessionUuid !== undefined &&
-        notification.sessionId === this.boundSessionUuid
-      ) {
+      if (this.boundSessionUuid !== undefined && notification.sessionId === this.boundSessionUuid) {
         // A bound-session release changes the scope of any in-flight discovery
         // forwarded with that UUID, so invalidate pending discovery too (#4655).
         this.discoveryEpoch += 1;
@@ -618,19 +617,24 @@ export class DaemonMcpProxy {
     }
 
     if (!this.config.autoStartDaemon) {
-      throw this.versionMismatchError(runningVersion, "autoStartDisabled", "auto-start is disabled");
+      throw this.versionMismatchError(
+        runningVersion,
+        "autoStartDisabled",
+        "auto-start is disabled",
+      );
     }
 
     if (!sameRelease) {
-      const cmp = runningBase.length > 0
-        ? compareStrictNumericVersions(clientBase, runningBase)
-        : Number.POSITIVE_INFINITY;
+      const cmp =
+        runningBase.length > 0
+          ? compareStrictNumericVersions(clientBase, runningBase)
+          : Number.POSITIVE_INFINITY;
 
       if (runningBase.length > 0 && !Number.isFinite(cmp)) {
         throw this.versionMismatchError(
           runningVersion,
           "nonNumeric",
-          "version comparison is not numeric"
+          "version comparison is not numeric",
         );
       }
 
@@ -638,7 +642,7 @@ export class DaemonMcpProxy {
         throw this.versionMismatchError(
           runningVersion,
           "daemonNewer",
-          "the running daemon is newer than this client"
+          "the running daemon is newer than this client",
         );
       }
     }
@@ -655,19 +659,19 @@ export class DaemonMcpProxy {
       const daemonAgeMs = this.timer.now() - status.startedAt;
       if (daemonAgeMs < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
         logger.warn(
-          `[DaemonMcpProxy] Skipping version-mismatch restart due to cooldown: daemon ${runningVersion || "unknown"} is ${daemonAgeMs}ms old, client version is ${this.clientVersion}`
+          `[DaemonMcpProxy] Skipping version-mismatch restart due to cooldown: daemon ${runningVersion || "unknown"} is ${daemonAgeMs}ms old, client version is ${this.clientVersion}`,
         );
         throw this.versionMismatchError(
           runningVersion,
           "cooldown",
           "restart is in cooldown",
-          DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs
+          DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs,
         );
       }
     }
 
     logger.info(
-      `[DaemonMcpProxy] Daemon version ${runningVersion || "unknown"} differs from MCP server ${this.clientVersion}, restarting daemon`
+      `[DaemonMcpProxy] Daemon version ${runningVersion || "unknown"} differs from MCP server ${this.clientVersion}, restarting daemon`,
     );
     // Preserve the running daemon's existing options across the restart rather
     // than resetting to this client's config, which would strip flags the
@@ -679,7 +683,7 @@ export class DaemonMcpProxy {
     const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
     if (!ready) {
       throw new DaemonUnavailableError(
-        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`
+        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
       );
     }
 
@@ -689,7 +693,7 @@ export class DaemonMcpProxy {
       throw this.versionMismatchError(
         restartedVersion,
         "restartMismatch",
-        "daemon restart completed but version still differs"
+        "daemon restart completed but version still differs",
       );
     }
   }
@@ -725,7 +729,7 @@ export class DaemonMcpProxy {
     }
     throw new DaemonAssetVersionMismatchError(
       this.clientAssetVersion,
-      daemonAssetVersion.length > 0 ? daemonAssetVersion : "unknown"
+      daemonAssetVersion.length > 0 ? daemonAssetVersion : "unknown",
     );
   }
 
@@ -756,19 +760,19 @@ export class DaemonMcpProxy {
       const daemonAgeMs = this.timer.now() - status.startedAt;
       if (daemonAgeMs < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
         logger.warn(
-          `[DaemonMcpProxy] Skipping build-mismatch restart due to cooldown: daemon build ${daemonIdentity.buildId} is ${daemonAgeMs}ms old, client build is ${this.buildIdentity.buildId}`
+          `[DaemonMcpProxy] Skipping build-mismatch restart due to cooldown: daemon build ${daemonIdentity.buildId} is ${daemonAgeMs}ms old, client build is ${this.buildIdentity.buildId}`,
         );
         throw this.buildMismatchError(
           daemonIdentity,
           "cooldown",
           "restart is in cooldown",
-          DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs
+          DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs,
         );
       }
     }
 
     logger.info(
-      `[DaemonMcpProxy] Daemon build ${daemonIdentity.buildId} (${daemonIdentity.entryScript || "unknown"}) differs from client build ${this.buildIdentity.buildId} (${this.buildIdentity.entryScript || "unknown"}), restarting daemon`
+      `[DaemonMcpProxy] Daemon build ${daemonIdentity.buildId} (${daemonIdentity.entryScript || "unknown"}) differs from client build ${this.buildIdentity.buildId} (${this.buildIdentity.entryScript || "unknown"}), restarting daemon`,
     );
     // Preserve the running daemon's existing options across the restart rather
     // than resetting to this client's config, which would strip flags the
@@ -780,7 +784,7 @@ export class DaemonMcpProxy {
     const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
     if (!ready) {
       throw new DaemonUnavailableError(
-        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`
+        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
       );
     }
 
@@ -790,7 +794,7 @@ export class DaemonMcpProxy {
       throw this.buildMismatchError(
         restartedIdentity,
         "restartMismatch",
-        "daemon restart completed but build still differs"
+        "daemon restart completed but build still differs",
       );
     }
   }
@@ -824,12 +828,12 @@ export class DaemonMcpProxy {
 
     if (!this.config.autoStartDaemon) {
       throw new DaemonUnavailableError(
-        `Daemon startup options differ from MCP server options (${deficits.join(", ")}) and auto-start is disabled`
+        `Daemon startup options differ from MCP server options (${deficits.join(", ")}) and auto-start is disabled`,
       );
     }
 
     logger.info(
-      `[DaemonMcpProxy] Daemon startup options differ (${deficits.join(", ")}), restarting daemon`
+      `[DaemonMcpProxy] Daemon startup options differ (${deficits.join(", ")}), restarting daemon`,
     );
     // Preserve the running daemon's existing options and add the requested ones
     // so the restart gains the missing flag without stripping any the daemon
@@ -838,7 +842,7 @@ export class DaemonMcpProxy {
     const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
     if (!ready) {
       throw new DaemonUnavailableError(
-        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`
+        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
       );
     }
 
@@ -846,7 +850,7 @@ export class DaemonMcpProxy {
     const remaining = startupOptionDeficits(requested, restartedStatus.options);
     if (!restartedStatus.running || remaining.length > 0) {
       throw new DaemonUnavailableError(
-        `Daemon restart completed but startup options still differ (${remaining.join(", ")})`
+        `Daemon restart completed but startup options still differ (${remaining.join(", ")})`,
       );
     }
   }
@@ -866,16 +870,14 @@ export class DaemonMcpProxy {
       const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
       if (!ready) {
         throw new DaemonUnavailableError(
-          `Daemon failed to start within ${DAEMON_STARTUP_TIMEOUT_MS}ms`
+          `Daemon failed to start within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
         );
       }
       logger.info("[DaemonMcpProxy] Daemon started successfully");
     }
   }
 
-  private async withRecoverableReconnect<T>(
-    operation: () => Promise<T>
-  ): Promise<T> {
+  private async withRecoverableReconnect<T>(operation: () => Promise<T>): Promise<T> {
     await this.ensureConnected();
 
     try {
@@ -886,7 +888,7 @@ export class DaemonMcpProxy {
       }
 
       logger.warn(
-        `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${error instanceof Error ? error.message : String(error)}`
+        `[DaemonMcpProxy] Daemon session is stale, reconnecting and retrying once: ${error instanceof Error ? error.message : String(error)}`,
       );
       await this.resetConnection();
       await this.ensureConnected();
@@ -965,7 +967,10 @@ export class DaemonMcpProxy {
       // reconnect (issue #4610).
       const discoveryEpoch = this.discoveryEpoch;
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("tools/list", this.withCapabilityProfile(this.withBoundSessionUuid({})))
+        this.client!.callDaemonMethod(
+          "tools/list",
+          this.withCapabilityProfile(this.withBoundSessionUuid({})),
+        ),
       );
       const tools = result?.tools ?? [];
       // If a list_changed or bound-session release invalidated this cache WHILE the
@@ -986,14 +991,12 @@ export class DaemonMcpProxy {
   /**
    * Call a tool on the daemon
    */
-  async callTool(
-    name: string,
-    args: Record<string, unknown>
-  ): Promise<any> {
+  async callTool(name: string, args: Record<string, unknown>): Promise<any> {
     // An omitted `sessionUuid` on the control tool means the connection profile,
     // not the proxy's retained device-routing session. Preserve that distinction
     // after a device has been bound.
-    const routingArgs = name === SET_TOOL_CAPABILITY_TOOL_NAME ? args : this.withBoundSessionUuid(args);
+    const routingArgs =
+      name === SET_TOOL_CAPABILITY_TOOL_NAME ? args : this.withBoundSessionUuid(args);
     const forwardedArgs = this.withCapabilityProfile(routingArgs);
     // Snapshot the release epoch at forward time. If a session-released signal for
     // the SPECIFIC forwarded UUID lands WHILE this call is in flight, that UUID's
@@ -1003,7 +1006,9 @@ export class DaemonMcpProxy {
     // so it does not block remembering the session this call forwarded.
     const callReleaseEpoch = this.releaseEpoch;
     try {
-      const result = await this.withRecoverableReconnect(() => this.client!.callTool(name, forwardedArgs));
+      const result = await this.withRecoverableReconnect(() =>
+        this.client!.callTool(name, forwardedArgs),
+      );
       this.rememberCapabilityProfile(name, args, result);
       // Remember what was actually forwarded, not the caller's raw args. An
       // implicit sessionless call injects the bound UUID into forwardedArgs and
@@ -1050,16 +1055,17 @@ export class DaemonMcpProxy {
     if (this.isBoundSessionReplayExpired()) {
       this.clearBoundSessionUuid();
     }
-    const explicitSessionUuid = typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0
-      ? args.sessionUuid
-      : undefined;
+    const explicitSessionUuid =
+      typeof args.sessionUuid === "string" && args.sessionUuid.trim().length > 0
+        ? args.sessionUuid
+        : undefined;
     if (!this.boundSessionUuid || explicitSessionUuid === this.boundSessionUuid) {
       return args;
     }
     if (explicitSessionUuid && this.initialSessionBindingConfigured) {
       throw new Error(
         `MCP connection is bound to device session ${this.boundSessionUuid}; ` +
-        `cannot route this call to ${explicitSessionUuid} until the binding is released.`
+          `cannot route this call to ${explicitSessionUuid} until the binding is released.`,
       );
     }
     if (explicitSessionUuid) {
@@ -1135,9 +1141,8 @@ export class DaemonMcpProxy {
     forwardedArgs: Record<string, unknown>,
     forwardEpoch: number,
   ): boolean {
-    const forwardedUuid = typeof forwardedArgs.sessionUuid === "string"
-      ? forwardedArgs.sessionUuid
-      : undefined;
+    const forwardedUuid =
+      typeof forwardedArgs.sessionUuid === "string" ? forwardedArgs.sessionUuid : undefined;
     if (forwardedUuid === undefined || forwardedUuid.trim().length === 0) {
       return false;
     }
@@ -1169,7 +1174,10 @@ export class DaemonMcpProxy {
     if (this.wasForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch)) {
       return;
     }
-    if (typeof forwardedArgs.sessionUuid === "string" && forwardedArgs.sessionUuid.trim().length > 0) {
+    if (
+      typeof forwardedArgs.sessionUuid === "string" &&
+      forwardedArgs.sessionUuid.trim().length > 0
+    ) {
       this.boundSessionUuid = forwardedArgs.sessionUuid;
       this.boundSessionUuidAt = this.timer.now();
     }
@@ -1192,7 +1200,11 @@ export class DaemonMcpProxy {
     error: unknown,
     callReleaseEpoch: number,
   ): void {
-    if (name === "executePlan" || name === SET_TOOL_CAPABILITY_TOOL_NAME || this.isRecoverableDaemonSessionError(error)) {
+    if (
+      name === "executePlan" ||
+      name === SET_TOOL_CAPABILITY_TOOL_NAME ||
+      this.isRecoverableDaemonSessionError(error)
+    ) {
       return;
     }
     // As in rememberSessionUuid: a release of the forwarded UUID observed
@@ -1202,7 +1214,10 @@ export class DaemonMcpProxy {
     if (this.wasForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch)) {
       return;
     }
-    if (typeof forwardedArgs.sessionUuid === "string" && forwardedArgs.sessionUuid.trim().length > 0) {
+    if (
+      typeof forwardedArgs.sessionUuid === "string" &&
+      forwardedArgs.sessionUuid.trim().length > 0
+    ) {
       this.boundSessionUuid = forwardedArgs.sessionUuid;
       this.boundSessionUuidAt = this.timer.now();
     }
@@ -1214,7 +1229,9 @@ export class DaemonMcpProxy {
       const status = await this.daemonManager.status();
       daemonIdentity = buildIdentityFromStatus(status);
     } catch (error) {
-      logger.warn(`[DaemonMcpProxy] Failed to read daemon status for tool-unavailable error: ${error}`);
+      logger.warn(
+        `[DaemonMcpProxy] Failed to read daemon status for tool-unavailable error: ${error}`,
+      );
     }
     return new DaemonToolUnavailableError({
       toolName: name,
@@ -1235,7 +1252,7 @@ export class DaemonMcpProxy {
     try {
       const discoveryEpoch = this.discoveryEpoch;
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("resources/list", this.withBoundSessionUuid({}))
+        this.client!.callDaemonMethod("resources/list", this.withBoundSessionUuid({})),
       );
       const resources = result?.resources ?? [];
       // Discard a response invalidated mid-flight rather than caching the stale
@@ -1262,7 +1279,7 @@ export class DaemonMcpProxy {
     try {
       const discoveryEpoch = this.discoveryEpoch;
       const result = await this.withRecoverableReconnect(() =>
-        this.client!.callDaemonMethod("resources/list-templates", this.withBoundSessionUuid({}))
+        this.client!.callDaemonMethod("resources/list-templates", this.withBoundSessionUuid({})),
       );
       const templates = result?.resourceTemplates ?? [];
       // Discard a response invalidated mid-flight rather than caching the stale
@@ -1282,7 +1299,7 @@ export class DaemonMcpProxy {
    */
   async readResource(uri: string): Promise<any> {
     return await this.withRecoverableReconnect(() =>
-      this.client!.readResource(uri, this.withBoundSessionUuid({}))
+      this.client!.readResource(uri, this.withBoundSessionUuid({})),
     );
   }
 

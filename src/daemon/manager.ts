@@ -1173,8 +1173,8 @@ export function parseDaemonArgs(args: string[], env: NodeJS.ProcessEnv = process
       const timeoutMs = parseRunnerReadinessTimeout(args[i + 1]);
       if (timeoutMs !== undefined) {
         options.runnerReadinessTimeoutMs = timeoutMs;
+        i++;
       }
-      i++;
     } else if (args[i] === "--video-quality" || args[i] === "--video-quality-preset") {
       options.videoQualityPreset = args[i + 1];
       i++;

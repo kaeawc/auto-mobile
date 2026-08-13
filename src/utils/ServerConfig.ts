@@ -6,7 +6,10 @@ import type {
   DeviceSnapshotConfigInput,
   AppearanceConfigInput,
 } from "../models";
-import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "./runnerReadinessConfig";
+import {
+  DEFAULT_RUNNER_READINESS_TIMEOUT_MS,
+  parseRunnerReadinessTimeout,
+} from "./runnerReadinessConfig";
 
 export type PlanExecutionLockScope = "session" | "global";
 
@@ -151,7 +154,11 @@ class ServerConfig {
   }
 
   setRunnerReadinessTimeoutMs(timeoutMs: number): void {
-    this._runnerReadinessTimeoutMs = timeoutMs;
+    const parsed = parseRunnerReadinessTimeout(timeoutMs);
+    if (parsed === undefined) {
+      throw new RangeError(`Invalid runner readiness timeout: ${timeoutMs}`);
+    }
+    this._runnerReadinessTimeoutMs = parsed;
   }
 
   getRunnerReadinessTimeoutMs(): number {

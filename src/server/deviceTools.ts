@@ -19,7 +19,7 @@ import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poo
 import { DEVICE_CREATE_ENV_VAR, getDeviceCreationGate, type DeviceCreationGate } from "../utils/deviceCreationGate";
 import { createDefaultDeviceProvisioner, type DeviceProvisioner } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
-import { DeviceBootService } from "../utils/deviceBootService";
+import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
@@ -33,7 +33,10 @@ import {
   MIN_RUNNER_READINESS_TIMEOUT_MS,
 } from "../utils/runnerReadinessConfig";
 import { serverConfig } from "../utils/ServerConfig";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
+import {
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  MAX_DEVICE_READY_TIMEOUT_MS,
+} from "../utils/deviceTimeouts";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -56,7 +59,12 @@ const startDeviceParametersSchema = z.object({
   }).optional().describe("Desired screen dimensions"),
   deviceId: z.string().optional(),
   preferRunning: z.boolean().optional().describe("Prefer already-booted device (default true)"),
-  timeoutMs: z.number().int().positive().optional().describe("Total device boot and automation-readiness timeout in ms"),
+  timeoutMs: z.number()
+    .int()
+    .positive()
+    .max(MAX_DEVICE_READY_TIMEOUT_MS)
+    .optional()
+    .describe("Total device boot and automation-readiness timeout in ms"),
   runnerReadinessTimeoutMs: z.number()
     .int()
     .min(MIN_RUNNER_READINESS_TIMEOUT_MS)
@@ -323,12 +331,26 @@ function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: st
     return;
   }
   const pooled = daemonState.getDevicePool().getDevice(device.deviceId);
-  if (pooled && pooled.platform !== device.platform) {
+  if (pooled && (pooled.platform !== device.platform || pooled.name !== device.name)) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requestedIdentity}] ` +
       `resolved=[${device.name} (${device.deviceId}) platform=${device.platform}] ` +
       `pooled=[${pooled.name} (${pooled.id}) platform=${pooled.platform}] ` +
-      "phase=pool-match: stale pool platform conflicts with the resolved runtime",
+      "phase=pool-match: stale pool identity conflicts with the resolved runtime",
+    );
+  }
+}
+
+function cancelUnownedColdBoot(boot: DeviceBootResult | undefined): void {
+  if (boot?.source !== "cold-boot" || !boot.processHandle) {
+    return;
+  }
+  try {
+    boot.processHandle.kill();
+  } catch (error) {
+    logger.warn(
+      `[DeviceTools] Failed to cancel unowned cold boot ${boot.device.deviceId}: ${error}`,
+      error,
     );
   }
 }
@@ -397,7 +419,11 @@ export function registerDeviceTools() {
   };
 
   // Start device handler — matches criteria against booted devices and images
-  const startDeviceHandler = async (args: StartDeviceArgs, progress?: ProgressCallback) => {
+  const startDeviceHandler = async (
+    args: StartDeviceArgs,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
     const internalSessionId = args.__mcpSessionId;
     args = {
       ...startDeviceSchema.parse(args),
@@ -410,6 +436,8 @@ export function registerDeviceTools() {
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
     const totalDeadlineMs = deps.timer.now() + totalTimeoutMs;
     const requestedIdentity = describeStartDeviceRequest(args);
+    let boot: DeviceBootResult | undefined;
+    let ownershipTransferred = false;
 
     try {
       const bootService = new DeviceBootService({
@@ -421,9 +449,13 @@ export function registerDeviceTools() {
         timer: deps.timer,
       });
       perf.startOperation("bootDevice");
-      const boot = await bootService.boot(args, progress ? { report: progress } : undefined);
+      boot = await bootService.boot(
+        { ...args, totalDeadlineMs, signal },
+        progress ? { report: progress } : undefined,
+      );
       perf.endOperation("bootDevice");
       validateBootIdentity(args, boot.device, boot.source, boot.sourceImage);
+      validatePooledDeviceMapping(boot.device, requestedIdentity);
 
       // A new incarnation must not inherit a prior intentional-shutdown marker
       // while its per-device runner setup is in flight.
@@ -436,8 +468,12 @@ export function registerDeviceTools() {
         totalDeadlineMs,
         readinessTimeoutMs:
           args.runnerReadinessTimeoutMs ?? serverConfig.getRunnerReadinessTimeoutMs(),
+        skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
         perf,
+        signal,
       });
+      // Re-check under the later binding lock because pool identity can change
+      // while runner setup is in flight.
       validatePooledDeviceMapping(boot.device, requestedIdentity);
 
       // Publish only after runner health passes. Readiness remains per-device,
@@ -449,6 +485,7 @@ export function registerDeviceTools() {
         boot.sourceImage,
         boot.processHandle
       );
+      ownershipTransferred = true;
 
       if (boot.source === "cold-boot" || boot.provisioned) {
         perf.startOperation("notifyResources");
@@ -464,6 +501,9 @@ export function registerDeviceTools() {
       );
     } catch (error) {
       perf.end();
+      if (!ownershipTransferred) {
+        cancelUnownedColdBoot(boot);
+      }
       if (error instanceof ActionableError) {
         throw error;
       }
@@ -498,7 +538,8 @@ export function registerDeviceTools() {
         device.platform,
         args.__mcpSessionId,
         sourceImage,
-        childProcess
+        childProcess,
+        device,
       );
       if (autolockSessionId) {
         return autolockSessionId;
@@ -514,7 +555,8 @@ export function registerDeviceTools() {
       device.deviceId,
       device.platform,
       sourceImage,
-      childProcess
+      childProcess,
+      device,
     );
   }
 

@@ -14,6 +14,7 @@ import {
   resolveMcpRequestTimeoutMs
 } from "../../src/daemon/mcpRequestTimeout";
 import type { DaemonRequest } from "../../src/daemon/types";
+import { MAX_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 
 describe("resolveMcpRequestTimeoutMs", () => {
   const timeoutEnvVars = [
@@ -153,6 +154,38 @@ describe("resolveMcpRequestTimeoutMs", () => {
 
     expect(resolveMcpRequestTimeoutMs(request)).toBe(
       300_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("keeps transport alive for the legacy nested startDevice timeout", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "startDevice",
+        arguments: { device: { platform: "android", timeoutMs: 300_000 } },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      300_000 + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    );
+  });
+
+  test("caps oversized startDevice budgets below the Node timer ceiling", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "startDevice",
+        arguments: { timeoutMs: Number.MAX_SAFE_INTEGER },
+      },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      MAX_DEVICE_READY_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
   });
 });

@@ -33,7 +33,9 @@ class FakeReadinessClient implements ReadinessClient {
 
   async waitForConnection(): Promise<boolean> {
     this.connectionCalls++;
-    return this.connectionResults.shift() ?? false;
+    const connected = this.connectionResults.shift() ?? false;
+    this.connected = connected;
+    return connected;
   }
 
   async verifyServiceReady(): Promise<boolean> {
@@ -45,7 +47,9 @@ class FakeReadinessClient implements ReadinessClient {
 class FakeAndroidManager implements ReadinessAndroidManager {
   installed = true;
   enabled = true;
+  versionCompatible = true;
   setupCalls = 0;
+  enableCalls = 0;
   compatibilityResult: Awaited<ReturnType<ReadinessAndroidManager["ensureCompatibleVersion"]>> = {
     status: "compatible",
   };
@@ -56,6 +60,15 @@ class FakeAndroidManager implements ReadinessAndroidManager {
 
   async isEnabled(): Promise<boolean> {
     return this.enabled;
+  }
+
+  async isVersionCompatible(): Promise<boolean> {
+    return this.versionCompatible;
+  }
+
+  async enable(): Promise<void> {
+    this.enableCalls++;
+    this.enabled = true;
   }
 
   async ensureCompatibleVersion() {
@@ -93,10 +106,13 @@ function createService(
     androidClient?: FakeReadinessClient;
     iosManager?: FakeIosManager;
     iosClient?: FakeReadinessClient;
+    autoAdvance?: boolean;
   } = {},
 ) {
   const timer = options.timer ?? new FakeTimer();
-  timer.enableAutoAdvance();
+  if (options.autoAdvance !== false) {
+    timer.enableAutoAdvance();
+  }
   const androidManager = options.androidManager ?? new FakeAndroidManager();
   const androidClient = options.androidClient ?? new FakeReadinessClient();
   const iosManager = options.iosManager ?? new FakeIosManager();
@@ -155,6 +171,43 @@ describe("RunnerReadinessService", () => {
     expect(androidClient.healthCalls).toBe(1);
   });
 
+  test("honors disabled downloads while still enabling an installed compatible runner", async () => {
+    const androidManager = new FakeAndroidManager();
+    androidManager.enabled = false;
+    const androidClient = new FakeReadinessClient();
+    androidClient.connected = false;
+    const { service } = createService({ androidManager, androidClient });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+      skipCtrlProxyDownload: true,
+    });
+
+    expect(androidManager.enableCalls).toBe(1);
+    expect(androidManager.setupCalls).toBe(0);
+    expect(androidClient.healthCalls).toBe(1);
+  });
+
+  test("fails without setup when downloads are disabled and CtrlProxy is missing", async () => {
+    const androidManager = new FakeAndroidManager();
+    androidManager.installed = false;
+    androidManager.enabled = false;
+    const { service } = createService({ androidManager });
+
+    await expect(service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+      skipCtrlProxyDownload: true,
+    })).rejects.toThrow(/not installed.*downloads are disabled/);
+
+    expect(androidManager.setupCalls).toBe(0);
+  });
+
   test("preserves the original signing incompatibility when Android recovery fails", async () => {
     const androidManager = new FakeAndroidManager();
     androidManager.compatibilityResult = {
@@ -182,20 +235,19 @@ describe("RunnerReadinessService", () => {
     };
     const { service } = createService({ androidManager });
 
-    try {
-      await service.ensureReady({
+    const error = await service.ensureReady({
         device: androidDevice(),
         requestedIdentity: "platform=android",
         totalDeadlineMs: 30_000,
         readinessTimeoutMs: 30_000,
-      });
-      throw new Error("expected readiness failure");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      expect(message).toContain("INSTALL_FAILED_UPDATE_INCOMPATIBLE");
-      expect(message).toContain("token=[REDACTED]");
-      expect(message).not.toContain("top-secret");
-    }
+      }).then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).toContain("INSTALL_FAILED_UPDATE_INCOMPATIBLE");
+    expect(message).toContain("token=[REDACTED]");
+    expect(message).not.toContain("top-secret");
   });
 
   test("fails start readiness when iOS setup fails", async () => {
@@ -217,6 +269,145 @@ describe("RunnerReadinessService", () => {
         readinessTimeoutMs: 30_000,
       }),
     ).rejects.toThrow(/phase=runner-setup.*xcodebuild exited 65/);
+  });
+
+  test("coalesces concurrent readiness for the same device", async () => {
+    const timer = new FakeTimer();
+    const manager = new FakeAndroidManager();
+    manager.installed = false;
+    manager.enabled = false;
+    manager.compatibilityResult = { status: "installed" };
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.healthResults = [true, true];
+    let releaseSetup!: () => void;
+    const setupGate = new Promise<void>((resolve) => {
+      releaseSetup = resolve;
+    });
+    manager.setup = async () => {
+      manager.setupCalls++;
+      await setupGate;
+      manager.installed = true;
+      manager.enabled = true;
+      return { success: true, message: "ready" };
+    };
+    const first = createService({
+      timer,
+      androidManager: manager,
+      androidClient: client,
+      autoAdvance: false,
+    }).service;
+    const second = createService({
+      timer,
+      androidManager: manager,
+      androidClient: client,
+      autoAdvance: false,
+    }).service;
+    const request = {
+      device: androidDevice(),
+      requestedIdentity: "platform=android deviceId=emulator-5554",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    };
+
+    const firstReadiness = first.ensureReady(request);
+    const secondReadiness = second.ensureReady(request);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(manager.setupCalls).toBe(1);
+    releaseSetup();
+    await Promise.all([firstReadiness, secondReadiness]);
+  });
+
+  test("lets a longer-budget waiter retry after the lock owner times out", async () => {
+    const timer = new FakeTimer();
+    const manager = new FakeAndroidManager();
+    manager.installed = false;
+    manager.enabled = false;
+    manager.compatibilityResult = { status: "installed" };
+    let firstSetupSignal: AbortSignal | undefined;
+    manager.setup = async (_force, _perf, signal) => {
+      manager.setupCalls++;
+      if (manager.setupCalls === 1) {
+        firstSetupSignal = signal;
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }
+      manager.installed = true;
+      manager.enabled = true;
+      return { success: true, message: "ready" };
+    };
+    const { service } = createService({
+      timer,
+      androidManager: manager,
+      androidClient: Object.assign(new FakeReadinessClient(), { connected: false }),
+      autoAdvance: false,
+    });
+
+    const first = service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "short owner",
+      totalDeadlineMs: 1_000,
+      readinessTimeoutMs: 1_000,
+    });
+    const second = service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "long waiter",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    timer.advanceTime(1_000);
+
+    await expect(first).rejects.toThrow(/requested=\[short owner\].*phase=runner-setup/);
+    await second;
+    expect(firstSetupSignal?.aborted).toBe(true);
+    expect(manager.setupCalls).toBe(2);
+  });
+
+  test("aborts runner setup when its readiness deadline expires", async () => {
+    const timer = new FakeTimer();
+    const manager = new FakeAndroidManager();
+    manager.installed = false;
+    manager.enabled = false;
+    manager.compatibilityResult = { status: "installed" };
+    let setupSignal: AbortSignal | undefined;
+    let setupSettled = false;
+    manager.setup = async (_force, _perf, signal) => {
+      manager.setupCalls++;
+      setupSignal = signal;
+      await new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => {
+            timer.setTimeout(() => {
+              setupSettled = true;
+              reject(signal.reason);
+            }, 250);
+          },
+          { once: true },
+        );
+      });
+      manager.installed = true;
+      manager.enabled = true;
+      return { success: true, message: "ready" };
+    };
+    const { service } = createService({ timer, androidManager: manager });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      }),
+    ).rejects.toThrow(/readiness phase exceeded/);
+
+    expect(setupSignal?.aborted).toBe(true);
+    expect(setupSettled).toBe(true);
+    expect(manager.installed).toBe(false);
+    expect(manager.enabled).toBe(false);
   });
 
   test("retries delayed runner health independently for 40 devices", async () => {
@@ -250,6 +441,30 @@ describe("RunnerReadinessService", () => {
       services.every(({ client }) => client.connectionCalls >= 2 && client.healthCalls >= 2),
     ).toBe(true);
     expect(timer.now()).toBeLessThan(2_000);
+  });
+
+  test("reconnects when the runner drops its connection after a failed health probe", async () => {
+    const client = new FakeReadinessClient();
+    client.healthResults = [false, true];
+    const originalVerify = client.verifyServiceReady.bind(client);
+    client.verifyServiceReady = async (...args) => {
+      const ready = await originalVerify(...args);
+      if (!ready) {
+        client.connected = false;
+      }
+      return ready;
+    };
+    const { service } = createService({ androidClient: client });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+
+    expect(client.connectionCalls).toBe(1);
+    expect(client.healthCalls).toBe(2);
   });
 
   test("reports the exhausted phase, attempts, mapping, and remaining budget", async () => {

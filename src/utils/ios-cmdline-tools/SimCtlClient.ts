@@ -11,6 +11,7 @@ import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
 import { PlistClient, type PlistReader } from "./PlistClient";
 import { isIosSimulatorUdid } from "./iosDeviceType";
+import { getAbortSignal } from "../AbortContext";
 
 export interface AppleDevice {
   udid: string;
@@ -53,7 +54,7 @@ export interface SimCtlFileSystem {
 }
 
 const defaultSimCtlFileSystem: SimCtlFileSystem = {
-  mkdtemp: prefix => fsPromises.mkdtemp(prefix),
+  mkdtemp: (prefix) => fsPromises.mkdtemp(prefix),
   writeFile: (path, data, encoding) => fsPromises.writeFile(path, data, encoding),
   readFile: (path, encoding) => fsPromises.readFile(path, encoding),
   rm: (path, options) => fsPromises.rm(path, options),
@@ -76,7 +77,7 @@ export interface SimCtl {
    * @param timeoutMs - Optional timeout in milliseconds
    * @returns Promise with command output
    */
-  executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
+  executeCommand(command: string, timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
 
   /**
    * Execute a simctl command from pre-split arguments. Use this for literal user
@@ -85,7 +86,7 @@ export interface SimCtl {
    * @param timeoutMs - Optional timeout in milliseconds
    * @returns Promise with command output
    */
-  executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult>;
+  executeCommandArgs(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
 
   /**
    * Start a long-lived simctl command. Callers own the returned process and
@@ -133,7 +134,11 @@ export interface SimCtl {
    *   it, and only resolve device metadata.
    * @returns Promise with booted device information
    */
-  waitForSimulatorReady(udid: string, timeoutMs?: number, options?: { assumeBooted?: boolean }): Promise<BootedDevice>;
+  waitForSimulatorReady(
+    udid: string,
+    timeoutMs?: number,
+    options?: { assumeBooted?: boolean },
+  ): Promise<BootedDevice>;
 
   /**
    * Get the list of available (booted and shutdown) simulator UDIDs
@@ -165,7 +170,7 @@ export interface SimCtl {
    * Get available device types (iPhone models, iPad models, etc.)
    * @returns Promise with array of device types
    */
-  getDeviceTypes(): Promise<AppleDeviceType[]>;
+  getDeviceTypes(signal?: AbortSignal): Promise<AppleDeviceType[]>;
 
   /**
    * Get available iOS runtimes
@@ -180,7 +185,12 @@ export interface SimCtl {
    * @param runtime - Runtime identifier (e.g., "iOS 17.0")
    * @returns Promise with the UDID of the created simulator
    */
-  createSimulator(name: string, deviceType: string, runtime: string): Promise<string>;
+  createSimulator(
+    name: string,
+    deviceType: string,
+    runtime: string,
+    signal?: AbortSignal,
+  ): Promise<string>;
 
   /**
    * Delete a simulator by UDID
@@ -206,7 +216,7 @@ export interface SimCtl {
   launchApp(
     bundleId: string,
     options?: { foregroundIfRunning?: boolean },
-    deviceId?: string
+    deviceId?: string,
   ): Promise<{
     success: boolean;
     pid?: number;
@@ -262,7 +272,11 @@ export interface SimCtl {
    * @param bundleId - Target app bundle identifier
    * @param payloadJson - APNs payload JSON (must contain a top-level `aps` key, <=4096 bytes)
    */
-  pushNotification(deviceId: string, bundleId: string, payloadJson: string): Promise<{ success: boolean; error?: string }>;
+  pushNotification(
+    deviceId: string,
+    bundleId: string,
+    payloadJson: string,
+  ): Promise<{ success: boolean; error?: string }>;
 }
 
 // Enhance the standard execAsync result to implement the ExecResult interface
@@ -270,16 +284,19 @@ const execAsync = async (
   file: string,
   args: string[],
   maxBuffer?: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<ExecResult> => {
   // Pass the AbortSignal to execFile so that when a caller's timeout aborts, Node
   // kills the child process (SIGTERM) instead of leaving it running orphaned
   // (issue #3938). Without this a timed-out `bootstatus -b` keeps booting the
   // simulator in the background after the tool has already reported failure.
   const options: Parameters<typeof execFile>[2] =
-    maxBuffer && signal ? { maxBuffer, signal }
-      : maxBuffer ? { maxBuffer }
-        : signal ? { signal }
+    maxBuffer && signal
+      ? { maxBuffer, signal }
+      : maxBuffer
+        ? { maxBuffer }
+        : signal
+          ? { signal }
           : undefined;
   const result = await promisify(execFile)(file, args, options);
 
@@ -288,7 +305,11 @@ const execAsync = async (
   return createExecResult(stdout, stderr);
 };
 
-function defaultSpawnProcess(command: string, args: string[], options?: SpawnOptions): ChildProcess {
+function defaultSpawnProcess(
+  command: string,
+  args: string[],
+  options?: SpawnOptions,
+): ChildProcess {
   return spawn(command, args, options ?? {});
 }
 
@@ -333,7 +354,7 @@ function splitCommandArgs(command: string): string[] {
       continue;
     }
 
-    if (char === "'" || char === "\"") {
+    if (char === "'" || char === '"') {
       quote = char;
       started = true;
       continue;
@@ -353,7 +374,10 @@ function splitCommandArgs(command: string): string[] {
   return args;
 }
 
-function normalizeIosVersion(runtimeId: string | undefined, osVersion: string | undefined): string | undefined {
+function normalizeIosVersion(
+  runtimeId: string | undefined,
+  osVersion: string | undefined,
+): string | undefined {
   const trimmedOsVersion = osVersion?.trim();
   if (trimmedOsVersion) {
     return trimmedOsVersion;
@@ -373,8 +397,8 @@ function normalizeIosVersion(runtimeId: string | undefined, osVersion: string | 
 
 /** Numeric, component-wise comparison of dotted version strings. */
 function compareVersions(a: string, b: string): number {
-  const left = a.split(".").map(part => Number.parseInt(part, 10) || 0);
-  const right = b.split(".").map(part => Number.parseInt(part, 10) || 0);
+  const left = a.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const right = b.split(".").map((part) => Number.parseInt(part, 10) || 0);
   const length = Math.max(left.length, right.length);
   for (let index = 0; index < length; index++) {
     const diff = (left[index] ?? 0) - (right[index] ?? 0);
@@ -386,17 +410,26 @@ function compareVersions(a: string, b: string): number {
 }
 
 /** Highest-versioned runtime whose version starts with `prefix`, if any. */
-function pickHighestRuntime(runtimes: AppleDeviceRuntime[], prefix: string): AppleDeviceRuntime | undefined {
+function pickHighestRuntime(
+  runtimes: AppleDeviceRuntime[],
+  prefix: string,
+): AppleDeviceRuntime | undefined {
   return runtimes
-    .filter(runtime => typeof runtime.version === "string" && runtime.version.startsWith(prefix))
+    .filter((runtime) => typeof runtime.version === "string" && runtime.version.startsWith(prefix))
     .sort((a, b) => compareVersions(a.version, b.version))
     .pop();
 }
 
 function inferIosFormFactor(deviceTypeId: string | undefined): "phone" | "tablet" | undefined {
-  if (!deviceTypeId) {return undefined;}
-  if (deviceTypeId.includes("iPad")) {return "tablet";}
-  if (deviceTypeId.includes("iPhone")) {return "phone";}
+  if (!deviceTypeId) {
+    return undefined;
+  }
+  if (deviceTypeId.includes("iPad")) {
+    return "tablet";
+  }
+  if (deviceTypeId.includes("iPhone")) {
+    return "phone";
+  }
   return undefined;
 }
 
@@ -406,14 +439,19 @@ function isAlreadyBootedCoreSimulator405(error: unknown, udid: string): boolean 
   }
 
   const execError = error as NodeJS.ErrnoException & { stderr?: unknown };
-  const stderr = typeof execError.stderr === "string"
-    ? execError.stderr
-    : Buffer.isBuffer(execError.stderr) ? execError.stderr.toString() : "";
+  const stderr =
+    typeof execError.stderr === "string"
+      ? execError.stderr
+      : Buffer.isBuffer(execError.stderr)
+        ? execError.stderr.toString()
+        : "";
 
-  return typeof execError.code === "number" &&
+  return (
+    typeof execError.code === "number" &&
     execError.code !== 0 &&
     stderr.includes("domain=com.apple.CoreSimulator.SimError, code=405") &&
-    stderr.includes("Unable to boot device in current state: Booted");
+    stderr.includes("Unable to boot device in current state: Booted")
+  );
 }
 
 /**
@@ -447,18 +485,27 @@ export const DEFAULT_SIMCTL_BOOT_OPTIONS: SimCtlBootOptions = {
 
 export class SimCtlClient implements SimCtl {
   device: BootedDevice | null;
-  execAsync: (file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>;
+  execAsync: (
+    file: string,
+    args: string[],
+    maxBuffer?: number,
+    signal?: AbortSignal,
+  ) => Promise<ExecResult>;
   private timer: Timer;
   private platform: NodeJS.Platform;
   private readonly usesInjectedExecAsync: boolean;
-  private readonly spawnProcess: (command: string, args: string[], options?: SpawnOptions) => ChildProcess;
+  private readonly spawnProcess: (
+    command: string,
+    args: string[],
+    options?: SpawnOptions,
+  ) => ChildProcess;
   private readonly fileSystem: SimCtlFileSystem;
   private readonly bootOptions: SimCtlBootOptions;
   // Cached result of the launchctl headless-session probe (null = not yet probed)
   private headlessSessionCache: boolean | null = null;
 
   // Static cache for device list
-  private static deviceListCache: { devices: DeviceInfo[], timestamp: number } | null = null;
+  private static deviceListCache: { devices: DeviceInfo[]; timestamp: number } | null = null;
   private static readonly DEVICE_LIST_CACHE_TTL = 5000; // 5 seconds
   private static localSimctlAvailability: Promise<void> | null = null;
 
@@ -470,13 +517,24 @@ export class SimCtlClient implements SimCtl {
    */
   constructor(
     device: BootedDevice | null = null,
-    execAsyncFn: ((file: string, args: string[], maxBuffer?: number, signal?: AbortSignal) => Promise<ExecResult>) | null = null,
+    execAsyncFn:
+      | ((
+          file: string,
+          args: string[],
+          maxBuffer?: number,
+          signal?: AbortSignal,
+        ) => Promise<ExecResult>)
+      | null = null,
     timer: Timer = defaultTimer,
     platform: NodeJS.Platform = process.platform,
-    spawnProcess: (command: string, args: string[], options?: SpawnOptions) => ChildProcess = defaultSpawnProcess,
+    spawnProcess: (
+      command: string,
+      args: string[],
+      options?: SpawnOptions,
+    ) => ChildProcess = defaultSpawnProcess,
     fileSystem: SimCtlFileSystem = defaultSimCtlFileSystem,
     bootOptions: SimCtlBootOptions = DEFAULT_SIMCTL_BOOT_OPTIONS,
-    private readonly plist: PlistReader = new PlistClient()
+    private readonly plist: PlistReader = new PlistClient(),
   ) {
     this.device = device;
     this.usesInjectedExecAsync = execAsyncFn !== null;
@@ -505,13 +563,21 @@ export class SimCtlClient implements SimCtl {
    * @param timeoutMs - Optional timeout in milliseconds
    * @returns Promise with command output
    */
-  async executeCommand(command: string, timeoutMs?: number): Promise<ExecResult> {
+  async executeCommand(
+    command: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<ExecResult> {
     const hostArgs = splitCommandArgs(command);
-    return this.executeCommandArgv(hostArgs, timeoutMs, command);
+    return this.executeCommandArgv(hostArgs, timeoutMs, command, signal);
   }
 
-  async executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult> {
-    return this.executeCommandArgv(args, timeoutMs, args.join(" "));
+  async executeCommandArgs(
+    args: string[],
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<ExecResult> {
+    return this.executeCommandArgv(args, timeoutMs, args.join(" "), signal);
   }
 
   async startCommandArgs(args: string[], options?: SpawnOptions): Promise<ChildProcess> {
@@ -530,18 +596,24 @@ export class SimCtlClient implements SimCtl {
       await this.ensureLocalSimctlAvailable();
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      const message = this.platform === "darwin"
-        ? `simctl is not available. Please install Xcode command line tools to continue. ${detail}`
-        : "iOS simulator tooling is only available on macOS.";
+      const message =
+        this.platform === "darwin"
+          ? `simctl is not available. Please install Xcode command line tools to continue. ${detail}`
+          : "iOS simulator tooling is only available on macOS.";
       throw new ActionableError(message);
     }
   }
 
-  private async executeCommandArgv(args: string[], timeoutMs?: number, displayCommand?: string): Promise<ExecResult> {
+  private async executeCommandArgv(
+    args: string[],
+    timeoutMs?: number,
+    displayCommand?: string,
+    explicitSignal?: AbortSignal,
+  ): Promise<ExecResult> {
     if (args.length === 0) {
       throw new Error("Command cannot be empty");
     }
-    const command = displayCommand ?? args.map(arg => JSON.stringify(arg)).join(" ");
+    const command = displayCommand ?? args.map((arg) => JSON.stringify(arg)).join(" ");
     const hostArgs = args;
     const localArgs = ["simctl", ...hostArgs];
 
@@ -552,7 +624,9 @@ export class SimCtlClient implements SimCtl {
 
     await this.ensureAvailableForCommand();
 
-    const runCommand = (signal?: AbortSignal) => this.execAsync("xcrun", localArgs, undefined, signal);
+    const callerSignal = explicitSignal ?? getAbortSignal();
+    const runCommand = (signal?: AbortSignal) =>
+      this.execAsync("xcrun", localArgs, undefined, signal);
 
     // Use Promise.race to implement timeout if specified. On timeout we abort the
     // controller so the underlying child process is killed rather than left
@@ -560,21 +634,23 @@ export class SimCtlClient implements SimCtl {
     if (timeoutMs) {
       let timeoutId: NodeJS.Timeout;
       const controller = new AbortController();
+      const signal = callerSignal
+        ? AbortSignal.any([callerSignal, controller.signal])
+        : controller.signal;
 
       const timeoutPromise = new Promise<ExecResult>((_, reject) => {
-        timeoutId = this.timer.setTimeout(
-          () => {
-            controller.abort();
-            reject(new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`));
-          },
-          timeoutMs
-        );
+        timeoutId = this.timer.setTimeout(() => {
+          controller.abort();
+          reject(new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`));
+        }, timeoutMs);
       });
 
-      const runPromise = runCommand(controller.signal);
+      const runPromise = runCommand(signal);
       // Once the timeout wins the race the aborted run promise rejects with an
       // AbortError; keep it handled so it can't surface as an unhandledRejection.
-      runPromise.catch(() => { /* settled after timeout; result consumed via race */ });
+      runPromise.catch(() => {
+        /* settled after timeout; result consumed via race */
+      });
 
       try {
         const result = await Promise.race([runPromise, timeoutPromise]);
@@ -583,7 +659,9 @@ export class SimCtlClient implements SimCtl {
         return result;
       } catch (error) {
         const duration = this.timer.now() - startTime;
-        logger.warn(`[iOS] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`);
+        logger.warn(
+          `[iOS] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`,
+        );
         throw error;
       } finally {
         clearTimeout(timeoutId!);
@@ -592,13 +670,15 @@ export class SimCtlClient implements SimCtl {
 
     // No timeout specified
     try {
-      const result = await runCommand();
+      const result = await runCommand(callerSignal);
       const duration = this.timer.now() - startTime;
       logger.debug(`[iOS] Command completed in ${duration}ms: ${command}`);
       return result;
     } catch (error) {
       const duration = this.timer.now() - startTime;
-      logger.warn(`[iOS] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`);
+      logger.warn(
+        `[iOS] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`,
+      );
       throw error;
     }
   }
@@ -624,9 +704,11 @@ export class SimCtlClient implements SimCtl {
     if (!SimCtlClient.localSimctlAvailability) {
       SimCtlClient.localSimctlAvailability = this.execAsync("xcrun", ["simctl", "--version"])
         .then(() => undefined)
-        .catch(err => {
+        .catch((err) => {
           SimCtlClient.localSimctlAvailability = null;
-          logger.debug(`[iOS] simctl unavailable: ${err instanceof Error ? err.message : String(err)}`);
+          logger.debug(
+            `[iOS] simctl unavailable: ${err instanceof Error ? err.message : String(err)}`,
+          );
           throw err;
         });
     }
@@ -666,22 +748,26 @@ export class SimCtlClient implements SimCtl {
       logger.error(`Failed to parse simctl device list: ${error}`);
       throw new ActionableError(
         "Failed to parse iOS device list from 'xcrun simctl list devices --json'. " +
-        `${error instanceof Error ? error.message : String(error)}. ` +
-        `stdout (first 300 chars): ${stdoutSnippet || "<empty>"}. ` +
-        `stderr (first 300 chars): ${stderrSnippet || "<empty>"}.`
+          `${error instanceof Error ? error.message : String(error)}. ` +
+          `stdout (first 300 chars): ${stdoutSnippet || "<empty>"}. ` +
+          `stderr (first 300 chars): ${stderrSnippet || "<empty>"}.`,
       );
     }
   }
 
   async isSimulatorRunning(identifier: string): Promise<boolean> {
-    return (await this.getBootedSimulators()).some(simulator =>
-      simulator.deviceId === identifier || simulator.name === identifier
+    return (await this.getBootedSimulators()).some(
+      (simulator) => simulator.deviceId === identifier || simulator.name === identifier,
     );
   }
 
-  async startSimulator(udid: string, timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS): Promise<ChildProcess> {
+  async startSimulator(
+    udid: string,
+    timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  ): Promise<ChildProcess> {
     logger.debug(`Starting iOS simulator ${udid}`);
     const perf = createGlobalPerformanceTracker();
+    const startSignal = getAbortSignal();
 
     // `bootstatus -b` is idempotent: it boots shutdown simulators, accepts
     // already-booted simulators, and waits until CoreSimulator reports ready.
@@ -691,6 +777,11 @@ export class SimCtlClient implements SimCtl {
     perf.startOperation("bootstatus");
     try {
       await this.bootAndVerify(udid, this.bootDeadline(timeoutMs));
+    } catch (error) {
+      if (startSignal?.aborted) {
+        await this.shutdownAfterAbortedStart(udid);
+      }
+      throw error;
     } finally {
       perf.endOperation("bootstatus");
     }
@@ -704,6 +795,10 @@ export class SimCtlClient implements SimCtl {
       perf.endOperation("openSimulatorApp");
       logger.debug("Could not open Simulator.app (non-fatal)");
     }
+    if (startSignal?.aborted) {
+      await this.shutdownAfterAbortedStart(udid);
+      throw startSignal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
+    }
 
     // `simctl bootstatus -b` is synchronous, so there is no long-lived OS child
     // process to hand back. Rather than fabricate a mock handle whose `kill()` is
@@ -715,7 +810,7 @@ export class SimCtlClient implements SimCtl {
     return {
       pid: undefined,
       kill: (): boolean => {
-        void this.executeCommandArgs(["shutdown", udid]).catch(error => {
+        void this.executeCommandArgs(["shutdown", udid]).catch((error) => {
           logger.debug(`[iOS] handle.kill() shutdown failed for ${udid}: ${error}`);
         });
         return true;
@@ -723,8 +818,21 @@ export class SimCtlClient implements SimCtl {
       killed: false,
       connected: false,
       exitCode: 0,
-      signalCode: null
-    } as Pick<ChildProcess, "pid" | "kill" | "killed" | "connected" | "exitCode" | "signalCode"> as ChildProcess;
+      signalCode: null,
+    } as Pick<
+      ChildProcess,
+      "pid" | "kill" | "killed" | "connected" | "exitCode" | "signalCode"
+    > as ChildProcess;
+  }
+
+  private async shutdownAfterAbortedStart(udid: string): Promise<void> {
+    try {
+      // Cleanup must not inherit the already-aborted request signal.
+      const cleanupSignal = new AbortController().signal;
+      await this.executeCommandArgs(["shutdown", udid], 10_000, cleanupSignal);
+    } catch (error) {
+      logger.warn(`[iOS] Failed to shut down simulator ${udid} after aborted start: ${error}`);
+    }
   }
 
   async killSimulator(device: BootedDevice): Promise<void> {
@@ -740,7 +848,7 @@ export class SimCtlClient implements SimCtl {
   async waitForSimulatorReady(
     udid: string,
     timeoutMs?: number,
-    options?: { assumeBooted?: boolean }
+    options?: { assumeBooted?: boolean },
   ): Promise<BootedDevice> {
     const perf = createGlobalPerformanceTracker();
 
@@ -758,16 +866,17 @@ export class SimCtlClient implements SimCtl {
     // This is far more reliable than polling `simctl list devices` for state.
     perf.startOperation("bootstatus");
     try {
-      await this.bootAndVerify(udid, this.bootDeadline(timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS));
+      await this.bootAndVerify(
+        udid,
+        this.bootDeadline(timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS),
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // "Invalid device" means the UDID doesn't exist at all
       if (message.includes("Invalid device")) {
         throw new ActionableError(`Simulator with UDID ${udid} not found`);
       }
-      throw new ActionableError(
-        `Simulator with UDID ${udid} failed to become ready: ${message}`
-      );
+      throw new ActionableError(`Simulator with UDID ${udid} failed to become ready: ${message}`);
     } finally {
       perf.endOperation("bootstatus");
     }
@@ -790,17 +899,17 @@ export class SimCtlClient implements SimCtl {
    * On a failed verification the device is shut down, a bounded backoff is
    * awaited through the injected {@link Timer}, and the boot is retried.
    */
-  private async bootAndVerify(
-    udid: string,
-    deadlineMs: number
-  ): Promise<void> {
+  private async bootAndVerify(udid: string, deadlineMs: number): Promise<void> {
     const { maxAttempts, retryBackoffMs } = this.bootOptions;
     let lastFailure = "";
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       let bootstatusReportedAlreadyBooted = false;
       try {
-        await this.executeCommandArgs(["bootstatus", udid, "-b"], this.remainingBootTimeoutMs(deadlineMs));
+        await this.executeCommandArgs(
+          ["bootstatus", udid, "-b"],
+          this.remainingBootTimeoutMs(deadlineMs),
+        );
       } catch (error) {
         // CoreSimulator can transiently reject bootstatus with error 405 while
         // reporting the requested simulator is already Booted. Verify its state
@@ -808,7 +917,9 @@ export class SimCtlClient implements SimCtl {
         if (!isAlreadyBootedCoreSimulator405(error, udid)) {
           throw error;
         }
-        logger.debug(`[iOS] bootstatus returned expected CoreSimulator error 405 for ${udid}; verifying simulator state: ${error}`);
+        logger.debug(
+          `[iOS] bootstatus returned expected CoreSimulator error 405 for ${udid}; verifying simulator state: ${error}`,
+        );
         bootstatusReportedAlreadyBooted = true;
       }
 
@@ -820,13 +931,18 @@ export class SimCtlClient implements SimCtl {
       lastFailure = bootstatusReportedAlreadyBooted
         ? `bootstatus reported CoreSimulator error 405 but device state is ${state ?? "unknown"}, not Booted`
         : `bootstatus exited 0 but device state is ${state ?? "unknown"}, not Booted`;
-      logger.warn(`[iOS] Boot verification failed for ${udid} on attempt ${attempt}/${maxAttempts}: ${lastFailure}`);
+      logger.warn(
+        `[iOS] Boot verification failed for ${udid} on attempt ${attempt}/${maxAttempts}: ${lastFailure}`,
+      );
 
       if (attempt < maxAttempts) {
         // Best-effort: shutting down an already-shutdown device errors, and that
         // is fine — the next attempt re-boots from whatever state it is in.
         try {
-          await this.executeCommandArgs(["shutdown", udid], this.remainingBootTimeoutMs(deadlineMs));
+          await this.executeCommandArgs(
+            ["shutdown", udid],
+            this.remainingBootTimeoutMs(deadlineMs),
+          );
         } catch (error) {
           logger.debug(`[iOS] shutdown before boot retry failed for ${udid}: ${error}`);
         }
@@ -836,8 +952,8 @@ export class SimCtlClient implements SimCtl {
 
     throw new ActionableError(
       `Simulator ${udid} did not reach the Booted state after ${maxAttempts} boot attempt(s): ${lastFailure}. ` +
-      "The simulator is likely wedged. Try 'xcrun simctl shutdown all' (or erase the device with " +
-      `'xcrun simctl erase ${udid}') and start it again.`
+        "The simulator is likely wedged. Try 'xcrun simctl shutdown all' (or erase the device with " +
+        `'xcrun simctl erase ${udid}') and start it again.`,
     );
   }
 
@@ -868,16 +984,16 @@ export class SimCtlClient implements SimCtl {
    * @param requestedVersion - iOS version to target; defaults to the active
    *                           Xcode iphonesimulator SDK version.
    */
-  async resolveRuntimeIdentifier(requestedVersion?: string): Promise<string> {
-    const version = (requestedVersion ?? await this.detectIosSdkVersion()).trim();
+  async resolveRuntimeIdentifier(requestedVersion?: string, signal?: AbortSignal): Promise<string> {
+    const version = (requestedVersion ?? (await this.detectIosSdkVersion(signal))).trim();
     if (!version) {
       throw new ActionableError(
         "Could not determine an iOS version to target. Ensure Xcode is installed and " +
-        "'xcrun --sdk iphonesimulator --show-sdk-version' returns a version."
+          "'xcrun --sdk iphonesimulator --show-sdk-version' returns a version.",
       );
     }
 
-    const runtimes = await this.listIosRuntimes();
+    const runtimes = await this.listIosRuntimes(signal);
     const majorMinor = version.split(".").slice(0, 2).join(".");
     const major = version.split(".")[0];
 
@@ -885,43 +1001,55 @@ export class SimCtlClient implements SimCtl {
     for (const prefix of prefixes) {
       const match = pickHighestRuntime(runtimes, prefix);
       if (match) {
-        logger.debug(`[iOS] Resolved runtime ${match.identifier} for iOS ${version} (prefix "${prefix}")`);
+        logger.debug(
+          `[iOS] Resolved runtime ${match.identifier} for iOS ${version} (prefix "${prefix}")`,
+        );
         return match.identifier;
       }
     }
 
-    const available = runtimes.map(runtime => `${runtime.name} (${runtime.version})`).join(", ") || "<none>";
+    const available =
+      runtimes.map((runtime) => `${runtime.name} (${runtime.version})`).join(", ") || "<none>";
     throw new ActionableError(
       `No iOS simulator runtime found for iOS ${version} (tried ${version}, ${majorMinor}.x, ${major}.x). ` +
-      `Available runtimes: ${available}. Install one via Xcode > Settings > Components.`
+        `Available runtimes: ${available}. Install one via Xcode > Settings > Components.`,
     );
   }
 
   /** Read the active Xcode iphonesimulator SDK version. */
-  private async detectIosSdkVersion(): Promise<string> {
+  private async detectIosSdkVersion(signal?: AbortSignal): Promise<string> {
     try {
-      const result = await this.execAsync("xcrun", ["--sdk", "iphonesimulator", "--show-sdk-version"]);
+      const result = await this.execAsync(
+        "xcrun",
+        ["--sdk", "iphonesimulator", "--show-sdk-version"],
+        undefined,
+        signal,
+      );
       return result.stdout.trim();
     } catch (error) {
       throw new ActionableError(
         "Could not detect the iOS SDK version from Xcode " +
-        `('xcrun --sdk iphonesimulator --show-sdk-version' failed: ${error instanceof Error ? error.message : String(error)}). ` +
-        "Ensure Xcode and its command line tools are installed and selected via xcode-select."
+          `('xcrun --sdk iphonesimulator --show-sdk-version' failed: ${error instanceof Error ? error.message : String(error)}). ` +
+          "Ensure Xcode and its command line tools are installed and selected via xcode-select.",
       );
     }
   }
 
   /** List installed iOS simulator runtimes that are actually available. */
-  private async listIosRuntimes(): Promise<AppleDeviceRuntime[]> {
-    const result = await this.executeCommandArgs(["list", "runtimes", "iOS", "--json"]);
+  private async listIosRuntimes(signal?: AbortSignal): Promise<AppleDeviceRuntime[]> {
+    const result = await this.executeCommandArgs(
+      ["list", "runtimes", "iOS", "--json"],
+      undefined,
+      signal,
+    );
     try {
       const parsed = JSON.parse(result.stdout) as { runtimes?: AppleDeviceRuntime[] };
-      return (parsed.runtimes ?? []).filter(runtime => runtime.isAvailable !== false);
+      return (parsed.runtimes ?? []).filter((runtime) => runtime.isAvailable !== false);
     } catch (error) {
       throw new ActionableError(
         "Failed to parse iOS simulator runtimes from 'xcrun simctl list runtimes iOS --json': " +
-        `${error instanceof Error ? error.message : String(error)}. ` +
-        `stdout (first 300 chars): ${result.stdout.trim().slice(0, 300) || "<empty>"}.`
+          `${error instanceof Error ? error.message : String(error)}. ` +
+          `stdout (first 300 chars): ${result.stdout.trim().slice(0, 300) || "<empty>"}.`,
       );
     }
   }
@@ -936,7 +1064,7 @@ export class SimCtlClient implements SimCtl {
     try {
       const simulatorList = await this.listSimulators(timeoutMs);
       for (const runtimeDevices of Object.values(simulatorList.devices)) {
-        const match = runtimeDevices.find(device => device.udid === udid);
+        const match = runtimeDevices.find((device) => device.udid === udid);
         if (match) {
           return match.state;
         }
@@ -945,7 +1073,7 @@ export class SimCtlClient implements SimCtl {
     } catch (error) {
       logger.warn(
         `[iOS] Could not read simulator state for ${udid}: ${error instanceof Error ? error.message : String(error)}`,
-        error
+        error,
       );
       return undefined;
     }
@@ -959,8 +1087,7 @@ export class SimCtlClient implements SimCtl {
   private async resolveReadySimulator(udid: string): Promise<BootedDevice> {
     const perf = createGlobalPerformanceTracker();
     perf.startOperation("deviceLookup");
-    const simulator = (await this.listSimulatorImages())
-      .find(device => device.deviceId === udid);
+    const simulator = (await this.listSimulatorImages()).find((device) => device.deviceId === udid);
     perf.endOperation("deviceLookup");
 
     if (!simulator) {
@@ -970,7 +1097,7 @@ export class SimCtlClient implements SimCtl {
     return {
       name: simulator.name,
       platform: simulator.platform,
-      deviceId: simulator.deviceId
+      deviceId: simulator.deviceId,
     } as BootedDevice;
   }
 
@@ -997,7 +1124,9 @@ export class SimCtlClient implements SimCtl {
       // Extract all devices from all runtime versions
       for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
         for (const device of runtimeDevices) {
-          logger.debug(`Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`);
+          logger.debug(
+            `Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`,
+          );
           const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
           devices.push({
             name: device.name,
@@ -1013,7 +1142,7 @@ export class SimCtlClient implements SimCtl {
             deviceType: device.deviceTypeIdentifier,
             runtime: runtimeId,
             model: device.model,
-            architecture: device.architecture
+            architecture: device.architecture,
           } as DeviceInfo);
         }
       }
@@ -1022,7 +1151,7 @@ export class SimCtlClient implements SimCtl {
       if (devices.length > 0) {
         SimCtlClient.deviceListCache = {
           devices,
-          timestamp: this.timer.now()
+          timestamp: this.timer.now(),
         };
       } else {
         SimCtlClient.deviceListCache = null;
@@ -1091,7 +1220,7 @@ export class SimCtlClient implements SimCtl {
 
       // Search for the device in all runtime versions
       for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
-        const device = runtimeDevices.find(d => d.udid === udid);
+        const device = runtimeDevices.find((d) => d.udid === udid);
         if (device) {
           return { ...device, runtime: runtimeId };
         }
@@ -1127,8 +1256,10 @@ export class SimCtlClient implements SimCtl {
     perf.endOperation("simctlBoot");
 
     perf.startOperation("bootRegistration");
-    const bootedSimulators = await this.getBootedSimulators(this.remainingBootTimeoutMs(deadlineMs));
-    const bootedSimulator = bootedSimulators.find(device => device.deviceId === udid);
+    const bootedSimulators = await this.getBootedSimulators(
+      this.remainingBootTimeoutMs(deadlineMs),
+    );
+    const bootedSimulator = bootedSimulators.find((device) => device.deviceId === udid);
     perf.endOperation("bootRegistration");
     if (!bootedSimulator) {
       throw new ActionableError(`Failed to boot iOS simulator ${udid}`);
@@ -1140,8 +1271,12 @@ export class SimCtlClient implements SimCtl {
    * Get available device types (iPhone models, iPad models, etc.)
    * @returns Promise with array of device types
    */
-  async getDeviceTypes(): Promise<AppleDeviceType[]> {
-    const result = await this.executeCommandArgs(["list", "devicetypes", "--json"]);
+  async getDeviceTypes(signal?: AbortSignal): Promise<AppleDeviceType[]> {
+    const result = await this.executeCommandArgs(
+      ["list", "devicetypes", "--json"],
+      undefined,
+      signal,
+    );
     try {
       const data = JSON.parse(result.stdout);
       return data.devicetypes ?? [];
@@ -1173,9 +1308,18 @@ export class SimCtlClient implements SimCtl {
    * @param runtime - Runtime identifier (e.g., "iOS 17.0")
    * @returns Promise with the UDID of the created simulator
    */
-  async createSimulator(name: string, deviceType: string, runtime: string): Promise<string> {
+  async createSimulator(
+    name: string,
+    deviceType: string,
+    runtime: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     logger.debug(`Creating iOS simulator: ${name} (${deviceType}, ${runtime})`);
-    const result = await this.executeCommandArgs(["create", name, deviceType, runtime]);
+    const result = await this.executeCommandArgs(
+      ["create", name, deviceType, runtime],
+      undefined,
+      signal,
+    );
     const simulatorUdid = result.stdout.trim();
 
     if (!simulatorUdid) {
@@ -1212,7 +1356,7 @@ export class SimCtlClient implements SimCtl {
    * @returns Promise with array of app objects containing bundle identifiers and other metadata
    */
   async listApps(deviceId?: string): Promise<any[]> {
-    const targetDevice = deviceId || (this.device?.deviceId) || "booted";
+    const targetDevice = deviceId || this.device?.deviceId || "booted";
     logger.debug(`Listing installed apps on iOS simulator ${targetDevice}`);
 
     try {
@@ -1268,12 +1412,16 @@ export class SimCtlClient implements SimCtl {
    * @param deviceId - Optional device ID (defaults to current device or "booted")
    * @returns Promise with launch result containing success status and optional PID
    */
-  async launchApp(bundleId: string, options?: { foregroundIfRunning?: boolean }, deviceId?: string): Promise<{
+  async launchApp(
+    bundleId: string,
+    options?: { foregroundIfRunning?: boolean },
+    deviceId?: string,
+  ): Promise<{
     success: boolean;
     pid?: number;
-    error?: string
+    error?: string;
   }> {
-    const targetDevice = deviceId || (this.device?.deviceId) || "booted";
+    const targetDevice = deviceId || this.device?.deviceId || "booted";
     logger.debug(`Launching app ${bundleId} on iOS simulator ${targetDevice}`);
 
     try {
@@ -1286,13 +1434,13 @@ export class SimCtlClient implements SimCtl {
 
       return {
         success: true,
-        pid
+        pid,
       };
     } catch (error) {
       logger.warn(`Failed to launch iOS app ${bundleId}: ${error}`);
       return {
         success: false,
-        error: (error as Error).message
+        error: (error as Error).message,
       };
     }
   }
@@ -1304,7 +1452,7 @@ export class SimCtlClient implements SimCtl {
    * @returns Promise that resolves when termination is complete
    */
   async terminateApp(bundleId: string, deviceId?: string): Promise<void> {
-    const targetDevice = deviceId || (this.device?.deviceId) || "booted";
+    const targetDevice = deviceId || this.device?.deviceId || "booted";
     logger.debug(`Terminating app ${bundleId} on iOS simulator ${targetDevice}`);
 
     try {
@@ -1316,13 +1464,13 @@ export class SimCtlClient implements SimCtl {
   }
 
   async installApp(appPath: string, deviceId?: string): Promise<void> {
-    const targetDevice = deviceId || (this.device?.deviceId) || "booted";
+    const targetDevice = deviceId || this.device?.deviceId || "booted";
     logger.debug(`Installing app ${appPath} on iOS simulator ${targetDevice}`);
     await this.executeCommandArgs(["install", targetDevice, appPath]);
   }
 
   async uninstallApp(bundleId: string, deviceId?: string): Promise<void> {
-    const targetDevice = deviceId || (this.device?.deviceId) || "booted";
+    const targetDevice = deviceId || this.device?.deviceId || "booted";
     logger.debug(`Uninstalling app ${bundleId} from iOS simulator ${targetDevice}`);
     await this.executeCommandArgs(["uninstall", targetDevice, bundleId]);
   }
@@ -1333,7 +1481,7 @@ export class SimCtlClient implements SimCtl {
    * @returns Promise with screen dimensions
    */
   async getScreenSize(deviceId?: string): Promise<ScreenSize> {
-    const targetDevice = deviceId || (this.device?.deviceId) || "booted";
+    const targetDevice = deviceId || this.device?.deviceId || "booted";
 
     logger.info(`[iOS] Getting screen size for simulator ${targetDevice}`);
 
@@ -1386,7 +1534,7 @@ export class SimCtlClient implements SimCtl {
     if (width > 0 && height > 0 && uiScale > 0) {
       return {
         width: Math.round(width / uiScale),
-        height: Math.round(height / uiScale)
+        height: Math.round(height / uiScale),
       } as ScreenSize;
     }
 
@@ -1402,7 +1550,11 @@ export class SimCtlClient implements SimCtl {
    * Deliver a simulated remote push to a booted simulator via `simctl push`.
    * Writes the payload to a temp .apns file because executeCommand cannot stream stdin.
    */
-  async pushNotification(deviceId: string, bundleId: string, payloadJson: string): Promise<{ success: boolean; error?: string }> {
+  async pushNotification(
+    deviceId: string,
+    bundleId: string,
+    payloadJson: string,
+  ): Promise<{ success: boolean; error?: string }> {
     const dir = await fsPromises.mkdtemp(join(tmpdir(), "automobile-apns-"));
     const file = join(dir, "payload.apns");
     try {

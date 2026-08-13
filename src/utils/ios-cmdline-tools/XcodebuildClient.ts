@@ -4,10 +4,12 @@ import { ActionableError, ExecResult } from "../../models";
 import { logger } from "../logger";
 import { createExecResult } from "../execResult";
 import { defaultTimer, Timer } from "../SystemTimer";
+import { getAbortSignal } from "../AbortContext";
 
 export interface XcodebuildCommandOptions {
   timeoutMs?: number;
   maxBuffer?: number;
+  signal?: AbortSignal;
 }
 
 export interface XcodebuildStreamingOptions {
@@ -15,6 +17,7 @@ export interface XcodebuildStreamingOptions {
   readonly detached?: boolean;
   readonly stdio?: SpawnOptions["stdio"];
   readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
 }
 
 export type XcodebuildSpawner = (
@@ -62,6 +65,7 @@ export class XcodebuildClient implements Xcodebuild {
 
   async executeCommand(args: string[], options: XcodebuildCommandOptions = {}): Promise<ExecResult> {
     const { timeoutMs, maxBuffer } = options;
+    const callerSignal = options.signal ?? getAbortSignal();
     const fullCommand = `xcodebuild ${args.join(" ")}`;
     const startTime = this.timer.now();
 
@@ -79,6 +83,9 @@ export class XcodebuildClient implements Xcodebuild {
     if (timeoutMs) {
       let timeoutId: NodeJS.Timeout;
       const controller = new AbortController();
+      const signal = callerSignal
+        ? AbortSignal.any([callerSignal, controller.signal])
+        : controller.signal;
       const timeoutError = new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`);
       const timeoutPromise = new Promise<ExecResult>((_, reject) => {
         timeoutId = this.timer.setTimeout(
@@ -90,7 +97,7 @@ export class XcodebuildClient implements Xcodebuild {
         );
       });
 
-      const runPromise = run(controller.signal);
+      const runPromise = run(signal);
       // Once the timeout wins the race the aborted run promise rejects with an
       // AbortError; keep it handled so it can't surface as an unhandledRejection.
       runPromise.catch(() => { /* settled after timeout; result consumed via race */ });
@@ -110,7 +117,7 @@ export class XcodebuildClient implements Xcodebuild {
     }
 
     try {
-      const result = await run();
+      const result = await run(callerSignal);
       const duration = this.timer.now() - startTime;
       logger.debug(`[iOS] Command completed in ${duration}ms: ${fullCommand}`);
       return result;
@@ -130,7 +137,8 @@ export class XcodebuildClient implements Xcodebuild {
     args: string[],
     options: XcodebuildStreamingOptions = {}
   ): Promise<ChildProcess> {
-    if (!(await this.isAvailableWithin(options.timeoutMs ?? 5000))) {
+    const signal = options.signal ?? getAbortSignal();
+    if (!(await this.isAvailableWithin(options.timeoutMs ?? 5000, signal))) {
       throw new ActionableError("xcodebuild is not available. Please install Xcode to continue.");
     }
 
@@ -139,6 +147,7 @@ export class XcodebuildClient implements Xcodebuild {
       env: options.env,
       stdio: options.stdio,
       shell: false,
+      signal,
     });
 
     if (!child.pid) {
@@ -149,8 +158,11 @@ export class XcodebuildClient implements Xcodebuild {
     return child;
   }
 
-  private async isAvailableWithin(timeoutMs: number): Promise<boolean> {
+  private async isAvailableWithin(timeoutMs: number, callerSignal?: AbortSignal): Promise<boolean> {
     const controller = new AbortController();
+    const signal = callerSignal
+      ? AbortSignal.any([callerSignal, controller.signal])
+      : controller.signal;
     let timeoutId: NodeJS.Timeout;
     const timeout = new Promise<boolean>((_, reject) => {
       timeoutId = this.timer.setTimeout(() => {
@@ -159,7 +171,7 @@ export class XcodebuildClient implements Xcodebuild {
       }, timeoutMs);
     });
     try {
-      return await Promise.race([this.isLocalXcodebuildAvailable(controller.signal), timeout]);
+      return await Promise.race([this.isLocalXcodebuildAvailable(signal), timeout]);
     } finally {
       this.timer.clearTimeout(timeoutId!);
     }

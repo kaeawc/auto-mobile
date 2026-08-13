@@ -7,7 +7,6 @@ import { parseOutputReductionFlags } from "../utils/outputReductionFlags";
 import { parseToolOutputsDirConfig } from "../utils/toolOutputArtifacts";
 import { resolveDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import {
-  DEFAULT_RUNNER_READINESS_TIMEOUT_MS,
   MAX_RUNNER_READINESS_TIMEOUT_MS,
   MIN_RUNNER_READINESS_TIMEOUT_MS,
   RUNNER_READINESS_TIMEOUT_ENV,
@@ -88,8 +87,9 @@ export function parseArgs(
     environment[RUNNER_READINESS_TIMEOUT_ENV] ??
     environment.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS;
   const parsedRunnerReadinessEnv = parseRunnerReadinessTimeout(runnerReadinessEnv);
-  let runnerReadinessTimeoutMs =
-    parsedRunnerReadinessEnv ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
+  // Undefined means this client has no opinion about a running daemon's
+  // readiness budget. The daemon's ServerConfig owns the product default.
+  let runnerReadinessTimeoutMs = parsedRunnerReadinessEnv;
   if (runnerReadinessEnv !== undefined && parsedRunnerReadinessEnv === undefined) {
     log.warn(
       `Invalid ${RUNNER_READINESS_TIMEOUT_ENV}: ${runnerReadinessEnv}; expected an integer ` +

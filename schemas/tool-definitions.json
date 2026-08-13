@@ -8515,7 +8515,7 @@
           "description": "Total device boot and automation-readiness timeout in ms",
           "type": "integer",
           "exclusiveMinimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 2147478647
         },
         "runnerReadinessTimeoutMs": {
           "description": "Runner-readiness budget in ms within timeoutMs; overrides the daemon default (1000-120000)",

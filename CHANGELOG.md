@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.55] - 2026-08-13
+### Other
+- No changes.
+
 ## [v0.0.54] - 2026-08-13
 ### Added
 - feat(desktop): UpdateController — detect newer GitHub release (no UI, no side effects) ([#5224](https://github.com/kaeawc/auto-mobile/issues/5224)) (desktop)

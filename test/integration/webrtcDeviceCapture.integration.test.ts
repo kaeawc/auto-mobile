@@ -651,13 +651,27 @@ function startStreamLeaseHeartbeat(
     }
     inFlight = sendWebRtcStreamRequest(
       { action: "status", id: `${streamId}-lease-heartbeat`, streamId, leaseId },
-      { socketPath, timeoutMs: 1_000 }
+      // Generous per-request budget: a keep-alive is not latency-sensitive and the
+      // old 1s deadline flaked under macos-26 CI contention. Still far under the
+      // TTL/3 renew interval, so it never overlaps the next tick.
+      { socketPath, timeoutMs: 5_000 }
     ).then(response => {
       if (!response.success) {
-        throw new Error(`failed to renew WebRTC stream lease: ${response.error ?? "no error detail returned"}`);
+        // The daemon actively REJECTED the renewal (lease expired or unknown) — a
+        // genuine ownership loss, which is exactly what this heartbeat guards
+        // against, so it is fatal.
+        failure = new Error(`failed to renew WebRTC stream lease: ${response.error ?? "no error detail returned"}`);
       }
-    }).catch(error => {
-      failure = error instanceof Error ? error : new Error(String(error));
+    }).catch((error: unknown) => {
+      // A transient request timeout / socket hiccup is NOT a lease loss: the 60s
+      // TTL spans several TTL/3 renews, so the next tick recovers and the stream is
+      // never reclaimed within the test window. Logging instead of latching a
+      // failure keeps a single contention blip from failing an otherwise-passing
+      // run (both device lanes reached every stage — the flake was here).
+      console.warn(
+        `WebRTC stream lease renew attempt failed transiently (will retry next tick): ` +
+          `${error instanceof Error ? error.message : String(error)}`
+      );
     }).finally(() => {
       inFlight = null;
     });

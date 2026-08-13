@@ -19,6 +19,7 @@ import {
   MAX_RUNNER_READINESS_TIMEOUT_MS,
   MIN_RUNNER_READINESS_TIMEOUT_MS,
 } from "../../src/utils/runnerReadinessConfig";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import * as os from "os";
 
 const AUTOLOCK_ENV_KEYS = [
@@ -300,6 +301,83 @@ describe("startDevice handler", () => {
       const result = await start;
       expect(result.sessionId).toBe("session-1");
     }
+  });
+
+  it("reserves a pooled device while runner readiness is in flight", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    daemonSessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.initializeWithDevices([androidDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    let releaseReadiness!: () => void;
+    const readinessGate = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    let readinessStarted!: () => void;
+    const waitForReadiness = new Promise<void>((resolve) => {
+      readinessStarted = resolve;
+    });
+    setDeviceToolsDependencies({
+      timer,
+      idGenerator: new CountingIdGenerator("session"),
+      ensureCtrlProxyReady: async () => {
+        readinessStarted();
+        await readinessGate;
+      },
+    });
+    registerDeviceTools();
+
+    const start = callStartDevice({ platform: "android" });
+    await waitForReadiness;
+    expect(pool.getIdleDevices()).toEqual([]);
+    await expect(pool.assignDeviceToSession("competing-session", "android")).rejects.toThrow(
+      /Timed out waiting for device/,
+    );
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
+
+    releaseReadiness();
+    const result = await start;
+    expect(result.sessionId).toBe("session-1");
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("session-1");
+  });
+
+  it("releases a pooled-device reservation when runner readiness fails", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([androidDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        throw new Error("runner unavailable");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow("runner unavailable");
+
+    expect(pool.getIdleDevices().map((device) => device.id)).toEqual([androidDevice.deviceId]);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
   });
 
   it("cold-boots without a process handle (adopted device: startDevice returns null)", async () => {

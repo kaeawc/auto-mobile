@@ -156,6 +156,7 @@ export class DevicePool {
   private readonly recoveringAndroidImages: Map<string, DeviceInfo> = new Map();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
+  private readonly readinessReservationCounts: Map<string, number> = new Map();
   /**
    * Serials the user intentionally stopped, mapped to the pooled-device
    * incarnation that was present at mark time (or {@link INCARNATION_ANY} when
@@ -1704,7 +1705,9 @@ export class DevicePool {
 
       // If no devices available and pool is empty, try to refresh
       // This handles race conditions during daemon startup
-      const busyDevicesBeforeRefresh = candidates.filter((d) => d.status === "busy").length;
+      const busyDevicesBeforeRefresh = candidates.filter(
+        (device) => device.status === "busy" || this.isReservedForReadiness(device.id),
+      ).length;
       if (
         !device &&
         (this.devices.size === 0 || totalDevices === 0 || busyDevicesBeforeRefresh === 0)
@@ -1730,7 +1733,9 @@ export class DevicePool {
 
       if (!device) {
         // No idle device - check if devices exist but are busy
-        const busyDevices = candidates.filter((d) => d.status === "busy").length;
+        const busyDevices = candidates.filter(
+          (candidate) => candidate.status === "busy" || this.isReservedForReadiness(candidate.id),
+        ).length;
 
         return {
           success: false,
@@ -1808,7 +1813,9 @@ export class DevicePool {
 
   private selectIdleDevice(candidates: PooledDevice[]): PooledDevice | undefined {
     // Find idle devices and prefer most recently released for reuse
-    const idleDevices = candidates.filter((d) => d.status === "idle");
+    const idleDevices = candidates.filter(
+      (device) => device.status === "idle" && !this.isReservedForReadiness(device.id),
+    );
     if (idleDevices.length === 0) {
       return undefined;
     }
@@ -1957,6 +1964,47 @@ export class DevicePool {
     this.lastReleasedDeviceId = deviceId;
 
     logger.info(`Released device ${deviceId} from session ${sessionId}`);
+  }
+
+  /**
+   * Keep an exact device out of general pool allocation while startDevice
+   * verifies its runner. The reservation does not create a user-visible
+   * session; session ownership is transferred only after readiness succeeds.
+   */
+  async reserveDeviceForReadiness(
+    deviceId: string,
+    expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+  ): Promise<() => Promise<void>> {
+    await this.assignmentMutex.runExclusive(() => {
+      const pooled = this.devices.get(deviceId);
+      if (pooled) {
+        this.assertRuntimeIdentity(pooled, expectedIdentity);
+      }
+      this.readinessReservationCounts.set(
+        deviceId,
+        (this.readinessReservationCounts.get(deviceId) ?? 0) + 1,
+      );
+    });
+
+    let released = false;
+    return async () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      await this.assignmentMutex.runExclusive(() => {
+        const count = this.readinessReservationCounts.get(deviceId);
+        if (count === undefined || count <= 1) {
+          this.readinessReservationCounts.delete(deviceId);
+          return;
+        }
+        this.readinessReservationCounts.set(deviceId, count - 1);
+      });
+    };
+  }
+
+  private isReservedForReadiness(deviceId: string): boolean {
+    return (this.readinessReservationCounts.get(deviceId) ?? 0) > 0;
   }
 
   /**
@@ -2372,7 +2420,9 @@ export class DevicePool {
    * Get all idle devices (available for assignment)
    */
   getIdleDevices(): PooledDevice[] {
-    return Array.from(this.devices.values()).filter((d) => d.status === "idle");
+    return Array.from(this.devices.values()).filter(
+      (device) => device.status === "idle" && !this.isReservedForReadiness(device.id),
+    );
   }
 
   /**
@@ -2463,8 +2513,12 @@ export class DevicePool {
     error: number;
   } {
     const devices = this.getDevicesByPlatform(platform);
-    const idle = devices.filter((device) => device.status === "idle").length;
-    const assigned = devices.filter((device) => device.status === "busy").length;
+    const idle = devices.filter(
+      (device) => device.status === "idle" && !this.isReservedForReadiness(device.id),
+    ).length;
+    const assigned = devices.filter(
+      (device) => device.status === "busy" || this.isReservedForReadiness(device.id),
+    ).length;
     const error = devices.filter((device) => device.status === "error").length;
 
     return {
@@ -2487,7 +2541,9 @@ export class DevicePool {
   } {
     const all = this.getAllDevices();
     const idle = this.getIdleDevices().length;
-    const assigned = this.getAssignedDevices().length;
+    const assigned = all.filter(
+      (device) => device.status === "busy" || this.isReservedForReadiness(device.id),
+    ).length;
     const error = this.getErrorDevices().length;
     const avgAssignments =
       all.length > 0

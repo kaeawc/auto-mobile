@@ -86,8 +86,18 @@ class FakeAndroidManager implements ReadinessAndroidManager {
 }
 
 class FakeIosManager implements ReadinessIosManager {
+  installed = true;
   setupResult = { success: true, message: "ready" };
   setupCalls = 0;
+  startCalls = 0;
+
+  async isInstalled(): Promise<boolean> {
+    return this.installed;
+  }
+
+  async start(): Promise<void> {
+    this.startCalls++;
+  }
 
   async setup() {
     this.setupCalls++;
@@ -269,6 +279,46 @@ describe("RunnerReadinessService", () => {
         readinessTimeoutMs: 30_000,
       }),
     ).rejects.toThrow(/phase=runner-setup.*xcodebuild exited 65/);
+  });
+
+  test("starts only the cached iOS runner when downloads are disabled", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    const { service } = createService({ iosManager, iosClient });
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+      skipCtrlProxyDownload: true,
+    });
+
+    expect(iosManager.startCalls).toBe(1);
+    expect(iosManager.setupCalls).toBe(0);
+    expect(iosClient.healthCalls).toBe(1);
+  });
+
+  test("fails without iOS setup when downloads are disabled and no runner is installed", async () => {
+    const iosManager = new FakeIosManager();
+    iosManager.installed = false;
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    const { service } = createService({ iosManager, iosClient });
+
+    await expect(
+      service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "platform=ios deviceId=IOS-UDID",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+        skipCtrlProxyDownload: true,
+      }),
+    ).rejects.toThrow(/not installed.*downloads are disabled/);
+
+    expect(iosManager.startCalls).toBe(0);
+    expect(iosManager.setupCalls).toBe(0);
   });
 
   test("coalesces concurrent readiness for the same device", async () => {

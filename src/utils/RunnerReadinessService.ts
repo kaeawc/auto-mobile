@@ -58,6 +58,8 @@ export interface ReadinessAndroidManager {
 }
 
 export interface ReadinessIosManager {
+  isInstalled(): Promise<boolean>;
+  start(): Promise<void>;
   setup(
     force?: boolean,
     perf?: PerformanceTracker,
@@ -384,12 +386,35 @@ export class RunnerReadinessService {
       }
     }
 
+    if (context.skipCtrlProxyDownload) {
+      await this.ensureIosReadyWithoutDownloads(context, manager, client);
+      return;
+    }
+
     const setup = await this.runPhase(context, "runner-setup", 1, (signal) =>
       manager.setup(false, context.perf, signal),
     );
     if (!setup.success) {
       this.fail(context, "runner-setup", 1, setup.error ?? setup.message);
     }
+    await this.waitForResponsiveClient(context, client);
+  }
+
+  private async ensureIosReadyWithoutDownloads(
+    context: ReadinessAttemptContext,
+    manager: ReadinessIosManager,
+    client: ReadinessClient,
+  ): Promise<void> {
+    const installed = await this.runPhase(context, "runner-setup", 1, () => manager.isInstalled());
+    if (!installed) {
+      this.fail(
+        context,
+        "runner-setup",
+        1,
+        "CtrlProxy iOS runner is not installed and runner downloads are disabled",
+      );
+    }
+    await this.runPhase(context, "runner-setup", 1, () => manager.start());
     await this.waitForResponsiveClient(context, client);
   }
 

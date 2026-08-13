@@ -438,6 +438,7 @@ export function registerDeviceTools() {
     const requestedIdentity = describeStartDeviceRequest(args);
     let boot: DeviceBootResult | undefined;
     let ownershipTransferred = false;
+    let releaseReadinessReservation: (() => Promise<void>) | undefined;
 
     try {
       const bootService = new DeviceBootService({
@@ -456,6 +457,12 @@ export function registerDeviceTools() {
       perf.endOperation("bootDevice");
       validateBootIdentity(args, boot.device, boot.source, boot.sourceImage);
       validatePooledDeviceMapping(boot.device, requestedIdentity);
+      const daemonState = DaemonState.getInstance();
+      if (daemonState.isInitialized()) {
+        releaseReadinessReservation = await daemonState
+          .getDevicePool()
+          .reserveDeviceForReadiness(boot.device.deviceId, boot.device);
+      }
 
       // A new incarnation must not inherit a prior intentional-shutdown marker
       // while its per-device runner setup is in flight.
@@ -508,6 +515,8 @@ export function registerDeviceTools() {
         throw error;
       }
       throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
+    } finally {
+      await releaseReadinessReservation?.();
     }
   };
 

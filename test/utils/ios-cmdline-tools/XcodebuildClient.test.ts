@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { XcodebuildClient } from "../../../src/utils/ios-cmdline-tools/XcodebuildClient";
 import type { ExecResult } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
+import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../../../src/utils/runnerReadinessConfig";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 
@@ -168,6 +169,36 @@ describe("XcodebuildClient streaming runner", () => {
     await expect(client.startStreaming(["test-without-building"])).rejects.toThrow(
       "xcodebuild is not available"
     );
+  });
+
+  test("uses the runner-readiness budget for a no-options availability probe", async () => {
+    const timer = new FakeTimer();
+    const child = new FakeChildProcess();
+    let resolveAvailability: (() => void) | undefined;
+    let spawned = false;
+    const client = new XcodebuildClient(
+      async () => new Promise<ExecResult>(resolve => {
+        resolveAvailability = () => resolve(createExecResult("Xcode 26.5", ""));
+      }),
+      timer,
+      () => {
+        spawned = true;
+        return child as never;
+      }
+    );
+
+    const promise = client.startStreaming(["test-without-building"]);
+    if (!resolveAvailability) {
+      throw new Error("Availability probe did not start");
+    }
+
+    timer.advanceTime(5001);
+    expect(spawned).toBe(false);
+    expect(timer.getPendingTimeouts()).toEqual([DEFAULT_RUNNER_READINESS_TIMEOUT_MS]);
+
+    resolveAvailability();
+    await expect(promise).resolves.toBe(child);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("startStreaming releases the availability-probe timer handle", async () => {

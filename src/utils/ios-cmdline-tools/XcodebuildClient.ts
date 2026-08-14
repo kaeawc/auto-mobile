@@ -5,6 +5,7 @@ import { logger } from "../logger";
 import { createExecResult } from "../execResult";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { getAbortSignal } from "../AbortContext";
+import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../runnerReadinessConfig";
 
 export interface XcodebuildCommandOptions {
   timeoutMs?: number;
@@ -138,7 +139,7 @@ export class XcodebuildClient implements Xcodebuild {
     options: XcodebuildStreamingOptions = {}
   ): Promise<ChildProcess> {
     const signal = options.signal ?? getAbortSignal();
-    if (!(await this.isAvailableWithin(options.timeoutMs ?? 5000, signal))) {
+    if (!(await this.isAvailableWithin(options.timeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS, signal))) {
       throw new ActionableError("xcodebuild is not available. Please install Xcode to continue.");
     }
 

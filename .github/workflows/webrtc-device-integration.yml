@@ -189,6 +189,12 @@ jobs:
           # The checked-out Swift package is a CI development fixture. Production
           # installs resolve only the signed helper from GitHub Releases.
           AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER: ${{ github.workspace }}/ios/screen-capture/.build/debug/screen-capture-helper
+          # ScreenCaptureKit window enumeration on this hosted macos-26 runner
+          # intermittently exceeds the 2s production default even though the boot
+          # step already confirmed the window is discoverable, so give the daemon
+          # (spawned by the test) a generous resolution budget. Well under the 45s
+          # stream-request timeout; the fast path is unaffected.
+          AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS: "15000"
         run: bun run test:integration:webrtc-device
       # Print the legend for reading result.txt / stage-latency.json and the
       # benign chrome.log/mediamtx.log ERROR lines (#4308). if: always() so it

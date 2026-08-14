@@ -116,23 +116,63 @@ async function waitFor(predicate: () => Promise<boolean>, message: string, timeo
   throw new Error(message);
 }
 
-async function waitForWebRtcStreamSocket(socketPath: string): Promise<void> {
-  await waitFor(async () => {
-    try {
-      const response = await sendWebRtcStreamRequest(
-        { action: "list", id: `${streamId}-daemon-ready` },
-        { socketPath, timeoutMs: 1_000 }
-      );
-      return response.success;
-    } catch {
-      return false;
-    }
-  }, "AutoMobile daemon did not become ready");
+async function waitForWebRtcStreamSocket(
+  socketPath: string,
+  // Match AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS (60s) so a merely-slow daemon is
+  // not abandoned inside its own startup budget.
+  timeoutMs = 60_000
+): Promise<void> {
+  // Retain WHY the last probe failed. A rejected request returns success=false
+  // with an error (e.g. the stream-socket auth guard), and a dropped socket
+  // throws; surface either in the timeout so a regression is diagnosable from the
+  // job console instead of only the uploaded daemon log.
+  let lastDetail = "no response from the daemon stream socket yet";
+  try {
+    await waitFor(
+      async () => {
+        try {
+          const response = await sendWebRtcStreamRequest(
+            { action: "list", id: `${streamId}-daemon-ready` },
+            { socketPath, timeoutMs: 1_000 }
+          );
+          if (response.success) {
+            return true;
+          }
+          lastDetail = response.error ?? "request rejected without an error detail";
+          return false;
+        } catch (error) {
+          lastDetail = error instanceof Error ? error.message : String(error);
+          return false;
+        }
+      },
+      "unused",
+      timeoutMs
+    );
+  } catch {
+    throw new Error(`AutoMobile daemon stream socket did not become ready: ${lastDetail}`);
+  }
 }
 
 async function startWebRtcDaemon(daemonEnvironment: NodeJS.ProcessEnv, socketPath: string): Promise<void> {
-  await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], { env: daemonEnvironment }).catch(() => undefined);
-  await waitForWebRtcStreamSocket(socketPath);
+  // Keep the start command's own failure instead of fully swallowing it, so a
+  // daemon that never spawns is reported alongside the readiness timeout rather
+  // than surfacing only as a generic "socket did not become ready".
+  const startError = await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], {
+    env: daemonEnvironment,
+  })
+    .then(() => null)
+    .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+  try {
+    await waitForWebRtcStreamSocket(socketPath);
+  } catch (readyError) {
+    if (startError) {
+      throw new Error(
+        `${readyError instanceof Error ? readyError.message : String(readyError)}; ` +
+          `daemon start command failed: ${startError.message}`
+      );
+    }
+    throw readyError;
+  }
 }
 
 /**
@@ -611,13 +651,27 @@ function startStreamLeaseHeartbeat(
     }
     inFlight = sendWebRtcStreamRequest(
       { action: "status", id: `${streamId}-lease-heartbeat`, streamId, leaseId },
-      { socketPath, timeoutMs: 1_000 }
+      // Generous per-request budget: a keep-alive is not latency-sensitive and the
+      // old 1s deadline flaked under macos-26 CI contention. Still far under the
+      // TTL/3 renew interval, so it never overlaps the next tick.
+      { socketPath, timeoutMs: 5_000 }
     ).then(response => {
       if (!response.success) {
-        throw new Error(`failed to renew WebRTC stream lease: ${response.error ?? "no error detail returned"}`);
+        // The daemon actively REJECTED the renewal (lease expired or unknown) — a
+        // genuine ownership loss, which is exactly what this heartbeat guards
+        // against, so it is fatal.
+        failure = new Error(`failed to renew WebRTC stream lease: ${response.error ?? "no error detail returned"}`);
       }
-    }).catch(error => {
-      failure = error instanceof Error ? error : new Error(String(error));
+    }).catch((error: unknown) => {
+      // A transient request timeout / socket hiccup is NOT a lease loss: the 60s
+      // TTL spans several TTL/3 renews, so the next tick recovers and the stream is
+      // never reclaimed within the test window. Logging instead of latching a
+      // failure keeps a single contention blip from failing an otherwise-passing
+      // run (both device lanes reached every stage — the flake was here).
+      console.warn(
+        `WebRTC stream lease renew attempt failed transiently (will retry next tick): ` +
+          `${error instanceof Error ? error.message : String(error)}`
+      );
     }).finally(() => {
       inFlight = null;
     });
@@ -682,6 +736,16 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       // use CtrlProxy, so do not compete for the hosted runner with a release
       // download that is unrelated to capture -> WHIP -> WHEP.
       AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD: "1",
+      // Opt this isolated, self-spawned daemon out of stream-socket session auth
+      // (#4923). The guard requires every webrtcStream request to carry a
+      // sessionUuid from a live daemon session; this harness talks to the socket
+      // directly and never establishes one, so with the guard on EVERY probe is
+      // rejected and `waitForWebRtcStreamSocket` times out — the deterministic
+      // failure that has reddened both device lanes on every webrtc-touching PR
+      // since the guard landed. The guard itself is covered by its own unit tests
+      // (streamSocketAuth / socketServerHandshake); this lane's job is the
+      // capture -> WHIP -> WHEP pipeline, so it uses the documented escape hatch.
+      AUTOMOBILE_DAEMON_STREAM_AUTH: "0",
     };
     delete daemonEnvironment.AUTOMOBILE_DB_PATH;
     delete daemonEnvironment.AUTO_MOBILE_DB_PATH;

@@ -188,8 +188,8 @@ describe("XcodebuildClient streaming runner", () => {
     );
 
     const promise = client.startStreaming(["test-without-building"]);
-    while (!resolveAvailability) {
-      await Promise.resolve();
+    if (!resolveAvailability) {
+      throw new Error("Availability probe did not start");
     }
 
     timer.advanceTime(5001);

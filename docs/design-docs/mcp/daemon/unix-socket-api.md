@@ -862,8 +862,9 @@ than aborting work that is still in progress.
 For `startDevice`, 180 000 ms is only the minimum transport floor. When the
 tool arguments specify a larger total `timeoutMs` (either at the top level or
 in the legacy `device` object), the daemon keeps the transport alive for that
-budget plus 5 000 ms of response overhead. Runner readiness has its own bounded
-budget inside that total: `runnerReadinessTimeoutMs` overrides the daemon's
+budget plus 5 000 ms of response overhead. That explicit timeout is also shared
+with runner readiness. `runnerReadinessTimeoutMs` supplies a narrower
+phase-specific override; when `timeoutMs` is omitted, the daemon uses the
 `AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS` / `--runner-readiness-timeout-ms`
 default (30 000 ms; accepted range 1 000–120 000 ms).
 

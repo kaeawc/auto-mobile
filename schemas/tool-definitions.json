@@ -8518,7 +8518,7 @@
           "maximum": 890000
         },
         "runnerReadinessTimeoutMs": {
-          "description": "Runner-readiness budget in ms within timeoutMs; overrides the daemon default (1000-120000)",
+          "description": "Runner-readiness budget in ms within timeoutMs; overrides the shared timeout (1000-120000)",
           "type": "integer",
           "minimum": 1000,
           "maximum": 120000

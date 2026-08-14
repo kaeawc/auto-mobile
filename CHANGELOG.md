@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.56] - 2026-08-14
+### Other
+- No changes.
+
 ## [v0.0.55] - 2026-08-13
 ### Other
 - No changes.

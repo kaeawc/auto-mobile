@@ -35,7 +35,7 @@ android {
     minSdk = libs.versions.build.android.minSdk.get().toInt()
     targetSdk = libs.versions.build.android.targetSdk.get().toInt()
     versionCode = 1
-    versionName = "0.0.55-SNAPSHOT"
+    versionName = "0.0.56-SNAPSHOT"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

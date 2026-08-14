@@ -71,7 +71,7 @@ const startDeviceParametersSchema = z.object({
     .max(MAX_RUNNER_READINESS_TIMEOUT_MS)
     .optional()
     .describe(
-      "Runner-readiness budget in ms within timeoutMs; overrides the daemon default " +
+      "Runner-readiness budget in ms within timeoutMs; overrides the shared timeout " +
       `(${MIN_RUNNER_READINESS_TIMEOUT_MS}-${MAX_RUNNER_READINESS_TIMEOUT_MS})`
     ),
   createIfMissing: z.boolean().optional().describe(
@@ -291,6 +291,14 @@ function describeStartDeviceRequest(args: StartDeviceArgs): string {
   ].filter((value): value is string => value !== undefined).join(" ");
 }
 
+function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
+  return (
+    args.runnerReadinessTimeoutMs ??
+    args.timeoutMs ??
+    serverConfig.getRunnerReadinessTimeoutMs()
+  );
+}
+
 function validateBootIdentity(
   args: StartDeviceArgs,
   device: BootedDevice,
@@ -434,6 +442,10 @@ export function registerDeviceTools() {
     const deps = getDeviceToolsDependencies();
     const deviceUtils = deps.deviceManagerFactory();
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    // An explicit timeoutMs is an end-to-end startDevice contract. Preserve it
+    // for runner readiness unless the caller deliberately supplies a narrower
+    // phase-specific budget.
+    const readinessTimeoutMs = resolveRunnerReadinessTimeoutMs(args);
     const totalDeadlineMs = deps.timer.now() + totalTimeoutMs;
     const requestedIdentity = describeStartDeviceRequest(args);
     let boot: DeviceBootResult | undefined;
@@ -473,8 +485,7 @@ export function registerDeviceTools() {
         device: boot.device,
         requestedIdentity,
         totalDeadlineMs,
-        readinessTimeoutMs:
-          args.runnerReadinessTimeoutMs ?? serverConfig.getRunnerReadinessTimeoutMs(),
+        readinessTimeoutMs,
         skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
         perf,
         signal,

@@ -603,6 +603,35 @@ describe("startDevice handler", () => {
     })]);
   });
 
+  it("uses an explicit total timeout for readiness when no phase override is supplied", async () => {
+    const readinessRequests: Array<{
+      totalDeadlineMs: number;
+      readinessTimeoutMs: number;
+    }> = [];
+    const timer = new FakeTimer();
+    timer.advanceTime(1_000);
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async request => {
+        readinessRequests.push(request);
+      },
+    });
+    registerDeviceTools();
+    fakeDeviceUtils.setBootedDevices("ios", [iosDevice]);
+    fakeMatcher.setBootedResult(iosDevice);
+
+    await callStartDevice({
+      platform: "ios",
+      deviceId: iosDevice.deviceId,
+      timeoutMs: 300_000,
+    });
+
+    expect(readinessRequests).toEqual([expect.objectContaining({
+      totalDeadlineMs: 301_000,
+      readinessTimeoutMs: 300_000,
+    })]);
+  });
+
   it("boots image when deviceId matches an image name", async () => {
     fakeDeviceUtils.setBootedDevices("android", []);
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);

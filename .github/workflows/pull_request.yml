@@ -1317,7 +1317,18 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             bun run test:windows 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
           else
-            turbo run test --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
+            # macOS-only (this job's matrix is macos + windows; the ubuntu Node TS
+            # suite is a SEPARATE job that keeps the tight 5s ceiling). The hosted
+            # macos runner is markedly slower / more contended than the Linux lane,
+            # so this ~13k-test --isolate suite intermittently trips bun's default
+            # 5s per-test / 10s hook ceiling by a hair (observed 5002/5004ms on
+            # fully-faked tests; a 10052ms beforeEach/afterEach hook) — a pure
+            # runner-contention flake, macos-only (ubuntu + windows had zero). Raise
+            # bun's timeout to give that headroom; --timeout covers BOTH the test and
+            # hook budgets (verified). Bypass turbo like the Windows branch so the
+            # flag applies directly (macos then always runs, which also keeps the
+            # native-source-scan guard tests from ever replaying a cached result).
+            bun test --isolate --timeout 20000 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
           fi
 
       - name: "Run Bun image runtime smoke"

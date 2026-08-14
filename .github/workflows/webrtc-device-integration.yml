@@ -195,7 +195,68 @@ jobs:
           # (spawned by the test) a generous resolution budget. Well under the 45s
           # stream-request timeout; the fast path is unaffected.
           AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS: "15000"
-        run: bun run test:integration:webrtc-device
+        # Belt-and-suspenders lane retry (2 attempts) layered on top of #5245's
+        # fixes. The one remaining GENUINE flake is intermittent: at capture start
+        # the daemon resolves the Simulator window via ScreenCaptureKit, which under
+        # macos-26 runner load can occasionally exceed even the 15s budget above and
+        # time out. A single transient miss should not redden the lane, so a second
+        # attempt runs before failing.
+        #
+        # The env block above is on the step, so it applies to BOTH attempts. The
+        # booted+activated Simulator from the prior "Boot and activate" step stays up
+        # across attempts and is deliberately NOT touched here.
+        #
+        # Attempt 2 runs ONLY after reaping attempt 1's processes. The test's own
+        # finally-block teardown stops MediaMTX and the daemon, but bun SKIPS that
+        # finally when a test-body deadline fires (exactly this timeout flake), which
+        # would leave MediaMTX bound to 8889 and the daemon subprocess alive and make
+        # a naive retry fail deterministically on a port/socket conflict.
+        run: |
+          set -uo pipefail
+
+          reap_before_retry() {
+            # AutoMobile daemon subprocess: DaemonLauncher spawns it as
+            # `<bun> dist/src/index.js --daemon-mode`; nothing else carries that flag.
+            pkill -f "index.js --daemon-mode" 2>/dev/null || true
+            # MediaMTX SFU — binds the WHIP/WHEP port 8889 the next attempt needs free.
+            pkill -x mediamtx 2>/dev/null || true
+            # Headless Chrome WHEP reader — binds the fixed CDP debug port 9222.
+            pkill -f "remote-debugging-port=9222" 2>/dev/null || true
+            # Give SIGTERM a moment, then hard-kill any straggler still holding a port.
+            sleep 2
+            pkill -KILL -x mediamtx 2>/dev/null || true
+            pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
+            # Confirm 8889 is actually free before retrying; wait for the kernel to
+            # release the listener. A retry into a still-bound port is worse than no
+            # retry, so abort the retry (fail the step) rather than guarantee a
+            # second failure.
+            for _ in $(seq 1 15); do
+              lsof -nP -iTCP:8889 -sTCP:LISTEN >/dev/null 2>&1 || return 0
+              sleep 1
+            done
+            echo "::error::Port 8889 still bound after cleanup; skipping retry to avoid a guaranteed conflict." >&2
+            return 1
+          }
+
+          attempts=2
+          for attempt in $(seq 1 "${attempts}"); do
+            echo "::group::iOS device capture integration (attempt ${attempt}/${attempts})"
+            bun run test:integration:webrtc-device && rc=0 || rc=$?
+            echo "::endgroup::"
+            if [ "${rc}" -eq 0 ]; then
+              if [ "${attempt}" -gt 1 ]; then
+                echo "iOS device capture passed on retry (transient macos-26 ScreenCaptureKit flake)."
+              fi
+              exit 0
+            fi
+            echo "iOS device capture attempt ${attempt} failed (exit ${rc})."
+            if [ "${attempt}" -lt "${attempts}" ]; then
+              echo "Reaping MediaMTX / daemon / Chrome before one retry."
+              reap_before_retry || exit 1
+            fi
+          done
+          echo "iOS device capture failed after ${attempts} attempts."
+          exit 1
       # Print the legend for reading result.txt / stage-latency.json and the
       # benign chrome.log/mediamtx.log ERROR lines (#4308). if: always() so it
       # is there for failed runs too, when it is most needed.

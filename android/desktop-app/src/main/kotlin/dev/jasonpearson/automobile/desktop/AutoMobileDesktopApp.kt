@@ -33,6 +33,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.DaemonEmulatorControlE
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
 import dev.jasonpearson.automobile.desktop.core.workspace.FailuresFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NetworkFacet
@@ -408,8 +409,6 @@ fun AutoMobileDesktopApp(
             state = pickerState,
             onAction = pickerViewModel::onAction,
             onClose = { pickerOpen = false },
-            // Authenticates each grid card's live-video subscribe against the daemon session guard.
-            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
             // Only offer Close when there is an observed workspace to return to.
             canClose = workspaceState is WorkspaceUiState.Content,
           )
@@ -433,6 +432,15 @@ fun AutoMobileDesktopApp(
               status = workspaceStatus.status,
               statusDetail = workspaceStatus.detail,
               facetContent = { column, tool -> WorkspaceFacet(column, tool) },
+              // Inspect mode's Layout inspector renders live video for its pixels; the session
+              // provider authenticates that subscribe against the stream-socket guard (#4751),
+              // exactly as the stream pane below.
+              inspectContent = { column ->
+                LayoutFacet(
+                  column,
+                  sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                )
+              },
               // Live device mirror in each pane's stream area, fed by the daemon's video-stream
               // relay. The pane authenticates with the workspace daemon session (#4977) bound to
               // the focused device above; when no session is available (non-Unix daemon, or the

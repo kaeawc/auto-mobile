@@ -8,6 +8,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
+import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -33,6 +34,7 @@ class LayoutFacetTest {
           LayoutFacet(
             column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
             observationStreamFactory = { fake },
+            videoSourceFactory = { FakeVideoStreamSource() },
           )
         }
       }
@@ -59,6 +61,7 @@ class LayoutFacetTest {
             column =
               DeviceColumn(deviceId = deviceId.value, name = "Pixel", platform = Platform.Android),
             observationStreamFactory = factory,
+            videoSourceFactory = { FakeVideoStreamSource() },
           )
         }
       }
@@ -88,10 +91,12 @@ class LayoutFacetTest {
           LayoutFacet(
             column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
             observationStreamFactory = factory,
+            videoSourceFactory = { FakeVideoStreamSource() },
           )
           LayoutFacet(
             column = DeviceColumn(deviceId = "dev-2", name = "iPhone", platform = Platform.Ios),
             observationStreamFactory = factory,
+            videoSourceFactory = { FakeVideoStreamSource() },
           )
         }
       }
@@ -115,6 +120,7 @@ class LayoutFacetTest {
           observationStreamFactory = { fake },
           backoffDelay = { backoff.await() },
           socketAvailable = { true },
+          videoSourceFactory = { FakeVideoStreamSource() },
         )
       }
     }
@@ -129,4 +135,30 @@ class LayoutFacetTest {
     waitForIdle()
     assertEquals("expected the facet to reconnect after a drop", 2, fake.connectCallCount)
   }
+
+  @Test
+  fun `owns a live video mirror scoped to the pane device and disposes it on removal`() =
+    runComposeUiTest {
+      // The inspector's device panel renders LIVE VIDEO for its pixels (screenshots are only the
+      // pre-video bootstrap + the capture selection maps against), so the facet owns a per-device
+      // video source with the pane's connect/dispose lifecycle.
+      val video = FakeVideoStreamSource()
+      val visible = mutableStateOf(true)
+      setContent {
+        MaterialTheme {
+          if (visible.value) {
+            LayoutFacet(
+              column =
+                DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+              observationStreamFactory = { FakeObservationStream() },
+              videoSourceFactory = { video },
+            )
+          }
+        }
+      }
+      waitUntil { video.connectedDeviceId == "dev-1" }
+
+      runOnIdle { visible.value = false }
+      waitUntil { video.connectedDeviceId == null }
+    }
 }

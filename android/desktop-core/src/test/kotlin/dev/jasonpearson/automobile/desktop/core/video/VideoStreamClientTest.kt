@@ -50,8 +50,11 @@ class VideoStreamClientTest {
     payload: ByteArray? = null,
     keepOpen: Boolean = false,
     rotation: Int? = null,
+    maxConnections: Int = 1,
   ): FakeRelay =
-    FakeRelay(success, error, permissionJson, payload, keepOpen, rotation).also { servers.add(it) }
+    FakeRelay(success, error, permissionJson, payload, keepOpen, rotation, maxConnections).also {
+      servers.add(it)
+    }
 
   @Test
   fun `subscribes with the device id and decodes frames`() = runBlocking {
@@ -294,6 +297,34 @@ class VideoStreamClientTest {
     client.dispose()
   }
 
+  @Test
+  fun `a rapid reconnect is not wedged by the superseded reader's teardown`() = runBlocking {
+    // The stall / first-frame watchdog reconnects with disconnect()+connect() back-to-back. The
+    // cancelled reader's channel-close throws on its blocking read AFTER the replacement reader is
+    // already installed; keyed only on the mutable readerJob it would publish its terminal
+    // Unavailable over the new session's Streaming and wedge the pane. Session identity must drop
+    // that stale write. Cycled several times to widen the interleaving window against real IO
+    // threads.
+    val server = relay(payload = sampleH264(), keepOpen = true, maxConnections = 8)
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+
+    repeat(6) {
+      client.connect("emulator-5554")
+      server.awaitFirstFrameFrom(client)
+      client.disconnect()
+    }
+
+    // Final session must settle on live video, never a stale Unavailable from a prior reader.
+    client.connect("emulator-5554")
+    server.awaitFirstFrameFrom(client)
+    waitUntil { client.state.value is VideoStreamState.Streaming }
+    assertTrue(
+      client.state.value is VideoStreamState.Streaming,
+      "expected Streaming, was ${client.state.value}",
+    )
+    client.dispose()
+  }
+
   private suspend fun waitUntil(timeoutMs: Long = 5_000, predicate: () -> Boolean) {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (System.currentTimeMillis() < deadline) {
@@ -313,7 +344,7 @@ class VideoStreamClientTest {
     return frame ?: throw AssertionError("No frame decoded before timeout")
   }
 
-  /** A one-connection relay speaking the daemon's handshake then its binary framing. */
+  /** A relay speaking the daemon's handshake then its binary framing over up to N connections. */
   private inner class FakeRelay(
     private val success: Boolean,
     private val error: String?,
@@ -323,6 +354,10 @@ class VideoStreamClientTest {
     // When set, the framed packet is flagged CONFIG and attests this rotation (issue #4786), as the
     // daemon relay does on a parameter-set packet.
     private val rotation: Int? = null,
+    // How many sequential subscribe connections to serve. >1 lets a reconnect (disconnect+connect)
+    // be exercised against one relay; each connection is handled on its own daemon thread so a
+    // keepOpen session never blocks the accept loop.
+    private val maxConnections: Int = 1,
   ) : AutoCloseable {
     private val tempDir: Path = Files.createTempDirectory(Path.of("/tmp"), "amvsc-")
     val socketPath: Path = tempDir.resolve("video-stream.sock")
@@ -332,40 +367,57 @@ class VideoStreamClientTest {
         .bind(UnixDomainSocketAddress.of(socketPath))
 
     @Volatile private var captured: kotlinx.serialization.json.JsonObject? = null
+    private val handlers = mutableListOf<Thread>()
+
+    private fun handle(socket: java.nio.channels.SocketChannel) {
+      socket.use {
+        val reader =
+          BufferedReader(InputStreamReader(Channels.newInputStream(socket), StandardCharsets.UTF_8))
+        val out = Channels.newOutputStream(socket)
+        captured = json.parseToJsonElement(reader.readLine()).jsonObject
+
+        val ack =
+          if (success) {
+            """{"id":"1","type":"video_stream_response","success":true,"framing":"h264"}"""
+          } else {
+            buildString {
+              append("""{"id":"1","type":"video_stream_response","success":false""")
+              if (error != null) append(""","error":"$error"""")
+              if (permissionJson != null) append(""","permission":$permissionJson""")
+              append("}")
+            }
+          }
+        out.write((ack + "\n").toByteArray(StandardCharsets.UTF_8))
+        out.flush()
+
+        if (success && payload != null) {
+          writeStream(out, payload)
+        }
+        while (keepOpen && !Thread.currentThread().isInterrupted) {
+          Thread.sleep(1000)
+        }
+      }
+    }
 
     private val thread = Thread {
       try {
-        serverChannel.accept().use { socket ->
-          val reader =
-            BufferedReader(
-              InputStreamReader(Channels.newInputStream(socket), StandardCharsets.UTF_8)
-            )
-          val out = Channels.newOutputStream(socket)
-          captured = json.parseToJsonElement(reader.readLine()).jsonObject
-
-          val ack =
-            if (success) {
-              """{"id":"1","type":"video_stream_response","success":true,"framing":"h264"}"""
-            } else {
-              buildString {
-                append("""{"id":"1","type":"video_stream_response","success":false""")
-                if (error != null) append(""","error":"$error"""")
-                if (permissionJson != null) append(""","permission":$permissionJson""")
-                append("}")
-              }
+        repeat(maxConnections) {
+          val socket = serverChannel.accept()
+          val handler = Thread {
+            try {
+              handle(socket)
+            } catch (_: Throwable) {
+              // The client disconnecting mid-stream is the normal end of a handler.
             }
-          out.write((ack + "\n").toByteArray(StandardCharsets.UTF_8))
-          out.flush()
-
-          if (success && payload != null) {
-            writeStream(out, payload)
           }
-          while (keepOpen && !Thread.currentThread().isInterrupted) {
-            Thread.sleep(1000)
-          }
+            .also {
+              it.isDaemon = true
+              it.start()
+            }
+          synchronized(handlers) { handlers.add(handler) }
         }
       } catch (_: Throwable) {
-        // The client disconnecting mid-stream is the normal end of this thread.
+        // The server channel closing on teardown ends the accept loop.
       }
     }
       .also {
@@ -413,6 +465,7 @@ class VideoStreamClientTest {
 
     override fun close() {
       thread.interrupt()
+      synchronized(handlers) { handlers.forEach { it.interrupt() } }
       serverChannel.close()
       Files.deleteIfExists(socketPath)
       Files.deleteIfExists(tempDir)

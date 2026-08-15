@@ -115,12 +115,52 @@ class NavigationProvenanceTest {
   }
 
   @Test
-  fun `legacy empty content hash reads as no hash`() {
+  fun `empty content hash reads as no hash`() {
+    // A genuinely historical record (another real device) with the empty-hash sentinel still
+    // formats as "no hash". Uses a real device — a legacy-device record is unclassified/opaque, not
+    // historical (see below), so it would never reach the historical formatter.
     val provenance =
-      listOf(record(versionCode = 0, contentHash = "", deviceId = "legacy", sessionUuid = "legacy"))
+      listOf(record(versionCode = 0, contentHash = "", deviceId = "emulator-9999", lastSeen = 100L))
     assertEquals(
-      "Home — historical: build v0 (no hash), device legacy, session legacy, last seen 100",
+      "Home — historical: build v0 (no hash), device emulator-9999, session session-1, last seen 100",
       ProvenanceOpacity.contentDescription("Home", provenance, activeContext),
     )
+  }
+
+  @Test
+  fun `legacy unknown-device record is opaque not faded`() {
+    // iOS events (and any pre-build-context write) carry the legacy device sentinel. We cannot
+    // confidently call these "another device's" reach, so they are UNCLASSIFIED → full opacity,
+    // NOT historical/faded (#4985; iOS eager build-context is deferred #4991).
+    val provenance =
+      listOf(
+        record(
+          versionCode = 0,
+          contentHash = "",
+          deviceId = ProvenanceOpacity.LEGACY_DEVICE_SENTINEL,
+          sessionUuid = "legacy",
+        )
+      )
+    assertEquals(
+      ProvenanceOpacity.ACTIVE_ALPHA,
+      ProvenanceOpacity.alphaFor(provenance, activeContext),
+    )
+    assertFalse(ProvenanceOpacity.isFaded(provenance, activeContext))
+    assertEquals(
+      "Home — active in current context",
+      ProvenanceOpacity.contentDescription("Home", provenance, activeContext),
+    )
+  }
+
+  @Test
+  fun `other real device still fades even alongside a legacy record`() {
+    // The legacy short-circuit must not weaken the real-device fade: a record from another concrete
+    // device is still historical.
+    val otherDevice = listOf(record(deviceId = "emulator-9999"))
+    assertEquals(
+      ProvenanceOpacity.FADED_ALPHA,
+      ProvenanceOpacity.alphaFor(otherDevice, activeContext),
+    )
+    assertTrue(ProvenanceOpacity.isFaded(otherDevice, activeContext))
   }
 }

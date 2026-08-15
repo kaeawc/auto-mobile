@@ -23,8 +23,20 @@ object ProvenanceOpacity {
   const val ACTIVE_ALPHA: Float = 1f
   const val FADED_ALPHA: Float = 0.5f
 
+  /**
+   * Non-null sentinel the ingest layer records for a provenance dimension it cannot resolve — e.g.
+   * iOS events carry no build context yet (deferred #4991), so their device is this sentinel.
+   * Mirrors `LEGACY_PROVENANCE_SENTINEL` in NavigationGraphManager.ts.
+   */
+  const val LEGACY_DEVICE_SENTINEL: String = "legacy"
+
   /** True when [record] was observed in the pane's active [context]. */
   fun isActiveRecord(record: ScreenProvenance, context: NavigationActiveContext): Boolean {
+    // A record with the unknown-device sentinel is UNCLASSIFIED, not "another device's" reach: we
+    // cannot confidently fade it, so treat it as active/opaque. Without this the whole iOS graph —
+    // whose events always carry the legacy device until eager build-context (deferred #4991) —
+    // would render 50% faded, because none of its nodes match the pane's real device.
+    if (record.deviceId == LEGACY_DEVICE_SENTINEL) return true
     if (record.deviceId != context.deviceId) return false
     if (record.buildKey.packageId != context.packageId) return false
     val activeBuild = context.buildKey ?: return true

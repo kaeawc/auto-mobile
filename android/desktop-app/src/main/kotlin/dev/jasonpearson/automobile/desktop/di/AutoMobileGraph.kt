@@ -5,7 +5,9 @@ import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.di.AppScope
 import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.SingleIn
+import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.update.UpdateController
 import dev.zacsweers.metro.DependencyGraph
 
 /**
@@ -26,6 +28,12 @@ interface AutoMobileGraph : AutoMobileGraphProvider {
 
   /** Factory for creating data source instances. */
   override val dataSourceFactory: DataSourceFactory
+
+  /** Checks GitHub Releases for a newer desktop build (#5224). */
+  override val updateController: UpdateController
+
+  /** The running app's own version (#5223). */
+  override val appVersionProvider: AppVersionProvider
 
   /** Factory for creating the graph. Metro generates the implementation. */
   @DependencyGraph.Factory

@@ -2,7 +2,9 @@ package dev.jasonpearson.automobile.desktop.core.di
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
+import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.update.UpdateController
 
 /**
  * Interface exposing the dependencies the UI layer needs from the DI graph.
@@ -19,4 +21,10 @@ interface AutoMobileGraphProvider {
 
   /** Factory for creating data source instances. */
   val dataSourceFactory: DataSourceFactory
+
+  /** Checks GitHub Releases for a newer desktop build; drives the status-bar update affordance. */
+  val updateController: UpdateController
+
+  /** The running app's own version, used to show "you're on X" and to gate update checks. */
+  val appVersionProvider: AppVersionProvider
 }

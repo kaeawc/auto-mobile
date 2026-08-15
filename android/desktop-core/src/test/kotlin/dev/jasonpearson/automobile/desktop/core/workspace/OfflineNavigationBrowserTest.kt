@@ -18,8 +18,11 @@ import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
+import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
+import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -33,6 +36,8 @@ class OfflineNavigationBrowserTest {
       override val autoMobileClient = client
       override val settingsProvider = FakeSettingsProvider()
       override val dataSourceFactory = DefaultDataSourceFactory(client)
+      override val updateController = FakeUpdateController()
+      override val appVersionProvider = AppVersionProvider { AppVersion.Dev }
     }
   }
 
@@ -312,6 +317,8 @@ class OfflineNavigationBrowserTest {
         override val autoMobileClient = client
         override val settingsProvider = FakeSettingsProvider()
         override val dataSourceFactory = DefaultDataSourceFactory(client)
+        override val updateController = FakeUpdateController()
+        override val appVersionProvider = AppVersionProvider { AppVersion.Dev }
       }
     val nodeWithShot =
       screen("Alpha").copy(screenshotUri = "automobile:navigation/nodes/1/screenshot")

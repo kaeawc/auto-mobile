@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.SystemUpdateAlt
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,9 +29,6 @@ import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
 import java.awt.Desktop
 import java.net.URI
 
-/** Accent used for the update affordance — a calm green that reads as "good news, optional". */
-private val UpdateAccent = Color(0xFF4CAF50)
-
 private val LOG = LoggerFactory.getLogger("UpdateReadyButton")
 
 /** Opens [url] in the user's default browser. Best-effort — a failure is logged, not surfaced. */
@@ -43,9 +41,10 @@ fun openReleaseNotesInBrowser(url: String) {
 }
 
 /**
- * The lower-left status-bar affordance that appears only when an update is available. Pure: it
- * renders from [status] and calls [onClick]; it performs no network work and does not reach into
- * the DI graph (the shell observes the controller and passes state down).
+ * The status-bar affordance that appears only when an update is available. Pure: it renders from
+ * [status] and calls [onClick]; it performs no network work and does not reach into the DI graph
+ * (the shell observes the controller and passes state down). Uses Material's `secondaryContainer` /
+ * `onSecondaryContainer` pair so text and icon meet contrast in both light and dark themes.
  */
 @Composable
 fun UpdateReadyButton(
@@ -61,7 +60,7 @@ fun UpdateReadyButton(
       modifier
         .clip(RoundedCornerShape(4.dp))
         .clickable(onClick = onClick)
-        .background(UpdateAccent.copy(alpha = 0.15f))
+        .background(MaterialTheme.colorScheme.secondaryContainer)
         .padding(horizontal = 6.dp, vertical = 1.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -69,13 +68,13 @@ fun UpdateReadyButton(
     Icon(
       imageVector = Icons.Filled.SystemUpdateAlt,
       contentDescription = null,
-      tint = UpdateAccent,
+      tint = MaterialTheme.colorScheme.onSecondaryContainer,
       modifier = Modifier.width(12.dp),
     )
     Text(
       text = "Update ready",
       style = DesktopTypography.label,
-      color = UpdateAccent,
+      color = MaterialTheme.colorScheme.onSecondaryContainer,
       lineHeight = 10.sp,
     )
   }

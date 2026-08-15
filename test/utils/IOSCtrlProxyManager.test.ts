@@ -1054,7 +1054,7 @@ describe("IOSCtrlProxyManager", function() {
         if (curlCalls === 3) {
           return firstHealthPoll;
         }
-        return createExecResult(curlCalls >= 6 ? "ok" : "", "");
+        return createExecResult(curlCalls >= 7 ? "ok" : "", "");
       });
 
       await withHealthBudget("3", async () => {
@@ -1071,7 +1071,7 @@ describe("IOSCtrlProxyManager", function() {
         await Promise.all([defaultStart, readinessStart]);
       });
 
-      expect(curlCalls).toBe(6);
+      expect(curlCalls).toBe(7);
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
     });
 
@@ -1146,6 +1146,48 @@ describe("IOSCtrlProxyManager", function() {
 
       expect(curlCalls).toBe(4);
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+    });
+
+    test("a caller arriving during hung-runner teardown starts fresh after it settles", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, createFakeBuilder(), fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let healthyAfterTeardown = false;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(healthyAfterTeardown ? "ok" : "", "")
+      );
+
+      const teardownEntered = deferred();
+      const releaseTeardown = deferred();
+      const processClient = (manager as unknown as {
+        processClient: IOSCtrlProxyProcessClient;
+      }).processClient;
+      const terminateProcessTree = processClient.terminateProcessTree.bind(processClient);
+      processClient.terminateProcessTree = async pid => {
+        teardownEntered.resolve();
+        await releaseTeardown.promise;
+        await terminateProcessTree(pid);
+      };
+
+      await withHealthBudget("1", async () => {
+        fakeTimer.enableAutoAdvance();
+        const originalStart = manager.start();
+        await teardownEntered.promise;
+
+        const retryStart = manager.start({ minimumHealthPollDurationMs: 2_000 });
+        await new Promise(resolve => setImmediate(resolve));
+        expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+
+        releaseTeardown.resolve();
+        await expect(originalStart).rejects.toThrow("CtrlProxy failed to start within timeout");
+        healthyAfterTeardown = true;
+        await retryStart;
+      });
+
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
     });
 
     test("a retry starts fresh after the prior sole caller aborts", async function() {

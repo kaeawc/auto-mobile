@@ -53,6 +53,7 @@ interface SharedCtrlProxyStart {
   healthPollDeadlineMs: number | null;
   defaultHealthPollDeadlineMs: number | null;
   callerHealthPollDeadlinesMs: Map<symbol, number>;
+  teardownCommitted: boolean;
   waitingCallers: number;
   completed: boolean;
 }
@@ -723,22 +724,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       throw options.signal.reason ?? new Error("iOS CtrlProxy startup was aborted");
     }
 
-    let sharedStart = this.sharedStart;
-    if (sharedStart?.controller.signal.aborted) {
-      logger.info("[IOSCtrlProxy] Waiting for aborted startup to settle before retrying");
-      const abortedStart = sharedStart;
-      try {
-        await this.waitForSharedStart(abortedStart, options.signal);
-      } catch (error) {
-        if (options.signal?.aborted) {
-          throw error;
-        }
-      }
-      if (this.sharedStart === abortedStart) {
-        this.sharedStart = null;
-      }
-      sharedStart = this.sharedStart;
-    }
+    let sharedStart = await this.waitForNonJoinableStart(options.signal);
     if (sharedStart) {
       logger.info("[IOSCtrlProxy] Start already in progress, waiting for it to complete");
     } else {
@@ -749,6 +735,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         healthPollDeadlineMs: null,
         defaultHealthPollDeadlineMs: null,
         callerHealthPollDeadlinesMs: new Map(),
+        teardownCommitted: false,
         waitingCallers: 0,
         completed: false,
       };
@@ -770,6 +757,26 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       options.minimumHealthPollDurationMs,
     );
     return this.waitForSharedStart(sharedStart, options.signal, callerId);
+  }
+
+  private async waitForNonJoinableStart(signal: AbortSignal | undefined): Promise<SharedCtrlProxyStart | null> {
+    const sharedStart = this.sharedStart;
+    if (!sharedStart ||
+      (!sharedStart.controller.signal.aborted && !sharedStart.teardownCommitted)) {
+      return sharedStart;
+    }
+    logger.info("[IOSCtrlProxy] Waiting for a non-joinable startup to settle before retrying");
+    try {
+      await this.waitForSharedStart(sharedStart, signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+    }
+    if (this.sharedStart === sharedStart) {
+      this.sharedStart = null;
+    }
+    return this.sharedStart;
   }
 
   /**
@@ -968,6 +975,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (await this.completeHealthStartupIfDeadlineExtended(sharedStart, perf, delayMs)) {
         return;
       }
+      sharedStart.teardownCommitted = true;
       // Suppress the exit-handler auto-restart across the kill + child-exit event only.
       this.isStopping = true;
       try {

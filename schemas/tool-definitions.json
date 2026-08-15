@@ -6246,6 +6246,14 @@
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
+            "ageMs": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "verified": {
+              "type": "boolean"
+            },
             "isFresh": {
               "type": "boolean"
             },

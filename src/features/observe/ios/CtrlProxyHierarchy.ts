@@ -11,6 +11,7 @@ import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQue
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger } from "../../../utils/logger";
 import { hasIosHeaderTrait } from "./semanticRoles";
+import { maxObservationAgeMs } from "../observationFreshness";
 import type {
   HierarchyDelegateContext,
   CtrlProxyNode,
@@ -91,6 +92,12 @@ export class CtrlProxyHierarchy {
     if (response.frameContext !== undefined) {
       converted.frameContext = response.frameContext;
     }
+    // Carry the delegate's own verdict to the caller. `getLatestHierarchy` has
+    // always known whether it verified this tree against the device or served a
+    // cache entry unverified, and this boundary used to drop that fact on the
+    // floor — which is how `ObserveScreen` ended up unable to tell the two apart
+    // and defaulted to calling everything fresh.
+    converted.fresh = response.fresh;
     return converted;
   }
 
@@ -106,8 +113,24 @@ export class CtrlProxyHierarchy {
   ): Promise<CtrlProxyHierarchyResponse> {
     // Check cache first
     const cachedHierarchy = this.context.getCachedHierarchy();
+    let cachedCaptureAgeMs: number | undefined;
     if (cachedHierarchy) {
-      const cacheAge = this.context.timer.now() - cachedHierarchy.receivedAt;
+      // Age is measured from the CAPTURE clock (`hierarchy.updatedAt`, stamped by
+      // the runner when it built the tree), not the DELIVERY clock
+      // (`receivedAt`, when this host took the push). They are not the same
+      // event and they diverge in exactly the case this cache exists to survive:
+      // `SdkHierarchyRefreshPublisher.publish()` re-broadcasts
+      // `HierarchyDebouncer.getLastHierarchy()` — an ALREADY-extracted tree —
+      // whenever SDK hierarchy data arrives, and `processMessage` stamps that
+      // push with `receivedAt: now, fresh: true`. Under `receivedAt` the entry
+      // then looks brand new while its content is arbitrarily old. Falls back to
+      // `receivedAt` only when the payload carries no capture timestamp.
+      const capturedAt = cachedHierarchy.hierarchy.updatedAt;
+      const ageBasis = typeof capturedAt === "number" && capturedAt > 0
+        ? capturedAt
+        : cachedHierarchy.receivedAt;
+      cachedCaptureAgeMs = this.context.timer.now() - ageBasis;
+      const cacheAge = cachedCaptureAgeMs;
       // `fresh` is honoured as well as elapsed time: without it, invalidateCache()
       // would be an observable no-op inside the TTL (issue #4193).
       const isFresh = cachedHierarchy.fresh && cacheAge < this.context.cacheFreshTtlMs;
@@ -137,7 +160,25 @@ export class CtrlProxyHierarchy {
     // Nulling the cache instead is not an option here: under skipWaitForFresh a
     // missing cache yields no hierarchy at all rather than a refetch.
     const cacheInvalidated = cachedHierarchy !== null && !cachedHierarchy.fresh;
-    if (!skipWaitForFresh || cacheInvalidated) {
+    // A cache whose CAPTURE timestamp is past the freshness budget must be
+    // re-verified before it may be served, even on the `skipWaitForFresh` path —
+    // which is `observe`'s default (ObserveScreen.execute: `skipWaitForFresh ??
+    // true`). Without this clause the default path reaches neither branch below
+    // and falls straight through to the stale fallback, so the ONLY thing that
+    // could ever advance this cache was an unsolicited push. The runner
+    // deliberately does not push when its structural hash is unchanged
+    // (CtrlProxy.swift, `case .unchanged: // Don't broadcast unchanged results`),
+    // so a screen that is merely sitting still — or a runner whose extraction
+    // has wedged — leaves the entry frozen and every subsequent `observe`
+    // re-serves it, forever. That is the "no known mechanism to recover a stale
+    // tree" symptom: there was no code path that asked.
+    const cacheStale = cachedCaptureAgeMs !== undefined && cachedCaptureAgeMs > maxObservationAgeMs();
+    if (!skipWaitForFresh || cacheInvalidated || cacheStale) {
+      if (cacheStale && skipWaitForFresh && !cacheInvalidated) {
+        logger.debug(
+          `[CTRL_PROXY] Cached hierarchy is ${cachedCaptureAgeMs}ms old (budget ${maxObservationAgeMs()}ms); forcing a synchronous re-verification`
+        );
+      }
       const result = await this.requestHierarchySync(perf, false, undefined, timeout);
       if (result) {
         if (result.hierarchy.packageName) {
@@ -165,8 +206,21 @@ export class CtrlProxyHierarchy {
     // skipWaitForFresh a missing cache yields no hierarchy at all (#4193/#4230).
     const fallbackHierarchy = this.context.getCachedHierarchy() ?? cachedHierarchy;
 
-    // Return cached (stale) data if available
+    // Return cached (stale) data if available.
+    //
+    // This return is the last honest resort, not a normal path: reaching it
+    // means the runner did not answer a synchronous hierarchy request within
+    // `timeout`. It is reported as `fresh: false`, which now survives all the
+    // way to `ObserveResult.freshness` (see getAccessibilityHierarchy) instead
+    // of being overwritten with a constant `true` by ObserveScreen.
     if (fallbackHierarchy) {
+      const fallbackCapturedAt = fallbackHierarchy.hierarchy.updatedAt;
+      logger.warn(
+        `[CTRL_PROXY] Serving an UNVERIFIED cached hierarchy: the runner did not answer a synchronous ` +
+        `hierarchy request within ${timeout}ms. Tree was captured ` +
+        `${typeof fallbackCapturedAt === "number" ? this.context.timer.now() - fallbackCapturedAt : "?"}ms ago. ` +
+        `Reporting freshness.isFresh=false.`
+      );
       // Update tracking from cache — it may have been refreshed by a WebSocket push
       if (fallbackHierarchy.hierarchy.packageName) {
         if (this.lastKnownPackageName && fallbackHierarchy.hierarchy.packageName !== this.lastKnownPackageName) {

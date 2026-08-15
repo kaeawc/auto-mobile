@@ -41,6 +41,7 @@ import {
   RealHierarchyPlatformValidator
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
+import { computeFreshness } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 
 /**
@@ -331,16 +332,23 @@ export class RealObserveScreen implements ObserveScreen {
 
       perf.end();
 
-      // Freshness diagnostics
-      const requestedAfter = minTimestamp > 0 ? minTimestamp : undefined;
-      const actualTimestamp = this.resolveObservationTimestampMs(result);
-      const isFresh = requestedAfter === undefined
-        ? true
-        : actualTimestamp !== undefined && actualTimestamp >= requestedAfter;
-      const staleDurationMs = requestedAfter !== undefined && actualTimestamp !== undefined && actualTimestamp < requestedAfter
-        ? requestedAfter - actualTimestamp
-        : undefined;
-      result.freshness = { requestedAfter, actualTimestamp, isFresh, staleDurationMs };
+      // Freshness diagnostics.
+      //
+      // This used to read `isFresh = requestedAfter === undefined ? true : …`,
+      // i.e. the literal `true` on every plain `observe` call — and
+      // `minTimestamp` is not reachable from the public tool schema, so that was
+      // the path virtually every consumer took. The field named for the exact
+      // property in question measured nothing. It is now always a measurement:
+      // capture age, plus whether the delegate verified the tree against the
+      // device on this call. See ./observationFreshness.ts.
+      result.freshness = computeFreshness({
+        requestedAfter: minTimestamp > 0 ? minTimestamp : undefined,
+        actualTimestamp: this.resolveObservationTimestampMs(result),
+        now: this.timer.now(),
+        verified: typeof result.viewHierarchy === "object" && result.viewHierarchy !== null
+          ? result.viewHierarchy.fresh
+          : undefined,
+      });
 
       // Attach the windowed performance snapshot when opted in (independent of --debug-perf).
       await this.attachPerfSnapshot(result);

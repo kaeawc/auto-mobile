@@ -845,10 +845,10 @@ export class Daemon {
    * Device-ready callback wired into {@link DevicePool}. Mints (or refreshes)
    * the device-session epoch for the connected device and preserves the
    * pre-existing input-cache eviction. The pool fires this on the refresh,
-   * addDevice, and bind/autolock paths (a device present only at startup mints
-   * on its first refresh or bind), so the mint is keyed on the pooled device's
-   * monotonic `incarnation` — a repeat ready-signal for the same epoch is
-   * idempotent, while a same-serial restart (new incarnation) mints a fresh
+   * addDevice, and bind/autolock paths; startup-booted devices are minted
+   * directly in {@link initializeDevicePool}. The mint is keyed on the pooled
+   * device's monotonic `incarnation` — a repeat ready-signal for the same epoch
+   * is idempotent, while a same-serial restart (new incarnation) mints a fresh
    * `deviceSessionUuid` (epic #5256).
    */
   private onDeviceReadyForSessionRegistry(deviceId: string): void {
@@ -1443,6 +1443,19 @@ export class Daemon {
 
       if (bootedDevices.length > 0) {
         await this.devicePool.initializeWithDevices(bootedDevices);
+        // Mint a device-session epoch for every startup-booted device so
+        // daemon/listDeviceSessions enumerates idle devices immediately, without
+        // waiting for a first assignment/refresh. initializeWithDevices does not
+        // fire the device-ready callback (that path stays silent by contract), so
+        // mint directly here. Idempotent with the later onDeviceReady mint — the
+        // incarnation is unchanged, so it returns the same uuid (epic #5256).
+        for (const pooled of this.devicePool.getAllDevices()) {
+          this.deviceSessionRegistry.onDeviceConnected({
+            deviceId: pooled.id,
+            platform: pooled.platform,
+            incarnation: pooled.incarnation,
+          });
+        }
         logger.info(`Device pool initialized with ${bootedDevices.length} devices: ${bootedDevices.map(device => device.deviceId).join(", ")}`);
       } else {
         logger.warn("No devices detected during daemon startup. Device pool is empty.");

@@ -90,17 +90,28 @@ class FakeIosManager implements ReadinessIosManager {
   setupResult = { success: true, message: "ready" };
   setupCalls = 0;
   startCalls = 0;
+  setupSignal: AbortSignal | undefined;
+  setupHealthCheckTimeoutMs: number | undefined;
+  startOptions: { signal?: AbortSignal; healthCheckTimeoutMs?: number } | undefined;
 
   async isInstalled(): Promise<boolean> {
     return this.installed;
   }
 
-  async start(): Promise<void> {
+  async start(options?: { signal?: AbortSignal; healthCheckTimeoutMs?: number }): Promise<void> {
     this.startCalls++;
+    this.startOptions = options;
   }
 
-  async setup() {
+  async setup(
+    _force?: boolean,
+    _perf?: unknown,
+    signal?: AbortSignal,
+    healthCheckTimeoutMs?: number,
+  ) {
     this.setupCalls++;
+    this.setupSignal = signal;
+    this.setupHealthCheckTimeoutMs = healthCheckTimeoutMs;
     return this.setupResult;
   }
 
@@ -281,6 +292,23 @@ describe("RunnerReadinessService", () => {
     ).rejects.toThrow(/phase=runner-setup.*xcodebuild exited 65/);
   });
 
+  test("passes the remaining readiness budget to iOS CtrlProxy setup", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    const { service } = createService({ iosManager, iosClient });
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 120_000,
+      readinessTimeoutMs: 120_000,
+    });
+
+    expect(iosManager.setupHealthCheckTimeoutMs).toBe(120_000);
+    expect(iosManager.setupSignal).toBeDefined();
+  });
+
   test("starts only the cached iOS runner when downloads are disabled", async () => {
     const iosManager = new FakeIosManager();
     const iosClient = new FakeReadinessClient();
@@ -296,6 +324,8 @@ describe("RunnerReadinessService", () => {
     });
 
     expect(iosManager.startCalls).toBe(1);
+    expect(iosManager.startOptions?.healthCheckTimeoutMs).toBe(30_000);
+    expect(iosManager.startOptions?.signal).toBeDefined();
     expect(iosManager.setupCalls).toBe(0);
     expect(iosClient.healthCalls).toBe(1);
   });

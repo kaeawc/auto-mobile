@@ -59,11 +59,15 @@ export interface ReadinessAndroidManager {
 
 export interface ReadinessIosManager {
   isInstalled(): Promise<boolean>;
-  start(): Promise<void>;
+  start(options?: {
+    signal?: AbortSignal;
+    healthCheckTimeoutMs?: number;
+  }): Promise<void>;
   setup(
     force?: boolean,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
+    healthCheckTimeoutMs?: number,
   ): Promise<ProxySetupResult>;
   getServicePort(): number;
 }
@@ -392,7 +396,7 @@ export class RunnerReadinessService {
     }
 
     const setup = await this.runPhase(context, "runner-setup", 1, (signal) =>
-      manager.setup(false, context.perf, signal),
+      manager.setup(false, context.perf, signal, this.remaining(context)),
     );
     if (!setup.success) {
       this.fail(context, "runner-setup", 1, setup.error ?? setup.message);
@@ -414,7 +418,12 @@ export class RunnerReadinessService {
         "CtrlProxy iOS runner is not installed and runner downloads are disabled",
       );
     }
-    await this.runPhase(context, "runner-setup", 1, () => manager.start());
+    await this.runPhase(context, "runner-setup", 1, (signal) =>
+      manager.start({
+        signal,
+        healthCheckTimeoutMs: this.remaining(context),
+      }),
+    );
     await this.waitForResponsiveClient(context, client);
   }
 

@@ -1016,6 +1016,27 @@ describe("IOSCtrlProxyManager", function() {
       expect((manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId).toBe(12345);
     });
 
+    test("start() honors a caller readiness budget beyond the configured health-poll default", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let curlCalls = 0;
+      fakeExecutor.setCommandHandler("curl -s", () => {
+        curlCalls++;
+        return createExecResult(curlCalls > 4 ? "ok" : "", "");
+      });
+
+      await withHealthBudget("3", async () => {
+        fakeTimer.enableAutoAdvance();
+        await manager.start({ healthCheckTimeoutMs: 2_000 });
+      });
+
+      expect(curlCalls).toBe(5);
+    });
+
     // Directly exercise the PID-reuse guard added in review (thread 2). Testing the
     // predicate rather than a full start() keeps it precise and avoids spawning a
     // runner (whose background monitor would leak into later tests under autoAdvance).

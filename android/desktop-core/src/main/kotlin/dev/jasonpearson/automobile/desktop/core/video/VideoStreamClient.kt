@@ -174,6 +174,14 @@ class VideoStreamClient(
   private var channel: SocketChannel? = null
   private var readerJob: Job? = null
 
+  // Session identity so a superseded reader's teardown can't clobber a newer session's state. A
+  // rapid disconnect()+connect() (the stall / first-frame watchdog) installs the replacement reader
+  // before the cancelled one unwinds; a stale reader that checked the mutable readerJob would see
+  // the fresh job as active and publish its own Unavailable over the new session's Connecting,
+  // wedging the stream. Keyed on this id every state write is dropped unless the reader is current.
+  private val sessionIds = java.util.concurrent.atomic.AtomicLong(0L)
+  @Volatile private var activeSessionId = 0L
+
   override fun isAvailable(): Boolean = Files.exists(File(socketPathValue).toPath())
 
   override fun connect(deviceId: String?) {
@@ -183,16 +191,21 @@ class VideoStreamClient(
       return
     }
 
+    val sessionId = sessionIds.incrementAndGet()
+    activeSessionId = sessionId
     _state.value = VideoStreamState.Connecting
     readerJob = scope.launch {
       // Name the dedicated thread per target so a farm's dozens of readers are tellable
       // apart in a thread dump.
       Thread.currentThread().name = "video-stream-reader-${deviceId ?: "default"}"
-      runSession(deviceId)
+      runSession(deviceId, sessionId)
     }
   }
 
   override fun disconnect() {
+    // Invalidate the current session first so the cancelled reader's terminal state write is
+    // dropped rather than racing an Unavailable over a subsequent Idle/Connecting.
+    activeSessionId = sessionIds.incrementAndGet()
     readerJob?.cancel()
     readerJob = null
     closeChannel()
@@ -206,19 +219,26 @@ class VideoStreamClient(
     readerDispatcher.close()
   }
 
-  private fun runSession(deviceId: String?) {
+  private fun runSession(deviceId: String?, sessionId: Long) {
+    // Only the current session may touch shared state; a reader superseded by a reconnect (or a
+    // disconnect) publishes nothing, so its late teardown can't clobber the live session.
+    fun isCurrent() = sessionId == activeSessionId
+    fun publish(state: VideoStreamState) {
+      if (isCurrent()) _state.value = state
+    }
+
     val decoder =
       try {
         decoderFactory()
       } catch (e: Exception) {
         LOG.warn("Could not create the H.264 decoder: ${e.message}", e)
-        _state.value = VideoStreamState.Unavailable(e.message ?: "No H.264 decoder available")
+        publish(VideoStreamState.Unavailable(e.message ?: "No H.264 decoder available"))
         return
       }
 
     try {
       SocketChannel.open(UnixDomainSocketAddress.of(socketPathValue)).use { socket ->
-        channel = socket
+        if (isCurrent()) channel = socket
         val input = Channels.newInputStream(socket)
         val writer =
           BufferedWriter(
@@ -244,26 +264,26 @@ class VideoStreamClient(
         val ackLine = readAckLine(input)
         val ack = json.decodeFromString(serializer<VideoStreamResponse>(), ackLine)
         if (!ack.success) {
-          _state.value =
+          publish(
             ack.permission.toPermissionState()
               ?: VideoStreamState.Unavailable(ack.error ?: "Live mirroring was refused")
+          )
           return
         }
 
-        pumpFrames(input, decoder)
-        if (readerJob?.isActive == true) {
-          _state.value = VideoStreamState.Unavailable("Live mirroring stopped")
-        }
+        pumpFrames(input, decoder, sessionId)
+        publish(VideoStreamState.Unavailable("Live mirroring stopped"))
       }
     } catch (e: Exception) {
-      // Cancellation arrives as an exception on the blocking read; that is a normal disconnect.
-      if (readerJob?.isActive == true) {
+      // Cancellation (from disconnect / a watchdog reconnect) supersedes this session, so publish()
+      // drops the terminal state; a genuine read error on the still-current session surfaces it.
+      if (isCurrent()) {
         LOG.warn("Live mirroring stopped: ${e.message}", e)
-        _state.value = VideoStreamState.Unavailable(e.message ?: "Live mirroring stopped")
+        publish(VideoStreamState.Unavailable(e.message ?: "Live mirroring stopped"))
       }
     } finally {
       decoder.close()
-      channel = null
+      if (isCurrent()) channel = null
     }
   }
 
@@ -283,7 +303,7 @@ class VideoStreamClient(
     }
   }
 
-  private fun pumpFrames(input: java.io.InputStream, decoder: H264Decoder) {
+  private fun pumpFrames(input: java.io.InputStream, decoder: H264Decoder, sessionId: Long) {
     val parser = VideoStreamParser()
     val buffer = ByteArray(64 * 1024)
     // Latest attested rotation, updated by each config packet that carries it (issue #4786). A
@@ -307,6 +327,9 @@ class VideoStreamClient(
             currentRotation = packet.rotation
           }
           decoder.decode(packet.payload) { frame ->
+            // A reader superseded by a reconnect must not publish frames or Streaming onto the new
+            // session's state; drop this frame once we are no longer the current session.
+            if (sessionId != activeSessionId) return@decode
             val current = _state.value
             if (
               current !is VideoStreamState.Streaming ||

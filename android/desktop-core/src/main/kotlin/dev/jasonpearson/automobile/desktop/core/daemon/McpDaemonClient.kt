@@ -657,7 +657,11 @@ class McpDaemonClient(
   }
 
   private fun queryDaemonCapabilities(identity: SocketIdentity?): DaemonCapabilitiesProbe {
-    val response = sendRequest(DAEMON_CAPABILITIES_METHOD)
+    // This probe runs on the keyboard input path (inputTypeText append=true), which shares the
+    // video pane's single FIFO dispatch thread. Bound it with the same input hang ceiling so a
+    // never-replying daemon can't freeze keystrokes forever — the taps/keys deadline is useless if
+    // its prerequisite blocks unbounded.
+    val response = sendRequest(DAEMON_CAPABILITIES_METHOD, timeoutMs = inputRequestTimeoutMs)
     if (!response.success) {
       if (response.error == OLD_DAEMON_CAPABILITIES_ERROR) return DaemonCapabilitiesProbe.Legacy
       return DaemonCapabilitiesProbe.Failure(response.error ?: "Daemon capability probe failed.")

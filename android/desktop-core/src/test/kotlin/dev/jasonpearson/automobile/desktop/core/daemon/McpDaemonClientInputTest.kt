@@ -656,6 +656,49 @@ class McpDaemonClientInputTest {
     }
   }
 
+  @Test
+  fun `a daemon that never answers the append capability probe fails typing at its deadline`() {
+    // The keyboard append path first probes daemon/capabilities, then sends input/typeText. That
+    // probe rode an UNBOUNDED sendRequest, so a wedged daemon hung it forever — freezing the video
+    // pane's single dispatch thread exactly like a hung tap, which the tap/key deadline was
+    // supposed to prevent. The input deadline must bound the prerequisite probe too.
+    val socketDir = Files.createTempDirectory(Path.of("/tmp"), "am-hang-cap-")
+    val socketPath = socketDir.resolve("daemon.sock")
+    val server = ServerSocketChannel.open(StandardProtocolFamily.UNIX)
+    server.bind(UnixDomainSocketAddress.of(socketPath))
+    var accepted: java.nio.channels.SocketChannel? = null
+    val accepter = Thread {
+      try {
+        accepted = server.accept() // Accept the capability probe, then never reply.
+        while (!Thread.currentThread().isInterrupted) Thread.sleep(50)
+      } catch (_: Exception) {
+        // Server/channel closed by the test's cleanup: the hang is over.
+      }
+    }
+      .apply {
+        isDaemon = true
+        start()
+      }
+    try {
+      val client =
+        McpDaemonClient(
+          socketPathValue = socketPath.toString(),
+          inputRequestTimeoutMs = 100,
+        )
+      val error =
+        assertFailsWith<DaemonUnavailableException> {
+          client.inputTypeText(text = "hello", platform = "android", append = true)
+        }
+      assertTrue(error.message.orEmpty().contains("timed out"))
+    } finally {
+      accepter.interrupt()
+      accepted?.close()
+      server.close()
+      Files.deleteIfExists(socketPath)
+      Files.deleteIfExists(socketDir)
+    }
+  }
+
   private fun captureInputRequest(
     resultJson: String? = null,
     error: String? = null,

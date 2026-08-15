@@ -122,9 +122,9 @@ describe("freshness regression repro (glance path, ObserveScreen.execute)", () =
   });
 
   test("THE CONSTANT: a plain observe of a 216s-stale hierarchy is not reported fresh", async () => {
-    // 216s is the exact lag measured on a real simulator in the field spike
-    // (docs/research/2026-08-14-automobile-ios-spike.md §4c) — the tree was
-    // frozen while the on-screen article visibly changed underneath it.
+    // A several-minutes-stale tree stands in for the reported symptom: the
+    // hierarchy stayed frozen (e.g. an unchanging native structure around a
+    // WebView) while the on-screen content visibly changed underneath it.
     const STALE_MS = 216_000;
     const fakeTimer = new FakeTimer();
     const { observeScreen } = createObserveScreen(fakeTimer, {

@@ -28,7 +28,7 @@ describe("computeFreshness", () => {
     });
 
     test("REGRESSION: a minutes-old tree is NOT reported fresh (was hardcoded `true`)", () => {
-      const ageMs = 216_000; // the lag measured on a real simulator, in seconds: 216s
+      const ageMs = 216_000; // a several-minutes-stale tree (well past any age budget)
       const v = computeFreshness({ actualTimestamp: NOW - ageMs, now: NOW });
       expect(v.isFresh).toBe(false);
       expect(v.ageMs).toBe(ageMs);
@@ -66,8 +66,7 @@ describe("computeFreshness", () => {
     test("NO FALSE ALARM: a device-verified tree stays fresh even past the age budget", () => {
       // Age past the budget on a verified read measures how long the REST of the
       // observation took (screenshot, audits, dense-screen element extraction),
-      // not a stale channel. Measured on a real simulator: a healthy read is
-      // ~1.5s, but a 2,895-node screen costs ~11s end to end.
+      // not a stale channel — a dense screen can take several seconds end to end.
       const v = computeFreshness({ actualTimestamp: NOW - 11_000, now: NOW, verified: true });
       expect(v.isFresh).toBe(true);
       expect(v.ageMs).toBe(11_000);

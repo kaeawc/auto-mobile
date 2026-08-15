@@ -83,6 +83,37 @@ export interface FreshnessVerdict {
 }
 
 /**
+ * The `requestedAfter` (explicit `minTimestamp`) branch, unchanged from the
+ * original implementation so existing `waitFor` polling semantics are
+ * byte-identical. Split out only to keep {@link computeFreshness} under the
+ * repo's per-function complexity budget.
+ */
+function computeRequestedFreshness(
+  requestedAfter: number,
+  actualTimestamp: number | undefined,
+  ageMs: number | undefined,
+  verified: boolean | undefined
+): FreshnessVerdict {
+  const isFresh = actualTimestamp !== undefined && actualTimestamp >= requestedAfter;
+  const staleDurationMs = !isFresh && actualTimestamp !== undefined
+    ? requestedAfter - actualTimestamp
+    : undefined;
+  return {
+    requestedAfter,
+    actualTimestamp,
+    ageMs,
+    verified,
+    isFresh,
+    staleDurationMs,
+    warning: isFresh
+      ? undefined
+      : actualTimestamp === undefined
+        ? "Observation carries no capture timestamp, so the requested minimum could not be checked."
+        : `Observation was captured ${staleDurationMs}ms before the requested minimum timestamp.`,
+  };
+}
+
+/**
  * Compute the freshness verdict.
  *
  * The `requestedAfter` branch is unchanged from the original implementation, so
@@ -97,23 +128,7 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
 
   // Caller supplied an explicit constraint: answer exactly that question.
   if (requestedAfter !== undefined) {
-    const isFresh = actualTimestamp !== undefined && actualTimestamp >= requestedAfter;
-    const staleDurationMs = !isFresh && actualTimestamp !== undefined
-      ? requestedAfter - actualTimestamp
-      : undefined;
-    return {
-      requestedAfter,
-      actualTimestamp,
-      ageMs,
-      verified,
-      isFresh,
-      staleDurationMs,
-      warning: isFresh
-        ? undefined
-        : actualTimestamp === undefined
-          ? "Observation carries no capture timestamp, so the requested minimum could not be checked."
-          : `Observation was captured ${staleDurationMs}ms before the requested minimum timestamp.`,
-    };
+    return computeRequestedFreshness(requestedAfter, actualTimestamp, ageMs, verified);
   }
 
   // No constraint supplied. This is the path that used to hardcode `true`.

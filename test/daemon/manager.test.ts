@@ -25,6 +25,7 @@ import type {
   ExtractionCleaner,
 } from "../../src/daemon/manager";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -1099,6 +1100,9 @@ describe("Daemon manager available-devices", () => {
           },
           getSessionManager: () => {
             throw new Error("Session manager unavailable");
+          },
+          getDeviceSessionRegistry: () => {
+            throw new Error("Device session registry unavailable");
           }
         } satisfies DaemonStateLike)
       });
@@ -1148,7 +1152,8 @@ describe("Daemon manager available-devices", () => {
       getSessionManager: () => ({
         getSession: () => null,
         releaseSession: async () => null
-      } as any)
+      } as any),
+      getDeviceSessionRegistry: () => new DeviceSessionRegistry()
     };
 
     try {

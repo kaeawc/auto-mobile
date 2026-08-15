@@ -9,6 +9,7 @@ import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { DevicePool, type PooledDevice } from "./devicePool";
 import { parseDeviceRecoveryPolicy } from "./poolConfig";
 import { DaemonState } from "./daemonState";
+import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
   DEFAULT_DAEMON_PORT,
   SOCKET_PATH,
@@ -142,6 +143,7 @@ export class Daemon {
   private stoppingRecordings: Set<string> = new Set();
   private sessionManager: SessionManager;
   private devicePool: DevicePool;
+  private deviceSessionRegistry: DeviceSessionRegistry;
   private daemonSessionId: string;
   private installedAppsRepository: InstalledAppsStore;
   private deviceSessionRepository: DeviceSessionRepository;
@@ -226,6 +228,7 @@ export class Daemon {
       `[Daemon] Device recovery policy: onLoss=${recoveryConfiguration.policy.onLoss}, ` +
       `maxAttempts=${recoveryConfiguration.policy.maxAttempts}`
     );
+    this.deviceSessionRegistry = new DeviceSessionRegistry(this.timer, this.idGenerator);
     this.devicePool = new DevicePool(
       this.sessionManager,
       this.daemonSessionId,
@@ -236,12 +239,16 @@ export class Daemon {
       this.deviceSessionRepository,
       undefined,
       (sessionId, _deviceId, releaseReason) => this.cancelAndReleaseSession(sessionId, releaseReason),
-      deviceId => this.socketServer?.evictDeviceInputCache(deviceId),
+      deviceId => this.onDeviceReadyForSessionRegistry(deviceId),
       undefined,
       recoveryConfiguration.policy,
     );
     // Initialize singleton for daemon state access
-    DaemonState.getInstance().initialize(this.sessionManager, this.devicePool);
+    DaemonState.getInstance().initialize(
+      this.sessionManager,
+      this.devicePool,
+      this.deviceSessionRegistry
+    );
 
     // Apply CLI flags to serverConfig so daemon tools respect them
     if (options.networkMockable) {
@@ -835,6 +842,27 @@ export class Daemon {
   }
 
   /**
+   * Device-ready callback wired into {@link DevicePool}. Mints (or refreshes)
+   * the device-session epoch for the connected device and preserves the
+   * pre-existing input-cache eviction. The pool fires this on every add path,
+   * so the mint is keyed on the pooled device's monotonic `incarnation` — a
+   * repeat ready-signal for the same epoch is idempotent, while a same-serial
+   * restart (new incarnation) mints a fresh `deviceSessionUuid` (epic #5256).
+   */
+  private onDeviceReadyForSessionRegistry(deviceId: string): void {
+    this.socketServer?.evictDeviceInputCache(deviceId);
+    const pooled = this.devicePool.getDevice(deviceId);
+    if (!pooled) {
+      return;
+    }
+    this.deviceSessionRegistry.onDeviceConnected({
+      deviceId: pooled.id,
+      platform: pooled.platform,
+      incarnation: pooled.incarnation,
+    });
+  }
+
+  /**
    * Set up callback for observation stream to trigger device WebSocket connections.
    * When an IDE plugin subscribes to the observation stream, we need to ensure
    * the WebSocket connections to Android devices are established so that
@@ -1244,6 +1272,9 @@ export class Daemon {
           // that never confirms is handled by the device-ready callback; the 5-min
           // idle close remains a fallback.
           this.socketServer?.evictDeviceInputCache(deviceId);
+          // Retire the device-session epoch so a stale deviceSessionUuid stops
+          // resolving and listDeviceSessions drops the gone device (epic #5256).
+          this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
           if (this.devicePool.getDevice(deviceId)) {
             deviceCleanupSucceeded = false;
           }

@@ -1,10 +1,12 @@
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
+import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 
 export interface DaemonStateLike {
   isInitialized(): boolean;
   getSessionManager(): SessionManager;
   getDevicePool(): DevicePool;
+  getDeviceSessionRegistry(): DeviceSessionRegistry;
 }
 
 /**
@@ -17,6 +19,7 @@ export class DaemonState implements DaemonStateLike {
   private static instance: DaemonState;
   private sessionManager: SessionManager | null = null;
   private devicePool: DevicePool | null = null;
+  private deviceSessionRegistry: DeviceSessionRegistry | null = null;
 
   private constructor() {}
 
@@ -34,9 +37,14 @@ export class DaemonState implements DaemonStateLike {
    * Initialize daemon state
    * Called by Daemon after creating SessionManager and DevicePool
    */
-  initialize(sessionManager: SessionManager, devicePool: DevicePool): void {
+  initialize(
+    sessionManager: SessionManager,
+    devicePool: DevicePool,
+    deviceSessionRegistry: DeviceSessionRegistry = new DeviceSessionRegistry()
+  ): void {
     this.sessionManager = sessionManager;
     this.devicePool = devicePool;
+    this.deviceSessionRegistry = deviceSessionRegistry;
   }
 
   /**
@@ -60,10 +68,24 @@ export class DaemonState implements DaemonStateLike {
   }
 
   /**
+   * Get the DeviceSessionRegistry
+   */
+  getDeviceSessionRegistry(): DeviceSessionRegistry {
+    if (!this.deviceSessionRegistry) {
+      throw new Error("DaemonState not initialized");
+    }
+    return this.deviceSessionRegistry;
+  }
+
+  /**
    * Check if daemon state is initialized
    */
   isInitialized(): boolean {
-    return this.sessionManager !== null && this.devicePool !== null;
+    return (
+      this.sessionManager !== null &&
+      this.devicePool !== null &&
+      this.deviceSessionRegistry !== null
+    );
   }
 
   /**
@@ -72,5 +94,6 @@ export class DaemonState implements DaemonStateLike {
   reset(): void {
     this.sessionManager = null;
     this.devicePool = null;
+    this.deviceSessionRegistry = null;
   }
 }

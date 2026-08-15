@@ -722,6 +722,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     let sharedStart = this.sharedStart;
+    if (sharedStart?.controller.signal.aborted) {
+      logger.info("[IOSCtrlProxy] Discarding aborted startup before retrying");
+      if (this.sharedStart === sharedStart) {
+        this.sharedStart = null;
+      }
+      sharedStart = null;
+    }
     if (sharedStart) {
       logger.info("[IOSCtrlProxy] Start already in progress, waiting for it to complete");
       this.extendHealthPollDeadline(sharedStart, options.minimumHealthPollDurationMs);

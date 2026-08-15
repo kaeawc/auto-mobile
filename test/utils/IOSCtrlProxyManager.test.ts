@@ -1104,6 +1104,43 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
     });
 
+    test("a retry starts fresh after the prior sole caller aborts", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let curlCalls = 0;
+      let releaseFirstHealthPoll: ((result: ExecResult) => void) | undefined;
+      const firstHealthPoll = new Promise<ExecResult>((resolve) => {
+        releaseFirstHealthPoll = resolve;
+      });
+      fakeExecutor.setCommandHandler("curl -s", () => {
+        curlCalls++;
+        if (curlCalls === 3) {
+          return firstHealthPoll;
+        }
+        return createExecResult("ok", "");
+      });
+
+      const controller = new AbortController();
+      const abortedStart = manager.start({ signal: controller.signal });
+      for (let i = 0; i < 5 && !releaseFirstHealthPoll; i++) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+      expect(releaseFirstHealthPoll).toBeDefined();
+
+      controller.abort(new Error("caller cancelled"));
+      await expect(abortedStart).rejects.toThrow("caller cancelled");
+
+      const retry = manager.start();
+      releaseFirstHealthPoll!(createExecResult("", ""));
+      await retry;
+
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+    });
+
     // Directly exercise the PID-reuse guard added in review (thread 2). Testing the
     // predicate rather than a full start() keeps it precise and avoids spawning a
     // runner (whose background monitor would leak into later tests under autoAdvance).

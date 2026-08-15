@@ -63,7 +63,9 @@ class NavigationProvenanceUiTest {
             node("Home", listOf(provenance(deviceId = activeDevice))),
             node(
               "Legacy",
-              listOf(provenance(deviceId = "emulator-9999", versionCode = 2, contentHash = "hashB")),
+              listOf(
+                provenance(deviceId = "emulator-9999", versionCode = 2, contentHash = "hashB")
+              ),
             ),
           ),
         transitions = emptyList(),

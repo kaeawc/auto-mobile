@@ -15,7 +15,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
@@ -149,6 +152,17 @@ fun AutoMobileDesktopApp(
   openPaletteRequest: Int = 0,
 ) {
   val graph = LocalAutoMobileGraph.current
+
+  // Update availability (#5225): collect the controller and run one check at app startup — hoisted
+  // above the surface switch so it runs regardless of the launch surface (onboarding, picker, or
+  // workspace), not only after a device is observed. Keyed to the controller so a graph change
+  // re-checks exactly once, rather than on every workspace re-entry. Dev / -SNAPSHOT builds no-op
+  // it.
+  val updateController = graph.updateController
+  val updateStatus by updateController.status.collectAsState()
+  var showUpdateDetails by remember { mutableStateOf(false) }
+  LaunchedEffect(updateController) { updateController.checkForUpdate() }
+
   val settings = remember(graph) { ObservableSettingsProvider(graph.settingsProvider) }
   val scope = rememberCoroutineScope()
   val controlExecutor = remember(graph) { DaemonEmulatorControlExecutor(graph.autoMobileClient) }
@@ -418,12 +432,6 @@ fun AutoMobileDesktopApp(
                 deriveWorkspaceStatus(daemon = daemonState, devices = emptyList())
               }
 
-            // Update availability (#5225): observe the controller and run one check at startup.
-            // Dev / -SNAPSHOT builds no-op the check, so the pill never appears in development.
-            val updateStatus by graph.updateController.status.collectAsState()
-            var showUpdateDetails by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { graph.updateController.checkForUpdate() }
-
             WorkspaceShell(
               state = workspaceState,
               onAction = workspaceViewModel::onAction,
@@ -464,7 +472,15 @@ fun AutoMobileDesktopApp(
             // install action inside is disabled.
             val availableUpdate = updateStatus as? UpdateStatus.UpdateAvailable
             if (showUpdateDetails && availableUpdate != null) {
+              // Anchor the popup under the top-right pill (below the 40dp top bar) rather than the
+              // window's default top-left, so it reads as coming from its trigger.
+              val popupOffset =
+                with(LocalDensity.current) {
+                  IntOffset(x = -8.dp.roundToPx(), y = 44.dp.roundToPx())
+                }
               Popup(
+                alignment = Alignment.TopEnd,
+                offset = popupOffset,
                 onDismissRequest = { showUpdateDetails = false },
                 properties = PopupProperties(focusable = true),
               ) {

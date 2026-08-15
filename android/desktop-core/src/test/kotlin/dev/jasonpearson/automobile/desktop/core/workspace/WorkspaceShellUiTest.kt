@@ -64,18 +64,28 @@ class WorkspaceShellUiTest {
   }
 
   @Test
-  fun `top bar hides the update pill when up to date`() = runComposeUiTest {
-    setContent {
-      MaterialTheme {
-        WorkspaceShell(
-          state = WorkspaceUiState.Empty,
-          onAction = {},
-          onOpenPicker = {},
-          updateStatus = UpdateStatus.UpToDate,
-        )
+  fun `top bar hides the update pill for every non-available state`() {
+    for (hidden in
+      listOf(
+        UpdateStatus.Idle,
+        UpdateStatus.Checking,
+        UpdateStatus.UpToDate,
+        UpdateStatus.Failed("boom"),
+      )) {
+      runComposeUiTest {
+        setContent {
+          MaterialTheme {
+            WorkspaceShell(
+              state = WorkspaceUiState.Empty,
+              onAction = {},
+              onOpenPicker = {},
+              updateStatus = hidden,
+            )
+          }
+        }
+        onNodeWithText("Update ready").assertDoesNotExist()
       }
     }
-    onNodeWithText("Update ready").assertDoesNotExist()
   }
 
   @Test

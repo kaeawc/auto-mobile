@@ -1026,7 +1026,7 @@ describe("IOSCtrlProxyManager", function() {
       let curlCalls = 0;
       fakeExecutor.setCommandHandler("curl -s", () => {
         curlCalls++;
-        return createExecResult(curlCalls > 4 ? "ok" : "", "");
+        return createExecResult(curlCalls > 5 ? "ok" : "", "");
       });
 
       await withHealthBudget("3", async () => {
@@ -1034,7 +1034,7 @@ describe("IOSCtrlProxyManager", function() {
         await manager.start({ healthCheckTimeoutMs: 2_000 });
       });
 
-      expect(curlCalls).toBe(5);
+      expect(curlCalls).toBe(6);
     });
 
     // Directly exercise the PID-reuse guard added in review (thread 2). Testing the

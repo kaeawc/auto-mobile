@@ -968,12 +968,24 @@ private fun ScreenNodeCard(
     }
   val textAlpha = if (isDimmed) 0.4f else 0.8f
 
+  // A faded node was reached only historically / by another build or device (#4985). Surface its
+  // provenance in the visible hover tooltip, not only in the semantics contentDescription, so
+  // sighted mouse users see the same signal screen readers get.
+  val isFaded = provenanceAlpha < ProvenanceOpacity.ACTIVE_ALPHA
+
   Tooltip(
     tooltip = {
       Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(screen.name, fontSize = 12.sp)
         Text(screen.type, fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.7f))
         Text(screen.packageName, fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
+        if (isFaded && provenanceDescription.isNotEmpty()) {
+          Text(
+            provenanceDescription,
+            fontSize = 10.sp,
+            color = colors.text.normal.copy(alpha = 0.7f),
+          )
+        }
       }
     }
   ) {

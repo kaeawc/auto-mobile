@@ -1239,6 +1239,10 @@ export class NavigationRepository {
       .innerJoin("navigation_build_keys as bk", "bk.id", "obs.build_key_id")
       .innerJoin("navigation_nodes as n", "n.id", "obs.node_id")
       .where("n.app_id", "=", appId)
+      // Constrain the build key to the node's own app: observation rows accept
+      // independent entity + build-key ids, so a mis-scoped build key must not
+      // surface another app's provenance in this app-union (#4985).
+      .whereRef("bk.app_id", "=", "n.app_id")
       .select([
         "obs.node_id as node_id",
         "bk.app_id as package_id",
@@ -1267,6 +1271,9 @@ export class NavigationRepository {
       .innerJoin("navigation_build_keys as bk", "bk.id", "obs.build_key_id")
       .innerJoin("navigation_edges as e", "e.id", "obs.edge_id")
       .where("e.app_id", "=", appId)
+      // Symmetric to the node query: pin the build key to the edge's own app so
+      // a mis-scoped build key cannot leak another app's provenance (#4985).
+      .whereRef("bk.app_id", "=", "e.app_id")
       .select([
         "obs.edge_id as edge_id",
         "bk.app_id as package_id",

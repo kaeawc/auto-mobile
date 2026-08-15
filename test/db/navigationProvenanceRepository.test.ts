@@ -158,4 +158,40 @@ describe("NavigationRepository provenance observations", () => {
     expect(rows[0].device_id).toBe("device-1");
     expect(rows[0].last_seen_at).toBe(150);
   });
+
+  // recordNodeObservation accepts independent entity + build-key ids, so a mis-scoped build key
+  // belonging to another app must NOT surface that app's provenance in this app-union (#4985).
+  test("getNodeProvenanceForApp excludes observations whose build key belongs to another app", async () => {
+    const node = await repo.getOrCreateNode("com.example.app", "Home", 100);
+    const ownBuild = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
+    await repo.recordNodeObservation(node.id, ownBuild.id, "device-1", "session-1", 100);
+
+    // A build key from a DIFFERENT app, recorded (mis-scoped) against this app's node.
+    await repo.getOrCreateApp("com.other.app");
+    const foreignBuild = await repo.getOrCreateBuildKey("com.other.app", 9, "hashZ");
+    await repo.recordNodeObservation(node.id, foreignBuild.id, "device-2", "session-2", 200);
+
+    const rows = await repo.getNodeProvenanceForApp("com.example.app");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].package_id).toBe("com.example.app");
+    expect(rows.every(r => r.package_id === "com.example.app")).toBe(true);
+    expect(rows.some(r => r.content_hash === "hashZ")).toBe(false);
+  });
+
+  test("getEdgeProvenanceForApp excludes observations whose build key belongs to another app", async () => {
+    const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
+    const ownBuild = await repo.getOrCreateBuildKey("com.example.app", 3, "hashC");
+    await repo.recordEdgeObservation(edge.id, ownBuild.id, "device-1", "session-1", 150);
+
+    // A build key from a DIFFERENT app, recorded (mis-scoped) against this app's edge.
+    await repo.getOrCreateApp("com.other.app");
+    const foreignBuild = await repo.getOrCreateBuildKey("com.other.app", 9, "hashZ");
+    await repo.recordEdgeObservation(edge.id, foreignBuild.id, "device-2", "session-2", 400);
+
+    const rows = await repo.getEdgeProvenanceForApp("com.example.app");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].package_id).toBe("com.example.app");
+    expect(rows.every(r => r.package_id === "com.example.app")).toBe(true);
+    expect(rows.some(r => r.content_hash === "hashZ")).toBe(false);
+  });
 });

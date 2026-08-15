@@ -157,6 +157,9 @@ function compareProvenanceRecords(
   if (a.lastSeen !== b.lastSeen) {
     return b.lastSeen - a.lastSeen;
   }
+  if (a.buildKey.packageId !== b.buildKey.packageId) {
+    return a.buildKey.packageId < b.buildKey.packageId ? -1 : 1;
+  }
   if (a.buildKey.versionCode !== b.buildKey.versionCode) {
     return b.buildKey.versionCode - a.buildKey.versionCode;
   }

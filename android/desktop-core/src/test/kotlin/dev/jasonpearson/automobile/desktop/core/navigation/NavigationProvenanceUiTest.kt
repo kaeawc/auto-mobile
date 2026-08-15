@@ -3,8 +3,12 @@ package dev.jasonpearson.automobile.desktop.core.navigation
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
@@ -93,6 +97,53 @@ class NavigationProvenanceUiTest {
         "Legacy — historical: build v2 (hashB), device emulator-9999, session session-1, last seen 250"
       )
       .assertExists()
+  }
+
+  @Test
+  fun `hovering a faded node reveals its provenance in the visible tooltip`() = runComposeUiTest {
+    val graph =
+      NavigationGraph(
+        screens =
+          listOf(
+            node(
+              "Legacy",
+              listOf(
+                provenance(deviceId = "emulator-9999", versionCode = 2, contentHash = "hashB")
+              ),
+            )
+          ),
+        transitions = emptyList(),
+      )
+
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+        MaterialTheme {
+          NavigationDashboard(
+            providedGraph = graph,
+            providedCurrentScreen = "Legacy",
+            activeContext = activeContext,
+          )
+        }
+      }
+    }
+
+    val provenanceText =
+      "Legacy — historical: build v2 (hashB), device emulator-9999, session session-1, last seen 250"
+
+    // The provenance lives in semantics from first render, but is NOT yet shown as visible tooltip
+    // text — a sighted mouse user only sees it after hovering the node.
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithContentDescription(provenanceText).fetchSemanticsNodes().isNotEmpty()
+    }
+    onAllNodesWithText(provenanceText).assertCountEquals(0)
+
+    // Hover the faded node; the TooltipArea popup must surface the same provenance as visible text.
+    onNodeWithContentDescription(provenanceText).performMouseInput { moveTo(center) }
+
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText(provenanceText).fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText(provenanceText).assertExists()
   }
 
   @Test

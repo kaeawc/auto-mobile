@@ -47,7 +47,9 @@ import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
+import dev.jasonpearson.automobile.desktop.core.shell.UpdateReadyButton
 import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
+import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -87,6 +89,9 @@ fun WorkspaceShell(
   status: WorkspaceStatus = WorkspaceStatus.Green,
   // A terse reason for a non-green status, shown inline next to the dot ("yellow = one line").
   statusDetail: String? = null,
+  // Update-availability state (#5225): the top bar shows a pill only when an update is available.
+  updateStatus: UpdateStatus = UpdateStatus.Idle,
+  onUpdateClick: () -> Unit = {},
   onOpenPalette: () -> Unit = {},
   modifier: Modifier = Modifier,
   // Renders the docked facet body for a pane's active tool. Hoisted so the host can supply real
@@ -138,6 +143,8 @@ fun WorkspaceShell(
       TopBar(
         status = status,
         statusDetail = statusDetail,
+        updateStatus = updateStatus,
+        onUpdateClick = onUpdateClick,
         onOpenPicker = onOpenPicker,
         onOpenPalette = onOpenPalette,
         onStatusClick = { showHealthSheet = true },
@@ -227,6 +234,8 @@ internal fun compareColumns(content: WorkspaceUiState.Content): Pair<DeviceColum
 private fun TopBar(
   status: WorkspaceStatus,
   statusDetail: String?,
+  updateStatus: UpdateStatus,
+  onUpdateClick: () -> Unit,
   onOpenPicker: () -> Unit,
   onOpenPalette: () -> Unit,
   onStatusClick: () -> Unit,
@@ -299,6 +308,13 @@ private fun TopBar(
             .padding(horizontal = 8.dp, vertical = 4.dp),
       )
     }
+    // Update-ready affordance — sits just before the status dot; visible only when an update is
+    // available (#5225).
+    UpdateReadyButton(status = updateStatus, onClick = onUpdateClick)
+    if (updateStatus is UpdateStatus.UpdateAvailable) {
+      Spacer(Modifier.width(8.dp))
+    }
+
     // Visible dot stays 12dp; the clickable target is enlarged to 32dp. For a green status (no
     // inline line) the dot is the only entry point to the health sheet.
     Box(

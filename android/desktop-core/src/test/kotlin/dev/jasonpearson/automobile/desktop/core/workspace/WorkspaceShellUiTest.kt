@@ -11,6 +11,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
+import dev.jasonpearson.automobile.desktop.core.update.ReleaseAsset
+import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
 import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -37,6 +39,61 @@ class WorkspaceShellUiTest {
     }
     onNodeWithContentDescription("Open command palette").performClick()
     assertTrue(opened)
+  }
+
+  private val availableUpdate =
+    UpdateStatus.UpdateAvailable(
+      version = "0.0.53",
+      asset = ReleaseAsset("AutoMobile-0.0.53-macos.dmg", "https://x/dmg", 1),
+      releaseNotesUrl = "https://notes",
+    )
+
+  @Test
+  fun `top bar shows the update pill only when an update is available`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          updateStatus = availableUpdate,
+        )
+      }
+    }
+    onNodeWithText("Update ready").assertIsDisplayed()
+  }
+
+  @Test
+  fun `top bar hides the update pill when up to date`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          updateStatus = UpdateStatus.UpToDate,
+        )
+      }
+    }
+    onNodeWithText("Update ready").assertDoesNotExist()
+  }
+
+  @Test
+  fun `clicking the update pill invokes onUpdateClick`() = runComposeUiTest {
+    var clicks = 0
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          updateStatus = availableUpdate,
+          onUpdateClick = { clicks++ },
+        )
+      }
+    }
+    onNodeWithText("Update ready").performClick()
+    assertEquals(1, clicks)
   }
 
   @Test

@@ -13,8 +13,11 @@ import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
+import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -34,6 +37,8 @@ class PerformanceFacetTest {
       override val autoMobileClient = client
       override val settingsProvider = FakeSettingsProvider()
       override val dataSourceFactory = DefaultDataSourceFactory(client)
+      override val updateController = FakeUpdateController()
+      override val appVersionProvider = AppVersionProvider { AppVersion.Dev }
     }
   }
 

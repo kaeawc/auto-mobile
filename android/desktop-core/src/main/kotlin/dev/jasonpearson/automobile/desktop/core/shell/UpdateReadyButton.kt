@@ -9,12 +9,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.SystemUpdateAlt
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,7 +34,7 @@ private val UpdateAccent = Color(0xFF4CAF50)
 private val LOG = LoggerFactory.getLogger("UpdateReadyButton")
 
 /** Opens [url] in the user's default browser. Best-effort — a failure is logged, not surfaced. */
-internal fun openReleaseNotesInBrowser(url: String) {
+fun openReleaseNotesInBrowser(url: String) {
   try {
     Desktop.getDesktop().browse(URI(url))
   } catch (error: Exception) {
@@ -44,8 +44,8 @@ internal fun openReleaseNotesInBrowser(url: String) {
 
 /**
  * The lower-left status-bar affordance that appears only when an update is available. Pure: it
- * renders from [status] and calls [onClick]; it performs no network work and does not reach into the
- * DI graph (the shell observes the controller and passes state down).
+ * renders from [status] and calls [onClick]; it performs no network work and does not reach into
+ * the DI graph (the shell observes the controller and passes state down).
  */
 @Composable
 fun UpdateReadyButton(
@@ -72,7 +72,12 @@ fun UpdateReadyButton(
       tint = UpdateAccent,
       modifier = Modifier.width(12.dp),
     )
-    Text(text = "Update ready", style = DesktopTypography.label, color = UpdateAccent, lineHeight = 10.sp)
+    Text(
+      text = "Update ready",
+      style = DesktopTypography.label,
+      color = UpdateAccent,
+      lineHeight = 10.sp,
+    )
   }
 }
 

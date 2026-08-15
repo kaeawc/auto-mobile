@@ -24,8 +24,11 @@ import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScre
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoaderRegistry
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
+import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
+import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.FlowCollector
@@ -48,6 +51,8 @@ class NavigationFacetTest {
       override val autoMobileClient = client
       override val settingsProvider = FakeSettingsProvider()
       override val dataSourceFactory = DefaultDataSourceFactory(client)
+      override val updateController = FakeUpdateController()
+      override val appVersionProvider = AppVersionProvider { AppVersion.Dev }
     }
   }
 
@@ -837,6 +842,8 @@ class NavigationFacetTest {
         override val autoMobileClient = client
         override val settingsProvider = settings
         override val dataSourceFactory = DefaultDataSourceFactory(client)
+        override val updateController = FakeUpdateController()
+        override val appVersionProvider = AppVersionProvider { AppVersion.Dev }
       }
     val fake = FakeObservationStream()
     setContent {

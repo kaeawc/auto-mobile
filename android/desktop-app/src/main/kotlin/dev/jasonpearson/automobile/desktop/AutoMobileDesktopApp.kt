@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -15,6 +16,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
@@ -24,6 +28,9 @@ import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
+import dev.jasonpearson.automobile.desktop.core.shell.UpdateDetailsContent
+import dev.jasonpearson.automobile.desktop.core.shell.openReleaseNotesInBrowser
+import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
 import dev.jasonpearson.automobile.desktop.core.workspace.BOOTED_DEVICES_RESOURCE_URI
 import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.workspace.DEVICE_LOCK_STATES_RESOURCE_URI
@@ -410,6 +417,13 @@ fun AutoMobileDesktopApp(
               remember(daemonState) {
                 deriveWorkspaceStatus(daemon = daemonState, devices = emptyList())
               }
+
+            // Update availability (#5225): observe the controller and run one check at startup.
+            // Dev / -SNAPSHOT builds no-op the check, so the pill never appears in development.
+            val updateStatus by graph.updateController.status.collectAsState()
+            var showUpdateDetails by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { graph.updateController.checkForUpdate() }
+
             WorkspaceShell(
               state = workspaceState,
               onAction = workspaceViewModel::onAction,
@@ -417,6 +431,8 @@ fun AutoMobileDesktopApp(
               onOpenPalette = { paletteOpen = true },
               status = workspaceStatus.status,
               statusDetail = workspaceStatus.detail,
+              updateStatus = updateStatus,
+              onUpdateClick = { showUpdateDetails = true },
               facetContent = { column, tool -> WorkspaceFacet(column, tool) },
               // Live device mirror in each pane's stream area, fed by the daemon's video-stream
               // relay. The pane authenticates with the workspace daemon session (#4977) bound to
@@ -440,6 +456,32 @@ fun AutoMobileDesktopApp(
                   ),
                 onDismiss = { paletteOpen = false },
               )
+            }
+
+            // Details popup for the top-bar update pill (#5225). `as?` closes it automatically if
+            // the
+            // status leaves UpdateAvailable while open. Applying the update is a later item, so the
+            // install action inside is disabled.
+            val availableUpdate = updateStatus as? UpdateStatus.UpdateAvailable
+            if (showUpdateDetails && availableUpdate != null) {
+              Popup(
+                onDismissRequest = { showUpdateDetails = false },
+                properties = PopupProperties(focusable = true),
+              ) {
+                Surface(
+                  shape = RoundedCornerShape(6.dp),
+                  color = MaterialTheme.colorScheme.surface,
+                  shadowElevation = 8.dp,
+                ) {
+                  UpdateDetailsContent(
+                    update = availableUpdate,
+                    currentVersion = graph.appVersionProvider.current().raw,
+                    onOpenReleaseNotes = {
+                      availableUpdate.releaseNotesUrl?.let { openReleaseNotesInBrowser(it) }
+                    },
+                  )
+                }
+              }
             }
           }
       }

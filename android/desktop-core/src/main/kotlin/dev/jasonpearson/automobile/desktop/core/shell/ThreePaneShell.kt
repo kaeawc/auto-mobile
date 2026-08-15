@@ -20,12 +20,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,11 +48,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
-import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
-import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
 import kotlinx.coroutines.delay
 
 /** Represents which pane currently has keyboard focus. */
@@ -170,13 +163,6 @@ fun ThreePaneShell(
   // Modal overlays
   var showCheatSheet by remember { mutableStateOf(false) }
   var showQuickJump by remember { mutableStateOf(false) }
-
-  // Update availability — observe the controller (item #5224) and run one check at startup. Dev /
-  // -SNAPSHOT builds no-op the check, so the pill never appears in development.
-  val autoMobileGraph = LocalAutoMobileGraph.current
-  val updateStatus by autoMobileGraph.updateController.status.collectAsState()
-  var showUpdateDetails by remember { mutableStateOf(false) }
-  LaunchedEffect(Unit) { autoMobileGraph.updateController.checkForUpdate() }
 
   // Observe menu bar triggers for overlays
   if (menuBarActions != null) {
@@ -377,31 +363,7 @@ fun ThreePaneShell(
             networkReqPerSec = networkReqPerSec,
             connectionStartTime = connectionStartTime,
             cpuUsagePercent = cpuUsagePercent,
-            updateStatus = updateStatus,
-            onUpdateClick = { showUpdateDetails = true },
           )
-        }
-
-        val availableUpdate = updateStatus as? UpdateStatus.UpdateAvailable
-        if (showUpdateDetails && availableUpdate != null) {
-          Popup(
-            onDismissRequest = { showUpdateDetails = false },
-            properties = PopupProperties(focusable = true),
-          ) {
-            Surface(
-              shape = RoundedCornerShape(6.dp),
-              color = SharedTheme.globalColors.panelBackground,
-              shadowElevation = 8.dp,
-            ) {
-              UpdateDetailsContent(
-                update = availableUpdate,
-                currentVersion = autoMobileGraph.appVersionProvider.current().raw,
-                onOpenReleaseNotes = {
-                  availableUpdate.releaseNotesUrl?.let { openReleaseNotesInBrowser(it) }
-                },
-              )
-            }
-          }
         }
 
         // Right inspector (collapsible)
@@ -567,8 +529,6 @@ private fun StatusBarStub(
   networkReqPerSec: Float? = null,
   connectionStartTime: Long? = null,
   cpuUsagePercent: Float? = null,
-  updateStatus: UpdateStatus = UpdateStatus.Idle,
-  onUpdateClick: () -> Unit = {},
 ) {
   val colors = SharedTheme.globalColors
   val totalFailures = crashCount + anrCount + nonFatalCount + toolFailureCount
@@ -593,12 +553,6 @@ private fun StatusBarStub(
       .padding(horizontal = 8.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    // Update-ready affordance — lower-left corner; visible only when an update is available.
-    UpdateReadyButton(status = updateStatus, onClick = onUpdateClick)
-    if (updateStatus is UpdateStatus.UpdateAvailable) {
-      Spacer(Modifier.width(8.dp))
-    }
-
     // Connection indicator — clickable segment
     val connColor =
       if (isDaemonConnected) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.3f)

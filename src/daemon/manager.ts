@@ -503,56 +503,35 @@ export class DaemonManager implements DaemonManagerLike {
    * Internal start implementation (caller must hold lock).
    */
   private async startUnlocked(options: DaemonOptions): Promise<void> {
-    // Check for any running daemon processes from ANY worktree
-    const otherDaemons = this.findLiveDaemonProcesses();
-    if (otherDaemons.length > 0) {
-      stderrLog(
-        `\nWARNING: Found ${otherDaemons.length} other auto-mobile daemon process(es) running:`
-      );
-      for (const pid of otherDaemons) {
-        stderrLog(`  - PID ${pid}`);
-      }
-      stderrLog(
-        `\nThese may be from other worktrees and can cause device pool conflicts.`
-      );
-      stderrLog(`Stopping all other daemons before starting new one...`);
-
-      for (const pid of otherDaemons) {
-        try {
-          process.kill(pid, "SIGTERM");
-          stderrLog(`  Sent SIGTERM to PID ${pid}`);
-        } catch (error) {
-          stderrLog(`  Failed to stop PID ${pid}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-
-      // Wait for processes to terminate
-      await this.timer.sleep(1000);
-
-      const remainingDaemonPids = new Set(this.findLiveDaemonProcesses());
-      for (const pid of otherDaemons) {
-        if (!remainingDaemonPids.has(pid)) {
-          continue;
-        }
-        try {
-          process.kill(pid, "SIGKILL");
-          stderrLog(`  Sent SIGKILL to PID ${pid}`);
-        } catch (error) {
-          stderrLog(`  Failed to kill PID ${pid}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-    }
-
-    // Enforce single daemon policy: stop any existing daemon before starting
-    // This ensures only one daemon runs on the host system (per user)
     const status = await this.status();
     if (status.running) {
+      stderrLog(`Daemon is already running (PID ${status.pid}, port ${status.port})`);
+      return;
+    }
+
+    // A missing or stale PID record must not turn an ordinary start request into
+    // permission to terminate a live daemon. This happens when a second client
+    // reaches the shared socket during a long-running tool call and races a
+    // transient availability probe. Reuse a responsive daemon; require an
+    // explicit restart for a live but unreachable process.
+    const liveDaemons = this.findLiveDaemonProcesses();
+    if (liveDaemons.length > 0) {
       stderrLog(
-        `Found existing daemon (PID ${status.pid}, port ${status.port}), stopping it...`
+        `Found ${liveDaemons.length} live auto-mobile daemon process(es) without a usable PID record; waiting for one to become ready...`
       );
-      await this.stop();
-      // Wait briefly for cleanup
-      await this.timer.sleep(500);
+      for (const pid of liveDaemons) {
+        stderrLog(`  - PID ${pid}`);
+      }
+      if (await this.waitForExistingDaemon(DAEMON_STARTUP_TIMEOUT_MS)) {
+        stderrLog("Reusing existing responsive daemon");
+        return;
+      }
+
+      throw new ActionableError(
+        `Found live AutoMobile daemon process(es) (${liveDaemons.join(", ")}) but none became reachable within ` +
+        `${DAEMON_STARTUP_TIMEOUT_MS}ms. Refusing to terminate a live daemon during start; ` +
+        `inspect it or run \`bunx ${resolveDaemonInstallSpecifier()} --daemon restart\` explicitly.`
+      );
     }
 
     // Clean up stale socket and PID files from previous sessions
@@ -999,6 +978,20 @@ export class DaemonManager implements DaemonManagerLike {
       `Daemon readiness probe timed out after ${this.timer.now() - startTime}ms ` +
       `(${pollCount} polls; socket ${socketObserved ? "observed" : "not observed"})`
     );
+    return false;
+  }
+
+  private async waitForExistingDaemon(timeout: number): Promise<boolean> {
+    const startTime = this.timer.now();
+    const pollInterval = 100;
+
+    while (this.timer.now() - startTime < timeout) {
+      if (await this.verifyDaemonConnection()) {
+        return true;
+      }
+      await this.timer.sleep(pollInterval);
+    }
+
     return false;
   }
 

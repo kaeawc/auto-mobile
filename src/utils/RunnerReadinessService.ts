@@ -61,13 +61,13 @@ export interface ReadinessIosManager {
   isInstalled(): Promise<boolean>;
   start(options?: {
     signal?: AbortSignal;
-    healthCheckTimeoutMs?: number;
+    minimumHealthPollDurationMs?: number;
   }): Promise<void>;
   setup(
     force?: boolean,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-    healthCheckTimeoutMs?: number,
+    minimumHealthPollDurationMs?: number,
   ): Promise<ProxySetupResult>;
   getServicePort(): number;
 }
@@ -421,7 +421,7 @@ export class RunnerReadinessService {
     await this.runPhase(context, "runner-setup", 1, (signal) =>
       manager.start({
         signal,
-        healthCheckTimeoutMs: this.remaining(context),
+        minimumHealthPollDurationMs: this.remaining(context),
       }),
     );
     await this.waitForResponsiveClient(context, client);

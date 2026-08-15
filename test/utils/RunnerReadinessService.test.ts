@@ -91,14 +91,14 @@ class FakeIosManager implements ReadinessIosManager {
   setupCalls = 0;
   startCalls = 0;
   setupSignal: AbortSignal | undefined;
-  setupHealthCheckTimeoutMs: number | undefined;
-  startOptions: { signal?: AbortSignal; healthCheckTimeoutMs?: number } | undefined;
+  setupMinimumHealthPollDurationMs: number | undefined;
+  startOptions: { signal?: AbortSignal; minimumHealthPollDurationMs?: number } | undefined;
 
   async isInstalled(): Promise<boolean> {
     return this.installed;
   }
 
-  async start(options?: { signal?: AbortSignal; healthCheckTimeoutMs?: number }): Promise<void> {
+  async start(options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }): Promise<void> {
     this.startCalls++;
     this.startOptions = options;
   }
@@ -107,11 +107,11 @@ class FakeIosManager implements ReadinessIosManager {
     _force?: boolean,
     _perf?: unknown,
     signal?: AbortSignal,
-    healthCheckTimeoutMs?: number,
+    minimumHealthPollDurationMs?: number,
   ) {
     this.setupCalls++;
     this.setupSignal = signal;
-    this.setupHealthCheckTimeoutMs = healthCheckTimeoutMs;
+    this.setupMinimumHealthPollDurationMs = minimumHealthPollDurationMs;
     return this.setupResult;
   }
 
@@ -128,6 +128,7 @@ function createService(
     iosManager?: FakeIosManager;
     iosClient?: FakeReadinessClient;
     autoAdvance?: boolean;
+    awaitIosStartupMaintenance?: () => Promise<void>;
   } = {},
 ) {
   const timer = options.timer ?? new FakeTimer();
@@ -151,7 +152,7 @@ function createService(
       getIosManager: () => iosManager,
       getIosClient: () => iosClient,
       checkIosOverride: async () => ({ present: false, usable: true }),
-      awaitIosStartupMaintenance: async () => {},
+      awaitIosStartupMaintenance: options.awaitIosStartupMaintenance ?? (async () => {}),
     }),
   };
 }
@@ -296,7 +297,15 @@ describe("RunnerReadinessService", () => {
     const iosManager = new FakeIosManager();
     const iosClient = new FakeReadinessClient();
     iosClient.connected = false;
-    const { service } = createService({ iosManager, iosClient });
+    const timer = new FakeTimer();
+    const { service } = createService({
+      timer,
+      iosManager,
+      iosClient,
+      awaitIosStartupMaintenance: async () => {
+        timer.advanceTime(10_000);
+      },
+    });
 
     await service.ensureReady({
       device: iosDevice,
@@ -305,7 +314,7 @@ describe("RunnerReadinessService", () => {
       readinessTimeoutMs: 120_000,
     });
 
-    expect(iosManager.setupHealthCheckTimeoutMs).toBe(120_000);
+    expect(iosManager.setupMinimumHealthPollDurationMs).toBe(110_000);
     expect(iosManager.setupSignal).toBeDefined();
   });
 
@@ -324,7 +333,7 @@ describe("RunnerReadinessService", () => {
     });
 
     expect(iosManager.startCalls).toBe(1);
-    expect(iosManager.startOptions?.healthCheckTimeoutMs).toBe(30_000);
+    expect(iosManager.startOptions?.minimumHealthPollDurationMs).toBe(30_000);
     expect(iosManager.startOptions?.signal).toBeDefined();
     expect(iosManager.setupCalls).toBe(0);
     expect(iosClient.healthCalls).toBe(1);

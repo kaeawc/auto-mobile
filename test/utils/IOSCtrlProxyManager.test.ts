@@ -1031,7 +1031,7 @@ describe("IOSCtrlProxyManager", function() {
 
       await withHealthBudget("3", async () => {
         fakeTimer.enableAutoAdvance();
-        await manager.start({ healthCheckTimeoutMs: 2_000 });
+        await manager.start({ minimumHealthPollDurationMs: 2_000 });
       });
 
       expect(curlCalls).toBe(6);

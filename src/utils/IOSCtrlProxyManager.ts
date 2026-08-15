@@ -37,11 +37,12 @@ export interface CtrlProxyIosSetupResult extends ProxySetupResult {
 
 export interface CtrlProxyStartOptions {
   /**
-   * Upper bound for health polling after the runner has launched. startDevice
-   * supplies its remaining readiness budget so a fixed manager default cannot
-   * fail a still-starting runner early.
+   * Minimum health-poll duration after the runner has launched. startDevice
+   * supplies its remaining readiness duration so a fixed manager default cannot
+   * fail a still-starting runner early. The caller's AbortSignal is the upper
+   * bound.
    */
-  healthCheckTimeoutMs?: number;
+  minimumHealthPollDurationMs?: number;
   signal?: AbortSignal;
 }
 
@@ -54,7 +55,7 @@ export interface CtrlProxyIosManager extends ProxyManager {
     force?: boolean,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-    healthCheckTimeoutMs?: number,
+    minimumHealthPollDurationMs?: number,
   ): Promise<CtrlProxyIosSetupResult>;
   isRunning(): Promise<boolean>;
   start(options?: CtrlProxyStartOptions): Promise<void>;
@@ -858,7 +859,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // coming up, which then triggers a kill+respawn livelock (#2834).
     const delayMs = 500;
     const maxAttempts = IOSCtrlProxyManager.resolveHealthPollMaxAttempts(
-      options.healthCheckTimeoutMs,
+      options.minimumHealthPollDurationMs,
       delayMs,
     );
     const timeoutSeconds = Math.round((maxAttempts * delayMs) / 1000);
@@ -1088,7 +1089,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     force: boolean = false,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
-    healthCheckTimeoutMs?: number,
+    minimumHealthPollDurationMs?: number,
   ): Promise<CtrlProxyIosSetupResult> {
     perf.serial("xcTestServiceSetup");
 
@@ -1179,7 +1180,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       // Start the service
       await perf.track("startService", () =>
-        this.start({ healthCheckTimeoutMs, signal }),
+        this.start({ minimumHealthPollDurationMs, signal }),
       );
 
       perf.end();
@@ -1587,7 +1588,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * cold-start routinely exceeds the default) can extend it without a code change.
    */
   private static resolveHealthPollMaxAttempts(
-    healthCheckTimeoutMs?: number,
+    minimumHealthPollDurationMs?: number,
     delayMs: number = 500,
   ): number {
     const raw = process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS
@@ -1599,10 +1600,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         configuredAttempts = parsed;
       }
     }
-    if (!healthCheckTimeoutMs || healthCheckTimeoutMs <= 0) {
+    if (!minimumHealthPollDurationMs || minimumHealthPollDurationMs <= 0) {
       return configuredAttempts;
     }
-    return Math.max(configuredAttempts, Math.ceil(healthCheckTimeoutMs / delayMs));
+    return Math.max(configuredAttempts, Math.ceil(minimumHealthPollDurationMs / delayMs));
   }
 
   private async sleepForHealthPoll(delayMs: number, signal?: AbortSignal): Promise<void> {

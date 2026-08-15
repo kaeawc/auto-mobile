@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
@@ -64,6 +65,9 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 // subscriber's hint fixes the shared per-device encode.
 private const val CONTROL_PANE_FPS = 30
 private const val MIRROR_PANE_FPS = 10
+
+/** Test tag on the armed interactive-video surface, so tests can pin which branch rendered. */
+internal const val DEVICE_CONTROL_SURFACE_TEST_TAG = "device-control-surface"
 
 @Composable
 fun DeviceStreamView(
@@ -131,22 +135,23 @@ fun DeviceStreamView(
         source.connect(column.deviceId)
       },
     )
-  } else if (enableDeviceControl && controlSnapshot != null) {
-    // Armed: keep the SMOOTH LIVE VIDEO on screen, but map clicks through the in-memory
-    // observation
-    // snapshot (its real device dimensions + frameContext). The video and the observation
-    // screenshot
-    // are the same screen at the same aspect ratio, so a click normalized against the displayed
-    // video maps to the same device pixel. DeviceScreenView already renders a live bitmap while
-    // mapping through separate device dims — that's exactly its inspector-mode configuration,
-    // reused
-    // here with Control mode so the click dispatches instead of selecting an element.
+  } else if (enableDeviceControl && controlSnapshot != null && liveFrame != null) {
+    // Armed WITH live video: the pane's pixels are ALWAYS the live H.264 mirror — never the
+    // observation screenshot. The armed surface therefore also requires a decoded frame: before
+    // the first frame (or in the rare case video never arrives) the pane falls through to the
+    // mirror branch below and shows the status hint, instead of interacting against a stale
+    // still. Clicks map through the in-memory observation snapshot (its real device dimensions);
+    // video and observation cover the same screen at the same aspect ratio, so a click normalized
+    // against the displayed video maps to the same device pixel. DeviceScreenView already renders
+    // a live bitmap while mapping through separate device dims — its inspector-mode
+    // configuration, reused here with Control mode so the click dispatches instead of selecting.
     val renderSnapshot = control.renderSnapshot
     DeviceScreenView(
-      // Fallback pixels only until the first video frame decodes; liveFrame renders instead when
-      // set.
-      screenshotData = renderSnapshot?.screenshotData,
-      liveFrame = liveFrame?.bitmap,
+      // Deliberately null: observation screenshots are for geometry/inspection, not pane pixels.
+      // Passing them here is what made the pane visibly "switch over to screenshots" whenever the
+      // relay dropped a frame source; the retained live frame now covers those windows.
+      screenshotData = null,
+      liveFrame = liveFrame.bitmap,
       screenWidth = renderSnapshot?.deviceWidth ?: 0,
       screenHeight = renderSnapshot?.deviceHeight ?: 0,
       rotation = renderSnapshot?.rotation ?: 0,
@@ -156,7 +161,8 @@ fun DeviceStreamView(
       onElementSelected = {},
       onElementHovered = {},
       elementMap = renderSnapshot?.hierarchy?.elementMap?.takeIf { it.isNotEmpty() },
-      modifier = Modifier.fillMaxSize(),
+      // Tagged so tests can pin WHICH surface rendered (interactive video vs. hint/mirror).
+      modifier = Modifier.fillMaxSize().testTag(DEVICE_CONTROL_SURFACE_TEST_TAG),
       controlMode = DeviceScreenControlMode.Control,
       controlSnapshot = controlSnapshot,
       // The view maps a click through `snapshot`'s geometry and hands back the device-mapped

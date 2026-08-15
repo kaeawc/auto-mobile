@@ -5,12 +5,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.waitUntilExactlyOneExists
 import dev.jasonpearson.automobile.desktop.core.control.testSnapshot
 import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
@@ -100,6 +103,69 @@ class DeviceStreamViewTest {
       onNodeWithText("Check again").performClick()
       waitUntil { source.connectCalls > connectsBeforeRetry }
     }
+
+  /** A minimal armed control state whose dispatcher never reaches a daemon. */
+  private fun armedControlState(scope: CoroutineScope) =
+    WorkspaceDeviceControlState(
+      dispatcher =
+        VideoInputDispatcher(
+          scope = scope,
+          clientProvider = { null },
+          platform = { "android" },
+          deviceId = "emulator-5554",
+          tracer = InteractionLatencyTracer(),
+        ),
+      interactionSnapshot = testSnapshot(),
+      renderSnapshot = testSnapshot(),
+      tapError = null,
+      tracer = InteractionLatencyTracer(),
+    )
+
+  @Test
+  fun `an armed pane without video yet shows the waiting hint, not a screenshot surface`() =
+    runComposeUiTest {
+      // The pane's pixels are ALWAYS live video. Before the first decoded frame the armed branch
+      // must fall through to the status hint instead of rendering the observation screenshot as an
+      // interactive still — the "pane switches over to screenshots" regression (#3348 family).
+      val source = FakeVideoStreamSource()
+      val scope = CoroutineScope(Dispatchers.Unconfined)
+      setContent {
+        MaterialTheme {
+          DeviceStreamView(
+            col(),
+            enableDeviceControl = true,
+            control = armedControlState(scope),
+            sourceFactory = { source },
+          )
+        }
+      }
+
+      onNodeWithText("Waiting for the first frame…").assertIsDisplayed()
+      onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).assertCountEquals(0)
+      scope.cancel()
+    }
+
+  @Test
+  fun `an armed pane with live video renders the interactive video surface`() = runComposeUiTest {
+    val source = FakeVideoStreamSource(nowMs = { System.nanoTime() / 1_000_000L })
+    val scope = CoroutineScope(Dispatchers.Unconfined)
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          col(),
+          enableDeviceControl = true,
+          control = armedControlState(scope),
+          sourceFactory = { source },
+        )
+      }
+    }
+
+    waitUntil { source.connectedDeviceId == "emulator-5554" }
+    source.emitFrame()
+    waitUntilExactlyOneExists(hasTestTag(DEVICE_CONTROL_SURFACE_TEST_TAG))
+    onAllNodesWithText("Waiting for the first frame…").assertCountEquals(0)
+    scope.cancel()
+  }
 
   @Test
   fun `an armed iOS pane still surfaces Screen Recording approval over the control view`() =

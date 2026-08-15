@@ -43,6 +43,19 @@ class McpDaemonClient(
   private val json: Json = DaemonJson,
   private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
   val sessionUuid: String? = null,
+  /**
+   * Hang ceiling for one daemon round-trip. The request socket is a BLOCKING [SocketChannel] —
+   * which supports no read timeout — so without a deadline a daemon that accepts the connection but
+   * never replies (wedged event loop, half-open socket after sleep/wake) hangs the calling thread
+   * FOREVER. For the video-pane input path that thread is the pane's single dispatch thread, held
+   * inside its FIFO mutex: one hung call silently killed ALL further input ("input stops working").
+   * A watchdog closes the channel at the deadline, failing the one call so the caller sheds it and
+   * the next input proceeds on a fresh connection. Generous defaults — these are hang detectors,
+   * not latency budgets; a healthy round-trip is ~milliseconds.
+   */
+  private val requestTimeoutMs: Long = DEFAULT_REQUEST_TIMEOUT_MS,
+  /** Tighter ceiling for the input helpers (tap/swipe/key), where a hang freezes interaction. */
+  private val inputRequestTimeoutMs: Long = INPUT_REQUEST_TIMEOUT_MS,
 ) : AutoMobileClient {
   private var daemonLifecycle: DaemonLifecycleEnsurer? =
     if (socketPathValue == DaemonSocketPaths.socketPath()) DesktopDaemonLifecycle() else null
@@ -585,7 +598,10 @@ class McpDaemonClient(
   }
 
   private fun sendInputRequest(method: String, params: JsonObject): InputActionResult {
-    val response = sendRequest(method, params)
+    // Input rides the tighter deadline: a hung input/* call froze the pane's whole input path
+    // (single dispatch thread + FIFO mutex), and live interaction would rather shed one tap
+    // after 5s than sit dead for a minute.
+    val response = sendRequest(method, params, timeoutMs = inputRequestTimeoutMs)
     if (!response.success) {
       return InputActionResult(action = method, success = false, error = response.error)
     }
@@ -690,34 +706,67 @@ class McpDaemonClient(
   private fun sendRequest(
     method: String,
     params: JsonObject = JsonObject(emptyMap()),
+    timeoutMs: Long = requestTimeoutMs,
   ): DaemonResponse {
     ensureVersionMatchedDaemon()
     ensureSocketExists()
 
     val address = UnixDomainSocketAddress.of(socketPathValue)
     SocketChannel.open(address).use { channel ->
-      val reader =
-        BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
-      val writer =
-        BufferedWriter(
-          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+      // Deadline watchdog: a blocking SocketChannel has no read timeout, so a daemon that
+      // accepts but never replies would hang the calling thread forever (see the constructor
+      // doc — for video-pane input that meant ALL input died). Closing the channel from the
+      // watchdog thread makes the blocked read throw, which the catch below reports as a
+      // timeout. Cancelled on completion, so a healthy round-trip never touches it.
+      val watchdog =
+        requestWatchdog.schedule(
+          {
+            try {
+              channel.close()
+            } catch (_: Exception) {
+              // Best-effort close; the request thread owns the definitive close via use{}.
+            }
+          },
+          timeoutMs,
+          java.util.concurrent.TimeUnit.MILLISECONDS,
         )
+      try {
+        val reader =
+          BufferedReader(
+            InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
+          )
+        val writer =
+          BufferedWriter(
+            OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+          )
 
-      val request =
-        DaemonRequest(
-          id = UUID.randomUUID().toString(),
-          type = "mcp_request",
-          method = method,
-          params = params,
-          clientVersion = clientVersion,
-        )
+        val request =
+          DaemonRequest(
+            id = UUID.randomUUID().toString(),
+            type = "mcp_request",
+            method = method,
+            params = params,
+            clientVersion = clientVersion,
+          )
 
-      writer.write(json.encodeToString(request))
-      writer.newLine()
-      writer.flush()
+        writer.write(json.encodeToString(request))
+        writer.newLine()
+        writer.flush()
 
-      val line = reader.readLine() ?: throw DaemonUnavailableException("Daemon closed the socket")
-      return json.decodeFromString(line)
+        val line = reader.readLine() ?: throw DaemonUnavailableException("Daemon closed the socket")
+        return json.decodeFromString(line)
+      } catch (e: Exception) {
+        // The watchdog having FIRED (not been cancelled) means the failure is our own forced
+        // close — report the timeout, not the incidental closed-channel exception it caused.
+        if (watchdog.isDone && !watchdog.isCancelled) {
+          throw DaemonUnavailableException(
+            "Daemon request '$method' timed out after ${timeoutMs}ms"
+          )
+        }
+        throw e
+      } finally {
+        watchdog.cancel(false)
+      }
     }
   }
 
@@ -770,6 +819,21 @@ class McpDaemonClient(
     if (value != null) {
       put(key, JsonPrimitive(value))
     }
+  }
+
+  companion object {
+    /** Hang ceiling for ordinary daemon requests (tool calls can legitimately take tens of s). */
+    const val DEFAULT_REQUEST_TIMEOUT_MS = 60_000L
+
+    /** Hang ceiling for the input helpers; a healthy input round-trip is ~milliseconds. */
+    const val INPUT_REQUEST_TIMEOUT_MS = 5_000L
+
+    // One shared daemon thread arms/cancels every request deadline. It only ever runs a
+    // channel.close() for a request that overran its ceiling, so it stays idle in normal use.
+    private val requestWatchdog =
+      java.util.concurrent.Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "daemon-request-watchdog").apply { isDaemon = true }
+      }
   }
 }
 

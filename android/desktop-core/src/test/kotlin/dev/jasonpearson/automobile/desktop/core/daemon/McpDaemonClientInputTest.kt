@@ -14,6 +14,7 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -600,6 +601,57 @@ class McpDaemonClientInputTest {
     assertEquals(false, stdioResult.success)
     assertEquals("input/tap", stdioResult.action)
     assertEquals("MCP STDIO does not support direct daemon input helpers", stdioResult.error)
+  }
+
+  @Test
+  fun `a daemon that accepts but never replies fails the input call at its deadline`() {
+    // The request socket is a blocking SocketChannel, which has NO read timeout: without the
+    // request watchdog a daemon that accepts the connection but never answers (wedged event
+    // loop, half-open socket) hung the caller forever — for the video pane that meant one hung
+    // call froze ALL input behind its single dispatch thread ("input stops working"). The
+    // deadline must fail just that call, quickly and with a clear message.
+    val socketDir = Files.createTempDirectory("am-hang-test")
+    val socketPath = socketDir.resolve("daemon.sock")
+    val server = ServerSocketChannel.open(StandardProtocolFamily.UNIX)
+    server.bind(UnixDomainSocketAddress.of(socketPath))
+    var accepted: java.nio.channels.SocketChannel? = null
+    val accepter = Thread {
+      try {
+        accepted = server.accept() // Hold the connection open and never reply.
+        while (!Thread.currentThread().isInterrupted) Thread.sleep(50)
+      } catch (_: Exception) {
+        // Server/channel closed by the test's cleanup: the hang is over.
+      }
+    }
+      .apply {
+        isDaemon = true
+        start()
+      }
+    try {
+      val client =
+        McpDaemonClient(
+          socketPathValue = socketPath.toString(),
+          inputRequestTimeoutMs = 100,
+        )
+      val error =
+        assertFailsWith<DaemonUnavailableException> {
+          client.inputTap(
+            x = 1.0,
+            y = 2.0,
+            platform = "android",
+            deviceId = "emulator-5554",
+            duration = null,
+            frameContext = null,
+          )
+        }
+      assertTrue(error.message.orEmpty().contains("timed out"))
+    } finally {
+      accepter.interrupt()
+      accepted?.close()
+      server.close()
+      Files.deleteIfExists(socketPath)
+      Files.deleteIfExists(socketDir)
+    }
   }
 
   private fun captureInputRequest(

@@ -209,6 +209,19 @@ internal const val LIVE_RECONNECT_INITIAL_MS = 1_000L
 internal const val LIVE_RECONNECT_MAX_MS = 15_000L
 
 /**
+ * Stall watchdog for [rememberLiveVideoFrame] when [autoReconnect] is on: force a reconnect after
+ * this long in `Streaming` with no frame progress. A relay that stalls with its socket OPEN (device
+ * capture silently dead, half-open socket, subscriber wedged waiting for a key frame the encoder
+ * never produced) keeps the state at `Streaming`, so the Unavailable-driven reconnect never fires
+ * and the mirror silently freezes. A healthy-but-idle Android stream emits ~1 fps heartbeat frames
+ * (FrameHeartbeat's 1s idle nudge), so ten missed seconds is decisively a stall, not idleness. The
+ * reconnect is visually free: the last frame is retained while the fresh subscribe (which requests
+ * an immediate key frame) replaces it.
+ */
+internal const val LIVE_STALL_RECONNECT_MS = 10_000L
+internal const val LIVE_STALL_CHECK_INTERVAL_MS = 2_000L
+
+/**
  * Connects a live-mirroring source for this composition and exposes only its newest frame.
  *
  * Frames arrive ready to draw — the client converts, sequences, and timestamps them on its reader
@@ -228,6 +241,9 @@ internal fun rememberLiveVideoFrame(
   deviceId: String?,
   autoReconnect: Boolean = false,
   reconnectInitialMs: Long = LIVE_RECONNECT_INITIAL_MS,
+  nowMs: () -> Long = MONOTONIC_NOW_MS,
+  stallReconnectMs: Long = LIVE_STALL_RECONNECT_MS,
+  stallCheckIntervalMs: Long = LIVE_STALL_CHECK_INTERVAL_MS,
 ): LiveVideoFrame? {
   var liveFrame by remember(source, deviceId) { mutableStateOf<LiveVideoFrame?>(null) }
 
@@ -257,7 +273,14 @@ internal fun rememberLiveVideoFrame(
     // timer while a recovered one stops cleanly.
     source.state.collectLatest { state ->
       if (state is VideoStreamState.Unavailable || state is VideoStreamState.PermissionRequired) {
-        liveFrame = null
+        // Auto-reconnecting consumers (the workspace video pane) RETAIN the last decoded frame
+        // across a relay drop: the pane keeps rendering the freshest video it ever had while the
+        // retry below re-subscribes, instead of flashing a non-video fallback for the whole
+        // backoff window ("video pane switches to screenshots"). Freshness gating is the frame
+        // consumer's job (receivedAtMs); rendering never falls back to observation screenshots.
+        // The plain path (IDE plugin / AutoMobileContent) keeps the original clear-and-blend
+        // semantics, where screenshot updates ARE the designed fallback surface.
+        if (!autoReconnect) liveFrame = null
         if (autoReconnect && deviceId != null) {
           var backoffMs = reconnectInitialMs
           while (isActive) {
@@ -269,6 +292,39 @@ internal fun rememberLiveVideoFrame(
             source.connect(deviceId)
           }
         }
+      }
+    }
+  }
+
+  // Stall watchdog (see LIVE_STALL_RECONNECT_MS): a relay that stops delivering frames while its
+  // socket stays open never leaves `Streaming`, so the Unavailable-driven reconnect above cannot
+  // catch it — the only observable signal is frame progress ceasing. Watch it and reconnect.
+  LaunchedEffect(source, deviceId, autoReconnect) {
+    if (source == null || deviceId == null || !autoReconnect) return@LaunchedEffect
+    var lastProgressMs = nowMs()
+    var lastSeenSequence = -1L
+    while (isActive) {
+      delay(stallCheckIntervalMs)
+      if (source.state.value !is VideoStreamState.Streaming) {
+        // Not streaming: connect/reconnect paths own recovery; restart the stall clock so a
+        // fresh session gets a full window before being judged.
+        lastProgressMs = nowMs()
+        continue
+      }
+      val frame = liveFrame
+      if (frame != null && frame.sequence != lastSeenSequence) {
+        lastSeenSequence = frame.sequence
+        lastProgressMs = frame.receivedAtMs
+        continue
+      }
+      if (nowMs() - lastProgressMs >= stallReconnectMs) {
+        LOG.info(
+          "Live mirror for $deviceId made no frame progress for ${stallReconnectMs}ms " +
+            "while Streaming; reconnecting"
+        )
+        lastProgressMs = nowMs()
+        source.disconnect()
+        source.connect(deviceId)
       }
     }
   }

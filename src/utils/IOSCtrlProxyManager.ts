@@ -723,11 +723,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     let sharedStart = this.sharedStart;
     if (sharedStart?.controller.signal.aborted) {
-      logger.info("[IOSCtrlProxy] Discarding aborted startup before retrying");
-      if (this.sharedStart === sharedStart) {
+      logger.info("[IOSCtrlProxy] Waiting for aborted startup to settle before retrying");
+      const abortedStart = sharedStart;
+      try {
+        await this.waitForSharedStart(abortedStart, options.signal);
+      } catch (error) {
+        if (options.signal?.aborted) {
+          throw error;
+        }
+      }
+      if (this.sharedStart === abortedStart) {
         this.sharedStart = null;
       }
-      sharedStart = null;
+      sharedStart = this.sharedStart;
     }
     if (sharedStart) {
       logger.info("[IOSCtrlProxy] Start already in progress, waiting for it to complete");
@@ -902,43 +910,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       (sharedStart.healthPollDeadlineMs - this.timer.now()) / 1000,
     );
 
-    perf.startOperation("healthPolling");
-    let attempts = 0;
-    for (;;) {
-      if (sharedStart.controller.signal.aborted) {
-        throw sharedStart.controller.signal.reason ?? new Error("iOS CtrlProxy startup was aborted");
-      }
-      attempts++;
-      if (await this.checkHealthEndpoint()) {
-        perf.endOperation("healthPolling");
-        logger.info("[IOSCtrlProxy] HTTP health endpoint is ready");
-        this.clearCaches();
-        await this.startProcessSupervision();
-
-        // Wait additional time for WebSocket server to be ready
-        // The HTTP server can respond before WebSocket is fully initialized
-        logger.info("[IOSCtrlProxy] Waiting for WebSocket server initialization");
-        perf.startOperation("websocketInit");
-        await this.sleepForHealthPoll(500, sharedStart.controller.signal);
-        perf.endOperation("websocketInit");
-
-        if (!this.isSimulator()) {
-          await this.iproxySupervisor.start();
-        }
-        return;
-      }
-      if (attempts > 1 && attempts % 10 === 0) {
-        logger.info(
-          `[IOSCtrlProxy] Still waiting for service... (attempt ${attempts}, ` +
-          `${Math.max(0, sharedStart.healthPollDeadlineMs - this.timer.now())}ms remaining)`,
-        );
-      }
-      if (this.timer.now() + delayMs >= sharedStart.healthPollDeadlineMs) {
-        break;
-      }
-      await this.sleepForHealthPoll(delayMs, sharedStart.controller.signal);
+    if (await this.waitForHealthEndpoint(sharedStart, perf, delayMs)) {
+      await this.completeHealthStartup(sharedStart, perf);
+      return;
     }
-    perf.endOperation("healthPolling");
 
     if (waitedForStartingRunner && this.xcTestProcessId !== null) {
       // Before giving up, adopt the runner if it actually came up healthy on CtrlProxy's
@@ -957,6 +932,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         // Mirror the normal success path's WebSocket-init settle (#2834 review — MINOR-3).
         await this.sleepForHealthPoll(500, sharedStart.controller.signal);
         await this.startProcessSupervision();
+        return;
+      }
+      if (await this.completeHealthStartupIfDeadlineExtended(sharedStart, perf, delayMs)) {
         return;
       }
       // Otherwise it is genuinely hung. Merely un-tracking it is NOT enough: the process
@@ -980,6 +958,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // pid-match enforcement is tracked as a follow-up.
       const hungPid = this.xcTestProcessId;
       const stillOurs = await this.isOwnRunnerProcessAlive();
+      if (await this.completeHealthStartupIfDeadlineExtended(sharedStart, perf, delayMs)) {
+        return;
+      }
       // Suppress the exit-handler auto-restart across the kill + child-exit event only.
       this.isStopping = true;
       try {
@@ -1033,6 +1014,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     const heldProcesses = await this.findListeningProcessesOnPort(this.servicePort);
+    if (await this.completeHealthStartupIfDeadlineExtended(sharedStart, perf, delayMs)) {
+      return;
+    }
     if (heldProcesses.length > 0) {
       throw new Error(
         `CtrlProxy failed to start within timeout (${timeoutSeconds}s); port ${this.servicePort} ` +
@@ -1660,6 +1644,74 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       sharedStart.healthPollDeadlineMs ?? 0,
       this.timer.now() + minimumHealthPollDurationMs,
     );
+  }
+
+  private async waitForHealthEndpoint(
+    sharedStart: SharedCtrlProxyStart,
+    perf: PerformanceTracker,
+    delayMs: number,
+  ): Promise<boolean> {
+    perf.startOperation("healthPolling");
+    let attempts = 0;
+    for (;;) {
+      if (sharedStart.controller.signal.aborted) {
+        throw sharedStart.controller.signal.reason ?? new Error("iOS CtrlProxy startup was aborted");
+      }
+      attempts++;
+      if (await this.checkHealthEndpoint()) {
+        perf.endOperation("healthPolling");
+        return true;
+      }
+      if (attempts > 1 && attempts % 10 === 0) {
+        logger.info(
+          `[IOSCtrlProxy] Still waiting for service... (attempt ${attempts}, ` +
+          `${Math.max(0, (sharedStart.healthPollDeadlineMs ?? 0) - this.timer.now())}ms remaining)`,
+        );
+      }
+      const remainingPollMs = (sharedStart.healthPollDeadlineMs ?? 0) - this.timer.now();
+      if (remainingPollMs <= 0) {
+        perf.endOperation("healthPolling");
+        return false;
+      }
+      await this.sleepForHealthPoll(
+        Math.min(delayMs, remainingPollMs),
+        sharedStart.controller.signal,
+      );
+    }
+  }
+
+  private async completeHealthStartup(
+    sharedStart: SharedCtrlProxyStart,
+    perf: PerformanceTracker,
+  ): Promise<void> {
+    logger.info("[IOSCtrlProxy] HTTP health endpoint is ready");
+    this.clearCaches();
+    await this.startProcessSupervision();
+
+    // The HTTP server can respond before the WebSocket server is initialized.
+    logger.info("[IOSCtrlProxy] Waiting for WebSocket server initialization");
+    perf.startOperation("websocketInit");
+    await this.sleepForHealthPoll(500, sharedStart.controller.signal);
+    perf.endOperation("websocketInit");
+
+    if (!this.isSimulator()) {
+      await this.iproxySupervisor.start();
+    }
+  }
+
+  private async completeHealthStartupIfDeadlineExtended(
+    sharedStart: SharedCtrlProxyStart,
+    perf: PerformanceTracker,
+    delayMs: number,
+  ): Promise<boolean> {
+    if ((sharedStart.healthPollDeadlineMs ?? 0) <= this.timer.now()) {
+      return false;
+    }
+    if (!await this.waitForHealthEndpoint(sharedStart, perf, delayMs)) {
+      return false;
+    }
+    await this.completeHealthStartup(sharedStart, perf);
+    return true;
   }
 
   private waitForSharedStart(

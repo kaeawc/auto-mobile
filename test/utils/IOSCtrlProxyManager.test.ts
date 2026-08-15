@@ -1026,7 +1026,7 @@ describe("IOSCtrlProxyManager", function() {
       let curlCalls = 0;
       fakeExecutor.setCommandHandler("curl -s", () => {
         curlCalls++;
-        return createExecResult(curlCalls > 5 ? "ok" : "", "");
+        return createExecResult(curlCalls > 6 ? "ok" : "", "");
       });
 
       await withHealthBudget("3", async () => {
@@ -1034,7 +1034,7 @@ describe("IOSCtrlProxyManager", function() {
         await manager.start({ minimumHealthPollDurationMs: 2_000 });
       });
 
-      expect(curlCalls).toBe(6);
+      expect(curlCalls).toBe(7);
     });
 
     test("joining readiness caller extends a default startup poll without spawning another runner", async function() {
@@ -1060,10 +1060,10 @@ describe("IOSCtrlProxyManager", function() {
       await withHealthBudget("3", async () => {
         fakeTimer.enableAutoAdvance();
         const defaultStart = manager.start();
-        for (let i = 0; i < 5 && !releaseFirstHealthPoll; i++) {
+        for (let i = 0; i < 5 && curlCalls < 3; i++) {
           await new Promise(resolve => setImmediate(resolve));
         }
-        expect(releaseFirstHealthPoll).toBeDefined();
+        expect(curlCalls).toBe(3);
 
         const readinessStart = manager.start({ minimumHealthPollDurationMs: 2_000 });
         releaseFirstHealthPoll!(createExecResult("", ""));
@@ -1118,7 +1118,7 @@ describe("IOSCtrlProxyManager", function() {
       });
       fakeExecutor.setCommandHandler("curl -s", () => {
         curlCalls++;
-        if (curlCalls === 3) {
+        if (curlCalls === 1) {
           return firstHealthPoll;
         }
         return createExecResult("ok", "");
@@ -1126,15 +1126,17 @@ describe("IOSCtrlProxyManager", function() {
 
       const controller = new AbortController();
       const abortedStart = manager.start({ signal: controller.signal });
-      for (let i = 0; i < 5 && !releaseFirstHealthPoll; i++) {
+      for (let i = 0; i < 5 && curlCalls < 1; i++) {
         await new Promise(resolve => setImmediate(resolve));
       }
-      expect(releaseFirstHealthPoll).toBeDefined();
+      expect(curlCalls).toBe(1);
 
       controller.abort(new Error("caller cancelled"));
       await expect(abortedStart).rejects.toThrow("caller cancelled");
 
       const retry = manager.start();
+      await new Promise(resolve => setImmediate(resolve));
+      expect(curlCalls).toBe(1);
       releaseFirstHealthPoll!(createExecResult("", ""));
       await retry;
 

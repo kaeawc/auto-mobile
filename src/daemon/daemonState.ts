@@ -40,6 +40,11 @@ export class DaemonState implements DaemonStateLike {
   initialize(
     sessionManager: SessionManager,
     devicePool: DevicePool,
+    // Production MUST pass the daemon's lifecycle-wired registry (the same
+    // instance mint/retire mutate). The default exists only so the ~30 test
+    // callers that don't exercise device sessions need not construct one; a
+    // production caller relying on it would get an empty registry that no device
+    // lifecycle ever populates.
     deviceSessionRegistry: DeviceSessionRegistry = new DeviceSessionRegistry()
   ): void {
     this.sessionManager = sessionManager;

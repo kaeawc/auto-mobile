@@ -844,10 +844,12 @@ export class Daemon {
   /**
    * Device-ready callback wired into {@link DevicePool}. Mints (or refreshes)
    * the device-session epoch for the connected device and preserves the
-   * pre-existing input-cache eviction. The pool fires this on every add path,
-   * so the mint is keyed on the pooled device's monotonic `incarnation` — a
-   * repeat ready-signal for the same epoch is idempotent, while a same-serial
-   * restart (new incarnation) mints a fresh `deviceSessionUuid` (epic #5256).
+   * pre-existing input-cache eviction. The pool fires this on the refresh,
+   * addDevice, and bind/autolock paths (a device present only at startup mints
+   * on its first refresh or bind), so the mint is keyed on the pooled device's
+   * monotonic `incarnation` — a repeat ready-signal for the same epoch is
+   * idempotent, while a same-serial restart (new incarnation) mints a fresh
+   * `deviceSessionUuid` (epic #5256).
    */
   private onDeviceReadyForSessionRegistry(deviceId: string): void {
     this.socketServer?.evictDeviceInputCache(deviceId);
@@ -1272,11 +1274,17 @@ export class Daemon {
           // that never confirms is handled by the device-ready callback; the 5-min
           // idle close remains a fallback.
           this.socketServer?.evictDeviceInputCache(deviceId);
-          // Retire the device-session epoch so a stale deviceSessionUuid stops
-          // resolving and listDeviceSessions drops the gone device (epic #5256).
-          this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
           if (this.devicePool.getDevice(deviceId)) {
+            // removeDisconnectedDevice can synchronously recover a same-serial
+            // Android emulator (reboot → re-add), which mints a fresh epoch. The
+            // device is live again, so retiring here would delete that just-minted
+            // epoch; skip the retire and let cleanup fail so the monitor retries.
             deviceCleanupSucceeded = false;
+          } else {
+            // Confirmed gone: retire the device-session epoch so a stale
+            // deviceSessionUuid stops resolving and listDeviceSessions drops the
+            // device (epic #5256).
+            this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
           }
           if (deviceCleanupSucceeded) {
             this.confirmedDisconnectedDeviceIds.add(deviceId);

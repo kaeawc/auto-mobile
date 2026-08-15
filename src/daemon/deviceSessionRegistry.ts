@@ -23,13 +23,15 @@ export interface DeviceSessionRecord {
  * Input describing a device that has reached a boot-ready connection boundary.
  *
  * `incarnation` is the pool's monotonic per-connection counter
- * (`PooledDevice.incarnation`). It is the authoritative epoch boundary: a fast
- * same-serial restart bumps the incarnation without the disconnect monitor ever
- * confirming a disappearance, so keying the mint on it — rather than on the
- * presence of a prior `onDeviceDisconnected` — is what makes the reconnect case
- * correct in every path.
+ * (`PooledDevice.incarnation`), assigned whenever the pool allocates a fresh
+ * `PooledDevice`. It is the epoch boundary: keying the mint on it — rather than
+ * on the presence of a prior `onDeviceDisconnected` — re-mints a same-serial
+ * reconnect even when the disconnect monitor never confirmed the disappearance,
+ * as long as the pool re-created the entry. (A restart so fast that the pool
+ * never dropped the entry keeps the same incarnation and uuid — the pool
+ * observed no boundary, so neither do we.)
  */
-export interface DeviceConnectedInput {
+interface DeviceConnectedInput {
   deviceId: string;
   platform: Platform;
   incarnation: number;

@@ -1104,6 +1104,50 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
     });
 
+    test("an aborted caller removes its readiness extension from a shared startup", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let curlCalls = 0;
+      let releaseFirstHealthPoll: ((result: ExecResult) => void) | undefined;
+      const firstHealthPoll = new Promise<ExecResult>((resolve) => {
+        releaseFirstHealthPoll = resolve;
+      });
+      fakeExecutor.setCommandHandler("curl -s", () => {
+        curlCalls++;
+        if (curlCalls === 3) {
+          return firstHealthPoll;
+        }
+        return createExecResult(curlCalls >= 5 ? "ok" : "", "");
+      });
+
+      await withHealthBudget("1", async () => {
+        fakeTimer.enableAutoAdvance();
+        const defaultStart = manager.start();
+        for (let i = 0; i < 5 && curlCalls < 3; i++) {
+          await new Promise(resolve => setImmediate(resolve));
+        }
+        expect(curlCalls).toBe(3);
+
+        const controller = new AbortController();
+        const extendedStart = manager.start({
+          minimumHealthPollDurationMs: 2_000,
+          signal: controller.signal,
+        });
+        controller.abort(new Error("caller cancelled"));
+        await expect(extendedStart).rejects.toThrow("caller cancelled");
+
+        releaseFirstHealthPoll!(createExecResult("", ""));
+        await expect(defaultStart).rejects.toThrow("CtrlProxy failed to start within timeout");
+      });
+
+      expect(curlCalls).toBe(4);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+    });
+
     test("a retry starts fresh after the prior sole caller aborts", async function() {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice, fakeTimer, undefined, fakeExecutor

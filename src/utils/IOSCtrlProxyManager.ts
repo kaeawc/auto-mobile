@@ -51,6 +51,8 @@ interface SharedCtrlProxyStart {
   controller: AbortController;
   completion: Promise<void>;
   healthPollDeadlineMs: number | null;
+  defaultHealthPollDeadlineMs: number | null;
+  callerHealthPollDeadlinesMs: Map<symbol, number>;
   waitingCallers: number;
   completed: boolean;
 }
@@ -739,17 +741,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
     if (sharedStart) {
       logger.info("[IOSCtrlProxy] Start already in progress, waiting for it to complete");
-      this.extendHealthPollDeadline(sharedStart, options.minimumHealthPollDurationMs);
     } else {
       const controller = new AbortController();
       const createdStart: SharedCtrlProxyStart = {
         controller,
         completion: Promise.resolve(),
         healthPollDeadlineMs: null,
+        defaultHealthPollDeadlineMs: null,
+        callerHealthPollDeadlinesMs: new Map(),
         waitingCallers: 0,
         completed: false,
       };
-      this.extendHealthPollDeadline(createdStart, options.minimumHealthPollDurationMs);
       this.sharedStart = createdStart;
       createdStart.completion = this.startInternal(createdStart);
       void createdStart.completion.finally(() => {
@@ -761,7 +763,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       sharedStart = createdStart;
     }
 
-    return this.waitForSharedStart(sharedStart, options.signal);
+    const callerId = Symbol("CtrlProxy startup caller");
+    this.extendHealthPollDeadline(
+      sharedStart,
+      callerId,
+      options.minimumHealthPollDurationMs,
+    );
+    return this.waitForSharedStart(sharedStart, options.signal, callerId);
   }
 
   /**
@@ -902,12 +910,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const delayMs = 500;
     const defaultHealthPollDurationMs =
       IOSCtrlProxyManager.resolveHealthPollMaxAttempts() * delayMs;
-    sharedStart.healthPollDeadlineMs = Math.max(
-      sharedStart.healthPollDeadlineMs ?? 0,
-      this.timer.now() + defaultHealthPollDurationMs,
-    );
+    sharedStart.defaultHealthPollDeadlineMs =
+      this.timer.now() + defaultHealthPollDurationMs;
+    this.refreshHealthPollDeadline(sharedStart);
     const timeoutSeconds = Math.round(
-      (sharedStart.healthPollDeadlineMs - this.timer.now()) / 1000,
+      ((sharedStart.healthPollDeadlineMs ?? 0) - this.timer.now()) / 1000,
     );
 
     if (await this.waitForHealthEndpoint(sharedStart, perf, delayMs)) {
@@ -1635,14 +1642,34 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private extendHealthPollDeadline(
     sharedStart: SharedCtrlProxyStart,
+    callerId: symbol,
     minimumHealthPollDurationMs: number | undefined,
   ): void {
     if (!minimumHealthPollDurationMs || minimumHealthPollDurationMs <= 0) {
       return;
     }
-    sharedStart.healthPollDeadlineMs = Math.max(
-      sharedStart.healthPollDeadlineMs ?? 0,
+    sharedStart.callerHealthPollDeadlinesMs.set(
+      callerId,
       this.timer.now() + minimumHealthPollDurationMs,
+    );
+    this.refreshHealthPollDeadline(sharedStart);
+  }
+
+  private removeHealthPollDeadline(
+    sharedStart: SharedCtrlProxyStart,
+    callerId: symbol | undefined,
+  ): void {
+    if (!callerId) {
+      return;
+    }
+    sharedStart.callerHealthPollDeadlinesMs.delete(callerId);
+    this.refreshHealthPollDeadline(sharedStart);
+  }
+
+  private refreshHealthPollDeadline(sharedStart: SharedCtrlProxyStart): void {
+    sharedStart.healthPollDeadlineMs = Math.max(
+      sharedStart.defaultHealthPollDeadlineMs ?? 0,
+      ...sharedStart.callerHealthPollDeadlinesMs.values(),
     );
   }
 
@@ -1717,6 +1744,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private waitForSharedStart(
     sharedStart: SharedCtrlProxyStart,
     signal: AbortSignal | undefined,
+    callerId?: symbol,
   ): Promise<void> {
     sharedStart.waitingCallers++;
     return new Promise<void>((resolve, reject) => {
@@ -1728,6 +1756,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         settled = true;
         signal?.removeEventListener("abort", onAbort);
         sharedStart.waitingCallers--;
+        this.removeHealthPollDeadline(sharedStart, callerId);
         if (!sharedStart.completed && sharedStart.waitingCallers === 0) {
           sharedStart.controller.abort(
             signal?.reason ?? new Error("iOS CtrlProxy startup has no remaining callers"),

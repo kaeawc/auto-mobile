@@ -19,7 +19,7 @@ build-kotlin-coroutines = "1.11.0"
 
 # Video decoding (live device mirroring). ffmpeg natives ship as per-platform classifier
 # artifacts on Maven Central; only the host platform's is packaged into an installer.
-bytedeco-ffmpeg = "8.0.1-1.5.13"
+bytedeco-ffmpeg = "8.1.2-1.5.14"
 bytedeco-javacpp = "1.5.13"
 
 # Java versions

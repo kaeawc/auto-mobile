@@ -555,14 +555,14 @@ describe("Daemon manager process detection", () => {
     expect(() => manager.findAllDaemonProcesses()).toThrow("Failed to inspect daemon process table: spawn ENOBUFS");
   });
 
-  test("start takeover escalates to SIGKILL when another live daemon is not the PID-file owner", async () => {
+  test("start reuses a responsive live daemon when its PID record is unavailable", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-takeover-test-"));
     process.env.AUTOMOBILE_DATA_DIR = dir;
     const pidFilePath = join(dir, "daemon.pid");
-    writeDaemonPidFile(pidFilePath, 201);
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const killCalls: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
+    let spawnCalls = 0;
     const processFinder = new FakeDaemonProcessFinder([
       {
         pid: 301,
@@ -572,7 +572,10 @@ describe("Daemon manager process detection", () => {
     ], new Set([301]));
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, _args: string[], _options: SpawnOptions) => ({
-        unref() {},
+        get unref() {
+          spawnCalls++;
+          return () => {};
+        },
         once() { return this; },
         off() { return this; },
       }) as ChildProcess,
@@ -596,7 +599,7 @@ describe("Daemon manager process detection", () => {
 
     try {
       const manager = new TestDaemonManager(
-        undefined,
+        () => new FakeDaemonClient({}),
         undefined,
         fakeTimer,
         join(dir, "daemon.lock"),
@@ -608,46 +611,37 @@ describe("Daemon manager process detection", () => {
 
       await manager.start();
 
-      expect(killCalls).toEqual([
-        { pid: 301, signal: "SIGTERM" },
-        { pid: 301, signal: "SIGKILL" },
-      ]);
+      expect(killCalls).toEqual([]);
+      expect(spawnCalls).toBe(0);
     } finally {
       killSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("start takeover does not SIGKILL when daemon identity is no longer confirmed", async () => {
+  test("start refuses to signal a live daemon that never becomes reachable", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-takeover-revalidate-test-"));
     process.env.AUTOMOBILE_DATA_DIR = dir;
     const pidFilePath = join(dir, "daemon.pid");
-    writeDaemonPidFile(pidFilePath, 301);
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const killCalls: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
-    let findCalls = 0;
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
       findDaemonProcesses() {
-        findCalls++;
-        return findCalls === 1 ? [
-          {
-            pid: 301,
-            ppid: 1,
-            command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
-          },
-        ] : [];
+        return [{
+          pid: 301,
+          ppid: 1,
+          command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+        }];
       },
       isProcessRunning(pid: number) {
         return pid === 301;
       },
     };
     const processSpawner: DaemonProcessSpawner = {
-      spawn: (_command: string, _args: string[], _options: SpawnOptions) => ({
-        unref() {},
-        once() { return this; },
-        off() { return this; },
-      }) as ChildProcess,
+      spawn: () => {
+        throw new Error("should not spawn while a live daemon exists");
+      },
     };
     const killSpy = spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
       if (pid === 301) {
@@ -668,7 +662,21 @@ describe("Daemon manager process detection", () => {
 
     try {
       const manager = new TestDaemonManager(
-        undefined,
+        () => ({
+          async connect() {
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
         undefined,
         fakeTimer,
         join(dir, "daemon.lock"),
@@ -678,12 +686,11 @@ describe("Daemon manager process detection", () => {
         processSpawner
       );
 
-      await manager.start();
+      await expect(manager.start()).rejects.toThrow(
+        "Refusing to terminate a live daemon during start"
+      );
 
-      expect(killCalls).toEqual([
-        { pid: 301, signal: "SIGTERM" },
-      ]);
-      expect(findCalls).toBe(2);
+      expect(killCalls).toEqual([]);
     } finally {
       killSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });

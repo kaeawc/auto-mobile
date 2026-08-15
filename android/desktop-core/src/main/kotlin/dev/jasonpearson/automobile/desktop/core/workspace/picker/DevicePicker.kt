@@ -55,20 +55,17 @@ fun DevicePicker(
   onAction: (DevicePickerAction) -> Unit,
   onClose: () -> Unit,
   modifier: Modifier = Modifier,
-  // Authenticates each card's live-video subscribe against the daemon stream-socket session guard
-  // (#4751); the host supplies it from its DesktopDaemonSession. Null yields no live thumbnails.
-  sessionUuidProvider: () -> String? = { null },
   // Whether the "Close" affordance is offered. False when the grid is the app's home surface (no
   // observed workspace to return to); true when opened over an existing workspace ("Devices +").
   canClose: Boolean = true,
-  // The per-card device thumbnail. Hoisted (default = the live [DeviceThumbnail]) so a test can
-  // stub
-  // it and never open a video/observation socket while composing the grid.
+  // The per-card device thumbnail. Hoisted (default = the screenshot [DeviceThumbnail]) so a test
+  // can stub it and never open an observation socket while composing the grid. Thumbnails are
+  // stills by design — a per-card live-video subscription would put a standing capture/decode cost
+  // on every booted tile of a potentially huge grid.
   thumbnail: @Composable (device: PickerDevice, booting: Boolean) -> Unit = { device, booting ->
     DeviceThumbnail(
       device = device,
       booting = booting,
-      sessionUuidProvider = sessionUuidProvider,
       modifier = Modifier.fillMaxWidth().height(DeviceThumbnailHeight),
     )
   },

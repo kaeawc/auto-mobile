@@ -83,6 +83,8 @@ async function startHarness(
     resolveError?: Error;
     authenticator?: StreamSocketAuthenticator;
     timer?: Timer;
+    /** Pre-arms each created source to throttle this many key-frame requests. */
+    keyFrameRejections?: number;
   } = {}
 ): Promise<Harness> {
   const dir = mkdtempSync(path.join(tmpdir(), "amvs-"));
@@ -107,6 +109,7 @@ async function startHarness(
         const source = new FakeCaptureSource();
         source.startError = options.startError ?? null;
         source.startGate = options.startGate ?? null;
+        source.keyFrameRejectionsRemaining = options.keyFrameRejections ?? 0;
         source.onStart = () => {
           if (options.startData) {
             onData?.(options.startData);
@@ -677,6 +680,24 @@ describe("VideoStreamSocketServer", () => {
     await waitFor(() => source.keyFrameRequests > before);
 
     expect(source.keyFrameRequests).toBeGreaterThan(before);
+  });
+
+  test("a key frame throttled at subscribe time is retried until the source honors one", async () => {
+    // The subscribe-ack path asks the source for an immediate IDR so a (re)joining subscriber never
+    // starts on an undecodable inter-frame. When that request lands inside the source's throttle
+    // window (~3s on Android/raw-iOS) a bare call is silently rejected and the subscriber sits in
+    // waitingForKeyFrame until the natural GOP — the frozen-pane-on-reconnect symptom. The retrying
+    // helper must keep asking through the injected timer until the source honors one.
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const h = await startHarness({ timer: fakeTimer, keyFrameRejections: 2 });
+    await subscribe(h.socketPath);
+    await waitFor(() => h.sources.length > 0);
+    const source = h.sources[0];
+
+    // 2 throttled attempts + the honored one. Without the retry the count would stay at 1.
+    await waitFor(() => source.keyFrameRequests >= 3);
+    expect(source.keyFrameRejectionsRemaining).toBe(0);
   });
 
   test("a key frame throttled at drain time is retried until the source honors one", async () => {

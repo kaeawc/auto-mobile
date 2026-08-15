@@ -44,6 +44,13 @@ fun LayoutInspectorDashboard(
   deviceId: String? = null, // Pane's device; tags applied frames and scopes the initial request
   platform: String = "android", // Device platform ("android" or "ios")
   onRestartDaemon: (() -> Unit)? = null,
+  /**
+   * A decoded live-mirror frame for the device panel's PIXELS. When present it renders instead of
+   * the observation screenshot, so the inspector shows the live screen; the screenshot remains the
+   * pre-video bootstrap and — always — the capture the hierarchy overlay/selection maps against.
+   * Null keeps the original screenshot-only rendering (the IDE-plugin dashboard path).
+   */
+  liveFrame: androidx.compose.ui.graphics.ImageBitmap? = null,
 ) {
   val state = rememberLayoutInspectorState()
   val colors = SharedTheme.globalColors
@@ -226,6 +233,7 @@ fun LayoutInspectorDashboard(
     ) {
       DeviceScreenView(
         screenshotData = state.screenshotData,
+        liveFrame = liveFrame,
         screenWidth = state.screenWidth,
         screenHeight = state.screenHeight,
         rotation = state.rotation,
@@ -246,13 +254,17 @@ fun LayoutInspectorDashboard(
         refitTrigger = refitTrigger, // Trigger refit when panels toggle
       )
 
-      ScreenshotMetadataOverlay(
-        fallback = state.screenshotFallback,
-        fallbackReason = state.screenshotFallbackReason,
-        format = state.screenshotFormat,
-        captureSource = state.screenshotCaptureSource,
-        modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
-      )
+      // The metadata badge describes the SCREENSHOT pixels (format/fallback/capture source), so it
+      // only applies while the screenshot is what's on screen — live video renders instead of it.
+      if (liveFrame == null) {
+        ScreenshotMetadataOverlay(
+          fallback = state.screenshotFallback,
+          fallbackReason = state.screenshotFallbackReason,
+          format = state.screenshotFormat,
+          captureSource = state.screenshotCaptureSource,
+          modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+        )
+      }
     }
 
     // Center panel: View Hierarchy (collapsible + resizable)

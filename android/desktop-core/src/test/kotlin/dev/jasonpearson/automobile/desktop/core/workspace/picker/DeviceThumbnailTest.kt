@@ -8,14 +8,9 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
-import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
-import dev.jasonpearson.automobile.desktop.core.video.VideoStreamPermission
-import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -29,7 +24,6 @@ class DeviceThumbnailTest {
 
   @Test
   fun `screenshot capture retries with backoff until it yields a still`() = runTest {
-    val state = MutableStateFlow<VideoStreamState>(VideoStreamState.Unavailable("no relay"))
     var attempts = 0
     val source =
       object : DeviceThumbnailScreenshotSource {
@@ -41,7 +35,6 @@ class DeviceThumbnailTest {
     val delays = mutableListOf<Long>()
     val shot =
       captureScreenshotWithRetry(
-        state,
         "d",
         source,
         initialBackoffMs = 1_000L,
@@ -54,26 +47,6 @@ class DeviceThumbnailTest {
   }
 
   @Test
-  fun `screenshot capture uses the fallback while Screen Recording approval is pending`() =
-    runTest {
-      val state =
-        MutableStateFlow<VideoStreamState>(
-          VideoStreamState.PermissionRequired(
-            VideoStreamPermission.ScreenRecordingNeedsApproval,
-            "AutoMobile",
-          )
-        )
-      val source =
-        object : DeviceThumbnailScreenshotSource {
-          override suspend fun latest(deviceId: String): ImageBitmap = ImageBitmap(1, 1)
-        }
-
-      val shot = withTimeout(100) { captureScreenshotWithRetry(state, "d", source) }
-
-      assertNotNull(shot)
-    }
-
-  @Test
   fun `placeholder label reflects device state`() {
     assertEquals("Booting", thumbnailPlaceholder(DeviceState.Shutdown, booting = true))
     assertEquals("Shutdown", thumbnailPlaceholder(DeviceState.Shutdown, booting = false))
@@ -83,14 +56,7 @@ class DeviceThumbnailTest {
   @Test
   fun `a shut-down device shows the Shutdown placeholder`() = runComposeUiTest {
     setContent {
-      MaterialTheme {
-        DeviceThumbnail(
-          shutdown,
-          booting = false,
-          sessionUuidProvider = { null },
-          screenshotSource = null,
-        )
-      }
+      MaterialTheme { DeviceThumbnail(shutdown, booting = false, screenshotSource = null) }
     }
     onNodeWithText("Shutdown").assertIsDisplayed()
   }
@@ -98,98 +64,34 @@ class DeviceThumbnailTest {
   @Test
   fun `a booting device shows the Booting placeholder`() = runComposeUiTest {
     setContent {
-      MaterialTheme {
-        DeviceThumbnail(
-          shutdown,
-          booting = true,
-          sessionUuidProvider = { null },
-          screenshotSource = null,
-        )
-      }
+      MaterialTheme { DeviceThumbnail(shutdown, booting = true, screenshotSource = null) }
     }
     onNodeWithText("Booting").assertIsDisplayed()
   }
 
   @Test
-  fun `a booted device renders the live video frame`() = runComposeUiTest {
-    val source = FakeVideoStreamSource()
-    setContent {
-      MaterialTheme {
-        DeviceThumbnail(
-          booted,
-          booting = false,
-          sessionUuidProvider = { null },
-          videoSourceFactory = { source },
-          screenshotSource = null,
-        )
+  fun `a booted device renders the last screenshot`() = runComposeUiTest {
+    // Thumbnails are stills BY DESIGN: a per-card live-video subscription would put a standing
+    // device capture + decoder cost on every booted tile of a potentially huge grid. The card
+    // renders the observation screenshot and never opens a video socket.
+    val screenshot =
+      object : DeviceThumbnailScreenshotSource {
+        override suspend fun latest(deviceId: String): ImageBitmap? = ImageBitmap(1, 1)
       }
+    setContent {
+      MaterialTheme { DeviceThumbnail(booted, booting = false, screenshotSource = screenshot) }
     }
-    waitUntil { source.connectedDeviceId != null }
-    source.emitFrame(width = 1, height = 1)
     waitUntil {
-      onAllNodesWithContentDescription("Live thumbnail of Pixel 8")
-        .fetchSemanticsNodes()
-        .isNotEmpty()
+      onAllNodesWithContentDescription("Screenshot of Pixel 8").fetchSemanticsNodes().isNotEmpty()
     }
-    onNodeWithContentDescription("Live thumbnail of Pixel 8").assertIsDisplayed()
+    onNodeWithContentDescription("Screenshot of Pixel 8").assertIsDisplayed()
   }
 
   @Test
-  fun `a booted iOS device names a pending Screen Recording approval`() = runComposeUiTest {
-    val source = FakeVideoStreamSource(screenRecordingRequired = true)
+  fun `a booted device with no screenshot yet shows the pending hint`() = runComposeUiTest {
     setContent {
-      MaterialTheme {
-        DeviceThumbnail(
-          PickerDevice("ios-simulator", "iPhone 16", Platform.Ios, DeviceState.Booted),
-          booting = false,
-          sessionUuidProvider = { null },
-          videoSourceFactory = { source },
-          screenshotSource = null,
-        )
-      }
+      MaterialTheme { DeviceThumbnail(booted, booting = false, screenshotSource = null) }
     }
-
-    onNodeWithText("Screen Recording needs approval").assertIsDisplayed()
+    onNodeWithText("No preview yet").assertIsDisplayed()
   }
-
-  @Test
-  fun `a booted device falls back to the last screenshot when the relay is unavailable`() =
-    runComposeUiTest {
-      val screenshot =
-        object : DeviceThumbnailScreenshotSource {
-          override suspend fun latest(deviceId: String): ImageBitmap? = ImageBitmap(1, 1)
-        }
-      setContent {
-        MaterialTheme {
-          DeviceThumbnail(
-            booted,
-            booting = false,
-            sessionUuidProvider = { null },
-            videoSourceFactory = { FakeVideoStreamSource(refuseWith = "no relay") },
-            screenshotSource = screenshot,
-          )
-        }
-      }
-      waitUntil {
-        onAllNodesWithContentDescription("Screenshot of Pixel 8").fetchSemanticsNodes().isNotEmpty()
-      }
-      onNodeWithContentDescription("Screenshot of Pixel 8").assertIsDisplayed()
-    }
-
-  @Test
-  fun `a booted device with no relay and no screenshot shows a no-preview hint`() =
-    runComposeUiTest {
-      setContent {
-        MaterialTheme {
-          DeviceThumbnail(
-            booted,
-            booting = false,
-            sessionUuidProvider = { null },
-            videoSourceFactory = { FakeVideoStreamSource(refuseWith = "no relay") },
-            screenshotSource = null,
-          )
-        }
-      }
-      onNodeWithText("No preview").assertIsDisplayed()
-    }
 }

@@ -403,6 +403,11 @@ class FakeVideoStreamSource(
   private var screenRecordingRequired: Boolean = false,
   private val screenRecordingApprovalTarget: String = "AutoMobile",
   private val nowMs: () -> Long = { 0L },
+  /**
+   * When true, [connect] stays in [VideoStreamState.Connecting] (never reaches Streaming) — for
+   * exercising the first-frame-deadline watchdog.
+   */
+  private val holdConnecting: Boolean = false,
 ) : VideoStreamSource {
   private val fakeSequence = java.util.concurrent.atomic.AtomicLong(0L)
 
@@ -437,6 +442,7 @@ class FakeVideoStreamSource(
             screenRecordingApprovalTarget,
           )
         refuseWith != null -> VideoStreamState.Unavailable(refuseWith)
+        holdConnecting -> VideoStreamState.Connecting
         else -> VideoStreamState.Streaming(1080, 2400)
       }
   }
@@ -453,6 +459,14 @@ class FakeVideoStreamSource(
   /** Simulates an unavailable relay after a stream has started. */
   fun becomeUnavailable(reason: String = "Live mirroring is unavailable on this daemon") {
     _state.value = VideoStreamState.Unavailable(reason)
+  }
+
+  /**
+   * Forces the Streaming state directly, independent of [connect] (which a `refuseWith` fake keeps
+   * routing to Unavailable) — used to stage a retained-frame-then-drop scenario.
+   */
+  fun becomeStreaming(width: Int = 1080, height: Int = 2400) {
+    _state.value = VideoStreamState.Streaming(width, height)
   }
 
   /** Simulates granting the macOS permission after the Settings flow. */

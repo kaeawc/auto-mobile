@@ -5,12 +5,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.waitUntilExactlyOneExists
 import dev.jasonpearson.automobile.desktop.core.control.testSnapshot
 import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
@@ -99,6 +102,103 @@ class DeviceStreamViewTest {
       val connectsBeforeRetry = source.connectCalls
       onNodeWithText("Check again").performClick()
       waitUntil { source.connectCalls > connectsBeforeRetry }
+    }
+
+  /** A minimal armed control state whose dispatcher never reaches a daemon. */
+  private fun armedControlState(scope: CoroutineScope) =
+    WorkspaceDeviceControlState(
+      dispatcher =
+        VideoInputDispatcher(
+          scope = scope,
+          clientProvider = { null },
+          platform = { "android" },
+          deviceId = "emulator-5554",
+          tracer = InteractionLatencyTracer(),
+        ),
+      interactionSnapshot = testSnapshot(),
+      renderSnapshot = testSnapshot(),
+      tapError = null,
+      tracer = InteractionLatencyTracer(),
+    )
+
+  @Test
+  fun `an armed pane without video yet shows the waiting hint, not a screenshot surface`() =
+    runComposeUiTest {
+      // The pane's pixels are ALWAYS live video. Before the first decoded frame the armed branch
+      // must fall through to the status hint instead of rendering the observation screenshot as an
+      // interactive still — the "pane switches over to screenshots" regression (#3348 family).
+      val source = FakeVideoStreamSource()
+      val scope = CoroutineScope(Dispatchers.Unconfined)
+      setContent {
+        MaterialTheme {
+          DeviceStreamView(
+            col(),
+            enableDeviceControl = true,
+            control = armedControlState(scope),
+            sourceFactory = { source },
+          )
+        }
+      }
+
+      onNodeWithText("Waiting for the first frame…").assertIsDisplayed()
+      onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).assertCountEquals(0)
+      scope.cancel()
+    }
+
+  @Test
+  fun `an armed pane with live video renders the interactive video surface`() = runComposeUiTest {
+    val source = FakeVideoStreamSource(nowMs = { System.nanoTime() / 1_000_000L })
+    val scope = CoroutineScope(Dispatchers.Unconfined)
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          col(),
+          enableDeviceControl = true,
+          control = armedControlState(scope),
+          sourceFactory = { source },
+        )
+      }
+    }
+
+    waitUntil { source.connectedDeviceId == "emulator-5554" }
+    source.emitFrame()
+    waitUntilExactlyOneExists(hasTestTag(DEVICE_CONTROL_SURFACE_TEST_TAG))
+    onAllNodesWithText("Waiting for the first frame…").assertCountEquals(0)
+    scope.cancel()
+  }
+
+  @Test
+  fun `armed control disarms when the relay drops, but the retained frame keeps rendering`() =
+    runComposeUiTest {
+      // Retention keeps the last video frame on screen across a drop, but a stale frame must NOT
+      // stay clickable — untagged taps would land on a device whose UI may have moved (#5255
+      // review). refuseWith keeps the auto-reconnect from racing the state back to Streaming.
+      val source =
+        FakeVideoStreamSource(refuseWith = "dropped", nowMs = { System.nanoTime() / 1_000_000L })
+      val scope = CoroutineScope(Dispatchers.Unconfined)
+      setContent {
+        MaterialTheme {
+          DeviceStreamView(
+            col(),
+            enableDeviceControl = true,
+            control = armedControlState(scope),
+            sourceFactory = { source },
+          )
+        }
+      }
+      // Stage a live frame: force Streaming, emit, and confirm the armed interactive surface.
+      runOnUiThread { source.becomeStreaming() }
+      source.emitFrame()
+      waitUntilExactlyOneExists(hasTestTag(DEVICE_CONTROL_SURFACE_TEST_TAG))
+
+      // Relay drops: control disarms (surface gone) but the retained frame still renders as a
+      // plain mirror image.
+      runOnUiThread { source.becomeUnavailable("dropped") }
+      waitUntil {
+        onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).fetchSemanticsNodes().isEmpty()
+      }
+      onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+      scope.cancel()
     }
 
   @Test

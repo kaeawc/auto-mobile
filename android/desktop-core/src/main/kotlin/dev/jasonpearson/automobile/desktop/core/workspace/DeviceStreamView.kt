@@ -21,8 +21,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.LIVE_STALL_RECONNECT_MS
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
 import dev.jasonpearson.automobile.desktop.core.platform.MacScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
@@ -65,6 +67,9 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 private const val CONTROL_PANE_FPS = 30
 private const val MIRROR_PANE_FPS = 10
 
+/** Test tag on the armed interactive-video surface, so tests can pin which branch rendered. */
+internal const val DEVICE_CONTROL_SURFACE_TEST_TAG = "device-control-surface"
+
 @Composable
 fun DeviceStreamView(
   column: DeviceColumn,
@@ -104,7 +109,16 @@ fun DeviceStreamView(
   // (VideoStreamSocketServer.attach). Changing an armed pane's live rate needs server-side capture
   // reconfiguration (follow-up); re-keying only added reconnect churn for no reliable effect.
   val source = remember(column.deviceId) { sourceFactory(column.deviceId) }
-  val liveFrame = rememberLiveVideoFrame(source, column.deviceId, autoReconnect = true)
+  val liveFrame =
+    rememberLiveVideoFrame(
+      source,
+      column.deviceId,
+      autoReconnect = true,
+      // The Streaming-stall reconnect is only valid for idle-heartbeat sources (Android). The iOS
+      // capture drops idle buffers, so a healthy static screen makes no frame progress and must
+      // NOT be reconnected; the first-frame deadline still catches a never-first-frame wedge.
+      stallReconnectMs = if (column.platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null,
+    )
   val state by source.state.collectAsState()
   val controlSnapshot = control?.interactionSnapshot
   var settingsLaunchFailure by remember(column.deviceId) { mutableStateOf(false) }
@@ -131,22 +145,29 @@ fun DeviceStreamView(
         source.connect(column.deviceId)
       },
     )
-  } else if (enableDeviceControl && controlSnapshot != null) {
-    // Armed: keep the SMOOTH LIVE VIDEO on screen, but map clicks through the in-memory
-    // observation
-    // snapshot (its real device dimensions + frameContext). The video and the observation
-    // screenshot
-    // are the same screen at the same aspect ratio, so a click normalized against the displayed
-    // video maps to the same device pixel. DeviceScreenView already renders a live bitmap while
-    // mapping through separate device dims — that's exactly its inspector-mode configuration,
-    // reused
-    // here with Control mode so the click dispatches instead of selecting an element.
+  } else if (
+    enableDeviceControl &&
+      controlSnapshot != null &&
+      liveFrame != null &&
+      state is VideoStreamState.Streaming
+  ) {
+    // Armed WITH live video: the pane's pixels are ALWAYS the live H.264 mirror — never the
+    // observation screenshot. The armed surface requires a decoded frame AND a currently-Streaming
+    // relay: before the first frame the pane shows the status hint, and once the relay drops the
+    // last frame is still RENDERED (mirror branch below) but control DISARMS — a retained-but-stale
+    // frame must not stay clickable while untagged taps land on a device whose UI may have moved.
+    // Clicks map through the in-memory observation snapshot (its real device dimensions);
+    // video and observation cover the same screen at the same aspect ratio, so a click normalized
+    // against the displayed video maps to the same device pixel. DeviceScreenView already renders
+    // a live bitmap while mapping through separate device dims — its inspector-mode
+    // configuration, reused here with Control mode so the click dispatches instead of selecting.
     val renderSnapshot = control.renderSnapshot
     DeviceScreenView(
-      // Fallback pixels only until the first video frame decodes; liveFrame renders instead when
-      // set.
-      screenshotData = renderSnapshot?.screenshotData,
-      liveFrame = liveFrame?.bitmap,
+      // Deliberately null: observation screenshots are for geometry/inspection, not pane pixels.
+      // Passing them here is what made the pane visibly "switch over to screenshots" whenever the
+      // relay dropped a frame source; the retained live frame now covers those windows.
+      screenshotData = null,
+      liveFrame = liveFrame.bitmap,
       screenWidth = renderSnapshot?.deviceWidth ?: 0,
       screenHeight = renderSnapshot?.deviceHeight ?: 0,
       rotation = renderSnapshot?.rotation ?: 0,
@@ -156,7 +177,8 @@ fun DeviceStreamView(
       onElementSelected = {},
       onElementHovered = {},
       elementMap = renderSnapshot?.hierarchy?.elementMap?.takeIf { it.isNotEmpty() },
-      modifier = Modifier.fillMaxSize(),
+      // Tagged so tests can pin WHICH surface rendered (interactive video vs. hint/mirror).
+      modifier = Modifier.fillMaxSize().testTag(DEVICE_CONTROL_SURFACE_TEST_TAG),
       controlMode = DeviceScreenControlMode.Control,
       controlSnapshot = controlSnapshot,
       // The view maps a click through `snapshot`'s geometry and hands back the device-mapped

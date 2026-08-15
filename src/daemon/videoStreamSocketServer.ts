@@ -306,8 +306,12 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.replayParameterSets(capture, socket);
       // Startup can synchronously emit an IDR before the acknowledgement makes this socket
       // eligible for binary data. Gate the subscriber and ask for a post-ack keyframe so it
-      // never begins on an undecodable inter-frame.
-      capture.source?.requestKeyFrame?.();
+      // never begins on an undecodable inter-frame. Retried through the injected timer when the
+      // source throttles the request (same helper as the drain path): a bare call that lands
+      // inside the throttle window (~3s Android/raw-iOS) would leave this just-promoted
+      // subscriber parked in waitingForKeyFrame until the encoder's natural GOP — which on an
+      // idle screen is exactly the frozen-pane-on-reconnect symptom.
+      this.requestKeyFrameForWaitingSubscriber(device.deviceId, socket);
     } catch (error) {
       logger.warn(`[VideoStream] subscribe failed: ${error}`);
       this.detach(socket);

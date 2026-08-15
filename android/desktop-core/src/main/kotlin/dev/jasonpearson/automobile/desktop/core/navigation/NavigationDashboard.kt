@@ -80,6 +80,11 @@ fun NavigationDashboard(
   // [providedGraph] with no observed device. Any future live "navigate device to this screen"
   // affordance must gate on this flag.
   readOnly: Boolean = false,
+  // Provenance-weighted opacity context (nav (app,build) Phase 2, #4985): a node/edge reached in
+  // this active context renders at 100% opacity, one reached only historically / by another build
+  // or device at 50%, with hover provenance on the faded ones. Null (the default, and the offline
+  // case) renders the union at full opacity — there is no active build to contrast against.
+  activeContext: NavigationActiveContext? = null,
 ) {
   val graph = LocalAutoMobileGraph.current
   var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
@@ -257,6 +262,7 @@ fun NavigationDashboard(
               settingsProvider.fogModeEnabled = enabled
             },
             fitToViewTrigger = fitToViewTrigger,
+            activeContext = activeContext,
           )
         }
 

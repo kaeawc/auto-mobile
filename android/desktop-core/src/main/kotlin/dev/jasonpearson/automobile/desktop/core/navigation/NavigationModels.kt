@@ -4,6 +4,13 @@ typealias ScreenNode = dev.jasonpearson.automobile.desktop.domain.ScreenNode
 
 typealias ScreenTransition = dev.jasonpearson.automobile.desktop.domain.ScreenTransition
 
+typealias ProvenanceBuildKey = dev.jasonpearson.automobile.desktop.domain.ProvenanceBuildKey
+
+typealias ScreenProvenance = dev.jasonpearson.automobile.desktop.domain.ScreenProvenance
+
+typealias NavigationActiveContext =
+  dev.jasonpearson.automobile.desktop.domain.NavigationActiveContext
+
 // Mock data for development - Messaging app (18 screens)
 // Timestamps simulate AutoMobile exploring the app starting from Splash
 object NavigationMockData {

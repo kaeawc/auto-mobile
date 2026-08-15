@@ -116,4 +116,46 @@ describe("NavigationRepository provenance observations", () => {
     expect(obs[0].first_seen_at).toBe(150);
     expect(obs[0].last_seen_at).toBe(400);
   });
+
+  // AC1 read surface (#4985): the provenance join returns build/device/session/
+  // lastSeen for each node/edge observation, scoped by app.
+  test("getNodeProvenanceForApp joins build keys and scopes by app", async () => {
+    const node = await repo.getOrCreateNode("com.example.app", "Home", 100);
+    const buildA = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
+    const buildB = await repo.getOrCreateBuildKey("com.example.app", 2, "hashB");
+    await repo.recordNodeObservation(node.id, buildA.id, "device-1", "session-1", 100);
+    await repo.recordNodeObservation(node.id, buildB.id, "device-2", "session-2", 200);
+
+    // A different app's observation must not leak into this app's provenance.
+    await repo.getOrCreateApp("com.other.app");
+    const otherNode = await repo.getOrCreateNode("com.other.app", "Home", 100);
+    const otherBuild = await repo.getOrCreateBuildKey("com.other.app", 9, "hashZ");
+    await repo.recordNodeObservation(otherNode.id, otherBuild.id, "device-9", "session-9", 300);
+
+    const rows = await repo.getNodeProvenanceForApp("com.example.app");
+    expect(rows).toHaveLength(2);
+    expect(rows.every(r => r.node_id === node.id)).toBe(true);
+    expect(rows.every(r => r.package_id === "com.example.app")).toBe(true);
+    // Ordered by last_seen_at desc.
+    expect(rows[0].last_seen_at).toBe(200);
+    expect(rows[0].version_code).toBe(2);
+    expect(rows[0].content_hash).toBe("hashB");
+    expect(rows[0].device_id).toBe("device-2");
+    expect(rows[0].session_uuid).toBe("session-2");
+  });
+
+  test("getEdgeProvenanceForApp joins build keys keyed by edge id", async () => {
+    const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
+    const build = await repo.getOrCreateBuildKey("com.example.app", 3, "hashC");
+    await repo.recordEdgeObservation(edge.id, build.id, "device-1", "session-1", 150);
+
+    const rows = await repo.getEdgeProvenanceForApp("com.example.app");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].edge_id).toBe(edge.id);
+    expect(rows[0].package_id).toBe("com.example.app");
+    expect(rows[0].version_code).toBe(3);
+    expect(rows[0].content_hash).toBe("hashC");
+    expect(rows[0].device_id).toBe("device-1");
+    expect(rows[0].last_seen_at).toBe(150);
+  });
 });

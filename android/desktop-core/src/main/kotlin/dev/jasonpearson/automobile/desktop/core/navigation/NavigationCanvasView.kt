@@ -101,6 +101,8 @@ fun NavigationCanvasView(
   currentObservedScreen: String? = null, // Current screen from device observation stream
   onFogModeToggled: (Boolean) -> Unit = {}, // Called when user toggles fog mode
   fitToViewTrigger: Int = 0, // Incremented to trigger fit-to-view animation
+  activeContext: NavigationActiveContext? =
+    null, // Provenance context for opacity weighting (#4985)
 ) {
   val density = LocalDensity.current
   val colors = SharedTheme.globalColors
@@ -705,12 +707,16 @@ fun NavigationCanvasView(
                 val isHighlighted = transition.id in highlightedTransitions
                 val hasAnyHighlight =
                   highlightedScreens.isNotEmpty() || highlightedTransitions.isNotEmpty()
-                val edgeColor =
+                val baseEdgeColor =
                   when {
                     isHighlighted -> highlightedArrowColor
                     hasAnyHighlight -> dimmedArrowColor
                     else -> arrowColor
                   }
+                // Fade transitions reached only historically / by another build or device (#4985).
+                val provenanceAlpha =
+                  ProvenanceOpacity.alphaFor(transition.provenance, activeContext)
+                val edgeColor = baseEdgeColor.copy(alpha = baseEdgeColor.alpha * provenanceAlpha)
                 val edgeStrokeWidth = if (isHighlighted) strokeWidth * 1.5f else strokeWidth
 
                 // Build smooth curved path using cubic bezier
@@ -788,6 +794,9 @@ fun NavigationCanvasView(
             isCurrentReplayStep = screen.name == currentReplayScreen,
             isFogFocused = fogModeEnabled && screen.name == focusedScreenName,
             isDimmed = hasAnyHighlight && screen.name !in highlightedScreens,
+            provenanceAlpha = ProvenanceOpacity.alphaFor(screen.provenance, activeContext),
+            provenanceDescription =
+              ProvenanceOpacity.contentDescription(screen.name, screen.provenance, activeContext),
             onClick = {
               onScreenSelected(screen.id)
             },
@@ -902,6 +911,8 @@ private fun ScreenNodeCard(
   isCurrentReplayStep: Boolean = false, // Currently active step in replay
   isFogFocused: Boolean = false, // Focused node in fog mode
   isDimmed: Boolean,
+  provenanceAlpha: Float = ProvenanceOpacity.ACTIVE_ALPHA, // 100%/50% provenance weighting (#4985)
+  provenanceDescription: String = "", // Accessible provenance signal for hover/detail (#4985)
   onClick: () -> Unit,
   onHoverChange: (Boolean) -> Unit,
   screenshotLoader: ScreenshotLoader? = null,
@@ -972,6 +983,10 @@ private fun ScreenNodeCard(
           .pointerHoverIcon(PointerIcon.Hand)
           .onPointerEvent(PointerEventType.Enter) { onHoverChange(true) }
           .onPointerEvent(PointerEventType.Exit) { onHoverChange(false) }
+          // Provenance-weighted opacity: 100% active, 50% historical / other build or device
+          // (#4985).
+          .graphicsLayer { alpha = provenanceAlpha }
+          .semantics { contentDescription = provenanceDescription }
     ) {
       // Screen name positioned 8dp above the card (plus ~12dp for text height)
       Text(

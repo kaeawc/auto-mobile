@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import dev.jasonpearson.automobile.desktop.core.LIVE_STALL_RECONNECT_MS
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
@@ -63,7 +64,15 @@ fun LayoutFacet(
       socketAvailable = socketAvailable,
     )
   val videoSource = remember(column.deviceId) { videoSourceFactory(column.deviceId) }
-  val liveFrame = rememberLiveVideoFrame(videoSource, column.deviceId, autoReconnect = true)
+  val liveFrame =
+    rememberLiveVideoFrame(
+      videoSource,
+      column.deviceId,
+      autoReconnect = true,
+      // Streaming-stall reconnect only for idle-heartbeat sources (Android); the iOS capture drops
+      // idle buffers, so a static inspected screen legitimately makes no frame progress.
+      stallReconnectMs = if (column.platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null,
+    )
   stream?.let { activeStream ->
     LayoutInspectorDashboard(
       dataSourceMode = DataSourceMode.Real,

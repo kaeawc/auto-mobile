@@ -209,17 +209,31 @@ internal const val LIVE_RECONNECT_INITIAL_MS = 1_000L
 internal const val LIVE_RECONNECT_MAX_MS = 15_000L
 
 /**
- * Stall watchdog for [rememberLiveVideoFrame] when [autoReconnect] is on: force a reconnect after
- * this long in `Streaming` with no frame progress. A relay that stalls with its socket OPEN (device
- * capture silently dead, half-open socket, subscriber wedged waiting for a key frame the encoder
- * never produced) keeps the state at `Streaming`, so the Unavailable-driven reconnect never fires
- * and the mirror silently freezes. A healthy-but-idle Android stream emits ~1 fps heartbeat frames
- * (FrameHeartbeat's 1s idle nudge), so ten missed seconds is decisively a stall, not idleness. The
- * reconnect is visually free: the last frame is retained while the fresh subscribe (which requests
- * an immediate key frame) replaces it.
+ * Streaming-stall reconnect window for [rememberLiveVideoFrame]: force a reconnect after this long
+ * in `Streaming` with no frame progress. A relay that stalls with its socket OPEN (device capture
+ * silently dead, half-open socket) stays `Streaming`, so the Unavailable-driven reconnect never
+ * fires and the mirror silently freezes; frame progress ceasing is the only signal.
+ *
+ * This is ONLY valid for sources that emit idle heartbeat frames, so "no progress" unambiguously
+ * means "stalled" rather than "static screen": the Android video-server's FrameHeartbeat re-submits
+ * ~1 fps while idle. The iOS ScreenCaptureKit capture deliberately DROPS idle buffers (`status !=
+ * .complete`), so a healthy static iOS screen makes no decoded-frame progress — those callers pass
+ * `stallReconnectMs = null` to disable this watchdog and rely on the first-frame deadline plus the
+ * Unavailable retry instead. The reconnect is visually free: the last frame is retained while the
+ * fresh subscribe (which re-requests a key frame) replaces it.
  */
 internal const val LIVE_STALL_RECONNECT_MS = 10_000L
 internal const val LIVE_STALL_CHECK_INTERVAL_MS = 2_000L
+
+/**
+ * First-frame deadline for [rememberLiveVideoFrame]: reconnect if the source sits in
+ * `Connecting`/`Idle` (subscribe accepted or connecting) this long without ever delivering a
+ * decodable first frame. This catches the key-frame wedge that never leaves `Connecting` — which
+ * neither the Streaming-stall watchdog nor the Unavailable retry can see — on BOTH platforms
+ * (unlike the Streaming-stall window, an idle static screen has no bearing here: there is no frame
+ * yet at all). Generous, since iOS startup + first key frame is legitimately several seconds.
+ */
+internal const val LIVE_FIRST_FRAME_TIMEOUT_MS = 15_000L
 
 /**
  * Connects a live-mirroring source for this composition and exposes only its newest frame.
@@ -242,7 +256,10 @@ internal fun rememberLiveVideoFrame(
   autoReconnect: Boolean = false,
   reconnectInitialMs: Long = LIVE_RECONNECT_INITIAL_MS,
   nowMs: () -> Long = MONOTONIC_NOW_MS,
-  stallReconnectMs: Long = LIVE_STALL_RECONNECT_MS,
+  // Null disables the Streaming-stall reconnect; iOS (idle-frame-dropping) callers pass null.
+  stallReconnectMs: Long? = LIVE_STALL_RECONNECT_MS,
+  // Null disables the first-frame deadline.
+  firstFrameTimeoutMs: Long? = LIVE_FIRST_FRAME_TIMEOUT_MS,
   stallCheckIntervalMs: Long = LIVE_STALL_CHECK_INTERVAL_MS,
 ): LiveVideoFrame? {
   var liveFrame by remember(source, deviceId) { mutableStateOf<LiveVideoFrame?>(null) }
@@ -296,35 +313,51 @@ internal fun rememberLiveVideoFrame(
     }
   }
 
-  // Stall watchdog (see LIVE_STALL_RECONNECT_MS): a relay that stops delivering frames while its
-  // socket stays open never leaves `Streaming`, so the Unavailable-driven reconnect above cannot
-  // catch it — the only observable signal is frame progress ceasing. Watch it and reconnect.
+  // Progress watchdog: recovers the two silent freezes the Unavailable-driven retry can't see —
+  //  - a `Streaming` relay that stops delivering frames (stall), for heartbeat-capable sources; and
+  //  - a `Connecting` subscribe that never yields a decodable first frame (the key-frame wedge).
+  // Both re-subscribe (disconnect+connect), which re-requests a key frame; the retained last frame
+  // keeps rendering across it. Idle static screens are handled correctly: on iOS stallReconnectMs
+  // is null so an idle `Streaming` stream is left alone, and the first-frame deadline only applies
+  // BEFORE the first frame, where a static screen is irrelevant.
   LaunchedEffect(source, deviceId, autoReconnect) {
     if (source == null || deviceId == null || !autoReconnect) return@LaunchedEffect
-    var lastProgressMs = nowMs()
+    if (stallReconnectMs == null && firstFrameTimeoutMs == null) return@LaunchedEffect
+    var noProgressSinceMs = nowMs()
     var lastSeenSequence = -1L
+    fun reconnect(reason: String) {
+      LOG.info("Live mirror for $deviceId reconnecting: $reason")
+      noProgressSinceMs = nowMs()
+      lastSeenSequence = -1L
+      source.disconnect()
+      source.connect(deviceId)
+    }
     while (isActive) {
       delay(stallCheckIntervalMs)
-      if (source.state.value !is VideoStreamState.Streaming) {
-        // Not streaming: connect/reconnect paths own recovery; restart the stall clock so a
-        // fresh session gets a full window before being judged.
-        lastProgressMs = nowMs()
-        continue
-      }
-      val frame = liveFrame
-      if (frame != null && frame.sequence != lastSeenSequence) {
-        lastSeenSequence = frame.sequence
-        lastProgressMs = frame.receivedAtMs
-        continue
-      }
-      if (nowMs() - lastProgressMs >= stallReconnectMs) {
-        LOG.info(
-          "Live mirror for $deviceId made no frame progress for ${stallReconnectMs}ms " +
-            "while Streaming; reconnecting"
-        )
-        lastProgressMs = nowMs()
-        source.disconnect()
-        source.connect(deviceId)
+      when (source.state.value) {
+        is VideoStreamState.Streaming -> {
+          val frame = liveFrame
+          if (frame != null && frame.sequence != lastSeenSequence) {
+            lastSeenSequence = frame.sequence
+            noProgressSinceMs = frame.receivedAtMs
+          } else if (stallReconnectMs != null && nowMs() - noProgressSinceMs >= stallReconnectMs) {
+            reconnect("no frame progress for ${stallReconnectMs}ms while Streaming")
+          }
+        }
+        is VideoStreamState.Connecting,
+        is VideoStreamState.Idle -> {
+          // No first frame yet. Do NOT reset the clock here — elapsed non-Streaming time is
+          // exactly what the first-frame deadline bounds.
+          if (firstFrameTimeoutMs != null && nowMs() - noProgressSinceMs >= firstFrameTimeoutMs) {
+            reconnect("no first frame within ${firstFrameTimeoutMs}ms")
+          }
+        }
+        else -> {
+          // Unavailable / PermissionRequired: the Unavailable-driven retry owns recovery. Keep the
+          // clock fresh so a recovered session gets a full window before being judged.
+          noProgressSinceMs = nowMs()
+          lastSeenSequence = -1L
+        }
       }
     }
   }

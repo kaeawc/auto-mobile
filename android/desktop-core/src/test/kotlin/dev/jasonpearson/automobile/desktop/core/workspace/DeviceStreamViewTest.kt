@@ -168,6 +168,40 @@ class DeviceStreamViewTest {
   }
 
   @Test
+  fun `armed control disarms when the relay drops, but the retained frame keeps rendering`() =
+    runComposeUiTest {
+      // Retention keeps the last video frame on screen across a drop, but a stale frame must NOT
+      // stay clickable — untagged taps would land on a device whose UI may have moved (#5255
+      // review). refuseWith keeps the auto-reconnect from racing the state back to Streaming.
+      val source =
+        FakeVideoStreamSource(refuseWith = "dropped", nowMs = { System.nanoTime() / 1_000_000L })
+      val scope = CoroutineScope(Dispatchers.Unconfined)
+      setContent {
+        MaterialTheme {
+          DeviceStreamView(
+            col(),
+            enableDeviceControl = true,
+            control = armedControlState(scope),
+            sourceFactory = { source },
+          )
+        }
+      }
+      // Stage a live frame: force Streaming, emit, and confirm the armed interactive surface.
+      runOnUiThread { source.becomeStreaming() }
+      source.emitFrame()
+      waitUntilExactlyOneExists(hasTestTag(DEVICE_CONTROL_SURFACE_TEST_TAG))
+
+      // Relay drops: control disarms (surface gone) but the retained frame still renders as a
+      // plain mirror image.
+      runOnUiThread { source.becomeUnavailable("dropped") }
+      waitUntil {
+        onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).fetchSemanticsNodes().isEmpty()
+      }
+      onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+      scope.cancel()
+    }
+
+  @Test
   fun `an armed iOS pane still surfaces Screen Recording approval over the control view`() =
     runComposeUiTest {
       // Regression: a refused iOS relay (PermissionRequired) must win even when device control is

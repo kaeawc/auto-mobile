@@ -131,6 +131,57 @@ class LiveVideoStreamTest {
   }
 
   @Test
+  fun `an idle-heartbeat-less source is NOT reconnected while idle-Streaming`() = runComposeUiTest {
+    // iOS drops idle ScreenCaptureKit buffers, so a healthy static screen makes no frame progress.
+    // With stallReconnectMs = null the watchdog must leave a Streaming-but-idle stream alone rather
+    // than churn a healthy capture (#5255 review). connectCalls stays at the initial subscribe.
+    val monotonic = { System.nanoTime() / 1_000_000L }
+    val source = FakeVideoStreamSource(nowMs = monotonic)
+    setContent {
+      rememberLiveVideoFrame(
+        source,
+        "ios-simulator",
+        autoReconnect = true,
+        reconnectInitialMs = 10,
+        nowMs = monotonic,
+        stallReconnectMs = null, // iOS
+        firstFrameTimeoutMs = 100,
+        stallCheckIntervalMs = 20,
+      )
+    }
+    waitUntil { source.connectCalls >= 1 }
+    source.emitFrame(width = 1, height = 1) // first frame arrives → Streaming, then idle forever
+    // Wait well past both the first-frame deadline and several stall-check intervals.
+    Thread.sleep(400)
+    waitForIdle()
+    assertEquals(1, source.connectCalls) // idle Streaming is healthy; never reconnected
+  }
+
+  @Test
+  fun `reconnects a stream stuck in Connecting past the first-frame deadline`() = runComposeUiTest {
+    // A subscribe accepted (or connecting) that never yields a decodable first frame is the
+    // key-frame wedge; neither the Streaming-stall watchdog nor the Unavailable retry can see it.
+    // The first-frame deadline must re-subscribe (#5255 review).
+    val monotonic = { System.nanoTime() / 1_000_000L }
+    val source = FakeVideoStreamSource(nowMs = monotonic, holdConnecting = true)
+    setContent {
+      rememberLiveVideoFrame(
+        source,
+        "emulator-5554",
+        autoReconnect = true,
+        reconnectInitialMs = 10,
+        nowMs = monotonic,
+        stallReconnectMs = null,
+        firstFrameTimeoutMs = 100,
+        stallCheckIntervalMs = 20,
+      )
+    }
+    waitUntil { source.connectCalls >= 1 }
+    // Never leaves Connecting; the first-frame deadline must force a re-subscribe.
+    waitUntil(timeoutMillis = 5_000) { source.connectCalls >= 2 }
+  }
+
+  @Test
   fun `auto-reconnect re-subscribes after the relay drops`() = runComposeUiTest {
     // A dropped relay ("Live mirroring stopped") must heal itself rather than stay dead until the
     // pane is torn down. With autoReconnect on, an Unavailable state triggers a connect() retry —

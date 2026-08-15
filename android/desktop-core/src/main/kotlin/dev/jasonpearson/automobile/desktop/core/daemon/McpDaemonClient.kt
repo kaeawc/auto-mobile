@@ -44,17 +44,16 @@ class McpDaemonClient(
   private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
   val sessionUuid: String? = null,
   /**
-   * Hang ceiling for one daemon round-trip. The request socket is a BLOCKING [SocketChannel] —
-   * which supports no read timeout — so without a deadline a daemon that accepts the connection but
-   * never replies (wedged event loop, half-open socket after sleep/wake) hangs the calling thread
-   * FOREVER. For the video-pane input path that thread is the pane's single dispatch thread, held
-   * inside its FIFO mutex: one hung call silently killed ALL further input ("input stops working").
-   * A watchdog closes the channel at the deadline, failing the one call so the caller sheds it and
-   * the next input proceeds on a fresh connection. Generous defaults — these are hang detectors,
-   * not latency budgets; a healthy round-trip is ~milliseconds.
+   * Hang ceiling for the input helpers (tap/swipe/key) ONLY. The request socket is a BLOCKING
+   * [SocketChannel] — which supports no connect/read timeout — so without a deadline a daemon that
+   * accepts but never replies (wedged event loop, half-open socket after sleep/wake) hangs the
+   * calling thread FOREVER. For the video pane that thread is the single dispatch thread, held in
+   * its FIFO mutex: one hung input call silently killed ALL further input. A watchdog fails the one
+   * call at this deadline so the dispatcher sheds it and the next input proceeds on a fresh
+   * connection. A hang detector, not a latency budget — a healthy input round-trip is ~ms. Ordinary
+   * tool calls are deliberately UNBOUNDED (see [sendRequest]) so the daemon's long-running-tool
+   * timeout floors are honored.
    */
-  private val requestTimeoutMs: Long = DEFAULT_REQUEST_TIMEOUT_MS,
-  /** Tighter ceiling for the input helpers (tap/swipe/key), where a hang freezes interaction. */
   private val inputRequestTimeoutMs: Long = INPUT_REQUEST_TIMEOUT_MS,
 ) : AutoMobileClient {
   private var daemonLifecycle: DaemonLifecycleEnsurer? =
@@ -703,34 +702,50 @@ class McpDaemonClient(
     }
   }
 
+  /**
+   * Send one request. [timeoutMs] is a HANG ceiling, not a latency budget, and is OPT-IN: null
+   * (ordinary tool calls) leaves the request unbounded, because the daemon deliberately grants
+   * long-running tools multi-minute floors (executePlan 600s, startDevice/launchApp/observe 90s;
+   * see src/daemon/mcpRequestTimeout.ts) and a blanket client ceiling would disconnect a valid slow
+   * call while it is still running. Only the input helpers pass a value, where a hang freezes the
+   * video pane's single dispatch thread.
+   */
   private fun sendRequest(
     method: String,
     params: JsonObject = JsonObject(emptyMap()),
-    timeoutMs: Long = requestTimeoutMs,
+    timeoutMs: Long? = null,
   ): DaemonResponse {
     ensureVersionMatchedDaemon()
     ensureSocketExists()
 
     val address = UnixDomainSocketAddress.of(socketPathValue)
-    SocketChannel.open(address).use { channel ->
-      // Deadline watchdog: a blocking SocketChannel has no read timeout, so a daemon that
-      // accepts but never replies would hang the calling thread forever (see the constructor
-      // doc — for video-pane input that meant ALL input died). Closing the channel from the
-      // watchdog thread makes the blocked read throw, which the catch below reports as a
-      // timeout. Cancelled on completion, so a healthy round-trip never touches it.
-      val watchdog =
+    // Open the channel UNCONNECTED so the deadline can be armed BEFORE the blocking connect(): a
+    // wedged daemon whose accept backlog is full would otherwise hang in connect() before any
+    // watchdog exists.
+    SocketChannel.open(java.net.StandardProtocolFamily.UNIX).use { channel ->
+      // Deadline watchdog. A blocking SocketChannel has no connect/read timeout, so a daemon that
+      // never accepts or never replies would hang the calling thread forever (for video-pane
+      // input that meant ALL input died). The watchdog closes the channel, which makes the blocked
+      // connect/read throw; `expired` is set BEFORE the close so the request thread
+      // deterministically
+      // reports the deadline rather than the incidental ClosedChannelException the close raced in.
+      val expired = java.util.concurrent.atomic.AtomicBoolean(false)
+      val watchdog = timeoutMs?.let { deadline ->
         requestWatchdog.schedule(
           {
+            expired.set(true)
             try {
               channel.close()
             } catch (_: Exception) {
               // Best-effort close; the request thread owns the definitive close via use{}.
             }
           },
-          timeoutMs,
+          deadline,
           java.util.concurrent.TimeUnit.MILLISECONDS,
         )
+      }
       try {
+        channel.connect(address)
         val reader =
           BufferedReader(
             InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
@@ -756,16 +771,14 @@ class McpDaemonClient(
         val line = reader.readLine() ?: throw DaemonUnavailableException("Daemon closed the socket")
         return json.decodeFromString(line)
       } catch (e: Exception) {
-        // The watchdog having FIRED (not been cancelled) means the failure is our own forced
-        // close — report the timeout, not the incidental closed-channel exception it caused.
-        if (watchdog.isDone && !watchdog.isCancelled) {
+        if (expired.get()) {
           throw DaemonUnavailableException(
             "Daemon request '$method' timed out after ${timeoutMs}ms"
           )
         }
         throw e
       } finally {
-        watchdog.cancel(false)
+        watchdog?.cancel(false)
       }
     }
   }
@@ -823,8 +836,6 @@ class McpDaemonClient(
 
   companion object {
     /** Hang ceiling for ordinary daemon requests (tool calls can legitimately take tens of s). */
-    const val DEFAULT_REQUEST_TIMEOUT_MS = 60_000L
-
     /** Hang ceiling for the input helpers; a healthy input round-trip is ~milliseconds. */
     const val INPUT_REQUEST_TIMEOUT_MS = 5_000L
 

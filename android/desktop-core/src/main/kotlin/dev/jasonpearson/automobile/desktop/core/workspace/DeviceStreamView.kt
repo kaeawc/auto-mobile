@@ -24,6 +24,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.LIVE_STALL_RECONNECT_MS
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
 import dev.jasonpearson.automobile.desktop.core.platform.MacScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
@@ -108,7 +109,16 @@ fun DeviceStreamView(
   // (VideoStreamSocketServer.attach). Changing an armed pane's live rate needs server-side capture
   // reconfiguration (follow-up); re-keying only added reconnect churn for no reliable effect.
   val source = remember(column.deviceId) { sourceFactory(column.deviceId) }
-  val liveFrame = rememberLiveVideoFrame(source, column.deviceId, autoReconnect = true)
+  val liveFrame =
+    rememberLiveVideoFrame(
+      source,
+      column.deviceId,
+      autoReconnect = true,
+      // The Streaming-stall reconnect is only valid for idle-heartbeat sources (Android). The iOS
+      // capture drops idle buffers, so a healthy static screen makes no frame progress and must
+      // NOT be reconnected; the first-frame deadline still catches a never-first-frame wedge.
+      stallReconnectMs = if (column.platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null,
+    )
   val state by source.state.collectAsState()
   val controlSnapshot = control?.interactionSnapshot
   var settingsLaunchFailure by remember(column.deviceId) { mutableStateOf(false) }
@@ -135,12 +145,18 @@ fun DeviceStreamView(
         source.connect(column.deviceId)
       },
     )
-  } else if (enableDeviceControl && controlSnapshot != null && liveFrame != null) {
+  } else if (
+    enableDeviceControl &&
+      controlSnapshot != null &&
+      liveFrame != null &&
+      state is VideoStreamState.Streaming
+  ) {
     // Armed WITH live video: the pane's pixels are ALWAYS the live H.264 mirror — never the
-    // observation screenshot. The armed surface therefore also requires a decoded frame: before
-    // the first frame (or in the rare case video never arrives) the pane falls through to the
-    // mirror branch below and shows the status hint, instead of interacting against a stale
-    // still. Clicks map through the in-memory observation snapshot (its real device dimensions);
+    // observation screenshot. The armed surface requires a decoded frame AND a currently-Streaming
+    // relay: before the first frame the pane shows the status hint, and once the relay drops the
+    // last frame is still RENDERED (mirror branch below) but control DISARMS — a retained-but-stale
+    // frame must not stay clickable while untagged taps land on a device whose UI may have moved.
+    // Clicks map through the in-memory observation snapshot (its real device dimensions);
     // video and observation cover the same screen at the same aspect ratio, so a click normalized
     // against the displayed video maps to the same device pixel. DeviceScreenView already renders
     // a live bitmap while mapping through separate device dims — its inspector-mode

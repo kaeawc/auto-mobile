@@ -610,7 +610,9 @@ class McpDaemonClientInputTest {
     // loop, half-open socket) hung the caller forever — for the video pane that meant one hung
     // call froze ALL input behind its single dispatch thread ("input stops working"). The
     // deadline must fail just that call, quickly and with a clear message.
-    val socketDir = Files.createTempDirectory("am-hang-test")
+    // Bind under /tmp like TestDaemonSocket: a Unix-socket path has a ~104-byte platform limit and
+    // macOS's default temp dir (/var/folders/...) can exceed it, failing the bind.
+    val socketDir = Files.createTempDirectory(Path.of("/tmp"), "am-hang-")
     val socketPath = socketDir.resolve("daemon.sock")
     val server = ServerSocketChannel.open(StandardProtocolFamily.UNIX)
     server.bind(UnixDomainSocketAddress.of(socketPath))

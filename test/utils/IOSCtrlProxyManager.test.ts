@@ -1037,6 +1037,73 @@ describe("IOSCtrlProxyManager", function() {
       expect(curlCalls).toBe(6);
     });
 
+    test("joining readiness caller extends a default startup poll without spawning another runner", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let curlCalls = 0;
+      let releaseFirstHealthPoll: ((result: ExecResult) => void) | undefined;
+      const firstHealthPoll = new Promise<ExecResult>((resolve) => {
+        releaseFirstHealthPoll = resolve;
+      });
+      fakeExecutor.setCommandHandler("curl -s", () => {
+        curlCalls++;
+        if (curlCalls === 3) {
+          return firstHealthPoll;
+        }
+        return createExecResult(curlCalls >= 6 ? "ok" : "", "");
+      });
+
+      await withHealthBudget("3", async () => {
+        fakeTimer.enableAutoAdvance();
+        const defaultStart = manager.start();
+        for (let i = 0; i < 5 && !releaseFirstHealthPoll; i++) {
+          await new Promise(resolve => setImmediate(resolve));
+        }
+        expect(releaseFirstHealthPoll).toBeDefined();
+
+        const readinessStart = manager.start({ minimumHealthPollDurationMs: 2_000 });
+        releaseFirstHealthPoll!(createExecResult("", ""));
+
+        await Promise.all([defaultStart, readinessStart]);
+      });
+
+      expect(curlCalls).toBe(6);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+    });
+
+    test("an aborted caller does not cancel an independent shared-start waiter", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let curlCalls = 0;
+      fakeExecutor.setCommandHandler("curl -s", () => {
+        curlCalls++;
+        return createExecResult(curlCalls >= 6 ? "ok" : "", "");
+      });
+
+      await withHealthBudget("3", async () => {
+        fakeTimer.enableAutoAdvance();
+        const controller = new AbortController();
+        const abortedStart = manager.start({ signal: controller.signal });
+        const independentStart = manager.start({ minimumHealthPollDurationMs: 2_000 });
+
+        controller.abort(new Error("caller cancelled"));
+
+        await expect(abortedStart).rejects.toThrow("caller cancelled");
+        await independentStart;
+      });
+
+      expect(curlCalls).toBe(6);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+    });
+
     // Directly exercise the PID-reuse guard added in review (thread 2). Testing the
     // predicate rather than a full start() keeps it precise and avoids spawning a
     // runner (whose background monitor would leak into later tests under autoAdvance).

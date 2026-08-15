@@ -90,17 +90,28 @@ class FakeIosManager implements ReadinessIosManager {
   setupResult = { success: true, message: "ready" };
   setupCalls = 0;
   startCalls = 0;
+  setupSignal: AbortSignal | undefined;
+  setupMinimumHealthPollDurationMs: number | undefined;
+  startOptions: { signal?: AbortSignal; minimumHealthPollDurationMs?: number } | undefined;
 
   async isInstalled(): Promise<boolean> {
     return this.installed;
   }
 
-  async start(): Promise<void> {
+  async start(options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }): Promise<void> {
     this.startCalls++;
+    this.startOptions = options;
   }
 
-  async setup() {
+  async setup(
+    _force?: boolean,
+    _perf?: unknown,
+    signal?: AbortSignal,
+    minimumHealthPollDurationMs?: number,
+  ) {
     this.setupCalls++;
+    this.setupSignal = signal;
+    this.setupMinimumHealthPollDurationMs = minimumHealthPollDurationMs;
     return this.setupResult;
   }
 
@@ -117,6 +128,7 @@ function createService(
     iosManager?: FakeIosManager;
     iosClient?: FakeReadinessClient;
     autoAdvance?: boolean;
+    awaitIosStartupMaintenance?: () => Promise<void>;
   } = {},
 ) {
   const timer = options.timer ?? new FakeTimer();
@@ -140,7 +152,7 @@ function createService(
       getIosManager: () => iosManager,
       getIosClient: () => iosClient,
       checkIosOverride: async () => ({ present: false, usable: true }),
-      awaitIosStartupMaintenance: async () => {},
+      awaitIosStartupMaintenance: options.awaitIosStartupMaintenance ?? (async () => {}),
     }),
   };
 }
@@ -281,6 +293,31 @@ describe("RunnerReadinessService", () => {
     ).rejects.toThrow(/phase=runner-setup.*xcodebuild exited 65/);
   });
 
+  test("passes the remaining readiness budget to iOS CtrlProxy setup", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    const timer = new FakeTimer();
+    const { service } = createService({
+      timer,
+      iosManager,
+      iosClient,
+      awaitIosStartupMaintenance: async () => {
+        timer.advanceTime(10_000);
+      },
+    });
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 120_000,
+      readinessTimeoutMs: 120_000,
+    });
+
+    expect(iosManager.setupMinimumHealthPollDurationMs).toBe(110_000);
+    expect(iosManager.setupSignal).toBeDefined();
+  });
+
   test("starts only the cached iOS runner when downloads are disabled", async () => {
     const iosManager = new FakeIosManager();
     const iosClient = new FakeReadinessClient();
@@ -296,6 +333,8 @@ describe("RunnerReadinessService", () => {
     });
 
     expect(iosManager.startCalls).toBe(1);
+    expect(iosManager.startOptions?.minimumHealthPollDurationMs).toBe(30_000);
+    expect(iosManager.startOptions?.signal).toBeDefined();
     expect(iosManager.setupCalls).toBe(0);
     expect(iosClient.healthCalls).toBe(1);
   });

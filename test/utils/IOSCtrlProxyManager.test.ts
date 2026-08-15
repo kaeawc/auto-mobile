@@ -1016,6 +1016,219 @@ describe("IOSCtrlProxyManager", function() {
       expect((manager as unknown as { xcTestProcessId: number | null }).xcTestProcessId).toBe(12345);
     });
 
+    test("start() honors a caller readiness budget beyond the configured health-poll default", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let curlCalls = 0;
+      fakeExecutor.setCommandHandler("curl -s", () => {
+        curlCalls++;
+        return createExecResult(curlCalls > 6 ? "ok" : "", "");
+      });
+
+      await withHealthBudget("3", async () => {
+        fakeTimer.enableAutoAdvance();
+        await manager.start({ minimumHealthPollDurationMs: 2_000 });
+      });
+
+      expect(curlCalls).toBe(7);
+    });
+
+    test("joining readiness caller extends a default startup poll without spawning another runner", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let curlCalls = 0;
+      let releaseFirstHealthPoll: ((result: ExecResult) => void) | undefined;
+      const firstHealthPoll = new Promise<ExecResult>((resolve) => {
+        releaseFirstHealthPoll = resolve;
+      });
+      fakeExecutor.setCommandHandler("curl -s", () => {
+        curlCalls++;
+        if (curlCalls === 3) {
+          return firstHealthPoll;
+        }
+        return createExecResult(curlCalls >= 7 ? "ok" : "", "");
+      });
+
+      await withHealthBudget("3", async () => {
+        fakeTimer.enableAutoAdvance();
+        const defaultStart = manager.start();
+        for (let i = 0; i < 5 && curlCalls < 3; i++) {
+          await new Promise(resolve => setImmediate(resolve));
+        }
+        expect(curlCalls).toBe(3);
+
+        const readinessStart = manager.start({ minimumHealthPollDurationMs: 2_000 });
+        releaseFirstHealthPoll!(createExecResult("", ""));
+
+        await Promise.all([defaultStart, readinessStart]);
+      });
+
+      expect(curlCalls).toBe(7);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+    });
+
+    test("an aborted caller does not cancel an independent shared-start waiter", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let curlCalls = 0;
+      fakeExecutor.setCommandHandler("curl -s", () => {
+        curlCalls++;
+        return createExecResult(curlCalls >= 6 ? "ok" : "", "");
+      });
+
+      await withHealthBudget("3", async () => {
+        fakeTimer.enableAutoAdvance();
+        const controller = new AbortController();
+        const abortedStart = manager.start({ signal: controller.signal });
+        const independentStart = manager.start({ minimumHealthPollDurationMs: 2_000 });
+
+        controller.abort(new Error("caller cancelled"));
+
+        await expect(abortedStart).rejects.toThrow("caller cancelled");
+        await independentStart;
+      });
+
+      expect(curlCalls).toBe(6);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+    });
+
+    test("an aborted caller removes its readiness extension from a shared startup", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let curlCalls = 0;
+      let releaseFirstHealthPoll: ((result: ExecResult) => void) | undefined;
+      const firstHealthPoll = new Promise<ExecResult>((resolve) => {
+        releaseFirstHealthPoll = resolve;
+      });
+      fakeExecutor.setCommandHandler("curl -s", () => {
+        curlCalls++;
+        if (curlCalls === 3) {
+          return firstHealthPoll;
+        }
+        return createExecResult(curlCalls >= 5 ? "ok" : "", "");
+      });
+
+      await withHealthBudget("1", async () => {
+        fakeTimer.enableAutoAdvance();
+        const defaultStart = manager.start();
+        for (let i = 0; i < 5 && curlCalls < 3; i++) {
+          await new Promise(resolve => setImmediate(resolve));
+        }
+        expect(curlCalls).toBe(3);
+
+        const controller = new AbortController();
+        const extendedStart = manager.start({
+          minimumHealthPollDurationMs: 2_000,
+          signal: controller.signal,
+        });
+        controller.abort(new Error("caller cancelled"));
+        await expect(extendedStart).rejects.toThrow("caller cancelled");
+
+        releaseFirstHealthPoll!(createExecResult("", ""));
+        await expect(defaultStart).rejects.toThrow("CtrlProxy failed to start within timeout");
+      });
+
+      expect(curlCalls).toBe(4);
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+    });
+
+    test("a caller arriving during hung-runner teardown starts fresh after it settles", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, createFakeBuilder(), fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let healthyAfterTeardown = false;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(healthyAfterTeardown ? "ok" : "", "")
+      );
+
+      const teardownEntered = deferred();
+      const releaseTeardown = deferred();
+      const processClient = (manager as unknown as {
+        processClient: IOSCtrlProxyProcessClient;
+      }).processClient;
+      const terminateProcessTree = processClient.terminateProcessTree.bind(processClient);
+      processClient.terminateProcessTree = async pid => {
+        teardownEntered.resolve();
+        await releaseTeardown.promise;
+        await terminateProcessTree(pid);
+      };
+
+      await withHealthBudget("1", async () => {
+        fakeTimer.enableAutoAdvance();
+        const originalStart = manager.start();
+        await teardownEntered.promise;
+
+        const retryStart = manager.start({ minimumHealthPollDurationMs: 2_000 });
+        await new Promise(resolve => setImmediate(resolve));
+        expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+
+        releaseTeardown.resolve();
+        await expect(originalStart).rejects.toThrow("CtrlProxy failed to start within timeout");
+        healthyAfterTeardown = true;
+        await retryStart;
+      });
+
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
+    });
+
+    test("a retry starts fresh after the prior sole caller aborts", async function() {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice, fakeTimer, undefined, fakeExecutor
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
+      installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
+
+      let curlCalls = 0;
+      let releaseFirstHealthPoll: ((result: ExecResult) => void) | undefined;
+      const firstHealthPoll = new Promise<ExecResult>((resolve) => {
+        releaseFirstHealthPoll = resolve;
+      });
+      fakeExecutor.setCommandHandler("curl -s", () => {
+        curlCalls++;
+        if (curlCalls === 1) {
+          return firstHealthPoll;
+        }
+        return createExecResult("ok", "");
+      });
+
+      const controller = new AbortController();
+      const abortedStart = manager.start({ signal: controller.signal });
+      for (let i = 0; i < 5 && curlCalls < 1; i++) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+      expect(curlCalls).toBe(1);
+
+      controller.abort(new Error("caller cancelled"));
+      await expect(abortedStart).rejects.toThrow("caller cancelled");
+
+      const retry = manager.start();
+      await new Promise(resolve => setImmediate(resolve));
+      expect(curlCalls).toBe(1);
+      releaseFirstHealthPoll!(createExecResult("", ""));
+      await retry;
+
+      expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
+    });
+
     // Directly exercise the PID-reuse guard added in review (thread 2). Testing the
     // predicate rather than a full start() keeps it precise and avoids spawning a
     // runner (whose background monitor would leak into later tests under autoAdvance).

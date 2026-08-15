@@ -35,14 +35,42 @@ export interface CtrlProxyIosSetupResult extends ProxySetupResult {
   buildResult?: CtrlProxyIosBuildResult;
 }
 
+export interface CtrlProxyStartOptions {
+  /**
+   * Minimum health-poll duration after the runner has launched. startDevice
+   * supplies its remaining readiness duration so a fixed manager default cannot
+   * fail a still-starting runner early. A concurrent caller can extend an
+   * in-progress shared startup poll.
+   */
+  minimumHealthPollDurationMs?: number;
+  /** Cancels only this caller's wait for shared startup. */
+  signal?: AbortSignal;
+}
+
+interface SharedCtrlProxyStart {
+  controller: AbortController;
+  completion: Promise<void>;
+  healthPollDeadlineMs: number | null;
+  defaultHealthPollDeadlineMs: number | null;
+  callerHealthPollDeadlinesMs: Map<symbol, number>;
+  teardownCommitted: boolean;
+  waitingCallers: number;
+  completed: boolean;
+}
+
 /**
  * iOS-specific runner process lifecycle, extending the platform-agnostic
  * {@link ProxyManager}.
  */
 export interface CtrlProxyIosManager extends ProxyManager {
-  setup(force?: boolean, perf?: PerformanceTracker): Promise<CtrlProxyIosSetupResult>;
+  setup(
+    force?: boolean,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    minimumHealthPollDurationMs?: number,
+  ): Promise<CtrlProxyIosSetupResult>;
   isRunning(): Promise<boolean>;
-  start(): Promise<void>;
+  start(options?: CtrlProxyStartOptions): Promise<void>;
   stop(): Promise<void>;
   getServicePort(): number;
   getReportedRunnerPort(): Promise<number | null>;
@@ -203,8 +231,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private iproxyDevicePort: number | null = null;
   private isStopping: boolean = false;
 
-  // Mutex to prevent concurrent start() calls from spawning multiple processes
-  private startPromise: Promise<void> | null = null;
+  // Shared process startup prevents concurrent callers from launching duplicate runners.
+  private sharedStart: SharedCtrlProxyStart | null = null;
 
   // Target app bundle ID for CtrlProxy to observe (instead of SpringBoard)
   private targetBundleId: string | null = null;
@@ -691,25 +719,70 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   /**
    * Start CtrlProxy
    */
-  public async start(): Promise<void> {
-    // Use mutex to prevent concurrent start() calls from spawning multiple processes
-    if (this.startPromise) {
-      logger.info("[IOSCtrlProxy] Start already in progress, waiting for it to complete");
-      return this.startPromise;
+  public async start(options: CtrlProxyStartOptions = {}): Promise<void> {
+    if (options.signal?.aborted) {
+      throw options.signal.reason ?? new Error("iOS CtrlProxy startup was aborted");
     }
 
-    this.startPromise = this.startInternal();
-    try {
-      await this.startPromise;
-    } finally {
-      this.startPromise = null;
+    let sharedStart = await this.waitForNonJoinableStart(options.signal);
+    if (sharedStart) {
+      logger.info("[IOSCtrlProxy] Start already in progress, waiting for it to complete");
+    } else {
+      const controller = new AbortController();
+      const createdStart: SharedCtrlProxyStart = {
+        controller,
+        completion: Promise.resolve(),
+        healthPollDeadlineMs: null,
+        defaultHealthPollDeadlineMs: null,
+        callerHealthPollDeadlinesMs: new Map(),
+        teardownCommitted: false,
+        waitingCallers: 0,
+        completed: false,
+      };
+      this.sharedStart = createdStart;
+      createdStart.completion = this.startInternal(createdStart);
+      void createdStart.completion.finally(() => {
+        createdStart.completed = true;
+        if (this.sharedStart === createdStart) {
+          this.sharedStart = null;
+        }
+      }).catch(() => {});
+      sharedStart = createdStart;
     }
+
+    const callerId = Symbol("CtrlProxy startup caller");
+    this.extendHealthPollDeadline(
+      sharedStart,
+      callerId,
+      options.minimumHealthPollDurationMs,
+    );
+    return this.waitForSharedStart(sharedStart, options.signal, callerId);
+  }
+
+  private async waitForNonJoinableStart(signal: AbortSignal | undefined): Promise<SharedCtrlProxyStart | null> {
+    const sharedStart = this.sharedStart;
+    if (!sharedStart ||
+      (!sharedStart.controller.signal.aborted && !sharedStart.teardownCommitted)) {
+      return sharedStart;
+    }
+    logger.info("[IOSCtrlProxy] Waiting for a non-joinable startup to settle before retrying");
+    try {
+      await this.waitForSharedStart(sharedStart, signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+    }
+    if (this.sharedStart === sharedStart) {
+      this.sharedStart = null;
+    }
+    return this.sharedStart;
   }
 
   /**
    * Internal start implementation (called within mutex)
    */
-  private async startInternal(): Promise<void> {
+  private async startInternal(sharedStart: SharedCtrlProxyStart): Promise<void> {
     // Authoritative fail-closed gate (#4221): this is the single chokepoint every
     // launch path funnels through (startDevice, session-reuse in toolRegistry, and
     // discovery-pooled devices that never hit verifyIosDevice/ensureCtrlProxyReady).
@@ -842,35 +915,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // generous — too short a budget declares failure while the runner is still
     // coming up, which then triggers a kill+respawn livelock (#2834).
     const delayMs = 500;
-    const maxAttempts = IOSCtrlProxyManager.resolveHealthPollMaxAttempts();
-    const timeoutSeconds = Math.round((maxAttempts * delayMs) / 1000);
+    const defaultHealthPollDurationMs =
+      IOSCtrlProxyManager.resolveHealthPollMaxAttempts() * delayMs;
+    sharedStart.defaultHealthPollDeadlineMs =
+      this.timer.now() + defaultHealthPollDurationMs;
+    this.refreshHealthPollDeadline(sharedStart);
+    const timeoutSeconds = Math.round(
+      ((sharedStart.healthPollDeadlineMs ?? 0) - this.timer.now()) / 1000,
+    );
 
-    perf.startOperation("healthPolling");
-    for (let i = 0; i < maxAttempts; i++) {
-      if (await this.checkHealthEndpoint()) {
-        perf.endOperation("healthPolling");
-        logger.info("[IOSCtrlProxy] HTTP health endpoint is ready");
-        this.clearCaches();
-        await this.startProcessSupervision();
-
-        // Wait additional time for WebSocket server to be ready
-        // The HTTP server can respond before WebSocket is fully initialized
-        logger.info("[IOSCtrlProxy] Waiting for WebSocket server initialization");
-        perf.startOperation("websocketInit");
-        await this.timer.sleep(500);
-        perf.endOperation("websocketInit");
-
-        if (!this.isSimulator()) {
-          await this.iproxySupervisor.start();
-        }
-        return;
-      }
-      if (i > 0 && i % 10 === 0) {
-        logger.info(`[IOSCtrlProxy] Still waiting for service... (attempt ${i}/${maxAttempts})`);
-      }
-      await this.timer.sleep(delayMs);
+    if (await this.waitForHealthEndpoint(sharedStart, perf, delayMs)) {
+      await this.completeHealthStartup(sharedStart, perf);
+      return;
     }
-    perf.endOperation("healthPolling");
 
     if (waitedForStartingRunner && this.xcTestProcessId !== null) {
       // Before giving up, adopt the runner if it actually came up healthy on CtrlProxy's
@@ -887,8 +944,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.adoptServicePort(IOSCtrlProxyManager.DEFAULT_PORT);
         this.clearCaches();
         // Mirror the normal success path's WebSocket-init settle (#2834 review — MINOR-3).
-        await this.timer.sleep(500);
+        await this.sleepForHealthPoll(500, sharedStart.controller.signal);
         await this.startProcessSupervision();
+        return;
+      }
+      if (await this.completeHealthStartupIfDeadlineExtended(sharedStart, perf, delayMs)) {
         return;
       }
       // Otherwise it is genuinely hung. Merely un-tracking it is NOT enough: the process
@@ -912,6 +972,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // pid-match enforcement is tracked as a follow-up.
       const hungPid = this.xcTestProcessId;
       const stillOurs = await this.isOwnRunnerProcessAlive();
+      if (await this.completeHealthStartupIfDeadlineExtended(sharedStart, perf, delayMs)) {
+        return;
+      }
+      sharedStart.teardownCommitted = true;
       // Suppress the exit-handler auto-restart across the kill + child-exit event only.
       this.isStopping = true;
       try {
@@ -965,6 +1029,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     const heldProcesses = await this.findListeningProcessesOnPort(this.servicePort);
+    if (await this.completeHealthStartupIfDeadlineExtended(sharedStart, perf, delayMs)) {
+      return;
+    }
     if (heldProcesses.length > 0) {
       throw new Error(
         `CtrlProxy failed to start within timeout (${timeoutSeconds}s); port ${this.servicePort} ` +
@@ -1068,7 +1135,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   public async setup(
     force: boolean = false,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+    minimumHealthPollDurationMs?: number,
   ): Promise<CtrlProxyIosSetupResult> {
     perf.serial("xcTestServiceSetup");
 
@@ -1158,7 +1227,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
 
       // Start the service
-      await perf.track("startService", () => this.start());
+      await perf.track("startService", () =>
+        this.start({ minimumHealthPollDurationMs, signal }),
+      );
 
       perf.end();
       return {
@@ -1567,13 +1638,183 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private static resolveHealthPollMaxAttempts(): number {
     const raw = process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS
       ?? process.env.AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    let configuredAttempts = IOSCtrlProxyManager.DEFAULT_HEALTH_POLL_MAX_ATTEMPTS;
     if (raw !== undefined) {
       const parsed = Number.parseInt(raw, 10);
       if (Number.isFinite(parsed) && parsed > 0) {
-        return parsed;
+        configuredAttempts = parsed;
       }
     }
-    return IOSCtrlProxyManager.DEFAULT_HEALTH_POLL_MAX_ATTEMPTS;
+    return configuredAttempts;
+  }
+
+  private extendHealthPollDeadline(
+    sharedStart: SharedCtrlProxyStart,
+    callerId: symbol,
+    minimumHealthPollDurationMs: number | undefined,
+  ): void {
+    if (!minimumHealthPollDurationMs || minimumHealthPollDurationMs <= 0) {
+      return;
+    }
+    sharedStart.callerHealthPollDeadlinesMs.set(
+      callerId,
+      this.timer.now() + minimumHealthPollDurationMs,
+    );
+    this.refreshHealthPollDeadline(sharedStart);
+  }
+
+  private removeHealthPollDeadline(
+    sharedStart: SharedCtrlProxyStart,
+    callerId: symbol | undefined,
+  ): void {
+    if (!callerId) {
+      return;
+    }
+    sharedStart.callerHealthPollDeadlinesMs.delete(callerId);
+    this.refreshHealthPollDeadline(sharedStart);
+  }
+
+  private refreshHealthPollDeadline(sharedStart: SharedCtrlProxyStart): void {
+    sharedStart.healthPollDeadlineMs = Math.max(
+      sharedStart.defaultHealthPollDeadlineMs ?? 0,
+      ...sharedStart.callerHealthPollDeadlinesMs.values(),
+    );
+  }
+
+  private async waitForHealthEndpoint(
+    sharedStart: SharedCtrlProxyStart,
+    perf: PerformanceTracker,
+    delayMs: number,
+  ): Promise<boolean> {
+    perf.startOperation("healthPolling");
+    let attempts = 0;
+    for (;;) {
+      if (sharedStart.controller.signal.aborted) {
+        throw sharedStart.controller.signal.reason ?? new Error("iOS CtrlProxy startup was aborted");
+      }
+      attempts++;
+      if (await this.checkHealthEndpoint()) {
+        perf.endOperation("healthPolling");
+        return true;
+      }
+      if (attempts > 1 && attempts % 10 === 0) {
+        logger.info(
+          `[IOSCtrlProxy] Still waiting for service... (attempt ${attempts}, ` +
+          `${Math.max(0, (sharedStart.healthPollDeadlineMs ?? 0) - this.timer.now())}ms remaining)`,
+        );
+      }
+      const remainingPollMs = (sharedStart.healthPollDeadlineMs ?? 0) - this.timer.now();
+      if (remainingPollMs <= 0) {
+        perf.endOperation("healthPolling");
+        return false;
+      }
+      await this.sleepForHealthPoll(
+        Math.min(delayMs, remainingPollMs),
+        sharedStart.controller.signal,
+      );
+    }
+  }
+
+  private async completeHealthStartup(
+    sharedStart: SharedCtrlProxyStart,
+    perf: PerformanceTracker,
+  ): Promise<void> {
+    logger.info("[IOSCtrlProxy] HTTP health endpoint is ready");
+    this.clearCaches();
+    await this.startProcessSupervision();
+
+    // The HTTP server can respond before the WebSocket server is initialized.
+    logger.info("[IOSCtrlProxy] Waiting for WebSocket server initialization");
+    perf.startOperation("websocketInit");
+    await this.sleepForHealthPoll(500, sharedStart.controller.signal);
+    perf.endOperation("websocketInit");
+
+    if (!this.isSimulator()) {
+      await this.iproxySupervisor.start();
+    }
+  }
+
+  private async completeHealthStartupIfDeadlineExtended(
+    sharedStart: SharedCtrlProxyStart,
+    perf: PerformanceTracker,
+    delayMs: number,
+  ): Promise<boolean> {
+    if ((sharedStart.healthPollDeadlineMs ?? 0) <= this.timer.now()) {
+      return false;
+    }
+    if (!await this.waitForHealthEndpoint(sharedStart, perf, delayMs)) {
+      return false;
+    }
+    await this.completeHealthStartup(sharedStart, perf);
+    return true;
+  }
+
+  private waitForSharedStart(
+    sharedStart: SharedCtrlProxyStart,
+    signal: AbortSignal | undefined,
+    callerId?: symbol,
+  ): Promise<void> {
+    sharedStart.waitingCallers++;
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const settle = (callback: () => void) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        sharedStart.waitingCallers--;
+        this.removeHealthPollDeadline(sharedStart, callerId);
+        if (!sharedStart.completed && sharedStart.waitingCallers === 0) {
+          sharedStart.controller.abort(
+            signal?.reason ?? new Error("iOS CtrlProxy startup has no remaining callers"),
+          );
+        }
+        callback();
+      };
+      const onAbort = () => settle(() => {
+        reject(signal?.reason ?? new Error("iOS CtrlProxy startup was aborted"));
+      });
+
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+      void sharedStart.completion.then(
+        () => settle(resolve),
+        (error) => settle(() => reject(error)),
+      );
+    });
+  }
+
+  private async sleepForHealthPoll(delayMs: number, signal?: AbortSignal): Promise<void> {
+    if (!signal) {
+      await this.timer.sleep(delayMs);
+      return;
+    }
+    if (signal.aborted) {
+      throw signal.reason ?? new Error("iOS CtrlProxy startup was aborted");
+    }
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const settle = (callback: () => void) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        callback();
+      };
+      const onAbort = () => settle(() => {
+        reject(signal.reason ?? new Error("iOS CtrlProxy startup was aborted"));
+      });
+      signal.addEventListener("abort", onAbort, { once: true });
+      void this.timer.sleep(delayMs).then(
+        () => settle(resolve),
+        (error) => settle(() => reject(error)),
+      );
+    });
   }
 
   /**

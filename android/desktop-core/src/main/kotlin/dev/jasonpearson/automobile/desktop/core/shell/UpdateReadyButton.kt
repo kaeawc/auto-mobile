@@ -20,7 +20,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
@@ -97,7 +96,11 @@ fun UpdateDetailsContent(
     verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
     Text(text = "Version ${update.version} is available", fontSize = 13.sp)
-    Text(text = "You're on $currentVersion", fontSize = 11.sp, color = Color.Gray)
+    Text(
+      text = "You're on $currentVersion",
+      fontSize = 11.sp,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 
     if (update.releaseNotesUrl != null) {
       TextButton(onClick = onOpenReleaseNotes) { Text("Release notes") }

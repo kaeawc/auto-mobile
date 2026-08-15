@@ -5,6 +5,8 @@ import type {
   DeviceRecoveryPolicy,
   PooledDevice,
 } from "./devicePool";
+import type { DeviceSessionRecord } from "./deviceSessionRegistry";
+import { DAEMON_LIST_DEVICE_SESSIONS_METHOD } from "./constants";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
 export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -32,6 +34,9 @@ export interface DaemonStateAccess {
       mcpSessionId: string | undefined,
       platform?: "android" | "ios"
     ): string | undefined;
+  };
+  getDeviceSessionRegistry(): {
+    list(): DeviceSessionRecord[];
   };
 }
 
@@ -193,6 +198,22 @@ export async function handleDaemonRequest(
           message: `Session ${sessionId} released`,
           device: deviceId,
           alreadyReleased: false,
+        },
+      };
+    }
+    case DAEMON_LIST_DEVICE_SESSIONS_METHOD: {
+      const registry = state.getDeviceSessionRegistry();
+      const deviceSessions = registry.list().map(record => ({
+        deviceSessionUuid: record.deviceSessionUuid,
+        deviceId: record.deviceId,
+        platform: record.platform,
+        epochStartedAt: record.epochStartedAt,
+      }));
+      return {
+        success: true,
+        result: {
+          deviceSessions,
+          totalDeviceSessions: deviceSessions.length,
         },
       };
     }

@@ -988,6 +988,39 @@ recovery eligibility for each pooled device.
 
 ---
 
+### `daemon/listDeviceSessions`
+
+Returns the current map of connected devices to their **device-session UUIDs**. A
+`deviceSessionUuid` identifies a device *connection epoch*: it is minted when a
+device is first booted/connected, retired on disconnect, and a fresh UUID is
+minted on same-serial reconnect. Unlike the adb serial / simulator UDID
+(`deviceId`, which a rebooted emulator reuses), the `deviceSessionUuid` is a
+stable routing key that a reused serial cannot alias — the identity stream
+consumers key on to tell "same device, stream continues" from "device rebooted,
+flush cached state". The registry is in-memory and process-scoped (epochs do not
+survive a daemon restart).
+
+**Params:** none
+
+**Result**
+
+```json
+{
+  "deviceSessions": [{
+    "deviceSessionUuid": "b1f2c3d4-0000-4000-8000-000000000001",
+    "deviceId": "emulator-5554",
+    "platform": "android",
+    "epochStartedAt": 1734300000000
+  }],
+  "totalDeviceSessions": 1
+}
+```
+
+`epochStartedAt` is the daemon-clock millisecond timestamp at which the epoch was
+minted.
+
+---
+
 ### `daemon/refreshDevices`
 
 Re-discovers connected devices and updates the pool.

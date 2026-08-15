@@ -167,6 +167,14 @@ export const DAEMON_BOUND_SESSION_REPLAY_TTL_MS = 30 * 60 * 1000;
 export const DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD = "daemon/subscribe-notifications";
 
 /**
+ * Control-socket method returning the current `deviceId (serial/UDID) ↔
+ * deviceSessionUuid` map from the daemon's `DeviceSessionRegistry`. Lets a
+ * stream consumer resolve a serial to its stable connection-epoch identity
+ * (device-session-UUID routing epic #5256).
+ */
+export const DAEMON_LIST_DEVICE_SESSIONS_METHOD = "daemon/listDeviceSessions";
+
+/**
  * Whether the daemon enforces the inbound version/build-identity handshake
  * (#2744). Enabled by default; set `AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE=1`
  * (or `AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE=1`) as an escape hatch if a

@@ -7,6 +7,8 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "../../src/daemon/devicePool";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 
 class FakeDevicePool {
   stats: DevicePoolStats;
@@ -50,10 +52,16 @@ class FakeDevicePool {
 class FakeDaemonState {
   private sessionManager: SessionManager | null;
   private devicePool: FakeDevicePool | null;
+  private deviceSessionRegistry: DeviceSessionRegistry;
 
-  constructor(sessionManager: SessionManager | null, devicePool: FakeDevicePool | null) {
+  constructor(
+    sessionManager: SessionManager | null,
+    devicePool: FakeDevicePool | null,
+    deviceSessionRegistry: DeviceSessionRegistry = new DeviceSessionRegistry()
+  ) {
     this.sessionManager = sessionManager;
     this.devicePool = devicePool;
+    this.deviceSessionRegistry = deviceSessionRegistry;
   }
 
   isInitialized(): boolean {
@@ -72,6 +80,10 @@ class FakeDaemonState {
       throw new Error("DaemonState not initialized");
     }
     return this.devicePool;
+  }
+
+  getDeviceSessionRegistry(): DeviceSessionRegistry {
+    return this.deviceSessionRegistry;
   }
 }
 
@@ -278,5 +290,39 @@ describe("handleDaemonRequest", () => {
       recoveryPolicy: { onLoss: false, maxAttempts: 2 },
       devices: [],
     });
+  });
+
+  test("lists live device sessions with their epoch identity", async () => {
+    const devicePool = new FakeDevicePool({ total: 2, idle: 0, assigned: 2, error: 0 });
+    const registry = new DeviceSessionRegistry(fakeTimer, new FakeIdGenerator(["uuid-a", "uuid-b"]));
+    fakeTimer.setCurrentTime(5000);
+    registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
+    registry.onDeviceConnected({ deviceId: "00008030-001", platform: "ios", incarnation: 1 });
+    const state = new FakeDaemonState(sessionManager, devicePool, registry);
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/listDeviceSessions"),
+      state
+    );
+
+    expect(response.success).toBe(true);
+    expect(response.result?.totalDeviceSessions).toBe(2);
+    expect(response.result?.deviceSessions).toEqual([
+      { deviceSessionUuid: "uuid-a", deviceId: "emulator-5554", platform: "android", epochStartedAt: 5000 },
+      { deviceSessionUuid: "uuid-b", deviceId: "00008030-001", platform: "ios", epochStartedAt: 5000 },
+    ]);
+  });
+
+  test("returns an empty device-session list when no devices are connected", async () => {
+    const devicePool = new FakeDevicePool({ total: 0, idle: 0, assigned: 0, error: 0 });
+    const state = new FakeDaemonState(sessionManager, devicePool);
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/listDeviceSessions"),
+      state
+    );
+
+    expect(response.success).toBe(true);
+    expect(response.result).toEqual({ deviceSessions: [], totalDeviceSessions: 0 });
   });
 });

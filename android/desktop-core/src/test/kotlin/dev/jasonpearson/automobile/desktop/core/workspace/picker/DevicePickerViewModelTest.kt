@@ -149,8 +149,31 @@ class DevicePickerViewModelTest {
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
       val columns = (awaitItem() as DevicePickerEffect.Observe).columns
       assertEquals(listOf("emulator-5556"), columns.map { it.deviceId })
+      // Auto-observed, so the device must NOT linger in the selection (no stale "Observe (1)" when
+      // the grid reopens) — issue #5220.
+      assertTrue("emulator-5556" !in content(v).selectedIds)
       cancelAndIgnoreRemainingEvents()
     }
+  }
+
+  @Test
+  fun `observe selected clears the observed devices from the selection`() = testScope.runTest {
+    val vm =
+      DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+    vm.onAction(DevicePickerAction.ToggleSelect("emulator-5554"))
+    assertEquals(setOf("emulator-5554"), content(vm).selectedIds)
+    vm.onAction(DevicePickerAction.ObserveSelected)
+    // Once observed, the device is no longer selected — reopening the grid shows a clean selection.
+    assertTrue("emulator-5554" !in content(vm).selectedIds)
+  }
+
+  @Test
+  fun `observe one clears the device from the selection`() = testScope.runTest {
+    val vm =
+      DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())
+    vm.onAction(DevicePickerAction.ToggleSelect("emulator-5554"))
+    vm.onAction(DevicePickerAction.ObserveOne("emulator-5554"))
+    assertTrue("emulator-5554" !in content(vm).selectedIds)
   }
 
   @Test
@@ -221,6 +244,8 @@ class DevicePickerViewModelTest {
 
         reloadGate.complete(Unit) // stale reload resumes: auto-observe must see the device is gone
         expectNoEvents() // no Observe effect for the now-dead device
+        // ...and the gone device is not left lingering in the selection either (#5220).
+        assertTrue("emulator-5556" !in content(v).selectedIds)
         cancelAndIgnoreRemainingEvents()
       }
     }
@@ -300,13 +325,13 @@ class DevicePickerViewModelTest {
   }
 
   @Test
-  fun `successful boot reloads to booted, auto-selects the new id, and clears booting`() =
+  fun `successful boot reloads to booted, leaves the device unselected, and clears booting`() =
     testScope.runTest {
       val resources = fake()
       val boot =
         FakeDeviceBootController().apply {
           // The daemon re-keys a booted device to a runtime serial (emulator-5556), not the AVD id,
-          // and returns that exact id from startDevice — auto-select keys on it, not the name.
+          // and returns that exact id from startDevice — auto-observe keys on it, not the name.
           result = Result.success("emulator-5556")
           onSuccess = {
             resources.bootedDevicesResponse =
@@ -324,7 +349,7 @@ class DevicePickerViewModelTest {
       val v = vm(resourceClient = resources, bootController = boot)
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
       val c = content(v)
-      assertTrue("emulator-5556" in c.selectedIds)
+      assertTrue("emulator-5556" !in c.selectedIds) // auto-observed, not auto-selected (#5220)
       assertTrue(c.bootingIds.isEmpty())
       assertTrue(c.devices.any { it.id == "emulator-5556" && it.state == DeviceState.Booted })
       assertTrue(c.devices.none { it.id == "Pixel_6_API_33" }) // shut-down entry replaced by booted
@@ -376,7 +401,7 @@ class DevicePickerViewModelTest {
     }
 
   @Test
-  fun `a boot completing after a mid-boot refresh still auto-selects the booted device`() =
+  fun `a boot completing after a mid-boot refresh still observes the booted device`() =
     testScope.runTest {
       val resources = fake()
       val boot =
@@ -399,9 +424,9 @@ class DevicePickerViewModelTest {
             "source":"local","isVirtual":true,"status":"booted"}]}
         """
           .trimIndent()
-      boot.complete() // reloadAfterBoot fetches -> device booted -> auto-select by runtime id
+      boot.complete() // reloadAfterBoot fetches -> device booted -> auto-observe by runtime id
       val c = content(v)
-      assertTrue("emulator-5556" in c.selectedIds)
+      assertTrue("emulator-5556" !in c.selectedIds) // auto-observed, not auto-selected (#5220)
       assertTrue(c.bootingIds.isEmpty())
       assertTrue(c.devices.any { it.id == "emulator-5556" && it.state == DeviceState.Booted })
     }
@@ -440,12 +465,12 @@ class DevicePickerViewModelTest {
       v.onAction(DevicePickerAction.Refresh)
       client.imagesGate = null // the post-boot reload must not be gated
 
-      boot.complete() // reloadAfterBoot fetches fresh, emits + selects the booted device
-      assertTrue("emulator-5556" in content(v).selectedIds)
+      boot.complete() // reloadAfterBoot fetches fresh, emits + auto-observes the booted device
+      assertTrue("emulator-5556" !in content(v).selectedIds) // auto-observed, not selected (#5220)
 
       staleGate.complete(Unit) // stale Refresh resumes with the OLD (shut-down) list — dropped
       val c = content(v)
-      assertTrue("emulator-5556" in c.selectedIds) // fresh post-boot state survived
+      assertTrue("emulator-5556" !in c.selectedIds) // fresh post-boot state survived
       assertTrue(c.devices.any { it.id == "emulator-5556" && it.state == DeviceState.Booted })
       assertTrue(c.devices.none { it.id == "Pixel_6_API_33" }) // stale shut-down card not restored
 
@@ -495,45 +520,9 @@ class DevicePickerViewModelTest {
       assertTrue(v.state.value is DevicePickerUiState.Error)
     }
 
-  @Test
-  fun `boot selections accumulate across boots and survive a refresh`() = testScope.runTest {
-    // Two differently-named shut-down devices so both can coexist (booted + shutdown) in the list.
-    val resources =
-      FakeMcpResourceClient().apply {
-        bootedDevicesResponse = bootedJson()
-        deviceImagesResponse =
-          """
-          {"totalCount":2,"androidCount":2,"iosCount":0,"lastUpdated":"x","images":[
-            {"name":"Pixel 6","platform":"android","deviceId":"avd_6","target":"android-33"},
-            {"name":"Pixel 5","platform":"android","deviceId":"avd_5","target":"android-32"}]}
-          """
-            .trimIndent()
-      }
-    val boot = FakeDeviceBootController()
-    val v = vm(resourceClient = resources, bootController = boot)
-
-    boot.result = Result.success("emu-6")
-    boot.onSuccess = {
-      resources.bootedDevicesResponse = bootedJsonNamed("Pixel 6" to "emu-6")
-    }
-    v.onAction(DevicePickerAction.BootDevice("avd_6"))
-    assertEquals(setOf("emu-6"), content(v).selectedIds)
-
-    boot.result = Result.success("emu-5")
-    boot.onSuccess = {
-      resources.bootedDevicesResponse = bootedJsonNamed("Pixel 6" to "emu-6", "Pixel 5" to "emu-5")
-    }
-    v.onAction(DevicePickerAction.BootDevice("avd_5"))
-    assertEquals(setOf("emu-6", "emu-5"), content(v).selectedIds) // accumulated, not replaced
-
-    // A refresh replaces only the device LIST; the accumulated selection must survive the
-    // Loading->Content swap (it lives on the ViewModel, not the discarded Content).
-    v.onAction(DevicePickerAction.Refresh)
-    val c = content(v)
-    assertEquals(setOf("emu-6", "emu-5"), c.selectedIds)
-    assertTrue(c.devices.any { it.id == "emu-6" && it.state == DeviceState.Booted })
-    assertTrue(c.devices.any { it.id == "emu-5" && it.state == DeviceState.Booted })
-  }
+  // NOTE: the former `boot selections accumulate across boots and survive a refresh` test was
+  // removed for #5220 — under the auto-observe contract each boot observes the device and the host
+  // closes the picker, so a boot never accumulates a persistent selection to survive a refresh.
 
   @Test
   fun `a refresh during boot whose post-boot read fails ends in Error, not stuck Loading`() =
@@ -594,40 +583,39 @@ class DevicePickerViewModelTest {
     }
 
   @Test
-  fun `a boot reload superseded by a refresh still syncs its selection`() = testScope.runTest {
-    // Boots are serialized, but a Refresh can still supersede a boot's reload list emission. The
-    // selection must survive that via syncState, not only via the (dropped) list emission.
-    val client =
-      ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)
-    val boot =
-      FakeDeviceBootController().apply {
-        autoComplete = false
-        result = Result.success("emulator-5556")
-        onSuccess = { client.bootedJson = TWO_BOOTED_PIXEL8_AND_6 }
+  fun `a boot reload superseded by a refresh still auto-observes the booted device`() =
+    testScope.runTest {
+      // Boots are serialized, but a Refresh can still supersede a boot's reload list emission. The
+      // auto-observe must still fire from the winning Content (not the dropped list), and it must
+      // not
+      // leave the device selected (#5220).
+      val client =
+        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)
+      val boot =
+        FakeDeviceBootController().apply {
+          autoComplete = false
+          result = Result.success("emulator-5556")
+          onSuccess = { client.bootedJson = TWO_BOOTED_PIXEL8_AND_6 }
+        }
+      val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
+      v.effect.test {
+        v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // boot in flight (held)
+
+        // Let the boot resolve so its reload starts, then stall that reload on the images gate.
+        val reloadGate = CompletableDeferred<Unit>()
+        client.imagesGate = reloadGate
+        boot.complete() // reloadAfterBoot (gen N) reads booted, stalls on the images gate
+        client.imagesGate = null
+
+        v.onAction(DevicePickerAction.Refresh) // gen N+1: reads (ungated) and emits, device booted
+
+        reloadGate.complete(Unit) // reload resumes: auto-observes from the winning Content
+        val columns = (awaitItem() as DevicePickerEffect.Observe).columns
+        assertEquals(listOf("emulator-5556"), columns.map { it.deviceId })
+        assertTrue("emulator-5556" !in content(v).selectedIds) // observed, not left selected
+        cancelAndIgnoreRemainingEvents()
       }
-    val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
-    v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // boot in flight (held)
-
-    // Let the boot resolve so its reload starts, then stall that reload on the images gate.
-    val reloadGate = CompletableDeferred<Unit>()
-    client.imagesGate = reloadGate
-    boot.complete() // reloadAfterBoot (gen N) reads booted, stalls on the images gate
-    client.imagesGate = null
-
-    v.onAction(DevicePickerAction.Refresh) // gen N+1: reads (ungated) and emits — no selection yet
-    assertTrue("emulator-5556" !in content(v).selectedIds)
-
-    reloadGate.complete(Unit) // reload resumes: records selection + syncs; stale list emit dropped
-    val c = content(v)
-    assertTrue("emulator-5556" in c.selectedIds) // selection synced despite the dropped list emit
-    assertEquals(
-      setOf("emulator-5556"),
-      c.devices
-        .filter { it.id in c.selectedIds && it.state == DeviceState.Booted }
-        .map { it.id }
-        .toSet(),
-    )
-  }
+    }
 
   @Test
   fun `booting the second of two same-named images hides that source, not the first`() =

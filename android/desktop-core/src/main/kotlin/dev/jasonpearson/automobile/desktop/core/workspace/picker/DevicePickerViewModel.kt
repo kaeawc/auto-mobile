@@ -353,15 +353,19 @@ class DevicePickerViewModel(
     }
     bootingIds = bootingIds - bootedDevice.id
     if (bootedRuntime != null) {
-      selectedIds = selectedIds + runtimeDeviceId // recorded before the guard — never lost
+      // A completed boot AUTO-OBSERVES the device (below); it deliberately does NOT auto-select it.
+      // The runtime id is daemon-assigned on boot and can't have been selected earlier (you can't
+      // select a shut-down card), so there is nothing to retain, and leaving it selected would show
+      // a stale "Observe (1)" when the grid reopens (#5220). Both the observed and the
+      // superseded/killed branches therefore leave the selection untouched.
       bootErrors = bootErrors - bootedDevice.id
     } else {
       bootErrors = bootErrors + (bootedDevice.id to "Boot did not complete")
     }
-    // Persistent state (esp. the selection) is reflected onto the CURRENT Content unconditionally,
-    // so it never diverges from what observeSelected() reads — even when this reload's device-LIST
-    // emission is dropped as stale below. Selection is persistent state, not tied to which list
-    // wins.
+    // Persistent state is reflected onto the CURRENT Content unconditionally, so it never diverges
+    // from what observeSelected() reads — even when this reload's device-LIST emission is dropped
+    // as
+    // stale below.
     syncState()
     emitIfCurrent(generation, devices)
     // Boot then auto-observe — but observe from the CURRENT (winning) state, not this reload's own
@@ -402,6 +406,11 @@ class DevicePickerViewModel(
         .filter { it.id in selectedIds && it.state == DeviceState.Booted }
         .map(::columnOf)
     if (columns.isNotEmpty()) {
+      // Observed devices leave the selection: otherwise reopening the grid shows them still
+      // selected as a stale "Observe (N)" (#5220). Selection is a transient staging area for the
+      // multi-select gesture, not a record of what's observed.
+      selectedIds = selectedIds - columns.map { it.deviceId }.toSet()
+      syncState()
       scope.launch { _effect.send(DevicePickerEffect.Observe(columns)) }
     }
   }
@@ -414,6 +423,10 @@ class DevicePickerViewModel(
     val content = _state.value as? DevicePickerUiState.Content ?: return
     val device = content.devices.firstOrNull { it.id == deviceId } ?: return
     if (device.state != DeviceState.Booted) return
+    // A plain click doesn't select, but a modifier-selected device can also be plain-clicked; clear
+    // it either way so an observed device never lingers selected (#5220).
+    selectedIds = selectedIds - deviceId
+    syncState()
     scope.launch { _effect.send(DevicePickerEffect.Observe(listOf(columnOf(device)))) }
   }
 

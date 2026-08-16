@@ -222,7 +222,7 @@ describe("SessionManager", () => {
 
     test("expires a session before accepting a request that arrives after its deadline", async () => {
       const released: string[] = [];
-      sessionManager.setActiveSessionExecutionChecker(() => true);
+      sessionManager.setActiveSessionExecutionChecker((_sessionId, startedAtOrBefore) => startedAtOrBefore === undefined);
       sessionManager.onSessionRelease(sessionId => released.push(sessionId));
       await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
       fakeTimer.advanceTime(1001);
@@ -234,6 +234,17 @@ describe("SessionManager", () => {
 
       expect(released).toEqual(["session-1"]);
       expect(sessionManager.getActiveSessionCount()).toBe(0);
+    });
+
+    test("keeps a session when work began before its expiry deadline", async () => {
+      sessionManager.setActiveSessionExecutionChecker((_sessionId, startedAtOrBefore) => startedAtOrBefore === 1000);
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
+      fakeTimer.advanceTime(1001);
+
+      const resolved = await sessionManager.getOrCreateSession("session-1");
+
+      expect(resolved).toBe(session);
+      expect(sessionManager.getActiveSessionCount()).toBe(1);
     });
   });
 

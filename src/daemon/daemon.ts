@@ -219,7 +219,7 @@ export class Daemon {
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     this.sessionManager.setActiveSessionExecutionChecker(
-      sessionId => this.hasActiveSessionExecution(sessionId),
+      (sessionId, startedAtOrBefore) => this.hasActiveSessionExecution(sessionId, startedAtOrBefore),
     );
     // Register centralized cleanup for session-scoped state
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
@@ -1229,11 +1229,12 @@ export class Daemon {
     this.navigationRetentionMonitor.start();
   }
 
-  private hasActiveSessionExecution(sessionId: string): boolean {
-    return executionTracker.hasActiveSessionUuidExecutions(sessionId)
+  private hasActiveSessionExecution(sessionId: string, startedAtOrBefore?: number): boolean {
+    return executionTracker.hasActiveSessionUuidExecutions(sessionId, startedAtOrBefore)
       || this.devicePool.hasActiveAutolockMcpSessionExecution(
         sessionId,
-        mcpSessionId => executionTracker.hasActiveSessionExecutions(mcpSessionId),
+        (mcpSessionId, startAtOrBefore) => executionTracker.hasActiveSessionExecutions(mcpSessionId, startAtOrBefore),
+        startedAtOrBefore,
       );
   }
 

@@ -134,14 +134,12 @@ export class ExecutionTracker {
     );
   }
 
-  hasActiveSessionUuidExecutions(sessionUuid: string): boolean {
-    const executions = this.sessionUuidExecutions.get(sessionUuid);
-    return executions !== undefined && executions.size > 0;
+  hasActiveSessionUuidExecutions(sessionUuid: string, startedAtOrBefore?: number): boolean {
+    return this.hasActiveExecutionsForKey(this.sessionUuidExecutions, sessionUuid, startedAtOrBefore);
   }
 
-  hasActiveSessionExecutions(sessionId: string): boolean {
-    const executions = this.sessionExecutions.get(sessionId);
-    return executions !== undefined && executions.size > 0;
+  hasActiveSessionExecutions(sessionId: string, startedAtOrBefore?: number): boolean {
+    return this.hasActiveExecutionsForKey(this.sessionExecutions, sessionId, startedAtOrBefore);
   }
 
   hasActiveToolExecution(toolName: string, options: ExecutionScopeOptions): boolean {
@@ -181,6 +179,24 @@ export class ExecutionTracker {
     if (sessionSet?.size === 0) {
       this.sessionExecutions.delete(sessionId);
     }
+  }
+
+  private hasActiveExecutionsForKey(
+    executionMap: Map<string, Set<string>>,
+    key: string,
+    startedAtOrBefore?: number,
+  ): boolean {
+    const executions = executionMap.get(key);
+    if (!executions || executions.size === 0) {
+      return false;
+    }
+    if (startedAtOrBefore === undefined) {
+      return true;
+    }
+    return Array.from(executions).some(executionId => {
+      const execution = this.executions.get(executionId);
+      return execution !== undefined && execution.startTime <= startedAtOrBefore;
+    });
   }
 
   private hasActiveToolExecutionForKey(

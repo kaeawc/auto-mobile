@@ -242,6 +242,17 @@ describe("DevicePool autolock", () => {
       expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeUndefined();
     });
 
+    it("does not route a new MCP request through an expired autolock held by older work", async () => {
+      await initializeLiveAndroidDevice();
+      sessionManager.setActiveSessionExecutionChecker((_sessionId, startedAtOrBefore) => startedAtOrBefore === undefined);
+
+      await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+      timer.advanceTime(61 * 1000);
+
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeUndefined();
+      expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
+    });
+
     it("aligns the session heartbeat timeout with the idle timeout", async () => {
       // The daemon heartbeat watchdog reaps sessions whose heartbeat is stale.
       // Autolock clients do not send heartbeats, so the heartbeat timeout must

@@ -2777,7 +2777,7 @@ export class DevicePool {
       return undefined;
     }
 
-    const session = this.sessionManager.getSession(sessionId);
+    const session = this.sessionManager.getSessionForNewExecution(sessionId);
     if (!session) {
       this.mcpSessionAutolockMap.delete(mcpSessionId);
       return undefined;
@@ -2803,10 +2803,11 @@ export class DevicePool {
    */
   hasActiveAutolockMcpSessionExecution(
     sessionId: string,
-    hasActiveMcpSessionExecution: (mcpSessionId: string) => boolean,
+    hasActiveMcpSessionExecution: (mcpSessionId: string, startedAtOrBefore?: number) => boolean,
+    startedAtOrBefore?: number,
   ): boolean {
     for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
-      if (mappedSessionId === sessionId && hasActiveMcpSessionExecution(mcpSessionId)) {
+      if (mappedSessionId === sessionId && hasActiveMcpSessionExecution(mcpSessionId, startedAtOrBefore)) {
         return true;
       }
     }

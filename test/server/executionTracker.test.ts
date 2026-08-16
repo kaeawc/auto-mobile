@@ -109,6 +109,20 @@ describe("ExecutionTracker", function() {
     expect(execution.abortController.signal.aborted).toBe(true);
   });
 
+  test("distinguishes executions that began before a session deadline", function() {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["before", "after"]));
+    tracker.startExecution("tapOn", "session-id");
+    timer.advanceTime(10);
+
+    expect(tracker.hasActiveSessionExecutions("session-id", 5)).toBe(true);
+
+    tracker.endExecution("before");
+    tracker.startExecution("tapOn", "session-id");
+
+    expect(tracker.hasActiveSessionExecutions("session-id", 5)).toBe(false);
+  });
+
   // #4183 item 6 (A3): the scope fallback in hasActiveToolExecution (executionTracker.ts)
   // had no table coverage. The scope order is: explicit "global" → sessionUuid map →
   // sessionId map → global fallback when neither key is provided.

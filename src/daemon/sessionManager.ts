@@ -83,7 +83,7 @@ export interface Session {
  * while sharing centralized state in the daemon.
  */
 export type SessionReleaseCallback = (sessionId: string, deviceId: string) => void;
-export type ActiveSessionExecutionChecker = (sessionId: string) => boolean;
+export type ActiveSessionExecutionChecker = (sessionId: string, startedAtOrBefore?: number) => boolean;
 
 export interface SessionDeviceAssigner {
   assignDeviceToSession(sessionId: string, platform?: Platform): Promise<string>;
@@ -250,7 +250,7 @@ export class SessionManager {
     const session = this.sessions.get(sessionId);
 <<<<<<< HEAD
     if (session && (expireDespiteActiveExecution
-      ? this.timer.now() > session.expiresAt
+      ? this.isSessionExpiredForNewExecution(session)
       : this.isSessionExpired(session))) {
       // Release owns this exact session object until it has restored device state
       // and removed its assignment. Keep expiry cleanup from creating a second
@@ -789,6 +789,11 @@ export class SessionManager {
    */
   private isSessionExpired(session: Session): boolean {
     return !this.activeSessionExecutionChecker(session.sessionId)
+      && this.timer.now() > session.expiresAt;
+  }
+
+  private isSessionExpiredForNewExecution(session: Session): boolean {
+    return !this.activeSessionExecutionChecker(session.sessionId, session.expiresAt)
       && this.timer.now() > session.expiresAt;
   }
 

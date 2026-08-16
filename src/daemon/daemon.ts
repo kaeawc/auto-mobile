@@ -31,9 +31,13 @@ import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import {
   awaitInFlightMigrations,
   closeDatabase,
+  getDatabase,
   getDatabasePath,
   getDbWriteBarrier,
 } from "../db";
+import { NavigationRetention } from "../db/navigationRetention";
+import { NavigationRetentionMonitor } from "./NavigationRetentionMonitor";
+import { DefaultFileSystem } from "../utils/filesystem/DefaultFileSystem";
 import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
 import { DatabaseHealthProbe, DefaultDatabaseHealthProbe } from "../db/DatabaseHealthProbe";
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
@@ -139,6 +143,7 @@ export class Daemon {
   private debug: boolean;
   private healthCheckTimer: NodeJS.Timeout | null = null;
   private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
+  private navigationRetentionMonitor: NavigationRetentionMonitor | null = null;
   private deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private pidFileWritten = false;
   private deviceDisconnectMisses: Map<string, number> = new Map();
@@ -423,6 +428,7 @@ export class Daemon {
     // Start health check timer (every 30 seconds)
     this.startHealthCheckTimer();
     this.startHeartbeatMonitor();
+    this.startNavigationRetentionMonitor();
 
     startupBenchmark.emit("daemon", {
       host: this.host,
@@ -1195,6 +1201,23 @@ export class Daemon {
     this.heartbeatMonitor.start();
   }
 
+  /**
+   * Start the periodic navigation-data retention pass (nav (app,build) Phase 3,
+   * #4986). Bounds accumulated cross-build/device/session observation rows and
+   * stale node screenshots. Best-effort: a failed pass is logged and swallowed,
+   * and its writes are tracked by the DB write barrier drained on shutdown.
+   */
+  private startNavigationRetentionMonitor(): void {
+    const fileSystem = new DefaultFileSystem();
+    const retention = new NavigationRetention(
+      getDatabase(),
+      {},
+      filePath => fileSystem.unlink(filePath),
+    );
+    this.navigationRetentionMonitor = new NavigationRetentionMonitor(retention, this.timer);
+    this.navigationRetentionMonitor.start();
+  }
+
   private startDeviceDisconnectMonitor(): void {
     if (this.deviceDisconnectMonitor) {
       return;
@@ -1638,6 +1661,8 @@ export class Daemon {
 
     const heartbeatMonitor = this.heartbeatMonitor;
     this.heartbeatMonitor = null;
+    const navigationRetentionMonitor = this.navigationRetentionMonitor;
+    this.navigationRetentionMonitor = null;
     const deviceDisconnectMonitor = this.deviceDisconnectMonitor;
     this.deviceDisconnectMonitor = null;
     await runShutdownCleanupStages(
@@ -1649,6 +1674,9 @@ export class Daemon {
         {
           name: "shutdown monitors",
           run: async () => {
+            // The navigation retention monitor's in-flight pass drains via the DB
+            // write-barrier stage below; here we only cancel its next scheduled tick.
+            navigationRetentionMonitor?.stop();
             const [heartbeatSettled, disconnectSettled] = await Promise.all([
               heartbeatMonitor ? heartbeatMonitor.stop().then(() => true) : true,
               deviceDisconnectMonitor ? deviceDisconnectMonitor.stop() : true,

@@ -1363,10 +1363,7 @@ export class DevicePool {
           await this.trackStartedDeviceProcess(ready, childProcess);
         } catch (error) {
           if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
-            intentionallyStopped = true;
-            if (readinessCompleted) {
-              await stopCancelledRecovery(ready);
-            }
+            await stopCancelledRecovery(readinessCompleted ? ready : undefined);
             return;
           }
           throw error;

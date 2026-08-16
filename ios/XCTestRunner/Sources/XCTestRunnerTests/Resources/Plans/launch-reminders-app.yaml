@@ -10,11 +10,6 @@ steps:
   # Wait on a structural, locale-independent signal — the Reminders bundle id being the
   # foreground app — instead of the localized "Reminders" label. This also rejects the
   # transitional home screen (com.apple.springboard) a cold launch can briefly surface.
-  # On a cold simulator CtrlProxy is still reconnecting for tens of seconds after launch
-  # (observe returns springboard/empty during that window), so this bounded wait can still
-  # miss on a cold first attempt; the runner's AUTOMOBILE_TEST_RETRY_COUNT=1 then re-runs the
-  # whole plan once, warm. The timeout stays <= 30s so a genuinely-broken observe still fails
-  # fast per attempt (guarded by RemindersPlanContentTests.testLaunchRemindersPlanIsGuardedAndBounded).
   - tool: observe
     waitFor:
       activeWindow:

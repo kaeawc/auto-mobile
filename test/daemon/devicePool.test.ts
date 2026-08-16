@@ -2404,6 +2404,56 @@ describe("DevicePool", () => {
       expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
       expect(devicePool.getDevice("emulator-5554")?.status).toBe("idle");
     });
+
+    test("does not roll back a replacement session with the same UUID", async () => {
+      const secondWriteStarted = Promise.withResolvers<void>();
+      const secondWriteFinished = Promise.withResolvers<void>();
+      let writeCount = 0;
+      const sessionPersistence: DeviceSessionPersistence = {
+        async upsertActiveSession(): Promise<void> {
+          writeCount++;
+          if (writeCount === 2) {
+            secondWriteStarted.resolve();
+            await secondWriteFinished.promise;
+            throw new Error("persist create failed");
+          }
+        },
+        async recordActivity(): Promise<void> {},
+        async markReleased(): Promise<void> {},
+      };
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, sessionPersistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([
+        createBootedDevice("emulator-5554"),
+        createBootedDevice("emulator-5556"),
+      ]);
+
+      const allocation = devicePool.assignMultipleDevices(["session-a", "session-b"], 1_000, "android");
+      const secondWriteStartedInTime = await Promise.race([
+        secondWriteStarted.promise.then(() => true),
+        new Promise<boolean>(resolve => setTimeout(() => resolve(false), 100)),
+      ]);
+      expect(secondWriteStartedInTime).toBe(true);
+
+      await sessionManager.releaseSession("session-a");
+      await sessionManager.createSession("session-a", "emulator-5554", "android");
+      secondWriteFinished.resolve();
+
+      await expect(allocation).rejects.toThrow("persist create failed");
+      expect(sessionManager.getSession("session-a")?.assignedDevice).toBe("emulator-5554");
+      expect(devicePool.getDevice("emulator-5554")).toMatchObject({
+        sessionId: "session-a",
+        status: "busy",
+      });
+    });
   });
     test("evicts a started emulator when its process exits after readiness", async () => {
       const images: DeviceInfo[] = [

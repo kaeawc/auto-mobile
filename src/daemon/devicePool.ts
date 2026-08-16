@@ -2288,10 +2288,24 @@ export class DevicePool {
     );
   }
 
-  private async rollbackAssignedSessions(assignments: ReadonlyMap<string, string>): Promise<void> {
+  private async rollbackAssignedSessions(
+    assignments: ReadonlyMap<string, string>,
+    assignedSessions: ReadonlyMap<string, Session>,
+  ): Promise<void> {
     for (const [sessionId, deviceId] of assignments) {
-      await this.sessionManager.releaseSession(sessionId);
-      await this.releaseDevice(deviceId, sessionId);
+      const session = assignedSessions.get(sessionId);
+      if (!session) {
+        continue;
+      }
+      const releasedDeviceId = await this.sessionManager.releaseSessionIfOwned(
+        sessionId,
+        session,
+        deviceId,
+        "batch-allocation-rollback",
+      );
+      if (releasedDeviceId === deviceId && !this.sessionManager.getSession(sessionId)) {
+        await this.releaseDevice(deviceId, sessionId);
+      }
     }
   }
 

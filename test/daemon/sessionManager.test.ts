@@ -434,6 +434,30 @@ describe("SessionManager", () => {
       }
     });
 
+    test("serializes expiry cleanup with a pending rebind", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository, () => new FakeDbWriteBarrier());
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android", 1);
+        repository.deferNextUpsert();
+        const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
+        await repository.waitForUpsert();
+
+        fakeTimer.advanceTime(2);
+        manager.cleanupExpiredSessions();
+        repository.finishUpsert();
+
+        await expect(rebinding).resolves.toMatchObject({ assignedDevice: "emulator-new" });
+        await expect(manager.drainReleasePromises(10)).resolves.toBe(true);
+        expect(manager.getSession("session-1")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-old")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("does not recreate a session when a release wins the rebind race", async () => {
       const repository = new DeferredDeviceSessionPersistence();
       const manager = new SessionManager(fakeTimer, repository);

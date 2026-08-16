@@ -38,6 +38,36 @@ class FakeProcess implements ProcessLifecycleProcess {
   }
 }
 
+type StdinEventMap = {
+  end: [];
+  error: [Error];
+  close: [];
+};
+
+class FakeStdin {
+  readonly listeners = new Map<keyof StdinEventMap, Array<(...args: any[]) => void>>();
+
+  on<K extends keyof StdinEventMap>(
+    event: K,
+    listener: (...args: StdinEventMap[K]) => void
+  ): this {
+    const eventListeners = this.listeners.get(event) ?? [];
+    eventListeners.push(listener);
+    this.listeners.set(event, eventListeners);
+    return this;
+  }
+
+  emit<K extends keyof StdinEventMap>(event: K, ...args: StdinEventMap[K]): void {
+    for (const listener of this.listeners.get(event) ?? []) {
+      listener(...args);
+    }
+  }
+
+  listenerCount(event: keyof StdinEventMap): number {
+    return this.listeners.get(event)?.length ?? 0;
+  }
+}
+
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -138,6 +168,50 @@ describe("process lifecycle handlers", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  test("closes active resources once before exiting when stdin closes", async () => {
+    const fakeProcess = new FakeProcess();
+    const fakeStdin = new FakeStdin();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+    const closedResources: string[] = [];
+    let finishClosingProxy!: () => void;
+
+    lifecycle.installStdinShutdownHandlers(fakeStdin);
+    lifecycle.setShutdownHandler(async reason => {
+      closedResources.push(reason);
+      await new Promise<void>(resolve => {
+        finishClosingProxy = resolve;
+      });
+      closedResources.push("proxy");
+    });
+
+    fakeStdin.emit("close");
+    fakeStdin.emit("end");
+    fakeStdin.emit("error", new Error("EPIPE"));
+    await flushMicrotasks();
+
+    expect(closedResources).toEqual(["stdin"]);
+    expect(fakeProcess.exitCodes).toEqual([]);
+
+    finishClosingProxy();
+    await flushMicrotasks();
+
+    expect(closedResources).toEqual(["stdin", "proxy"]);
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("installs each stdin shutdown listener only once", () => {
+    const fakeProcess = new FakeProcess();
+    const fakeStdin = new FakeStdin();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+
+    lifecycle.installStdinShutdownHandlers(fakeStdin);
+    lifecycle.installStdinShutdownHandlers(fakeStdin);
+
+    expect(fakeStdin.listenerCount("end")).toBe(1);
+    expect(fakeStdin.listenerCount("error")).toBe(1);
+    expect(fakeStdin.listenerCount("close")).toBe(1);
   });
 
   test("delegates fatal process events without forcing an exit", async () => {

@@ -33,6 +33,7 @@ import { EVENT_ALL_MARKERS_FLAG } from "./utils/eventAllMarkers";
 import { parseArgs } from "./cli/parseArgs";
 import {
   installProcessLifecycleHandlers,
+  installStdinShutdownHandlers,
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "./processLifecycle";
@@ -123,6 +124,7 @@ async function main() {
   const { startAppearanceSocketServer, stopAppearanceSocketServer } = appearanceSocketServer;
   const { startWebRtcStreamSocketServer, stopWebRtcStreamSocketServer } = webrtcStreamSocketServer;
   const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
+  let stdioProxy: { close(): Promise<void> } | undefined;
   setProcessShutdownHandler(async (signal) => {
     logger.info(`Received ${signal} signal, shutting down`);
     await runShutdownCleanupStages(
@@ -137,6 +139,7 @@ async function main() {
           name: "prefetched Android CtrlProxy APK",
           run: AndroidCtrlProxyManager.cleanupPrefetchedApk,
         },
+        { name: "stdio proxy", run: async () => await stdioProxy?.close() },
         {
           name: "logger",
           run: async () => {
@@ -538,21 +541,12 @@ async function main() {
       }
 
       // Detect when the MCP client disconnects (stdin closes / pipe breaks).
-      // Without this, the bun process stays alive indefinitely as an orphan
-      // when the client (Claude Code, Cursor, etc.) exits or crashes.
-      const shutdownOnStdinClose = () => {
-        logger.info("stdin closed — MCP client disconnected, shutting down");
-        logger.close();
-        process.exit(0);
-      };
-      process.stdin.on("end", shutdownOnStdinClose);
-      process.stdin.on("error", shutdownOnStdinClose);
-      process.stdin.on("close", shutdownOnStdinClose);
+      // This uses the shared lifecycle handler so resources close before exit.
+      installStdinShutdownHandlers();
 
       // Run as MCP server with STDIO transport
       const stdioTransport = new StdioServerTransport();
       let server;
-      let stdioProxy: ReturnType<typeof createProxyMcpServer>["proxy"] | undefined;
       try {
         if (useProxyMode) {
           const result = createProxyMcpServer({
@@ -584,14 +578,6 @@ async function main() {
           transport: "stdio",
           mode: useProxyMode ? "proxy" : "direct",
         });
-
-        // Register cleanup for proxy mode
-        if (stdioProxy) {
-          const cleanupProxy = async () => {
-            await stdioProxy!.close();
-          };
-          process.on("beforeExit", cleanupProxy);
-        }
       } catch (error) {
         logger.error("MCP server connect failed:", error);
         throw error;

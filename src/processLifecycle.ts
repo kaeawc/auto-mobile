@@ -1,4 +1,9 @@
-export type ShutdownSignal = "SIGINT" | "SIGTERM";
+export type ShutdownSignal = "SIGINT" | "SIGTERM" | "stdin";
+
+export interface StdinShutdownSource {
+  on(event: "end" | "close", listener: () => void): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+}
 
 export type ProcessLifecycleEventMap = {
   SIGINT: [];
@@ -25,6 +30,7 @@ export type FatalProcessHandler = (event: FatalProcessEvent) => Promise<void> | 
 
 export class ProcessLifecycleHandlers {
   private installed = false;
+  private stdinShutdownHandlersInstalled = false;
   private shutdownInProgress = false;
   private shutdownHandler: ProcessShutdownHandler | undefined;
   private fatalProcessHandler: FatalProcessHandler | undefined;
@@ -57,6 +63,20 @@ export class ProcessLifecycleHandlers {
 
   setFatalProcessHandler(handler: FatalProcessHandler): void {
     this.fatalProcessHandler = handler;
+  }
+
+  installStdinShutdownHandlers(stdin: StdinShutdownSource): void {
+    if (this.stdinShutdownHandlersInstalled) {
+      return;
+    }
+    this.stdinShutdownHandlersInstalled = true;
+
+    const shutdownOnStdinClose = () => {
+      void this.shutdown("stdin");
+    };
+    stdin.on("end", shutdownOnStdinClose);
+    stdin.on("error", shutdownOnStdinClose);
+    stdin.on("close", shutdownOnStdinClose);
   }
 
   private async shutdown(signal: ShutdownSignal): Promise<void> {
@@ -99,6 +119,10 @@ const processLifecycleHandlers = new ProcessLifecycleHandlers(process);
 
 export function installProcessLifecycleHandlers(): void {
   processLifecycleHandlers.install();
+}
+
+export function installStdinShutdownHandlers(stdin: StdinShutdownSource = process.stdin): void {
+  processLifecycleHandlers.installStdinShutdownHandlers(stdin);
 }
 
 export function setProcessShutdownHandler(handler: ProcessShutdownHandler): void {

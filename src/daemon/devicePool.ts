@@ -813,10 +813,7 @@ export class DevicePool {
     );
 
     if (!result.success) {
-      // Release any devices we've assigned so far
-      for (const [sessionId, deviceId] of assignments) {
-        await this.releaseDevice(deviceId, sessionId);
-      }
+      await this.rollbackAssignments(assignments);
 
       // Check if it was a non-retryable error
       if (result.error instanceof DevicePoolError && !result.error.isRetryable) {
@@ -924,9 +921,7 @@ export class DevicePool {
       const elapsed = this.timer.now() - startTime;
 
       if (elapsed > timeoutMs) {
-        for (const [sessionId, deviceId] of assignments) {
-          await this.releaseDevice(deviceId, sessionId);
-        }
+        await this.rollbackAssignments(assignments);
         throw new ActionableError(
           `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
             `Required: ${requiredCount} devices, allocated: ${assignments.size}\n` +
@@ -954,16 +949,12 @@ export class DevicePool {
               `(${assignments.size}/${requiredCount})`,
           );
         } else if (result.livenessUnknown) {
-          for (const [sessionId, deviceId] of assignments) {
-            await this.releaseDevice(deviceId, sessionId);
-          }
+          await this.rollbackAssignments(assignments);
           throw new ActionableError(
             `Unable to verify iOS simulator liveness for session ${request.sessionId}; iOS discovery failed.`,
           );
         } else if (!result.shouldWait) {
-          for (const [sessionId, deviceId] of assignments) {
-            await this.releaseDevice(deviceId, sessionId);
-          }
+          await this.rollbackAssignments(assignments);
           const summary = this.criteriaMatcher.formatCriteriaSummary(request.criteria);
           throw new ActionableError(
             `Failed to allocate device for session ${request.sessionId}${summary}.\n` +
@@ -2011,6 +2002,43 @@ export class DevicePool {
   }
 
   /**
+   * Undo the completed portion of a failed multi-device allocation.
+   *
+   * The mutex keeps a new allocation from taking ownership between releasing
+   * the session and returning its device to the idle pool. The optional owner
+   * check in releaseDevice also protects this cleanup from any concurrent
+   * external release that has already reassigned the device.
+   */
+  private async rollbackAssignments(assignments: ReadonlyMap<string, string>): Promise<void> {
+    await this.assignmentMutex.runExclusive(async () => {
+      for (const [sessionId, deviceId] of assignments) {
+        const device = this.devices.get(deviceId);
+        if (!device || device.sessionId !== sessionId) {
+          logger.warn(
+            `[DevicePool] Skipping allocation rollback for ${sessionId}: ` +
+              `device ${deviceId} is no longer owned by that session`,
+          );
+          continue;
+        }
+
+        const session = this.sessionManager.getSession(sessionId);
+        if (session && session.assignedDevice !== deviceId) {
+          logger.warn(
+            `[DevicePool] Skipping allocation rollback for ${sessionId}: ` +
+              `session is now assigned to ${session.assignedDevice}, not ${deviceId}`,
+          );
+          continue;
+        }
+
+        if (session) {
+          await this.sessionManager.releaseSession(sessionId, "allocation-rollback");
+        }
+        await this.releaseDevice(deviceId, sessionId);
+      }
+    });
+  }
+
+  /**
    * Release device from session
    *
    * Called when a session completes or times out.
@@ -2020,6 +2048,14 @@ export class DevicePool {
     const device = this.devices.get(deviceId);
     if (!device) {
       logger.warn(`Cannot release device ${deviceId}: not in pool`);
+      return;
+    }
+
+    if (expectedSessionId !== undefined && device.sessionId !== expectedSessionId) {
+      logger.warn(
+        `Cannot release device ${deviceId}: expected session ${expectedSessionId}, ` +
+          `but it is owned by ${device.sessionId ?? "no session"}`,
+      );
       return;
     }
 

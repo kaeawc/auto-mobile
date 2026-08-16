@@ -445,6 +445,28 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     }
   });
 
+  test("preserves diagnostics emitted after a post-exit child error", async () => {
+    const child = createChild();
+    const { client } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    child.emit("exit", 1, null);
+    const readiness = expectRejection(
+      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
+    );
+    child.emit("error", new Error("stdio failed after exit"));
+    child.stderr!.emit(
+      "data",
+      Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
+    );
+    child.emit("close", 1, null);
+
+    const error = await readiness;
+    expect(error.message).toContain("hypervisor");
+    expect(error.message).toContain("sandbox");
+  });
+
   test("prefers finalized diagnostics for exits observed during readiness", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {
@@ -469,6 +491,43 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const error = await readiness;
     expect(error.message).toContain("hypervisor");
     expect(error.message).toContain("sandbox");
+  });
+
+  test("keeps duplicate-AVD adoption nonfatal during active readiness", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    let rejection: Error | undefined;
+    void readiness.catch((error) => {
+      rejection = error instanceof Error ? error : new Error(String(error));
+    });
+
+    try {
+      for (let turn = 0; turn < 10 && timer.getSleepCallCount() < 2; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      child.stderr!.emit(
+        "data",
+        Buffer.from(
+          "Running multiple emulators with the same AVD is an experimental feature.\n",
+        ),
+      );
+      child.emit("exit", 1, null);
+      child.emit("close", 1, null);
+      await timer.advanceTimeAsync(500);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(rejection).toBeUndefined();
+    } finally {
+      timer.setCurrentTime(60_000);
+      timer.resolveAll();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      timer.resolveAll();
+      await readiness.catch(() => undefined);
+    }
   });
 
   test("removes readiness listeners after observing a process exit", async () => {

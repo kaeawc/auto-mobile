@@ -1480,7 +1480,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           this.launchErrors.delete(child);
           const resolveFinalization = resolvePostValidationExit;
           resolvePostValidationExit = undefined;
-          this.launchErrorFinalizations.delete(child);
           resolveFinalization(undefined);
           return;
         }
@@ -1494,7 +1493,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         const finalError = this.launchErrors.get(child) ?? postValidationExitError(output);
         const resolveFinalization = resolvePostValidationExit;
         resolvePostValidationExit = undefined;
-        this.launchErrorFinalizations.delete(child);
         resolveFinalization(finalError);
       };
 
@@ -1843,7 +1841,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       child.on("error", (error) => {
         this.timer.clearTimeout(startupTimeout);
         if (startupValidationComplete) {
-          finalizePostValidationExit(flushLaunchOutput());
+          // The exit drain timer or close event owns finalization so later stdio is retained.
           return;
         }
         clearExitDrainTimeout();
@@ -1896,15 +1894,18 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
   }
 
-  private async finalizedReadinessExitError(
+  private async settleReadinessExit(
     childProcess: ChildProcess | null | undefined,
     fallback: ActionableError,
-  ): Promise<ActionableError> {
+    onFatal: (error: ActionableError) => Promise<never>,
+  ): Promise<void> {
     const finalization = this.getLaunchErrorFinalization(childProcess);
     const finalizedError = finalization
       ? await finalization
-      : this.getLaunchError(childProcess);
-    return finalizedError ?? fallback;
+      : (this.getLaunchError(childProcess) ?? fallback);
+    if (finalizedError) {
+      await onFatal(finalizedError);
+    }
   }
 
   private recordLaunchError(
@@ -2035,6 +2036,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         // failed Qt xcb plugin on a headless host) — treat that as a failure too.
         if (code !== 0) {
           const combinedOutput = processOutput.join("");
+          if (combinedOutput.includes("Running multiple emulators with the same AVD")) {
+            logger.info(
+              `AVD '${avdName}' is owned by another emulator process; continuing readiness polling`,
+            );
+            return;
+          }
 
           // Check for known error patterns
           const sandboxError = this.sandboxFailure(combinedOutput);
@@ -2069,7 +2076,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           logger.error(
             `Emulator process exited during readiness wait: ${processExitError.message}`,
           );
-          pollingActive = false;
         }
       };
       childProcess.stdout?.on("data", captureOutput);
@@ -2092,7 +2098,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         try {
           this.recordLaunchError(childProcess, (error) => {
             processExitError = error;
-            pollingActive = false;
           });
           logger.debug(`Background polling iteration - checking for emulator '${avdName}'...`);
 
@@ -2286,15 +2291,19 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     while (this.timer.now() - startTime < timeoutMs) {
       const readinessFailure = processExitError;
       if (readinessFailure) {
-        pollingActive = false;
-        await pollingPromise;
-        const finalizedReadinessFailure = await this.finalizedReadinessExitError(
+        await this.settleReadinessExit(
           childProcess,
           readinessFailure,
+          async (finalizedReadinessFailure) => {
+            pollingActive = false;
+            await pollingPromise;
+            perf.endOperation("devicePolling");
+            cleanupProcessListeners();
+            throw finalizedReadinessFailure;
+          },
         );
-        perf.endOperation("devicePolling");
-        cleanupProcessListeners();
-        throw finalizedReadinessFailure;
+        processExitError = null;
+        continue;
       }
 
       if (foundDeviceId) {

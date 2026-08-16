@@ -189,8 +189,11 @@ export class Daemon {
     this.startupFailureTracker = startupFailureTracker;
     this.recoverFromDatabaseHealthFailure = recoverFromDatabaseHealthFailure ?? (async code => {
       cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
-      await logger.closeAfterFlush();
-      process.exit(code);
+      try {
+        await logger.closeAfterFlush();
+      } finally {
+        process.exit(code);
+      }
     });
     this.observationStreamHealth = new DefaultObservationStreamHealth({
       getServer: getDeviceDataStreamServer,

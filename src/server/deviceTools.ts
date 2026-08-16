@@ -504,12 +504,8 @@ function isSameBootedDeviceIdentity(device: BootedDevice, candidate: BootedDevic
   if (device.platform !== candidate.platform || device.deviceId !== candidate.deviceId) {
     return false;
   }
-  if (
-    device.transportId !== undefined &&
-    candidate.transportId !== undefined &&
-    device.transportId !== candidate.transportId
-  ) {
-    return false;
+  if (device.platform === "android" && device.transportId !== undefined && candidate.transportId !== undefined) {
+    return device.transportId === candidate.transportId;
   }
   return device.name === candidate.name;
 }
@@ -611,12 +607,23 @@ async function retireShutdownOwnership(
   const sessionManager = daemonState.getSessionManager();
   const sessionId = expectedPooledDevice.sessionId;
   if (sessionId && sessionManager.getSessionForDevice(device.deviceId) === sessionId) {
+    const retirementDeadlineMs = Math.max(
+      deadlineMs,
+      timer.now() + DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS,
+    );
     await executionTracker.cancelSessionUuidExecutions(
       sessionId,
       `device-disconnected:${device.deviceId}`,
       { excludeSignal: abortSignal },
     );
-    await sessionManager.releaseSession(sessionId, `device-stopped:${device.deviceId}`);
+    await runWithinShutdownDeadline(
+      device,
+      timer,
+      retirementDeadlineMs,
+      "session ownership retirement did not complete",
+      abortSignal,
+      async () => await sessionManager.releaseSession(sessionId, `device-stopped:${device.deviceId}`),
+    );
   }
   if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
     return;
@@ -1124,7 +1131,7 @@ export function registerDeviceTools() {
         shutdownDeadlineMs,
         "shutdown preparation did not complete",
         requestAbortSignal,
-        async () => await devicePool?.reserveDeviceForShutdown(args.device.deviceId),
+        async signal => await devicePool?.reserveDeviceForShutdown(args.device.deviceId, signal),
       );
       const expectedPooledDevice = shutdownReservation?.device ?? null;
       const shutdownContext = {

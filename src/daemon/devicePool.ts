@@ -2272,12 +2272,15 @@ export class DevicePool {
    * gone and retires its ownership. A replacement with the same ID remains
    * independently assignable once it has been atomically installed.
    */
-  async reserveDeviceForShutdown(deviceId: string): Promise<{
+  async reserveDeviceForShutdown(deviceId: string, abortSignal?: AbortSignal): Promise<{
     device: PooledDevice;
     release: () => Promise<void>;
   } | undefined> {
     let expectedDevice: PooledDevice | undefined;
     await this.assignmentMutex.runExclusive(() => {
+      if (abortSignal?.aborted) {
+        throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
+      }
       expectedDevice = this.devices.get(deviceId);
       if (!expectedDevice) {
         return;

@@ -2301,11 +2301,11 @@ export class DevicePool {
         return;
       }
       released = true;
-      await this.assignmentMutex.runExclusive(() => {
-        if (this.shutdownReservations.get(capturedDevice.id) === capturedDevice) {
-          this.shutdownReservations.delete(capturedDevice.id);
-        }
-      });
+      // Reservation ownership is identity-scoped. Releasing it does not mutate
+      // the pool, so it must not queue behind a refresh holding assignmentMutex.
+      if (this.shutdownReservations.get(capturedDevice.id) === capturedDevice) {
+        this.shutdownReservations.delete(capturedDevice.id);
+      }
     };
     return { device: capturedDevice, release };
   }

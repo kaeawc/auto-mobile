@@ -701,6 +701,7 @@ async function killProcessAndRetireOwnership(
     return alreadyStoppedMessage;
   }
 
+  let shutdownWasConfirmed = false;
   try {
     perf.startOperation("waitForShutdown");
     const observedReplacement = await waitForDeviceShutdown(
@@ -711,6 +712,7 @@ async function killProcessAndRetireOwnership(
       requestAbortSignal,
     );
     perf.endOperation("waitForShutdown");
+    shutdownWasConfirmed = true;
 
     perf.startOperation("retireOwnership");
     await retireShutdownOwnership(
@@ -730,7 +732,10 @@ async function killProcessAndRetireOwnership(
     // the pool. It must remain eligible for normal unexpected-loss recovery.
     // Caller cancellation is different: the platform command may already have
     // succeeded, so retain the marker for its later process-exit cleanup.
-    if (shouldClearIntentionalShutdownAfterFailure(device.platform, requestAbortSignal)) {
+    if (
+      !shutdownWasConfirmed &&
+      shouldClearIntentionalShutdownAfterFailure(device.platform, requestAbortSignal)
+    ) {
       devicePool?.clearIntentionalShutdown(device.deviceId);
     }
     throw error;

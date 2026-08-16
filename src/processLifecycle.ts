@@ -1,4 +1,8 @@
+import { defaultTimer, type Timer } from "./utils/SystemTimer";
+
 export type ShutdownSignal = "SIGINT" | "SIGTERM" | "stdin";
+
+export const PROCESS_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 export interface StdinShutdownSource {
   on(event: "end" | "close", listener: () => void): unknown;
@@ -35,7 +39,11 @@ export class ProcessLifecycleHandlers {
   private shutdownHandler: ProcessShutdownHandler | undefined;
   private fatalProcessHandler: FatalProcessHandler | undefined;
 
-  constructor(private readonly lifecycleProcess: ProcessLifecycleProcess) {}
+  constructor(
+    private readonly lifecycleProcess: ProcessLifecycleProcess,
+    private readonly timer: Timer = defaultTimer,
+    private readonly shutdownTimeoutMs: number = PROCESS_SHUTDOWN_TIMEOUT_MS,
+  ) {}
 
   install(): void {
     if (this.installed) {
@@ -86,11 +94,35 @@ export class ProcessLifecycleHandlers {
     this.shutdownInProgress = true;
 
     try {
-      await this.shutdownHandler?.(signal);
+      const shutdownCompleted = await this.runShutdownHandler(signal);
+      if (!shutdownCompleted) {
+        console.error(`Shutdown timed out after ${this.shutdownTimeoutMs}ms; forcing exit`);
+      }
       this.lifecycleProcess.exit(0);
     } catch (error) {
       console.error(`Error during ${signal} shutdown:`, error);
       this.lifecycleProcess.exit(1);
+    }
+  }
+
+  private async runShutdownHandler(signal: ShutdownSignal): Promise<boolean> {
+    const handler = this.shutdownHandler;
+    if (!handler) {
+      return true;
+    }
+
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const completed = handler(signal);
+    const timedOut = new Promise<false>(resolve => {
+      timeoutHandle = this.timer.setTimeout(() => resolve(false), this.shutdownTimeoutMs);
+    });
+
+    try {
+      return (await Promise.race([completed, timedOut])) !== false;
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
     }
   }
 

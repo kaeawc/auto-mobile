@@ -4,6 +4,7 @@ import {
   type ProcessLifecycleEventMap,
   type ProcessLifecycleProcess,
 } from "../src/processLifecycle";
+import { FakeTimer } from "./fakes/FakeTimer";
 
 class FakeProcess implements ProcessLifecycleProcess {
   readonly listeners = new Map<keyof ProcessLifecycleEventMap, Array<(...args: any[]) => void>>();
@@ -69,6 +70,7 @@ class FakeStdin {
 }
 
 async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
 }
@@ -199,6 +201,30 @@ describe("process lifecycle handlers", () => {
 
     expect(closedResources).toEqual(["stdin", "proxy"]);
     expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("exits when stdin cleanup exceeds the shutdown timeout", async () => {
+    const fakeProcess = new FakeProcess();
+    const fakeStdin = new FakeStdin();
+    const timer = new FakeTimer();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, timer, 50);
+    const consoleError = spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      lifecycle.installStdinShutdownHandlers(fakeStdin);
+      lifecycle.setShutdownHandler(async () => await new Promise<void>(() => {}));
+
+      fakeStdin.emit("close");
+      await flushMicrotasks();
+      expect(fakeProcess.exitCodes).toEqual([]);
+
+      timer.advanceTime(50);
+      await flushMicrotasks();
+
+      expect(fakeProcess.exitCodes).toEqual([0]);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   test("installs each stdin shutdown listener only once", () => {

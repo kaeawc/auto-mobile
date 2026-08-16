@@ -19,6 +19,7 @@ import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poo
 import { DEVICE_CREATE_ENV_VAR, getDeviceCreationGate, type DeviceCreationGate } from "../utils/deviceCreationGate";
 import { createDefaultDeviceProvisioner, type DeviceProvisioner } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
+import type { PooledDevice } from "../daemon/devicePool";
 import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -108,6 +109,12 @@ export const killDeviceSchema = z.object({
 });
 
 export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
+
+// A successful platform shutdown command only confirms that the request was
+// accepted. Keep the public killDevice result coupled to the observable device
+// lifecycle, while bounding the wait so a wedged platform command is actionable.
+const DEVICE_SHUTDOWN_TIMEOUT_MS = 30_000;
+const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
 
 function isAlreadyStoppedDeviceError(
   platform: SomePlatform,
@@ -240,6 +247,113 @@ async function notifyResourcesAfterShutdown(dependencies: DeviceToolsDependencie
     // The device is already stopped; resource subscriptions refresh on their next update.
     logger.warn(`[DeviceTools] Failed to notify resource changes after shutdown: ${error}`, error);
   }
+}
+
+async function waitForDeviceShutdown(
+  deviceManager: PlatformDeviceManager,
+  device: BootedDevice,
+  timer: Timer,
+): Promise<void> {
+  const startedAt = timer.now();
+  for (;;) {
+    const discovery = await deviceManager.getBootedDevicesDetailed(device.platform);
+    const platformWasDiscovered = discovery.succeededPlatforms.has(device.platform);
+    const isStillBooted = discovery.devices.some(candidate =>
+      candidate.platform === device.platform && candidate.deviceId === device.deviceId,
+    );
+    if (platformWasDiscovered && !isStillBooted) {
+      return;
+    }
+
+    const elapsedMs = timer.now() - startedAt;
+    if (elapsedMs >= DEVICE_SHUTDOWN_TIMEOUT_MS) {
+      const discoveryDetail = platformWasDiscovered
+        ? "the device is still reported as booted"
+        : "platform discovery did not succeed";
+      throw new ActionableError(
+        `Timed out waiting for ${device.platform} device '${device.name}' (${device.deviceId}) ` +
+        `to disappear after ${DEVICE_SHUTDOWN_TIMEOUT_MS}ms: ${discoveryDetail}. ` +
+        "Verify the platform shutdown state and retry.",
+      );
+    }
+    await timer.sleep(Math.min(DEVICE_SHUTDOWN_POLL_INTERVAL_MS, DEVICE_SHUTDOWN_TIMEOUT_MS - elapsedMs));
+  }
+}
+
+async function retireShutdownOwnership(
+  device: BootedDevice,
+  expectedPooledDevice: PooledDevice | null,
+): Promise<void> {
+  if (!expectedPooledDevice) {
+    return;
+  }
+  const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    return;
+  }
+  const devicePool = daemonState.getDevicePool();
+  // A fast reboot can reuse a serial. Do not release or remove a later pool
+  // incarnation that happens to use the same device ID.
+  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
+    return;
+  }
+
+  const sessionManager = daemonState.getSessionManager();
+  const sessionId = expectedPooledDevice?.sessionId;
+  if (sessionId && sessionManager.getSessionForDevice(device.deviceId) === sessionId) {
+    await sessionManager.releaseSession(sessionId, `device-stopped:${device.deviceId}`);
+  }
+  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
+    return;
+  }
+
+  await devicePool.releaseDevice(device.deviceId);
+  await devicePool.removeDisconnectedDevice(device.deviceId, false);
+  if (!devicePool.getDevice(device.deviceId)) {
+    daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
+  }
+}
+
+async function killProcessAndRetireOwnership(
+  dependencies: DeviceToolsDependencies,
+  device: BootedDevice,
+  perf: ReturnType<typeof createPerformanceTracker>,
+): Promise<string | undefined> {
+  const deviceManager = dependencies.deviceManagerFactory();
+  const devicePool = DaemonState.getInstance().isInitialized()
+    ? DaemonState.getInstance().getDevicePool()
+    : undefined;
+  const expectedPooledDevice = devicePool?.getDevice?.(device.deviceId) ?? null;
+  if (device.platform === "android") {
+    devicePool?.markIntentionalShutdown(device.deviceId);
+  }
+
+  let alreadyStoppedMessage: string | undefined;
+  perf.startOperation("killProcess");
+  try {
+    await deviceManager.killDevice(device);
+  } catch (error) {
+    if (isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)) {
+      alreadyStoppedMessage = `Failed to kill ${device.platform} device: ${error}`;
+    } else {
+      devicePool?.clearIntentionalShutdown(device.deviceId);
+      throw error;
+    }
+  }
+  perf.endOperation("killProcess");
+
+  if (alreadyStoppedMessage !== undefined) {
+    return alreadyStoppedMessage;
+  }
+
+  perf.startOperation("waitForShutdown");
+  await waitForDeviceShutdown(deviceManager, device, dependencies.timer);
+  perf.endOperation("waitForShutdown");
+
+  perf.startOperation("retireOwnership");
+  await retireShutdownOwnership(device, expectedPooledDevice);
+  perf.endOperation("retireOwnership");
+  return undefined;
 }
 
 let moduleDependencies: DeviceToolsDependencies | null = null;
@@ -651,26 +765,7 @@ export function registerDeviceTools() {
       }
 
       const deps = getDeviceToolsDependencies();
-      const deviceUtils = deps.deviceManagerFactory();
-      perf.startOperation("killProcess");
-      const devicePool = DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getDevicePool()
-        : undefined;
-      if (args.device.platform === "android") {
-        devicePool?.markIntentionalShutdown(args.device.deviceId);
-      }
-      let alreadyStoppedMessage: string | undefined;
-      try {
-        await deviceUtils.killDevice(args.device);
-      } catch (error) {
-        if (isAlreadyStoppedDeviceError(args.device.platform, args.device.deviceId, error)) {
-          alreadyStoppedMessage = `Failed to kill ${args.device.platform} device: ${error}`;
-        } else {
-          devicePool?.clearIntentionalShutdown(args.device.deviceId);
-          throw error;
-        }
-      }
-      perf.endOperation("killProcess");
+      const alreadyStoppedMessage = await killProcessAndRetireOwnership(deps, args.device, perf);
 
       perf.startOperation("cleanup");
       await clearInstalledAppsAfterShutdown(deps, args.device.deviceId);

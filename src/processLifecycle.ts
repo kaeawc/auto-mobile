@@ -13,9 +13,13 @@ export type ShutdownCleanupOperation = () => void | Promise<void>;
 
 export async function runAllCleanupOperations(
   cleanupOperations: readonly ShutdownCleanupOperation[],
+  onCleanupFailure?: (error: unknown) => void,
 ): Promise<void> {
   const cleanupResults = await Promise.allSettled(
-    cleanupOperations.map(operation => Promise.resolve().then(operation)),
+    cleanupOperations.map(operation => Promise.resolve().then(operation).catch(error => {
+      onCleanupFailure?.(error);
+      throw error;
+    })),
   );
   const cleanupFailures = cleanupResults.filter(
     (result): result is PromiseRejectedResult => result.status === "rejected",
@@ -44,6 +48,10 @@ export interface ProcessLifecycleProcess {
 }
 
 export type ProcessShutdownHandler = (signal: ShutdownSignal) => Promise<void> | void;
+type ProcessShutdownTimeoutHandler = () =>
+  | Promise<{ exitCode?: number } | undefined>
+  | { exitCode?: number }
+  | undefined;
 
 export type FatalProcessEvent =
   | { type: "uncaughtException"; error: Error }
@@ -56,7 +64,7 @@ export class ProcessLifecycleHandlers {
   private stdinShutdownHandlersInstalled = false;
   private shutdownInProgress = false;
   private shutdownHandler: ProcessShutdownHandler | undefined;
-  private shutdownTimeoutHandler: (() => Promise<void> | void) | undefined;
+  private shutdownTimeoutHandler: ProcessShutdownTimeoutHandler | undefined;
   private fatalProcessHandler: FatalProcessHandler | undefined;
 
   constructor(
@@ -87,7 +95,7 @@ export class ProcessLifecycleHandlers {
 
   setShutdownHandler(
     handler: ProcessShutdownHandler,
-    timeoutHandler?: () => Promise<void> | void,
+    timeoutHandler?: ProcessShutdownTimeoutHandler,
   ): void {
     this.shutdownHandler = handler;
     this.shutdownTimeoutHandler = timeoutHandler;
@@ -119,11 +127,12 @@ export class ProcessLifecycleHandlers {
 
     try {
       const shutdownCompleted = await this.runShutdownHandler(signal);
+      let exitCode = 0;
       if (!shutdownCompleted) {
         console.error(`Shutdown timed out after ${this.shutdownTimeoutMs}ms; forcing exit`);
-        await this.shutdownTimeoutHandler?.();
+        exitCode = (await this.shutdownTimeoutHandler?.())?.exitCode ?? 0;
       }
-      this.lifecycleProcess.exit(0);
+      this.lifecycleProcess.exit(exitCode);
     } catch (error) {
       console.error(`Error during ${signal} shutdown:`, error);
       this.lifecycleProcess.exit(1);
@@ -189,7 +198,7 @@ export function installStdinShutdownHandlers(stdin: StdinShutdownSource = proces
 
 export function setProcessShutdownHandler(
   handler: ProcessShutdownHandler,
-  timeoutHandler?: () => Promise<void> | void,
+  timeoutHandler?: ProcessShutdownTimeoutHandler,
 ): void {
   processLifecycleHandlers.setShutdownHandler(handler, timeoutHandler);
 }

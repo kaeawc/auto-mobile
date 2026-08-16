@@ -216,7 +216,9 @@ describe("process lifecycle handlers", () => {
       lifecycle.installStdinShutdownHandlers(fakeStdin);
       lifecycle.setShutdownHandler(
         async () => await new Promise<void>(() => {}),
-        () => timeoutFinalizers.push("logger"),
+        () => {
+          timeoutFinalizers.push("logger");
+        },
       );
 
       fakeStdin.emit("close");
@@ -228,6 +230,45 @@ describe("process lifecycle handlers", () => {
 
       expect(fakeProcess.exitCodes).toEqual([0]);
       expect(timeoutFinalizers).toEqual(["logger"]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  test("exits with failure when a cleanup fails before stdin shutdown times out", async () => {
+    const fakeProcess = new FakeProcess();
+    const fakeStdin = new FakeStdin();
+    const timer = new FakeTimer();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, timer, 50);
+    const consoleError = spyOn(console, "error").mockImplementation(() => {});
+    let cleanupFailed = false;
+
+    try {
+      lifecycle.installStdinShutdownHandlers(fakeStdin);
+      lifecycle.setShutdownHandler(
+        async () => {
+          await runAllCleanupOperations(
+            [
+              () => {
+                throw new Error("first cleanup failed");
+              },
+              () => new Promise<void>(() => {}),
+            ],
+            () => {
+              cleanupFailed = true;
+            },
+          );
+        },
+        () => cleanupFailed ? { exitCode: 1 } : undefined,
+      );
+
+      fakeStdin.emit("close");
+      await flushMicrotasks();
+      timer.advanceTime(50);
+      await flushMicrotasks();
+
+      expect(cleanupFailed).toBe(true);
+      expect(fakeProcess.exitCodes).toEqual([1]);
     } finally {
       consoleError.mockRestore();
     }

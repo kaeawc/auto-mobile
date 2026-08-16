@@ -126,7 +126,9 @@ async function main() {
   const { startWebRtcStreamSocketServer, stopWebRtcStreamSocketServer } = webrtcStreamSocketServer;
   const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
   let stdioProxy: { close(): Promise<void> } | undefined;
+  let shutdownCleanupFailed = false;
   setProcessShutdownHandler(async (signal) => {
+    shutdownCleanupFailed = false;
     logger.info(`Received ${signal} signal, shutting down`);
     await runShutdownCleanupStages(
       [
@@ -148,9 +150,15 @@ async function main() {
           },
         },
       ],
-      (message, error) => logger.warn(message, error),
+      (message, error) => {
+        shutdownCleanupFailed = true;
+        logger.warn(message, error);
+      },
     );
-  }, () => logger.closeAfterFlush());
+  }, async () => {
+    await logger.closeAfterFlush();
+    return shutdownCleanupFailed ? { exitCode: 1 } : undefined;
+  });
 
   try {
     // Parse command line arguments

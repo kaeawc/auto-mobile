@@ -91,7 +91,7 @@ export async function createToolExecutionContext(
 
   await sessionManager.trackSessionSetup(
     session,
-    ensureKeepScreenAwake(session, sessionManager, sessionOptions),
+    () => ensureKeepScreenAwake(session, sessionManager, sessionOptions),
   );
 
   if (!existingSession) {

@@ -341,6 +341,61 @@ describe("killDevice handler", () => {
     await expect(result).rejects.toThrow("Timed out waiting for android device 'Pixel 8' (emulator-5554) to disappear");
   });
 
+  test("awaits iOS pool removal before retiring its device-session epoch", async () => {
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "ios-udid-1",
+      isRunning: false,
+      source: "local",
+    };
+    successfulManager.setDeviceImages("ios", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    const registry = new DeviceSessionRegistry(timer);
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "ios");
+    const pooled = pool.getDevice(image.deviceId!);
+    if (!pooled) {
+      throw new Error("expected assigned iOS device to be pooled");
+    }
+    const deviceSession = registry.onDeviceConnected({
+      deviceId: pooled.id,
+      platform: pooled.platform,
+      incarnation: pooled.incarnation,
+    });
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await tool.handler({
+      device: { name: image.name, platform: "ios", deviceId: image.deviceId! },
+    });
+
+    expect(pool.getDevice(image.deviceId!)).toBeNull();
+    expect(registry.getByUuid(deviceSession.deviceSessionUuid)).toBeUndefined();
+  });
+
   test("bounds a hung shutdown discovery with the same actionable timeout", async () => {
     const timer = new FakeTimer();
     const hungManager = new HungDiscoveryKillDeviceManager();
@@ -514,7 +569,7 @@ describe("killDevice handler", () => {
     expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();
   });
 
-  test("does not retire a same-ID device that reappears while releasing the old session", async () => {
+  test("rebuilds a same-ID device that reappears while releasing the old session", async () => {
     const timer = new FakeTimer();
     const successfulManager = new SuccessfulKillDeviceManager();
     manager = successfulManager;
@@ -575,12 +630,15 @@ describe("killDevice handler", () => {
         deviceId: image.deviceId!,
       },
     });
-    await new Promise(resolve => setImmediate(resolve));
-    timer.advanceTime(30_000);
 
-    await expect(result).rejects.toThrow("the device is still reported as booted");
-    expect(pool.getDevice(image.deviceId!)).toBe(original);
-    expect(registry.getByUuid(originalSession.deviceSessionUuid)).toBeDefined();
+    await expect(result).resolves.toBeDefined();
+    const current = pool.getDevice(image.deviceId!);
+    expect(current).not.toBeNull();
+    expect(current).not.toBe(original);
+    expect(current?.name).toBe(replacement.name);
+    expect(sessionManager.getSessionForDevice(image.deviceId!)).toBeNull();
+    expect(registry.getByUuid(originalSession.deviceSessionUuid)).toBeUndefined();
+    expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();
   });
 
   test.each([

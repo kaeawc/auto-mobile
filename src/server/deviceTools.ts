@@ -2,7 +2,11 @@ import type { ChildProcess } from "child_process";
 import { z } from "zod";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
+import {
+  type BootedDeviceDiscovery,
+  MultiPlatformDeviceManager,
+  PlatformDeviceManager,
+} from "../utils/deviceUtils";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, SomePlatform } from "../models";
 import type { FormFactor, StartDeviceResult } from "../models/DeviceMatchCriteria";
@@ -25,6 +29,7 @@ import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheW
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { executionTracker } from "./executionTracker";
 import {
   createDefaultRunnerReadinessService,
   type RunnerReadinessRequest,
@@ -316,6 +321,37 @@ async function waitForDeviceShutdown(
   }
 }
 
+function discoveryShowsDevice(discovery: BootedDeviceDiscovery, device: BootedDevice): boolean {
+  return discovery.succeededPlatforms.has(device.platform) && discovery.devices.some(candidate =>
+    candidate.platform === device.platform && candidate.deviceId === device.deviceId,
+  );
+}
+
+async function rebuildSameIdReplacement(
+  device: BootedDevice,
+  expectedPooledDevice: PooledDevice,
+  daemonState: DaemonState,
+): Promise<void> {
+  const devicePool = daemonState.getDevicePool();
+  await devicePool.releaseDevice(device.deviceId);
+  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
+    return;
+  }
+  await devicePool.removeDisconnectedDevice(device.deviceId, false);
+  if (!devicePool.getDevice(device.deviceId)) {
+    daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
+  }
+  await devicePool.refreshDevices();
+  const replacement = devicePool.getDevice(device.deviceId);
+  if (replacement) {
+    daemonState.getDeviceSessionRegistry().onDeviceConnected({
+      deviceId: replacement.id,
+      platform: replacement.platform,
+      incarnation: replacement.incarnation,
+    });
+  }
+}
+
 async function retireShutdownOwnership(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice | null,
@@ -340,30 +376,39 @@ async function retireShutdownOwnership(
   const sessionManager = daemonState.getSessionManager();
   const sessionId = expectedPooledDevice.sessionId;
   if (sessionId && sessionManager.getSessionForDevice(device.deviceId) === sessionId) {
+    await executionTracker.cancelSessionUuidExecutions(
+      sessionId,
+      `device-disconnected:${device.deviceId}`,
+      { excludeToolName: "killDevice" },
+    );
     await sessionManager.releaseSession(sessionId, `device-stopped:${device.deviceId}`);
   }
   if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
     return;
   }
 
-  // A same-ID replacement can boot while releasing the old session. Re-check
-  // physical disappearance after that await, then synchronously detach the
-  // captured pool entry before another lifecycle event can interleave.
-  await waitForDeviceShutdown(deviceManager, device, timer, deadlineMs);
+  // A same-ID replacement can boot while releasing the old session. If so,
+  // retire only the captured incarnation, then immediately rediscover the
+  // replacement so it owns a fresh pool and registry epoch.
+  const discovery = await getShutdownDiscovery(deviceManager, device, timer, deadlineMs);
+  if (discoveryShowsDevice(discovery, device)) {
+    await rebuildSameIdReplacement(device, expectedPooledDevice, daemonState);
+    return;
+  }
+  if (!discovery.succeededPlatforms.has(device.platform)) {
+    await waitForDeviceShutdown(deviceManager, device, timer, deadlineMs);
+  }
   if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
     return;
   }
-  const poolRelease = devicePool.releaseDevice(device.deviceId);
+  await devicePool.releaseDevice(device.deviceId);
   if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
-    await poolRelease;
     return;
   }
-  const poolRemoval = devicePool.removeDisconnectedDevice(device.deviceId, false);
+  await devicePool.removeDisconnectedDevice(device.deviceId, false);
   if (!devicePool.getDevice(device.deviceId)) {
     daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
   }
-  await poolRelease;
-  await poolRemoval;
 }
 
 async function killProcessAndRetireOwnership(

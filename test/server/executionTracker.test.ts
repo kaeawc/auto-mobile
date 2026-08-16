@@ -73,6 +73,25 @@ describe("ExecutionTracker", function() {
     expect(tracker.hasActiveSessionUuidExecutions("session-uuid")).toBe(false);
   });
 
+  test("keeps the shutdown control operation alive while cancelling device work", async function() {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["kill", "tap"]),
+    );
+    const kill = tracker.startExecution("killDevice", undefined, "session-uuid");
+    const tap = tracker.startExecution("tapOn", undefined, "session-uuid");
+
+    const cancelled = await tracker.cancelSessionUuidExecutions(
+      "session-uuid",
+      "device-disconnected:emulator-5554",
+      { excludeToolName: "killDevice" },
+    );
+
+    expect(cancelled).toBe(1);
+    expect(kill.abortController.signal.aborted).toBe(false);
+    expect(tap.abortController.signal.aborted).toBe(true);
+  });
+
   // #4183 item 6 (A3): the scope fallback in hasActiveToolExecution (executionTracker.ts)
   // had no table coverage. The scope order is: explicit "global" → sessionUuid map →
   // sessionId map → global fallback when neither key is provided.

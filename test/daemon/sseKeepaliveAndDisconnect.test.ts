@@ -377,6 +377,22 @@ describe("disconnect monitor miss counting", () => {
     expect(confirmedDisconnectedDeviceIds.has("sim-1")).toBe(false);
   });
 
+  test("clears confirmed state after a recording-only candidate stops being tracked", () => {
+    const confirmedDisconnectedDeviceIds = new Set(["sim-1"]);
+
+    evaluateDeviceDisconnects({
+      deviceDisconnectMisses: new Map(),
+      confirmedDisconnectedDeviceIds,
+      bootedDeviceIds: new Set(["emulator-5554"]),
+      candidateDeviceIds: new Set(),
+      succeededPlatforms: new Set(["android" as const]),
+      candidatePlatforms: new Map(),
+      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
+    });
+
+    expect(confirmedDisconnectedDeviceIds.has("sim-1")).toBe(false);
+  });
+
   test("clears a confirmed marker for a newly pooled candidate", () => {
     const confirmedDisconnectedDeviceIds = new Set(["sim-1"]);
     const misses = new Map<string, number>();
@@ -454,6 +470,7 @@ describe("disconnect monitor miss counting", () => {
       deviceDisconnectMissIncarnations: missIncarnations,
       confirmedDisconnectedDeviceIds: confirmed,
       forceDisconnectedDeviceIds: forced,
+      forceDisconnectedDeviceGenerations: new Map(),
     };
     const shouldSkipStaleDisconnectCleanup = (
       Daemon.prototype as unknown as {
@@ -484,6 +501,7 @@ describe("disconnect monitor miss counting", () => {
       deviceDisconnectMissIncarnations: missIncarnations,
       confirmedDisconnectedDeviceIds: new Set(["emulator-5554"]),
       forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
+      forceDisconnectedDeviceGenerations: new Map([["emulator-5554", 1]]),
     };
     const shouldSkipStaleDisconnectCleanup = (
       Daemon.prototype as unknown as {
@@ -503,6 +521,45 @@ describe("disconnect monitor miss counting", () => {
     expect(daemon.forceDisconnectedDeviceIds.has("emulator-5554")).toBe(false);
   });
 
+  test("preserves a force signal raised during recovery verification", async () => {
+    let resolveVerification: (() => void) | undefined;
+    const verification = new Promise<void>(resolve => {
+      resolveVerification = resolve;
+    });
+    const forced = new Set<string>();
+    const forceGenerations = new Map<string, number>();
+    const daemon = {
+      devicePool: {
+        isCurrentDisconnectedDevice: async () => {
+          await verification;
+          return "recovered" as const;
+        },
+      },
+      deviceDisconnectMisses: new Map([["emulator-5554", DEVICE_DISCONNECT_MISS_THRESHOLD]]),
+      deviceDisconnectMissIncarnations: new Map([["emulator-5554", 4]]),
+      confirmedDisconnectedDeviceIds: new Set(["emulator-5554"]),
+      forceDisconnectedDeviceIds: forced,
+      forceDisconnectedDeviceGenerations: forceGenerations,
+    };
+    const shouldSkipStaleDisconnectCleanup = (
+      Daemon.prototype as unknown as {
+        shouldSkipStaleDisconnectCleanup: (
+          pooledDeviceAtDisconnect: object,
+          deviceId: string,
+        ) => Promise<boolean>;
+      }
+    ).shouldSkipStaleDisconnectCleanup;
+
+    const pending = shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554");
+    forced.add("emulator-5554");
+    forceGenerations.set("emulator-5554", 1);
+    resolveVerification?.();
+
+    await expect(pending).resolves.toBe(true);
+    expect(forced.has("emulator-5554")).toBe(true);
+    expect(forceGenerations.get("emulator-5554")).toBe(1);
+  });
+
   test("retains disconnect state when cleanup verification is inconclusive", async () => {
     const misses = new Map([["emulator-5554", DEVICE_DISCONNECT_MISS_THRESHOLD]]);
     const missIncarnations = new Map([["emulator-5554", 4]]);
@@ -514,6 +571,7 @@ describe("disconnect monitor miss counting", () => {
       deviceDisconnectMissIncarnations: missIncarnations,
       confirmedDisconnectedDeviceIds: new Set(["emulator-5554"]),
       forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
+      forceDisconnectedDeviceGenerations: new Map([["emulator-5554", 1]]),
     };
     const shouldSkipStaleDisconnectCleanup = (
       Daemon.prototype as unknown as {

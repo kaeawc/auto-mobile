@@ -33,6 +33,12 @@ export function evaluateDeviceDisconnects(
     deviceDisconnectMissIncarnations.delete(deviceId);
   };
 
+  for (const deviceId of input.confirmedDisconnectedDeviceIds) {
+    if (!input.candidateDeviceIds.has(deviceId)) {
+      input.confirmedDisconnectedDeviceIds.delete(deviceId);
+    }
+  }
+
   for (const deviceId of input.deviceDisconnectMisses.keys()) {
     if (!input.candidateDeviceIds.has(deviceId)) {
       clearMiss(deviceId);

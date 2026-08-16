@@ -151,6 +151,7 @@ export class Daemon {
   private deviceDisconnectMissIncarnations: Map<string, number> = new Map();
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
   private forceDisconnectedDeviceIds: Set<string> = new Set();
+  private forceDisconnectedDeviceGenerations: Map<string, number> = new Map();
   private stoppingRecordings: Set<string> = new Set();
   private sessionManager: SessionManager;
   private devicePool: DevicePool;
@@ -1368,6 +1369,7 @@ export class Daemon {
             this.deviceDisconnectMisses.delete(deviceId);
             this.deviceDisconnectMissIncarnations.delete(deviceId);
             this.forceDisconnectedDeviceIds.delete(deviceId);
+            this.forceDisconnectedDeviceGenerations.delete(deviceId);
           }
         }
       } catch (error) {
@@ -1389,11 +1391,13 @@ export class Daemon {
       this.deviceDisconnectMissIncarnations.delete(deviceId);
       this.confirmedDisconnectedDeviceIds.delete(deviceId);
       this.forceDisconnectedDeviceIds.delete(deviceId);
+      this.forceDisconnectedDeviceGenerations.delete(deviceId);
       logger.info(
         `[DisconnectMonitor] Skipping stale disconnect cleanup for recovered device ${deviceId}`
       );
       return true;
     }
+    const forceGenerationAtVerificationStart = this.forceDisconnectedDeviceGenerations.get(deviceId);
     const disconnectStatus = await this.devicePool.isCurrentDisconnectedDevice(pooledDeviceAtDisconnect);
     if (disconnectStatus === "current") {
       return false;
@@ -1407,7 +1411,10 @@ export class Daemon {
     this.deviceDisconnectMisses.delete(deviceId);
     this.deviceDisconnectMissIncarnations.delete(deviceId);
     this.confirmedDisconnectedDeviceIds.delete(deviceId);
-    this.forceDisconnectedDeviceIds.delete(deviceId);
+    if (this.forceDisconnectedDeviceGenerations.get(deviceId) === forceGenerationAtVerificationStart) {
+      this.forceDisconnectedDeviceIds.delete(deviceId);
+      this.forceDisconnectedDeviceGenerations.delete(deviceId);
+    }
     logger.info(
       `[DisconnectMonitor] Skipping stale disconnect cleanup for recovered device ${deviceId}`
     );
@@ -1425,6 +1432,10 @@ export class Daemon {
       }
       logger.warn(`[Daemon] ADB reported tracked device ${event.deviceId} missing: ${event.message}`);
       this.forceDisconnectedDeviceIds.add(event.deviceId);
+      this.forceDisconnectedDeviceGenerations.set(
+        event.deviceId,
+        (this.forceDisconnectedDeviceGenerations.get(event.deviceId) ?? 0) + 1,
+      );
       this.deviceDisconnectMisses.set(event.deviceId, DEVICE_DISCONNECT_MISS_THRESHOLD);
     });
   }

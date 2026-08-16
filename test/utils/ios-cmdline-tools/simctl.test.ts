@@ -10,9 +10,11 @@ function resetSimctlCaches(): void {
   const simctlClass = Simctl as unknown as {
     deviceListCache: { devices: unknown[]; timestamp: number } | null;
     localSimctlAvailability: Promise<void> | null;
+    simulatorBoots: Map<string, unknown>;
   };
   simctlClass.deviceListCache = null;
   simctlClass.localSimctlAvailability = null;
+  simctlClass.simulatorBoots.clear();
 }
 
 function forceStaticAvailabilityPath(instance: Simctl): void {
@@ -258,6 +260,9 @@ describe("Simctl", function() {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1.0.0", "");
         }
+        if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
+          return createExecResult("", "");
+        }
         return new Promise<ExecResult>(resolve => {
           resolveCommand = resolve;
         });
@@ -284,6 +289,9 @@ describe("Simctl", function() {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1.0.0", "");
         }
+        if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
+          return createExecResult("", "");
+        }
         return new Promise<ExecResult>(resolve => {
           resolveCommand = resolve;
         });
@@ -309,6 +317,9 @@ describe("Simctl", function() {
       mockExecAsync = async (file: string, args: string[], _maxBuffer?: number, signal?: AbortSignal): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1.0.0", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
+          return createExecResult("", "");
         }
         capturedSignal = signal;
         // Simulate a long-running child that only settles when aborted, mirroring

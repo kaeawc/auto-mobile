@@ -17,6 +17,7 @@ import java.awt.Color
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -41,14 +42,14 @@ fun ApplicationScope.AutoMobileSystemTray(
   onToggleWindow: () -> Unit,
   onQuit: () -> Unit,
 ) {
-  // Re-probe the appearance on a timer so the icon stays legible after the user (or the OS's
-  // automatic schedule) flips Light/Dark, without restarting the app. The probe shells out, so it
-  // runs off the UI thread and only occasionally rather than on every recomposition.
-  var darkMenuBar by remember { mutableStateOf(detectDarkMenuBar()) }
+  // Start from the safe fallback and probe the real appearance off the UI thread, so a slow or
+  // hung `defaults`/`reg` can never stall first composition (the tray/window still appear). The
+  // effect probes immediately, then re-probes on a timer so the icon follows Light/Dark switches.
+  var darkMenuBar by remember { mutableStateOf(DEFAULT_DARK_MENU_BAR) }
   LaunchedEffect(Unit) {
     while (true) {
-      delay(APPEARANCE_POLL_INTERVAL_MS)
       darkMenuBar = withContext(Dispatchers.IO) { detectDarkMenuBar() }
+      delay(APPEARANCE_POLL_INTERVAL_MS)
     }
   }
   val icon = remember(isConnected, darkMenuBar) { truckTrayIcon(isConnected, darkMenuBar) }
@@ -70,6 +71,12 @@ fun ApplicationScope.AutoMobileSystemTray(
 
 /** How often the tray re-probes the system appearance so the icon follows Light/Dark switches. */
 private const val APPEARANCE_POLL_INTERVAL_MS = 10_000L
+
+/** Appearance assumed until the first probe returns, and whenever a probe can't be read. */
+private const val DEFAULT_DARK_MENU_BAR = true
+
+/** Upper bound on the appearance subprocess so a hung `defaults`/`reg` can't wedge the probe. */
+private const val APPEARANCE_PROBE_TIMEOUT_MS = 2_000L
 
 /**
  * True when the tray truck should be drawn light. macOS reads the system-wide
@@ -98,13 +105,21 @@ internal fun detectDarkMenuBar(): Boolean {
   }
 }
 
-/** Runs an appearance-detection command and returns its (merged) output, or null on failure. */
+/**
+ * Runs an appearance-detection command and returns its (merged) output, or null on failure. Bounded
+ * by [APPEARANCE_PROBE_TIMEOUT_MS] so a hung subprocess is killed rather than blocking the caller
+ * (the probe runs off the UI thread, but an unbounded wait would still leak a stuck process).
+ */
 private fun probeAppearance(command: List<String>): String? =
   try {
     val process = ProcessBuilder(command).redirectErrorStream(true).start()
-    val output = process.inputStream.bufferedReader().use { it.readText() }
-    process.waitFor()
-    output
+    if (!process.waitFor(APPEARANCE_PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+      process.destroyForcibly()
+      LOG.debug("menu bar appearance probe timed out; defaulting to dark")
+      null
+    } else {
+      process.inputStream.bufferedReader().use { it.readText() }
+    }
   } catch (e: IOException) {
     // Best-effort probe: if the command can't be run, fall back to the light-on-dark default.
     LOG.debug("Could not read menu bar appearance; defaulting to dark: ${e.message}")

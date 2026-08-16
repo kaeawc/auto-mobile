@@ -112,6 +112,7 @@ const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 // writes to quiesce before closing the connection (issue #2792). Best-effort
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
 const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
+const SESSION_RELEASE_DRAIN_TIMEOUT_MS = 1_000;
 
 // Ceiling on awaiting an in-flight cold-start migration before closing the DB on
 // shutdown (issue #3044). A SIGTERM arriving mid-startup-migration would otherwise
@@ -1406,9 +1407,13 @@ export class Daemon {
     });
   }
 
-  private async cancelAndReleaseSession(sessionId: string, releaseReason: string = "explicit-release"): Promise<void> {
+  private async cancelAndReleaseSession(
+    sessionId: string,
+    releaseReason: string = "explicit-release",
+    allowExpired: boolean = false,
+  ): Promise<void> {
     const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
-    const deviceId = await this.sessionManager.releaseSession(sessionId, releaseReason);
+    const deviceId = await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
     if (deviceId) {
       await this.devicePool.releaseDevice(deviceId);
     }
@@ -1759,6 +1764,7 @@ export class Daemon {
           name: "HTTP server",
           run: () => this.closeHttpListener(),
         },
+        { name: "active device sessions", run: () => this.releaseActiveSessionsForShutdown() },
         { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },
         {
           name: "database write drain",
@@ -1803,6 +1809,37 @@ export class Daemon {
       ],
       (message, error) => logger.warn(message, error),
     );
+  }
+
+  private async releaseActiveSessionsForShutdown(): Promise<void> {
+    await Promise.all(this.sessionManager.getAllSessionIds().map(sessionId => this.releaseSessionForShutdown(sessionId)));
+    if (!await this.sessionManager.drainReleasePromises(SESSION_RELEASE_DRAIN_TIMEOUT_MS)) {
+      logger.warn(`Timed out after ${SESSION_RELEASE_DRAIN_TIMEOUT_MS}ms draining in-flight session releases during shutdown`);
+    }
+  }
+
+  private async releaseSessionForShutdown(sessionId: string): Promise<void> {
+    const release = this.cancelAndReleaseSession(sessionId, "daemon-shutdown", true);
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeout = new Promise<boolean>(resolve => {
+      timeoutHandle = this.timer.setTimeout(() => resolve(false), SESSION_RELEASE_DRAIN_TIMEOUT_MS);
+    });
+    try {
+      const released = await Promise.race([
+        release.then(() => true, error => {
+          logger.warn(`[Daemon] Failed to release session ${sessionId} during shutdown: ${error}`);
+          return true;
+        }),
+        timeout,
+      ]);
+      if (!released) {
+        logger.warn(`Timed out after ${SESSION_RELEASE_DRAIN_TIMEOUT_MS}ms releasing session ${sessionId} during shutdown`);
+      }
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+    }
   }
 
   private getDaemonFileCleanupOptions(): { expectedPid?: number } {

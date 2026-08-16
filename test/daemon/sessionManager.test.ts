@@ -1,8 +1,9 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager, type KeepScreenAwakeRestorer } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
+import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
 
 function makeHierarchy(label: string): ViewHierarchyResult {
   return {
@@ -238,6 +239,138 @@ describe("SessionManager", () => {
     test("should return null for non-existent session", async () => {
       const deviceId = await sessionManager.releaseSession("non-existent");
       expect(deviceId).toBeNull();
+    });
+
+    test("coalesces concurrent releases before callbacks and persistence", async () => {
+      const released: string[] = [];
+      const callbacks: string[] = [];
+      let beginRestore!: () => void;
+      const restoreStarted = new Promise<void>(resolve => { beginRestore = resolve; });
+      let finishRestore!: () => void;
+      const restoreFinished = new Promise<void>(resolve => { finishRestore = resolve; });
+      const restorer: KeepScreenAwakeRestorer = {
+        async restore(_state: KeepScreenAwakeState): Promise<void> {
+          beginRestore();
+          await restoreFinished;
+        },
+      };
+      const repository = {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(sessionId: string): Promise<void> { released.push(sessionId); },
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      };
+      const manager = new SessionManager(
+        fakeTimer,
+        repository,
+        () => new FakeDbWriteBarrier(),
+        () => restorer,
+      );
+      try {
+        await manager.createSession("s1", "device-1", "android");
+        manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
+        manager.onSessionRelease(sessionId => callbacks.push(sessionId));
+
+        const first = manager.releaseSession("s1", "heartbeat");
+        await restoreStarted;
+        const second = manager.releaseSession("s1", "daemon-shutdown");
+        finishRestore();
+
+        await expect(Promise.all([first, second])).resolves.toEqual(["device-1", "device-1"]);
+        expect(callbacks).toEqual(["s1"]);
+        expect(released).toEqual(["s1"]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("waits for tracked setup before restoring and removing a session", async () => {
+      let finishSetup!: () => void;
+      const setupFinished = new Promise<void>(resolve => { finishSetup = resolve; });
+      const manager = new SessionManager(fakeTimer, {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(): Promise<void> {},
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      }, () => new FakeDbWriteBarrier());
+      try {
+        const session = await manager.createSession("s1", "device-1", "android");
+        const setup = manager.trackSessionSetup(session, setupFinished);
+        const release = manager.releaseSession("s1", "daemon-shutdown");
+
+        await Promise.resolve();
+        expect(manager.getSession("s1")).not.toBeNull();
+
+        finishSetup();
+        await setup;
+        await expect(release).resolves.toBe("device-1");
+        expect(manager.getSession("s1")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("bounds a drain of an already-started release", async () => {
+      let finishRestore!: () => void;
+      const restoreFinished = new Promise<void>(resolve => { finishRestore = resolve; });
+      const manager = new SessionManager(
+        fakeTimer,
+        {
+          async upsertActiveSession(): Promise<void> {},
+          async recordActivity(): Promise<void> {},
+          async markReleased(): Promise<void> {},
+          async markStaleActiveSessionsExpired(): Promise<void> {},
+        },
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => await restoreFinished }),
+      );
+      try {
+        await manager.createSession("s1", "device-1", "android");
+        manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
+        const release = manager.releaseSession("s1", "heartbeat");
+        const drained = manager.drainReleasePromises(1_000);
+
+        fakeTimer.advanceTime(1_000);
+        await expect(drained).resolves.toBe(false);
+
+        finishRestore();
+        await release;
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("does not coalesce a replacement session with the same UUID", async () => {
+      const releases: string[] = [];
+      let finishFirstPersistence!: () => void;
+      const firstPersistence = new Promise<void>(resolve => { finishFirstPersistence = resolve; });
+      const repository = {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(_sessionId: string, _status: string, _releasedAt: number, reason: string): Promise<void> {
+          releases.push(reason);
+          if (reason === "first") {
+            await firstPersistence;
+          }
+        },
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      };
+      const manager = new SessionManager(fakeTimer, repository, () => new FakeDbWriteBarrier());
+      try {
+        await manager.createSession("s1", "device-1", "android");
+        const first = manager.releaseSession("s1", "first");
+        await Promise.resolve();
+
+        await manager.createSession("s1", "device-2", "android");
+        await expect(manager.releaseSession("s1", "second")).resolves.toBe("device-2");
+        finishFirstPersistence();
+        await expect(first).resolves.toBe("device-1");
+
+        expect(releases).toEqual(["first", "second"]);
+        expect(manager.getSession("s1")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
     });
   });
 

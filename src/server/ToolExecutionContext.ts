@@ -89,7 +89,10 @@ export async function createToolExecutionContext(
     sessionOptions.platform
   );
 
-  await ensureKeepScreenAwake(session, sessionManager, sessionOptions);
+  await sessionManager.trackSessionSetup(
+    session,
+    ensureKeepScreenAwake(session, sessionManager, sessionOptions),
+  );
 
   if (!existingSession) {
     if (session.platform === "android") {

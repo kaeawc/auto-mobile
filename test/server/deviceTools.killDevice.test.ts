@@ -297,6 +297,29 @@ class ReplacingDeviceSessionRepository extends FakeDeviceSessionRepository {
   }
 }
 
+class DeferredReleaseDeviceSessionRepository extends FakeDeviceSessionRepository {
+  private releaseMarkReleased: (() => void) | undefined;
+  private resolveMarkReleasedStarted: (() => void) | undefined;
+  private readonly markReleasedStarted = new Promise<void>(resolve => {
+    this.resolveMarkReleasedStarted = resolve;
+  });
+
+  override async markReleased(): Promise<void> {
+    this.resolveMarkReleasedStarted?.();
+    await new Promise<void>(resolve => {
+      this.releaseMarkReleased = resolve;
+    });
+  }
+
+  async waitForMarkReleased(): Promise<void> {
+    await this.markReleasedStarted;
+  }
+
+  finishMarkReleased(): void {
+    this.releaseMarkReleased?.();
+  }
+}
+
 describe("killDevice handler", () => {
   const originalPreferred = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
   const originalAlias = process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;
@@ -792,7 +815,7 @@ describe("killDevice handler", () => {
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
-    await pool.releaseDevice(image.deviceId!);
+    await pool.releaseDevice(image.deviceId!, "session-1");
     await setVideoRecordingManagerDependencies({
       videoRecorderService: {
         stopRecording: async () => {
@@ -895,7 +918,7 @@ describe("killDevice handler", () => {
 
     await expect(result).rejects.toThrow("video recording teardown did not complete");
     expect(pool.getDevice(image.deviceId!)?.sessionId).toBe("session-1");
-    await pool.releaseDevice(image.deviceId!);
+    await pool.releaseDevice(image.deviceId!, "session-1");
     expect(pool.getAvailableDeviceCount()).toBe(1);
   });
 
@@ -1435,6 +1458,135 @@ describe("killDevice handler", () => {
     expect(sessionManager.getSessionForDevice(image.deviceId!)).toBeNull();
     expect(registry.getByUuid(originalSession.deviceSessionUuid)).toBeUndefined();
     expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();
+  });
+
+  test("releases the shutdown reservation before post-shutdown cleanup", async () => {
+    const timer = new FakeTimer();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    const replacement: BootedDevice = {
+      name: "Pixel 8 replacement",
+      platform: "android",
+      deviceId: image.deviceId!,
+      transportId: "2",
+    };
+    const replacementManager = new FirstReplacementThenEmptyDeviceManager(replacement);
+    manager = replacementManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    let finishCleanup: (() => void) | undefined;
+    let resolveCleanupStarted: (() => void) | undefined;
+    const cleanupStarted = new Promise<void>(resolve => {
+      resolveCleanupStarted = resolve;
+    });
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => replacementManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {
+        resolveCleanupStarted?.();
+        await new Promise<void>(resolve => {
+          finishCleanup = resolve;
+        });
+      },
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    replacementManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      replacementManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    const result = tool.handler(tool.schema.parse({
+      device: { ...image, transportId: "1" },
+    }));
+    await cleanupStarted;
+
+    const replacementReservation = await pool.reserveDeviceForShutdown(image.deviceId!);
+    expect(replacementReservation?.device.name).toBe(replacement.name);
+    await replacementReservation?.release();
+
+    finishCleanup?.();
+    await expect(result).resolves.toBeDefined();
+  });
+
+  test("finishes retiring a stopped device after a timed-out session release completes", async () => {
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    const deviceSessionRepository = new DeferredReleaseDeviceSessionRepository();
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    successfulManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    const registry = new DeviceSessionRegistry(timer);
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const pooled = pool.getDevice(image.deviceId!);
+    if (!pooled) {
+      throw new Error("expected assigned device to be pooled");
+    }
+    const deviceSession = registry.onDeviceConnected({
+      deviceId: pooled.id,
+      platform: pooled.platform,
+      incarnation: pooled.incarnation,
+    });
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    const result = tool.handler({
+      device: { name: image.name, platform: image.platform, deviceId: image.deviceId! },
+    });
+    await deviceSessionRepository.waitForMarkReleased();
+    timer.advanceTime(30_000);
+
+    await expect(result).rejects.toThrow("session ownership retirement did not complete");
+    expect(pool.getDevice(image.deviceId!)).toBe(pooled);
+
+    deviceSessionRepository.finishMarkReleased();
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(pool.getDevice(image.deviceId!)).toBeNull();
+    expect(registry.getByUuid(deviceSession.deviceSessionUuid)).toBeUndefined();
   });
 
   test("recognizes a same-ID Android replacement before the first shutdown poll", async () => {

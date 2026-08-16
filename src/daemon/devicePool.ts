@@ -410,7 +410,11 @@ export class DevicePool {
   /**
    * Add a new device to the pool
    */
-  async addDevice(device: BootedDevice, sourceImage?: DeviceInfo): Promise<void> {
+  async addDevice(
+    device: BootedDevice,
+    sourceImage?: DeviceInfo,
+    awaitSessionTracking: boolean = true,
+  ): Promise<void> {
     this.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
     if (sourceImage) {
       this.intentionalShutdowns.delete(device.deviceId);
@@ -449,7 +453,14 @@ export class DevicePool {
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
       this.deviceSessionStarts.set(device.deviceId, now);
       this.refreshMissingDeviceMisses.delete(device.deviceId);
-      await this.setDeviceSessionTracking(device.deviceId, now);
+      const sessionTracking = this.setDeviceSessionTracking(device.deviceId, now);
+      if (awaitSessionTracking) {
+        await sessionTracking;
+      } else {
+        // Shutdown replacement already owns assignmentMutex. Persisting cache
+        // metadata is best-effort and must not make allocators wait forever.
+        void sessionTracking;
+      }
 
       logger.info(`Added device ${device.deviceId} to pool`);
     }
@@ -2201,7 +2212,11 @@ export class DevicePool {
       if (this.devices.has(expectedDevice.id)) {
         return undefined;
       }
-      await this.addDevice(replacement, this.sourceImageForSameAndroidReplacement(expectedDevice, replacement));
+      await this.addDevice(
+        replacement,
+        this.sourceImageForSameAndroidReplacement(expectedDevice, replacement),
+        false,
+      );
       return this.devices.get(replacement.deviceId);
     });
   }
@@ -2293,7 +2308,7 @@ export class DevicePool {
       if (!expectedDevice) {
         return;
       }
-      if (this.shutdownReservations.has(deviceId)) {
+      if (this.shutdownReservations.get(deviceId) === expectedDevice) {
         throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
       }
       this.shutdownReservations.set(deviceId, expectedDevice);

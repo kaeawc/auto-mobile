@@ -137,6 +137,33 @@ describe("DevicePool", () => {
     }
   }
 
+  class DeferredSessionTrackingAppsRepository extends FakeInstalledAppsRepository {
+    private deferTracking = false;
+    private resolveDeferredTracking: (() => void) | undefined;
+
+    deferNextTrackingWrite(): void {
+      this.deferTracking = true;
+    }
+
+    finishDeferredTrackingWrite(): void {
+      this.resolveDeferredTracking?.();
+    }
+
+    override async setSessionTracking(
+      daemonSessionId: string,
+      deviceId: string,
+      deviceSessionStart: number,
+    ): Promise<void> {
+      if (this.deferTracking) {
+        this.deferTracking = false;
+        await new Promise<void>(resolve => {
+          this.resolveDeferredTracking = resolve;
+        });
+      }
+      await super.setSessionTracking(daemonSessionId, deviceId, deviceSessionStart);
+    }
+  }
+
   class ThrowingDiscoveryFakeDeviceManager extends FakeDeviceManager {
     override async getBootedDevicesDetailed(): Promise<never> {
       throw new Error("adb discovery crashed");
@@ -1284,6 +1311,56 @@ describe("DevicePool", () => {
 
       await devicePool.refreshDevices();
       expect(devicePool.getDevice(captured.id)).toBeNull();
+    });
+
+    test("does not hold the assignment mutex for replacement session tracking", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const appsRepository = new DeferredSessionTrackingAppsRepository();
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        fakeTimer,
+        appsRepository,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await pool.initializeWithDevices([device]);
+      const captured = pool.getDevice(device.deviceId);
+      if (!captured) {
+        throw new Error("expected shutdown device to be pooled");
+      }
+      appsRepository.deferNextTrackingWrite();
+
+      const replacement = await pool.replaceDeviceForShutdown(captured, {
+        ...device,
+        name: "Pixel 8 replacement",
+      });
+
+      expect(replacement?.name).toBe("Pixel 8 replacement");
+      appsRepository.finishDeferredTrackingWrite();
+    });
+
+    test("allows a replacement incarnation to acquire its own shutdown reservation", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      await devicePool.initializeWithDevices([device]);
+      const captured = devicePool.getDevice(device.deviceId);
+      if (!captured) {
+        throw new Error("expected shutdown device to be pooled");
+      }
+      const originalReservation = await devicePool.reserveDeviceForShutdown(captured.id);
+      if (!originalReservation) {
+        throw new Error("expected original shutdown reservation");
+      }
+
+      const replacement = await devicePool.replaceDeviceForShutdown(captured, {
+        ...device,
+        name: "Pixel 8 replacement",
+      });
+      const replacementReservation = await devicePool.reserveDeviceForShutdown(captured.id);
+
+      expect(replacementReservation?.device).toBe(replacement);
+      await replacementReservation?.release();
+      await originalReservation.release();
     });
 
     test("retains devices on first partial platform discovery miss", async () => {

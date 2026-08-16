@@ -1385,6 +1385,10 @@ export class Daemon {
       if (!this.devicePool.getDevice(deviceId)) {
         return false;
       }
+      this.deviceDisconnectMisses.delete(deviceId);
+      this.deviceDisconnectMissIncarnations.delete(deviceId);
+      this.confirmedDisconnectedDeviceIds.delete(deviceId);
+      this.forceDisconnectedDeviceIds.delete(deviceId);
       logger.info(
         `[DisconnectMonitor] Skipping stale disconnect cleanup for recovered device ${deviceId}`
       );
@@ -1393,6 +1397,10 @@ export class Daemon {
     if (await this.devicePool.isCurrentDisconnectedDevice(pooledDeviceAtDisconnect)) {
       return false;
     }
+    this.deviceDisconnectMisses.delete(deviceId);
+    this.deviceDisconnectMissIncarnations.delete(deviceId);
+    this.confirmedDisconnectedDeviceIds.delete(deviceId);
+    this.forceDisconnectedDeviceIds.delete(deviceId);
     logger.info(
       `[DisconnectMonitor] Skipping stale disconnect cleanup for recovered device ${deviceId}`
     );

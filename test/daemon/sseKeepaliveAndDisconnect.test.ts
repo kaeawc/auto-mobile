@@ -441,11 +441,19 @@ describe("disconnect monitor miss counting", () => {
     expect(confirmedDisconnectedDeviceIds.has("device-1")).toBe(false);
   });
 
-  test("skips cleanup when an absent candidate is pooled before cleanup", async () => {
+  test("clears disconnect state when an absent candidate is pooled before cleanup", async () => {
+    const misses = new Map([["sim-1", DEVICE_DISCONNECT_MISS_THRESHOLD]]);
+    const missIncarnations = new Map([["sim-1", 1]]);
+    const confirmed = new Set(["sim-1"]);
+    const forced = new Set(["sim-1"]);
     const daemon = {
       devicePool: {
         getDevice: () => ({}),
       },
+      deviceDisconnectMisses: misses,
+      deviceDisconnectMissIncarnations: missIncarnations,
+      confirmedDisconnectedDeviceIds: confirmed,
+      forceDisconnectedDeviceIds: forced,
     };
     const shouldSkipStaleDisconnectCleanup = (
       Daemon.prototype as unknown as {
@@ -459,6 +467,40 @@ describe("disconnect monitor miss counting", () => {
     await expect(
       shouldSkipStaleDisconnectCleanup.call(daemon, null, "sim-1"),
     ).resolves.toBe(true);
+    expect(misses.has("sim-1")).toBe(false);
+    expect(missIncarnations.has("sim-1")).toBe(false);
+    expect(confirmed.has("sim-1")).toBe(false);
+    expect(forced.has("sim-1")).toBe(false);
+  });
+
+  test("clears disconnect state when cleanup rediscovers the pooled incarnation", async () => {
+    const misses = new Map([["emulator-5554", DEVICE_DISCONNECT_MISS_THRESHOLD]]);
+    const missIncarnations = new Map([["emulator-5554", 4]]);
+    const daemon = {
+      devicePool: {
+        isCurrentDisconnectedDevice: async () => false,
+      },
+      deviceDisconnectMisses: misses,
+      deviceDisconnectMissIncarnations: missIncarnations,
+      confirmedDisconnectedDeviceIds: new Set(["emulator-5554"]),
+      forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
+    };
+    const shouldSkipStaleDisconnectCleanup = (
+      Daemon.prototype as unknown as {
+        shouldSkipStaleDisconnectCleanup: (
+          pooledDeviceAtDisconnect: object,
+          deviceId: string,
+        ) => Promise<boolean>;
+      }
+    ).shouldSkipStaleDisconnectCleanup;
+
+    await expect(
+      shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554"),
+    ).resolves.toBe(true);
+    expect(misses.has("emulator-5554")).toBe(false);
+    expect(missIncarnations.has("emulator-5554")).toBe(false);
+    expect(daemon.confirmedDisconnectedDeviceIds.has("emulator-5554")).toBe(false);
+    expect(daemon.forceDisconnectedDeviceIds.has("emulator-5554")).toBe(false);
   });
 
   test("fires at poll interval using FakeTimer", () => {

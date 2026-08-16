@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Daemon } from "../../src/daemon/daemon";
 import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -401,6 +402,26 @@ describe("disconnect monitor miss counting", () => {
     });
 
     expect(confirmedDisconnectedDeviceIds.has("device-1")).toBe(false);
+  });
+
+  test("skips cleanup when an absent candidate is pooled before cleanup", async () => {
+    const daemon = {
+      devicePool: {
+        getDevice: () => ({}),
+      },
+    };
+    const shouldSkipStaleDisconnectCleanup = (
+      Daemon.prototype as unknown as {
+        shouldSkipStaleDisconnectCleanup: (
+          pooledDeviceAtDisconnect: null,
+          deviceId: string,
+        ) => Promise<boolean>;
+      }
+    ).shouldSkipStaleDisconnectCleanup;
+
+    await expect(
+      shouldSkipStaleDisconnectCleanup.call(daemon, null, "sim-1"),
+    ).resolves.toBe(true);
   });
 
   test("fires at poll interval using FakeTimer", () => {

@@ -1381,10 +1381,16 @@ export class Daemon {
     pooledDeviceAtDisconnect: PooledDevice | null,
     deviceId: string
   ): Promise<boolean> {
-    if (
-      !pooledDeviceAtDisconnect ||
-      await this.devicePool.isCurrentDisconnectedDevice(pooledDeviceAtDisconnect)
-    ) {
+    if (!pooledDeviceAtDisconnect) {
+      if (!this.devicePool.getDevice(deviceId)) {
+        return false;
+      }
+      logger.info(
+        `[DisconnectMonitor] Skipping stale disconnect cleanup for recovered device ${deviceId}`
+      );
+      return true;
+    }
+    if (await this.devicePool.isCurrentDisconnectedDevice(pooledDeviceAtDisconnect)) {
       return false;
     }
     logger.info(

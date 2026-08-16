@@ -401,6 +401,26 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     expect(error.message).toContain("exited with code: 1");
   });
 
+  test("installs readiness exit monitoring without a check-to-listener yield", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    const baselineExitListeners = child.listenerCount("exit");
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    const readinessSettled = readiness.catch(() => undefined);
+
+    try {
+      expect(child.listenerCount("exit")).toBe(baselineExitListeners + 1);
+    } finally {
+      child.emit("exit", 1, null);
+      child.emit("close", 1, null);
+      await timer.advanceTimeAsync(500);
+      await readinessSettled;
+    }
+  });
+
   test("removes readiness listeners after observing a process exit", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {

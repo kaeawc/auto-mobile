@@ -1888,6 +1888,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return childProcess ? this.launchErrorFinalizations.get(childProcess) : undefined;
   }
 
+  private throwLaunchError(error?: ActionableError): void {
+    if (error) {
+      throw error;
+    }
+  }
+
   private recordLaunchError(
     childProcess: ChildProcess | null | undefined,
     onError: (error: ActionableError) => void,
@@ -1989,11 +1995,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       `Waiting for emulator '${avdName}' to be ready... (polling interval: ${pollingIntervalMs}ms)`,
     );
 
-    const finalizedLaunchError = await this.getLaunchErrorFinalization(childProcess);
+    const launchErrorFinalization = this.getLaunchErrorFinalization(childProcess);
+    const finalizedLaunchError = launchErrorFinalization
+      ? await launchErrorFinalization
+      : undefined;
     const recordedLaunchError = finalizedLaunchError ?? this.getLaunchError(childProcess);
-    if (recordedLaunchError) {
-      throw recordedLaunchError;
-    }
+    this.throwLaunchError(recordedLaunchError);
 
     // Monitor child process for early exit if provided
     let pollingActive = true;

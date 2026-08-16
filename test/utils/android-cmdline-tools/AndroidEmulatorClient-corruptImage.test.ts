@@ -263,6 +263,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     expect(fakeAvdConfigReader.readConfigCalls).toEqual([
       "Pixel_9_Pro", // listAvds() enrichment
       "Pixel_9_Pro", // validateAvdMemory()
+      "Pixel_9_Pro", // checkArchitectureCompatibility() reads the ABI from config (issue #5202)
     ]);
     expect(error.message).toContain("corrupt");
     expect(error.message).toContain("Suggestion");

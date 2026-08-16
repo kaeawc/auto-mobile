@@ -116,6 +116,32 @@ describe("parseAvdConfig", () => {
     expect(config.screenDensity).toBe(420);
     expect(config.deviceName).toBe("pixel_7");
     expect(config.tag).toBe("google_apis_playstore");
+    expect(config.abi).toBe("arm64-v8a");
+  });
+
+  it("reads the ABI from abi.type", () => {
+    expect(parseAvdConfig("abi.type=x86_64\n").abi).toBe("x86_64");
+    expect(parseAvdConfig("abi.type=armeabi-v7a\n").abi).toBe("armeabi-v7a");
+  });
+
+  it("falls back to the trailing ABI segment of image.sysdir.1 when abi.type is absent", () => {
+    const config = parseAvdConfig(
+      "image.sysdir.1=system-images/android-35/google_apis_playstore/arm64-v8a/\n",
+    );
+    expect(config.abi).toBe("arm64-v8a");
+  });
+
+  it("prefers abi.type over the image.sysdir.1 segment", () => {
+    const content = [
+      "abi.type=x86_64",
+      "image.sysdir.1=system-images/android-30/google_apis/arm64-v8a/",
+    ].join("\n");
+    expect(parseAvdConfig(content).abi).toBe("x86_64");
+  });
+
+  it("leaves abi undefined when neither key encodes a recognized ABI", () => {
+    expect(parseAvdConfig("").abi).toBeUndefined();
+    expect(parseAvdConfig("image.sysdir.1=system-images/android-30/google_apis/\n").abi).toBeUndefined();
   });
 });
 

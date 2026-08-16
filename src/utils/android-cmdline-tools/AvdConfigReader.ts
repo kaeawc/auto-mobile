@@ -18,6 +18,8 @@ export interface AvdConfig {
   ramSizeInvalid?: boolean;
   deviceName?: string;
   tag?: string;
+  /** Guest ABI as declared in config.ini (e.g. "arm64-v8a", "x86_64"). */
+  abi?: string;
 }
 
 /**
@@ -138,7 +140,29 @@ export function parseAvdConfig(content: string): AvdConfig {
     ...parseRamSize(props),
     ...parseDeviceMetadata(props),
     ...parseApiMetadata(props),
+    ...parseAbi(props),
   };
+}
+
+/**
+ * Determine the guest ABI without booting the emulator.
+ *
+ * Prefers the explicit `abi.type` key; falls back to the trailing ABI segment
+ * of `image.sysdir.1` (e.g. `.../google_apis_playstore/arm64-v8a/`). Reading it
+ * from config.ini instead of an `emulator -verbose` probe avoids leaving a stale
+ * QEMU lock behind (issue #5202).
+ */
+function parseAbi(props: Map<string, string>): Pick<AvdConfig, "abi"> {
+  const explicit = props.get("abi.type")?.trim();
+  if (explicit) {
+    return { abi: explicit };
+  }
+  const sysdir = props.get("image.sysdir.1");
+  const segments = sysdir?.split("/").filter(Boolean) ?? [];
+  const trailing = segments.at(-1);
+  return trailing && /^(?:arm64-v8a|armeabi(?:-v7a)?|x86_64|x86|riscv64)$/.test(trailing)
+    ? { abi: trailing }
+    : {};
 }
 
 function parseKeyValueProperties(content: string): Map<string, string> {

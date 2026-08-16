@@ -151,6 +151,35 @@ export interface AndroidEmulator {
 }
 
 /**
+ * Normalize a config.ini ABI (e.g. "arm64-v8a", "armeabi-v7a", "x86_64") to the
+ * coarse architecture token used for host/guest compatibility checks. Returns
+ * undefined when the ABI is absent or unrecognized so callers fall back to
+ * "allow the attempt" rather than blocking on a guess.
+ */
+export function normalizeAbiToArch(abi?: string): string | undefined {
+  const value = abi?.trim().toLowerCase();
+  if (!value) {
+    return undefined;
+  }
+  if (value === "x86_64") {
+    return "x86_64";
+  }
+  if (value === "x86") {
+    return "x86";
+  }
+  if (value.startsWith("arm64")) {
+    return "arm64";
+  }
+  if (value.startsWith("arm")) {
+    return "arm";
+  }
+  if (value.startsWith("riscv")) {
+    return "riscv64";
+  }
+  return undefined;
+}
+
+/**
  * Infer form factor from AVD device name.
  * Tablet device names typically contain "tab", "pad", or "nexus_9/10".
  */
@@ -544,46 +573,34 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }> {
     const hostArch = this.getHostArchitecture();
 
+    // Read the guest ABI from config.ini rather than booting a throwaway
+    // `emulator -verbose` instance. That probe never exits on its own, so it was
+    // always SIGKILLed on timeout, leaving a stale QEMU lock that made the real
+    // launch FATAL and hang the full boot timeout (issue #5202).
+    let avdArch: string | undefined;
     try {
-      // Get AVD config to determine its architecture
-      const result = await this.executeCommand(["-avd", avdName, "-verbose"], 3000);
-      const output = result.stdout + result.stderr;
-
-      // Look for architecture information in the output
-      let avdArch: string | undefined;
-
-      // Check for target architecture in verbose output
-      const archMatch = output.match(/Found AVD target architecture: (\w+)/);
-      if (archMatch) {
-        avdArch = archMatch[1];
-      }
-
-      // If we couldn't determine from verbose output, try to infer from common patterns
-      if (!avdArch) {
-        // This is a fallback - we'll let the actual emulator start attempt reveal the issue
-        return {
-          compatible: true,
-          hostArch,
-          reason: "Could not determine AVD architecture, allowing attempt",
-        };
-      }
-
-      // Check compatibility
-      const compatible = this.isArchitectureCompatible(hostArch, avdArch);
-      const reason = compatible
-        ? undefined
-        : `Host architecture '${hostArch}' cannot run AVD with architecture '${avdArch}'`;
-
-      return { compatible, hostArch, avdArch, reason };
+      const config = await this.avdConfigReader.readConfig(avdName);
+      avdArch = normalizeAbiToArch(config?.abi);
     } catch (error) {
-      // If we can't check, we'll let the emulator start attempt proceed and catch errors there
-      logger.debug(`Could not check architecture compatibility for ${avdName}: ${error}`);
+      logger.debug(`Could not read AVD config for architecture check of ${avdName}: ${error}`);
+    }
+
+    // If we couldn't determine the ABI, let the actual start attempt reveal any
+    // issue (the emulator emits a clear PANIC for a genuine arch mismatch).
+    if (!avdArch) {
       return {
         compatible: true,
         hostArch,
-        reason: "Could not verify compatibility, allowing attempt",
+        reason: "Could not determine AVD architecture, allowing attempt",
       };
     }
+
+    const compatible = this.isArchitectureCompatible(hostArch, avdArch);
+    const reason = compatible
+      ? undefined
+      : `Host architecture '${hostArch}' cannot run AVD with architecture '${avdArch}'`;
+
+    return { compatible, hostArch, avdArch, reason };
   }
 
   /**

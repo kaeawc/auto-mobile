@@ -1399,7 +1399,7 @@ export class Daemon {
   private async initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void> {
     let timeoutHandle: NodeJS.Timeout | undefined;
     const timeoutPromise = new Promise<void>(resolve => {
-      timeoutHandle = defaultTimer.setTimeout(() => {
+      timeoutHandle = this.timer.setTimeout(() => {
         logger.warn(`Device pool initialization timed out after ${timeoutMs}ms`);
         resolve();
       }, timeoutMs);
@@ -1414,7 +1414,7 @@ export class Daemon {
       await Promise.race([initPromise, timeoutPromise]);
     } finally {
       if (timeoutHandle !== undefined) {
-        defaultTimer.clearTimeout(timeoutHandle);
+        this.timer.clearTimeout(timeoutHandle);
       }
     }
 
@@ -1434,17 +1434,19 @@ export class Daemon {
    */
   private async initializeDevicePool(): Promise<void> {
     try {
-      const deviceManager = new MultiPlatformDeviceManager();
-      const bootedDevices = await deviceManager.getBootedDevices("either");
+      // Use the pool's refresh path instead of replacing entries directly. The
+      // startup timeout does not cancel discovery, so this may run after a
+      // session has claimed a device; refresh preserves that owner and its
+      // incarnation when rediscovering the same device.
+      await this.devicePool.refreshDevices();
+      const bootedDevices = this.devicePool.getAllDevices();
 
       if (bootedDevices.length > 0) {
-        await this.devicePool.initializeWithDevices(bootedDevices);
         // Mint a device-session epoch for every startup-booted device so
         // daemon/listDeviceSessions enumerates idle devices immediately, without
-        // waiting for a first assignment/refresh. initializeWithDevices does not
-        // fire the device-ready callback (that path stays silent by contract), so
-        // mint directly here. Idempotent with the later onDeviceReady mint — the
-        // incarnation is unchanged, so it returns the same uuid (epic #5256).
+        // waiting for a first assignment/refresh. The refresh callback may have
+        // minted these already; this is idempotent because the incarnation is
+        // unchanged (epic #5256).
         for (const pooled of this.devicePool.getAllDevices()) {
           this.deviceSessionRegistry.onDeviceConnected({
             deviceId: pooled.id,
@@ -1452,7 +1454,7 @@ export class Daemon {
             incarnation: pooled.incarnation,
           });
         }
-        logger.info(`Device pool initialized with ${bootedDevices.length} devices: ${bootedDevices.map(device => device.deviceId).join(", ")}`);
+        logger.info(`Device pool initialized with ${bootedDevices.length} devices: ${bootedDevices.map(device => device.id).join(", ")}`);
       } else {
         logger.warn("No devices detected during daemon startup. Device pool is empty.");
         logger.warn("Start an emulator or connect a physical device before creating sessions.");

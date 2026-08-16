@@ -18,6 +18,7 @@ import { indexOfNamed, indexOfWaitOn, loadJobSteps, stepNamed } from "../helpers
 
 const PR_WORKFLOW = ".github/workflows/pull_request.yml";
 const MERGE_WORKFLOW = ".github/workflows/merge.yml";
+const DOCS_WORKFLOW = ".github/workflows/docs.yml";
 
 for (const jobId of ["mcp-build-and-test", "ts-code-coverage"]) {
   describe(`#4130 cache fan-out (${jobId})`, () => {
@@ -96,8 +97,8 @@ describe("#4130 hadolint hoist (fast-validation)", () => {
   });
 });
 
-describe("#4130 deploy-docs fan-outs (merge.yml)", () => {
-  const steps = loadJobSteps(MERGE_WORKFLOW, "deploy-docs");
+describe("#4130 deploy-docs fan-outs (docs.yml)", () => {
+  const steps = loadJobSteps(DOCS_WORKFLOW, "deploy-docs");
 
   test("the job exists and has steps", () => {
     expect(steps.length).toBeGreaterThan(0);

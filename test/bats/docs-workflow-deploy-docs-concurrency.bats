@@ -1,13 +1,13 @@
 #!/usr/bin/env bats
 #
-# Guards issue #3578: overlapping `On Merge` runs (multiple PRs merging in
-# quick succession) each reach actions/deploy-pages@v4, and GitHub Pages
-# allows only one in-progress deployment per environment — the loser errors
-# out. The deploy-docs job must serialize via a job-scoped `concurrency`
+# Guards issue #3578: overlapping documentation deploys (a manual dispatch
+# racing the nightly schedule) each reach actions/deploy-pages@v4, and GitHub
+# Pages allows only one in-progress deployment per environment — the loser
+# errors out. The deploy-docs job must serialize via a job-scoped `concurrency`
 # block (group "pages", cancel-in-progress: false) so deploys queue instead
 # of racing, without serializing the rest of the workflow.
 
-WORKFLOW=".github/workflows/merge.yml"
+WORKFLOW=".github/workflows/docs.yml"
 
 # Extract the deploy-docs job block: from its "  deploy-docs:" line up to
 # (but not including) the next top-level (2-space-indented) job key.

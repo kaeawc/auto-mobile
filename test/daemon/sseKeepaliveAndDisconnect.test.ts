@@ -478,7 +478,7 @@ describe("disconnect monitor miss counting", () => {
     const missIncarnations = new Map([["emulator-5554", 4]]);
     const daemon = {
       devicePool: {
-        isCurrentDisconnectedDevice: async () => false,
+        isCurrentDisconnectedDevice: async () => "recovered" as const,
       },
       deviceDisconnectMisses: misses,
       deviceDisconnectMissIncarnations: missIncarnations,
@@ -501,6 +501,36 @@ describe("disconnect monitor miss counting", () => {
     expect(missIncarnations.has("emulator-5554")).toBe(false);
     expect(daemon.confirmedDisconnectedDeviceIds.has("emulator-5554")).toBe(false);
     expect(daemon.forceDisconnectedDeviceIds.has("emulator-5554")).toBe(false);
+  });
+
+  test("retains disconnect state when cleanup verification is inconclusive", async () => {
+    const misses = new Map([["emulator-5554", DEVICE_DISCONNECT_MISS_THRESHOLD]]);
+    const missIncarnations = new Map([["emulator-5554", 4]]);
+    const daemon = {
+      devicePool: {
+        isCurrentDisconnectedDevice: async () => "unknown" as const,
+      },
+      deviceDisconnectMisses: misses,
+      deviceDisconnectMissIncarnations: missIncarnations,
+      confirmedDisconnectedDeviceIds: new Set(["emulator-5554"]),
+      forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
+    };
+    const shouldSkipStaleDisconnectCleanup = (
+      Daemon.prototype as unknown as {
+        shouldSkipStaleDisconnectCleanup: (
+          pooledDeviceAtDisconnect: object,
+          deviceId: string,
+        ) => Promise<boolean>;
+      }
+    ).shouldSkipStaleDisconnectCleanup;
+
+    await expect(
+      shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554"),
+    ).resolves.toBe(true);
+    expect(misses.get("emulator-5554")).toBe(DEVICE_DISCONNECT_MISS_THRESHOLD);
+    expect(missIncarnations.get("emulator-5554")).toBe(4);
+    expect(daemon.confirmedDisconnectedDeviceIds.has("emulator-5554")).toBe(true);
+    expect(daemon.forceDisconnectedDeviceIds.has("emulator-5554")).toBe(true);
   });
 
   test("fires at poll interval using FakeTimer", () => {

@@ -1394,8 +1394,15 @@ export class Daemon {
       );
       return true;
     }
-    if (await this.devicePool.isCurrentDisconnectedDevice(pooledDeviceAtDisconnect)) {
+    const disconnectStatus = await this.devicePool.isCurrentDisconnectedDevice(pooledDeviceAtDisconnect);
+    if (disconnectStatus === "current") {
       return false;
+    }
+    if (disconnectStatus === "unknown") {
+      logger.warn(
+        `[DisconnectMonitor] Retaining disconnect state for ${deviceId}: recovery verification was inconclusive`
+      );
+      return true;
     }
     this.deviceDisconnectMisses.delete(deviceId);
     this.deviceDisconnectMissIncarnations.delete(deviceId);

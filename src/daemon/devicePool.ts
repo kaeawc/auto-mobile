@@ -52,6 +52,8 @@ export class DevicePoolError extends Error {
  * Pooled Device Status
  */
 export type DeviceStatus = "idle" | "busy" | "error";
+type AndroidRediscoveryVerification = "rediscovered" | "not-rediscovered" | "unknown";
+export type CurrentDisconnectStatus = "current" | "recovered" | "unknown";
 export type DeviceRecoveryIneligibilityReason =
   | "disabled"
   | "not-automobile-owned"
@@ -504,7 +506,11 @@ export class DevicePool {
       this.intentionalShutdowns.delete(deviceId);
       return false;
     }
-    if (mayBeStaleSignal && device && (await this.wasRebootedAndroidDeviceRediscovered(device))) {
+    if (
+      mayBeStaleSignal &&
+      device &&
+      (await this.wasRebootedAndroidDeviceRediscovered(device)) !== "not-rediscovered"
+    ) {
       // The intentionally-stopped serial is still (or again) booted, so this
       // disconnect is stale — keep the live device and the marker until a real
       // disconnect for this incarnation arrives.
@@ -536,9 +542,10 @@ export class DevicePool {
       await this.removeDevice(deviceId);
       return;
     }
-    const rediscovered =
-      mayBeStaleSignal && (await this.wasRebootedAndroidDeviceRediscovered(device));
-    if (this.devices.get(deviceId) !== device || rediscovered) {
+    const rediscovery = mayBeStaleSignal
+      ? await this.wasRebootedAndroidDeviceRediscovered(device)
+      : "not-rediscovered";
+    if (this.devices.get(deviceId) !== device || rediscovery !== "not-rediscovered") {
       return;
     }
     if (await this.rebootDisconnectedAndroidDevice(device)) {
@@ -552,9 +559,11 @@ export class DevicePool {
     await this.removeDevice(deviceId);
   }
 
-  private async wasRebootedAndroidDeviceRediscovered(device: PooledDevice): Promise<boolean> {
+  private async wasRebootedAndroidDeviceRediscovered(
+    device: PooledDevice,
+  ): Promise<AndroidRediscoveryVerification> {
     if (!this.getRecoveryPolicy().onLoss || !this.isAutoMobileOwnedAndroidVirtualDevice(device)) {
-      return false;
+      return "not-rediscovered";
     }
     const avdName = device.avdName;
     try {
@@ -564,34 +573,40 @@ export class DevicePool {
         logger.warn(
           `[DevicePool] Retained ${device.id}: Android discovery failed during stale-disconnect check`,
         );
-        return true;
+        return "unknown";
       }
       if (
         !discovery.devices.some((candidate) =>
           this.criteriaMatcher.androidRediscoveryMatches(candidate, device.id, avdName),
         )
       ) {
-        return false;
+        return "not-rediscovered";
       }
       logger.info(
         `[DevicePool] Retained ${device.id}: a rebooted Android emulator is present despite a stale disconnect signal`,
       );
-      return true;
+      return "rediscovered";
     } catch (error) {
       logger.warn(
         `[DevicePool] Could not verify rebooted Android emulator ${device.id}: ${error}`,
         error,
       );
-      return true;
+      return "unknown";
     }
   }
 
-  async isCurrentDisconnectedDevice(device: PooledDevice): Promise<boolean> {
+  async isCurrentDisconnectedDevice(device: PooledDevice): Promise<CurrentDisconnectStatus> {
     if (this.devices.get(device.id) !== device) {
-      return false;
+      return "recovered";
     }
-    const rediscovered = await this.wasRebootedAndroidDeviceRediscovered(device);
-    return this.devices.get(device.id) === device && !rediscovered;
+    const rediscovery = await this.wasRebootedAndroidDeviceRediscovered(device);
+    if (this.devices.get(device.id) !== device) {
+      return "recovered";
+    }
+    if (rediscovery === "unknown") {
+      return "unknown";
+    }
+    return rediscovery === "rediscovered" ? "recovered" : "current";
   }
 
   /** Assign the next monotonic incarnation id for a newly pooled connection. */

@@ -1446,7 +1446,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           !startupValidationComplete ||
           exitCode === undefined ||
           exitCode === 0 ||
-          duplicateAvdDetected ||
           resolvePostValidationExit
         ) {
           return;

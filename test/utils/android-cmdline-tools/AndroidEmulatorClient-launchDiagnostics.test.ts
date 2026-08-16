@@ -515,6 +515,9 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
           "Running multiple emulators with the same AVD is an experimental feature.\n",
         ),
       );
+      for (let index = 0; index < 51; index += 1) {
+        child.stderr!.emit("data", Buffer.from(`later readiness diagnostic ${index}\n`));
+      }
       child.emit("exit", 1, null);
       child.emit("close", 1, null);
       await timer.advanceTimeAsync(500);

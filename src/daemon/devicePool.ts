@@ -2024,9 +2024,10 @@ export class DevicePool {
         const session = this.sessionManager.getSession(sessionId);
         if (session && session.assignedDevice !== deviceId) {
           logger.warn(
-            `[DevicePool] Skipping allocation rollback for ${sessionId}: ` +
-              `session is now assigned to ${session.assignedDevice}, not ${deviceId}`,
+            `[DevicePool] Preserving session ${sessionId} on ${session.assignedDevice} ` +
+              `while releasing stale allocation of ${deviceId}`,
           );
+          await this.releaseDevice(deviceId, sessionId);
           continue;
         }
 

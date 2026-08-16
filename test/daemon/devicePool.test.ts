@@ -1747,6 +1747,25 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("sim-2")).toMatchObject({ sessionId: null, status: "idle" });
     });
 
+    test("releases a partial device claim when the session was already bound elsewhere", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("sim-1", "ios", "iPhone 15"),
+        createBootedDevice("sim-2", "ios", "iPhone 16"),
+      ]);
+      await sessionManager.createSession("session-a", "existing-device", "ios");
+      failIosLivenessAfterFirstSession();
+
+      await expect(
+        devicePool.assignMultipleDevices(["session-a", "session-b"], 1000, "ios"),
+      ).rejects.toThrow(/Unable to verify iOS simulator liveness/);
+
+      expect(sessionManager.getSession("session-a")).toMatchObject({
+        assignedDevice: "existing-device",
+      });
+      expect(devicePool.getDevice("sim-1")).toMatchObject({ sessionId: null, status: "idle" });
+      expect(devicePool.getDevice("sim-2")).toMatchObject({ sessionId: null, status: "idle" });
+    });
+
     test("rolls back sessions and devices when criteria allocation loses iOS liveness after a partial assignment", async () => {
       await initializeLiveDevices([
         createBootedDevice("sim-1", "ios", "iPhone 15"),

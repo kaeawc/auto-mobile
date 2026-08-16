@@ -294,6 +294,72 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     expect(accelChecks()).toBe(0);
   });
 
+  test("replays a post-validation exit to readiness with launch diagnostics", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    const baselineExitListeners = child.listenerCount("exit");
+    child.stderr!.emit(
+      "data",
+      Buffer.from("token=handoff-secret\nhandoff diagnostic\n"),
+    );
+    child.emit("exit", 1, null);
+    child.emit("close", 1, null);
+
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    let rejection: Error | undefined;
+    void readiness.catch((error) => {
+      rejection = error instanceof Error ? error : new Error(String(error));
+    });
+
+    try {
+      for (let turn = 0; turn < 10 && !rejection; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+
+      expect(rejection?.message).toContain("exited with code: 1");
+      expect(rejection?.message).toContain("handoff diagnostic");
+      expect(rejection?.message).toContain("token=[REDACTED]");
+      expect(rejection?.message).not.toContain("handoff-secret");
+      expect(timer.getSleepCallCount()).toBe(0);
+      expect(child.listenerCount("exit")).toBe(baselineExitListeners);
+    } finally {
+      timer.setCurrentTime(60_000);
+      timer.resolveAll();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      timer.resolveAll();
+      await readiness.catch(() => undefined);
+    }
+  });
+
+  test("removes readiness listeners after observing a process exit", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    const baselineExitListeners = child.listenerCount("exit");
+    const baselineStdoutListeners = child.stdout!.listenerCount("data");
+    const baselineStderrListeners = child.stderr!.listenerCount("data");
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    const readinessError = expectRejection(readiness);
+
+    for (let turn = 0; turn < 10 && timer.getSleepCallCount() < 2; turn += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    child.emit("exit", 1, null);
+    child.emit("close", 1, null);
+    await timer.advanceTimeAsync(500);
+
+    const error = await readinessError;
+    expect(error.message).toContain("exited with code 1");
+    expect(child.listenerCount("exit")).toBe(baselineExitListeners);
+    expect(child.stdout!.listenerCount("data")).toBe(baselineStdoutListeners);
+    expect(child.stderr!.listenerCount("data")).toBe(baselineStderrListeners);
+  });
+
   test("times out an acceleration check without masking the original exit code", async () => {
     const child = createChild();
     let probeSignal: AbortSignal | undefined;

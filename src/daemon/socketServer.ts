@@ -2740,9 +2740,9 @@ export class UnixSocketServer {
     await requestHandlersDrained;
     this.server = null;
 
-    if (this.isOwnedSocketFile()) {
-      await unlink(this.socketPath);
-    }
+    // The listener removes the socket it created as part of close(). Do not
+    // unlink the pathname afterward: a successor can bind in the interval and
+    // filesystems are allowed to reuse the original socket inode immediately.
     this.socketFileIdentity = null;
   }
 

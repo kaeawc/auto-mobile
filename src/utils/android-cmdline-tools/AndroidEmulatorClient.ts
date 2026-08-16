@@ -1396,6 +1396,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       let duplicateAvdDetected = false;
       let earlyExitCategory: LaunchFailureCategory | undefined;
       let startupValidationComplete = false;
+      let childTerminationObserved = false;
       let exitCode: number | null | undefined;
       let exitSignal: NodeJS.Signals | null | undefined;
       perf.startOperation("panicDetection");
@@ -1561,7 +1562,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           output.includes("Detected GPU type")
         ) {
           // Emulator has started successfully, resolve with the child process
-          if (!startupValidationComplete) {
+          if (!childTerminationObserved && !startupValidationComplete) {
             startupValidationComplete = true;
             perf.endOperation("panicDetection");
             resolve(child);
@@ -1732,6 +1733,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       child.on("exit", (code, signal) => {
         this.timer.clearTimeout(startupTimeout);
+        childTerminationObserved = true;
         exitCode = code;
         exitSignal = signal;
         if (code !== 0) {
@@ -1752,6 +1754,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       child.on("close", (code, signal) => {
         this.timer.clearTimeout(startupTimeout);
         clearExitDrainTimeout();
+        childTerminationObserved = true;
         exitCode ??= code;
         exitSignal ??= signal;
         if (startupValidationComplete) {

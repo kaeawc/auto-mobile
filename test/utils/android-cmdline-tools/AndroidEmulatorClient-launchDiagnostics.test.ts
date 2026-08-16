@@ -358,6 +358,21 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("rejects when a startup marker drains after child exit", async () => {
+    const child = createChild();
+    const { client, accelChecks } = createClient(child, () => {
+      child.emit("exit", 0, null);
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.emit("close", 0, null);
+    });
+
+    const error = await expectRejection(client.startEmulator(avdName));
+
+    expect(error.message).toContain("exited with code: 0");
+    expect(error.message).toContain(`AVD '${avdName}'`);
+    expect(accelChecks()).toBe(0);
+  });
+
   test("bounds and redacts a generic early-exit diagnostic tail", async () => {
     const child = createChild();
     const home = homedir();

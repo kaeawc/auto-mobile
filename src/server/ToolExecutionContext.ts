@@ -80,7 +80,7 @@ export async function createToolExecutionContext(
     return {};
   }
 
-  const existingSession = sessionManager.getSession(sessionUuid);
+  const existingSession = sessionManager.getSessionForNewExecution(sessionUuid);
 
   // Get or create session
   const session = await sessionManager.getOrCreateSession(

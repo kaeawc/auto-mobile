@@ -67,7 +67,9 @@ describe("MCP session autolock routing", () => {
       { value: "ok", __mcpSessionId: "unix-socket-session" },
       () => {
         expect(executionTracker.hasActiveSessionExecutions("unix-socket-session")).toBe(true);
-        expect(executionTracker.hasActiveSessionExecutions("shared-loopback-session")).toBe(false);
+        // The forwarded key drives autolock expiry, while the transport key is
+        // retained solely so its close/error handlers can cancel this execution.
+        expect(executionTracker.hasActiveSessionExecutions("shared-loopback-session")).toBe(true);
       },
     );
   });

@@ -92,6 +92,23 @@ describe("ExecutionTracker", function() {
     expect(tap.abortController.signal.aborted).toBe(true);
   });
 
+  test("cancels a forwarded execution when its transport session closes", async function() {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
+    const execution = tracker.startExecution(
+      "tapOn",
+      "forwarded-mcp-session",
+      undefined,
+      "streamable-http-session",
+    );
+
+    expect(tracker.hasActiveSessionExecutions("forwarded-mcp-session")).toBe(true);
+    expect(tracker.hasActiveSessionExecutions("streamable-http-session")).toBe(true);
+
+    await tracker.cancelSessionExecutions("streamable-http-session", "streamable_http_onclose");
+
+    expect(execution.abortController.signal.aborted).toBe(true);
+  });
+
   // #4183 item 6 (A3): the scope fallback in hasActiveToolExecution (executionTracker.ts)
   // had no table coverage. The scope order is: explicit "global" → sessionUuid map →
   // sessionId map → global fallback when neither key is provided.

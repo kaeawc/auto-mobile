@@ -219,6 +219,22 @@ describe("SessionManager", () => {
       const retrieved = sessionManager.getSession("session-1");
       expect(retrieved).toBeNull();
     });
+
+    test("expires a session before accepting a request that arrives after its deadline", async () => {
+      const released: string[] = [];
+      sessionManager.setActiveSessionExecutionChecker(() => true);
+      sessionManager.onSessionRelease(sessionId => released.push(sessionId));
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
+      fakeTimer.advanceTime(1001);
+
+      // Existing work keeps an expired session assigned, but a new request must
+      // not use that protection to revive the session after its deadline.
+      expect(sessionManager.getSession("session-1")).not.toBeNull();
+      await expect(sessionManager.getOrCreateSession("session-1")).rejects.toThrow("not found");
+
+      expect(released).toEqual(["session-1"]);
+      expect(sessionManager.getActiveSessionCount()).toBe(0);
+    });
   });
 
   describe("cache management", () => {

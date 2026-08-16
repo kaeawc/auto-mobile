@@ -234,8 +234,24 @@ export class SessionManager {
    * Get existing session
    */
   getSession(sessionId: string): Session | null {
+    return this.getSessionInternal(sessionId, false);
+  }
+
+  /**
+   * Resolve a session before a new tool execution is accepted. Existing work may
+   * defer expiry cleanup, but it must not let a request that arrived after the
+   * deadline revive an expired session.
+   */
+  getSessionForNewExecution(sessionId: string): Session | null {
+    return this.getSessionInternal(sessionId, true);
+  }
+
+  private getSessionInternal(sessionId: string, expireDespiteActiveExecution: boolean): Session | null {
     const session = this.sessions.get(sessionId);
-    if (session && this.isSessionExpired(session)) {
+<<<<<<< HEAD
+    if (session && (expireDespiteActiveExecution
+      ? this.timer.now() > session.expiresAt
+      : this.isSessionExpired(session))) {
       // Release owns this exact session object until it has restored device state
       // and removed its assignment. Keep expiry cleanup from creating a second
       // incarnation with the same UUID before teardown completes.
@@ -275,7 +291,7 @@ export class SessionManager {
     devicePool?: SessionDeviceAssigner,
     platform?: Platform
   ): Promise<Session> {
-    const existing = this.getSession(sessionId);
+    const existing = this.getSessionForNewExecution(sessionId);
     if (existing) {
       const inFlightRelease = this.releasePromises.get(sessionId);
       if (this.releasingSessions.has(existing) && inFlightRelease?.session === existing) {

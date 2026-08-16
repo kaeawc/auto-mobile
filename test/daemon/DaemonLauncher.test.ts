@@ -274,7 +274,7 @@ describe("DaemonLauncher", () => {
     const spawner = new FakeDaemonSpawner();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const processGroupSignals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const processGroupSignals: Array<{ pid: number; signal: NodeJS.Signals | 0 }> = [];
     const launcher = new DaemonLauncher({
       spawn: spawner.spawn.bind(spawner),
       timer,
@@ -298,8 +298,55 @@ describe("DaemonLauncher", () => {
 
     expect(processGroupSignals).toEqual([
       { pid: 12345, signal: "SIGTERM" },
+      { pid: 12345, signal: 0 },
       { pid: 12345, signal: "SIGKILL" },
     ]);
+    expect(spawner.process.signals).toEqual([]);
+  });
+
+  test("keeps detached process-group escalation armed after its wrapper exits", async () => {
+    const spawner = new FakeDaemonSpawner();
+    const timer = new FakeTimer();
+    const processGroupSignals: Array<NodeJS.Signals | 0> = [];
+    let daemonStillAlive = true;
+    const launcher = new DaemonLauncher({
+      spawn: spawner.spawn.bind(spawner),
+      timer,
+      platform: "linux",
+      processGroupKiller: (_pid, signal) => {
+        processGroupSignals.push(signal);
+        if (signal === 0 && !daemonStillAlive) {
+          throw new Error("ESRCH");
+        }
+        if (signal === "SIGTERM") {
+          // The package runner exits, but its daemon descendant ignores TERM.
+          spawner.process.emitExit(signal);
+        }
+        if (signal === "SIGKILL") {
+          daemonStillAlive = false;
+        }
+      },
+    });
+    let settled = false;
+    const launch = launcher.launchAndWait({
+      command: "bunx",
+      args: ["-y", "@kaeawc/auto-mobile@1.2.3", "--daemon-mode"],
+      spawnOptions: { detached: true },
+      timeoutMs: 100,
+      waitForReady: async () => false,
+      formatFailure: async summary => new Error(summary),
+    }).finally(() => {
+      settled = true;
+    });
+
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(processGroupSignals).toEqual(["SIGTERM", 0]);
+    expect(settled).toBe(false);
+
+    timer.advanceTime(DAEMON_SHUTDOWN_TIMEOUT_MS);
+    await expect(launch).rejects.toThrow("Daemon failed to start within 100ms");
+
+    expect(processGroupSignals).toEqual(["SIGTERM", 0, 0, "SIGKILL"]);
     expect(spawner.process.signals).toEqual([]);
   });
 

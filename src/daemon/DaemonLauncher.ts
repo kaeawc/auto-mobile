@@ -5,7 +5,6 @@ import { ActionableError } from "../models";
 import {
   trackProcess,
   waitForExit,
-  type StoppableProcess,
   type TrackedChildProcess,
 } from "../utils/ChildProcessTracker";
 import { releaseVersion } from "../utils/mcpVersion";
@@ -22,8 +21,8 @@ export interface DaemonProcessSpawner {
   spawn(command: string, args: string[], options: SpawnOptions): ChildProcess;
 }
 
-/** Signals the dedicated process group created by a detached POSIX spawn. */
-export type DaemonProcessGroupKiller = (pid: number, signal: NodeJS.Signals) => void;
+/** Signals or probes the dedicated process group created by a detached POSIX spawn. */
+export type DaemonProcessGroupKiller = (pid: number, signal: NodeJS.Signals | 0) => void;
 
 export interface DaemonLauncherDependencies {
   entryScript?: string | null;
@@ -217,15 +216,16 @@ export class DaemonLauncher {
         }
         cleanupProcessListeners();
 
-        // Keep startup ownership until the child has actually exited. The shared
-        // tracker sends SIGTERM, escalates to SIGKILL after the bounded daemon
-        // shutdown grace, and waits for the corresponding exit observation.
+        // Keep startup ownership until the child has actually exited. Detached
+        // POSIX launchers also keep process-group escalation armed after their
+        // package-runner wrapper exits, so the daemon descendant is reaped.
         const tracker = trackProcess(daemonProcess as TrackedChildProcess);
-        await waitForExit(this.shutdownTarget(tracker.process, daemonProcess.pid, request.spawnOptions.detached === true), tracker.exitPromise, {
-          signal: "SIGTERM",
-          timeoutMs: DAEMON_SHUTDOWN_TIMEOUT_MS,
-          timer: this.timer,
-        });
+        await this.stopTimedOutProcess(
+          tracker.process,
+          tracker.exitPromise,
+          daemonProcess.pid,
+          request.spawnOptions.detached === true,
+        );
         throw await request.formatFailure(`Daemon failed to start within ${request.timeoutMs}ms`);
       }
     } finally {
@@ -256,43 +256,77 @@ export class DaemonLauncher {
     }
   }
 
-  /**
-   * Detached POSIX spawns lead a new process group. Signalling that group keeps
-   * a `bunx`/`bun x` wrapper from leaving its daemon child behind. Windows has
-   * no negative-PID process-group signal API, so retain the direct-child path.
-   */
-  private shutdownTarget(
+  private async stopTimedOutProcess(
     process: TrackedChildProcess,
+    exitPromise: Promise<void>,
     pid: number | undefined,
     detached: boolean,
-  ): StoppableProcess {
+  ): Promise<void> {
     if (!detached || this.platform === "win32" || pid === undefined) {
-      return process;
+      await waitForExit(process, exitPromise, {
+        signal: "SIGTERM",
+        timeoutMs: DAEMON_SHUTDOWN_TIMEOUT_MS,
+        timer: this.timer,
+      });
+      return;
     }
 
-    const processGroupPid = pid;
-    return {
-      get exitCode() {
-        return process.exitCode;
-      },
-      get killed() {
-        return process.killed;
-      },
-      kill: signal => {
-        try {
-          this.processGroupKiller(processGroupPid, signal as NodeJS.Signals);
-          return true;
-        } catch (error) {
-          // A vanished group has no descendants left to reap. Fall back to the
-          // direct handle for unusual spawn implementations that do not create
-          // a process group despite receiving `detached: true`.
-          logger.debug(
-            `Daemon process-group signal failed for pid=${processGroupPid}; falling back to the direct child: ${error}`
-          );
-          return process.kill(signal);
-        }
-      },
-    };
+    this.signalProcessGroup(process, pid, "SIGTERM");
+    let timeout: NodeJS.Timeout | undefined;
+    const deadline = new Promise<void>(resolve => {
+      timeout = this.timer.setTimeout(resolve, DAEMON_SHUTDOWN_TIMEOUT_MS);
+    });
+
+    try {
+      const wrapperExited = await Promise.race([
+        exitPromise.then(() => true),
+        deadline.then(() => false),
+      ]);
+
+      // A `bunx`/`bun x` wrapper can exit while its daemon remains in the same
+      // detached group. Keep the grace timer alive when that group still exists.
+      if (wrapperExited && !this.isProcessGroupAlive(pid)) {
+        return;
+      }
+
+      await deadline;
+      if (this.isProcessGroupAlive(pid)) {
+        this.signalProcessGroup(process, pid, "SIGKILL");
+      }
+      await exitPromise;
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
+  }
+
+  private isProcessGroupAlive(pid: number): boolean {
+    try {
+      this.processGroupKiller(pid, 0);
+      return true;
+    } catch (error) {
+      logger.debug(`Daemon process group is no longer alive for pid=${pid}: ${error}`);
+      return false;
+    }
+  }
+
+  private signalProcessGroup(
+    process: TrackedChildProcess,
+    pid: number,
+    signal: NodeJS.Signals,
+  ): void {
+    try {
+      this.processGroupKiller(pid, signal);
+    } catch (error) {
+      // A vanished group has no descendants left to reap. Fall back to the
+      // direct handle for unusual spawn implementations that do not create a
+      // group despite receiving `detached: true`.
+      logger.debug(
+        `Daemon process-group signal failed for pid=${pid}; falling back to the direct child: ${error}`
+      );
+      process.kill(signal);
+    }
   }
 }
 

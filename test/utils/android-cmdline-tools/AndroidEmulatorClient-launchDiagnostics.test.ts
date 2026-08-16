@@ -306,7 +306,6 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       Buffer.from("token=handoff-secret\nhandoff diagnostic\n"),
     );
     child.emit("exit", 1, null);
-    child.emit("close", 1, null);
 
     const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
     let rejection: Error | undefined;
@@ -326,6 +325,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       expect(timer.getSleepCallCount()).toBe(0);
       expect(child.listenerCount("exit")).toBe(baselineExitListeners);
     } finally {
+      child.emit("close", 1, null);
       timer.setCurrentTime(60_000);
       timer.resolveAll();
       await new Promise<void>((resolve) => setImmediate(resolve));

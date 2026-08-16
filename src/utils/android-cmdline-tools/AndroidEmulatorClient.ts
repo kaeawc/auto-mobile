@@ -1680,7 +1680,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
           let category = earlyExitCategory ?? this.launchFailureCategory(finalizedOutput);
           let accelCheckOutput = "";
-          if (this.platform === "linux" && (!category || category === "kvm_permission_denied")) {
+          if (
+            completedExitCode !== 0 &&
+            this.platform === "linux" &&
+            (!category || category === "kvm_permission_denied")
+          ) {
             accelCheckOutput = await this.runAccelerationCheck();
             category = category ?? this.accelerationCheckCategory(accelCheckOutput);
           }
@@ -1732,16 +1736,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         exitSignal = signal;
         if (code !== 0) {
           logger.error(`Emulator process exited with code: ${code}`);
-          if (!startupValidationComplete) {
-            exitDrainTimeout = this.timer.setTimeout(() => {
-              logger.debug(
-                `Emulator stdio did not close within ${EARLY_EXIT_DRAIN_TIMEOUT_MS}ms after an early exit`,
-              );
-              finalizeEarlyExit();
-            }, EARLY_EXIT_DRAIN_TIMEOUT_MS);
-          }
         } else {
           logger.info(`Emulator process exited with code: ${code}`);
+        }
+        if (!startupValidationComplete) {
+          exitDrainTimeout = this.timer.setTimeout(() => {
+            logger.debug(
+              `Emulator stdio did not close within ${EARLY_EXIT_DRAIN_TIMEOUT_MS}ms after an early exit`,
+            );
+            finalizeEarlyExit();
+          }, EARLY_EXIT_DRAIN_TIMEOUT_MS);
         }
       });
 
@@ -1750,7 +1754,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         clearExitDrainTimeout();
         exitCode ??= code;
         exitSignal ??= signal;
-        if (exitCode === 0 || startupValidationComplete) {
+        if (startupValidationComplete) {
           return;
         }
         finalizeEarlyExit();

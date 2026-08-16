@@ -267,6 +267,10 @@ function shutdownTimeoutError(device: BootedDevice, detail: string): ActionableE
   );
 }
 
+function isShutdownTimeoutError(error: unknown): error is ActionableError {
+  return error instanceof ActionableError && String(error.message).startsWith("Timed out waiting for");
+}
+
 function abortPromise(signal: AbortSignal | undefined): {
   promise: Promise<never> | undefined;
   cleanup: () => void;
@@ -558,13 +562,12 @@ async function killProcessAndRetireOwnership(
   dependencies: DeviceToolsDependencies,
   device: BootedDevice,
   perf: ReturnType<typeof createPerformanceTracker>,
-  abortSignal: AbortSignal | undefined,
+  requestAbortSignal: AbortSignal | undefined,
   devicePool: DevicePool | undefined,
   expectedPooledDevice: PooledDevice | null,
+  shutdownDeadlineMs: number,
 ): Promise<string | undefined> {
   const deviceManager = dependencies.deviceManagerFactory();
-  const shutdownDeadlineMs = dependencies.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
-  const requestAbortSignal = abortSignal ?? getAbortSignal();
   if (device.platform === "android") {
     devicePool?.markIntentionalShutdown(device.deviceId);
   }
@@ -1013,20 +1016,47 @@ export function registerDeviceTools() {
     perf.serial("killDevice");
     const daemonState = DaemonState.getInstance();
     const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+    const deps = getDeviceToolsDependencies();
+    const shutdownDeadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
+    const requestAbortSignal = abortSignal ?? getAbortSignal();
     let shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
     try {
-      shutdownReservation = await devicePool?.reserveDeviceForShutdown(args.device.deviceId);
+      shutdownReservation = await runWithinShutdownDeadline(
+        args.device,
+        deps.timer,
+        shutdownDeadlineMs,
+        "shutdown preparation did not complete",
+        requestAbortSignal,
+        async () => await devicePool?.reserveDeviceForShutdown(args.device.deviceId),
+      );
       const expectedPooledDevice = shutdownReservation?.device ?? null;
 
       perf.startOperation("stopRecordings");
-      const activeRecordings = await listActiveVideoRecordings({
-        deviceId: args.device.deviceId,
-        platform: args.device.platform,
-      });
+      const activeRecordings = await runWithinShutdownDeadline(
+        args.device,
+        deps.timer,
+        shutdownDeadlineMs,
+        "recording discovery did not complete",
+        requestAbortSignal,
+        async () => await listActiveVideoRecordings({
+          deviceId: args.device.deviceId,
+          platform: args.device.platform,
+        }),
+      );
       for (const recording of activeRecordings) {
         try {
-          await stopVideoRecording(recording.recordingId);
+          await runWithinShutdownDeadline(
+            args.device,
+            deps.timer,
+            shutdownDeadlineMs,
+            "video recording teardown did not complete",
+            requestAbortSignal,
+            async () => await stopVideoRecording(recording.recordingId),
+          );
         } catch (error) {
+          if (isShutdownTimeoutError(error)) {
+            throw error;
+          }
           logger.warn(
             `[DeviceTools] Failed to stop recording ${recording.recordingId} before shutdown: ${error}`
           );
@@ -1044,21 +1074,31 @@ export function registerDeviceTools() {
             deviceId: args.device.deviceId,
             source: "local",
           });
-          await xcTestManager.stop();
+          await runWithinShutdownDeadline(
+            args.device,
+            deps.timer,
+            shutdownDeadlineMs,
+            "iOS CtrlProxy shutdown did not complete",
+            requestAbortSignal,
+            async () => await xcTestManager.stop(),
+          );
         } catch (error) {
+          if (isShutdownTimeoutError(error)) {
+            throw error;
+          }
           logger.warn(`[DeviceTools] Failed to stop CtrlProxy iOS before kill: ${error}`);
         }
         perf.endOperation("stopCtrlProxy");
       }
 
-      const deps = getDeviceToolsDependencies();
       const alreadyStoppedMessage = await killProcessAndRetireOwnership(
         deps,
         args.device,
         perf,
-        abortSignal,
+        requestAbortSignal,
         devicePool,
         expectedPooledDevice,
+        shutdownDeadlineMs,
       );
 
       perf.startOperation("cleanup");

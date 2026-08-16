@@ -1577,6 +1577,12 @@ export class DevicePool {
     if (!device) {
       return;
     }
+    if (this.isReservedForShutdown(device)) {
+      // An explicit kill owns this incarnation until it confirms physical exit
+      // and retires ownership. Its tracked process exit is expected and must
+      // not cancel the initiating request or plan through normal loss cleanup.
+      return;
+    }
 
     await this.evictMissingPooledDevice(
       device,

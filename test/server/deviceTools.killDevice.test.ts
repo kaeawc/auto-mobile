@@ -834,6 +834,71 @@ describe("killDevice handler", () => {
     expect(pool.getDevice(image.deviceId!)).toBeNull();
   });
 
+  test("releases a shutdown reservation when recording teardown exhausts the deadline", async () => {
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    let recordingListCalls = 0;
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    successfulManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: {
+        stopRecording: async () => await new Promise<void>(() => {}),
+      } as never,
+      recordingRepository: {
+        listRecordings: async () => {
+          recordingListCalls++;
+          return recordingListCalls === 1 ? [] : [{ recordingId: "recording-1" }];
+        },
+      } as never,
+      configRepository: {} as never,
+      highlightClient: {} as never,
+      timer,
+      now: () => new Date(0),
+    });
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    const result = tool.handler({
+      device: { name: image.name, platform: image.platform, deviceId: image.deviceId! },
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    timer.advanceTime(30_000);
+
+    await expect(result).rejects.toThrow("video recording teardown did not complete");
+    expect(pool.getDevice(image.deviceId!)?.sessionId).toBe("session-1");
+    await pool.releaseDevice(image.deviceId!);
+    expect(pool.getAvailableDeviceCount()).toBe(1);
+  });
+
   test("returns an actionable timeout instead of reporting success while the device remains visible", async () => {
     const timer = new FakeTimer();
     const delayedManager = new DelayedSuccessfulKillDeviceManager();

@@ -1991,6 +1991,51 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
 
+    test("defers a started emulator's process-exit cleanup while shutdown is reserved", async () => {
+      const images: DeviceInfo[] = [
+        {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          deviceId: "emulator-5554",
+          source: "local",
+        },
+      ];
+      const manager = new FakeDeviceManagerWithStartedProcess(images);
+      const releaseCalls: Array<{ sessionId: string; deviceId: string; reason: string }> = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        async (sessionId, deviceId, reason) => {
+          releaseCalls.push({ sessionId, deviceId, reason });
+          await sessionManager.releaseSession(sessionId, reason);
+        },
+      );
+
+      await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+      const reservation = await devicePool.reserveDeviceForShutdown("emulator-5554");
+      if (!reservation) {
+        throw new Error("expected shutdown reservation");
+      }
+
+      try {
+        manager.childProcess.emit("exit", 0, null);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(releaseCalls).toEqual([]);
+        expect(devicePool.getDevice("emulator-5554")).toBe(reservation.device);
+        expect(sessionManager.getSessionForDevice("emulator-5554")).toBe("session-1");
+      } finally {
+        await reservation.release();
+      }
+    });
+
     test("keeps criteria auto-start available after a process exit when recovery is disabled", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       const originalRebootOnDeathAlias = process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;

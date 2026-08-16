@@ -2077,6 +2077,20 @@ describe("DevicePool", () => {
       ).resolves.toBe("session-1");
     });
 
+    test("releases the old pooled device after rebinding an existing session", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("emulator-old"),
+        createBootedDevice("emulator-new"),
+      ]);
+      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-old", "android");
+
+      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-new", "android");
+
+      expect(devicePool.getDevice("emulator-old")).toMatchObject({ sessionId: null, status: "idle" });
+      expect(devicePool.getDevice("emulator-new")).toMatchObject({ sessionId: "session-1", status: "busy" });
+      expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-new");
+    });
+
     test("rejects a changed runtime identity inside the assignment mutex", async () => {
       await devicePool.initializeWithDevices([
         createBootedDevice("emulator-5554", "android", "Old Pixel"),

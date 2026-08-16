@@ -151,6 +151,27 @@ describe("SessionManager", () => {
       }
     });
 
+    test("releases a session after its pending creation finishes", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        repository.deferNextUpsert();
+        const creation = manager.createSession("session-pending-release", "emulator-5554", "android");
+        await repository.waitForUpsert();
+        const release = manager.releaseSession("session-pending-release");
+
+        repository.finishUpsert();
+
+        await expect(creation).resolves.toMatchObject({ sessionId: "session-pending-release" });
+        await expect(release).resolves.toBe("emulator-5554");
+        expect(manager.getSession("session-pending-release")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-5554")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("keeps ownership unpublished while a creation write is pending", async () => {
       let rejectFirstWrite!: (error: Error) => void;
       const firstWrite = new Promise<void>((_resolve, reject) => {

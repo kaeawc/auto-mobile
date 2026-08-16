@@ -148,6 +148,8 @@ export class SessionManager {
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
   /** Creation writes that must finish before a session becomes visible to callers. */
   private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
+  /** Releases received before a creation write has published its session. */
+  private readonly pendingCreationReleasePromises: Map<string, Promise<string | null>> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
   private readonly pendingSessionRebinds: Map<string, PendingSessionRebind> = new Map();
   private deviceSessionRepository: DeviceSessionPersistence;
@@ -522,8 +524,7 @@ export class SessionManager {
       if (inFlightRelease) {
         return await inFlightRelease.promise;
       }
-      logger.warn(`Cannot release session ${sessionId}: not found`);
-      return null;
+      return await this.releasePendingSessionCreation(sessionId, releaseReason, allowExpired);
     }
 
     const inFlightRelease = this.releasePromises.get(sessionId);
@@ -549,6 +550,53 @@ export class SessionManager {
       if (this.releasePromises.get(sessionId) === release) {
         this.releasePromises.delete(sessionId);
       }
+    }
+  }
+
+  private async releasePendingSessionCreation(
+    sessionId: string,
+    releaseReason: string,
+    allowExpired: boolean,
+  ): Promise<string | null> {
+    const pendingCreation = this.pendingSessionCreations.get(sessionId);
+    if (!pendingCreation) {
+      logger.warn(`Cannot release session ${sessionId}: not found`);
+      return null;
+    }
+
+    const existingRelease = this.pendingCreationReleasePromises.get(sessionId);
+    if (existingRelease) {
+      return await existingRelease;
+    }
+
+    const release = this.releaseAfterSessionCreation(
+      sessionId,
+      releaseReason,
+      allowExpired,
+      pendingCreation,
+    );
+    this.pendingCreationReleasePromises.set(sessionId, release);
+    try {
+      return await release;
+    } finally {
+      if (this.pendingCreationReleasePromises.get(sessionId) === release) {
+        this.pendingCreationReleasePromises.delete(sessionId);
+      }
+    }
+  }
+
+  private async releaseAfterSessionCreation(
+    sessionId: string,
+    releaseReason: string,
+    allowExpired: boolean,
+    pendingCreation: PendingSessionCreation,
+  ): Promise<string | null> {
+    try {
+      await pendingCreation.promise;
+      return await this.releaseSession(sessionId, releaseReason, allowExpired);
+    } catch (error) {
+      logger.warn(`Session ${sessionId} creation failed before release: ${error}`);
+      return null;
     }
   }
 
@@ -602,6 +650,21 @@ export class SessionManager {
       }
     }
   }
+
+  /** Wait for a release already admitted for this session, if any. */
+  async waitForSessionRelease(sessionId: string): Promise<void> {
+    const pendingCreationRelease = this.pendingCreationReleasePromises.get(sessionId);
+    if (pendingCreationRelease) {
+      await pendingCreationRelease;
+      return;
+    }
+
+    const release = this.releasePromises.get(sessionId);
+    if (release) {
+      await release.promise;
+    }
+  }
+
   private async releaseSessionInternal(
     sessionId: string,
     session: Session,

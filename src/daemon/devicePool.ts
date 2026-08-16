@@ -2256,14 +2256,11 @@ export class DevicePool {
     const attemptedSessionId = device.sessionId;
     try {
       const session = await createSession();
+      await this.sessionManager.waitForSessionRelease(session.sessionId);
       // A tracked process can exit while the durable session write is pending.
       // Do not publish success for a device that eviction already removed or
       // released; undo the just-published session before restoring the pool.
-      if (
-        this.devices.get(device.id) !== device ||
-        device.sessionId !== session.sessionId ||
-        device.status !== "busy"
-      ) {
+      if (!this.isSessionAssignmentCurrent(device, session)) {
         await this.sessionManager.releaseSession(
           session.sessionId,
           `device-disconnected-during-session-create:${device.id}`,
@@ -2277,6 +2274,15 @@ export class DevicePool {
       }
       throw error;
     }
+  }
+
+  private isSessionAssignmentCurrent(device: PooledDevice, session: Session): boolean {
+    return (
+      this.devices.get(device.id) === device &&
+      device.sessionId === session.sessionId &&
+      device.status === "busy" &&
+      this.sessionManager.getSession(session.sessionId) === session
+    );
   }
 
   private async rollbackAssignedSessions(assignments: ReadonlyMap<string, string>): Promise<void> {
@@ -2604,40 +2610,40 @@ export class DevicePool {
         device.status = "idle";
       }
 
-      await this.claimKnownDeviceForSession(sessionId, device, platform);
+      const assignmentSnapshot = this.snapshotSessionAssignment(device);
+      const previousSession = this.sessionManager.getSession(sessionId);
+      device.sessionId = sessionId;
+      device.status = "busy";
+      device.lastUsedAt = this.nextLastUsedAt();
+      device.assignmentCount++;
+      device.errorCount = 0;
 
+      await this.createSessionOrRestore(
+        device,
+        assignmentSnapshot,
+        this.createSessionForBinding(previousSession, sessionId, deviceId, platform),
+      );
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
     });
   }
 
-  private async claimKnownDeviceForSession(
+  private createSessionForBinding(
+    previousSession: Session | null,
     sessionId: string,
-    device: PooledDevice,
+    deviceId: string,
     platform: Platform,
-  ): Promise<void> {
-    // Create the session before claiming the device so a session created by
-    // the automatic allocator cannot leave this device reserved as well.
-    const previousSession = this.sessionManager.getSession(sessionId);
+  ): () => Promise<Session> {
     const previousDeviceId = previousSession?.assignedDevice;
-    const session = previousSession && previousDeviceId !== device.id
-      ? await this.sessionManager.rebindSession(sessionId, device.id, platform)
-      : await this.sessionManager.createSession(sessionId, device.id, platform);
-    if (session.assignedDevice !== device.id) {
-      throw new ActionableError(
-        `Session '${sessionId}' is already assigned to device '${session.assignedDevice}'.`,
-      );
+    if (!previousDeviceId || previousDeviceId === deviceId) {
+      return async () => await this.sessionManager.createSession(sessionId, deviceId, platform);
     }
 
-    device.sessionId = sessionId;
-    device.status = "busy";
-    device.lastUsedAt = this.nextLastUsedAt();
-    device.assignmentCount++;
-    device.errorCount = 0;
-
-    if (previousDeviceId && previousDeviceId !== device.id) {
-      await this.releaseDevice(previousDeviceId, sessionId);
-    }
+    return async () => {
+      const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform);
+      await this.releaseDevice(previousDeviceId);
+      return session;
+    };
   }
 
   private async reuseExistingDeviceSession(

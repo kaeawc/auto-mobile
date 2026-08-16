@@ -366,6 +366,28 @@ function shouldClearIntentionalShutdownAfterFailure(
   return platform === "android" && !requestAbortSignal?.aborted;
 }
 
+function shouldKeepIntentionalShutdownAfterCommandError(
+  error: unknown,
+  requestAbortSignal: AbortSignal | undefined,
+): boolean {
+  return requestAbortSignal?.aborted === true || isShutdownTimeoutError(error);
+}
+
+function handleShutdownCommandError(
+  device: BootedDevice,
+  error: unknown,
+  devicePool: DevicePool | undefined,
+  requestAbortSignal: AbortSignal | undefined,
+): string | undefined {
+  if (isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)) {
+    return `Failed to kill ${device.platform} device: ${error}`;
+  }
+  if (!shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal)) {
+    devicePool?.clearIntentionalShutdown(device.deviceId);
+  }
+  throw error;
+}
+
 function abortPromise(signal: AbortSignal | undefined): {
   promise: Promise<never> | undefined;
   cleanup: () => void;
@@ -688,12 +710,7 @@ async function killProcessAndRetireOwnership(
     );
     shutdownDevice = killedDevice ?? device;
   } catch (error) {
-    if (isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)) {
-      alreadyStoppedMessage = `Failed to kill ${device.platform} device: ${error}`;
-    } else {
-      devicePool?.clearIntentionalShutdown(device.deviceId);
-      throw error;
-    }
+    alreadyStoppedMessage = handleShutdownCommandError(device, error, devicePool, requestAbortSignal);
   }
   perf.endOperation("killProcess");
 

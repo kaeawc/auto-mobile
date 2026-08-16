@@ -2208,6 +2208,7 @@ export class DevicePool {
       replacement.platform !== "android" ||
       !expectedDevice.avdName ||
       !expectedDevice.androidImage ||
+      replacement.name !== expectedDevice.avdName ||
       !this.criteriaMatcher.androidRediscoveryMatches(
         replacement,
         expectedDevice.id,

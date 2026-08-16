@@ -82,7 +82,7 @@ describe("AndroidEmulatorClient polling interval configuration", () => {
     expect(await observePollingInterval("250")).toBe(250);
   });
 
-  test("bounds a large finite interval by the readiness deadline", async () => {
-    expect(await observePollingInterval("1e9")).toBe(1_000);
+  test("chunks a large finite interval to preserve exit responsiveness", async () => {
+    expect(await observePollingInterval("1e9")).toBe(500);
   });
 });

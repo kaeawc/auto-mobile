@@ -27,6 +27,7 @@ const EARLY_EXIT_DRAIN_TIMEOUT_MS = 1_000;
 const DEFAULT_EMULATOR_POLLING_INTERVAL_MS = 500;
 const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const MAX_POLLING_SLEEP_CHUNK_MS = 500;
 
 type LaunchFailureCategory =
   | "display_initialization_failed"
@@ -1899,6 +1900,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     );
 
     // Monitor child process for early exit if provided
+    let pollingActive = true;
     let processExitError: ActionableError | null = null;
     if (childProcess && childProcess.pid) {
       const processOutput: string[] = [];
@@ -1952,12 +1954,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           logger.error(
             `Emulator process exited during readiness wait: ${processExitError.message}`,
           );
+          pollingActive = false;
         }
       });
     }
 
     // Start background polling immediately with configurable intervals
-    let pollingActive = true;
     let foundDeviceId: string | null = null;
     const offlineTracker = { deviceId: null as string | null, since: null as number | null };
 
@@ -1967,6 +1969,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         try {
           this.recordLaunchError(childProcess, (error) => {
             processExitError = error;
+            pollingActive = false;
           });
           logger.debug(`Background polling iteration - checking for emulator '${avdName}'...`);
 
@@ -2133,13 +2136,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           pollingActive = false;
           break;
         }
-        const pollingDelayMs = Math.min(pollingIntervalMs, remainingPollingTimeMs);
+        let remainingPollingDelayMs = Math.min(pollingIntervalMs, remainingPollingTimeMs);
 
         // Never let the background poller sleep past the readiness deadline.
         logger.debug(
-          `Background polling cycle complete - sleeping ${pollingDelayMs}ms before next check`,
+          `Background polling cycle complete - sleeping ${remainingPollingDelayMs}ms before next check`,
         );
-        await this.sleep(pollingDelayMs);
+        while (pollingActive && !foundDeviceId && remainingPollingDelayMs > 0) {
+          const sleepChunkMs = Math.min(
+            remainingPollingDelayMs,
+            MAX_POLLING_SLEEP_CHUNK_MS,
+          );
+          await this.sleep(sleepChunkMs);
+          remainingPollingDelayMs -= sleepChunkMs;
+        }
       }
       logger.debug(
         `Background polling stopped - pollingActive: ${pollingActive}, foundDeviceId: ${foundDeviceId}`,

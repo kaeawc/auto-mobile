@@ -1396,6 +1396,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       let duplicateAvdDetected = false;
       let earlyExitCategory: LaunchFailureCategory | undefined;
       let startupValidationComplete = false;
+      let childTerminationObserved = false;
       let exitCode: number | null | undefined;
       let exitSignal: NodeJS.Signals | null | undefined;
       perf.startOperation("panicDetection");
@@ -1561,7 +1562,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           output.includes("Detected GPU type")
         ) {
           // Emulator has started successfully, resolve with the child process
-          if (!startupValidationComplete) {
+          if (!childTerminationObserved && !startupValidationComplete) {
             startupValidationComplete = true;
             perf.endOperation("panicDetection");
             resolve(child);
@@ -1680,7 +1681,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
           let category = earlyExitCategory ?? this.launchFailureCategory(finalizedOutput);
           let accelCheckOutput = "";
-          if (this.platform === "linux" && (!category || category === "kvm_permission_denied")) {
+          if (
+            completedExitCode !== 0 &&
+            this.platform === "linux" &&
+            (!category || category === "kvm_permission_denied")
+          ) {
             accelCheckOutput = await this.runAccelerationCheck();
             category = category ?? this.accelerationCheckCategory(accelCheckOutput);
           }
@@ -1728,29 +1733,31 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       child.on("exit", (code, signal) => {
         this.timer.clearTimeout(startupTimeout);
+        childTerminationObserved = true;
         exitCode = code;
         exitSignal = signal;
         if (code !== 0) {
           logger.error(`Emulator process exited with code: ${code}`);
-          if (!startupValidationComplete) {
-            exitDrainTimeout = this.timer.setTimeout(() => {
-              logger.debug(
-                `Emulator stdio did not close within ${EARLY_EXIT_DRAIN_TIMEOUT_MS}ms after an early exit`,
-              );
-              finalizeEarlyExit();
-            }, EARLY_EXIT_DRAIN_TIMEOUT_MS);
-          }
         } else {
           logger.info(`Emulator process exited with code: ${code}`);
+        }
+        if (!startupValidationComplete) {
+          exitDrainTimeout = this.timer.setTimeout(() => {
+            logger.debug(
+              `Emulator stdio did not close within ${EARLY_EXIT_DRAIN_TIMEOUT_MS}ms after an early exit`,
+            );
+            finalizeEarlyExit();
+          }, EARLY_EXIT_DRAIN_TIMEOUT_MS);
         }
       });
 
       child.on("close", (code, signal) => {
         this.timer.clearTimeout(startupTimeout);
         clearExitDrainTimeout();
+        childTerminationObserved = true;
         exitCode ??= code;
         exitSignal ??= signal;
-        if (exitCode === 0 || startupValidationComplete) {
+        if (startupValidationComplete) {
           return;
         }
         finalizeEarlyExit();

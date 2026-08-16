@@ -280,13 +280,17 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     expect(error.message).toContain("Disk image is corrupt");
   });
 
-  test("does not run an acceleration check for a successful launch", async () => {
+  test("keeps a validated launch resolved after a later clean exit", async () => {
     const child = createChild();
     const { client, accelChecks } = createClient(child, () => {
       child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
 
-    await expect(client.startEmulator(avdName)).resolves.toBe(child);
+    const launchedChild = await client.startEmulator(avdName);
+    child.emit("exit", 0, null);
+    child.emit("close", 0, null);
+
+    expect(launchedChild).toBe(child);
     expect(accelChecks()).toBe(0);
   });
 
@@ -331,6 +335,42 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const error = await expectRejection(start);
 
     expect(error.message).toContain("exited with code: 1");
+  });
+
+  test("rejects promptly when the child exits cleanly before startup validation", async () => {
+    const child = createChild();
+    const { client, accelChecks, timer } = createClient(child, () => {
+      child.emit("exit", 0, null);
+      child.emit("close", 0, null);
+    });
+    let rejection: Error | undefined;
+    void client.startEmulator(avdName).catch((error) => {
+      rejection = error instanceof Error ? error : new Error(String(error));
+    });
+
+    for (let turn = 0; turn < 10 && !rejection; turn += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    expect(rejection?.message).toContain("exited with code: 0");
+    expect(rejection?.message).toContain(`AVD '${avdName}'`);
+    expect(accelChecks()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("rejects when a startup marker drains after child exit", async () => {
+    const child = createChild();
+    const { client, accelChecks } = createClient(child, () => {
+      child.emit("exit", 0, null);
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.emit("close", 0, null);
+    });
+
+    const error = await expectRejection(client.startEmulator(avdName));
+
+    expect(error.message).toContain("exited with code: 0");
+    expect(error.message).toContain(`AVD '${avdName}'`);
+    expect(accelChecks()).toBe(0);
   });
 
   test("bounds and redacts a generic early-exit diagnostic tail", async () => {

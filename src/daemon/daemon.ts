@@ -117,7 +117,7 @@ const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
 const MIGRATION_SETTLE_TIMEOUT_MS = 5_000;
 
 type HealthFailureKind = "http" | "socket" | "database" | "unknown";
-type DatabaseHealthFailureRecovery = (code: number) => void;
+type DatabaseHealthFailureRecovery = (code: number) => void | Promise<void>;
 
 /**
  * Main daemon process
@@ -187,10 +187,13 @@ export class Daemon {
     this.databaseInitializer = databaseInitializer;
     this.databaseHealthProbe = databaseHealthProbe;
     this.startupFailureTracker = startupFailureTracker;
-    this.recoverFromDatabaseHealthFailure = recoverFromDatabaseHealthFailure ?? (code => {
+    this.recoverFromDatabaseHealthFailure = recoverFromDatabaseHealthFailure ?? (async code => {
       cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
-      logger.close();
-      process.exit(code);
+      try {
+        await logger.closeAfterFlush();
+      } finally {
+        process.exit(code);
+      }
     });
     this.observationStreamHealth = new DefaultObservationStreamHealth({
       getServer: getDeviceDataStreamServer,
@@ -1401,7 +1404,7 @@ export class Daemon {
 
       if (failureKind === "database") {
         logger.error("Database health check failed repeatedly; exiting daemon for a clean restart.");
-        this.recoverFromDatabaseHealthFailure(1);
+        await this.recoverFromDatabaseHealthFailure(1);
         return;
       }
 

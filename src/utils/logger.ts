@@ -60,7 +60,7 @@ export interface Logger {
   flush(): Promise<void>;
 
   /**
-   * Closes the log stream
+   * Flushes queued writes and closes the log stream.
    */
   close(): void;
 
@@ -155,7 +155,6 @@ ensureDirExists(logsDir).catch(err => {
 const ownLogPrefix = resolveProcessLogPrefix(process.argv, process.pid);
 const logFilePath = path.join(logsDir, `${ownLogPrefix}.log`);
 let logStream = fs.createWriteStream(logFilePath, { flags: "a" });
-
 interface EndableLogStream {
   end(callback: () => void): void;
   once(event: "error", listener: (error: Error) => void): void;
@@ -315,7 +314,15 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
       logMessage = logMessage.substring(0, 1000) + "... (truncated)";
     }
     const safeLogMessage = logMessage.replace(/[\r\n\t]/g, " ");
-    logStream.write(safeLogMessage + "\n");
+    await new Promise<void>((resolve, reject) => {
+      logStream.write(safeLogMessage + "\n", error => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
 
     // Also write to STDOUT if enabled
     if (logToStdout) {
@@ -408,7 +415,7 @@ export const logger: Logger = {
   },
 
   /**
-   * Closes the log stream
+   * Flushes queued writes and closes the log stream.
    */
   close(): void {
     logStream.end();

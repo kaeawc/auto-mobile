@@ -361,10 +361,20 @@ describe("disconnect monitor miss counting", () => {
 
   test("clears miss state after a candidate stops being tracked", () => {
     const misses = new Map<string, number>([["sim-1", 2]]);
+    const confirmedDisconnectedDeviceIds = new Set(["sim-1"]);
 
-    runDisconnectPoll(misses, new Set(["emulator-5554"]), new Set(), new Set(["android"]));
+    evaluateDeviceDisconnects({
+      deviceDisconnectMisses: misses,
+      confirmedDisconnectedDeviceIds,
+      bootedDeviceIds: new Set(["emulator-5554"]),
+      candidateDeviceIds: new Set(),
+      succeededPlatforms: new Set(["android" as const]),
+      candidatePlatforms: new Map(),
+      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
+    });
 
     expect(misses.has("sim-1")).toBe(false);
+    expect(confirmedDisconnectedDeviceIds.has("sim-1")).toBe(false);
   });
 
   test("clears a confirmed marker for a newly pooled candidate", () => {

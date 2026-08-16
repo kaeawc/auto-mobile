@@ -36,6 +36,7 @@ export function evaluateDeviceDisconnects(
   for (const deviceId of input.deviceDisconnectMisses.keys()) {
     if (!input.candidateDeviceIds.has(deviceId)) {
       clearMiss(deviceId);
+      input.confirmedDisconnectedDeviceIds.delete(deviceId);
     }
   }
 

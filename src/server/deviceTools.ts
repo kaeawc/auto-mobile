@@ -30,7 +30,7 @@ import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheW
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { executionTracker } from "./executionTracker";
 import {
   createDefaultRunnerReadinessService,
@@ -267,38 +267,99 @@ function shutdownTimeoutError(device: BootedDevice, detail: string): ActionableE
   );
 }
 
-async function getShutdownDiscovery(
-  deviceManager: PlatformDeviceManager,
+function abortPromise(signal: AbortSignal | undefined): {
+  promise: Promise<never> | undefined;
+  cleanup: () => void;
+} {
+  if (!signal) {
+    return { promise: undefined, cleanup: () => undefined };
+  }
+  let onAbort: (() => void) | undefined;
+  const promise = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason ?? new Error("Operation cancelled"));
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  return {
+    promise,
+    cleanup: () => {
+      if (onAbort) {
+        signal.removeEventListener("abort", onAbort);
+      }
+    },
+  };
+}
+
+async function runWithinShutdownDeadline<T>(
   device: BootedDevice,
   timer: Timer,
   deadlineMs: number,
-) {
+  detail: string,
+  requestAbortSignal: AbortSignal | undefined,
+  operation: (signal: AbortSignal, timeoutMs: number) => Promise<T>,
+): Promise<T> {
   const remainingMs = deadlineMs - timer.now();
   if (remainingMs <= 0) {
-    throw shutdownTimeoutError(device, "platform discovery did not complete");
+    throw shutdownTimeoutError(device, detail);
   }
+  const deadlineController = new AbortController();
+  const signal = requestAbortSignal
+    ? AbortSignal.any([requestAbortSignal, deadlineController.signal])
+    : deadlineController.signal;
   let timeout: NodeJS.Timeout | undefined;
-  const controller = new AbortController();
+  let timedOut = false;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeout = timer.setTimeout(() => {
-      controller.abort();
-      reject(shutdownTimeoutError(device, "platform discovery did not complete"));
+      timedOut = true;
+      deadlineController.abort();
+      reject(shutdownTimeoutError(device, detail));
     }, remainingMs);
   });
+  const requestAbort = abortPromise(requestAbortSignal);
+  const operationPromise = runWithAbortSignal(signal, () => operation(signal, remainingMs)).catch(error => {
+    if (timedOut) {
+      throw shutdownTimeoutError(device, detail);
+    }
+    throw error;
+  });
+  // If the deadline wins while a platform command ignores abort, the race is
+  // settled but the underlying promise remains observed rather than leaking an
+  // unhandled rejection when it eventually completes.
+  operationPromise.catch(() => undefined);
   try {
     return await Promise.race([
-      runWithAbortSignal(controller.signal, () =>
-        deviceManager.getBootedDevicesDetailed(device.platform, {
-          bypassAndroidDeviceListCache: true,
-        }),
-      ),
+      operationPromise,
       timeoutPromise,
+      ...(requestAbort.promise ? [requestAbort.promise] : []),
     ]);
   } finally {
     if (timeout) {
       timer.clearTimeout(timeout);
     }
+    requestAbort.cleanup();
   }
+}
+
+async function getShutdownDiscovery(
+  deviceManager: PlatformDeviceManager,
+  device: BootedDevice,
+  timer: Timer,
+  deadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+) {
+  return await runWithinShutdownDeadline(
+    device,
+    timer,
+    deadlineMs,
+    "platform discovery did not complete",
+    requestAbortSignal ?? getAbortSignal(),
+    async () => await deviceManager.getBootedDevicesDetailed(device.platform, {
+          bypassAndroidDeviceListCache: true,
+        }),
+  );
 }
 
 async function waitForDeviceShutdown(
@@ -306,13 +367,20 @@ async function waitForDeviceShutdown(
   device: BootedDevice,
   timer: Timer,
   deadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
 ): Promise<BootedDevice | undefined> {
   let lastDiscoveryDetail = "platform discovery did not complete";
   for (;;) {
     if (timer.now() >= deadlineMs) {
       throw shutdownTimeoutError(device, lastDiscoveryDetail);
     }
-    const discovery = await getShutdownDiscovery(deviceManager, device, timer, deadlineMs);
+    const discovery = await getShutdownDiscovery(
+      deviceManager,
+      device,
+      timer,
+      deadlineMs,
+      requestAbortSignal,
+    );
     const platformWasDiscovered = discovery.succeededPlatforms.has(device.platform);
     const matchingDevice = findDiscoveredDevice(discovery, device);
     if (platformWasDiscovered && !matchingDevice) {
@@ -384,6 +452,7 @@ async function findReplacementAfterSessionRelease(
   device: BootedDevice,
   timer: Timer,
   deadlineMs: number,
+  requestAbortSignal: AbortSignal | undefined,
 ): Promise<BootedDevice | undefined> {
   // The absence observation only proves the old incarnation was gone before
   // session release. A same-ID replacement can appear while that release
@@ -393,7 +462,13 @@ async function findReplacementAfterSessionRelease(
     deadlineMs,
     timer.now() + DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS,
   );
-  const discovery = await getShutdownDiscovery(deviceManager, device, timer, recheckDeadlineMs);
+  const discovery = await getShutdownDiscovery(
+    deviceManager,
+    device,
+    timer,
+    recheckDeadlineMs,
+    requestAbortSignal,
+  );
   const replacement = findDiscoveredDevice(discovery, device);
   if (replacement && !isSameBootedDeviceIdentity(device, replacement)) {
     return replacement;
@@ -401,7 +476,13 @@ async function findReplacementAfterSessionRelease(
   if (!replacement && discovery.succeededPlatforms.has(device.platform)) {
     return undefined;
   }
-  return await waitForDeviceShutdown(deviceManager, device, timer, recheckDeadlineMs);
+  return await waitForDeviceShutdown(
+    deviceManager,
+    device,
+    timer,
+    recheckDeadlineMs,
+    requestAbortSignal,
+  );
 }
 
 async function retireShutdownOwnership(
@@ -452,6 +533,7 @@ async function retireShutdownOwnership(
     device,
     timer,
     deadlineMs,
+    abortSignal,
   );
   if (replacement) {
     await rebuildSameIdReplacement(
@@ -481,6 +563,8 @@ async function killProcessAndRetireOwnership(
   expectedPooledDevice: PooledDevice | null,
 ): Promise<string | undefined> {
   const deviceManager = dependencies.deviceManagerFactory();
+  const shutdownDeadlineMs = dependencies.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
+  const requestAbortSignal = abortSignal ?? getAbortSignal();
   if (device.platform === "android") {
     devicePool?.markIntentionalShutdown(device.deviceId);
   }
@@ -489,7 +573,14 @@ async function killProcessAndRetireOwnership(
   let alreadyStoppedMessage: string | undefined;
   perf.startOperation("killProcess");
   try {
-    const killedDevice = await deviceManager.killDevice(device);
+    const killedDevice = await runWithinShutdownDeadline(
+      device,
+      dependencies.timer,
+      shutdownDeadlineMs,
+      "platform shutdown command did not complete",
+      requestAbortSignal,
+      async (signal, timeoutMs) => await deviceManager.killDevice(device, { signal, timeoutMs }),
+    );
     shutdownDevice = killedDevice ?? device;
   } catch (error) {
     if (isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)) {
@@ -505,7 +596,6 @@ async function killProcessAndRetireOwnership(
     return alreadyStoppedMessage;
   }
 
-  const shutdownDeadlineMs = dependencies.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
   try {
     perf.startOperation("waitForShutdown");
     const observedReplacement = await waitForDeviceShutdown(
@@ -513,6 +603,7 @@ async function killProcessAndRetireOwnership(
       shutdownDevice,
       dependencies.timer,
       shutdownDeadlineMs,
+      requestAbortSignal,
     );
     perf.endOperation("waitForShutdown");
 
@@ -524,7 +615,7 @@ async function killProcessAndRetireOwnership(
       deviceManager,
       dependencies.timer,
       shutdownDeadlineMs,
-      abortSignal,
+      requestAbortSignal,
       dependencies.stopPerformanceMonitoring,
     );
     perf.endOperation("retireOwnership");

@@ -148,7 +148,7 @@ export interface AndroidEmulator {
    * @param device - The device to kill
    * @returns Promise that resolves when emulator is stopped
    */
-  killDevice(device: BootedDevice): Promise<BootedDevice>;
+  killDevice(device: BootedDevice, options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<BootedDevice>;
 
   /**
    * Wait for the emulator to be ready for use
@@ -1128,6 +1128,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   async getBootedDevicesChecked(
     onlyEmulators: boolean = false,
     options: { bypassDeviceListCache?: boolean } = {},
+    signal?: AbortSignal,
   ): Promise<BootedDevice[]> {
     const perf = createGlobalPerformanceTracker();
     {
@@ -1136,6 +1137,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const devices = await adb.getBootedAndroidDevices({
         bypassCache: options.bypassDeviceListCache,
         throwOnMissingAdb: true,
+        signal,
       });
       perf.endOperation("adbDeviceScan");
       const runningDevices: BootedDevice[] = [];
@@ -1156,6 +1158,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             infoTimeoutMs,
             undefined,
             true,
+            signal,
           );
           const avdName = result.stdout.trim().replace(/\r?\n.*$/, ""); // Remove any trailing newlines and additional text
 
@@ -1198,6 +1201,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
               infoTimeoutMs,
               undefined,
               true,
+              signal,
             );
             const modelName = result.stdout.trim();
 
@@ -1780,10 +1784,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param device - The device to kill
    * @returns Promise that resolves when emulator is stopped
    */
-  async killDevice(device: BootedDevice): Promise<BootedDevice> {
+  async killDevice(
+    device: BootedDevice,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<BootedDevice> {
     const runningEmulators = await this.getBootedDevicesChecked(false, {
       bypassDeviceListCache: true,
-    });
+    }, options.signal);
     const emulator = runningEmulators.find((emu) => emu.deviceId === device.deviceId);
 
     if (!emulator || !emulator.deviceId) {
@@ -1792,7 +1799,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     // Use ADB to stop the emulator
     const adb = this.adbFactory.create(emulator);
-    await adb.executeCommand("emu kill");
+    await adb.executeCommand("emu kill", options.timeoutMs, undefined, true, options.signal);
 
     logger.info(`Killed emulator '${device.name}'`);
     return emulator;

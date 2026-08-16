@@ -22,7 +22,11 @@ import { DeviceSessionRepository } from "../../src/db/DeviceSessionRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import type { BootedDeviceDiscovery, BootedDeviceDiscoveryOptions } from "../../src/utils/deviceUtils";
+import type {
+  BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
+  DeviceShutdownOptions,
+} from "../../src/utils/deviceUtils";
 
 class FailingKillDeviceManager extends FakeDeviceUtils {
   readonly childProcess = new EventEmitter() as ChildProcess;
@@ -227,6 +231,19 @@ class AbortAwareHungDiscoveryKillDeviceManager extends DelayedSuccessfulKillDevi
       this.discoveryWasAborted = true;
     }, { once: true });
     return new Promise<BootedDeviceDiscovery>(() => {});
+  }
+}
+
+class AbortAwareHungShutdownCommandDeviceManager extends FailingKillDeviceManager {
+  commandWasAborted = false;
+  commandOptions: DeviceShutdownOptions | undefined;
+
+  override killDevice(_: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
+    this.commandOptions = options;
+    options?.signal?.addEventListener("abort", () => {
+      this.commandWasAborted = true;
+    }, { once: true });
+    return new Promise<void>(() => {});
   }
 }
 
@@ -1065,6 +1082,63 @@ describe("killDevice handler", () => {
     timer.advanceTime(30_000);
     await expect(result).rejects.toThrow("platform discovery did not complete");
 
+    expect(abortAwareManager.discoveryWasAborted).toBe(true);
+  });
+
+  test("bounds and aborts a hung platform shutdown command", async () => {
+    const timer = new FakeTimer();
+    const hungManager = new AbortAwareHungShutdownCommandDeviceManager();
+    manager = hungManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => hungManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    const device: BootedDevice = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    const result = tool.handler({ device });
+    await new Promise(resolve => setImmediate(resolve));
+    timer.advanceTime(30_000);
+
+    await expect(result).rejects.toThrow("platform shutdown command did not complete");
+    expect(hungManager.commandWasAborted).toBe(true);
+    expect(hungManager.commandOptions?.timeoutMs).toBe(30_000);
+  });
+
+  test("preserves caller cancellation while shutdown discovery is pending", async () => {
+    const timer = new FakeTimer();
+    const abortAwareManager = new AbortAwareHungDiscoveryKillDeviceManager();
+    manager = abortAwareManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => abortAwareManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    const controller = new AbortController();
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    const result = tool.handler({
+      device: { name: "iPhone 16", platform: "ios", deviceId: "IOS-UDID" },
+    }, undefined, controller.signal);
+    await new Promise(resolve => setImmediate(resolve));
+    controller.abort(new Error("caller cancelled shutdown"));
+
+    await expect(result).rejects.toThrow("caller cancelled shutdown");
     expect(abortAwareManager.discoveryWasAborted).toBe(true);
   });
 

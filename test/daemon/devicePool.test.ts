@@ -1642,6 +1642,9 @@ describe("DevicePool", () => {
 
       try {
         expect(devicePool.getAvailableDeviceCount()).toBe(0);
+        devicePool.markIntentionalShutdown(captured.id);
+        await devicePool.removeDisconnectedDevice(captured.id, false);
+        expect(devicePool.getDevice(captured.id)).toBe(captured);
         await expect(
           devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform),
         ).rejects.toThrow(/shutting down/);

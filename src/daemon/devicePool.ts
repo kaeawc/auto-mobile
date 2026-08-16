@@ -541,12 +541,26 @@ export class DevicePool {
     return true;
   }
 
+  private async shouldDeferDisconnectCleanup(
+    deviceId: string,
+    device: PooledDevice | undefined,
+    mayBeStaleSignal: boolean,
+  ): Promise<boolean> {
+    if (device && this.isReservedForShutdown(device)) {
+      // killDevice owns this captured incarnation until its bounded disappearance
+      // check retires it (or hands a replacement to the pool). A concurrent
+      // monitor signal must not release its session or consume its marker.
+      return true;
+    }
+    return await this.applyIntentionalShutdownOnDisconnect(deviceId, device, mayBeStaleSignal);
+  }
+
   async removeDisconnectedDevice(
     deviceId: string,
     mayBeStaleSignal: boolean = true,
   ): Promise<void> {
     const device = this.devices.get(deviceId);
-    if (await this.applyIntentionalShutdownOnDisconnect(deviceId, device, mayBeStaleSignal)) {
+    if (await this.shouldDeferDisconnectCleanup(deviceId, device, mayBeStaleSignal)) {
       return;
     }
     if (!device || device.sessionId) {

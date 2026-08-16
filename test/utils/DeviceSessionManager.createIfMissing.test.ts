@@ -6,7 +6,7 @@ import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
 import { resetDeviceCreationGate, setDeviceCreationGate } from "../../src/utils/deviceCreationGate";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, DeviceInfo } from "../../src/models";
 
 interface SimctlRecorder {
   createCalls: { name: string; deviceType: string; runtime: string }[];
@@ -14,12 +14,12 @@ interface SimctlRecorder {
 }
 
 /**
- * Minimal simctl stub reporting an EMPTY simulator list — the condition that
- * makes findOrStartIosDevice either throw or (when gated on) provision.
+ * Minimal injected simctl fake. It never reaches a real simulator, and records
+ * the creation and boot decisions made by findOrStartIosDevice.
  */
-function makeEmptySimctl(recorder: SimctlRecorder): SimCtlClient {
+function makeSimctl(recorder: SimctlRecorder, simulatorImages: DeviceInfo[] = []): SimCtlClient {
   return {
-    listSimulatorImages: async () => [],
+    listSimulatorImages: async () => simulatorImages,
     getBootedSimulators: async () => [],
     getDeviceTypes: async () => [
       {
@@ -45,6 +45,22 @@ function makeEmptySimctl(recorder: SimctlRecorder): SimCtlClient {
   } as unknown as SimCtlClient;
 }
 
+function simulatorImage(
+  deviceId: string,
+  isAvailable: boolean,
+  availabilityError?: string,
+): DeviceInfo {
+  return {
+    name: `iPhone ${deviceId}`,
+    platform: "ios",
+    isRunning: false,
+    deviceId,
+    state: "Shutdown",
+    isAvailable,
+    availabilityError,
+  };
+}
+
 describe("findOrStartIosDevice creation gate", () => {
   let recorder: SimctlRecorder;
   let manager: DeviceSessionManager;
@@ -54,7 +70,7 @@ describe("findOrStartIosDevice creation gate", () => {
     const provider = new FakeDeviceClientProvider(
       new FakeAdbExecutor(),
       new FakeDeviceUtils(),
-      makeEmptySimctl(recorder),
+      makeSimctl(recorder),
     );
     manager = new DeviceSessionManager(provider);
   });
@@ -92,5 +108,52 @@ describe("findOrStartIosDevice creation gate", () => {
 
     await expect(manager.findOrStartIosDevice()).rejects.toThrow(/No iOS simulators are available/);
     expect(gate.calls).toEqual([undefined]);
+  });
+
+  test("boots an available simulator when an unavailable one sorts first", async () => {
+    const provider = new FakeDeviceClientProvider(
+      new FakeAdbExecutor(),
+      new FakeDeviceUtils(),
+      makeSimctl(recorder, [
+        simulatorImage("000-unavailable", false, "runtime unavailable"),
+        simulatorImage("999-available", true),
+      ]),
+    );
+    manager = new DeviceSessionManager(provider);
+
+    await manager.findOrStartIosDevice();
+
+    expect(recorder.bootCalls).toEqual(["999-available"]);
+  });
+
+  test("provisions a replacement when every simulator image is unavailable and creation is enabled", async () => {
+    const provider = new FakeDeviceClientProvider(
+      new FakeAdbExecutor(),
+      new FakeDeviceUtils(),
+      makeSimctl(recorder, [simulatorImage("unavailable", false, "runtime unavailable")]),
+    );
+    manager = new DeviceSessionManager(provider);
+    setDeviceCreationGate(new FakeDeviceCreationGate(true));
+
+    await manager.findOrStartIosDevice();
+
+    expect(recorder.createCalls).toHaveLength(1);
+    expect(recorder.bootCalls).toEqual(["CREATED-UDID"]);
+  });
+
+  test("reports unavailable simulator diagnostics when creation is disabled", async () => {
+    const provider = new FakeDeviceClientProvider(
+      new FakeAdbExecutor(),
+      new FakeDeviceUtils(),
+      makeSimctl(recorder, [simulatorImage("unavailable", false, "runtime unavailable")]),
+    );
+    manager = new DeviceSessionManager(provider);
+    setDeviceCreationGate(new FakeDeviceCreationGate(false));
+
+    await expect(manager.findOrStartIosDevice()).rejects.toThrow(
+      "No available iOS simulators. Unavailable simulators: iPhone unavailable (unavailable): runtime unavailable."
+    );
+    expect(recorder.createCalls).toEqual([]);
+    expect(recorder.bootCalls).toEqual([]);
   });
 });

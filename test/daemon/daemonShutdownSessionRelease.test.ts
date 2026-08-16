@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import * as databaseModule from "../../src/db";
+import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import {
   type DeviceSessionActivityUpdate,
   type DeviceSessionRecord,
@@ -45,10 +46,15 @@ class FakeDeviceSessionRepository {
 }
 
 describe("Daemon shutdown session release (issue #5303)", () => {
+  // Daemon shutdown drains the process-wide write barrier. These unit tests mock
+  // closeDatabase(), so reset that global explicitly to retain test isolation.
+  beforeEach(() => resetDbWriteBarrier());
+
   afterEach(() => {
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
+    resetDbWriteBarrier();
   });
 
   test("releases active sessions before closing the database", async () => {

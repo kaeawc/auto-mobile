@@ -825,7 +825,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
           // detector cleanup) complete — and any rejection is caught by this try —
           // before the device is freed (#4984).
           await sessionManager.releaseSession(session.sessionId);
-          await devicePool.releaseDevice(deviceId);
+          await devicePool.releaseDevice(deviceId, session.sessionId);
           NavigationGraphManager.releaseSession(releaseSessionUuid);
           // CtrlProxy client binding + detector cleanup for the released session is
           // handled centrally in the daemon's onSessionRelease hook (#4984), which

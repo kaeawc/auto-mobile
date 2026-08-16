@@ -799,8 +799,8 @@ export class DevicePool {
 
     if (!result.success) {
       // Release any devices we've assigned so far
-      for (const deviceId of assignments.values()) {
-        await this.releaseDevice(deviceId);
+      for (const [sessionId, deviceId] of assignments) {
+        await this.releaseDevice(deviceId, sessionId);
       }
 
       // Check if it was a non-retryable error
@@ -909,8 +909,8 @@ export class DevicePool {
       const elapsed = this.timer.now() - startTime;
 
       if (elapsed > timeoutMs) {
-        for (const deviceId of assignments.values()) {
-          await this.releaseDevice(deviceId);
+        for (const [sessionId, deviceId] of assignments) {
+          await this.releaseDevice(deviceId, sessionId);
         }
         throw new ActionableError(
           `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
@@ -939,15 +939,15 @@ export class DevicePool {
               `(${assignments.size}/${requiredCount})`,
           );
         } else if (result.livenessUnknown) {
-          for (const deviceId of assignments.values()) {
-            await this.releaseDevice(deviceId);
+          for (const [sessionId, deviceId] of assignments) {
+            await this.releaseDevice(deviceId, sessionId);
           }
           throw new ActionableError(
             `Unable to verify iOS simulator liveness for session ${request.sessionId}; iOS discovery failed.`,
           );
         } else if (!result.shouldWait) {
-          for (const deviceId of assignments.values()) {
-            await this.releaseDevice(deviceId);
+          for (const [sessionId, deviceId] of assignments) {
+            await this.releaseDevice(deviceId, sessionId);
           }
           const summary = this.criteriaMatcher.formatCriteriaSummary(request.criteria);
           throw new ActionableError(
@@ -1986,7 +1986,7 @@ export class DevicePool {
    * Called when a session completes or times out.
    * Frees the device so it can be assigned to other sessions.
    */
-  async releaseDevice(deviceId: string): Promise<void> {
+  async releaseDevice(deviceId: string, expectedSessionId: string): Promise<void> {
     const device = this.devices.get(deviceId);
     if (!device) {
       logger.warn(`Cannot release device ${deviceId}: not in pool`);
@@ -1995,6 +1995,13 @@ export class DevicePool {
 
     if (!device.sessionId) {
       logger.debug(`Device ${deviceId} is already idle`);
+      return;
+    }
+
+    if (device.sessionId !== expectedSessionId) {
+      logger.debug(
+        `Ignoring stale release for device ${deviceId}: expected ${expectedSessionId}, owned by ${device.sessionId}`,
+      );
       return;
     }
 

@@ -118,7 +118,7 @@ export const releaseDeviceLabelSessions = async (baseSessionUuid: string): Promi
     // possibly reassigned — otherwise hierarchy/nav broadcasts during the release get
     // recorded under the ended session's uuid. Mirrors the base-session path (#4984).
     await sessionManager.releaseSession(sessionUuid);
-    await devicePool.releaseDevice(deviceId);
+    await devicePool.releaseDevice(deviceId, sessionUuid);
     released.push(sessionUuid);
   }
 

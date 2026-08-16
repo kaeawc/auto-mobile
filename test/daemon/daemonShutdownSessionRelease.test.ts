@@ -96,7 +96,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
 
       expect(restoreSpy).toHaveBeenCalledWith(keepAwakeState);
       expect(releasedCallbacks).toContainEqual({ sessionId, deviceId });
-      expect(releaseDeviceSpy).toHaveBeenCalledWith(deviceId);
+      expect(releaseDeviceSpy).toHaveBeenCalledWith(deviceId, sessionId);
       expect(sessionManager.getSession(sessionId)).toBeNull();
       expect(devicePool.getDevice(deviceId)).toMatchObject({
         sessionId: null,

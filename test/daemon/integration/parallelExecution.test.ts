@@ -116,7 +116,7 @@ describe("Parallel Execution Across Multiple Devices", function() {
       const device1 = await devicePool.assignDeviceToSession(session1Id);
 
       // Release first session
-      await devicePool.releaseDevice(device1);
+      await devicePool.releaseDevice(device1, session1Id);
 
       const deviceIds = ["device-1", "device-2", "device-3"];
       const releasedDevice = devicePool.getDevice(device1);
@@ -157,9 +157,9 @@ describe("Parallel Execution Across Multiple Devices", function() {
         expect(devicePool.getAvailableDeviceCount()).toBe(0);
 
         // Release all devices
-        await devicePool.releaseDevice(device1);
-        await devicePool.releaseDevice(device2);
-        await devicePool.releaseDevice(device3);
+        await devicePool.releaseDevice(device1, session1Id);
+        await devicePool.releaseDevice(device2, session2Id);
+        await devicePool.releaseDevice(device3, session3Id);
 
         // Verify all devices are back to idle
         expect(devicePool.getAvailableDeviceCount()).toBe(3);
@@ -232,7 +232,7 @@ describe("Parallel Execution Across Multiple Devices", function() {
       expect(device3).toBe(assignedDevice);
 
       // Release and verify device is removed
-      await devicePool.releaseDevice(assignedDevice);
+      await devicePool.releaseDevice(assignedDevice, sessionId);
       const device4 = devicePool.getDeviceForSession(sessionId);
       expect(device4).toBeNull();
     });
@@ -268,8 +268,8 @@ describe("Parallel Execution Across Multiple Devices", function() {
       }
 
       // Release all in parallel
-      const releasePromises = assignedDevices.map(deviceId =>
-        devicePool.releaseDevice(deviceId)
+      const releasePromises = assignedDevices.map((deviceId, index) =>
+        devicePool.releaseDevice(deviceId, sessionIds[index]!)
       );
 
       await Promise.all(releasePromises);

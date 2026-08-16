@@ -248,7 +248,7 @@ describe("SessionHeartbeatMonitor", () => {
     const reapVia = (mgr: SessionManager, devicePool: DevicePool) => async (sid: string): Promise<void> => {
       const deviceId = await mgr.releaseSession(sid);
       if (deviceId) {
-        await devicePool.releaseDevice(deviceId);
+        await devicePool.releaseDevice(deviceId, sid);
       }
     };
 

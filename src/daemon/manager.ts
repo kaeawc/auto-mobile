@@ -1506,7 +1506,7 @@ export async function runDaemonCommand(
           }
           const deviceId = session.assignedDevice;
           sessionManager.releaseSession(sessionId);
-          pool.releaseDevice(deviceId);
+          pool.releaseDevice(deviceId, sessionId);
           console.log(`Session ${sessionId} released`);
           console.log(`Device ${deviceId} is now available`);
         } else {

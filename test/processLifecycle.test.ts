@@ -330,6 +330,30 @@ describe("process lifecycle handlers", () => {
     expect(fakeProcess.exitCodes).toEqual([0]);
   });
 
+  test("uses the stdin timeout when stdin closes during signal cleanup", async () => {
+    const fakeProcess = new FakeProcess();
+    const fakeStdin = new FakeStdin();
+    const timer = new FakeTimer();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, timer, 50);
+    const consoleError = spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      lifecycle.install();
+      lifecycle.installStdinShutdownHandlers(fakeStdin);
+      lifecycle.setShutdownHandler(async () => await new Promise<void>(() => {}));
+
+      fakeProcess.emit("SIGTERM");
+      await flushMicrotasks();
+      fakeStdin.emit("close");
+      timer.advanceTime(50);
+      await flushMicrotasks();
+
+      expect(fakeProcess.exitCodes).toEqual([0]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   test("attempts every cleanup operation when one fails", async () => {
     const cleaned: string[] = [];
 

@@ -65,6 +65,12 @@ export class ProcessLifecycleHandlers {
   private installed = false;
   private stdinShutdownHandlersInstalled = false;
   private shutdownInProgress = false;
+  private stdinShutdownTimeoutArmed = false;
+  private stdinShutdownTimeoutHandle: NodeJS.Timeout | undefined;
+  private resolveStdinShutdownTimeout!: (value: false) => void;
+  private readonly stdinShutdownTimeout = new Promise<false>(resolve => {
+    this.resolveStdinShutdownTimeout = resolve;
+  });
   private shutdownHandler: ProcessShutdownHandler | undefined;
   private shutdownTimeoutHandler: ProcessShutdownTimeoutHandler | undefined;
   private fatalProcessHandler: FatalProcessHandler | undefined;
@@ -123,6 +129,9 @@ export class ProcessLifecycleHandlers {
 
   private async shutdown(signal: ShutdownSignal): Promise<void> {
     if (this.shutdownInProgress) {
+      if (signal === "stdin") {
+        this.armStdinShutdownTimeout();
+      }
       return;
     }
     this.shutdownInProgress = true;
@@ -147,24 +156,28 @@ export class ProcessLifecycleHandlers {
       return true;
     }
 
-    if (signal !== "stdin") {
-      await handler(signal);
-      return true;
+    if (signal === "stdin") {
+      this.armStdinShutdownTimeout();
     }
-
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    const completed = handler(signal);
-    const timedOut = new Promise<false>(resolve => {
-      timeoutHandle = this.timer.setTimeout(() => resolve(false), this.shutdownTimeoutMs);
-    });
 
     try {
-      return (await Promise.race([completed, timedOut])) !== false;
+      return (await Promise.race([handler(signal), this.stdinShutdownTimeout])) !== false;
     } finally {
-      if (timeoutHandle !== undefined) {
-        this.timer.clearTimeout(timeoutHandle);
+      if (this.stdinShutdownTimeoutHandle !== undefined) {
+        this.timer.clearTimeout(this.stdinShutdownTimeoutHandle);
+        this.stdinShutdownTimeoutHandle = undefined;
       }
     }
+  }
+
+  private armStdinShutdownTimeout(): void {
+    if (this.stdinShutdownTimeoutArmed) {
+      return;
+    }
+    this.stdinShutdownTimeoutArmed = true;
+    this.stdinShutdownTimeoutHandle = this.timer.setTimeout(() => {
+      this.resolveStdinShutdownTimeout(false);
+    }, this.shutdownTimeoutMs);
   }
 
   private async runShutdownTimeoutHandler(): Promise<ProcessShutdownTimeoutResult | undefined> {

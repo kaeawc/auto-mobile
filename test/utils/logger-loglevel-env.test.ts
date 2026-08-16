@@ -1,8 +1,28 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import { readFile } from "fs/promises";
-import path from "path";
+import fs from "fs";
+import { EventEmitter } from "node:events";
 import { LogLevel, parseAutomobileLogLevel, resolveProcessLogPrefix } from "../../src/utils/logger";
-import { getTempDir, TEMP_SUBDIRS } from "../../src/utils/tempDir";
+
+class FakeLogStream extends EventEmitter {
+  writableFinished = false;
+  destroyed = false;
+  writable = true;
+  readonly writes: string[] = [];
+  endCalls = 0;
+
+  write(chunk: unknown, callback?: (error: Error | null) => void): boolean {
+    this.writes.push(String(chunk));
+    queueMicrotask(() => callback?.(null));
+    return true;
+  }
+
+  end(): this {
+    this.endCalls += 1;
+    this.writableFinished = true;
+    queueMicrotask(() => this.emit("finish"));
+    return this;
+  }
+}
 
 // Re-import the logger module with AUTOMOBILE_LOG_LEVEL set so the module-load
 // seed (`currentLogLevel = parseAutomobileLogLevel(...) ?? INFO`) re-evaluates
@@ -112,20 +132,25 @@ describe("AUTOMOBILE_LOG_LEVEL is applied at process start (issue #3845)", () =>
   });
 
   test("close waits for queued file-log writes", async () => {
-    const marker = `logger-close-${crypto.randomUUID()}`;
-    const mod = await loggerWithEnvLevel("error");
-
-    for (let index = 0; index < 2_000; index += 1) {
-      mod.logger.error(`${marker}-${index}`);
-    }
-    await mod.logger.close();
-
-    const logFile = path.join(
-      getTempDir(TEMP_SUBDIRS.LOGS),
-      `${mod.resolveProcessLogPrefix(process.argv, process.pid)}.log`,
+    const stream = new FakeLogStream();
+    const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(
+      stream as unknown as fs.WriteStream,
     );
-    const contents = await readFile(logFile, "utf8");
-    expect(contents).toContain(`${marker}-1999`);
+
+    try {
+      const mod = await loggerWithEnvLevel("error");
+      mod.logger.error("first queued line");
+      mod.logger.error("second queued line");
+
+      const closed = mod.logger.close();
+      expect(stream.endCalls).toBe(0);
+
+      await closed;
+      expect(stream.writes).toHaveLength(2);
+      expect(stream.endCalls).toBe(1);
+    } finally {
+      createWriteStream.mockRestore();
+    }
   });
 });
 

@@ -1242,7 +1242,6 @@ export class Daemon {
         const missingByDevice = new Map<string, string[]>();
         const candidateDeviceIds = new Set<string>();
         const candidatePlatforms = new Map<string, "android" | "ios">();
-        const idleCandidateIds = new Set<string>();
         for (const recording of activeRecordings) {
           candidateDeviceIds.add(recording.deviceId);
           candidatePlatforms.set(recording.deviceId, recording.platform);
@@ -1250,9 +1249,6 @@ export class Daemon {
         for (const device of this.devicePool.getAllDevices()) {
           candidateDeviceIds.add(device.id);
           candidatePlatforms.set(device.id, device.platform);
-          if (device.status === "idle") {
-            idleCandidateIds.add(device.id);
-          }
         }
         for (const deviceId of this.sessionManager.getAssignedDevices()) {
           candidateDeviceIds.add(deviceId);
@@ -1265,14 +1261,13 @@ export class Daemon {
           candidateDeviceIds,
           succeededPlatforms,
           candidatePlatforms,
-          idleCandidateIds,
           forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
           missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
         });
 
-        if (disconnectResult.skippedAdbUnreachable) {
+        if (disconnectResult.skippedAllDiscoveryFailed) {
           logger.warn(
-            `[DisconnectMonitor] ADB returned 0 devices but ${candidateDeviceIds.size} tracked — skipping miss count (ADB likely unreachable)`
+            `[DisconnectMonitor] No platform discovery succeeded but ${candidateDeviceIds.size} tracked — skipping miss count`
           );
           return;
         }

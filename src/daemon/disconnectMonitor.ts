@@ -3,7 +3,7 @@ import type { Platform } from "../models";
 export interface DisconnectMonitorEvaluation {
   disconnected: string[];
   missed: Array<{ deviceId: string; misses: number }>;
-  skippedAdbUnreachable: boolean;
+  skippedAllDiscoveryFailed: boolean;
 }
 
 export interface DisconnectMonitorEvaluationInput {
@@ -13,7 +13,6 @@ export interface DisconnectMonitorEvaluationInput {
   candidateDeviceIds: Set<string>;
   succeededPlatforms: Set<Platform>;
   candidatePlatforms: Map<string, Platform>;
-  idleCandidateIds: Set<string>;
   forceDisconnectedDeviceIds?: Set<string>;
   missThreshold: number;
 }
@@ -41,11 +40,15 @@ export function evaluateDeviceDisconnects(
   }
 
   if (disconnected.length > 0) {
-    return { disconnected, missed, skippedAdbUnreachable: false };
+    return { disconnected, missed, skippedAllDiscoveryFailed: false };
   }
 
-  if (input.bootedDeviceIds.size === 0 && input.candidateDeviceIds.size > 0) {
-    return { disconnected, missed, skippedAdbUnreachable: true };
+  if (
+    input.bootedDeviceIds.size === 0 &&
+    input.candidateDeviceIds.size > 0 &&
+    input.succeededPlatforms.size === 0
+  ) {
+    return { disconnected, missed, skippedAllDiscoveryFailed: true };
   }
 
   for (const deviceId of input.candidateDeviceIds) {
@@ -61,11 +64,7 @@ export function evaluateDeviceDisconnects(
     }
 
     const platform = input.candidatePlatforms.get(deviceId);
-    if (
-      platform &&
-      input.idleCandidateIds.has(deviceId) &&
-      !input.succeededPlatforms.has(platform)
-    ) {
+    if (platform && !input.succeededPlatforms.has(platform)) {
       input.deviceDisconnectMisses.delete(deviceId);
       continue;
     }
@@ -81,5 +80,5 @@ export function evaluateDeviceDisconnects(
     }
   }
 
-  return { disconnected, missed, skippedAdbUnreachable: false };
+  return { disconnected, missed, skippedAllDiscoveryFailed: false };
 }

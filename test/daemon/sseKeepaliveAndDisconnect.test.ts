@@ -135,8 +135,7 @@ describe("disconnect monitor miss counting", () => {
     candidateDeviceIds: Set<string>,
     succeededPlatforms: Set<string> = new Set(),
     candidatePlatforms: Map<string, string> = new Map(),
-    idleCandidateIds: Set<string> = new Set(),
-  ): { disconnected: string[]; skippedAdbUnreachable: boolean } => {
+  ): { disconnected: string[]; skippedAllDiscoveryFailed: boolean } => {
     return evaluateDeviceDisconnects({
       deviceDisconnectMisses,
       confirmedDisconnectedDeviceIds: new Set(),
@@ -144,7 +143,6 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds,
       succeededPlatforms: succeededPlatforms as Set<"android" | "ios">,
       candidatePlatforms: candidatePlatforms as Map<string, "android" | "ios">,
-      idleCandidateIds,
       missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
   };
@@ -161,7 +159,7 @@ describe("disconnect monitor miss counting", () => {
     const misses = new Map<string, number>();
 
     runDisconnectPoll(misses, new Set(), new Set(["device-1"]));
-    // ADB unreachable guard: 0 booted but 1 tracked → skip
+    // No platform discovery succeeded, so retain the tracked device.
     expect(misses.has("device-1")).toBe(false);
 
     // Simulate ADB returning some devices but not ours
@@ -184,21 +182,75 @@ describe("disconnect monitor miss counting", () => {
     expect(result.disconnected).toEqual(["device-1"]);
   });
 
-  test("skips miss counting when ADB returns 0 devices (unreachable guard)", () => {
+  test("miss-counts an Android candidate when Android discovery succeeds empty", () => {
     const misses = new Map<string, number>();
 
     const result = runDisconnectPoll(
       misses,
       new Set(),
-      new Set(["device-1", "device-2"]),
+      new Set(["device-1"]),
+      new Set(["android"]),
+      new Map([["device-1", "android"]]),
     );
 
-    expect(result.skippedAdbUnreachable).toBe(true);
+    expect(result.skippedAllDiscoveryFailed).toBe(false);
     expect(result.disconnected).toEqual([]);
-    expect(misses.size).toBe(0);
+    expect(misses.get("device-1")).toBe(1);
   });
 
-  test("forced missing devices bypass the zero-device ADB guard", () => {
+  test("miss-counts an iOS candidate when iOS discovery succeeds empty", () => {
+    const misses = new Map<string, number>();
+
+    const result = runDisconnectPoll(
+      misses,
+      new Set(),
+      new Set(["sim-1"]),
+      new Set(["ios"]),
+      new Map([["sim-1", "ios"]]),
+    );
+
+    expect(result.skippedAllDiscoveryFailed).toBe(false);
+    expect(result.disconnected).toEqual([]);
+    expect(misses.get("sim-1")).toBe(1);
+  });
+
+  test("retains candidates without misses when all platform discovery fails", () => {
+    const misses = new Map<string, number>([["device-1", 2]]);
+
+    const result = runDisconnectPoll(
+      misses,
+      new Set(),
+      new Set(["device-1"]),
+      new Set(),
+      new Map([["device-1", "android"]]),
+    );
+
+    expect(result.skippedAllDiscoveryFailed).toBe(true);
+    expect(result.disconnected).toEqual([]);
+    expect(misses.get("device-1")).toBe(2);
+  });
+
+  test("miss-counts only candidates whose platform discovery succeeds", () => {
+    const misses = new Map<string, number>();
+
+    const result = runDisconnectPoll(
+      misses,
+      new Set(),
+      new Set(["device-1", "sim-1"]),
+      new Set(["android"]),
+      new Map([
+        ["device-1", "android"],
+        ["sim-1", "ios"],
+      ]),
+    );
+
+    expect(result.skippedAllDiscoveryFailed).toBe(false);
+    expect(result.disconnected).toEqual([]);
+    expect(misses.get("device-1")).toBe(1);
+    expect(misses.has("sim-1")).toBe(false);
+  });
+
+  test("forced missing devices bypass the all-discovery-failed guard", () => {
     const result = evaluateDeviceDisconnects({
       deviceDisconnectMisses: new Map(),
       confirmedDisconnectedDeviceIds: new Set(),
@@ -207,11 +259,10 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds: new Set(["emulator-5554"]),
       succeededPlatforms: new Set(["android" as const]),
       candidatePlatforms: new Map([["emulator-5554", "android" as const]]),
-      idleCandidateIds: new Set<string>(),
       missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
 
-    expect(result.skippedAdbUnreachable).toBe(false);
+    expect(result.skippedAllDiscoveryFailed).toBe(false);
     expect(result.disconnected).toEqual(["emulator-5554"]);
   });
 
@@ -225,20 +276,19 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds: new Set(["emulator-5554"]),
       succeededPlatforms: new Set(["android" as const]),
       candidatePlatforms: new Map([["emulator-5554", "android" as const]]),
-      idleCandidateIds: new Set<string>(),
       missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
 
-    expect(result.skippedAdbUnreachable).toBe(false);
+    expect(result.skippedAllDiscoveryFailed).toBe(false);
     expect(result.disconnected).toEqual([]);
     expect(forceDisconnectedDeviceIds.has("emulator-5554")).toBe(false);
   });
 
-  test("skips idle candidates from platforms whose discovery did not succeed", () => {
+  test("skips candidates from platforms whose discovery did not succeed", () => {
     const misses = new Map<string, number>();
     misses.set("sim-1", 2);
 
-    // Android discovery succeeded; iOS discovery did not, so the idle iOS
+    // Android discovery succeeded; iOS discovery did not, so the iOS
     // simulator must not be miss-counted toward disconnect.
     const result = runDisconnectPoll(
       misses,
@@ -246,18 +296,17 @@ describe("disconnect monitor miss counting", () => {
       new Set(["sim-1"]),
       new Set(["android"]),
       new Map([["sim-1", "ios"]]),
-      new Set(["sim-1"]),
     );
 
-    expect(result.skippedAdbUnreachable).toBe(false);
+    expect(result.skippedAllDiscoveryFailed).toBe(false);
     expect(result.disconnected).toEqual([]);
     expect(misses.has("sim-1")).toBe(false);
   });
 
-  test("miss-counts an idle device once its platform discovery succeeds", () => {
+  test("miss-counts a device once its platform discovery succeeds", () => {
     const misses = new Map<string, number>();
 
-    // iOS discovery succeeded but reported zero simulators, so an idle iOS
+    // iOS discovery succeeded but reported zero simulators, so an iOS
     // device that is genuinely gone should now be miss-counted.
     const result = runDisconnectPoll(
       misses,
@@ -265,10 +314,9 @@ describe("disconnect monitor miss counting", () => {
       new Set(["sim-1"]),
       new Set(["android", "ios"]),
       new Map([["sim-1", "ios"]]),
-      new Set(["sim-1"]),
     );
 
-    expect(result.skippedAdbUnreachable).toBe(false);
+    expect(result.skippedAllDiscoveryFailed).toBe(false);
     expect(misses.get("sim-1")).toBe(1);
   });
 
@@ -296,7 +344,6 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds: new Set(["device-1"]),
       succeededPlatforms: new Set(["android" as const, "ios" as const]),
       candidatePlatforms: new Map([["device-1", "android" as const]]),
-      idleCandidateIds: new Set<string>(),
       missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     };
 
@@ -326,7 +373,6 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds: new Set(["device-1"]),
       succeededPlatforms: new Set(["android" as const]),
       candidatePlatforms: new Map([["device-1", "android" as const]]),
-      idleCandidateIds: new Set<string>(),
       missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
 

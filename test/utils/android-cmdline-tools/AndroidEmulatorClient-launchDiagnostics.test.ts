@@ -345,6 +345,37 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     expect(error.message).toContain("sandbox");
   });
 
+  test("keeps a post-validation duplicate-AVD exit nonfatal", async () => {
+    const child = createChild();
+    const { client, timer, accelChecks } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    child.stderr!.emit(
+      "data",
+      Buffer.from("Running multiple emulators with the same AVD is an experimental feature.\n"),
+    );
+    child.emit("exit", 1, null);
+    child.emit("close", 1, null);
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    let rejection: Error | undefined;
+    void readiness.catch((error) => {
+      rejection = error instanceof Error ? error : new Error(String(error));
+    });
+
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(rejection).toBeUndefined();
+      expect(accelChecks()).toBe(0);
+    } finally {
+      timer.setCurrentTime(60_000);
+      timer.resolveAll();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      timer.resolveAll();
+      await readiness.catch(() => undefined);
+    }
+  });
+
   test("bounds post-validation exit diagnostic draining", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {

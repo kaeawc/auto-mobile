@@ -331,7 +331,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
   private readonly launchErrorFinalizations = new WeakMap<
     ChildProcess,
-    Promise<ActionableError>
+    Promise<ActionableError | undefined>
   >();
 
   /**
@@ -1404,7 +1404,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       let exitCode: number | null | undefined;
       let exitSignal: NodeJS.Signals | null | undefined;
       let provisionalPostValidationExitError: ActionableError | undefined;
-      let resolvePostValidationExit: ((error: ActionableError) => void) | undefined;
+      let resolvePostValidationExit:
+        | ((error: ActionableError | undefined) => void)
+        | undefined;
       perf.startOperation("panicDetection");
 
       const appendRedactedLaunchOutput = (output: string) => {
@@ -1444,13 +1446,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           !startupValidationComplete ||
           exitCode === undefined ||
           exitCode === 0 ||
+          duplicateAvdDetected ||
           resolvePostValidationExit
         ) {
           return;
         }
         this.launchErrorFinalizations.set(
           child,
-          new Promise<ActionableError>((resolveFinalization) => {
+          new Promise<ActionableError | undefined>((resolveFinalization) => {
             resolvePostValidationExit = resolveFinalization;
           }),
         );
@@ -1470,6 +1473,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           return;
         }
         clearExitDrainTimeout();
+        if (
+          duplicateAvdDetected ||
+          output.includes("Running multiple emulators with the same AVD")
+        ) {
+          this.launchErrors.delete(child);
+          const resolveFinalization = resolvePostValidationExit;
+          resolvePostValidationExit = undefined;
+          this.launchErrorFinalizations.delete(child);
+          resolveFinalization(undefined);
+          return;
+        }
         if (
           !this.launchErrors.has(child) ||
           this.launchErrors.get(child) === provisionalPostValidationExitError
@@ -1870,7 +1884,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
   private getLaunchErrorFinalization(
     childProcess?: ChildProcess | null,
-  ): Promise<ActionableError> | undefined {
+  ): Promise<ActionableError | undefined> | undefined {
     return childProcess ? this.launchErrorFinalizations.get(childProcess) : undefined;
   }
 

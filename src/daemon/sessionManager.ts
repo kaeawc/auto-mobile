@@ -263,15 +263,13 @@ export class SessionManager {
       return await pendingCreation;
     }
 
-    const creation = this.createUnseenSession(sessionId, devicePool, platform);
-    this.pendingSessionCreations.set(sessionId, creation);
-    try {
-      return await creation;
-    } finally {
+    const creation = this.createUnseenSession(sessionId, devicePool, platform).finally(() => {
       if (this.pendingSessionCreations.get(sessionId) === creation) {
         this.pendingSessionCreations.delete(sessionId);
       }
-    }
+    });
+    this.pendingSessionCreations.set(sessionId, creation);
+    return await creation;
   }
 
   private async createUnseenSession(

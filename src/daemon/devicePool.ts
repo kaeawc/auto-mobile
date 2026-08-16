@@ -1786,21 +1786,13 @@ export class DevicePool {
         };
       }
 
-      // Assign to session
-      device.sessionId = sessionId;
-      device.status = "busy";
-      device.lastUsedAt = this.nextLastUsedAt();
-      device.assignmentCount++;
-      device.errorCount = 0; // Reset errors on successful assignment
-
-      // Create session in SessionManager
-      await this.sessionManager.createSession(sessionId, device.id, device.platform);
+      const assignedDeviceId = await this.claimSelectedDeviceForSession(sessionId, device);
 
       logger.info(`Assigned device ${device.id} to session ${sessionId}`);
 
       return {
         success: true,
-        deviceId: device.id,
+        deviceId: assignedDeviceId,
         shouldWait: false,
         totalDevices,
       };
@@ -1850,6 +1842,29 @@ export class DevicePool {
     }
 
     return { livenessUnknown };
+  }
+
+  private async claimSelectedDeviceForSession(
+    sessionId: string,
+    device: PooledDevice,
+  ): Promise<string> {
+    // Create the session before claiming the device. A direct binding can
+    // create the same session while this allocator waits for the mutex; in
+    // that case, its device remains the sole owner.
+    const session = await this.sessionManager.createSession(sessionId, device.id, device.platform);
+    if (session.assignedDevice !== device.id) {
+      logger.info(
+        `Reusing session ${sessionId} already assigned to device ${session.assignedDevice}`,
+      );
+      return session.assignedDevice;
+    }
+
+    device.sessionId = sessionId;
+    device.status = "busy";
+    device.lastUsedAt = this.nextLastUsedAt();
+    device.assignmentCount++;
+    device.errorCount = 0;
+    return device.id;
   }
 
   private selectIdleDevice(candidates: PooledDevice[]): PooledDevice | undefined {
@@ -2123,16 +2138,32 @@ export class DevicePool {
         device.status = "idle";
       }
 
-      device.sessionId = sessionId;
-      device.status = "busy";
-      device.lastUsedAt = this.nextLastUsedAt();
-      device.assignmentCount++;
-      device.errorCount = 0;
+      await this.claimKnownDeviceForSession(sessionId, device, platform);
 
-      await this.sessionManager.createSession(sessionId, deviceId, platform);
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
     });
+  }
+
+  private async claimKnownDeviceForSession(
+    sessionId: string,
+    device: PooledDevice,
+    platform: Platform,
+  ): Promise<void> {
+    // Create the session before claiming the device so a session created by
+    // the automatic allocator cannot leave this device reserved as well.
+    const session = await this.sessionManager.createSession(sessionId, device.id, platform);
+    if (session.assignedDevice !== device.id) {
+      throw new ActionableError(
+        `Session '${sessionId}' is already assigned to device '${session.assignedDevice}'.`,
+      );
+    }
+
+    device.sessionId = sessionId;
+    device.status = "busy";
+    device.lastUsedAt = this.nextLastUsedAt();
+    device.assignmentCount++;
+    device.errorCount = 0;
   }
 
   private async reuseExistingDeviceSession(

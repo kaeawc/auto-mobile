@@ -48,7 +48,7 @@ class FakeDatabaseHealthProbe {
 function buildDaemon(
   timer: FakeTimer,
   databaseHealthProbe: FakeDatabaseHealthProbe,
-  exitProcess: (code: number) => void = () => {}
+  exitProcess: (code: number) => Promise<void> | void = () => {}
 ): Daemon {
   const daemon = new Daemon(
     {},
@@ -66,6 +66,11 @@ function buildDaemon(
     recover: async () => {},
   };
   return daemon;
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("Daemon database health check", () => {
@@ -129,6 +134,35 @@ describe("Daemon database health check", () => {
     }
 
     expect(exitCodes).toEqual([1]);
+  });
+
+  test("awaits asynchronous database recovery before completing recovery", async () => {
+    const timer = new FakeTimer();
+    const databaseHealthProbe = new FakeDatabaseHealthProbe();
+    const recoveryCodes: number[] = [];
+    let finishRecovery!: () => void;
+    const daemon = buildDaemon(timer, databaseHealthProbe, async code => {
+      recoveryCodes.push(code);
+      await new Promise<void>(resolve => {
+        finishRecovery = resolve;
+      });
+    });
+    const internals = daemon as unknown as DaemonHealthInternals;
+
+    const recovery = internals.attemptRecovery("database");
+    await flushMicrotasks();
+
+    expect(recoveryCodes).toEqual([1]);
+    let recoveryCompleted = false;
+    void recovery.then(() => {
+      recoveryCompleted = true;
+    });
+    await flushMicrotasks();
+    expect(recoveryCompleted).toBe(false);
+
+    finishRecovery();
+    await recovery;
+    expect(recoveryCompleted).toBe(true);
   });
 
   test("does not exit for database recovery after mixed health failure kinds", async () => {

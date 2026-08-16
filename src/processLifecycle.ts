@@ -3,6 +3,7 @@ import { defaultTimer, type Timer } from "./utils/SystemTimer";
 export type ShutdownSignal = "SIGINT" | "SIGTERM" | "stdin";
 
 const PROCESS_SHUTDOWN_TIMEOUT_MS = 5_000;
+const PROCESS_SHUTDOWN_FINALIZATION_TIMEOUT_MS = 100;
 
 export interface StdinShutdownSource {
   on(event: "end" | "close", listener: () => void): unknown;
@@ -48,9 +49,10 @@ export interface ProcessLifecycleProcess {
 }
 
 export type ProcessShutdownHandler = (signal: ShutdownSignal) => Promise<void> | void;
+type ProcessShutdownTimeoutResult = { exitCode?: number };
 type ProcessShutdownTimeoutHandler = () =>
-  | Promise<{ exitCode?: number } | undefined>
-  | { exitCode?: number }
+  | Promise<ProcessShutdownTimeoutResult | undefined>
+  | ProcessShutdownTimeoutResult
   | undefined;
 
 export type FatalProcessEvent =
@@ -130,7 +132,7 @@ export class ProcessLifecycleHandlers {
       let exitCode = 0;
       if (!shutdownCompleted) {
         console.error(`Shutdown timed out after ${this.shutdownTimeoutMs}ms; forcing exit`);
-        exitCode = (await this.shutdownTimeoutHandler?.())?.exitCode ?? 0;
+        exitCode = (await this.runShutdownTimeoutHandler())?.exitCode ?? 0;
       }
       this.lifecycleProcess.exit(exitCode);
     } catch (error) {
@@ -158,6 +160,33 @@ export class ProcessLifecycleHandlers {
 
     try {
       return (await Promise.race([completed, timedOut])) !== false;
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
+  private async runShutdownTimeoutHandler(): Promise<ProcessShutdownTimeoutResult | undefined> {
+    const handler = this.shutdownTimeoutHandler;
+    if (!handler) {
+      return undefined;
+    }
+
+    const finalizationTimeoutMs = Math.min(
+      this.shutdownTimeoutMs,
+      PROCESS_SHUTDOWN_FINALIZATION_TIMEOUT_MS,
+    );
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<undefined>(resolve => {
+      timeoutHandle = this.timer.setTimeout(() => {
+        console.error(`Shutdown finalization timed out after ${finalizationTimeoutMs}ms; forcing exit`);
+        resolve(undefined);
+      }, finalizationTimeoutMs);
+    });
+
+    try {
+      return await Promise.race([Promise.resolve(handler()), timedOut]);
     } finally {
       if (timeoutHandle !== undefined) {
         this.timer.clearTimeout(timeoutHandle);

@@ -74,6 +74,8 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("process lifecycle handlers", () => {
@@ -269,6 +271,34 @@ describe("process lifecycle handlers", () => {
 
       expect(cleanupFailed).toBe(true);
       expect(fakeProcess.exitCodes).toEqual([1]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  test("exits when timeout finalization exceeds its bound", async () => {
+    const fakeProcess = new FakeProcess();
+    const fakeStdin = new FakeStdin();
+    const timer = new FakeTimer();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, timer, 50);
+    const consoleError = spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      lifecycle.installStdinShutdownHandlers(fakeStdin);
+      lifecycle.setShutdownHandler(
+        async () => await new Promise<void>(() => {}),
+        async () => await new Promise<void>(() => {}),
+      );
+
+      fakeStdin.emit("close");
+      await flushMicrotasks();
+      timer.advanceTime(50);
+      await flushMicrotasks();
+      expect(fakeProcess.exitCodes).toEqual([]);
+
+      timer.advanceTime(50);
+      await flushMicrotasks();
+      expect(fakeProcess.exitCodes).toEqual([0]);
     } finally {
       consoleError.mockRestore();
     }

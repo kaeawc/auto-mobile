@@ -262,7 +262,7 @@ describe("ToolExecutionContext", () => {
         await new Promise<void>(resolve => setImmediate(resolve));
       }
       expect(releasedDevice).toBe("device-1");
-      await boundedPool.releaseDevice("device-1");
+      await boundedPool.releaseDevice("device-1", "session-setup-race");
 
       expect(boundedSessionManager.getSession("session-setup-race")).toBeNull();
       expect(boundedPool.getDevice("device-1")).toMatchObject({

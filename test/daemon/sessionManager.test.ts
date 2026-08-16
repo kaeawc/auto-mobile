@@ -486,7 +486,7 @@ describe("SessionManager", () => {
         await firstPersistenceStartedPromise;
         const replacement = manager.createSession("s1", "device-2", "android");
 
-        expect(manager.getSession("s1")).toBeNull();
+        expect(manager.getSession("s1")).toMatchObject({ assignedDevice: "device-2" });
         finishFirstPersistence();
         await expect(first).resolves.toBe("device-1");
         await expect(replacement).resolves.toMatchObject({ assignedDevice: "device-2" });
@@ -563,15 +563,23 @@ describe("SessionManager", () => {
         await Promise.resolve();
         await Promise.resolve();
         const deviceId = await release;
-        await pool.releaseDevice(deviceId!);
+        await pool.releaseDevice(deviceId!, "s1");
 
         expect(pool.getDevice("device-1")).toMatchObject({ sessionId: "s1", status: "busy" });
+
+        // A same-serial replacement must not be released by the old deferred callback.
+        const oldDevice = pool.getDevice("device-1")!;
+        oldDevice.sessionId = null;
+        oldDevice.status = "idle";
+        await pool.removeDevice("device-1");
+        await pool.initializeWithDevices([{ name: "device-1", deviceId: "device-1", platform: "android" }]);
+        await pool.assignDeviceToSession("s2", "android");
 
         finishRestore();
         for (let attempt = 0; attempt < 10 && pool.getDevice("device-1")?.status !== "idle"; attempt++) {
           await new Promise<void>(resolve => setImmediate(resolve));
         }
-        expect(pool.getDevice("device-1")).toMatchObject({ sessionId: null, status: "idle" });
+        expect(pool.getDevice("device-1")).toMatchObject({ sessionId: "s2", status: "busy" });
       } finally {
         manager.stopCleanupTimer();
       }

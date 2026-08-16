@@ -266,6 +266,11 @@ export class SessionManager {
   ): Promise<Session> {
     const existing = this.getSession(sessionId);
     if (existing) {
+      const inFlightRelease = this.releasePromises.get(sessionId);
+      if (this.releasingSessions.has(existing) && inFlightRelease?.session === existing) {
+        await inFlightRelease.promise;
+        return await this.getOrCreateSession(sessionId, devicePool, platform);
+      }
       logger.info(`[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`);
       // Resolving a session for a tool call is activity: extend both the idle
       // timeout (expiresAt) and the heartbeat clock (lastHeartbeat). Without the
@@ -436,10 +441,6 @@ export class SessionManager {
       }
     }
   }
-  getPendingDeviceCleanup(deviceId: string): Promise<void> | null {
-    return this.pendingDeviceCleanups.get(deviceId) ?? null;
-  }
-
   private async releaseSessionInternal(
     sessionId: string,
     session: Session,
@@ -457,11 +458,11 @@ export class SessionManager {
       const deviceId = session.assignedDevice;
 
       if (!this.removeSession(sessionId, session)) {
-        if (pendingCleanup.length > 0) this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
+        if (pendingCleanup.length > 0) {this.trackPendingDeviceCleanup(deviceId, pendingCleanup);}
         logger.warn(`Skipping release finalization for ${sessionId}: session ownership changed`);
         return null;
       }
-      if (pendingCleanup.length > 0) this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
+      if (pendingCleanup.length > 0) {this.trackPendingDeviceCleanup(deviceId, pendingCleanup);}
 
       await this.deviceSessionRepository.markReleased(sessionId, "released", this.timer.now(), releaseReason);
       for (const callback of this.releaseCallbacks) {
@@ -502,11 +503,11 @@ export class SessionManager {
         return { pending: settled.then(() => undefined) };
       }
       for (const setup of result) {
-        if (setup.status === "rejected") logger.warn(`Failed session setup for ${sessionId} before release: ${setup.reason}`);
+        if (setup.status === "rejected") {logger.warn(`Failed session setup for ${sessionId} before release: ${setup.reason}`);}
       }
       return { pending: null };
     } finally {
-      if (timeoutHandle !== undefined) this.timer.clearTimeout(timeoutHandle);
+      if (timeoutHandle !== undefined) {this.timer.clearTimeout(timeoutHandle);}
     }
   }
 
@@ -534,7 +535,7 @@ export class SessionManager {
       }
       return { pending: null };
     } finally {
-      if (timeoutHandle !== undefined) this.timer.clearTimeout(timeoutHandle);
+      if (timeoutHandle !== undefined) {this.timer.clearTimeout(timeoutHandle);}
     }
   }
 

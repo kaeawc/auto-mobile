@@ -311,6 +311,16 @@ describe("DevicePool", () => {
     }
   }
 
+  class DeferredRecoveryDeviceManagerWithStubbornFailingReadiness extends DeferredRecoveryDeviceManagerWithStubbornChild {
+    override async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
+      const ready = await super.waitForDeviceReady(device);
+      if (this.childProcesses.length === 2) {
+        throw new Error("recovery readiness rejected");
+      }
+      return ready;
+    }
+  }
+
   class DeferredLivenessRecoveryDeviceManager extends FakeDeviceManager {
     readonly childProcess = new FakeChildProcess();
     private readonly recoveryStartedPromise: Promise<void>;
@@ -2147,6 +2157,54 @@ describe("DevicePool", () => {
       }
     });
 
+    test("does not re-terminate a recovery child that already exited by signal", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      fakeTimer.enableAutoAdvance();
+      const manager = new DeferredRecoveryDeviceManager();
+      manager.deviceImages = [
+        {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          deviceId: "emulator-5554",
+          source: "local",
+        },
+      ];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      try {
+        await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+        await devicePool.releaseDevice("emulator-5554");
+
+        const recovery = devicePool.removeDisconnectedDevice("emulator-5554", false);
+        await manager.waitForRecoveryStart();
+        devicePool.markIntentionalShutdown("emulator-5554");
+        const recoveryChild = manager.childProcesses[1]!;
+        recoveryChild.exitCode = null;
+        recoveryChild.signalCode = "SIGTERM";
+        recoveryChild.emit("exit", null, "SIGTERM");
+        manager.releaseRecovery();
+
+        await expect(recovery).resolves.toBeUndefined();
+        expect(recoveryChild.killCount).toBe(0);
+        expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      } finally {
+        manager.releaseRecovery();
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
     test("does not retry recovery when cancelling the owned child fails", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
@@ -2181,6 +2239,51 @@ describe("DevicePool", () => {
         await expect(recovery).rejects.toThrow("did not exit after SIGKILL");
         expect(manager.childProcesses).toHaveLength(2);
         expect(manager.recoveryChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
+        expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      } finally {
+        manager.releaseRecovery();
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
+    test("stops the owned child when cancellation coincides with readiness failure", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      fakeTimer.enableAutoAdvance();
+      const manager = new DeferredRecoveryDeviceManagerWithStubbornFailingReadiness();
+      manager.deviceImages = [
+        {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          deviceId: "emulator-5554",
+          source: "local",
+        },
+      ];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      try {
+        await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+        await devicePool.releaseDevice("emulator-5554");
+
+        const recovery = devicePool.removeDisconnectedDevice("emulator-5554", false);
+        await manager.waitForRecoveryStart();
+        devicePool.markIntentionalShutdown("emulator-5554");
+        manager.releaseRecovery();
+
+        await expect(recovery).rejects.toThrow("did not exit after SIGKILL");
+        expect(manager.childProcesses).toHaveLength(2);
+        expect(manager.recoveryChild.signals).toEqual([undefined, "SIGTERM", "SIGKILL"]);
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
       } finally {
         manager.releaseRecovery();

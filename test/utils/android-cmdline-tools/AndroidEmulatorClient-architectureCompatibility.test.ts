@@ -51,13 +51,13 @@ function createClient(config: AvdConfig | null, hostArchitecture: string) {
 
 describe("AndroidEmulatorClient architecture compatibility", () => {
   test("reads compatible AVD architecture from config without launching an emulator probe", async () => {
-    const { client, commandCalls, reader } = createClient({ architecture: "arm64-v8a" }, "arm64");
+    const { client, commandCalls, reader } = createClient({ architecture: "arm64" }, "arm64");
 
     const compatibility = await client.checkArchitectureCompatibility("Pixel_9");
 
     expect(compatibility.compatible).toBe(true);
     expect(compatibility.hostArch).toBe("arm64");
-    expect(compatibility.avdArch).toBe("arm64-v8a");
+    expect(compatibility.avdArch).toBe("arm64");
     expect(reader.readConfigCalls).toEqual(["Pixel_9"]);
     expect(commandCalls).toEqual([]);
   });

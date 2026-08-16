@@ -9,7 +9,7 @@ export const MIN_AVD_RAM_MB = 2048;
 export interface AvdConfig {
   apiLevel?: number;
   osVersion?: string;
-  /** System-image ABI used by the AVD. */
+  /** Normalized emulator CPU architecture used by the AVD. */
   architecture?: string;
   screenWidth?: number;
   screenHeight?: number;
@@ -218,12 +218,36 @@ function parseApiMetadata(props: Map<string, string>): Pick<AvdConfig, "apiLevel
 }
 
 function parseArchitecture(props: Map<string, string>): Pick<AvdConfig, "architecture"> {
-  const configuredAbi = props.get("abi.type");
-  if (configuredAbi) {
-    return { architecture: configuredAbi };
-  }
-
   const imagePathSegments = props.get("image.sysdir.1")?.split(/[\\/]/).filter(Boolean);
-  const architecture = imagePathSegments?.at(-1);
-  return architecture ? { architecture } : {};
+  const candidates = [
+    props.get("hw.cpu.arch"),
+    props.get("abi.type"),
+    imagePathSegments?.at(-1),
+  ];
+  for (const candidate of candidates) {
+    const architecture = normalizeArchitecture(candidate);
+    if (architecture) {
+      return { architecture };
+    }
+  }
+  return {};
+}
+
+function normalizeArchitecture(value: string | undefined): string | undefined {
+  switch (value?.trim().toLowerCase()) {
+    case "arm64":
+    case "arm64-v8a":
+    case "aarch64":
+      return "arm64";
+    case "arm":
+    case "armeabi":
+    case "armeabi-v7a":
+      return "arm";
+    case "x86":
+      return "x86";
+    case "x86_64":
+      return "x86_64";
+    default:
+      return undefined;
+  }
 }

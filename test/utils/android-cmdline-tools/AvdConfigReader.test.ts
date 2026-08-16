@@ -22,12 +22,23 @@ describe("parseAvdConfig", () => {
     expect(config.osVersion).toBe("14");
   });
 
-  it("parses architecture from abi.type", () => {
+  it("prefers the emulator CPU architecture over conflicting ABI metadata", () => {
     const config = parseAvdConfig(
-      "abi.type=arm64-v8a\nimage.sysdir.1=system-images/android-34/google_apis/x86_64/",
+      [
+        "hw.cpu.arch=x86_64",
+        "abi.type=arm64-v8a",
+        "image.sysdir.1=system-images/android-34/google_apis/arm64-v8a/",
+      ].join("\n"),
     );
 
-    expect(config.architecture).toBe("arm64-v8a");
+    expect(config.architecture).toBe("x86_64");
+  });
+
+  it("normalizes supported ABI aliases when hw.cpu.arch is absent", () => {
+    expect(parseAvdConfig("abi.type=ARM64-V8A").architecture).toBe("arm64");
+    expect(parseAvdConfig("abi.type=aarch64").architecture).toBe("arm64");
+    expect(parseAvdConfig("abi.type=armeabi-v7a").architecture).toBe("arm");
+    expect(parseAvdConfig("abi.type=X86_64").architecture).toBe("x86_64");
   });
 
   it("falls back to image.sysdir.1 when abi.type is absent", () => {
@@ -36,6 +47,14 @@ describe("parseAvdConfig", () => {
     );
 
     expect(config.architecture).toBe("x86_64");
+  });
+
+  it("ignores malformed architecture metadata", () => {
+    const config = parseAvdConfig(
+      "hw.cpu.arch=unknown\nabi.type=also-unknown\nimage.sysdir.1=not/a/system/image/",
+    );
+
+    expect(config.architecture).toBeUndefined();
   });
 
   it("parses device name and tag", () => {
@@ -127,6 +146,7 @@ describe("parseAvdConfig", () => {
     const config = parseAvdConfig(content);
     expect(config.apiLevel).toBe(34);
     expect(config.osVersion).toBe("14");
+    expect(config.architecture).toBe("arm64");
     expect(config.screenWidth).toBe(1080);
     expect(config.screenHeight).toBe(2400);
     expect(config.screenDensity).toBe(420);

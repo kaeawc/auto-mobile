@@ -108,6 +108,8 @@ export class SessionManager {
   private readonly activeReleasePromises: Set<{ session: Session; promise: Promise<string | null> }> = new Set();
   /** Setup work that must settle before a session restores its cached device state. */
   private readonly sessionSetupPromises: Set<{ session: Session; promise: Promise<void> }> = new Set();
+  /** Sessions whose teardown has closed admission for further device-state setup. */
+  private readonly releasingSessions: WeakSet<Session> = new WeakSet();
   private deviceSessionRepository: DeviceSessionRepository;
   private readonly getBarrier: () => DbWriteBarrier;
   private readonly keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer;
@@ -204,6 +206,12 @@ export class SessionManager {
   getSession(sessionId: string): Session | null {
     const session = this.sessions.get(sessionId);
     if (session && this.isSessionExpired(session)) {
+      // Release owns this exact session object until it has restored device state
+      // and removed its assignment. Keep expiry cleanup from creating a second
+      // incarnation with the same UUID before teardown completes.
+      if (this.releasingSessions.has(session)) {
+        return session;
+      }
       logger.info(`Session ${sessionId} has expired, removing`);
       const deviceId = session.assignedDevice;
       this.removeSession(sessionId);
@@ -320,6 +328,7 @@ export class SessionManager {
       return await inFlightRelease.promise;
     }
 
+    this.releasingSessions.add(session);
     const promise = this.releaseSessionInternal(sessionId, session, releaseReason);
     const release = { session, promise };
     this.releasePromises.set(sessionId, release);
@@ -338,7 +347,12 @@ export class SessionManager {
    * Track setup that can modify device state after a session has been assigned.
    * Release waits for this work so restoration sees the final cached state.
    */
-  trackSessionSetup(session: Session, setup: Promise<void>): Promise<void> {
+  trackSessionSetup(session: Session, setupFactory: () => Promise<void>): Promise<void> {
+    if (this.releasingSessions.has(session) || this.sessions.get(session.sessionId) !== session) {
+      return Promise.resolve();
+    }
+
+    const setup = setupFactory();
     const tracked = { session, promise: setup };
     this.sessionSetupPromises.add(tracked);
     void setup.then(
@@ -396,7 +410,10 @@ export class SessionManager {
     }
 
     const deviceId = session.assignedDevice;
-    this.removeSession(sessionId);
+    if (!this.removeSession(sessionId, session)) {
+      logger.warn(`Skipping release finalization for ${sessionId}: session ownership changed`);
+      return null;
+    }
     // Intentionally NOT barrier-tracked: releaseSession is awaited by its caller
     // (explicit release), so this write is caller-tied, not fire-and-forget. Only
     // the lazy-expiry / cleanup-expired markReleased calls above are fire-and-forget
@@ -641,13 +658,15 @@ export class SessionManager {
   /**
    * Remove session from all maps
    */
-  private removeSession(sessionId: string): void {
+  private removeSession(sessionId: string, expectedSession?: Session): boolean {
     const session = this.sessions.get(sessionId);
-    if (session) {
-      this.deviceSessionMap.delete(session.assignedDevice);
+    if (!session || (expectedSession && session !== expectedSession)) {
+      return false;
     }
+    this.deviceSessionMap.delete(session.assignedDevice);
     this.sessions.delete(sessionId);
     this.sessionDeviceMap.delete(sessionId);
+    return true;
   }
 
   private async restoreKeepScreenAwake(session: Session): Promise<void> {
@@ -680,7 +699,7 @@ export class SessionManager {
     const expiredSessions: string[] = [];
 
     for (const [sessionId, session] of this.sessions) {
-      if (this.isSessionExpired(session)) {
+      if (this.isSessionExpired(session) && !this.releasingSessions.has(session)) {
         expiredSessions.push(sessionId);
       }
     }

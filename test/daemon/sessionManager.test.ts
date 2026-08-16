@@ -295,12 +295,66 @@ describe("SessionManager", () => {
       }, () => new FakeDbWriteBarrier());
       try {
         const session = await manager.createSession("s1", "device-1", "android");
-        const setup = manager.trackSessionSetup(session, setupFinished);
+        const setup = manager.trackSessionSetup(session, () => setupFinished);
         const release = manager.releaseSession("s1", "daemon-shutdown");
 
         await Promise.resolve();
         expect(manager.getSession("s1")).not.toBeNull();
 
+        finishSetup();
+        await setup;
+        await expect(release).resolves.toBe("device-1");
+        expect(manager.getSession("s1")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("does not admit setup that arrives after release begins", async () => {
+      let finishInitialSetup!: () => void;
+      const initialSetup = new Promise<void>(resolve => { finishInitialSetup = resolve; });
+      const manager = new SessionManager(fakeTimer, {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(): Promise<void> {},
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      }, () => new FakeDbWriteBarrier());
+      try {
+        const session = await manager.createSession("s1", "device-1", "android");
+        const setup = manager.trackSessionSetup(session, () => initialSetup);
+        const release = manager.releaseSession("s1", "daemon-shutdown");
+        let lateSetupStarted = false;
+
+        await Promise.resolve();
+        await manager.trackSessionSetup(session, async () => { lateSetupStarted = true; });
+        expect(lateSetupStarted).toBe(false);
+
+        finishInitialSetup();
+        await setup;
+        await expect(release).resolves.toBe("device-1");
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("keeps an expiring session assigned until its release finishes", async () => {
+      let finishSetup!: () => void;
+      const setupFinished = new Promise<void>(resolve => { finishSetup = resolve; });
+      const manager = new SessionManager(fakeTimer, {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(): Promise<void> {},
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      }, () => new FakeDbWriteBarrier());
+      try {
+        const session = await manager.createSession("s1", "device-1", "android", 1);
+        const setup = manager.trackSessionSetup(session, () => setupFinished);
+        const release = manager.releaseSession("s1", "daemon-shutdown", true);
+
+        fakeTimer.advanceTime(1);
+        manager.cleanupExpiredSessions();
+
+        await expect(manager.createSession("s1", "device-2", "android")).resolves.toBe(session);
         finishSetup();
         await setup;
         await expect(release).resolves.toBe("device-1");

@@ -52,6 +52,23 @@ class SuccessfulKillDeviceManager extends FailingKillDeviceManager {
   }
 }
 
+class ReplacementBeforeShutdownWaitDeviceManager extends FailingKillDeviceManager {
+  constructor(private readonly replacement: BootedDevice) {
+    super();
+  }
+
+  override async killDevice(device: BootedDevice): Promise<void> {
+    this.setBootedDevices(device.platform, [this.replacement]);
+  }
+}
+
+class AllocationRaceDevicePool extends DevicePool {
+  override async releaseDevice(deviceId: string): Promise<void> {
+    await super.releaseDevice(deviceId);
+    await this.assignMultipleDevices(["racing-session"], 1_000, "android");
+  }
+}
+
 class DelayedSuccessfulKillDeviceManager extends FailingKillDeviceManager {
   override async killDevice(): Promise<void> {}
 }
@@ -632,6 +649,147 @@ describe("killDevice handler", () => {
     });
 
     await expect(result).resolves.toBeDefined();
+    const current = pool.getDevice(image.deviceId!);
+    expect(current).not.toBeNull();
+    expect(current).not.toBe(original);
+    expect(current?.name).toBe(replacement.name);
+    expect(sessionManager.getSessionForDevice(image.deviceId!)).toBeNull();
+    expect(registry.getByUuid(originalSession.deviceSessionUuid)).toBeUndefined();
+    expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();
+  });
+
+  test("recognizes a same-ID Android replacement before the first shutdown poll", async () => {
+    const timer = new FakeTimer();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    const replacement: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: image.deviceId!,
+      transportId: "2",
+    };
+    const replacementManager = new ReplacementBeforeShutdownWaitDeviceManager(replacement);
+    manager = replacementManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => replacementManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    replacementManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      replacementManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    const registry = new DeviceSessionRegistry(timer);
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const original = pool.getDevice(image.deviceId!);
+    if (!original) {
+      throw new Error("expected original device to be pooled");
+    }
+    const originalSession = registry.onDeviceConnected({
+      deviceId: original.id,
+      platform: original.platform,
+      incarnation: original.incarnation,
+    });
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await expect(tool.handler({
+      device: {
+        name: image.name,
+        platform: "android",
+        deviceId: image.deviceId!,
+        transportId: "1",
+      },
+    })).resolves.toBeDefined();
+
+    const current = pool.getDevice(image.deviceId!);
+    expect(current).not.toBeNull();
+    expect(current).not.toBe(original);
+    expect(sessionManager.getSessionForDevice(image.deviceId!)).toBeNull();
+    expect(registry.getByUuid(originalSession.deviceSessionUuid)).toBeUndefined();
+    expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();
+  });
+
+  test("does not publish a same-ID replacement's dead incarnation as idle", async () => {
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    const replacement: BootedDevice = {
+      name: "Pixel 8 replacement",
+      platform: "android",
+      deviceId: image.deviceId!,
+    };
+    const deviceSessionRepository = new ReplacingDeviceSessionRepository(async () => {
+      successfulManager.setBootedDevices("android", [replacement]);
+    });
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    successfulManager.setDeviceImages("android", [image]);
+    const pool = new AllocationRaceDevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    const registry = new DeviceSessionRegistry(timer);
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const original = pool.getDevice(image.deviceId!);
+    if (!original) {
+      throw new Error("expected original device to be pooled");
+    }
+    const originalSession = registry.onDeviceConnected({
+      deviceId: original.id,
+      platform: original.platform,
+      incarnation: original.incarnation,
+    });
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await tool.handler({
+      device: {
+        name: image.name,
+        platform: "android",
+        deviceId: image.deviceId!,
+      },
+    });
+
     const current = pool.getDevice(image.deviceId!);
     expect(current).not.toBeNull();
     expect(current).not.toBe(original);

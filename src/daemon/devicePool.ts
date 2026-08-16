@@ -2128,6 +2128,52 @@ export class DevicePool {
   }
 
   /**
+   * Retire a captured device incarnation without publishing it as idle first.
+   * A device that has been explicitly stopped must not become assignable in the
+   * interval between its session release and pool removal.
+   */
+  async retireDeviceForShutdown(expectedDevice: PooledDevice): Promise<boolean> {
+    return await this.assignmentMutex.runExclusive(async () => {
+      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+        return false;
+      }
+      this.releaseCapturedDeviceForShutdown(expectedDevice);
+      await this.removeDevice(expectedDevice.id);
+      return this.devices.get(expectedDevice.id) !== expectedDevice;
+    });
+  }
+
+  /**
+   * Atomically replace a captured stopped-device incarnation with the device
+   * discovered under the same ID. This keeps allocators from claiming the old
+   * device during the handoff.
+   */
+  async replaceDeviceForShutdown(
+    expectedDevice: PooledDevice,
+    replacement: BootedDevice,
+  ): Promise<PooledDevice | undefined> {
+    return await this.assignmentMutex.runExclusive(async () => {
+      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+        return undefined;
+      }
+      this.releaseCapturedDeviceForShutdown(expectedDevice);
+      await this.removeDevice(expectedDevice.id);
+      if (this.devices.has(expectedDevice.id)) {
+        return undefined;
+      }
+      await this.addDevice(replacement);
+      return this.devices.get(replacement.deviceId);
+    });
+  }
+
+  private releaseCapturedDeviceForShutdown(device: PooledDevice): void {
+    device.sessionId = null;
+    device.status = "idle";
+    device.errorCount = 0;
+    this.lastReleasedDeviceId = device.id;
+  }
+
+  /**
    * Keep an exact device out of general pool allocation while startDevice
    * verifies its runner. The reservation does not create a user-visible
    * session; session ownership is transferred only after readiness succeeds.

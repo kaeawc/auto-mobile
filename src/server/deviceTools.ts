@@ -295,7 +295,7 @@ async function waitForDeviceShutdown(
   device: BootedDevice,
   timer: Timer,
   deadlineMs: number,
-): Promise<void> {
+): Promise<BootedDevice | undefined> {
   let lastDiscoveryDetail = "platform discovery did not complete";
   for (;;) {
     if (timer.now() >= deadlineMs) {
@@ -303,11 +303,12 @@ async function waitForDeviceShutdown(
     }
     const discovery = await getShutdownDiscovery(deviceManager, device, timer, deadlineMs);
     const platformWasDiscovered = discovery.succeededPlatforms.has(device.platform);
-    const isStillBooted = discovery.devices.some(candidate =>
-      candidate.platform === device.platform && candidate.deviceId === device.deviceId,
-    );
-    if (platformWasDiscovered && !isStillBooted) {
-      return;
+    const matchingDevice = findDiscoveredDevice(discovery, device);
+    if (platformWasDiscovered && !matchingDevice) {
+      return undefined;
+    }
+    if (matchingDevice && !isSameBootedDeviceIdentity(device, matchingDevice)) {
+      return matchingDevice;
     }
 
     lastDiscoveryDetail = platformWasDiscovered
@@ -319,6 +320,20 @@ async function waitForDeviceShutdown(
     }
     await timer.sleep(Math.min(DEVICE_SHUTDOWN_POLL_INTERVAL_MS, remainingMs));
   }
+}
+
+function isSameBootedDeviceIdentity(device: BootedDevice, candidate: BootedDevice): boolean {
+  if (device.platform !== candidate.platform || device.deviceId !== candidate.deviceId) {
+    return false;
+  }
+  if (
+    device.transportId !== undefined &&
+    candidate.transportId !== undefined &&
+    device.transportId !== candidate.transportId
+  ) {
+    return false;
+  }
+  return device.name === candidate.name;
 }
 
 function findDiscoveredDevice(
@@ -340,23 +355,16 @@ async function rebuildSameIdReplacement(
   daemonState: DaemonState,
 ): Promise<void> {
   const devicePool = daemonState.getDevicePool();
-  await devicePool.releaseDevice(device.deviceId);
-  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
+  const rebuilt = await devicePool.replaceDeviceForShutdown(expectedPooledDevice, replacement);
+  if (!rebuilt) {
     return;
   }
-  await devicePool.removeDisconnectedDevice(device.deviceId, false);
-  if (!devicePool.getDevice(device.deviceId)) {
-    daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
-  }
-  await devicePool.addDevice(replacement);
-  const rebuilt = devicePool.getDevice(device.deviceId);
-  if (rebuilt) {
-    daemonState.getDeviceSessionRegistry().onDeviceConnected({
-      deviceId: rebuilt.id,
-      platform: rebuilt.platform,
-      incarnation: rebuilt.incarnation,
-    });
-  }
+  daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
+  daemonState.getDeviceSessionRegistry().onDeviceConnected({
+    deviceId: rebuilt.id,
+    platform: rebuilt.platform,
+    incarnation: rebuilt.incarnation,
+  });
 }
 
 async function retireShutdownOwnership(
@@ -410,12 +418,7 @@ async function retireShutdownOwnership(
   if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
     return;
   }
-  await devicePool.releaseDevice(device.deviceId);
-  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
-    return;
-  }
-  await devicePool.removeDisconnectedDevice(device.deviceId, false);
-  if (!devicePool.getDevice(device.deviceId)) {
+  if (await devicePool.retireDeviceForShutdown(expectedPooledDevice)) {
     daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
   }
 }

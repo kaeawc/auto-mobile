@@ -587,7 +587,10 @@ async function findReplacementAfterSessionRelease(
     requestAbortSignal,
   );
   const replacement = findDiscoveredDevice(discovery, device);
-  if (replacement && !isSameBootedDeviceIdentity(device, replacement)) {
+  if (
+    replacement &&
+    (device.platform === "ios" || !isSameBootedDeviceIdentity(device, replacement))
+  ) {
     return replacement;
   }
   if (!replacement && discovery.succeededPlatforms.has(device.platform)) {

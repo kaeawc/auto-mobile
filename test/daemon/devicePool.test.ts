@@ -1323,7 +1323,7 @@ describe("DevicePool", () => {
       }
 
       // Release the device
-      await devicePool.releaseDevice(device1);
+      await devicePool.releaseDevice(device1, "session-1");
 
       // Advance time to allow the retry
       fakeTimer.advanceTime(1000);
@@ -1346,7 +1346,7 @@ describe("DevicePool", () => {
     test("should reuse device after session release", async () => {
       await initializeLiveDevices([createBootedDevice("emulator-5554")]);
       const device1 = await devicePool.assignDeviceToSession("session-1");
-      await devicePool.releaseDevice(device1);
+      await devicePool.releaseDevice(device1, "session-1");
       const device2 = await devicePool.assignDeviceToSession("session-2");
       expect(device1).toBe(device2);
     });
@@ -1363,7 +1363,7 @@ describe("DevicePool", () => {
 
       const firstDevice = await devicePool.assignDeviceToSession("session-1", "ios");
       expect(firstDevice).toBe("sim-old");
-      await devicePool.releaseDevice(firstDevice);
+      await devicePool.releaseDevice(firstDevice, "session-1");
       fakeDeviceManager.bootedDevices = [createBootedDevice("sim-new", "ios", "iPhone 16")];
 
       const secondDevice = await devicePool.assignDeviceToSession("session-2", "ios");
@@ -1832,7 +1832,7 @@ describe("DevicePool", () => {
         );
 
         await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
-        await devicePool.releaseDevice("emulator-5554");
+        await devicePool.releaseDevice("emulator-5554", "session-1");
         manager.bootedDevices = [];
         await devicePool.removeDisconnectedDevice("emulator-5554");
         await devicePool.assignMultipleDevices(["session-2"], 1000, "android");
@@ -2181,7 +2181,7 @@ describe("DevicePool", () => {
       );
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
-        await devicePool.releaseDevice("emulator-5554");
+        await devicePool.releaseDevice("emulator-5554", "session-1");
 
         const recovery = devicePool.removeDisconnectedDevice("emulator-5554", false);
         await manager.waitForRecoveryStart();
@@ -2229,7 +2229,7 @@ describe("DevicePool", () => {
       );
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
-        await devicePool.releaseDevice("emulator-5554");
+        await devicePool.releaseDevice("emulator-5554", "session-1");
 
         const recovery = devicePool.removeDisconnectedDevice("emulator-5554", false);
         await manager.waitForRecoveryStart();
@@ -2274,7 +2274,7 @@ describe("DevicePool", () => {
       );
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
-        await devicePool.releaseDevice("emulator-5554");
+        await devicePool.releaseDevice("emulator-5554", "session-1");
 
         const recovery = devicePool.removeDisconnectedDevice("emulator-5554", false);
         await manager.waitForRecoveryStart();
@@ -2318,7 +2318,7 @@ describe("DevicePool", () => {
       );
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
-        await devicePool.releaseDevice("emulator-5554");
+        await devicePool.releaseDevice("emulator-5554", "session-1");
         manager.bootedDevices = [];
 
         await devicePool.removeDisconnectedDevice("emulator-5554", false);
@@ -2361,7 +2361,7 @@ describe("DevicePool", () => {
       );
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
-        await devicePool.releaseDevice("emulator-5554");
+        await devicePool.releaseDevice("emulator-5554", "session-1");
         manager.bootedDevices = [];
         await devicePool.removeDisconnectedDevice("emulator-5554", false);
 
@@ -2420,7 +2420,7 @@ describe("DevicePool", () => {
       );
       try {
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
-        await devicePool.releaseDevice("emulator-5554");
+        await devicePool.releaseDevice("emulator-5554", "session-1");
         manager.bootedDevices = [];
         await devicePool.removeDisconnectedDevice("emulator-5554", false);
 
@@ -3044,9 +3044,9 @@ describe("DevicePool", () => {
       await devicePool.bindOrReuseDeviceSession("seed-b", "dev-b", "android");
       await devicePool.bindOrReuseDeviceSession("seed-a", "dev-a", "android");
 
-      await devicePool.releaseDevice("dev-a");
-      await devicePool.releaseDevice("dev-b");
-      await devicePool.releaseDevice("dev-c");
+      await devicePool.releaseDevice("dev-a", "seed-a");
+      await devicePool.releaseDevice("dev-b", "seed-b");
+      await devicePool.releaseDevice("dev-c", "seed-c");
 
       // Re-bind dev-c so it is busy (and remains the lastReleasedDeviceId,
       // which should be ignored because it is no longer idle). Idle pool is
@@ -3072,24 +3072,39 @@ describe("DevicePool", () => {
     test("should release device assigned to session", async () => {
       await initializeLiveDevices([createBootedDevice("emulator-5554")]);
       const deviceId = await devicePool.assignDeviceToSession("session-1");
-      await devicePool.releaseDevice(deviceId);
+      await devicePool.releaseDevice(deviceId, "session-1");
       const device = devicePool.getDevice(deviceId);
       expect(device?.sessionId).toBeNull();
       expect(device?.status).toBe("idle");
       expect(devicePool.getAvailableDeviceCount()).toBe(1);
     });
 
-    test("should handle release of already idle device", async () => {
-      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
+    test("keeps repeated release idempotent", async () => {
+      await initializeLiveDevices([createBootedDevice("emulator-5554")]);
+      await devicePool.assignDeviceToSession("session-1");
+      await devicePool.releaseDevice("emulator-5554", "session-1");
+      await devicePool.releaseDevice("emulator-5554", "session-1");
       const device = devicePool.getDevice("emulator-5554");
-      expect(device?.status).toBe("idle");
-      await devicePool.releaseDevice("emulator-5554");
       expect(device?.status).toBe("idle");
     });
 
     test("should handle release of non-existent device", async () => {
-      await devicePool.releaseDevice("non-existent");
+      await devicePool.releaseDevice("non-existent", "session-1");
       expect(devicePool.getTotalDeviceCount()).toBe(0);
+    });
+
+    test("does not release a replacement session after a duplicate stale release", async () => {
+      await initializeLiveDevices([createBootedDevice("emulator-5554")]);
+      const deviceId = await devicePool.assignDeviceToSession("session-s");
+
+      await devicePool.releaseDevice(deviceId, "session-s");
+      await devicePool.assignDeviceToSession("session-t");
+      await devicePool.releaseDevice(deviceId, "session-s");
+
+      const device = devicePool.getDevice(deviceId);
+      expect(device?.sessionId).toBe("session-t");
+      expect(device?.status).toBe("busy");
+      expect(devicePool.getAvailableDeviceCount()).toBe(0);
     });
   });
 
@@ -3118,7 +3133,7 @@ describe("DevicePool", () => {
       await initializeLiveDevices([createBootedDevice("emulator-5554")]);
       devicePool.recordDeviceError("emulator-5554");
       expect(devicePool.getDevice("emulator-5554")?.errorCount).toBe(1);
-      await devicePool.releaseDevice("emulator-5554");
+      await devicePool.releaseDevice("emulator-5554", "session-1");
       await devicePool.assignDeviceToSession("session-1");
       expect(devicePool.getDevice("emulator-5554")?.errorCount).toBe(0);
     });

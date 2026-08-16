@@ -148,7 +148,7 @@ export function registerUtilityTools() {
         const existing = sessionManager.getSession(args.sessionUuid);
         if (existing && existing.assignedDevice !== args.deviceId) {
           await sessionManager.releaseSession(existing.sessionId);
-          await devicePool.releaseDevice(existing.assignedDevice);
+          await devicePool.releaseDevice(existing.assignedDevice, existing.sessionId);
         }
         if (!existing || existing.assignedDevice !== args.deviceId) {
           const boundSession = await devicePool.bindOrReuseDeviceSession(args.sessionUuid, args.deviceId, args.platform);

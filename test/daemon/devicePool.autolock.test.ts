@@ -130,7 +130,7 @@ describe("DevicePool autolock", () => {
     fakeDeviceUtils.markDeviceAsStopped("Medium_Phone_API_35");
     fakeDeviceUtils.markDeviceAsStopped("emulator-5554");
     await pool.removeDisconnectedDevice("emulator-5554");
-    await pool.releaseDevice("emulator-5554");
+    await pool.releaseDevice("emulator-5554", "active-session");
     await pool.removeDevice("emulator-5554");
 
     const assignments = await pool.assignMultipleDevices(["next-session"], 1000, "android");

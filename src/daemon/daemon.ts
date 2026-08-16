@@ -1415,7 +1415,7 @@ export class Daemon {
     const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
     const deviceId = await this.sessionManager.releaseSession(sessionId, releaseReason, allowExpired);
     if (deviceId) {
-      await this.devicePool.releaseDevice(deviceId);
+      await this.devicePool.releaseDevice(deviceId, sessionId);
     }
     logger.info(
       `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId ?? "unknown"} ` +

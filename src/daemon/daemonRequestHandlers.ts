@@ -26,7 +26,7 @@ export interface DaemonStateAccess {
   getDevicePool(): {
     refreshDevices(): Promise<number>;
     getStats(): DevicePoolStats;
-    releaseDevice(deviceId: string): Promise<void>;
+    releaseDevice(deviceId: string, expectedSessionId: string): Promise<void>;
     getAllDevices?(): PooledDevice[];
     getRecoveryPolicy?(): DeviceRecoveryPolicy;
     getRecoveryEligibility?(deviceId: string): DeviceRecoveryEligibility;
@@ -191,7 +191,7 @@ export async function handleDaemonRequest(
       }
       const deviceId = session.assignedDevice;
       await manager.releaseSession(sessionId);
-      await pool.releaseDevice(deviceId);
+      await pool.releaseDevice(deviceId, sessionId);
       return {
         success: true,
         result: {

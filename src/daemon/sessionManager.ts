@@ -104,8 +104,10 @@ export class SessionManager {
     string,
     { session: Session; promise: Promise<string | null> }
   > = new Map();
+  /** Every release still running, including an older session that reused a UUID. */
+  private readonly activeReleasePromises: Set<{ session: Session; promise: Promise<string | null> }> = new Set();
   /** Setup work that must settle before a session restores its cached device state. */
-  private readonly sessionSetupPromises: Map<string, { session: Session; promise: Promise<void> }> = new Map();
+  private readonly sessionSetupPromises: Set<{ session: Session; promise: Promise<void> }> = new Set();
   private deviceSessionRepository: DeviceSessionRepository;
   private readonly getBarrier: () => DbWriteBarrier;
   private readonly keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer;
@@ -321,9 +323,11 @@ export class SessionManager {
     const promise = this.releaseSessionInternal(sessionId, session, releaseReason);
     const release = { session, promise };
     this.releasePromises.set(sessionId, release);
+    this.activeReleasePromises.add(release);
     try {
       return await promise;
     } finally {
+      this.activeReleasePromises.delete(release);
       if (this.releasePromises.get(sessionId) === release) {
         this.releasePromises.delete(sessionId);
       }
@@ -336,17 +340,17 @@ export class SessionManager {
    */
   trackSessionSetup(session: Session, setup: Promise<void>): Promise<void> {
     const tracked = { session, promise: setup };
-    this.sessionSetupPromises.set(session.sessionId, tracked);
+    this.sessionSetupPromises.add(tracked);
     void setup.then(
-      () => this.clearSessionSetup(session.sessionId, tracked),
-      () => this.clearSessionSetup(session.sessionId, tracked)
+      () => this.clearSessionSetup(tracked),
+      () => this.clearSessionSetup(tracked)
     );
     return setup;
   }
 
   /** Wait a bounded amount of time for releases already started by monitors. */
   async drainReleasePromises(timeoutMs: number): Promise<boolean> {
-    const releases = Array.from(this.releasePromises.values(), release => release.promise);
+    const releases = Array.from(this.activeReleasePromises, release => release.promise);
     if (releases.length === 0) {
       return true;
     }
@@ -370,12 +374,14 @@ export class SessionManager {
     session: Session,
     releaseReason: string,
   ): Promise<string | null> {
-    const setup = this.sessionSetupPromises.get(sessionId);
-    if (setup?.session === session) {
-      try {
-        await setup.promise;
-      } catch (error) {
-        logger.warn(`Failed session setup for ${sessionId} before release: ${error}`);
+    const setups = Array.from(this.sessionSetupPromises, setup => setup.session === session ? setup.promise : null)
+      .filter((setup): setup is Promise<void> => setup !== null);
+    if (setups.length > 0) {
+      const setupResults = await Promise.allSettled(setups);
+      for (const result of setupResults) {
+        if (result.status === "rejected") {
+          logger.warn(`Failed session setup for ${sessionId} before release: ${result.reason}`);
+        }
       }
     }
 
@@ -414,12 +420,9 @@ export class SessionManager {
   }
 
   private clearSessionSetup(
-    sessionId: string,
     tracked: { session: Session; promise: Promise<void> },
   ): void {
-    if (this.sessionSetupPromises.get(sessionId) === tracked) {
-      this.sessionSetupPromises.delete(sessionId);
-    }
+    this.sessionSetupPromises.delete(tracked);
   }
 
   /**

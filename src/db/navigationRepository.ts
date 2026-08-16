@@ -26,6 +26,35 @@ import type {
 import { logger } from "../utils/logger";
 
 /**
+ * Flat row of a node-provenance join (nav (app,build) Phase 2, #4985):
+ * navigation_node_observations ⋈ navigation_build_keys. `package_id` is the build
+ * key's `app_id`. Grouped per `node_id` by the caller.
+ */
+export interface NavigationNodeProvenanceRow {
+  node_id: number;
+  package_id: string;
+  version_code: number;
+  content_hash: string;
+  device_id: string;
+  session_uuid: string;
+  last_seen_at: number;
+}
+
+/**
+ * Flat row of an edge-provenance join (#4985), symmetric to
+ * {@link NavigationNodeProvenanceRow} but keyed by `edge_id`.
+ */
+export interface NavigationEdgeProvenanceRow {
+  edge_id: number;
+  package_id: string;
+  version_code: number;
+  content_hash: string;
+  device_id: string;
+  session_uuid: string;
+  last_seen_at: number;
+}
+
+/**
  * Repository for navigation graph database operations.
  * Provides type-safe access to navigation data.
  */
@@ -1193,6 +1222,69 @@ export class NavigationRepository {
             last_seen_at: sql`max(navigation_edge_observations.last_seen_at, ${seenAt})`,
           })
       )
+      .execute();
+  }
+
+  /**
+   * Read every node-provenance observation for an app in one typed join
+   * (nav (app,build) Phase 2, #4985): node_observations ⋈ build_keys, scoped by
+   * the node's own `app_id`. Rows are ordered `last_seen_at` desc so the caller's
+   * per-node grouping preserves recency order deterministically. `package_id` is
+   * the build key's `app_id` (== the queried app), surfaced for the read shape.
+   */
+  async getNodeProvenanceForApp(appId: string): Promise<NavigationNodeProvenanceRow[]> {
+    const db = this.getDb();
+    return db
+      .selectFrom("navigation_node_observations as obs")
+      .innerJoin("navigation_build_keys as bk", "bk.id", "obs.build_key_id")
+      .innerJoin("navigation_nodes as n", "n.id", "obs.node_id")
+      .where("n.app_id", "=", appId)
+      // Constrain the build key to the node's own app: observation rows accept
+      // independent entity + build-key ids, so a mis-scoped build key must not
+      // surface another app's provenance in this app-union (#4985).
+      .whereRef("bk.app_id", "=", "n.app_id")
+      .select([
+        "obs.node_id as node_id",
+        "bk.app_id as package_id",
+        "bk.version_code as version_code",
+        "bk.content_hash as content_hash",
+        "obs.device_id as device_id",
+        "obs.session_uuid as session_uuid",
+        "obs.last_seen_at as last_seen_at",
+      ])
+      .orderBy("obs.last_seen_at", "desc")
+      .orderBy("obs.device_id", "asc")
+      .execute();
+  }
+
+  /**
+   * Read every edge-provenance observation for an app in one typed join
+   * (nav (app,build) Phase 2, #4985), symmetric to
+   * {@link getNodeProvenanceForApp}. Keyed by `edge_id` so the caller can union
+   * provenance across the multiple edge rows that aggregate into one summary
+   * transition.
+   */
+  async getEdgeProvenanceForApp(appId: string): Promise<NavigationEdgeProvenanceRow[]> {
+    const db = this.getDb();
+    return db
+      .selectFrom("navigation_edge_observations as obs")
+      .innerJoin("navigation_build_keys as bk", "bk.id", "obs.build_key_id")
+      .innerJoin("navigation_edges as e", "e.id", "obs.edge_id")
+      .where("e.app_id", "=", appId)
+      // Symmetric to the node query: pin the build key to the edge's own app so
+      // a mis-scoped build key cannot leak another app's provenance (#4985).
+      .whereRef("bk.app_id", "=", "e.app_id")
+      .select([
+        "obs.edge_id as edge_id",
+        "bk.app_id as package_id",
+        "bk.version_code as version_code",
+        "bk.content_hash as content_hash",
+        "obs.device_id as device_id",
+        "obs.session_uuid as session_uuid",
+        "obs.last_seen_at as last_seen_at",
+      ])
+      .orderBy("obs.last_seen_at", "desc")
+      .orderBy("obs.device_id", "asc")
       .execute();
   }
 

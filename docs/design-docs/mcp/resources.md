@@ -31,6 +31,50 @@ Returns the current navigation graph showing:
 - Known screens and their IDs
 - Screen transitions and triggers
 - UI elements that cause navigation
+- Per-node/edge **provenance** — which build, device, and session reached each
+  screen and transition (nav (app,build) Phase 2, [#4985](https://github.com/kaeawc/auto-mobile/issues/4985))
+
+The graph is an **app-union**: a node or edge is present if any recorded build of
+the app reached it, and each node/edge carries the union of the observations that
+reached it. Consumers use provenance to weight rendering — the desktop navigation
+pane draws screens/transitions reached in the currently-active context at 100%
+opacity and everything else (another build/device, or historical) at 50%. A
+record whose `deviceId` is the `"legacy"` sentinel is **unclassified** (e.g. iOS
+events that carry no build context yet, deferred
+[#4991](https://github.com/kaeawc/auto-mobile/issues/4991)) and is treated as
+active/opaque rather than faded.
+
+Each node's and edge's `provenance` is an **optional** array (omitted when the
+summary is produced without a provenance source, e.g. fakes) of records:
+
+- `buildKey` — the build identity: `{ packageId, versionCode, contentHash }`
+- `deviceId` — the device that observed the mutation; `"legacy"` for rows
+  backfilled from pre-provenance graphs or written before a build context existed
+- `sessionUuid` — the owning agent-session UUID; `"legacy"` when unknown
+- `lastSeen` — epoch milliseconds of the most recent observation for this
+  `(buildKey, deviceId, sessionUuid)` tuple
+
+Records are unique per `(buildKey, deviceId, sessionUuid)` and ordered
+recency-first (newest `lastSeen`).
+
+**Provenance shape** (illustrative node/edge fragment):
+
+```json
+{
+  "provenance": [
+    {
+      "buildKey": {
+        "packageId": "com.example.app",
+        "versionCode": 42,
+        "contentHash": "a1b2c3"
+      },
+      "deviceId": "emulator-5554",
+      "sessionUuid": "3f9c1e70-0e2a-4a1b-9d1a-1f2e3d4c5b6a",
+      "lastSeen": 1735776000000
+    }
+  ]
+}
+```
 
 See [Navigation Graph](nav/index.md) for details.
 

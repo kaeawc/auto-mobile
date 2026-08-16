@@ -160,6 +160,38 @@ export interface ExportedGraph {
 }
 
 /**
+ * Build-key identity for a provenance observation (nav (app,build) Phase 2, #4985).
+ * `packageId` is the application package id — the `navigation_build_keys.app_id`
+ * column; the build-key dimension is (packageId, versionCode, contentHash).
+ */
+export interface NavigationProvenanceBuildKey {
+  /** Application package id (navigation_build_keys.app_id). */
+  packageId: string;
+  /** APK version code the observation was recorded under (0 for legacy/default). */
+  versionCode: number;
+  /** Content hash of the build (empty string for legacy/default). */
+  contentHash: string;
+}
+
+/**
+ * A single provenance observation attached to a node or edge in the app-level
+ * union graph (nav (app,build) Phase 2, #4985): which build/device/session
+ * reached it and when it was last seen there. Sourced from the Phase 1 (#4984)
+ * `navigation_node_observations` / `navigation_edge_observations` tables. Each
+ * record is unique per (buildKey, deviceId, sessionUuid); `lastSeen` mirrors the
+ * observation's `last_seen_at`. `deviceId`/`sessionUuid` are `"legacy"` for rows
+ * backfilled from pre-provenance graphs.
+ */
+export interface NavigationProvenanceRecord {
+  buildKey: NavigationProvenanceBuildKey;
+  deviceId: string;
+  /** Owning agent-session UUID that observed the mutation (not deviceSessionUuid). */
+  sessionUuid: string;
+  /** Epoch ms of the most recent observation for this (build, device, session). */
+  lastSeen: number;
+}
+
+/**
  * High-level summary node for navigation graph resources.
  */
 export interface NavigationGraphSummaryNode {
@@ -168,6 +200,13 @@ export interface NavigationGraphSummaryNode {
   visitCount: number;
   /** Path to screenshot file, or resource URI for fetching */
   screenshotPath?: string | null;
+  /**
+   * Per-(build, device, session) provenance for this node in the app-union graph
+   * (#4985). Additive/optional: consumers that ignore it are unaffected. Omitted
+   * when the summary is produced without a provenance source (e.g. fakes); an
+   * empty array means the node has no recorded observations.
+   */
+  provenance?: NavigationProvenanceRecord[];
 }
 
 /**
@@ -181,6 +220,12 @@ export interface NavigationGraphSummaryEdge {
   toolName: string | null;
   /** Number of times this transition has been traversed */
   traversalCount: number;
+  /**
+   * Per-(build, device, session) provenance for this transition, unioned across
+   * every underlying edge row aggregated into it (#4985). Additive/optional; see
+   * {@link NavigationGraphSummaryNode.provenance}.
+   */
+  provenance?: NavigationProvenanceRecord[];
 }
 
 /**

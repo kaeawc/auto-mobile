@@ -30,6 +30,7 @@ import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
+import dev.jasonpearson.automobile.desktop.core.navigation.NavigationActiveContext
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import kotlinx.coroutines.CancellationException
@@ -367,6 +368,12 @@ fun NavigationFacet(
         selectedAppId = foregroundAppId,
         screenshotLoader = screenshotLoader,
         streamOnly = true,
+        // Active-context resolution (#4985, design point 1): this pane's device + the app resolved
+        // from its stream. `buildKey` is null until the build discriminator is threaded through the
+        // navigation stream (deferred #4837, see class KDoc caveat), so provenance matching is
+        // device+package scoped for now and tightens to full build-key equality when it lands.
+        activeContext =
+          NavigationActiveContext(deviceId = column.deviceId, packageId = current.appId),
       )
   }
 }

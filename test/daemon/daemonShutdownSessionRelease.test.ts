@@ -75,7 +75,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore")
       .mockResolvedValue(undefined);
     const releaseDeviceSpy = spyOn(devicePool, "releaseDevice");
-    const loggerCloseSpy = spyOn(logger, "close").mockImplementation(() => {});
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
     const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
       repository.events.push("closeDatabase");
     });
@@ -136,7 +136,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
         }
         return await originalRelease(sessionId, reason);
       });
-    const loggerCloseSpy = spyOn(logger, "close").mockImplementation(() => {});
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
       await sessionManager.createSession(brokenSessionId, "broken-device", "android");
@@ -172,7 +172,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const deviceId = "restore-failure-device";
     const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore")
       .mockRejectedValue(new Error("simulated restore failure"));
-    const loggerCloseSpy = spyOn(logger, "close").mockImplementation(() => {});
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
       await devicePool.initializeWithDevices([{
@@ -218,7 +218,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const releasedCallbacks: string[] = [];
     const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore")
       .mockResolvedValue(undefined);
-    const loggerCloseSpy = spyOn(logger, "close").mockImplementation(() => {});
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
       await devicePool.initializeWithDevices([{

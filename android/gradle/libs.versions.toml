@@ -78,6 +78,7 @@ dokka = "2.2.0"
 compose-multiplatform = "1.11.1"
 compose-hot-reload = "1.2.0"
 metro = "1.4.1"
+conveyor = "2.0"
 
 [plugins]
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "build-kotlin" }
@@ -91,6 +92,7 @@ compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose-m
 compose-hot-reload = { id = "org.jetbrains.compose.hot-reload", version.ref = "compose-hot-reload" }
 metro = { id = "dev.zacsweers.metro", version.ref = "metro" }
 detekt = { id = "dev.detekt", version.ref = "detekt" }
+conveyor = { id = "dev.hydraulic.conveyor", version.ref = "conveyor" }
 
 [libraries]
 # H.264 decoding for the live device view. Deliberately org.bytedeco:ffmpeg and NOT

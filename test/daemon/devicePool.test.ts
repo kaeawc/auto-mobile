@@ -583,7 +583,7 @@ describe("DevicePool", () => {
       }
       devicePool.markIntentionalShutdown(device.id);
 
-      expect(await devicePool.isCurrentDisconnectedDevice(device)).toBe(true);
+      expect(await devicePool.isCurrentDisconnectedDevice(device)).toBe("current");
     });
 
     test("does not accept a different AVD that reuses the disconnected emulator serial", async () => {
@@ -605,7 +605,7 @@ describe("DevicePool", () => {
           createBootedDevice("emulator-5554", "android", "Pixel 9"),
         ];
 
-        expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe(true);
+        expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe("current");
       } finally {
         if (originalRebootOnDeath === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
@@ -648,7 +648,48 @@ describe("DevicePool", () => {
           createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)"),
         ];
 
-        expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe(false);
+        expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe("recovered");
+      } finally {
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
+    test("reports an unknown disconnect state when Android rediscovery discovery fails", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      try {
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          fakeDeviceManager,
+          new DefaultRetryExecutor(fakeTimer),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { onLoss: true, maxAttempts: 2 },
+        );
+        await devicePool.addDevice(ready, {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          source: "local",
+        });
+        const disconnected = devicePool.getDevice(ready.deviceId);
+        if (!disconnected) {
+          throw new Error("expected disconnected pooled device");
+        }
+        fakeDeviceManager.failedPlatforms = new Set(["android"]);
+
+        expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe("unknown");
       } finally {
         if (originalRebootOnDeath === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
@@ -691,7 +732,7 @@ describe("DevicePool", () => {
 
         manager.releaseDiscovery();
 
-        expect(await validation).toBe(false);
+        expect(await validation).toBe("recovered");
         expect(devicePool.getDevice(ready.deviceId)).toBe(replacement);
       } finally {
         manager.releaseDiscovery();

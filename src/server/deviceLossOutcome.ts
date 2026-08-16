@@ -1,9 +1,5 @@
 export const DEVICE_LOSS_OUTCOME_CODE = "device_lost";
-const DEVICE_LOSS_ABORT_ERROR = Symbol.for("automobile.device-loss-error");
-
-type DeviceLossAwareAbortSignal = AbortSignal & {
-  [DEVICE_LOSS_ABORT_ERROR]?: DeviceLostError;
-};
+const deviceLossAbortErrors = new WeakMap<AbortSignal, DeviceLostError>();
 
 export interface DeviceLossOutcome {
   code: typeof DEVICE_LOSS_OUTCOME_CODE;
@@ -42,17 +38,17 @@ export function deviceLostErrorFromCancellationReason(reason: string): DeviceLos
 
 /**
  * Bun can report an aborted signal while temporarily hiding `signal.reason`.
- * Track the typed reason by signal so downstream cancellation checks retain the
- * infrastructure outcome in that runtime path.
+ * Keep the typed reason out of the runtime-owned signal object so downstream
+ * cancellation checks retain the infrastructure outcome across runtimes.
  */
 export function rememberDeviceLossAbort(signal: AbortSignal, error: DeviceLostError): void {
-  (signal as DeviceLossAwareAbortSignal)[DEVICE_LOSS_ABORT_ERROR] = error;
+  deviceLossAbortErrors.set(signal, error);
 }
 
 export function deviceLostErrorFromAbortSignal(signal: AbortSignal): DeviceLostError | undefined {
   return isDeviceLostError(signal.reason)
     ? signal.reason
-    : (signal as DeviceLossAwareAbortSignal)[DEVICE_LOSS_ABORT_ERROR];
+    : deviceLossAbortErrors.get(signal);
 }
 
 export function deviceLossOutcomeFromError(

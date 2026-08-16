@@ -80,7 +80,11 @@ import { startPerformanceMonitor, stopPerformanceMonitor, getPerformanceMonitor 
 import { interruptVideoRecording, listActiveVideoRecordings, stopVideoRecording } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
-import { evaluateDeviceDisconnects } from "./disconnectMonitor";
+import {
+  evaluateDeviceDisconnects,
+  recordingCandidateIncarnations,
+  type DisconnectCandidateIncarnation,
+} from "./disconnectMonitor";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
@@ -148,8 +152,10 @@ export class Daemon {
   private deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private pidFileWritten = false;
   private deviceDisconnectMisses: Map<string, number> = new Map();
+  private deviceDisconnectMissIncarnations: Map<string, DisconnectCandidateIncarnation> = new Map();
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
   private forceDisconnectedDeviceIds: Set<string> = new Set();
+  private forceDisconnectedDeviceGenerations: Map<string, number> = new Map();
   private stoppingRecordings: Set<string> = new Set();
   private sessionManager: SessionManager;
   private devicePool: DevicePool;
@@ -1242,7 +1248,7 @@ export class Daemon {
         const missingByDevice = new Map<string, string[]>();
         const candidateDeviceIds = new Set<string>();
         const candidatePlatforms = new Map<string, "android" | "ios">();
-        const idleCandidateIds = new Set<string>();
+        const candidateIncarnations = recordingCandidateIncarnations(activeRecordings);
         for (const recording of activeRecordings) {
           candidateDeviceIds.add(recording.deviceId);
           candidatePlatforms.set(recording.deviceId, recording.platform);
@@ -1250,9 +1256,7 @@ export class Daemon {
         for (const device of this.devicePool.getAllDevices()) {
           candidateDeviceIds.add(device.id);
           candidatePlatforms.set(device.id, device.platform);
-          if (device.status === "idle") {
-            idleCandidateIds.add(device.id);
-          }
+          candidateIncarnations.set(device.id, device.incarnation);
         }
         for (const deviceId of this.sessionManager.getAssignedDevices()) {
           candidateDeviceIds.add(deviceId);
@@ -1265,14 +1269,15 @@ export class Daemon {
           candidateDeviceIds,
           succeededPlatforms,
           candidatePlatforms,
-          idleCandidateIds,
+          candidateIncarnations,
+          deviceDisconnectMissIncarnations: this.deviceDisconnectMissIncarnations,
           forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
           missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
         });
 
-        if (disconnectResult.skippedAdbUnreachable) {
+        if (disconnectResult.skippedAllDiscoveryFailed) {
           logger.warn(
-            `[DisconnectMonitor] ADB returned 0 devices but ${candidateDeviceIds.size} tracked — skipping miss count (ADB likely unreachable)`
+            `[DisconnectMonitor] No platform discovery succeeded but ${candidateDeviceIds.size} tracked — skipping miss count`
           );
           return;
         }
@@ -1366,7 +1371,9 @@ export class Daemon {
           if (deviceCleanupSucceeded) {
             this.confirmedDisconnectedDeviceIds.add(deviceId);
             this.deviceDisconnectMisses.delete(deviceId);
+            this.deviceDisconnectMissIncarnations.delete(deviceId);
             this.forceDisconnectedDeviceIds.delete(deviceId);
+            this.forceDisconnectedDeviceGenerations.delete(deviceId);
           }
         }
       } catch (error) {
@@ -1380,11 +1387,37 @@ export class Daemon {
     pooledDeviceAtDisconnect: PooledDevice | null,
     deviceId: string
   ): Promise<boolean> {
-    if (
-      !pooledDeviceAtDisconnect ||
-      await this.devicePool.isCurrentDisconnectedDevice(pooledDeviceAtDisconnect)
-    ) {
+    if (!pooledDeviceAtDisconnect) {
+      if (!this.devicePool.getDevice(deviceId)) {
+        return false;
+      }
+      this.deviceDisconnectMisses.delete(deviceId);
+      this.deviceDisconnectMissIncarnations.delete(deviceId);
+      this.confirmedDisconnectedDeviceIds.delete(deviceId);
+      this.forceDisconnectedDeviceIds.delete(deviceId);
+      this.forceDisconnectedDeviceGenerations.delete(deviceId);
+      logger.info(
+        `[DisconnectMonitor] Skipping stale disconnect cleanup for recovered device ${deviceId}`
+      );
+      return true;
+    }
+    const forceGenerationAtVerificationStart = this.forceDisconnectedDeviceGenerations.get(deviceId);
+    const disconnectStatus = await this.devicePool.isCurrentDisconnectedDevice(pooledDeviceAtDisconnect);
+    if (disconnectStatus === "current") {
       return false;
+    }
+    if (disconnectStatus === "unknown") {
+      logger.warn(
+        `[DisconnectMonitor] Retaining disconnect state for ${deviceId}: recovery verification was inconclusive`
+      );
+      return true;
+    }
+    this.deviceDisconnectMisses.delete(deviceId);
+    this.deviceDisconnectMissIncarnations.delete(deviceId);
+    this.confirmedDisconnectedDeviceIds.delete(deviceId);
+    if (this.forceDisconnectedDeviceGenerations.get(deviceId) === forceGenerationAtVerificationStart) {
+      this.forceDisconnectedDeviceIds.delete(deviceId);
+      this.forceDisconnectedDeviceGenerations.delete(deviceId);
     }
     logger.info(
       `[DisconnectMonitor] Skipping stale disconnect cleanup for recovered device ${deviceId}`
@@ -1403,6 +1436,10 @@ export class Daemon {
       }
       logger.warn(`[Daemon] ADB reported tracked device ${event.deviceId} missing: ${event.message}`);
       this.forceDisconnectedDeviceIds.add(event.deviceId);
+      this.forceDisconnectedDeviceGenerations.set(
+        event.deviceId,
+        (this.forceDisconnectedDeviceGenerations.get(event.deviceId) ?? 0) + 1,
+      );
       this.deviceDisconnectMisses.set(event.deviceId, DEVICE_DISCONNECT_MISS_THRESHOLD);
     });
   }

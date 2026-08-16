@@ -323,6 +323,28 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("rebindSession", () => {
+    test("retains the existing binding when replacement persistence rejects", async () => {
+      const repository = new FakeDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android");
+        repository.failure = "create";
+
+        await expect(manager.rebindSession("session-1", "emulator-new", "android")).rejects.toThrow(
+          "persist create failed",
+        );
+
+        expect(manager.getSession("session-1")?.assignedDevice).toBe("emulator-old");
+        expect(manager.getSessionForDevice("emulator-old")).toBe("session-1");
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  });
+
   describe("cache management", () => {
     test("should update session cache data", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");

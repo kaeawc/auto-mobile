@@ -953,6 +953,9 @@ export class DevicePool {
       if (result.error instanceof DevicePoolError && !result.error.isRetryable) {
         throw new ActionableError(result.error.message);
       }
+      if (result.error && !(result.error instanceof DevicePoolError && result.error.isRetryable)) {
+        throw result.error;
+      }
 
       // Timeout case
       const elapsed = this.timer.now() - startTime;
@@ -2258,6 +2261,13 @@ export class DevicePool {
     }
   }
 
+  private async rollbackAssignedSessions(assignments: ReadonlyMap<string, string>): Promise<void> {
+    for (const [sessionId, deviceId] of assignments) {
+      await this.sessionManager.releaseSession(sessionId);
+      await this.releaseDevice(deviceId);
+    }
+  }
+
   /**
    * Release device from session
    *
@@ -2590,7 +2600,11 @@ export class DevicePool {
   ): Promise<void> {
     // Create the session before claiming the device so a session created by
     // the automatic allocator cannot leave this device reserved as well.
-    const session = await this.sessionManager.createSession(sessionId, device.id, platform);
+    const previousSession = this.sessionManager.getSession(sessionId);
+    const previousDeviceId = previousSession?.assignedDevice;
+    const session = previousSession && previousDeviceId !== device.id
+      ? await this.sessionManager.rebindSession(sessionId, device.id, platform)
+      : await this.sessionManager.createSession(sessionId, device.id, platform);
     if (session.assignedDevice !== device.id) {
       throw new ActionableError(
         `Session '${sessionId}' is already assigned to device '${session.assignedDevice}'.`,
@@ -2602,6 +2616,10 @@ export class DevicePool {
     device.lastUsedAt = this.nextLastUsedAt();
     device.assignmentCount++;
     device.errorCount = 0;
+
+    if (previousDeviceId && previousDeviceId !== device.id) {
+      await this.releaseDevice(previousDeviceId, sessionId);
+    }
   }
 
   private async reuseExistingDeviceSession(

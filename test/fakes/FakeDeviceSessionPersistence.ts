@@ -2,9 +2,12 @@ import type { DeviceSessionPersistence } from "../../src/db/deviceSessionReposit
 
 export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
   failure: "create" | "release" | null = null;
+  createFailureOnAttempt: number | null = null;
+  private createAttempts = 0;
 
   async upsertActiveSession(): Promise<void> {
-    if (this.failure === "create") {
+    this.createAttempts++;
+    if (this.failure === "create" || this.createFailureOnAttempt === this.createAttempts) {
       throw new Error("persist create failed");
     }
   }

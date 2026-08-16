@@ -2328,6 +2328,33 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("device-a")).toMatchObject({ sessionId: null, status: "idle" });
     });
 
+    test("releases earlier session ownership when a later persistence write rejects", async () => {
+      sessionManager.stopCleanupTimer();
+      const sessionPersistence = new FakeDeviceSessionPersistence();
+      sessionPersistence.createFailureOnAttempt = 2;
+      sessionManager = new SessionManager(fakeTimer, sessionPersistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([
+        createBootedDevice("emulator-5554"),
+        createBootedDevice("emulator-5556"),
+      ]);
+
+      await expect(
+        devicePool.assignMultipleDevices(["session-a", "session-b"], 1_000, "android"),
+      ).rejects.toThrow("persist create failed");
+
+      expect(sessionManager.getSession("session-a")).toBeNull();
+      expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
+      expect(devicePool.getDevice("emulator-5554")?.status).toBe("idle");
+    });
+  });
     test("evicts a started emulator when its process exits after readiness", async () => {
       const images: DeviceInfo[] = [
         {

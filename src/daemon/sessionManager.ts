@@ -391,6 +391,31 @@ export class SessionManager {
     return session;
   }
 
+  async rebindSession(
+    sessionId: string,
+    assignedDevice: string,
+    platform: Platform,
+  ): Promise<Session> {
+    const existing = this.sessions.get(sessionId);
+    if (!existing) {
+      return await this.createSession(sessionId, assignedDevice, platform);
+    }
+    if (existing.assignedDevice === assignedDevice) {
+      return existing;
+    }
+
+    const replacement: Session = { ...existing, assignedDevice, platform };
+    await this.persistSession(replacement);
+
+    this.sessions.set(sessionId, replacement);
+    this.sessionDeviceMap.set(sessionId, assignedDevice);
+    if (this.deviceSessionMap.get(existing.assignedDevice) === sessionId) {
+      this.deviceSessionMap.delete(existing.assignedDevice);
+    }
+    this.deviceSessionMap.set(assignedDevice, sessionId);
+    return replacement;
+  }
+
   /**
    * Get device assigned to a session
    */

@@ -104,6 +104,8 @@ export class SessionManager {
     string,
     { session: Session; promise: Promise<string | null> }
   > = new Map();
+  /** Setup work that must settle before a session restores its cached device state. */
+  private readonly sessionSetupPromises: Map<string, { session: Session; promise: Promise<void> }> = new Map();
   private deviceSessionRepository: DeviceSessionRepository;
   private readonly getBarrier: () => DbWriteBarrier;
   private readonly keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer;
@@ -328,11 +330,55 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Track setup that can modify device state after a session has been assigned.
+   * Release waits for this work so restoration sees the final cached state.
+   */
+  trackSessionSetup(session: Session, setup: Promise<void>): Promise<void> {
+    const tracked = { session, promise: setup };
+    this.sessionSetupPromises.set(session.sessionId, tracked);
+    void setup.then(
+      () => this.clearSessionSetup(session.sessionId, tracked),
+      () => this.clearSessionSetup(session.sessionId, tracked)
+    );
+    return setup;
+  }
+
+  /** Wait a bounded amount of time for releases already started by monitors. */
+  async drainReleasePromises(timeoutMs: number): Promise<boolean> {
+    const releases = Array.from(this.releasePromises.values(), release => release.promise);
+    if (releases.length === 0) {
+      return true;
+    }
+
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeout = new Promise<boolean>(resolve => {
+      timeoutHandle = this.timer.setTimeout(() => resolve(false), timeoutMs);
+    });
+
+    try {
+      return await Promise.race([Promise.allSettled(releases).then(() => true), timeout]);
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
   private async releaseSessionInternal(
     sessionId: string,
     session: Session,
     releaseReason: string,
   ): Promise<string | null> {
+    const setup = this.sessionSetupPromises.get(sessionId);
+    if (setup?.session === session) {
+      try {
+        await setup.promise;
+      } catch (error) {
+        logger.warn(`Failed session setup for ${sessionId} before release: ${error}`);
+      }
+    }
+
     try {
       await this.restoreKeepScreenAwake(session);
     } catch (error) {
@@ -365,6 +411,15 @@ export class SessionManager {
     logger.info(`Released session ${sessionId}, freeing device ${deviceId}`);
 
     return deviceId;
+  }
+
+  private clearSessionSetup(
+    sessionId: string,
+    tracked: { session: Session; promise: Promise<void> },
+  ): void {
+    if (this.sessionSetupPromises.get(sessionId) === tracked) {
+      this.sessionSetupPromises.delete(sessionId);
+    }
   }
 
   /**

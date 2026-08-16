@@ -284,6 +284,62 @@ describe("SessionManager", () => {
       }
     });
 
+    test("waits for tracked setup before restoring and removing a session", async () => {
+      let finishSetup!: () => void;
+      const setupFinished = new Promise<void>(resolve => { finishSetup = resolve; });
+      const manager = new SessionManager(fakeTimer, {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(): Promise<void> {},
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      }, () => new FakeDbWriteBarrier());
+      try {
+        const session = await manager.createSession("s1", "device-1", "android");
+        const setup = manager.trackSessionSetup(session, setupFinished);
+        const release = manager.releaseSession("s1", "daemon-shutdown");
+
+        await Promise.resolve();
+        expect(manager.getSession("s1")).not.toBeNull();
+
+        finishSetup();
+        await setup;
+        await expect(release).resolves.toBe("device-1");
+        expect(manager.getSession("s1")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("bounds a drain of an already-started release", async () => {
+      let finishRestore!: () => void;
+      const restoreFinished = new Promise<void>(resolve => { finishRestore = resolve; });
+      const manager = new SessionManager(
+        fakeTimer,
+        {
+          async upsertActiveSession(): Promise<void> {},
+          async recordActivity(): Promise<void> {},
+          async markReleased(): Promise<void> {},
+          async markStaleActiveSessionsExpired(): Promise<void> {},
+        },
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => await restoreFinished }),
+      );
+      try {
+        await manager.createSession("s1", "device-1", "android");
+        manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
+        const release = manager.releaseSession("s1", "heartbeat");
+        const drained = manager.drainReleasePromises(1_000);
+
+        fakeTimer.advanceTime(1_000);
+        await expect(drained).resolves.toBe(false);
+
+        finishRestore();
+        await release;
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("does not coalesce a replacement session with the same UUID", async () => {
       const releases: string[] = [];
       let finishFirstPersistence!: () => void;

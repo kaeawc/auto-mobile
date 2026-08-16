@@ -97,7 +97,7 @@ type Settled<T> =
 
 async function settleWithin<T>(work: Promise<T>, timer: Timer, timeoutMs: number): Promise<Settled<T>> {
   let handle: NodeJS.Timeout | undefined;
-  const settled = work.then<Settled<T>>(
+  const settled: Promise<Settled<T>> = work.then(
     value => ({ status: "fulfilled", value }),
     error => ({ status: "failed", error })
   );

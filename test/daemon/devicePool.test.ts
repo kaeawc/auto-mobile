@@ -1766,6 +1766,46 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("sim-2")).toMatchObject({ sessionId: null, status: "idle" });
     });
 
+    test("preserves a replacement session that reuses a UUID during rollback", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("sim-1", "ios", "iPhone 15"),
+        createBootedDevice("sim-2", "ios", "iPhone 16"),
+      ]);
+      const createSession = sessionManager.createSession.bind(sessionManager);
+      const releaseSession = sessionManager.releaseSession.bind(sessionManager);
+      let sessionCreates = 0;
+      sessionManager.createSession = async (
+        sessionId,
+        deviceId,
+        platform,
+        timeoutMs,
+        heartbeatTimeoutMs,
+      ) => {
+        const session = await createSession(
+          sessionId,
+          deviceId,
+          platform,
+          timeoutMs,
+          heartbeatTimeoutMs,
+        );
+        sessionCreates++;
+        if (sessionCreates === 1) {
+          await releaseSession(sessionId);
+          await createSession(sessionId, deviceId, platform, timeoutMs, heartbeatTimeoutMs);
+          fakeDeviceManager.failedPlatforms.add("ios");
+        }
+        return session;
+      };
+
+      await expect(
+        devicePool.assignMultipleDevices(["session-a", "session-b"], 1000, "ios"),
+      ).rejects.toThrow(/Unable to verify iOS simulator liveness/);
+
+      expect(sessionManager.getSession("session-a")).toMatchObject({ assignedDevice: "sim-1" });
+      expect(devicePool.getDevice("sim-1")).toMatchObject({ sessionId: "session-a", status: "busy" });
+      expect(devicePool.getDevice("sim-2")).toMatchObject({ sessionId: null, status: "idle" });
+    });
+
     test("rolls back sessions and devices when criteria allocation loses iOS liveness after a partial assignment", async () => {
       await initializeLiveDevices([
         createBootedDevice("sim-1", "ios", "iPhone 15"),

@@ -56,14 +56,23 @@ async function observePollingInterval(value: string | undefined): Promise<number
 
 describe("AndroidEmulatorClient polling interval configuration", () => {
   test("uses the safe default for absent or invalid values", async () => {
-    const values = [undefined, "", "garbage", "-1", "0", "9".repeat(400)];
+    const values = [
+      undefined,
+      "",
+      "garbage",
+      "-1",
+      "0",
+      "2147483648",
+      "1e308",
+      "9".repeat(400),
+    ];
     const observed = [];
 
     for (const value of values) {
       observed.push(await observePollingInterval(value));
     }
 
-    expect(observed).toEqual([500, 500, 500, 500, 500, 500]);
+    expect(observed).toEqual([500, 500, 500, 500, 500, 500, 500, 500]);
   });
 
   test("clamps finite positive values to the documented minimum", async () => {

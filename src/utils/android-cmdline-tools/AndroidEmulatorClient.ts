@@ -26,6 +26,7 @@ const ACCEL_CHECK_TIMEOUT_MS = 3_000;
 const EARLY_EXIT_DRAIN_TIMEOUT_MS = 1_000;
 const DEFAULT_EMULATOR_POLLING_INTERVAL_MS = 500;
 const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 type LaunchFailureCategory =
   | "display_initialization_failed"
@@ -56,7 +57,11 @@ function outputFromUnknown(value: unknown): string {
 
 function resolveEmulatorPollingInterval(value: string | undefined): number {
   const configuredInterval = Number(value);
-  if (!Number.isFinite(configuredInterval) || configuredInterval <= 0) {
+  if (
+    !Number.isFinite(configuredInterval) ||
+    configuredInterval <= 0 ||
+    configuredInterval > MAX_TIMER_DELAY_MS
+  ) {
     return DEFAULT_EMULATOR_POLLING_INTERVAL_MS;
   }
   return Math.max(configuredInterval, MIN_EMULATOR_POLLING_INTERVAL_MS);

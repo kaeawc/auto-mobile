@@ -1,0 +1,231 @@
+name: "Build Desktop App Installers"
+
+# Packages the Compose Desktop app (`android/desktop-app`) into native installers
+# — macOS .dmg, Windows .msi, Linux .deb — via jpackage (bundled with JDK 21) and
+# uploads each as a CI artifact. Called by prepare-release.yml, which builds these
+# once as release candidates from the staging ref; release.yml then reuses the
+# uploaded artifacts (by prepare run id) rather than rebuilding — the same
+# "prepare builds, release reuses" model as the APK/IPA/jar/helper.
+#
+# Versioning: the installer version is passed in as `version` and forwarded to
+# Gradle as `-PdesktopPackageVersion`, so the installer identity matches the
+# npm/Maven coordinates rather than the module's SNAPSHOT VERSION_NAME.
+#
+# macOS signing/notarization mirrors the ScreenCaptureKit helper release: the
+# Developer ID cert is imported into a temporary keychain, Compose signs the .app
+# during packaging (MACOS_SIGN=true), then this workflow notarizes and staples the
+# DMG with notarytool using the App Store Connect API key.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Installer version (plain semver, no leading v, e.g. 0.0.47)"
+        required: true
+        type: string
+      checkout-ref:
+        description: "Commit or tag to build; defaults to the caller SHA"
+        required: false
+        type: string
+        default: ""
+      upload-artifact:
+        description: "Whether to upload the built installers as workflow artifacts"
+        required: false
+        type: boolean
+        default: true
+      artifact-retention-days:
+        description: "How long to retain the uploaded installer artifacts"
+        required: false
+        type: number
+        default: 7
+    secrets:
+      GRADLE_ENCRYPTION_KEY:
+        required: true
+      MACOS_DEVELOPER_ID_CERT_BASE64:
+        required: true
+      MACOS_DEVELOPER_ID_CERT_PASSWORD:
+        required: true
+      MACOS_KEYCHAIN_PASSWORD:
+        required: true
+      MACOS_DEVELOPER_ID_SIGNING_IDENTITY:
+        required: true
+      APPLE_NOTARY_KEY_ID:
+        required: true
+      APPLE_NOTARY_ISSUER_ID:
+        required: true
+      APPLE_NOTARY_PRIVATE_KEY_BASE64:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "Package ${{ matrix.format }} (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos
+            format: dmg
+            gradle-task: ":desktop-app:packageDmg"
+          - os: windows-latest
+            platform: windows
+            format: msi
+            gradle-task: ":desktop-app:packageMsi"
+          - os: ubuntu-latest
+            platform: linux
+            format: deb
+            gradle-task: ":desktop-app:packageDeb"
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          # No LFS: the packaging config sets no custom icon (the only LFS assets
+          # under desktop-app), so the LFS-tracked pointer files are never read.
+          lfs: false
+          ref: ${{ inputs.checkout-ref || github.sha }}
+          persist-credentials: false
+
+      # Fail closed on a malformed version before packaging. Also prevents any
+      # `${{ inputs.version }}` from carrying shell metacharacters into later run
+      # steps. Mirrors the semver shape accepted by bump-versions.sh.
+      - name: "Validate installer version"
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid installer version: $VERSION (expected MAJOR.MINOR.PATCH semver)" >&2
+            exit 1
+          fi
+
+      # jpackage builds the .deb with dpkg-deb under fakeroot; fakeroot is not
+      # preinstalled on the ubuntu runner image.
+      - name: "Install fakeroot (Linux deb)"
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot
+
+      - name: "Install macOS Developer ID certificate"
+        if: matrix.platform == 'macos'
+        env:
+          MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
+          MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: ./scripts/ios/setup-macos-signing-keychain.sh
+
+      # Export the signing toggle + identity through the environment (not the
+      # Gradle command line) so the identity is not visible in a process listing.
+      # These persist into the composite action's gradle invocation via GITHUB_ENV.
+      - name: "Enable Compose macOS signing"
+        if: matrix.platform == 'macos'
+        env:
+          SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          echo "MACOS_SIGN=true" >> "$GITHUB_ENV"
+          printf 'MACOS_DEVELOPER_ID_SIGNING_IDENTITY=%s\n' "$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: "Package installer"
+        uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ${{ matrix.gradle-task }}
+          gradle-flags: '["-PdesktopPackageVersion=${{ inputs.version }}"]'
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/build-desktop-app-installers-${{ matrix.os }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          malloc-replacement: ${{ runner.os == 'Linux' && 'jemalloc' || 'none' }}
+
+      - name: "Write App Store Connect API key"
+        if: matrix.platform == 'macos'
+        env:
+          APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          KEY_PATH="${RUNNER_TEMP}/notary-key.p8"
+          printf '%s' "${APPLE_NOTARY_PRIVATE_KEY_BASE64}" | base64 --decode > "${KEY_PATH}"
+          chmod 600 "${KEY_PATH}"
+          echo "APPLE_NOTARY_KEY_PATH=${KEY_PATH}" >> "${GITHUB_ENV}"
+
+      - name: "Notarize and staple DMG"
+        if: matrix.platform == 'macos'
+        working-directory: android
+        env:
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          DMG=$(find desktop-app/build/compose/binaries/main/dmg -maxdepth 1 -type f -name '*.dmg' | head -n 1)
+          if [ -z "$DMG" ]; then
+            echo "No DMG was produced under desktop-app/build/compose/binaries/main/dmg" >&2
+            exit 1
+          fi
+          echo "Notarizing $DMG"
+          # `notarytool submit --wait` exits 0 even when Apple's verdict is
+          # Invalid, which previously let the step run on to `stapler staple`
+          # and die with an opaque "Record not found" error 65. Parse the JSON
+          # result instead: anything but Accepted fails the step, after dumping
+          # the notary log so the per-file rejection reasons land in CI output.
+          SUBMISSION_JSON=$(xcrun notarytool submit "$DMG" \
+            --key "$APPLE_NOTARY_KEY_PATH" \
+            --key-id "$APPLE_NOTARY_KEY_ID" \
+            --issuer "$APPLE_NOTARY_ISSUER_ID" \
+            --wait \
+            --output-format json)
+          echo "$SUBMISSION_JSON"
+          SUBMISSION_ID=$(jq -r '.id // empty' <<<"$SUBMISSION_JSON")
+          STATUS=$(jq -r '.status // empty' <<<"$SUBMISSION_JSON")
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "Notarization verdict: ${STATUS:-unknown} (submission ${SUBMISSION_ID:-unknown})" >&2
+            if [ -n "$SUBMISSION_ID" ]; then
+              # Best-effort: the log service can lag right after the verdict.
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --key "$APPLE_NOTARY_KEY_PATH" \
+                --key-id "$APPLE_NOTARY_KEY_ID" \
+                --issuer "$APPLE_NOTARY_ISSUER_ID" >&2 || true
+            fi
+            exit 1
+          fi
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+
+      # jpackage names the file after packageName + version (e.g.
+      # AutoMobile-1.0.47.dmg, automobile_0.0.47-1_amd64.deb), which varies per
+      # format and platform. Copy it to one stable, platform-tagged asset name for
+      # the release. Glob by extension because the version-derived name differs
+      # between the macOS-floored version and the real MSI/Deb version.
+      - name: "Stage installer"
+        shell: bash
+        working-directory: android
+        env:
+          # Consumed through the environment, not interpolated into the script
+          # body, so the version can never expand into runner-side shell code.
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          SRC=$(find "desktop-app/build/compose/binaries/main/${{ matrix.format }}" \
+            -maxdepth 1 -type f -name "*.${{ matrix.format }}" | head -n 1)
+          if [ -z "$SRC" ]; then
+            echo "No .${{ matrix.format }} produced under desktop-app/build/compose/binaries/main/${{ matrix.format }}" >&2
+            exit 1
+          fi
+          DEST_DIR="desktop-app/build/desktop-dist"
+          mkdir -p "$DEST_DIR"
+          DEST="${DEST_DIR}/AutoMobile-${VERSION}-${{ matrix.platform }}.${{ matrix.format }}"
+          cp "$SRC" "$DEST"
+          echo "Staged $SRC -> $DEST"
+
+      - name: "Upload installer"
+        if: ${{ inputs.upload-artifact }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: automobile-desktop-${{ matrix.platform }}
+          path: android/desktop-app/build/desktop-dist/AutoMobile-${{ inputs.version }}-${{ matrix.platform }}.${{ matrix.format }}
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: error

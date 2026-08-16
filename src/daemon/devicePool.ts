@@ -2139,7 +2139,7 @@ export class DevicePool {
       }
       this.releaseCapturedDeviceForShutdown(expectedDevice);
       await this.removeDevice(expectedDevice.id);
-      return this.devices.get(expectedDevice.id) !== expectedDevice;
+      return !this.devices.has(expectedDevice.id);
     });
   }
 

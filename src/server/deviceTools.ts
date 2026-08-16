@@ -368,6 +368,24 @@ async function rebuildSameIdReplacement(
   });
 }
 
+async function findReplacementAfterSessionRelease(
+  deviceManager: PlatformDeviceManager,
+  device: BootedDevice,
+  timer: Timer,
+  deadlineMs: number,
+  replacementObservedDuringShutdown: BootedDevice | undefined,
+): Promise<BootedDevice | undefined> {
+  if (timer.now() >= deadlineMs) {
+    return replacementObservedDuringShutdown;
+  }
+  const discovery = await getShutdownDiscovery(deviceManager, device, timer, deadlineMs);
+  const replacement = findDiscoveredDevice(discovery, device);
+  if (replacement || discovery.succeededPlatforms.has(device.platform)) {
+    return replacement;
+  }
+  return await waitForDeviceShutdown(deviceManager, device, timer, deadlineMs);
+}
+
 async function retireShutdownOwnership(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice | null,
@@ -375,6 +393,7 @@ async function retireShutdownOwnership(
   timer: Timer,
   deadlineMs: number,
   abortSignal: AbortSignal | undefined,
+  replacementObservedDuringShutdown: BootedDevice | undefined,
 ): Promise<void> {
   if (!expectedPooledDevice) {
     return;
@@ -406,29 +425,20 @@ async function retireShutdownOwnership(
 
   // A same-ID replacement can boot while releasing the old session. If so,
   // retire only the captured incarnation, then immediately rediscover the
-  // replacement so it owns a fresh pool and registry epoch.
-  const discovery = await getShutdownDiscovery(deviceManager, device, timer, deadlineMs);
-  const replacement = findDiscoveredDevice(discovery, device);
+  // replacement so it owns a fresh pool and registry epoch. Once shutdown was
+  // observed, an exhausted disappearance deadline must not prevent ownership
+  // cleanup; reuse that successful observation instead of starting another
+  // deadline-bound discovery.
+  const replacement = await findReplacementAfterSessionRelease(
+    deviceManager,
+    device,
+    timer,
+    deadlineMs,
+    replacementObservedDuringShutdown,
+  );
   if (replacement) {
     await rebuildSameIdReplacement(device, expectedPooledDevice, replacement, daemonState);
     return;
-  }
-  if (!discovery.succeededPlatforms.has(device.platform)) {
-    const replacementAfterRetry = await waitForDeviceShutdown(
-      deviceManager,
-      device,
-      timer,
-      deadlineMs,
-    );
-    if (replacementAfterRetry) {
-      await rebuildSameIdReplacement(
-        device,
-        expectedPooledDevice,
-        replacementAfterRetry,
-        daemonState,
-      );
-      return;
-    }
   }
   if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
     return;
@@ -473,7 +483,12 @@ async function killProcessAndRetireOwnership(
 
   const shutdownDeadlineMs = dependencies.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
   perf.startOperation("waitForShutdown");
-  await waitForDeviceShutdown(deviceManager, device, dependencies.timer, shutdownDeadlineMs);
+  const replacementObservedDuringShutdown = await waitForDeviceShutdown(
+    deviceManager,
+    device,
+    dependencies.timer,
+    shutdownDeadlineMs,
+  );
   perf.endOperation("waitForShutdown");
 
   perf.startOperation("retireOwnership");
@@ -484,6 +499,7 @@ async function killProcessAndRetireOwnership(
     dependencies.timer,
     shutdownDeadlineMs,
     abortSignal,
+    replacementObservedDuringShutdown,
   );
   perf.endOperation("retireOwnership");
   return undefined;

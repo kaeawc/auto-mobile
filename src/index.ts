@@ -43,7 +43,7 @@ import { startStartupMaintenance } from "./utils/startupMaintenance";
 
 interface FatalLogger {
   error(...args: unknown[]): void;
-  close(): void;
+  close(): Promise<void>;
 }
 
 let fatalLogger: FatalLogger | undefined;
@@ -471,7 +471,7 @@ async function main() {
       await runDaemonCommand(daemonCommand, daemonArgs);
       // Exit explicitly after daemon command completes to prevent process from hanging
       // Same issue as CLI mode - event loop may have pending operations
-      logger.close();
+      await logger.closeAfterFlush();
       process.exit(0);
     }
 
@@ -528,7 +528,7 @@ async function main() {
       // CRITICAL: Exit explicitly after CLI command completes to prevent process from hanging
       // The event loop may have pending operations (ADB connections, file descriptors) that
       // prevent Node.js from exiting naturally. Force exit with code 0 to ensure clean termination.
-      logger.close();
+      await logger.closeAfterFlush();
       process.exit(0);
     } else {
       // In proxy mode (default), the MCP server proxies requests to the daemon
@@ -604,7 +604,7 @@ if (import.meta.main) {
   main().catch(async (err) => {
     console.error("Fatal error in main():", err);
     fatalLogger?.error("Fatal error in main():", err);
-    fatalLogger?.close();
+    await fatalLogger?.close();
     // An incomplete-extraction startup failure exits with a distinct, recoverable
     // code (EX_TEMPFAIL) so a wrapper can re-extract and retry (issue #2833);
     // every other fatal keeps exit 1. Resolved lazily to match this file's

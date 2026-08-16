@@ -24,7 +24,7 @@ import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poo
 import { DEVICE_CREATE_ENV_VAR, getDeviceCreationGate, type DeviceCreationGate } from "../utils/deviceCreationGate";
 import { createDefaultDeviceProvisioner, type DeviceProvisioner } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
-import type { PooledDevice } from "../daemon/devicePool";
+import type { DevicePool, PooledDevice } from "../daemon/devicePool";
 import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -474,52 +474,74 @@ async function killProcessAndRetireOwnership(
     ? DaemonState.getInstance().getDevicePool()
     : undefined;
   const expectedPooledDevice = devicePool?.getDevice?.(device.deviceId) ?? null;
-  if (device.platform === "android") {
-    devicePool?.markIntentionalShutdown(device.deviceId);
-  }
-
-  let shutdownDevice = device;
-  let alreadyStoppedMessage: string | undefined;
-  perf.startOperation("killProcess");
-  try {
-    const killedDevice = await deviceManager.killDevice(device);
-    shutdownDevice = killedDevice ?? device;
-  } catch (error) {
-    if (isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)) {
-      alreadyStoppedMessage = `Failed to kill ${device.platform} device: ${error}`;
-    } else {
-      devicePool?.clearIntentionalShutdown(device.deviceId);
-      throw error;
+  return await withShutdownPoolReservation(devicePool, expectedPooledDevice, async () => {
+    if (device.platform === "android") {
+      devicePool?.markIntentionalShutdown(device.deviceId);
     }
+
+    let shutdownDevice = device;
+    let alreadyStoppedMessage: string | undefined;
+    perf.startOperation("killProcess");
+    try {
+      const killedDevice = await deviceManager.killDevice(device);
+      shutdownDevice = killedDevice ?? device;
+    } catch (error) {
+      if (isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)) {
+        alreadyStoppedMessage = `Failed to kill ${device.platform} device: ${error}`;
+      } else {
+        devicePool?.clearIntentionalShutdown(device.deviceId);
+        throw error;
+      }
+    }
+    perf.endOperation("killProcess");
+
+    if (alreadyStoppedMessage !== undefined) {
+      return alreadyStoppedMessage;
+    }
+
+    const shutdownDeadlineMs = dependencies.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
+    perf.startOperation("waitForShutdown");
+    await waitForDeviceShutdown(
+      deviceManager,
+      shutdownDevice,
+      dependencies.timer,
+      shutdownDeadlineMs,
+    );
+    perf.endOperation("waitForShutdown");
+
+    perf.startOperation("retireOwnership");
+    await retireShutdownOwnership(
+      shutdownDevice,
+      expectedPooledDevice,
+      deviceManager,
+      dependencies.timer,
+      shutdownDeadlineMs,
+      abortSignal,
+      dependencies.stopPerformanceMonitoring,
+    );
+    perf.endOperation("retireOwnership");
+    return undefined;
+  });
+}
+
+async function withShutdownPoolReservation<T>(
+  devicePool: DevicePool | undefined,
+  expectedPooledDevice: PooledDevice | null,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (!devicePool || !expectedPooledDevice) {
+    return await operation();
   }
-  perf.endOperation("killProcess");
-
-  if (alreadyStoppedMessage !== undefined) {
-    return alreadyStoppedMessage;
+  const releaseReservation = await devicePool.reserveDeviceForReadiness(expectedPooledDevice.id, {
+    deviceId: expectedPooledDevice.id,
+    name: expectedPooledDevice.name,
+    platform: expectedPooledDevice.platform,
+  });
+  try {
+    return await operation();
+  } finally {
+    await releaseReservation();
   }
-
-  const shutdownDeadlineMs = dependencies.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
-  perf.startOperation("waitForShutdown");
-  await waitForDeviceShutdown(
-    deviceManager,
-    shutdownDevice,
-    dependencies.timer,
-    shutdownDeadlineMs,
-  );
-  perf.endOperation("waitForShutdown");
-
-  perf.startOperation("retireOwnership");
-  await retireShutdownOwnership(
-    shutdownDevice,
-    expectedPooledDevice,
-    deviceManager,
-    dependencies.timer,
-    shutdownDeadlineMs,
-    abortSignal,
-    dependencies.stopPerformanceMonitoring,
-  );
-  perf.endOperation("retireOwnership");
-  return undefined;
 }
 
 let moduleDependencies: DeviceToolsDependencies | null = null;

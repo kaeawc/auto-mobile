@@ -550,6 +550,73 @@ describe("killDevice handler", () => {
     expect(registry.getByUuid(deviceSession.deviceSessionUuid)).toBeUndefined();
   });
 
+  test("keeps a shutdown target reserved against allocation during ownership release", async () => {
+    const timer = new FakeTimer();
+    const delayedManager = new DelayedSuccessfulKillDeviceManager();
+    manager = delayedManager;
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    let allocationOutcome: "assigned" | "blocked" | undefined;
+    const deviceSessionRepository = new ReplacingDeviceSessionRepository(async () => {
+      const activePool = DaemonState.getInstance().getDevicePool();
+      await activePool.releaseDevice(image.deviceId!);
+      allocationOutcome = await activePool
+        .assignMultipleDevices(["racing-session"], 1, "android")
+        .then(() => "assigned" as const, () => "blocked" as const);
+    });
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => delayedManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    delayedManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      delayedManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const original = pool.getDevice(image.deviceId!);
+    if (!original) {
+      throw new Error("expected assigned device to be pooled");
+    }
+    delayedManager.setBootedDevices("android", [{
+      name: image.name,
+      platform: "android",
+      deviceId: image.deviceId!,
+    }]);
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    const result = tool.handler({
+      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    delayedManager.setBootedDevices("android", []);
+    timer.advanceTime(1_000);
+    await expect(result).resolves.toBeDefined();
+
+    expect(allocationOutcome).toBe("blocked");
+    expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
+    expect(sessionManager.getSession("racing-session")).toBeNull();
+    expect(pool.getDevice(image.deviceId!)).toBeNull();
+  });
+
   test("returns an actionable timeout instead of reporting success while the device remains visible", async () => {
     const timer = new FakeTimer();
     const delayedManager = new DelayedSuccessfulKillDeviceManager();

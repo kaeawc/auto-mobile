@@ -34,6 +34,7 @@ import { parseArgs } from "./cli/parseArgs";
 import {
   installProcessLifecycleHandlers,
   installStdinShutdownHandlers,
+  runAllCleanupOperations,
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "./processLifecycle";

@@ -2,11 +2,30 @@ import { defaultTimer, type Timer } from "./utils/SystemTimer";
 
 export type ShutdownSignal = "SIGINT" | "SIGTERM" | "stdin";
 
-export const PROCESS_SHUTDOWN_TIMEOUT_MS = 5_000;
+const PROCESS_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 export interface StdinShutdownSource {
   on(event: "end" | "close", listener: () => void): unknown;
   on(event: "error", listener: (error: Error) => void): unknown;
+}
+
+export type ShutdownCleanupOperation = () => void | Promise<void>;
+
+export async function runAllCleanupOperations(
+  cleanupOperations: readonly ShutdownCleanupOperation[],
+): Promise<void> {
+  const cleanupResults = await Promise.allSettled(
+    cleanupOperations.map(operation => Promise.resolve().then(operation)),
+  );
+  const cleanupFailures = cleanupResults.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(
+      cleanupFailures.map(result => result.reason),
+      "One or more shutdown cleanup operations failed",
+    );
+  }
 }
 
 export type ProcessLifecycleEventMap = {
@@ -108,6 +127,11 @@ export class ProcessLifecycleHandlers {
   private async runShutdownHandler(signal: ShutdownSignal): Promise<boolean> {
     const handler = this.shutdownHandler;
     if (!handler) {
+      return true;
+    }
+
+    if (signal !== "stdin") {
+      await handler(signal);
       return true;
     }
 

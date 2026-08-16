@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   ProcessLifecycleHandlers,
+  runAllCleanupOperations,
   type ProcessLifecycleEventMap,
   type ProcessLifecycleProcess,
 } from "../src/processLifecycle";
@@ -225,6 +226,48 @@ describe("process lifecycle handlers", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  test("does not time out signal cleanup", async () => {
+    const fakeProcess = new FakeProcess();
+    const timer = new FakeTimer();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, timer, 50);
+    let finishShutdown!: () => void;
+
+    lifecycle.install();
+    lifecycle.setShutdownHandler(async () => {
+      await new Promise<void>(resolve => {
+        finishShutdown = resolve;
+      });
+    });
+
+    fakeProcess.emit("SIGTERM");
+    await flushMicrotasks();
+    timer.advanceTime(50);
+    await flushMicrotasks();
+
+    expect(fakeProcess.exitCodes).toEqual([]);
+
+    finishShutdown();
+    await flushMicrotasks();
+
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("attempts every cleanup operation when one fails", async () => {
+    const cleaned: string[] = [];
+
+    await expect(runAllCleanupOperations([
+      () => {
+        cleaned.push("video");
+        throw new Error("video cleanup failed");
+      },
+      async () => {
+        cleaned.push("proxy");
+      },
+    ])).rejects.toThrow("One or more shutdown cleanup operations failed");
+
+    expect(cleaned).toEqual(["video", "proxy"]);
   });
 
   test("installs each stdin shutdown listener only once", () => {

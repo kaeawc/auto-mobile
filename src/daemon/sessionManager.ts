@@ -118,7 +118,11 @@ export class SessionManager {
   private readonly sessionSetupPromises: Set<{ session: Session; promise: Promise<void> }> = new Set();
   /** Sessions whose teardown has closed admission for further device-state setup. */
   private readonly releasingSessions: WeakSet<Session> = new WeakSet();
-  /** Device work that outlived the bounded release phase. */
+  /**
+   * Device work that outlived its bounded release phase. The pool keeps the
+   * device assigned until this settles, so no replacement session can race a
+   * late setup or keep-awake restore.
+   */
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
   private deviceSessionRepository: DeviceSessionRepository;
   private readonly getBarrier: () => DbWriteBarrier;
@@ -163,6 +167,11 @@ export class SessionManager {
    */
   onSessionRelease(callback: SessionReleaseCallback): void {
     this.releaseCallbacks.push(callback);
+  }
+
+  /** Return outstanding post-release device work, if the device must stay quarantined. */
+  getPendingDeviceCleanup(deviceId: string): Promise<void> | null {
+    return this.pendingDeviceCleanups.get(deviceId) ?? null;
   }
 
   /**
@@ -502,7 +511,9 @@ export class SessionManager {
   }
 
   private async restoreKeepScreenAwakeBestEffort(session: Session): Promise<{ pending: Promise<void> | null }> {
-    if (!session.cacheData.keepScreenAwake?.applied) return { pending: null };
+    if (!session.cacheData.keepScreenAwake?.applied) {
+      return { pending: null };
+    }
     let timeoutHandle: NodeJS.Timeout | undefined;
     const restoration = this.restoreKeepScreenAwake(session).then(
       () => ({ outcome: "restored" as const }),
@@ -516,7 +527,9 @@ export class SessionManager {
       if (result.outcome === "failed") {
         logger.warn(`Failed to restore keep-awake state for session ${session.sessionId}: ${result.error}`);
       } else if (result.outcome === "timed-out") {
-        logger.warn(`Timed out after ${KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS}ms restoring keep-awake state for session ${session.sessionId}`);
+        logger.warn(
+          `Timed out after ${KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS}ms restoring keep-awake state for session ${session.sessionId}`,
+        );
         return { pending: restoration.then(() => undefined) };
       }
       return { pending: null };
@@ -527,10 +540,13 @@ export class SessionManager {
 
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {
     const previous = this.pendingDeviceCleanups.get(deviceId);
-    const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups).then(() => undefined);
+    const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups)
+      .then(() => undefined);
     this.pendingDeviceCleanups.set(deviceId, cleanup);
     void cleanup.then(() => {
-      if (this.pendingDeviceCleanups.get(deviceId) === cleanup) this.pendingDeviceCleanups.delete(deviceId);
+      if (this.pendingDeviceCleanups.get(deviceId) === cleanup) {
+        this.pendingDeviceCleanups.delete(deviceId);
+      }
     });
   }
 

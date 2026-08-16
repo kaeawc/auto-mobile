@@ -138,6 +138,43 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(0);
   });
 
+  test("runs first-session setup when a released UUID is recreated during context creation", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      } as any);
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    const original = await sessionManager.createSession("session-recreated", "device-1", "android");
+    let finishSetup!: () => void;
+    const setup = sessionManager.trackSessionSetup(
+      original,
+      () => new Promise<void>(resolve => { finishSetup = resolve; }),
+    );
+    const release = sessionManager.releaseSession("session-recreated");
+    await Promise.resolve();
+    const context = createToolExecutionContext(
+      "session-recreated",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
+    finishSetup();
+    await setup;
+    await release;
+
+    await expect(context).resolves.toMatchObject({ deviceId: "device-1" });
+    expect(setupCalls).toBe(1);
+  });
+
   test("does not apply keep-awake after a session is released during setup", async () => {
     let allowActivityWrite!: () => void;
     const activityWrite = new Promise<void>(resolve => { allowActivityWrite = resolve; });
@@ -177,6 +214,21 @@ describe("ToolExecutionContext", () => {
   });
 
   test("bounds accessibility setup and rejects it after the session releases", async () => {
+    const boundedTimer = new FakeTimer();
+    const boundedSessionManager = new SessionManager(boundedTimer, {
+      async upsertActiveSession(): Promise<void> {},
+      async recordActivity(): Promise<void> {},
+      async markReleased(): Promise<void> {},
+      async markStaleActiveSessionsExpired(): Promise<void> {},
+    });
+    const boundedPool = new DevicePool(
+      boundedSessionManager,
+      "test-daemon-session-id",
+      boundedTimer,
+      fakeAppsRepo,
+      new FakeDeviceManager(),
+    );
+    await boundedPool.initializeWithDevices([createBootedDevice("device-1")]);
     let finishSetup!: () => void;
     const setupFinished = new Promise<void>(resolve => { finishSetup = resolve; });
     let setupStarted!: () => void;
@@ -195,16 +247,38 @@ describe("ToolExecutionContext", () => {
       close: async () => {},
     })) as any;
 
-    const context = createToolExecutionContext("session-setup-race", sessionManager, devicePool, sessionOptions);
-    await setupStartedPromise;
-    void sessionManager.releaseSession("session-setup-race");
-    await Promise.resolve();
-    fakeTimer.advanceTime(1_000);
-    await fakeTimer.sleep(0);
+    try {
+      const context = createToolExecutionContext("session-setup-race", boundedSessionManager, boundedPool, sessionOptions);
+      await setupStartedPromise;
+      const release = boundedSessionManager.releaseSession("session-setup-race");
+      for (let attempt = 0; attempt < 10 && !boundedTimer.getPendingTimeouts().includes(1_000); attempt++) {
+        await Promise.resolve();
+      }
+      expect(boundedTimer.getPendingTimeouts()).toContain(1_000);
+      boundedTimer.advanceTime(1_000);
+      let releasedDevice: string | null | undefined;
+      void release.then(deviceId => { releasedDevice = deviceId; });
+      for (let attempt = 0; attempt < 10 && releasedDevice === undefined; attempt++) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      expect(releasedDevice).toBe("device-1");
+      await boundedPool.releaseDevice("device-1");
 
-    expect(sessionManager.getSession("session-setup-race")).toBeNull();
+      expect(boundedSessionManager.getSession("session-setup-race")).toBeNull();
+      expect(boundedPool.getDevice("device-1")).toMatchObject({
+        sessionId: "session-setup-race",
+        status: "busy",
+      });
 
-    finishSetup();
-    await expect(context).rejects.toThrow("released during setup");
+      finishSetup();
+      await expect(context).rejects.toThrow("released during setup");
+      await Promise.resolve();
+      expect(boundedPool.getDevice("device-1")).toMatchObject({
+        sessionId: null,
+        status: "idle",
+      });
+    } finally {
+      boundedSessionManager.stopCleanupTimer();
+    }
   });
 });

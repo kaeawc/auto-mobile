@@ -95,7 +95,7 @@ export async function createToolExecutionContext(
 
   await sessionManager.trackSessionSetup(
     session,
-    () => setupSession(session, existingSession !== null, sessionManager, sessionOptions),
+    () => setupSession(session, existingSession === session, sessionManager, sessionOptions),
   );
 
   return {

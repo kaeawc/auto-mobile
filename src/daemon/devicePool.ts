@@ -164,6 +164,8 @@ export class DevicePool {
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly readinessReservationCounts: Map<string, number> = new Map();
+  /** Devices awaiting late session teardown work before they may be reused. */
+  private readonly deferredDeviceReleases: Map<string, Promise<void>> = new Map();
   /**
    * Serials the user intentionally stopped, mapped to the pooled-device
    * incarnation that was present at mark time (or {@link INCARNATION_ANY} when
@@ -2026,6 +2028,26 @@ export class DevicePool {
     const device = this.devices.get(deviceId);
     if (!device) {
       logger.warn(`Cannot release device ${deviceId}: not in pool`);
+      return;
+    }
+
+    if (this.deferredDeviceReleases.has(deviceId)) {
+      return;
+    }
+
+    const pendingCleanup = this.sessionManager.getPendingDeviceCleanup(deviceId);
+    if (pendingCleanup) {
+      this.deferredDeviceReleases.set(deviceId, pendingCleanup);
+      logger.warn(`Keeping device ${deviceId} assigned until late session teardown completes`);
+      void pendingCleanup.then(() => {
+        if (this.deferredDeviceReleases.get(deviceId) !== pendingCleanup) {
+          return;
+        }
+        this.deferredDeviceReleases.delete(deviceId);
+        return this.releaseDevice(deviceId);
+      }).catch(error => {
+        logger.warn(`Failed to release device ${deviceId} after late session teardown: ${error}`);
+      });
       return;
     }
 

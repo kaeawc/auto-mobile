@@ -4,8 +4,11 @@ import {
   type KeepScreenAwakeRestorer,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
+import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
 
@@ -517,6 +520,58 @@ describe("SessionManager", () => {
 
         expect(manager.getSession("s1")).toBeNull();
         expect(released).toEqual(["s1"]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("keeps a device quarantined until timed-out keep-awake restoration completes", async () => {
+      let finishRestore!: () => void;
+      const restoration = new Promise<void>(resolve => { finishRestore = resolve; });
+      let restoreStarted!: () => void;
+      const restorationStarted = new Promise<void>(resolve => { restoreStarted = resolve; });
+      const manager = new SessionManager(
+        fakeTimer,
+        {
+          async upsertActiveSession(): Promise<void> {},
+          async recordActivity(): Promise<void> {},
+          async markReleased(): Promise<void> {},
+          async markStaleActiveSessionsExpired(): Promise<void> {},
+        },
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {
+          restoreStarted();
+          await restoration;
+        } }),
+      );
+      const pool = new DevicePool(
+        manager,
+        "test-daemon",
+        fakeTimer,
+        new FakeInstalledAppsRepository(),
+        new FakeDeviceManager(),
+      );
+      try {
+        await pool.initializeWithDevices([{ name: "device-1", deviceId: "device-1", platform: "android" }]);
+        await pool.assignDeviceToSession("s1", "android");
+        manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
+
+        const release = manager.releaseSession("s1", "daemon-shutdown");
+        await restorationStarted;
+        await Promise.resolve();
+        fakeTimer.advanceTime(1_000);
+        await Promise.resolve();
+        await Promise.resolve();
+        const deviceId = await release;
+        await pool.releaseDevice(deviceId!);
+
+        expect(pool.getDevice("device-1")).toMatchObject({ sessionId: "s1", status: "busy" });
+
+        finishRestore();
+        for (let attempt = 0; attempt < 10 && pool.getDevice("device-1")?.status !== "idle"; attempt++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+        }
+        expect(pool.getDevice("device-1")).toMatchObject({ sessionId: null, status: "idle" });
       } finally {
         manager.stopCleanupTimer();
       }

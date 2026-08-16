@@ -40,6 +40,11 @@ export interface ExecutionCancellationOptions {
   excludeSignal?: AbortSignal;
 }
 
+export interface ActiveExecutionQuery {
+  startedAtOrBefore?: number;
+  excludeExecutionId?: string;
+}
+
 export class ExecutionTracker {
   private executions = new Map<string, ActiveExecution>();
   private sessionExecutions = new Map<string, Set<string>>();
@@ -134,12 +139,12 @@ export class ExecutionTracker {
     );
   }
 
-  hasActiveSessionUuidExecutions(sessionUuid: string, startedAtOrBefore?: number): boolean {
-    return this.hasActiveExecutionsForKey(this.sessionUuidExecutions, sessionUuid, startedAtOrBefore);
+  hasActiveSessionUuidExecutions(sessionUuid: string, query?: ActiveExecutionQuery): boolean {
+    return this.hasActiveExecutionsForKey(this.sessionUuidExecutions, sessionUuid, query);
   }
 
-  hasActiveSessionExecutions(sessionId: string, startedAtOrBefore?: number): boolean {
-    return this.hasActiveExecutionsForKey(this.sessionExecutions, sessionId, startedAtOrBefore);
+  hasActiveSessionExecutions(sessionId: string, query?: ActiveExecutionQuery): boolean {
+    return this.hasActiveExecutionsForKey(this.sessionExecutions, sessionId, query);
   }
 
   hasActiveToolExecution(toolName: string, options: ExecutionScopeOptions): boolean {
@@ -184,18 +189,20 @@ export class ExecutionTracker {
   private hasActiveExecutionsForKey(
     executionMap: Map<string, Set<string>>,
     key: string,
-    startedAtOrBefore?: number,
+    query?: ActiveExecutionQuery,
   ): boolean {
     const executions = executionMap.get(key);
     if (!executions || executions.size === 0) {
       return false;
     }
-    if (startedAtOrBefore === undefined) {
+    if (query?.startedAtOrBefore === undefined && query?.excludeExecutionId === undefined) {
       return true;
     }
     return Array.from(executions).some(executionId => {
       const execution = this.executions.get(executionId);
-      return execution !== undefined && execution.startTime <= startedAtOrBefore;
+      return execution !== undefined
+        && executionId !== query?.excludeExecutionId
+        && (query?.startedAtOrBefore === undefined || execution.startTime <= query.startedAtOrBefore);
     });
   }
 

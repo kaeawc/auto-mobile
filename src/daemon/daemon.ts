@@ -4,7 +4,7 @@ import { createMcpServer } from "../server";
 import { logger } from "../utils/logger";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
-import { SessionManager } from "./sessionManager";
+import { SessionManager, type ActiveSessionExecutionQuery } from "./sessionManager";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { DevicePool, type PooledDevice } from "./devicePool";
@@ -219,7 +219,7 @@ export class Daemon {
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     this.sessionManager.setActiveSessionExecutionChecker(
-      (sessionId, startedAtOrBefore) => this.hasActiveSessionExecution(sessionId, startedAtOrBefore),
+      (sessionId, query) => this.hasActiveSessionExecution(sessionId, query),
     );
     // Register centralized cleanup for session-scoped state
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
@@ -1229,12 +1229,12 @@ export class Daemon {
     this.navigationRetentionMonitor.start();
   }
 
-  private hasActiveSessionExecution(sessionId: string, startedAtOrBefore?: number): boolean {
-    return executionTracker.hasActiveSessionUuidExecutions(sessionId, startedAtOrBefore)
+  private hasActiveSessionExecution(sessionId: string, query?: ActiveSessionExecutionQuery): boolean {
+    return executionTracker.hasActiveSessionUuidExecutions(sessionId, query)
       || this.devicePool.hasActiveAutolockMcpSessionExecution(
         sessionId,
-        (mcpSessionId, startAtOrBefore) => executionTracker.hasActiveSessionExecutions(mcpSessionId, startAtOrBefore),
-        startedAtOrBefore,
+        (mcpSessionId, executionQuery) => executionTracker.hasActiveSessionExecutions(mcpSessionId, executionQuery),
+        query,
       );
   }
 

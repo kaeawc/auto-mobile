@@ -96,6 +96,8 @@ export interface McpServerOptions {
 }
 
 const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
+const INTERNAL_EXECUTION_ID_PARAM = "__executionId";
+const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
 function extractInternalMcpSessionId(params: unknown): string | undefined {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
     return undefined;
@@ -110,12 +112,16 @@ function stripInternalToolParams(params: unknown): unknown {
     return params;
   }
 
-  if (!(INTERNAL_MCP_SESSION_PARAM in params)) {
+  if (!(INTERNAL_MCP_SESSION_PARAM in params)
+    && !(INTERNAL_EXECUTION_ID_PARAM in params)
+    && !(INTERNAL_EXECUTION_START_TIME_PARAM in params)) {
     return params;
   }
 
   const rest = { ...(params as Record<string, unknown>) };
   delete rest[INTERNAL_MCP_SESSION_PARAM];
+  delete rest[INTERNAL_EXECUTION_ID_PARAM];
+  delete rest[INTERNAL_EXECUTION_START_TIME_PARAM];
   return rest;
 }
 
@@ -487,8 +493,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       executionSessionUuid,
       sessionId,
     );
-    const handlerParams = implicitAutolockMcpSessionId && parsedParams && typeof parsedParams === "object"
-      ? { ...parsedParams, [INTERNAL_MCP_SESSION_PARAM]: implicitAutolockMcpSessionId }
+    const handlerParams = parsedParams && typeof parsedParams === "object"
+      ? {
+        ...parsedParams,
+        ...(implicitAutolockMcpSessionId ? { [INTERNAL_MCP_SESSION_PARAM]: implicitAutolockMcpSessionId } : {}),
+        [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
+        [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
+      }
       : parsedParams;
 
     // Create progress callback if tool supports progress

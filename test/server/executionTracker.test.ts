@@ -115,12 +115,12 @@ describe("ExecutionTracker", function() {
     tracker.startExecution("tapOn", "session-id");
     timer.advanceTime(10);
 
-    expect(tracker.hasActiveSessionExecutions("session-id", 5)).toBe(true);
+    expect(tracker.hasActiveSessionExecutions("session-id", { startedAtOrBefore: 5 })).toBe(true);
 
     tracker.endExecution("before");
     tracker.startExecution("tapOn", "session-id");
 
-    expect(tracker.hasActiveSessionExecutions("session-id", 5)).toBe(false);
+    expect(tracker.hasActiveSessionExecutions("session-id", { startedAtOrBefore: 5 })).toBe(false);
   });
 
   // #4183 item 6 (A3): the scope fallback in hasActiveToolExecution (executionTracker.ts)

@@ -1,5 +1,5 @@
 import { SessionManager } from "../daemon/sessionManager";
-import type { Session } from "../daemon/sessionManager";
+import type { Session, SessionExecutionMetadata } from "../daemon/sessionManager";
 import { DevicePool } from "../daemon/devicePool";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
@@ -74,19 +74,21 @@ export async function createToolExecutionContext(
   sessionUuid: string | undefined,
   sessionManager: SessionManager,
   devicePool: DevicePool,
-  sessionOptions: SessionOptions = {}
+  sessionOptions: SessionOptions = {},
+  execution?: SessionExecutionMetadata,
 ): Promise<ToolExecutionContext> {
   if (!sessionUuid) {
     return {};
   }
 
-  const existingSession = sessionManager.getSessionForNewExecution(sessionUuid);
+  const existingSession = sessionManager.getSessionForNewExecution(sessionUuid, execution);
 
   // Get or create session
   const session = await sessionManager.getOrCreateSession(
     sessionUuid,
     devicePool,
-    sessionOptions.platform
+    sessionOptions.platform,
+    execution,
   );
 
   if (!sessionManager.isCurrentSession(session)) {

@@ -237,13 +237,32 @@ describe("SessionManager", () => {
     });
 
     test("keeps a session when work began before its expiry deadline", async () => {
-      sessionManager.setActiveSessionExecutionChecker((_sessionId, startedAtOrBefore) => startedAtOrBefore === 1000);
       const session = await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
       fakeTimer.advanceTime(1001);
 
-      const resolved = await sessionManager.getOrCreateSession("session-1");
+      const resolved = await sessionManager.getOrCreateSession(
+        "session-1",
+        undefined,
+        undefined,
+        { executionId: "pre-deadline", startTime: 1000 },
+      );
 
       expect(resolved).toBe(session);
+      expect(sessionManager.getActiveSessionCount()).toBe(1);
+    });
+
+    test("rejects a late execution while earlier work keeps the expired session assigned", async () => {
+      sessionManager.setActiveSessionExecutionChecker((_sessionId, query) => query?.excludeExecutionId === "late");
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
+      fakeTimer.advanceTime(1001);
+
+      await expect(sessionManager.getOrCreateSession(
+        "session-1",
+        undefined,
+        undefined,
+        { executionId: "late", startTime: 1001 },
+      )).rejects.toThrow("earlier work is still active");
+
       expect(sessionManager.getActiveSessionCount()).toBe(1);
     });
   });

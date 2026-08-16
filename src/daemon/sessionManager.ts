@@ -83,7 +83,17 @@ export interface Session {
  * while sharing centralized state in the daemon.
  */
 export type SessionReleaseCallback = (sessionId: string, deviceId: string) => void;
-export type ActiveSessionExecutionChecker = (sessionId: string, startedAtOrBefore?: number) => boolean;
+export interface SessionExecutionMetadata {
+  executionId: string;
+  startTime: number;
+}
+
+export interface ActiveSessionExecutionQuery {
+  startedAtOrBefore?: number;
+  excludeExecutionId?: string;
+}
+
+export type ActiveSessionExecutionChecker = (sessionId: string, query?: ActiveSessionExecutionQuery) => boolean;
 
 export interface SessionDeviceAssigner {
   assignDeviceToSession(sessionId: string, platform?: Platform): Promise<string>;
@@ -242,15 +252,23 @@ export class SessionManager {
    * defer expiry cleanup, but it must not let a request that arrived after the
    * deadline revive an expired session.
    */
-  getSessionForNewExecution(sessionId: string): Session | null {
-    return this.getSessionInternal(sessionId, true);
+  getSessionForNewExecution(sessionId: string, execution?: SessionExecutionMetadata): Session | null {
+    return this.getSessionInternal(sessionId, true, execution);
   }
 
-  private getSessionInternal(sessionId: string, expireDespiteActiveExecution: boolean): Session | null {
+  private getSessionInternal(
+    sessionId: string,
+    expireDespiteActiveExecution: boolean,
+    execution?: SessionExecutionMetadata,
+  ): Session | null {
     const session = this.sessions.get(sessionId);
-<<<<<<< HEAD
+    if (session && expireDespiteActiveExecution && this.isLateExecutionWhileEarlierWorkIsActive(session, execution)) {
+      throw new Error(
+        `Session ${sessionId} expired before this execution began while earlier work is still active.`,
+      );
+    }
     if (session && (expireDespiteActiveExecution
-      ? this.isSessionExpiredForNewExecution(session)
+      ? this.isSessionExpiredForNewExecution(session, execution)
       : this.isSessionExpired(session))) {
       // Release owns this exact session object until it has restored device state
       // and removed its assignment. Keep expiry cleanup from creating a second
@@ -289,9 +307,10 @@ export class SessionManager {
   async getOrCreateSession(
     sessionId: string,
     devicePool?: SessionDeviceAssigner,
-    platform?: Platform
+    platform?: Platform,
+    execution?: SessionExecutionMetadata,
   ): Promise<Session> {
-    const existing = this.getSessionForNewExecution(sessionId);
+    const existing = this.getSessionForNewExecution(sessionId, execution);
     if (existing) {
       const inFlightRelease = this.releasePromises.get(sessionId);
       if (this.releasingSessions.has(existing) && inFlightRelease?.session === existing) {
@@ -792,9 +811,23 @@ export class SessionManager {
       && this.timer.now() > session.expiresAt;
   }
 
-  private isSessionExpiredForNewExecution(session: Session): boolean {
-    return !this.activeSessionExecutionChecker(session.sessionId, session.expiresAt)
-      && this.timer.now() > session.expiresAt;
+  private isSessionExpiredForNewExecution(session: Session, execution?: SessionExecutionMetadata): boolean {
+    if (this.timer.now() <= session.expiresAt) {
+      return false;
+    }
+    return execution?.startTime === undefined || execution.startTime > session.expiresAt;
+  }
+
+  private isLateExecutionWhileEarlierWorkIsActive(
+    session: Session,
+    execution: SessionExecutionMetadata | undefined,
+  ): boolean {
+    return execution !== undefined
+      && this.timer.now() > session.expiresAt
+      && execution.startTime > session.expiresAt
+      && this.activeSessionExecutionChecker(session.sessionId, {
+        excludeExecutionId: execution.executionId,
+      });
   }
 
   /**

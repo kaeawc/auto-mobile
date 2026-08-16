@@ -307,6 +307,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     const deviceLabel = typeof args.device === "string" ? args.device : undefined;
     const declaredDeviceLabels = Array.isArray(args.devices) ? args.devices : undefined;
     const mcpSessionId = typeof args.__mcpSessionId === "string" ? args.__mcpSessionId : undefined;
+    const execution = typeof args.__executionId === "string" && typeof args.__executionStartTime === "number"
+      ? { executionId: args.__executionId, startTime: args.__executionStartTime }
+      : undefined;
     // Internal tool-to-tool marker (#3053 / #3087): internal callers (PlanExecutor
     // steps, navigation/setup replays) set this via `markInternalToolCall` so a
     // plan/navigation step's finalized envelope is never diffed/stripped and never
@@ -351,7 +354,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     let platform: SomePlatform = args.platform || "either";
 
     if (shouldResolveDevice) {
-      const implicitSessionUuid = this.resolveImplicitAutolockSession(platform, sessionUuid, providedDeviceId, mcpSessionId);
+      const implicitSessionUuid = this.resolveImplicitAutolockSession(platform, sessionUuid, providedDeviceId, mcpSessionId, execution);
       if (implicitSessionUuid) {
         sessionUuid = implicitSessionUuid;
         logger.info(`[ToolRegistry] Resolved implicit autolock session for MCP session ${mcpSessionId}: ${implicitSessionUuid}`);
@@ -376,7 +379,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       const context = await createToolExecutionContext(sessionUuid, sessionManager, devicePool, {
         keepScreenAwake,
         platform: platform === "android" || platform === "ios" ? platform : undefined
-      });
+      }, execution);
       if (context.deviceId && !providedDeviceId) {
         providedDeviceId = context.deviceId;
         logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
@@ -502,7 +505,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     platform: SomePlatform,
     sessionUuid: string | undefined,
     providedDeviceId: string | undefined,
-    mcpSessionId: string | undefined
+    mcpSessionId: string | undefined,
+    execution?: import("../daemon/sessionManager").SessionExecutionMetadata,
   ): string | undefined {
     if (sessionUuid) {
       return undefined;
@@ -514,7 +518,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     const platformFilter = platform === "android" || platform === "ios" ? platform : undefined;
     const sessionId = DaemonState.getInstance()
       .getDevicePool()
-      .resolveAutolockSessionForMcpSession(mcpSessionId, platformFilter);
+      .resolveAutolockSessionForMcpSession(mcpSessionId, platformFilter, execution);
     if (!sessionId) {
       return undefined;
     }

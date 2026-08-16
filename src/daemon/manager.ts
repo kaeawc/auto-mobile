@@ -847,8 +847,9 @@ export class DaemonManager implements DaemonManagerLike {
         stderrLog(`Daemon did not stop gracefully, sending SIGKILL...`);
         process.kill(pid, "SIGKILL");
 
-        // Wait a bit more
-        await this.timer.sleep(1000);
+        if (!(await this.waitForStop(pid, 1000))) {
+          throw new Error(`Daemon process ${pid} did not exit after SIGKILL`);
+        }
       }
 
       await cleanupDaemonFiles({
@@ -1099,7 +1100,7 @@ export class DaemonManager implements DaemonManagerLike {
       await this.timer.sleep(pollInterval);
     }
 
-    return false;
+    return !this.isProcessRunning(pid);
   }
 
   /**

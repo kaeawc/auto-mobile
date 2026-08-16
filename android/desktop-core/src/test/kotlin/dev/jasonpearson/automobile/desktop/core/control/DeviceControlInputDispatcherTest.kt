@@ -169,6 +169,7 @@ class DeviceControlInputDispatcherTest {
             is DeviceControlInputCommand.PressButton -> "button${cmd.token}"
             is DeviceControlInputCommand.TypeText -> "text${cmd.token}"
             is DeviceControlInputCommand.SendKey -> "key${cmd.token}"
+            is DeviceControlInputCommand.StreamGesture -> "stream${cmd.token}"
           }
         )
       }

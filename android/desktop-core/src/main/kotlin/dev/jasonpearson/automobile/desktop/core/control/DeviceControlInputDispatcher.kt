@@ -94,6 +94,58 @@ sealed interface DeviceControlInputCommand {
     override val snapshot: DeviceFrameSnapshot,
     override val token: Long,
   ) : DeviceControlInputCommand
+
+  /**
+   * A live, streamed drag (issue: streaming gesture input). Unlike [Swipe] — one atomic request on
+   * release — this holds ONE queue slot for the whole drag: [start] is the finger-down point, and
+   * incremental moves and the release arrive over [events] as the user drags, so the device tracks
+   * the pointer in real time. All points are mapped through the one [snapshot], like [Swipe].
+   *
+   * Occupying the single FIFO slot for the drag's lifetime is deliberate: taps/keys made mid-drag
+   * queue behind it and run after release, which is the correct ordering (you cannot tap during a
+   * drag). When the client cannot stream, the consumer drains [events] and falls back to one atomic
+   * swipe, so the caller emits the same start/move/end regardless of daemon/runner support.
+   */
+  data class StreamGesture(
+    val start: DevicePoint,
+    val gestureId: String,
+    val events: Channel<GestureStreamEvent>,
+    override val client: AutoMobileClient?,
+    override val platform: String,
+    override val snapshot: DeviceFrameSnapshot,
+    override val token: Long,
+  ) : DeviceControlInputCommand
+}
+
+/**
+ * One frame fed to an in-flight [DeviceControlInputCommand.StreamGesture] as the drag progresses.
+ */
+sealed interface GestureStreamEvent {
+  /** The pointer moved to [point] (already mapped through the gesture's snapshot). */
+  data class Move(val point: DevicePoint) : GestureStreamEvent
+
+  /** The pointer was released at [point], or the drag was [cancel]led (lift in place). Terminal. */
+  data class End(val point: DevicePoint, val cancel: Boolean) : GestureStreamEvent
+}
+
+/**
+ * The view's handle to one in-flight streamed drag, returned by
+ * `DeviceControlSession.beginGestureStream`. The view maps each pointer sample through the pinned
+ * snapshot and calls [move]; on release it calls [end], which closes the stream. Fire-and-forget
+ * (`trySend` onto an unbounded channel): the caller never blocks the UI thread, and the desktop
+ * client's throttle keeps the volume bounded. Calling [move] after [end] is a harmless no-op on the
+ * closed channel.
+ */
+class DeviceGestureStreamHandle
+internal constructor(private val events: Channel<GestureStreamEvent>) {
+  fun move(point: DevicePoint) {
+    events.trySend(GestureStreamEvent.Move(point))
+  }
+
+  fun end(point: DevicePoint, cancel: Boolean = false) {
+    events.trySend(GestureStreamEvent.End(point, cancel))
+    events.close()
+  }
 }
 
 /**

@@ -1616,6 +1616,100 @@ class DeviceControlSessionTest {
   }
 
   /** A coherent, freshly-received screenshot+hierarchy pair sharing one capture identity. */
+  private fun streamingSession(
+    scope: CoroutineScope,
+    client: FakeAutoMobileClient,
+    scheduler: TestCoroutineScheduler,
+    publishError: (String?) -> Unit = {},
+  ) =
+    DeviceControlSession(
+      scope = scope,
+      clientProvider = { client },
+      platform = { "android" },
+      nowMs = { 1_000L },
+      publishError = publishError,
+      uiContext = UnconfinedTestDispatcher(scheduler),
+      ioDispatcher = UnconfinedTestDispatcher(scheduler),
+      streamingEnabled = true,
+    )
+
+  @Test
+  fun `the streaming flag off means no gesture stream is begun`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    // The default session() helper leaves streamingEnabled off.
+    val handle = session(scope, FakeAutoMobileClient()).beginGestureStream(testSnapshot(), point)
+    assertNull(handle, "with the flag off the caller falls back to the atomic swipe")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a streamed drag relays start, moves, and the release over one persistent stream`() =
+    runTest {
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val client = FakeAutoMobileClient()
+      val session = streamingSession(scope, client, testScheduler)
+
+      val handle = assertNotNull(session.beginGestureStream(testSnapshot(sequence = 5L), point))
+      handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
+      handle.move(DevicePoint(x = 360, y = 1200, inBounds = true))
+      handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
+      advanceUntilIdle()
+
+      val stream = client.openedGestureStreams.single()
+      assertEquals(
+        listOf(
+          FakeAutoMobileClient.GestureFrame.Start("gesture-1", 360.0, 780.0),
+          FakeAutoMobileClient.GestureFrame.Move("gesture-1", 360.0, 1000.0),
+          FakeAutoMobileClient.GestureFrame.Move("gesture-1", 360.0, 1200.0),
+          FakeAutoMobileClient.GestureFrame.End("gesture-1", 360.0, 1400.0, false),
+        ),
+        stream.frames,
+      )
+      assertTrue(stream.closed, "the stream is closed when the gesture ends")
+      // No atomic swipe was sent; the whole drag went through the stream.
+      assertTrue(client.inputSwipeCalls.isEmpty())
+      // A completed drag changed the device, so the session awaits the superseding frame.
+      assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
+      scope.cancel()
+    }
+
+  @Test
+  fun `a streamed drag falls back to one atomic swipe when the client cannot stream`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient().apply { gestureStreamSupported = false }
+    val session = streamingSession(scope, client, testScheduler)
+
+    val handle = assertNotNull(session.beginGestureStream(testSnapshot(sequence = 5L), point))
+    handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
+    handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
+    advanceUntilIdle()
+
+    // No stream was usable, so the drag became one atomic swipe start -> release.
+    assertTrue(client.openedGestureStreams.isEmpty())
+    val swipe = client.inputSwipeCalls.single()
+    assertEquals(360.0, swipe.startX)
+    assertEquals(780.0, swipe.startY)
+    assertEquals(360.0, swipe.endX)
+    assertEquals(1400.0, swipe.endY)
+    scope.cancel()
+  }
+
+  @Test
+  fun `a cancelled streamed drag lifts in place and sends no atomic fallback`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient().apply { gestureStreamSupported = false }
+    val session = streamingSession(scope, client, testScheduler)
+
+    val handle = assertNotNull(session.beginGestureStream(testSnapshot(sequence = 5L), point))
+    handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
+    handle.end(DevicePoint(x = 360, y = 1400, inBounds = true), cancel = true)
+    advanceUntilIdle()
+
+    // A cancel abandons the drag: no atomic swipe is synthesized from a gesture the user aborted.
+    assertTrue(client.inputSwipeCalls.isEmpty())
+    scope.cancel()
+  }
+
   private fun paired(
     captureSequence: Long,
     sourceSequence: Long,

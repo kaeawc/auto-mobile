@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
@@ -276,6 +277,85 @@ class VideoInputDispatcherTest {
     val call = client.inputPressButtonCalls.single()
     assertEquals("BACK", call.button)
     assertNull(call.frameContext)
+    scope.cancel()
+  }
+
+  private fun CoroutineScope.streamingDispatcher(
+    client: FakeAutoMobileClient,
+    scheduler: TestCoroutineScheduler,
+  ) =
+    VideoInputDispatcher(
+      scope = this,
+      clientProvider = { client },
+      platform = { "android" },
+      deviceId = "emulator-5554",
+      tracer = InteractionLatencyTracer(),
+      ioDispatcher = UnconfinedTestDispatcher(scheduler),
+      streamingEnabled = true,
+    )
+
+  @Test
+  fun `the streaming flag off begins no gesture stream`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    // The default dispatcher() helper leaves streamingEnabled off.
+    val handle =
+      scope
+        .dispatcher(FakeAutoMobileClient(), testScheduler)
+        .beginGestureStream(testSnapshot(), inBounds)
+    assertNull(handle, "with the flag off the pane falls back to the atomic swipe")
+    scope.cancel()
+  }
+
+  @Test
+  fun `a streamed drag relays start, moves, and the release with no frame context`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient()
+    val handle =
+      assertNotNull(
+        scope
+          .streamingDispatcher(client, testScheduler)
+          .beginGestureStream(testSnapshot(), inBounds)
+      )
+    handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
+    handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
+    advanceUntilIdle()
+
+    val stream = client.openedGestureStreams.single()
+    assertEquals(
+      listOf(
+        FakeAutoMobileClient.GestureFrame.Start("gesture-1", 360.0, 780.0),
+        FakeAutoMobileClient.GestureFrame.Move("gesture-1", 360.0, 1000.0),
+        FakeAutoMobileClient.GestureFrame.End("gesture-1", 360.0, 1400.0, false),
+      ),
+      stream.frames,
+    )
+    assertTrue(stream.closed)
+    assertTrue(client.inputSwipeCalls.isEmpty())
+    scope.cancel()
+  }
+
+  @Test
+  fun `a streamed drag falls back to one atomic swipe when the client cannot stream`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client = FakeAutoMobileClient().apply { gestureStreamSupported = false }
+    val handle =
+      assertNotNull(
+        scope
+          .streamingDispatcher(client, testScheduler)
+          .beginGestureStream(testSnapshot(), inBounds)
+      )
+    handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
+    handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
+    advanceUntilIdle()
+
+    assertTrue(client.openedGestureStreams.isEmpty())
+    val swipe = client.inputSwipeCalls.single()
+    assertEquals(360.0, swipe.startX)
+    assertEquals(780.0, swipe.startY)
+    assertEquals(360.0, swipe.endX)
+    assertEquals(1400.0, swipe.endY)
+    // Still frame-identity-free on the fallback path.
+    assertNull(swipe.frameContext)
     scope.cancel()
   }
 }

@@ -10,6 +10,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.MONOTONIC_NOW_MS
 import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
+import dev.jasonpearson.automobile.desktop.core.control.GestureStreamingConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
@@ -108,6 +109,7 @@ fun rememberWorkspaceDeviceControl(
         platform = { column.platform.wireName() },
         deviceId = column.deviceId,
         tracer = tracer,
+        streamingEnabled = GestureStreamingConfig.enabled,
       )
     }
 

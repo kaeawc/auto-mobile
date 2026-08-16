@@ -61,4 +61,71 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       errorLabel: "Two-finger swipe",
     });
   }
+
+  /**
+   * Begin a streamed gesture (finger down) at ([x], [y]). Android-only: the runner chains the
+   * start/move/end sharing [gestureId] into one continued AccessibilityService gesture so the device
+   * tracks the pointer live (issue: streaming gesture input). Each frame is correlated by requestId
+   * and answered with the shared `swipe_result` frame, like the sibling gestures. Deliberately no
+   * `frameContext` — streamed gestures are frame-identity-free, like taps.
+   */
+  async requestGestureStart(
+    gestureId: string,
+    x: number,
+    y: number,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<A11ySwipeResult> {
+    return sendCommand<A11ySwipeResult>(this.context, {
+      idPrefix: "gesture_start",
+      responseType: "swipe",
+      messageType: "request_gesture_start",
+      params: { gestureId, x: this.coord(x), y: this.coord(y) },
+      timeoutMs,
+      perf,
+      errorLabel: "Gesture start",
+    });
+  }
+
+  /** Feed an incremental move to the streamed gesture [gestureId]. See {@link requestGestureStart}. */
+  async requestGestureMove(
+    gestureId: string,
+    x: number,
+    y: number,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<A11ySwipeResult> {
+    return sendCommand<A11ySwipeResult>(this.context, {
+      idPrefix: "gesture_move",
+      responseType: "swipe",
+      messageType: "request_gesture_move",
+      params: { gestureId, x: this.coord(x), y: this.coord(y) },
+      timeoutMs,
+      perf,
+      errorLabel: "Gesture move",
+    });
+  }
+
+  /**
+   * End the streamed gesture [gestureId], lifting at ([x], [y]) — or, when [cancel] is true,
+   * abandoning it and lifting in place. See {@link requestGestureStart}.
+   */
+  async requestGestureEnd(
+    gestureId: string,
+    x: number,
+    y: number,
+    cancel: boolean = false,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<A11ySwipeResult> {
+    return sendCommand<A11ySwipeResult>(this.context, {
+      idPrefix: "gesture_end",
+      responseType: "swipe",
+      messageType: "request_gesture_end",
+      params: { gestureId, x: this.coord(x), y: this.coord(y), cancel },
+      timeoutMs,
+      perf,
+      errorLabel: "Gesture end",
+    });
+  }
 }

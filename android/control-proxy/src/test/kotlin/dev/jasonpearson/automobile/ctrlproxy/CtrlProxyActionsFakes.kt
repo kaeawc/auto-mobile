@@ -57,6 +57,18 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     duration: Long,
   ) {}
 
+  override fun requestGestureStart(requestId: String?, gestureId: String, x: Double, y: Double) {}
+
+  override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) {}
+
+  override fun requestGestureEnd(
+    requestId: String?,
+    gestureId: String,
+    x: Double,
+    y: Double,
+    cancel: Boolean,
+  ) {}
+
   override fun requestSetText(
     requestId: String?,
     text: String,
@@ -263,6 +275,20 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
       rotationDegrees,
       duration,
     )
+
+  override fun requestGestureStart(requestId: String?, gestureId: String, x: Double, y: Double) =
+    record("requestGestureStart", requestId, gestureId, x, y)
+
+  override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) =
+    record("requestGestureMove", requestId, gestureId, x, y)
+
+  override fun requestGestureEnd(
+    requestId: String?,
+    gestureId: String,
+    x: Double,
+    y: Double,
+    cancel: Boolean,
+  ) = record("requestGestureEnd", requestId, gestureId, x, y, cancel)
 
   override fun requestSetText(
     requestId: String?,

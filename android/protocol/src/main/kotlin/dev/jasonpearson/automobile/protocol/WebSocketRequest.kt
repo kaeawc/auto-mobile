@@ -137,6 +137,48 @@ data class RequestPinch(
 ) : WebSocketRequest()
 
 // =============================================================================
+// Streaming Gesture Requests
+// =============================================================================
+//
+// A live drag is delivered as a stream of three request kinds sharing one [gestureId]: one
+// `request_gesture_start` (finger down), zero or more `request_gesture_move` (incremental travel),
+// and one `request_gesture_end` (lift or cancel). The runner chains them into a single continued
+// AccessibilityService gesture (`StrokeDescription.willContinue`/`continueStroke`) so the device
+// tracks the pointer in real time instead of receiving one atomic swipe on release.
+//
+// Deliberately frame-identity-free: like taps, these carry no `frameContext`, so a snapshot
+// advancing mid-drag cannot reject an in-flight gesture as stale (issue: streaming gesture input).
+
+@Serializable
+@SerialName("request_gesture_start")
+data class RequestGestureStart(
+  override val requestId: String? = null,
+  val gestureId: String,
+  val x: Double,
+  val y: Double,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_gesture_move")
+data class RequestGestureMove(
+  override val requestId: String? = null,
+  val gestureId: String,
+  val x: Double,
+  val y: Double,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_gesture_end")
+data class RequestGestureEnd(
+  override val requestId: String? = null,
+  val gestureId: String,
+  val x: Double,
+  val y: Double,
+  /** Abandon the drag and lift in place instead of completing at ([x], [y]). */
+  val cancel: Boolean = false,
+) : WebSocketRequest()
+
+// =============================================================================
 // Text Input Requests
 // =============================================================================
 

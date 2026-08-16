@@ -17,6 +17,8 @@ import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Base64
@@ -269,6 +271,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private val serviceScope: CoroutineScope =
     CoroutineScope(Dispatchers.IO + SupervisorJob() + serviceScopeGuard.handler)
+
+  /**
+   * The DEDICATED thread streamed gestures are driven on — deliberately NOT the main thread.
+   * `StrokeDescription.continueStroke` must be issued promptly after the previous stroke completes
+   * or the framework cancels the continued gesture; the main thread runs the accessibility-event
+   * and hierarchy work (e.g. a ~460ms `hierarchyDebouncer` pass) that would stall a continuation
+   * posted there long enough to trip that cancel. A private [HandlerThread] keeps the continuation
+   * cadence off that contention. The gesture state machine is single-threaded, so every gesture
+   * mutation and pump is funnelled onto this one thread (see [GestureStreamSession]); WebSocket
+   * requests arrive on [serviceScope]'s IO threads and hand their work here.
+   */
+  private val gestureHandlerThread = HandlerThread("automobile-gesture-dispatch").apply { start() }
+  private val gestureHandler = Handler(gestureHandlerThread.looper)
+
+  /** Active streamed gestures, keyed by their wire `gestureId`. */
+  private val gestureStreamRegistry = GestureStreamRegistry()
+
+  /**
+   * The `requestId` of the `request_gesture_end` awaiting each gesture's terminal result, so the
+   * asynchronous lift completion broadcasts back to the end request that is waiting for it (start
+   * and move are acked immediately). Concurrent because it is written on IO and read on the gesture
+   * thread.
+   */
+  private val gestureEndRequestIds = java.util.concurrent.ConcurrentHashMap<String, String>()
 
   /**
    * Launches request-correlated raw work with [RequestIdContext] attached so [serviceScopeGuard]
@@ -1344,6 +1370,130 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) {
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE)) return
     performSwipe(requestId, x1, y1, x2, y2, duration, frameContext)
+  }
+
+  /**
+   * The Android half of streaming gesture input: builds real `StrokeDescription`s and dispatches
+   * them through the AccessibilityService, one continued stroke per [GestureSegment]. Kept a thin
+   * seam so the continuation loop ([GestureStreamSession]) stays framework-free and unit-tested.
+   * Requires API 26+ (the `willContinue` constructor and `continueStroke`); the caller guards.
+   */
+  private inner class AccessibilityStrokeDispatcher :
+    StrokeDispatcher<GestureDescription.StrokeDescription> {
+    override fun initialStroke(segment: GestureSegment): GestureDescription.StrokeDescription =
+      GestureDescription.StrokeDescription(
+        segment.toPath(),
+        0,
+        segment.durationMs.coerceAtLeast(1L),
+        segment.willContinue,
+      )
+
+    override fun continueStroke(
+      previous: GestureDescription.StrokeDescription,
+      segment: GestureSegment,
+    ): GestureDescription.StrokeDescription =
+      previous.continueStroke(
+        segment.toPath(),
+        0,
+        segment.durationMs.coerceAtLeast(1L),
+        segment.willContinue,
+      )
+
+    override fun dispatch(
+      stroke: GestureDescription.StrokeDescription,
+      onComplete: () -> Unit,
+      onFailed: (error: String) -> Unit,
+    ) {
+      val gesture = GestureDescription.Builder().addStroke(stroke).build()
+      val dispatched =
+        try {
+          dispatchGesture(
+            gesture,
+            object : GestureResultCallback() {
+              override fun onCompleted(gestureDescription: GestureDescription?) = onComplete()
+
+              override fun onCancelled(gestureDescription: GestureDescription?) =
+                onFailed("Streamed gesture stroke was cancelled")
+            },
+            gestureHandler,
+          )
+        } catch (e: Exception) {
+          Log.e(TAG, "Error dispatching streamed gesture stroke", e)
+          onFailed(e.message ?: "Failed to dispatch streamed gesture stroke")
+          return
+        }
+      if (!dispatched) onFailed("Failed to dispatch streamed gesture stroke")
+    }
+
+    private fun GestureSegment.toPath(): Path =
+      Path().apply {
+        moveTo(from.x, from.y)
+        lineTo(to.x, to.y)
+      }
+  }
+
+  override fun requestGestureStart(requestId: String?, gestureId: String, x: Double, y: Double) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+      // continueStroke is API 26+. Fail cleanly so the client falls back to an atomic swipe.
+      broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
+      return
+    }
+    if (gestureStreamRegistry.contains(gestureId)) {
+      broadcastGestureResult(requestId, false, "Gesture $gestureId is already active")
+      return
+    }
+    val session =
+      GestureStreamSession(
+        coordinator = GestureStreamCoordinator(),
+        dispatcher = AccessibilityStrokeDispatcher(),
+        runOnGestureThread = { gestureHandler.post(it) },
+        onFinished = { success, error ->
+          gestureStreamRegistry.remove(gestureId)
+          // The end request (if any) is the one awaiting the terminal lift result.
+          val endRequestId = gestureEndRequestIds.remove(gestureId)
+          broadcastGestureResult(endRequestId, success, error)
+        },
+      )
+    gestureStreamRegistry.register(gestureId, session)
+    session.start(x.toFloat(), y.toFloat())
+    // Ack the down immediately; the terminal result is delivered on the matching end.
+    broadcastGestureResult(requestId, true, null)
+  }
+
+  override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) {
+    val session = gestureStreamRegistry.get(gestureId)
+    if (session == null) {
+      // A move after the gesture already ended (a late/raced frame) is a benign no-op, not a client
+      // error; acking success keeps the stream from surfacing a spurious failure.
+      broadcastGestureResult(requestId, true, null)
+      return
+    }
+    session.move(x.toFloat(), y.toFloat())
+    broadcastGestureResult(requestId, true, null)
+  }
+
+  override fun requestGestureEnd(
+    requestId: String?,
+    gestureId: String,
+    x: Double,
+    y: Double,
+    cancel: Boolean,
+  ) {
+    val session = gestureStreamRegistry.get(gestureId)
+    if (session == null) {
+      // The gesture already finished (e.g. it hit the runner's duration ceiling first). Idempotent.
+      broadcastGestureResult(requestId, true, null)
+      return
+    }
+    // Record which request awaits the terminal lift before asking the session to end, so the
+    // finish callback broadcasts to it.
+    if (requestId != null) gestureEndRequestIds[gestureId] = requestId
+    session.end(x.toFloat(), y.toFloat(), cancel)
+  }
+
+  /** Ack one streamed-gesture request, reusing the shared `swipe_result` frame. */
+  private fun broadcastGestureResult(requestId: String?, success: Boolean, error: String?) {
+    launchRequestScope(requestId) { broadcastSwipeResult(requestId, success, error, 0L, null) }
   }
 
   override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =

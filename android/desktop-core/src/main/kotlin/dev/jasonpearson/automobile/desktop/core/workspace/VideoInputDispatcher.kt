@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.control.DeviceGestureStreamHandle
+import dev.jasonpearson.automobile.desktop.core.control.GestureStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
@@ -17,6 +19,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
@@ -74,8 +77,18 @@ class VideoInputDispatcher(
   private val deviceId: String,
   private val tracer: InteractionLatencyTracer,
   ioDispatcher: CoroutineDispatcher? = null,
+  /**
+   * Feature flag for streaming (real-time) drag input on the video pane (issue: streaming gesture
+   * input). Off by default: [beginGestureStream] returns null and a drag stays an atomic [swipe] on
+   * release. When on, a drag streams live and — if the daemon/runner cannot stream — falls back to
+   * the same atomic swipe, so the pane behaves identically either way.
+   */
+  private val streamingEnabled: Boolean = false,
 ) {
   private val injectedDispatcher: CoroutineDispatcher? = ioDispatcher
+
+  /** Monotonic id per streamed gesture, correlating its start/move/end frames on the wire. */
+  private val gestureSeq = AtomicLong(0L)
 
   // The warm dispatch thread is created LAZILY — on the first real dispatch, and only when no
   // dispatcher was injected. A pane that is never driven (an unfocused farm pane whose control is
@@ -191,6 +204,129 @@ class VideoInputDispatcher(
         durationMs = decision.durationMs,
         frameContext = null,
       )
+    }
+  }
+
+  /**
+   * Begin a streamed (real-time) drag from [start] (mapped through [snapshot]). Returns a handle
+   * the pane feeds incremental moves and the release to, or null when streaming is off, the start
+   * is off-screen, or the backlog is full — in which case the pane falls back to the atomic [swipe]
+   * on release. Like the atomic path this is frame-identity-free (no `frameContext`).
+   *
+   * The drag holds the warm dispatch thread's mutex for its whole lifetime — the same single-slot
+   * serialization taps use — so a mid-drag tap simply queues until release. When the client cannot
+   * stream, the consumer drains the events and dispatches one atomic swipe, so the pane emits the
+   * same start/move/end regardless of daemon/runner support.
+   */
+  fun beginGestureStream(
+    snapshot: DeviceFrameSnapshot,
+    start: DevicePoint,
+  ): DeviceGestureStreamHandle? {
+    if (!streamingEnabled) return null
+    if (!start.inBounds) return null
+    flushPendingText()
+    val events = Channel<GestureStreamEvent>(Channel.UNLIMITED)
+    val gestureId = "gesture-${gestureSeq.incrementAndGet()}"
+    val platformName = platform()
+    val generation = activeGeneration.get()
+    if (pendingDispatches.incrementAndGet() > MAX_PENDING_DISPATCHES) {
+      pendingDispatches.decrementAndGet()
+      LOG.warn("dropping video gesture stream for $deviceId: dispatch backlog full")
+      events.close()
+      return null
+    }
+    scope.launch(dispatchDispatcher()) {
+      try {
+        mutex.withLock {
+          if (generation != activeGeneration.get()) {
+            drainGestureEvents(events)
+            return@withLock
+          }
+          val client = clientProvider()
+          if (client == null) {
+            drainGestureEvents(events)
+            return@withLock
+          }
+          streamOrFallback(client, platformName, snapshot, gestureId, start, events)
+        }
+      } finally {
+        pendingDispatches.decrementAndGet()
+      }
+    }
+    return DeviceGestureStreamHandle(events)
+  }
+
+  private suspend fun streamOrFallback(
+    client: AutoMobileClient,
+    platformName: String,
+    snapshot: DeviceFrameSnapshot,
+    gestureId: String,
+    start: DevicePoint,
+    events: Channel<GestureStreamEvent>,
+  ) {
+    val stream = client.openGestureStream(platformName, deviceId)
+    if (stream == null) {
+      fallbackAtomicSwipe(client, platformName, snapshot, start, events)
+      return
+    }
+    tracer.dispatching(deviceId)
+    try {
+      stream.start(gestureId, start.x.toDouble(), start.y.toDouble())
+      for (event in events) {
+        when (event) {
+          is GestureStreamEvent.Move ->
+            stream.move(gestureId, event.point.x.toDouble(), event.point.y.toDouble())
+          is GestureStreamEvent.End -> {
+            stream.end(gestureId, event.point.x.toDouble(), event.point.y.toDouble(), event.cancel)
+            break
+          }
+        }
+      }
+      tracer.acked(deviceId)
+    } finally {
+      stream.close()
+    }
+  }
+
+  private suspend fun fallbackAtomicSwipe(
+    client: AutoMobileClient,
+    platformName: String,
+    snapshot: DeviceFrameSnapshot,
+    start: DevicePoint,
+    events: Channel<GestureStreamEvent>,
+  ) {
+    for (event in events) {
+      if (event is GestureStreamEvent.End) {
+        if (event.cancel) return
+        val decision =
+          DeviceDragGesturePolicy.evaluate(
+            start = start,
+            end = event.point,
+            deviceWidth = snapshot.deviceWidth,
+            deviceHeight = snapshot.deviceHeight,
+            coordinateSpace = snapshot.coordinateSpace,
+            nativeScale = snapshot.nativeScale,
+          )
+        if (decision is DeviceDragDecision.Swipe) {
+          client.inputSwipe(
+            startX = decision.start.x.toDouble(),
+            startY = decision.start.y.toDouble(),
+            endX = decision.end.x.toDouble(),
+            endY = decision.end.y.toDouble(),
+            platform = platformName,
+            deviceId = deviceId,
+            durationMs = decision.durationMs,
+            frameContext = null,
+          )
+        }
+        return
+      }
+    }
+  }
+
+  private suspend fun drainGestureEvents(events: Channel<GestureStreamEvent>) {
+    for (event in events) {
+      if (event is GestureStreamEvent.End) break
     }
   }
 

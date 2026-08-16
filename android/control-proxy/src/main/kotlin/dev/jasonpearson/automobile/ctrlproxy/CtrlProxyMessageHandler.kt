@@ -21,6 +21,9 @@ import dev.jasonpearson.automobile.protocol.RequestAction
 import dev.jasonpearson.automobile.protocol.RequestClipboard
 import dev.jasonpearson.automobile.protocol.RequestDeviceInfo
 import dev.jasonpearson.automobile.protocol.RequestDrag
+import dev.jasonpearson.automobile.protocol.RequestGestureEnd
+import dev.jasonpearson.automobile.protocol.RequestGestureMove
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
 import dev.jasonpearson.automobile.protocol.RequestGlobalAction
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
 import dev.jasonpearson.automobile.protocol.RequestHierarchyIfStale
@@ -213,6 +216,30 @@ class CtrlProxyMessageHandler(
           request.distanceEnd,
           request.rotationDegrees,
           request.duration,
+        )
+      }
+      is RequestGestureStart -> {
+        firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
+          return swipeError(request.requestId, field, value)
+        }
+        actions.requestGestureStart(request.requestId, request.gestureId, request.x, request.y)
+      }
+      is RequestGestureMove -> {
+        firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
+          return swipeError(request.requestId, field, value)
+        }
+        actions.requestGestureMove(request.requestId, request.gestureId, request.x, request.y)
+      }
+      is RequestGestureEnd -> {
+        firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
+          return swipeError(request.requestId, field, value)
+        }
+        actions.requestGestureEnd(
+          request.requestId,
+          request.gestureId,
+          request.x,
+          request.y,
+          request.cancel,
         )
       }
       is RequestSetText ->

@@ -175,6 +175,13 @@ interface McpForwardRoute {
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
+/** Wire method name for each streamed-gesture frame kind (issue: streaming gesture input). */
+const GESTURE_FRAME_METHODS = {
+  start: "input/gestureStart",
+  move: "input/gestureMove",
+  end: "input/gestureEnd",
+} as const;
+
 /**
  * The narrow key-value mutation surface the `ide/*` handlers need from a
  * platform CtrlProxy client. Both AndroidCtrlProxyClient and IOSCtrlProxyClient
@@ -1255,6 +1262,15 @@ export class UnixSocketServer {
     if (request.method === "input/key") {
       return await this.handleInputKey(request, socketSessionId);
     }
+    if (request.method === "input/gestureStart") {
+      return await this.handleInputGesture(request, "start", socketSessionId);
+    }
+    if (request.method === "input/gestureMove") {
+      return await this.handleInputGesture(request, "move", socketSessionId);
+    }
+    if (request.method === "input/gestureEnd") {
+      return await this.handleInputGesture(request, "end", socketSessionId);
+    }
 
     switch (request.method) {
       case "ide/listFeatureFlags": {
@@ -1715,6 +1731,126 @@ export class UnixSocketServer {
       end: { x: args.endX, y: args.endY },
       durationMs: args.durationMs,
     };
+  }
+
+  /**
+   * One streamed-gesture frame (start / move / end). A live drag arrives as one `input/gestureStart`,
+   * many `input/gestureMove`, and one `input/gestureEnd` sharing a `gestureId`; the runner chains
+   * them into a single continued on-device gesture. Android only — streaming has no XCUITest
+   * equivalent, so the desktop client keeps the atomic `input/swipe` for iOS and old daemons.
+   *
+   * Frame-identity-free like taps: no `frameContext` is required or checked, so a snapshot advancing
+   * mid-drag cannot reject an in-flight gesture as stale. Each frame is serialized through the same
+   * per-device keyed forward as taps/swipes, so gesture ordering is preserved.
+   */
+  private async handleInputGesture(
+    request: DaemonRequest,
+    kind: "start" | "move" | "end",
+    socketSessionId?: string
+  ): Promise<any | undefined> {
+    const method = GESTURE_FRAME_METHODS[kind];
+    const queueEnterMs = this.timer.now();
+    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const args = this.parseInputGestureParams(request.params, method);
+    const targetDevice = await this.resolveInputTargetDevice(
+      args.platform,
+      args.deviceId,
+      socketSessionId,
+      method
+    );
+    const gestureResult = await this.runKeyedMcpForward(`device:${targetDevice.deviceId}`, async () => {
+      const queueWaitMs = this.timer.now() - queueEnterMs;
+      const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+      if (remainingTimeoutMs <= 0) {
+        throw new McpTimeoutError({
+          toolName: method,
+          timeoutMs: totalTimeoutMs,
+          origin: "UnixSocketServer.handleInputGesture",
+          detail: `spent ${queueWaitMs}ms waiting in queue`,
+        });
+      }
+      const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+      return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
+    }, `device:${targetDevice.deviceId}`);
+
+    if (!gestureResult.success) {
+      throw new Error(gestureResult.error ?? `${method} failed on ${args.platform}`);
+    }
+
+    return {
+      action: method,
+      platform: args.platform,
+      deviceId: targetDevice.deviceId,
+      success: true,
+      gestureId: args.gestureId,
+      point: { x: args.x, y: args.y },
+      ...(kind === "end" ? { cancel: args.cancel } : {}),
+    };
+  }
+
+  /** Relay one gesture frame to the Android runner's continued-gesture path. */
+  private forwardGestureFrame(
+    client: AndroidCtrlProxyClient,
+    kind: "start" | "move" | "end",
+    args: { gestureId: string; x: number; y: number; cancel: boolean },
+    timeoutMs: number
+  ) {
+    switch (kind) {
+      case "start":
+        return client.requestGestureStart(args.gestureId, args.x, args.y, timeoutMs);
+      case "move":
+        return client.requestGestureMove(args.gestureId, args.x, args.y, timeoutMs);
+      case "end":
+        return client.requestGestureEnd(args.gestureId, args.x, args.y, args.cancel, timeoutMs);
+    }
+  }
+
+  private parseInputGestureParams(
+    params: unknown,
+    method: string
+  ): {
+    platform: "android";
+    deviceId?: string;
+    gestureId: string;
+    x: number;
+    y: number;
+    cancel: boolean;
+  } {
+    if (!params || typeof params !== "object" || Array.isArray(params)) {
+      throw new Error(`${method} requires params object`);
+    }
+    const args = params as Record<string, unknown>;
+    // Streaming gestures have no XCUITest equivalent, so the wire is Android-only. A client that
+    // reaches here for iOS bypassed the capability check; reject rather than silently degrade.
+    if (args.platform !== "android") {
+      throw new Error(`${method} is only supported on platform 'android'`);
+    }
+    if (typeof args.gestureId !== "string" || args.gestureId.length === 0) {
+      throw new Error(`${method} requires a non-empty gestureId`);
+    }
+    const x = this.requireGestureCoordinate(args.x, method);
+    const y = this.requireGestureCoordinate(args.y, method);
+    if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
+      throw new Error(`${method} deviceId must be a string when provided`);
+    }
+    if (args.cancel !== undefined && typeof args.cancel !== "boolean") {
+      throw new Error(`${method} cancel must be a boolean when provided`);
+    }
+    return {
+      platform: args.platform,
+      deviceId: args.deviceId,
+      gestureId: args.gestureId,
+      x,
+      y,
+      cancel: args.cancel === true,
+    };
+  }
+
+  private requireGestureCoordinate(value: unknown, method: string): number {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new Error(`${method} requires numeric x and y params`);
+    }
+    return value;
   }
 
   private async handleInputTypeText(
@@ -2345,7 +2481,15 @@ export class UnixSocketServer {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: "input/tap" | "input/swipe" | "input/typeText" | "input/pressButton" | "input/key",
+    action:
+      | "input/tap"
+      | "input/swipe"
+      | "input/typeText"
+      | "input/pressButton"
+      | "input/key"
+      | "input/gestureStart"
+      | "input/gestureMove"
+      | "input/gestureEnd",
     bypassAndroidDeviceListCache: boolean = false
   ): Promise<BootedDevice> {
     const bootedDevices = await this.discoverInputTargetDevices(
@@ -2388,7 +2532,15 @@ export class UnixSocketServer {
 
   private async discoverInputTargetDevices(
     platform: "android" | "ios",
-    action: "input/tap" | "input/swipe" | "input/typeText" | "input/pressButton" | "input/key",
+    action:
+      | "input/tap"
+      | "input/swipe"
+      | "input/typeText"
+      | "input/pressButton"
+      | "input/key"
+      | "input/gestureStart"
+      | "input/gestureMove"
+      | "input/gestureEnd",
     bypassAndroidDeviceListCache: boolean
   ): Promise<BootedDevice[]> {
     const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform, {

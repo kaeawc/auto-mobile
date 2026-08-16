@@ -3344,7 +3344,7 @@ describe("DevicePool", () => {
       const deviceId = await devicePool.assignDeviceToSession("session-a");
 
       await sessionManager.releaseSession("session-a");
-      await devicePool.releaseDevice(deviceId);
+      await devicePool.releaseDevice(deviceId, "session-a");
       await devicePool.assignDeviceToSession("session-b");
 
       await devicePool.releaseDevice(deviceId, "session-a");

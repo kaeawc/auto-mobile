@@ -84,6 +84,10 @@ export interface Session {
  */
 export type SessionReleaseCallback = (sessionId: string, deviceId: string) => void;
 
+export interface SessionDeviceAssigner {
+  assignDeviceToSession(sessionId: string, platform?: Platform): Promise<string>;
+}
+
 export function getDefaultSessionHeartbeatTimeoutMs(): number {
   const rawValue = process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS
     ?? process.env.AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS;
@@ -97,6 +101,7 @@ export class SessionManager {
   private sessions: Map<string, Session> = new Map();
   private sessionDeviceMap: Map<string, string> = new Map(); // sessionId -> deviceId
   private deviceSessionMap: Map<string, string> = new Map(); // deviceId -> sessionId (reverse lookup)
+  private pendingSessionCreations: Map<string, Promise<Session>> = new Map();
   private cleanupTimer: NodeJS.Timeout | null = null;
   private timer: Timer;
   private releaseCallbacks: SessionReleaseCallback[] = [];
@@ -242,7 +247,7 @@ export class SessionManager {
    */
   async getOrCreateSession(
     sessionId: string,
-    devicePool?: import("./devicePool").DevicePool,
+    devicePool?: SessionDeviceAssigner,
     platform?: Platform
   ): Promise<Session> {
     const existing = this.getSession(sessionId);
@@ -261,6 +266,25 @@ export class SessionManager {
       return existing;
     }
 
+    const pendingCreation = this.pendingSessionCreations.get(sessionId);
+    if (pendingCreation) {
+      return await pendingCreation;
+    }
+
+    const creation = this.createUnseenSession(sessionId, devicePool, platform).finally(() => {
+      if (this.pendingSessionCreations.get(sessionId) === creation) {
+        this.pendingSessionCreations.delete(sessionId);
+      }
+    });
+    this.pendingSessionCreations.set(sessionId, creation);
+    return await creation;
+  }
+
+  private async createUnseenSession(
+    sessionId: string,
+    devicePool: SessionDeviceAssigner | undefined,
+    platform: Platform | undefined,
+  ): Promise<Session> {
     logger.info(`[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`);
 
     // Need to create new session - assign device from pool

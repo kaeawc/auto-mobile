@@ -1279,6 +1279,69 @@ describe("DevicePool", () => {
       expect(device?.errorCount).toBe(0);
     });
 
+    test("concurrent same-session creation converges on one assigned device", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("emulator-5554"),
+        createBootedDevice("emulator-5556"),
+      ]);
+
+      const [first, second] = await Promise.all([
+        sessionManager.getOrCreateSession("shared-session", devicePool),
+        sessionManager.getOrCreateSession("shared-session", devicePool),
+      ]);
+
+      expect(first.sessionId).toBe("shared-session");
+      expect(second).toBe(first);
+      expect(first.assignedDevice).toBe(second.assignedDevice);
+      expect(devicePool.getAvailableDeviceCount()).toBe(1);
+      expect(devicePool.getDevice(first.assignedDevice)?.status).toBe("busy");
+    });
+
+    test("does not reserve a second device when binding an automatically created session", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("emulator-5554"),
+        createBootedDevice("emulator-5556"),
+      ]);
+
+      const session = await sessionManager.getOrCreateSession("shared-session", devicePool);
+      const otherDeviceId = session.assignedDevice === "emulator-5554"
+        ? "emulator-5556"
+        : "emulator-5554";
+
+      await expect(
+        devicePool.bindOrReuseDeviceSession("shared-session", otherDeviceId, "android"),
+      ).rejects.toThrow(`Session 'shared-session' is already assigned to device '${session.assignedDevice}'.`);
+
+      expect(devicePool.getAvailableDeviceCount()).toBe(1);
+      expect(devicePool.getDevice(otherDeviceId)).toMatchObject({
+        sessionId: null,
+        status: "idle",
+      });
+    });
+
+    test("keeps an explicit binding as the sole owner during automatic creation", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("emulator-5554"),
+        createBootedDevice("emulator-5556"),
+      ]);
+
+      const explicitBinding = devicePool.bindOrReuseDeviceSession(
+        "shared-session",
+        "emulator-5556",
+        "android",
+      );
+      const automaticCreation = sessionManager.getOrCreateSession("shared-session", devicePool);
+      const [boundSession, session] = await Promise.all([explicitBinding, automaticCreation]);
+
+      expect(boundSession).toBe("shared-session");
+      expect(session.assignedDevice).toBe("emulator-5556");
+      expect(devicePool.getAvailableDeviceCount()).toBe(1);
+      expect(devicePool.getDevice("emulator-5554")).toMatchObject({
+        sessionId: null,
+        status: "idle",
+      });
+    });
+
     test("should throw error when no devices available after timeout", async () => {
       // Use manual mode so we can control time advancement
 

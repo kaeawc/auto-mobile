@@ -267,7 +267,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       try {
         const emulators = await this.emulator.getBootedDevicesChecked(false, {
           bypassDeviceListCache: options.bypassAndroidDeviceListCache,
-        });
+        }, getAbortSignal());
         devices.push(...emulators);
         succeededPlatforms.add("android");
       } catch (error) {

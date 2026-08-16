@@ -118,8 +118,10 @@ describe("DevicePool", () => {
     pid = 12345;
     exitCode: number | null | undefined = undefined;
     signalCode: NodeJS.Signals | null | undefined = undefined;
+    killCount = 0;
     kill(): boolean {
-      return false;
+      this.killCount++;
+      return true;
     }
   }
 
@@ -2104,6 +2106,7 @@ describe("DevicePool", () => {
         await new Promise((resolve) => setImmediate(resolve));
 
         expect(manager.childProcesses).toHaveLength(2);
+        expect(manager.childProcesses[1]!.killCount).toBe(1);
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
       } finally {
         manager.releaseRecovery();

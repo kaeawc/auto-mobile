@@ -1326,21 +1326,25 @@ export class DevicePool {
         }
         const childProcess = await this.deviceManager.startDevice(target);
         let ready: BootedDevice | undefined;
+        let readinessCompleted = false;
         try {
           ready = this.criteriaMatcher.withDeviceImageMetadata(
             await waitForDeviceReadyOrCancel(this.deviceManager, target, childProcess),
             recoveryImage,
           );
+          readinessCompleted = true;
           recoveryDeviceIds.add(ready.deviceId);
           this.recoveringAndroidDeviceIds.add(ready.deviceId);
           if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
             intentionallyStopped = true;
+            await this.stopEmulatorProcess(childProcess);
             return;
           }
           await this.addDevice(ready, recoveryImage);
           if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
             intentionallyStopped = true;
             await this.removeDevice(ready.deviceId);
+            await this.stopEmulatorProcess(childProcess);
             return;
           }
           await this.trackStartedDeviceProcess(ready, childProcess);
@@ -1349,6 +1353,9 @@ export class DevicePool {
             intentionallyStopped = true;
             if (ready) {
               await this.removeDevice(ready.deviceId);
+            }
+            if (readinessCompleted) {
+              await this.stopEmulatorProcess(childProcess);
             }
             return;
           }
@@ -1388,6 +1395,10 @@ export class DevicePool {
   private async stopTrackedEmulatorProcess(deviceId: string): Promise<void> {
     const childProcess = this.startedDeviceProcesses.get(deviceId);
     this.startedDeviceProcesses.delete(deviceId);
+    await this.stopEmulatorProcess(childProcess);
+  }
+
+  private async stopEmulatorProcess(childProcess: ChildProcess | null | undefined): Promise<void> {
     if (!childProcess || typeof childProcess.kill !== "function") {
       return;
     }

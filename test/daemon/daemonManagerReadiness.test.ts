@@ -44,7 +44,21 @@ class ProbeClient implements DaemonClientLike {
 
 class FakeDaemonProcess extends EventEmitter {
   pid = 12345;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  killed = false;
+  readonly signals: NodeJS.Signals[] = [];
+
   unref(): void {}
+
+  kill(signal: NodeJS.Signals): boolean {
+    this.killed = true;
+    this.signals.push(signal);
+    this.exitCode = 0;
+    this.signalCode = signal;
+    this.emit("exit", 0, signal);
+    return true;
+  }
 }
 
 class FakeDaemonSpawner implements DaemonProcessSpawner {
@@ -330,9 +344,56 @@ describe("DaemonManager readiness", () => {
         /Daemon failed to start within \d+ms[\s\S]*Logs: .*daemon-launch-\d+\.log[\s\S]*SQLiteError: database is locked/
       );
       expect(message).not.toContain("OLD_LOG_START");
+      expect(spawner.process.signals).toEqual(["SIGTERM"]);
     } finally {
       readySpy.mockRestore();
       findSpy.mockRestore();
+    }
+  });
+
+  test("preserves the spawned daemon when its exact PID becomes reachable at the deadline", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    const spawner = new FakeDaemonSpawner();
+    const clients: ProbeClient[] = [];
+    const manager = new DaemonManager(
+      () => {
+        const client = new ProbeClient(true);
+        clients.push(client);
+        return client;
+      },
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      spawner
+    );
+    let statusCalls = 0;
+    const statusSpy = spyOn(manager, "status").mockImplementation(async () => {
+      statusCalls++;
+      if (statusCalls === 1) {
+        return { running: false };
+      }
+      return {
+        running: true,
+        pid: spawner.process.pid,
+        port: 31879,
+        socketPath,
+      };
+    });
+    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
+    const readySpy = spyOn(manager, "waitForReady").mockResolvedValue(false);
+
+    try {
+      await expect(manager.start()).resolves.toBeUndefined();
+      expect(statusCalls).toBe(3);
+      expect(clients[0].connectCallCount).toBe(1);
+      expect(spawner.process.signals).toEqual([]);
+    } finally {
+      statusSpy.mockRestore();
+      findSpy.mockRestore();
+      readySpy.mockRestore();
     }
   });
 

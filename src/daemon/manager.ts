@@ -361,10 +361,12 @@ export class DaemonManager implements DaemonManagerLike {
     this.launchCommandResolver = typeof launcher === "function" ? launcher : undefined;
     this.launcher = (typeof launcher === "object" ? launcher : undefined) ?? new DaemonLauncher({
       spawn: processSpawner?.spawn.bind(processSpawner),
+      timer,
     });
     this.fallbackLauncher = new DaemonLauncher({
       entryScript: null,
       spawn: processSpawner?.spawn.bind(processSpawner),
+      timer,
     });
     this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath));
   }
@@ -590,6 +592,7 @@ export class DaemonManager implements DaemonManagerLike {
             },
             timeoutMs: DAEMON_STARTUP_TIMEOUT_MS,
             waitForReady: (timeoutMs, signal) => this.waitForReady(timeoutMs, signal),
+            isReadyForLaunchedProcess: pid => this.isLaunchedProcessReady(pid),
             formatFailure: summary => this.createDaemonStartupFailure(summary, logPath),
             formatExitFailure: (code, signal) => this.createDaemonExitFailure(code, signal, logPath),
           });
@@ -1048,6 +1051,15 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     return false;
+  }
+
+  private async isLaunchedProcessReady(pid: number | undefined): Promise<boolean> {
+    if (pid === undefined) {
+      return false;
+    }
+
+    const status = await this.status();
+    return status.running === true && status.pid === pid && await this.verifyDaemonConnection();
   }
 
   /**

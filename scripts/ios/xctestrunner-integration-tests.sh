@@ -7,10 +7,10 @@
 #   ./scripts/ios/xctestrunner-integration-tests.sh [test-filter]
 #
 # Arguments:
-#   test-filter   Optional test filter (default: RemindersLaunchPlanTests)
+#   test-filter   Optional test filter (default: RemindersAddPlanTests)
 #
 # Environment Variables:
-#   AUTOMOBILE_TEST_PLAN   Test plan file to use (default: Plans/launch-reminders-app.yaml)
+#   AUTOMOBILE_TEST_PLAN   Test plan file to use (default: Plans/add-reminder.yaml)
 #
 # Prerequisites:
 #   - CtrlProxy iOS artifacts must be built (run ctrl-proxy-build-for-testing.sh)
@@ -33,10 +33,10 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 XCTESTRUNNER_DIR="${PROJECT_ROOT}/ios/XCTestRunner"
 
 # Test filter
-TEST_FILTER="${1:-RemindersLaunchPlanTests}"
+TEST_FILTER="${1:-RemindersAddPlanTests}"
 
 # Test plan
-TEST_PLAN="${AUTOMOBILE_TEST_PLAN:-Plans/launch-reminders-app.yaml}"
+TEST_PLAN="${AUTOMOBILE_TEST_PLAN:-Plans/add-reminder.yaml}"
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  XCTestRunner Integration Tests${NC}"
@@ -76,7 +76,7 @@ echo -e "  ${GREEN}✓${NC} Bun available"
 
 echo ""
 
-if [[ "${TEST_FILTER} ${TEST_PLAN}" == *Reminders* || "${TEST_FILTER} ${TEST_PLAN}" == *reminders* ]]; then
+if [[ "${TEST_FILTER}" == *RemindersAdd* || "${TEST_PLAN}" == *add-reminder* ]]; then
     echo -e "${BLUE}Warming Reminders target app...${NC}"
     "${PROJECT_ROOT}/scripts/ci/warm-reminders-target-app.sh"
     echo ""

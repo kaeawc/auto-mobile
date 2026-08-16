@@ -64,23 +64,25 @@ teardown() {
   [ -x "$SCRIPT" ]
 }
 
-@test "warms Reminders before the default launch integration test" {
+@test "warms Reminders before the default add-reminder integration test" {
   run "${PROJECT}/scripts/ios/xctestrunner-integration-tests.sh"
   [ "$status" -eq 0 ]
   [ "$(sed -n '1p' "$INVOCATIONS")" = "warm-reminders-target-app" ]
-  [ "$(sed -n '2p' "$INVOCATIONS")" = "swift test --filter RemindersLaunchPlanTests" ]
+  [ "$(sed -n '2p' "$INVOCATIONS")" = "swift test --filter RemindersAddPlanTests" ]
 }
 
-@test "warms Reminders for explicit Reminders test filters" {
-  run "${PROJECT}/scripts/ios/xctestrunner-integration-tests.sh" RemindersAddPlanTests
+@test "warms Reminders for an explicit add-reminder plan" {
+  run env AUTOMOBILE_TEST_PLAN=Plans/add-reminder-custom.yaml \
+    "${PROJECT}/scripts/ios/xctestrunner-integration-tests.sh" CustomAddPlanTests
   [ "$status" -eq 0 ]
   grep -q '^warm-reminders-target-app$' "$INVOCATIONS"
-  grep -q '^swift test --filter RemindersAddPlanTests$' "$INVOCATIONS"
+  grep -q '^swift test --filter CustomAddPlanTests$' "$INVOCATIONS"
 }
 
-@test "skips Reminders warm-up for unrelated filters and plans" {
-  run env AUTOMOBILE_TEST_PLAN=Plans/list-devices.yaml "${PROJECT}/scripts/ios/xctestrunner-integration-tests.sh" ListDevicesPlanTests
+@test "skips Reminders warm-up for the hermetic launch-plan contract" {
+  run env AUTOMOBILE_TEST_PLAN=Plans/launch-reminders-app.yaml \
+    "${PROJECT}/scripts/ios/xctestrunner-integration-tests.sh" RemindersLaunchPlanTests
   [ "$status" -eq 0 ]
   ! grep -q '^warm-reminders-target-app$' "$INVOCATIONS"
-  grep -q '^swift test --filter ListDevicesPlanTests$' "$INVOCATIONS"
+  grep -q '^swift test --filter RemindersLaunchPlanTests$' "$INVOCATIONS"
 }

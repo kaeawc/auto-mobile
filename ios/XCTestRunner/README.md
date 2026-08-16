@@ -151,7 +151,7 @@ xcodebuild -scheme XCTestRunner -destination 'platform=iOS Simulator,name=iPhone
 When using the daemon socket transport (default), XCTestRunner will attempt to start the AutoMobile
 daemon automatically if it cannot connect.
 
-## Example XCTest Target (Reminders)
+## Example Plans (Reminders)
 
 Plan fixtures live in `ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/Plans`:
 - `Plans/launch-reminders-app.yaml`
@@ -159,47 +159,53 @@ Plan fixtures live in `ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/Plan
 
 Platform-specific plans should declare a top-level `platform` field (e.g., `platform: ios`). Multi-device plans must declare platform per device at the top level.
 
-Sample XCTest case:
+`RemindersLaunchPlanTests` is a hermetic contract test. It loads the bundled launch plan,
+executes `AutoMobilePlanExecutor` against an injected MCP fake, and verifies the complete
+`setToolCapability` / `executePlan` request without starting a daemon or simulator:
 
 ```swift
 import XCTest
 import XCTestRunner
 
-final class RemindersLaunchPlanTests: AutoMobileTestCase {
-    override var planPath: String { "Plans/launch-reminders-app.yaml" }
-
+final class RemindersLaunchPlanTests: XCTestCase {
     func testLaunchRemindersPlan() throws {
-        try executePlan()
+        // Constructs an AutoMobilePlanExecutor with the bundled plan and an MCP fake.
     }
 }
 ```
 
-The sample target is implemented in `ios/XCTestRunner/Sources/XCTestRunnerTests/RemindersIntegrationTests.swift`
-and compiles as part of the `XCTestRunnerTests` target.
+The contract test is implemented in
+`ios/XCTestRunner/Sources/XCTestRunnerTests/RemindersIntegrationTests.swift` and runs as part
+of the ordinary macOS Swift package test sweep:
 
-Integration test (opt-in, requires MCP + iOS simulator running):
+```bash
+swift test --filter RemindersLaunchPlanTests
+```
+
+The add-reminder sample remains an opt-in integration test that requires the daemon and a
+booted iOS simulator:
 
 ```bash
 AUTOMOBILE_DAEMON_SOCKET_PATH=/tmp/auto-mobile-daemon-$UID.sock \
-swift test --filter RemindersLaunchPlanTests
+swift test --filter RemindersAddPlanTests
 ```
 
 Note: The Reminders plans assume English UI labels and may need adjustment for other locales.
 
 ## CI vs local execution
 
-Both local and CI execution use the daemon socket transport:
+The opt-in Reminders integration uses daemon socket transport:
 
 ```bash
-AUTOMOBILE_TEST_PLAN=Plans/launch-reminders-app.yaml \
-swift test --filter RemindersLaunchPlanTests
+AUTOMOBILE_TEST_PLAN=Plans/add-reminder.yaml \
+swift test --filter RemindersAddPlanTests
 ```
 
 CI should set explicit MCP metadata:
 
 ```bash
 AUTOMOBILE_CI_MODE=1 \
-AUTOMOBILE_TEST_PLAN=Plans/launch-reminders-app.yaml \
+AUTOMOBILE_TEST_PLAN=Plans/add-reminder.yaml \
 AUTOMOBILE_APP_VERSION="1.2.3" \
 AUTOMOBILE_GIT_COMMIT="$GITHUB_SHA" \
 xcodebuild test -scheme XCTestRunner -destination 'platform=iOS Simulator,name=iPhone 15'

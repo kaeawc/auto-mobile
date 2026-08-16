@@ -8,11 +8,15 @@ import {
   resolveNavigationRetentionConfig,
   resolveNavigationRetentionIntervalMs,
   computeProtectedBuildKeyIds,
+  computeActiveObservationIds,
   DEFAULT_SCREENSHOT_TTL_MS,
   DEFAULT_STRUCTURE_TTL_MS,
   DEFAULT_PER_APP_MAX_OBSERVATIONS,
   DEFAULT_GLOBAL_MAX_OBSERVATIONS,
   DEFAULT_NAV_RETENTION_INTERVAL_MS,
+  DEFAULT_EVICTION_CHUNK_SIZE,
+  MAX_EVICTION_CHUNK_SIZE,
+  MAX_INTERVAL_MS,
 } from "../../src/db/navigationRetention";
 
 const APP = "com.example.app";
@@ -107,6 +111,24 @@ describe("navigationRetention config", () => {
     );
     // A valid override still wins.
     expect(resolveNavigationRetentionConfig({ perAppMaxObservations: 7 }).perAppMaxObservations).toBe(7);
+  });
+
+  test("rejects an interval above the Int32 setInterval ceiling (would clamp to 1ms)", () => {
+    process.env.AUTOMOBILE_NAV_RETENTION_INTERVAL_MS = String(MAX_INTERVAL_MS + 1);
+    expect(resolveNavigationRetentionIntervalMs()).toBe(DEFAULT_NAV_RETENTION_INTERVAL_MS);
+    expect(resolveNavigationRetentionIntervalMs(3_000_000_000)).toBe(DEFAULT_NAV_RETENTION_INTERVAL_MS);
+    // A large-but-in-range interval is honored.
+    expect(resolveNavigationRetentionIntervalMs(MAX_INTERVAL_MS)).toBe(MAX_INTERVAL_MS);
+  });
+
+  test("clamps evictionChunkSize to the safe batch ceiling (env and override)", () => {
+    expect(resolveNavigationRetentionConfig({ evictionChunkSize: 300_000 }).evictionChunkSize).toBe(
+      MAX_EVICTION_CHUNK_SIZE
+    );
+    expect(resolveNavigationRetentionConfig({ evictionChunkSize: 2 }).evictionChunkSize).toBe(2);
+    expect(resolveNavigationRetentionConfig().evictionChunkSize).toBe(DEFAULT_EVICTION_CHUNK_SIZE);
+    process.env.AUTOMOBILE_NAV_RETENTION_EVICTION_CHUNK_SIZE = "999999";
+    expect(resolveNavigationRetentionConfig().evictionChunkSize).toBe(MAX_EVICTION_CHUNK_SIZE);
   });
 });
 
@@ -219,6 +241,25 @@ describe("NavigationRetention prune", () => {
     expect(removed).toEqual([]);
     const node = await repo.getNodeById(APP, nodeId);
     expect(node?.screenshot_path).toBe("/tmp/shot-home.webp");
+  });
+
+  test("clears stale screenshots in bounded batches (oversized UPDATE cannot form)", async () => {
+    // Node cardinality is not bounded by the observation caps, so the stale-
+    // screenshot UPDATE must batch. chunkSize 2 forces several UPDATEs of <= 2 ids.
+    await repo.getOrCreateApp(APP);
+    const paths: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const node = await repo.getOrCreateNode(APP, `S${i}`, 100);
+      await repo.updateNodeScreenshotById(node.id, `/tmp/shot-${i}.webp`);
+      paths.push(`/tmp/shot-${i}.webp`);
+    }
+
+    const summary = await retention({ ...CONFIG, evictionChunkSize: 2 }).prune(10_000);
+
+    expect(summary.screenshotsCleared).toBe(5);
+    expect(removed.sort()).toEqual(paths.sort());
+    const remaining = await db.selectFrom("navigation_nodes").select("screenshot_path").execute();
+    expect(remaining.every(r => r.screenshot_path === null)).toBe(true);
   });
 
   test("keeps a recent screenshot (within short TTL)", async () => {
@@ -443,5 +484,51 @@ describe("NavigationRetention prune", () => {
       edgeObservationsDeleted: 0,
       buildKeysDeleted: 0,
     });
+  });
+});
+
+describe("computeActiveObservationIds at scale", () => {
+  let db: Kysely<Database>;
+
+  beforeEach(async () => {
+    db = await createTestDatabase();
+  });
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  test("handles >1000 protected build keys with one relational query (no OR-depth blowup)", async () => {
+    // A per-row `(build_key_id=? AND last_seen_at=?) OR …` chain would exceed
+    // SQLite's expression-tree depth (~1000) here and throw; the relational
+    // max-join form must not. Bulk-insert stays well under MAX_VARIABLE_NUMBER.
+    const N = 1_200;
+    const buildKeyRows = Array.from({ length: N }, (_, i) => ({
+      app_id: `app.${i}`,
+      version_code: 1,
+      content_hash: `h${i}`,
+    }));
+    await db.insertInto("navigation_build_keys").values(buildKeyRows).execute();
+
+    const bks = await db
+      .selectFrom("navigation_build_keys")
+      .select("id")
+      .orderBy("id", "asc")
+      .execute();
+    const obsRows = bks.map((bk, i) => ({
+      node_id: i + 1,
+      build_key_id: bk.id,
+      device_id: "d",
+      session_uuid: "s",
+      first_seen_at: 100,
+      last_seen_at: 100,
+    }));
+    await db.insertInto("navigation_node_observations").values(obsRows).execute();
+
+    const protectedIds = bks.map(b => b.id);
+    const active = await computeActiveObservationIds(db, protectedIds);
+
+    // One active (max-last_seen) node observation per protected build key.
+    expect(active.nodeIds.length).toBe(N);
+    expect(active.edgeIds.length).toBe(0);
   });
 });

@@ -29,6 +29,15 @@
 // in one transaction (atomic, no torn graph); observations are deleted before
 // their orphaned build keys (FK-safe order), and file unlinks run AFTER commit as
 // side effects (never inside the txn).
+//
+// SQLite scale safety: every statement in this module keeps its bound-parameter
+// count and expression-tree depth bounded regardless of DB size. Row-count id
+// lists (stale screenshots, evicted observations) are processed in batches capped
+// at `evictionChunkSize` (<= MAX_EVICTION_CHUNK_SIZE, well under bun:sqlite's
+// MAX_VARIABLE_NUMBER of 250_000). App/build-key filters bind at most one param
+// per app (`protectedIds`, `activeIds`) or use a join on `app_id` (no id list at
+// all), and the active-row lookup is a relational max-join, never a per-row OR
+// chain. See the per-helper notes below.
 
 import type { Kysely } from "kysely";
 import type { Database } from "./types";
@@ -45,10 +54,9 @@ export interface NavigationRetentionConfig {
   /** Backstop: max observation rows kept across all apps. */
   globalMaxObservations: number;
   /**
-   * Max victim ids bound in one DELETE. Kept well under bun:sqlite's
-   * `MAX_VARIABLE_NUMBER` (250_000) so a runaway eviction can never overflow the
-   * bind limit and roll back the whole retention transaction. Overridable mainly
-   * so tests can exercise the batching loop without a quarter-million rows.
+   * Max ids bound in one batched DELETE/UPDATE. Clamped to
+   * {@link MAX_EVICTION_CHUNK_SIZE} so a misconfigured value can never approach
+   * bun:sqlite's `MAX_VARIABLE_NUMBER` (250_000) and defeat the batching.
    */
   evictionChunkSize: number;
 }
@@ -67,6 +75,15 @@ export const DEFAULT_EVICTION_CHUNK_SIZE = 5_000;
 /** Default cadence of the background pass: every 6 hours. */
 export const DEFAULT_NAV_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+// Hard SQLite/runtime ceilings the config is validated against.
+// A single DELETE/UPDATE binds at most this many ids — comfortably under
+// bun:sqlite's MAX_VARIABLE_NUMBER (250_000), and small enough that each batch
+// statement stays cheap.
+export const MAX_EVICTION_CHUNK_SIZE = 10_000;
+// setInterval delays above the signed-32-bit max are silently clamped to 1ms by
+// the runtime, so an interval over this is treated as invalid and defaulted.
+export const MAX_INTERVAL_MS = 2_147_483_647;
+
 /**
  * Deletes a screenshot file previously referenced by a pruned node. Injected so
  * unit tests observe the calls without touching disk; production wires the
@@ -84,6 +101,12 @@ export interface NavigationRetentionSummary {
   prunedAt: number;
 }
 
+/** The newest observation-row ids per protected build key, kept out of eviction. */
+export interface ActiveObservationIds {
+  nodeIds: number[];
+  edgeIds: number[];
+}
+
 function emptySummary(prunedAt: number): NavigationRetentionSummary {
   return {
     screenshotsCleared: 0,
@@ -94,38 +117,46 @@ function emptySummary(prunedAt: number): NavigationRetentionSummary {
   };
 }
 
-/** A positive safe integer, or undefined for anything else (0, negative, NaN, float). */
-function sanitizePositiveInt(value: number | undefined): number | undefined {
+/** A positive safe integer within `[1, max]`, else undefined (0/neg/NaN/float/too-big). */
+function sanitizePositiveInt(
+  value: number | undefined,
+  max: number = Number.MAX_SAFE_INTEGER
+): number | undefined {
   if (value === undefined) {
     return undefined;
   }
-  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  return Number.isSafeInteger(value) && value > 0 && value <= max ? value : undefined;
 }
 
 /**
  * Strict env read: the ENTIRE trimmed value must be a run of digits, so partial
  * parses that `Number.parseInt` would silently accept ("1e6" -> 1, "12abc" -> 12)
  * are rejected and fall back to the default rather than becoming a 1ms interval.
+ * The parsed value is then bounded by `max`.
  */
-function readPositiveIntEnv(name: string): number | undefined {
+function readPositiveIntEnv(name: string, max: number = Number.MAX_SAFE_INTEGER): number | undefined {
   const raw = process.env[name]?.trim();
   if (!raw || !/^\d+$/.test(raw)) {
     return undefined;
   }
-  return sanitizePositiveInt(Number.parseInt(raw, 10));
+  return sanitizePositiveInt(Number.parseInt(raw, 10), max);
 }
 
 /**
  * Resolve the retention config from explicit overrides, then env, then the
- * conservative defaults. Every source is validated the same way (positive safe
- * integer), so a stray `perAppMaxObservations: 0` or `NaN` override falls back to
- * the default instead of evicting everything / no-op'ing.
+ * conservative defaults. Every source is validated against its REAL ceiling — not
+ * just positivity — so a stray `perAppMaxObservations: 0`, a float, or an
+ * oversized chunk falls back / clamps rather than corrupting the pass.
  */
 export function resolveNavigationRetentionConfig(
   overrides: Partial<NavigationRetentionConfig> = {}
 ): NavigationRetentionConfig {
-  const resolve = (override: number | undefined, envName: string, def: number): number =>
-    sanitizePositiveInt(override) ?? readPositiveIntEnv(envName) ?? def;
+  const resolve = (
+    override: number | undefined,
+    envName: string,
+    def: number,
+    max: number = Number.MAX_SAFE_INTEGER
+  ): number => sanitizePositiveInt(override, max) ?? readPositiveIntEnv(envName, max) ?? def;
 
   return {
     screenshotTtlMs: resolve(
@@ -148,19 +179,28 @@ export function resolveNavigationRetentionConfig(
       "AUTOMOBILE_NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS",
       DEFAULT_GLOBAL_MAX_OBSERVATIONS
     ),
-    evictionChunkSize: resolve(
-      overrides.evictionChunkSize,
-      "AUTOMOBILE_NAV_RETENTION_EVICTION_CHUNK_SIZE",
-      DEFAULT_EVICTION_CHUNK_SIZE
+    // Resolve as a positive integer, then clamp to the hard batch ceiling so any
+    // configured value keeps the batching effective.
+    evictionChunkSize: Math.min(
+      resolve(
+        overrides.evictionChunkSize,
+        "AUTOMOBILE_NAV_RETENTION_EVICTION_CHUNK_SIZE",
+        DEFAULT_EVICTION_CHUNK_SIZE
+      ),
+      MAX_EVICTION_CHUNK_SIZE
     ),
   };
 }
 
-/** Resolve the background-pass interval (ms) from override, env, or the default. */
+/**
+ * Resolve the background-pass interval (ms) from override, env, or the default,
+ * bounded by the signed-32-bit setInterval ceiling (a larger value would be
+ * clamped to 1ms by the runtime, so it is rejected and defaulted).
+ */
 export function resolveNavigationRetentionIntervalMs(override?: number): number {
   return (
-    sanitizePositiveInt(override)
-    ?? readPositiveIntEnv("AUTOMOBILE_NAV_RETENTION_INTERVAL_MS")
+    sanitizePositiveInt(override, MAX_INTERVAL_MS)
+    ?? readPositiveIntEnv("AUTOMOBILE_NAV_RETENTION_INTERVAL_MS", MAX_INTERVAL_MS)
     ?? DEFAULT_NAV_RETENTION_INTERVAL_MS
   );
 }
@@ -176,10 +216,9 @@ interface EvictionCandidate {
   lastSeenAt: number;
 }
 
-/** The newest observation-row ids per protected build key, kept out of eviction. */
-interface ActiveObservationIds {
-  nodeIds: number[];
-  edgeIds: number[];
+interface ObservationRow {
+  id: number;
+  lastSeenAt: number;
 }
 
 /**
@@ -248,6 +287,11 @@ export class NavigationRetention {
    * SHORT tier: clear `screenshot_path` on nodes last seen before the cutoff,
    * unless the node is still observed under the active (protected) build. Returns
    * the file paths whose pointers were cleared, for post-commit unlinking.
+   *
+   * Batched: node cardinality is NOT bounded by the observation caps, so a large
+   * stale set is cleared in chunks of `evictionChunkSize` — each UPDATE binds at
+   * most that many ids. Clearing the pointer removes rows from the next batch's
+   * predicate, so the loop terminates.
    */
   private async pruneScreenshots(
     trx: Kysely<Database>,
@@ -256,45 +300,58 @@ export class NavigationRetention {
     summary: NavigationRetentionSummary
   ): Promise<string[]> {
     const cutoff = now - this.config.screenshotTtlMs;
+    const chunk = this.config.evictionChunkSize;
+    const paths: string[] = [];
 
-    let query = trx
-      .selectFrom("navigation_nodes")
-      .select(["id", "screenshot_path"])
-      .where("screenshot_path", "is not", null)
-      .where("last_seen_at", "<", cutoff);
+    for (;;) {
+      let query = trx
+        .selectFrom("navigation_nodes")
+        .select(["id", "screenshot_path"])
+        .where("screenshot_path", "is not", null)
+        .where("last_seen_at", "<", cutoff);
 
-    if (protectedIds.length > 0) {
-      // Keep the screenshot if the node has any observation under a protected
-      // build key (i.e. it is part of the active context).
-      query = query.where("id", "not in", eb =>
-        eb
-          .selectFrom("navigation_node_observations")
-          .select("node_id")
-          .where("build_key_id", "in", protectedIds)
-      );
+      if (protectedIds.length > 0) {
+        // Keep the screenshot if the node has any observation under a protected
+        // build key (i.e. it is part of the active context).
+        query = query.where("id", "not in", eb =>
+          eb
+            .selectFrom("navigation_node_observations")
+            .select("node_id")
+            .where("build_key_id", "in", protectedIds)
+        );
+      }
+
+      const batch = await query.limit(chunk).execute();
+      if (batch.length === 0) {
+        break;
+      }
+
+      const ids = batch.map(row => row.id);
+      await trx
+        .updateTable("navigation_nodes")
+        .set({ screenshot_path: null })
+        .where("id", "in", ids)
+        .execute();
+
+      summary.screenshotsCleared += ids.length;
+      for (const row of batch) {
+        if (row.screenshot_path !== null) {
+          paths.push(row.screenshot_path);
+        }
+      }
+
+      if (batch.length < chunk) {
+        break;
+      }
     }
 
-    const stale = await query.execute();
-    if (stale.length === 0) {
-      return [];
-    }
-
-    const ids = stale.map(row => row.id);
-    await trx
-      .updateTable("navigation_nodes")
-      .set({ screenshot_path: null })
-      .where("id", "in", ids)
-      .execute();
-
-    summary.screenshotsCleared += ids.length;
-    return stale
-      .map(row => row.screenshot_path)
-      .filter((p): p is string => p !== null);
+    return paths;
   }
 
   /**
    * LONG tier: delete observation rows last seen before the cutoff, except those
-   * on a protected (active) build key.
+   * on a protected (active) build key. A single DELETE by predicate — it binds
+   * only the (per-app-bounded) protected id list, never one param per matched row.
    */
   private async pruneObservationsByTtl(
     trx: Kysely<Database>,
@@ -327,6 +384,10 @@ export class NavigationRetention {
    * the oldest observation rows by `last_seen_at`. The budgets count ALL of an
    * app's rows (so a single-build app is still bounded), but the newest row of
    * each protected build key is shielded so the active context is never evicted.
+   *
+   * Per-app scope is expressed as a join on `app_id` (binds one param, the app id)
+   * rather than an id list of the app's build keys, so it stays bounded no matter
+   * how many builds an app accumulates.
    */
   private async enforceCaps(
     trx: Kysely<Database>,
@@ -336,18 +397,12 @@ export class NavigationRetention {
   ): Promise<void> {
     const activeIds = await computeActiveObservationIds(trx, protectedIds);
 
-    const buildKeysByApp = new Map<string, number[]>();
-    for (const bk of buildKeys) {
-      const list = buildKeysByApp.get(bk.appId) ?? [];
-      list.push(bk.id);
-      buildKeysByApp.set(bk.appId, list);
-    }
-
-    for (const [, ids] of buildKeysByApp) {
-      const count = await countObservations(trx, ids);
+    const appIds = Array.from(new Set(buildKeys.map(bk => bk.appId)));
+    for (const appId of appIds) {
+      const count = await countObservations(trx, appId);
       const overflow = count - this.config.perAppMaxObservations;
       if (overflow > 0) {
-        await this.evictOldest(trx, ids, activeIds, overflow, summary);
+        await this.evictOldest(trx, appId, activeIds, overflow, summary);
       }
     }
 
@@ -359,10 +414,11 @@ export class NavigationRetention {
   }
 
   /**
-   * Evict `count` oldest observation rows in scope, in bounded batches so a single
-   * DELETE never binds more ids than {@link NavigationRetentionConfig.evictionChunkSize}.
-   * The loop terminates when the target is met or no evictable rows remain (the
-   * active rows are excluded, so a scope can be irreducible below its active set).
+   * Evict `count` oldest observation rows in scope (`appId === null` == global),
+   * in bounded batches so a single DELETE never binds more ids than
+   * `evictionChunkSize`. The loop terminates when the target is met or no
+   * evictable rows remain (active rows are excluded, so a scope can be irreducible
+   * below its active set).
    *
    * Perf note: each batch does an ordered scan of the observation tables. A
    * `(build_key_id, last_seen_at)` index would turn this into an index range scan;
@@ -370,7 +426,7 @@ export class NavigationRetention {
    */
   private async evictOldest(
     trx: Kysely<Database>,
-    scopeBuildKeyIds: number[] | null,
+    appId: string | null,
     activeIds: ActiveObservationIds,
     count: number,
     summary: NavigationRetentionSummary
@@ -378,7 +434,7 @@ export class NavigationRetention {
     let remaining = count;
     while (remaining > 0) {
       const batch = Math.min(remaining, this.config.evictionChunkSize);
-      const victims = await collectOldestEvictable(trx, scopeBuildKeyIds, activeIds, batch);
+      const victims = await collectOldestEvictable(trx, appId, activeIds, batch);
       if (victims.length === 0) {
         return;
       }
@@ -406,7 +462,9 @@ export class NavigationRetention {
   /**
    * Sweep build keys left with no observations (except protected ones). Runs
    * after observation deletes so the FK-safe order holds even with foreign_keys
-   * ON (deleting a still-referenced build key would cascade-wipe its rows).
+   * ON (deleting a still-referenced build key would cascade-wipe its rows). The
+   * "no observations" test is a correlated subquery (binds O(1)); only the
+   * per-app-bounded protected id list is bound directly.
    */
   private async pruneOrphanBuildKeys(
     trx: Kysely<Database>,
@@ -505,10 +563,14 @@ async function loadMaxSeenByBuildKey(db: Kysely<Database>): Promise<Map<number, 
 /**
  * For each protected build key, the observation-row ids whose `last_seen_at` is
  * that build key's maximum, per table — the "active" rows the size cap must never
- * evict (ties keep all rows at the max instant). Small: at most a few rows per
- * protected build key, and protected build keys number ~one per app.
+ * evict (ties keep all rows at the max instant).
+ *
+ * Relational form: a join against a `GROUP BY build_key_id` max subquery, so the
+ * only bound parameters are the (per-app-bounded) protected id list — NO per-row
+ * `(build_key_id=? AND last_seen_at=?) OR …` chain, which would blow the
+ * expression-tree depth at high app counts.
  */
-async function computeActiveObservationIds(
+export async function computeActiveObservationIds(
   trx: Kysely<Database>,
   protectedIds: number[]
 ): Promise<ActiveObservationIds> {
@@ -516,128 +578,99 @@ async function computeActiveObservationIds(
     return { nodeIds: [], edgeIds: [] };
   }
 
-  const nodeMax = await trx
-    .selectFrom("navigation_node_observations")
-    .select(eb => ["build_key_id", eb.fn.max("last_seen_at").as("m")])
-    .where("build_key_id", "in", protectedIds)
-    .groupBy("build_key_id")
+  const nodeRows = await trx
+    .selectFrom("navigation_node_observations as o")
+    .innerJoin(
+      eb =>
+        eb
+          .selectFrom("navigation_node_observations")
+          .select(sb => ["build_key_id", sb.fn.max("last_seen_at").as("m")])
+          .where("build_key_id", "in", protectedIds)
+          .groupBy("build_key_id")
+          .as("mx"),
+      join =>
+        join
+          .onRef("mx.build_key_id", "=", "o.build_key_id")
+          .onRef("mx.m", "=", "o.last_seen_at")
+    )
+    .select("o.id as id")
     .execute();
-  const nodeIds = nodeMax.length === 0
-    ? []
-    : (await trx
-        .selectFrom("navigation_node_observations")
-        .select("id")
-        .where(eb =>
-          eb.or(
-            nodeMax.map(r =>
-              eb.and([
-                eb("build_key_id", "=", r.build_key_id),
-                eb("last_seen_at", "=", Number(r.m)),
-              ])
-            )
-          )
-        )
-        .execute()).map(r => r.id);
 
-  const edgeMax = await trx
-    .selectFrom("navigation_edge_observations")
-    .select(eb => ["build_key_id", eb.fn.max("last_seen_at").as("m")])
-    .where("build_key_id", "in", protectedIds)
-    .groupBy("build_key_id")
+  const edgeRows = await trx
+    .selectFrom("navigation_edge_observations as o")
+    .innerJoin(
+      eb =>
+        eb
+          .selectFrom("navigation_edge_observations")
+          .select(sb => ["build_key_id", sb.fn.max("last_seen_at").as("m")])
+          .where("build_key_id", "in", protectedIds)
+          .groupBy("build_key_id")
+          .as("mx"),
+      join =>
+        join
+          .onRef("mx.build_key_id", "=", "o.build_key_id")
+          .onRef("mx.m", "=", "o.last_seen_at")
+    )
+    .select("o.id as id")
     .execute();
-  const edgeIds = edgeMax.length === 0
-    ? []
-    : (await trx
-        .selectFrom("navigation_edge_observations")
-        .select("id")
-        .where(eb =>
-          eb.or(
-            edgeMax.map(r =>
-              eb.and([
-                eb("build_key_id", "=", r.build_key_id),
-                eb("last_seen_at", "=", Number(r.m)),
-              ])
-            )
-          )
-        )
-        .execute()).map(r => r.id);
 
-  return { nodeIds, edgeIds };
+  return { nodeIds: nodeRows.map(r => r.id), edgeIds: edgeRows.map(r => r.id) };
 }
 
 /**
- * Count observation rows (node + edge). `scopeBuildKeyIds === null` counts every
- * row (global); otherwise only rows whose build key is in the list (one app).
+ * Count observation rows (node + edge). `appId === null` counts every row
+ * (global); otherwise it joins on `app_id` (one bound param) rather than an id
+ * list of the app's build keys.
  */
 async function countObservations(
   trx: Kysely<Database>,
-  scopeBuildKeyIds: number[] | null
+  appId: string | null
 ): Promise<number> {
-  if (scopeBuildKeyIds !== null && scopeBuildKeyIds.length === 0) {
-    return 0;
+  if (appId === null) {
+    const nodeRow = await trx
+      .selectFrom("navigation_node_observations")
+      .select(eb => eb.fn.countAll<number>().as("c"))
+      .executeTakeFirst();
+    const edgeRow = await trx
+      .selectFrom("navigation_edge_observations")
+      .select(eb => eb.fn.countAll<number>().as("c"))
+      .executeTakeFirst();
+    return Number(nodeRow?.c ?? 0) + Number(edgeRow?.c ?? 0);
   }
 
-  let nodeQuery = trx
-    .selectFrom("navigation_node_observations")
-    .select(eb => eb.fn.countAll<number>().as("c"));
-  let edgeQuery = trx
-    .selectFrom("navigation_edge_observations")
-    .select(eb => eb.fn.countAll<number>().as("c"));
-  if (scopeBuildKeyIds !== null) {
-    nodeQuery = nodeQuery.where("build_key_id", "in", scopeBuildKeyIds);
-    edgeQuery = edgeQuery.where("build_key_id", "in", scopeBuildKeyIds);
-  }
-
-  const nodeRow = await nodeQuery.executeTakeFirst();
-  const edgeRow = await edgeQuery.executeTakeFirst();
+  const nodeRow = await trx
+    .selectFrom("navigation_node_observations as o")
+    .innerJoin("navigation_build_keys as bk", "bk.id", "o.build_key_id")
+    .select(eb => eb.fn.countAll<number>().as("c"))
+    .where("bk.app_id", "=", appId)
+    .executeTakeFirst();
+  const edgeRow = await trx
+    .selectFrom("navigation_edge_observations as o")
+    .innerJoin("navigation_build_keys as bk", "bk.id", "o.build_key_id")
+    .select(eb => eb.fn.countAll<number>().as("c"))
+    .where("bk.app_id", "=", appId)
+    .executeTakeFirst();
   return Number(nodeRow?.c ?? 0) + Number(edgeRow?.c ?? 0);
 }
 
 /**
  * Collect the `limit` oldest evictable observation rows (by last_seen_at, then
- * id), optionally scoped to one app's build keys, excluding the active rows.
- * Fetches at most `limit` rows per table then merges, so it never loads the whole
- * table — only the batch being evicted.
+ * id), optionally scoped to one app (via an `app_id` join), excluding the active
+ * rows. Fetches at most `limit` rows per table then merges, so it never loads the
+ * whole table — only the batch being evicted.
  */
 async function collectOldestEvictable(
   trx: Kysely<Database>,
-  scopeBuildKeyIds: number[] | null,
+  appId: string | null,
   activeIds: ActiveObservationIds,
   limit: number
 ): Promise<EvictionCandidate[]> {
-  let nodeQuery = trx
-    .selectFrom("navigation_node_observations")
-    .select(["id", "last_seen_at"]);
-  if (scopeBuildKeyIds !== null) {
-    nodeQuery = nodeQuery.where("build_key_id", "in", scopeBuildKeyIds);
-  }
-  if (activeIds.nodeIds.length > 0) {
-    nodeQuery = nodeQuery.where("id", "not in", activeIds.nodeIds);
-  }
-  const nodeRows = await nodeQuery
-    .orderBy("last_seen_at", "asc")
-    .orderBy("id", "asc")
-    .limit(limit)
-    .execute();
-
-  let edgeQuery = trx
-    .selectFrom("navigation_edge_observations")
-    .select(["id", "last_seen_at"]);
-  if (scopeBuildKeyIds !== null) {
-    edgeQuery = edgeQuery.where("build_key_id", "in", scopeBuildKeyIds);
-  }
-  if (activeIds.edgeIds.length > 0) {
-    edgeQuery = edgeQuery.where("id", "not in", activeIds.edgeIds);
-  }
-  const edgeRows = await edgeQuery
-    .orderBy("last_seen_at", "asc")
-    .orderBy("id", "asc")
-    .limit(limit)
-    .execute();
+  const nodeRows = await oldestNodeObservations(trx, appId, activeIds.nodeIds, limit);
+  const edgeRows = await oldestEdgeObservations(trx, appId, activeIds.edgeIds, limit);
 
   const candidates: EvictionCandidate[] = [
-    ...nodeRows.map(row => ({ isNode: true, id: row.id, lastSeenAt: row.last_seen_at })),
-    ...edgeRows.map(row => ({ isNode: false, id: row.id, lastSeenAt: row.last_seen_at })),
+    ...nodeRows.map(row => ({ isNode: true, id: row.id, lastSeenAt: row.lastSeenAt })),
+    ...edgeRows.map(row => ({ isNode: false, id: row.id, lastSeenAt: row.lastSeenAt })),
   ];
   // Oldest first; break ties by table (nodes before edges) then id for determinism.
   candidates.sort(
@@ -647,4 +680,78 @@ async function collectOldestEvictable(
       || a.id - b.id
   );
   return candidates.slice(0, limit);
+}
+
+async function oldestNodeObservations(
+  trx: Kysely<Database>,
+  appId: string | null,
+  excludeIds: number[],
+  limit: number
+): Promise<ObservationRow[]> {
+  if (appId === null) {
+    let query = trx
+      .selectFrom("navigation_node_observations")
+      .select(["id", "last_seen_at"]);
+    if (excludeIds.length > 0) {
+      query = query.where("id", "not in", excludeIds);
+    }
+    const rows = await query
+      .orderBy("last_seen_at", "asc")
+      .orderBy("id", "asc")
+      .limit(limit)
+      .execute();
+    return rows.map(r => ({ id: r.id, lastSeenAt: r.last_seen_at }));
+  }
+
+  let query = trx
+    .selectFrom("navigation_node_observations as o")
+    .innerJoin("navigation_build_keys as bk", "bk.id", "o.build_key_id")
+    .select(["o.id as id", "o.last_seen_at as last_seen_at"])
+    .where("bk.app_id", "=", appId);
+  if (excludeIds.length > 0) {
+    query = query.where("o.id", "not in", excludeIds);
+  }
+  const rows = await query
+    .orderBy("o.last_seen_at", "asc")
+    .orderBy("o.id", "asc")
+    .limit(limit)
+    .execute();
+  return rows.map(r => ({ id: r.id, lastSeenAt: r.last_seen_at }));
+}
+
+async function oldestEdgeObservations(
+  trx: Kysely<Database>,
+  appId: string | null,
+  excludeIds: number[],
+  limit: number
+): Promise<ObservationRow[]> {
+  if (appId === null) {
+    let query = trx
+      .selectFrom("navigation_edge_observations")
+      .select(["id", "last_seen_at"]);
+    if (excludeIds.length > 0) {
+      query = query.where("id", "not in", excludeIds);
+    }
+    const rows = await query
+      .orderBy("last_seen_at", "asc")
+      .orderBy("id", "asc")
+      .limit(limit)
+      .execute();
+    return rows.map(r => ({ id: r.id, lastSeenAt: r.last_seen_at }));
+  }
+
+  let query = trx
+    .selectFrom("navigation_edge_observations as o")
+    .innerJoin("navigation_build_keys as bk", "bk.id", "o.build_key_id")
+    .select(["o.id as id", "o.last_seen_at as last_seen_at"])
+    .where("bk.app_id", "=", appId);
+  if (excludeIds.length > 0) {
+    query = query.where("o.id", "not in", excludeIds);
+  }
+  const rows = await query
+    .orderBy("o.last_seen_at", "asc")
+    .orderBy("o.id", "asc")
+    .limit(limit)
+    .execute();
+  return rows.map(r => ({ id: r.id, lastSeenAt: r.last_seen_at }));
 }

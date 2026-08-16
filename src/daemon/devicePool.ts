@@ -2253,10 +2253,28 @@ export class DevicePool {
     snapshot: SessionAssignmentSnapshot,
     createSession: () => Promise<Session>,
   ): Promise<Session> {
+    const attemptedSessionId = device.sessionId;
     try {
-      return await createSession();
+      const session = await createSession();
+      // A tracked process can exit while the durable session write is pending.
+      // Do not publish success for a device that eviction already removed or
+      // released; undo the just-published session before restoring the pool.
+      if (
+        this.devices.get(device.id) !== device ||
+        device.sessionId !== session.sessionId ||
+        device.status !== "busy"
+      ) {
+        await this.sessionManager.releaseSession(
+          session.sessionId,
+          `device-disconnected-during-session-create:${device.id}`,
+        );
+        throw new ActionableError(`Device '${device.id}' disconnected while its session was being created.`);
+      }
+      return session;
     } catch (error) {
-      this.restoreSessionAssignment(device, snapshot);
+      if (this.devices.get(device.id) === device && device.sessionId === attemptedSessionId) {
+        this.restoreSessionAssignment(device, snapshot);
+      }
       throw error;
     }
   }

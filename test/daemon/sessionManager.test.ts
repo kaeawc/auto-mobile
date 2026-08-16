@@ -14,6 +14,40 @@ import type { DeviceSessionPersistence } from "../../src/db/deviceSessionReposit
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
 
+class DeferredDeviceSessionPersistence implements DeviceSessionPersistence {
+  private deferredWrite: Promise<void> | null = null;
+  private resolveDeferredWrite: (() => void) | null = null;
+  private readonly writeStarted = Promise.withResolvers<void>();
+
+  deferNextUpsert(): void {
+    this.deferredWrite = new Promise<void>(resolve => {
+      this.resolveDeferredWrite = resolve;
+    });
+  }
+
+  async waitForUpsert(): Promise<void> {
+    await this.writeStarted.promise;
+  }
+
+  finishUpsert(): void {
+    this.resolveDeferredWrite?.();
+  }
+
+  async upsertActiveSession(): Promise<void> {
+    const deferredWrite = this.deferredWrite;
+    if (!deferredWrite) {
+      return;
+    }
+    this.deferredWrite = null;
+    this.writeStarted.resolve();
+    await deferredWrite;
+  }
+
+  async recordActivity(): Promise<void> {}
+
+  async markReleased(): Promise<void> {}
+}
+
 function makeHierarchy(label: string): ViewHierarchyResult {
   return {
     hierarchy: {
@@ -338,6 +372,59 @@ describe("SessionManager", () => {
 
         expect(manager.getSession("session-1")?.assignedDevice).toBe("emulator-old");
         expect(manager.getSessionForDevice("emulator-old")).toBe("session-1");
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("serializes a pending rebind with release and clears device-scoped state", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const restoredDevices: string[] = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        repository,
+        undefined,
+        device => ({ restore: async () => { restoredDevices.push(device.deviceId); } }),
+      );
+      const unboundDevices: string[] = [];
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android");
+        manager.setLastHierarchy("session-1", makeHierarchy("old"));
+        manager.setKeepScreenAwake("session-1", { applied: true });
+        manager.onSessionDeviceUnbound((_sessionId, deviceId) => unboundDevices.push(deviceId));
+        repository.deferNextUpsert();
+
+        const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
+        await repository.waitForUpsert();
+        const releasing = manager.releaseSession("session-1");
+        repository.finishUpsert();
+
+        await expect(rebinding).resolves.toMatchObject({ assignedDevice: "emulator-new", cacheData: {} });
+        await expect(releasing).resolves.toBe("emulator-new");
+        expect(restoredDevices).toEqual(["emulator-old"]);
+        expect(unboundDevices).toEqual(["emulator-old"]);
+        expect(manager.getSession("session-1")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-old")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("does not recreate a session when a release wins the rebind race", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android");
+        const releasing = manager.releaseSession("session-1");
+        await expect(manager.rebindSession("session-1", "emulator-new", "android")).rejects.toThrow(
+          "Cannot rebind released session session-1",
+        );
+        await expect(releasing).resolves.toBe("emulator-old");
+        expect(manager.getSession("session-1")).toBeNull();
         expect(manager.getSessionForDevice("emulator-new")).toBeNull();
       } finally {
         manager.stopCleanupTimer();

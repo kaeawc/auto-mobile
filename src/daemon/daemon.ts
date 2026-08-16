@@ -234,6 +234,13 @@ export class Daemon {
       AndroidCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
       IOSCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
     });
+    // Moving a live session must clear only the old device's observation and
+    // CtrlProxy binding. Session-wide cleanup belongs exclusively to release.
+    this.sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
+      RealObserveScreen.clearCache(deviceId);
+      AndroidCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
+      IOSCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
+    });
     // Emit a real "session released" signal so a connected DaemonMcpProxy clears
     // its remembered session binding the moment the daemon releases the session
     // (heartbeat / idle / plan), rather than guessing with the replay TTL. Fires

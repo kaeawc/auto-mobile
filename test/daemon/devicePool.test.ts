@@ -8,6 +8,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -233,6 +234,33 @@ describe("DevicePool", () => {
       this.killCount++;
       return true;
     }
+  }
+
+  class DeferredDeviceSessionPersistence implements DeviceSessionPersistence {
+    private readonly writeStarted = Promise.withResolvers<void>();
+    private readonly writeFinished = Promise.withResolvers<void>();
+    private deferWrite = true;
+
+    async waitForUpsert(): Promise<void> {
+      await this.writeStarted.promise;
+    }
+
+    finishUpsert(): void {
+      this.writeFinished.resolve();
+    }
+
+    async upsertActiveSession(): Promise<void> {
+      if (!this.deferWrite) {
+        return;
+      }
+      this.deferWrite = false;
+      this.writeStarted.resolve();
+      await this.writeFinished.promise;
+    }
+
+    async recordActivity(): Promise<void> {}
+
+    async markReleased(): Promise<void> {}
   }
 
   class FakeDeviceManagerWithStartedProcess extends FakeDeviceManagerWithMinimalReadyDevice {
@@ -2442,6 +2470,39 @@ describe("DevicePool", () => {
       } finally {
         await reservation.release();
       }
+    });
+
+    test("does not publish a session when its started emulator exits during persistence", async () => {
+      const images: DeviceInfo[] = [{
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        deviceId: "emulator-5554",
+        source: "local",
+      }];
+      const manager = new FakeDeviceManagerWithStartedProcess(images);
+      const persistence = new DeferredDeviceSessionPersistence();
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+
+      const assignment = devicePool.assignMultipleDevices(["session-1"], 1000, "android");
+      await persistence.waitForUpsert();
+      manager.childProcess.emit("exit", 0, null);
+      await new Promise(resolve => setImmediate(resolve));
+      persistence.finishUpsert();
+
+      await expect(assignment).rejects.toThrow("disconnected while its session was being created");
+      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(sessionManager.getSession("session-1")).toBeNull();
+      expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
     });
 
     test("keeps criteria auto-start available after a process exit when recovery is disabled", async () => {

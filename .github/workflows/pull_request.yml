@@ -1186,7 +1186,10 @@ jobs:
     name: "Node TypeScript Build and Test (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
-    timeout-minutes: 10
+    # The full isolated Bun suite can approach ten minutes on a contended hosted
+    # macOS runner. Keep the cross-platform lane intact while allowing enough
+    # headroom to finish after setup, lint, and build (issue #5328).
+    timeout-minutes: 15
     env:
       RUN_MCP_BUILD_TEST: ${{ needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' }}
     strategy:

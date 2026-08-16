@@ -1635,7 +1635,10 @@ describe("DevicePool", () => {
       if (!captured) {
         throw new Error("expected shutdown device to be pooled");
       }
-      const releaseReservation = await devicePool.reserveDeviceForShutdown(captured);
+      const reservation = await devicePool.reserveDeviceForShutdown(captured.id);
+      if (!reservation) {
+        throw new Error("expected shutdown reservation");
+      }
 
       try {
         expect(devicePool.getAvailableDeviceCount()).toBe(0);
@@ -1648,7 +1651,7 @@ describe("DevicePool", () => {
           devicePool.autolockDevice(device.deviceId, device.platform, "mcp-session-1"),
         ).rejects.toThrow(/shutting down/);
       } finally {
-        await releaseReservation();
+        await reservation.release();
         if (originalAutolock === undefined) {
           delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
         } else {

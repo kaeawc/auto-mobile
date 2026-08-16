@@ -30,6 +30,7 @@ import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheW
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { runWithAbortSignal } from "../utils/AbortContext";
 import { executionTracker } from "./executionTracker";
 import {
   createDefaultRunnerReadinessService,
@@ -277,16 +278,20 @@ async function getShutdownDiscovery(
     throw shutdownTimeoutError(device, "platform discovery did not complete");
   }
   let timeout: NodeJS.Timeout | undefined;
+  const controller = new AbortController();
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeout = timer.setTimeout(() => {
+      controller.abort();
       reject(shutdownTimeoutError(device, "platform discovery did not complete"));
     }, remainingMs);
   });
   try {
     return await Promise.race([
-      deviceManager.getBootedDevicesDetailed(device.platform, {
-        bypassAndroidDeviceListCache: true,
-      }),
+      runWithAbortSignal(controller.signal, () =>
+        deviceManager.getBootedDevicesDetailed(device.platform, {
+          bypassAndroidDeviceListCache: true,
+        }),
+      ),
       timeoutPromise,
     ]);
   } finally {
@@ -402,6 +407,7 @@ async function findReplacementAfterSessionRelease(
 async function retireShutdownOwnership(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice | null,
+  observedReplacement: BootedDevice | undefined,
   deviceManager: PlatformDeviceManager,
   timer: Timer,
   deadlineMs: number,
@@ -441,7 +447,7 @@ async function retireShutdownOwnership(
   // replacement so it owns a fresh pool and registry epoch. Once shutdown was
   // observed, a bounded post-release recheck protects against a replacement
   // that boots at the disappearance deadline.
-  const replacement = await findReplacementAfterSessionRelease(
+  const replacement = observedReplacement ?? await findReplacementAfterSessionRelease(
     deviceManager,
     device,
     timer,
@@ -471,84 +477,65 @@ async function killProcessAndRetireOwnership(
   device: BootedDevice,
   perf: ReturnType<typeof createPerformanceTracker>,
   abortSignal: AbortSignal | undefined,
-): Promise<string | undefined> {
-  const deviceManager = dependencies.deviceManagerFactory();
-  const devicePool = DaemonState.getInstance().isInitialized()
-    ? DaemonState.getInstance().getDevicePool()
-    : undefined;
-  const expectedPooledDevice = devicePool?.getDevice?.(device.deviceId) ?? null;
-  return await withShutdownPoolReservation(devicePool, expectedPooledDevice, async () => {
-    if (device.platform === "android") {
-      devicePool?.markIntentionalShutdown(device.deviceId);
-    }
-
-    let shutdownDevice = device;
-    let alreadyStoppedMessage: string | undefined;
-    perf.startOperation("killProcess");
-    try {
-      const killedDevice = await deviceManager.killDevice(device);
-      shutdownDevice = killedDevice ?? device;
-    } catch (error) {
-      if (isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)) {
-        alreadyStoppedMessage = `Failed to kill ${device.platform} device: ${error}`;
-      } else {
-        devicePool?.clearIntentionalShutdown(device.deviceId);
-        throw error;
-      }
-    }
-    perf.endOperation("killProcess");
-
-    if (alreadyStoppedMessage !== undefined) {
-      return alreadyStoppedMessage;
-    }
-
-    const shutdownDeadlineMs = dependencies.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
-    try {
-      perf.startOperation("waitForShutdown");
-      await waitForDeviceShutdown(
-        deviceManager,
-        shutdownDevice,
-        dependencies.timer,
-        shutdownDeadlineMs,
-      );
-      perf.endOperation("waitForShutdown");
-
-      perf.startOperation("retireOwnership");
-      await retireShutdownOwnership(
-        shutdownDevice,
-        expectedPooledDevice,
-        deviceManager,
-        dependencies.timer,
-        shutdownDeadlineMs,
-        abortSignal,
-        dependencies.stopPerformanceMonitoring,
-      );
-      perf.endOperation("retireOwnership");
-      return undefined;
-    } catch (error) {
-      // A failed disappearance confirmation leaves the original incarnation in
-      // the pool. It must remain eligible for normal unexpected-loss recovery.
-      if (device.platform === "android") {
-        devicePool?.clearIntentionalShutdown(device.deviceId);
-      }
-      throw error;
-    }
-  });
-}
-
-async function withShutdownPoolReservation<T>(
   devicePool: DevicePool | undefined,
   expectedPooledDevice: PooledDevice | null,
-  operation: () => Promise<T>,
-): Promise<T> {
-  if (!devicePool || !expectedPooledDevice) {
-    return await operation();
+): Promise<string | undefined> {
+  const deviceManager = dependencies.deviceManagerFactory();
+  if (device.platform === "android") {
+    devicePool?.markIntentionalShutdown(device.deviceId);
   }
-  const releaseReservation = await devicePool.reserveDeviceForShutdown(expectedPooledDevice);
+
+  let shutdownDevice = device;
+  let alreadyStoppedMessage: string | undefined;
+  perf.startOperation("killProcess");
   try {
-    return await operation();
-  } finally {
-    await releaseReservation();
+    const killedDevice = await deviceManager.killDevice(device);
+    shutdownDevice = killedDevice ?? device;
+  } catch (error) {
+    if (isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)) {
+      alreadyStoppedMessage = `Failed to kill ${device.platform} device: ${error}`;
+    } else {
+      devicePool?.clearIntentionalShutdown(device.deviceId);
+      throw error;
+    }
+  }
+  perf.endOperation("killProcess");
+
+  if (alreadyStoppedMessage !== undefined) {
+    return alreadyStoppedMessage;
+  }
+
+  const shutdownDeadlineMs = dependencies.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
+  try {
+    perf.startOperation("waitForShutdown");
+    const observedReplacement = await waitForDeviceShutdown(
+      deviceManager,
+      shutdownDevice,
+      dependencies.timer,
+      shutdownDeadlineMs,
+    );
+    perf.endOperation("waitForShutdown");
+
+    perf.startOperation("retireOwnership");
+    await retireShutdownOwnership(
+      shutdownDevice,
+      expectedPooledDevice,
+      observedReplacement,
+      deviceManager,
+      dependencies.timer,
+      shutdownDeadlineMs,
+      abortSignal,
+      dependencies.stopPerformanceMonitoring,
+    );
+    perf.endOperation("retireOwnership");
+    return undefined;
+  } catch (error) {
+    // A failed disappearance confirmation leaves the original incarnation in
+    // the pool. It must remain eligible for normal unexpected-loss recovery.
+    if (device.platform === "android") {
+      devicePool?.clearIntentionalShutdown(device.deviceId);
+    }
+    throw error;
   }
 }
 
@@ -933,7 +920,13 @@ export function registerDeviceTools() {
   ) => {
     const perf = createPerformanceTracker(true);
     perf.serial("killDevice");
+    const daemonState = DaemonState.getInstance();
+    const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+    let shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
     try {
+      shutdownReservation = await devicePool?.reserveDeviceForShutdown(args.device.deviceId);
+      const expectedPooledDevice = shutdownReservation?.device ?? null;
+
       perf.startOperation("stopRecordings");
       const activeRecordings = await listActiveVideoRecordings({
         deviceId: args.device.deviceId,
@@ -973,6 +966,8 @@ export function registerDeviceTools() {
         args.device,
         perf,
         abortSignal,
+        devicePool,
+        expectedPooledDevice,
       );
 
       perf.startOperation("cleanup");
@@ -989,6 +984,8 @@ export function registerDeviceTools() {
       return createKillDeviceResponse(args, timing, alreadyStoppedMessage);
     } catch (error) {
       throw new ActionableError(`Failed to kill ${args.device.platform} device: ${error}`);
+    } finally {
+      await shutdownReservation?.release();
     }
   };
 

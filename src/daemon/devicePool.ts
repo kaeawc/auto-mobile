@@ -2245,31 +2245,39 @@ export class DevicePool {
    * gone and retires its ownership. A replacement with the same ID remains
    * independently assignable once it has been atomically installed.
    */
-  async reserveDeviceForShutdown(expectedDevice: PooledDevice): Promise<() => Promise<void>> {
+  async reserveDeviceForShutdown(deviceId: string): Promise<{
+    device: PooledDevice;
+    release: () => Promise<void>;
+  } | undefined> {
+    let expectedDevice: PooledDevice | undefined;
     await this.assignmentMutex.runExclusive(() => {
-      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
-        throw new ActionableError(
-          `Device '${expectedDevice.id}' is no longer available for shutdown.`,
-        );
+      expectedDevice = this.devices.get(deviceId);
+      if (!expectedDevice) {
+        return;
       }
-      if (this.shutdownReservations.has(expectedDevice.id)) {
-        throw new ActionableError(`Device '${expectedDevice.id}' is already shutting down.`);
+      if (this.shutdownReservations.has(deviceId)) {
+        throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
       }
-      this.shutdownReservations.set(expectedDevice.id, expectedDevice);
+      this.shutdownReservations.set(deviceId, expectedDevice);
     });
+    if (!expectedDevice) {
+      return undefined;
+    }
+    const capturedDevice = expectedDevice;
 
     let released = false;
-    return async () => {
+    const release = async () => {
       if (released) {
         return;
       }
       released = true;
       await this.assignmentMutex.runExclusive(() => {
-        if (this.shutdownReservations.get(expectedDevice.id) === expectedDevice) {
-          this.shutdownReservations.delete(expectedDevice.id);
+        if (this.shutdownReservations.get(capturedDevice.id) === capturedDevice) {
+          this.shutdownReservations.delete(capturedDevice.id);
         }
       });
     };
+    return { device: capturedDevice, release };
   }
 
   private isReservedForShutdown(device: PooledDevice): boolean {

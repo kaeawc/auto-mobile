@@ -408,8 +408,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public static async shutdownAll(): Promise<void> {
     const instances = Array.from(IOSCtrlProxyManager.instances.values());
-    await Promise.all(instances.map(instance => instance.stop()));
+    const results = await Promise.allSettled(instances.map(instance => instance.stop()));
     IOSCtrlProxyManager.instances.clear();
+    for (const result of results) {
+      if (result.status === "rejected") {
+        logger.warn(`[IOSCtrlProxy] Failed to stop instance during shutdown: ${result.reason}`);
+      }
+    }
   }
 
   /**

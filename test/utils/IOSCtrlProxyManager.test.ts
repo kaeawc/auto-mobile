@@ -281,6 +281,26 @@ describe("IOSCtrlProxyManager", function() {
     });
   });
 
+  describe("shutdownAll", function() {
+    test("stops every instance and clears them when one stop fails", async function() {
+      const first = IOSCtrlProxyManager.getInstance(testDevice);
+      const second = IOSCtrlProxyManager.getInstance({
+        deviceId: "22222222-2222-2222-2222-222222222222",
+        platform: "ios",
+        name: "Other iPhone",
+      });
+      const firstStop = spyOn(first, "stop").mockRejectedValue(new Error("iproxy stop failed"));
+      const secondStop = spyOn(second, "stop").mockResolvedValue();
+
+      await expect(IOSCtrlProxyManager.shutdownAll()).resolves.toBeUndefined();
+
+      expect(firstStop).toHaveBeenCalledTimes(1);
+      expect(secondStop).toHaveBeenCalledTimes(1);
+      expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
+      expect(IOSCtrlProxyManager.getInstance(second.device)).not.toBe(second);
+    });
+  });
+
   describe("getServicePort", function() {
     test("should return default port 8765", function() {
       const manager = IOSCtrlProxyManager.getInstance(testDevice);

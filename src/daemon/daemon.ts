@@ -108,6 +108,7 @@ import {
 import { onAdbMissingDevice } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { iosSimulatorCaptureHelperPool } from "../features/screen-stream";
 import { runShutdownCleanupStages } from "../shutdownCleanup";
+import { cleanupDaemonChildProcesses } from "./childProcessCleanup";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -1821,6 +1822,14 @@ export class Daemon {
         {
           name: "HTTP server",
           run: () => this.closeHttpListener(),
+        },
+        {
+          // The listener and every live transport are closed before this stage,
+          // so no request can start a new capture after the active-recording
+          // snapshot. Keep the database open until recording and CtrlProxy
+          // cleanup has persisted its terminal state (issue #5301).
+          name: "active capture and iOS CtrlProxy children",
+          run: cleanupDaemonChildProcesses,
         },
         { name: "active device sessions", run: () => this.releaseActiveSessionsForShutdown() },
         { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },

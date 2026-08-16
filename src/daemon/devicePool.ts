@@ -1418,7 +1418,8 @@ export class DevicePool {
       childProcess.kill();
       return;
     }
-    if (exitCode !== null) {
+    const signalCode = (childProcess as { signalCode?: NodeJS.Signals | null }).signalCode;
+    if (exitCode !== null || (signalCode !== null && signalCode !== undefined)) {
       return;
     }
 

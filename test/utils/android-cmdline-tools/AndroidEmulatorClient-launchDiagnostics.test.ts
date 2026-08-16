@@ -307,31 +307,67 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     );
     child.emit("exit", 1, null);
 
-    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
-    let rejection: Error | undefined;
-    void readiness.catch((error) => {
-      rejection = error instanceof Error ? error : new Error(String(error));
+    const readiness = expectRejection(
+      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
+    );
+
+    child.stderr!.emit("data", Buffer.from("late handoff diagnostic\n"));
+    child.emit("close", 1, null);
+    const error = await readiness;
+
+    expect(error.message).toContain("exited with code: 1");
+    expect(error.message).toContain("handoff diagnostic");
+    expect(error.message).toContain("late handoff diagnostic");
+    expect(error.message).toContain("token=[REDACTED]");
+    expect(error.message).not.toContain("handoff-secret");
+    expect(timer.getSleepCallCount()).toBe(0);
+    expect(child.listenerCount("exit")).toBe(baselineExitListeners);
+  });
+
+  test("preserves richer diagnostics emitted after a post-validation exit", async () => {
+    const child = createChild();
+    const { client } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
+    const launchedChild = await client.startEmulator(avdName);
+    child.emit("exit", 1, null);
+    const readiness = expectRejection(
+      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
+    );
+    child.stderr!.emit(
+      "data",
+      Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
+    );
+    child.emit("close", 1, null);
 
-    try {
-      for (let turn = 0; turn < 10 && !rejection; turn += 1) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      }
+    const error = await readiness;
+    expect(error.message).toContain("hypervisor");
+    expect(error.message).toContain("sandbox");
+  });
 
-      expect(rejection?.message).toContain("exited with code: 1");
-      expect(rejection?.message).toContain("handoff diagnostic");
-      expect(rejection?.message).toContain("token=[REDACTED]");
-      expect(rejection?.message).not.toContain("handoff-secret");
-      expect(timer.getSleepCallCount()).toBe(0);
-      expect(child.listenerCount("exit")).toBe(baselineExitListeners);
-    } finally {
-      child.emit("close", 1, null);
-      timer.setCurrentTime(60_000);
-      timer.resolveAll();
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      timer.resolveAll();
-      await readiness.catch(() => undefined);
-    }
+  test("bounds post-validation exit diagnostic draining", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    child.emit("exit", 1, null);
+    const readiness = expectRejection(
+      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
+    );
+    let settled = false;
+    void readiness.then(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(settled).toBe(false);
+    await timer.advanceTimeAsync(999);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    await timer.advanceTimeAsync(1);
+    const error = await readiness;
+    expect(error.message).toContain("exited with code: 1");
   });
 
   test("removes readiness listeners after observing a process exit", async () => {

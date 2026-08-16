@@ -532,8 +532,25 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(error.message).toContain("failed to become ready within 100ms");
   });
 
+  test("removes child process listeners after readiness times out", async () => {
+    const fakeChild = createFakeChildProcess();
+    fakeTimer.enableAutoAdvance();
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
+
+    const error = await expectRejection(
+      client.waitForEmulatorReady("Pixel_9_Pro", 100, fakeChild),
+    );
+
+    expect(error.message).toContain("failed to become ready within 100ms");
+    expect(fakeChild.listenerCount("exit")).toBe(0);
+    expect(fakeChild.stdout!.listenerCount("data")).toBe(0);
+    expect(fakeChild.stderr!.listenerCount("data")).toBe(0);
+  });
+
   test("waits for Android boot-complete signals before reporting readiness", async () => {
     fakeTimer.enableAutoAdvance();
+    const fakeChild = createFakeChildProcess();
     fakeAdb.setDevices([{
       name: "Pixel_9_Pro",
       platform: "android",
@@ -552,7 +569,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
     skipEmulatorPathDetection(client);
 
-    const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000);
+    const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, fakeChild);
 
     expect(result.deviceId).toBe("emulator-5554");
     expect(fakeAdb.wasCommandExecuted("shell getprop sys.boot_completed")).toBe(true);
@@ -561,6 +578,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       fakeAdb.getExecutedCommands()
         .filter(command => command.includes("shell getprop sys.boot_completed")),
     ).toHaveLength(2);
+    expect(fakeChild.listenerCount("exit")).toBe(0);
+    expect(fakeChild.stdout!.listenerCount("data")).toBe(0);
+    expect(fakeChild.stderr!.listenerCount("data")).toBe(0);
   });
 
   test("targets the selected emulator deviceId during already-running readiness waits", async () => {

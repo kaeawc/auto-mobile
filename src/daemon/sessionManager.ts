@@ -148,6 +148,8 @@ export class SessionManager {
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
   /** Creation writes that must finish before a session becomes visible to callers. */
   private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
+  /** Automatic device assignments that have not yet started their creation write. */
+  private readonly pendingSessionAssignments: Map<string, Promise<Session>> = new Map();
   /** Releases received before a creation write has published its session. */
   private readonly pendingCreationReleasePromises: Map<string, Promise<string | null>> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
@@ -373,18 +375,23 @@ export class SessionManager {
       return existing;
     }
 
+    const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
+    if (pendingAssignment) {
+      return await pendingAssignment;
+    }
+
     const pendingCreation = this.pendingSessionCreations.get(sessionId);
     if (pendingCreation) {
       return await pendingCreation.promise;
     }
 
-    const creation = this.createUnseenSession(sessionId, devicePool, platform).finally(() => {
-      if (this.pendingSessionCreations.get(sessionId) === creation) {
-        this.pendingSessionCreations.delete(sessionId);
+    const assignment = this.createUnseenSession(sessionId, devicePool, platform).finally(() => {
+      if (this.pendingSessionAssignments.get(sessionId) === assignment) {
+        this.pendingSessionAssignments.delete(sessionId);
       }
     });
-    this.pendingSessionCreations.set(sessionId, creation);
-    return await creation;
+    this.pendingSessionAssignments.set(sessionId, assignment);
+    return await assignment;
   }
 
   private async createUnseenSession(

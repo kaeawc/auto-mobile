@@ -2084,7 +2084,15 @@ describe("DevicePool", () => {
       ]);
       await devicePool.bindOrReuseDeviceSession("session-1", "emulator-old", "android");
 
-      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-new", "android");
+      await devicePool.bindOrReuseDeviceSession(
+        "session-1",
+        "emulator-new",
+        "android",
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
 
       expect(devicePool.getDevice("emulator-old")).toMatchObject({ sessionId: null, status: "idle" });
       expect(devicePool.getDevice("emulator-new")).toMatchObject({ sessionId: "session-1", status: "busy" });

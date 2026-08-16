@@ -2025,23 +2025,20 @@ export class DevicePool {
     sessionId: string,
     device: PooledDevice,
   ): Promise<{ deviceId: string; session?: Session }> {
-    // Create the session before claiming the device. A direct binding can
-    // create the same session while this allocator waits for the mutex; in
-    // that case, its device remains the sole owner.
     const existingSession = this.sessionManager.getSession(sessionId);
-    const session = await this.sessionManager.createSession(sessionId, device.id, device.platform);
-    if (session.assignedDevice !== device.id) {
-      logger.info(
-        `Reusing session ${sessionId} already assigned to device ${session.assignedDevice}`,
-      );
-      return { deviceId: session.assignedDevice };
-    }
-
+    const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;
     device.status = "busy";
     device.lastUsedAt = this.nextLastUsedAt();
     device.assignmentCount++;
     device.errorCount = 0;
+    const session = await this.createSessionOrRestore(device, assignmentSnapshot, () =>
+      this.sessionManager.createSession(sessionId, device.id, device.platform),
+    );
+    if (session.assignedDevice !== device.id) {
+      this.restoreSessionAssignment(device, assignmentSnapshot);
+      return { deviceId: session.assignedDevice };
+    }
     return existingSession === session ? { deviceId: device.id } : { deviceId: device.id, session };
   }
 
@@ -2256,6 +2253,12 @@ export class DevicePool {
     const attemptedSessionId = device.sessionId;
     try {
       const session = await createSession();
+      if (session.assignedDevice !== device.id) {
+        if (this.devices.get(device.id) === device && device.sessionId === attemptedSessionId) {
+          this.restoreSessionAssignment(device, snapshot);
+        }
+        return session;
+      }
       await this.sessionManager.waitForSessionRelease(session.sessionId);
       // A tracked process can exit while the durable session write is pending.
       // Do not publish success for a device that eviction already removed or
@@ -2288,7 +2291,7 @@ export class DevicePool {
   private async rollbackAssignedSessions(assignments: ReadonlyMap<string, string>): Promise<void> {
     for (const [sessionId, deviceId] of assignments) {
       await this.sessionManager.releaseSession(sessionId);
-      await this.releaseDevice(deviceId);
+      await this.releaseDevice(deviceId, sessionId);
     }
   }
 
@@ -2543,6 +2546,7 @@ export class DevicePool {
     sourceImage?: DeviceInfo,
     childProcess?: ChildProcess | null,
     expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    allowSessionRebind = false,
   ): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
       const alreadyPooled = this.devices.has(deviceId);
@@ -2621,7 +2625,13 @@ export class DevicePool {
       await this.createSessionOrRestore(
         device,
         assignmentSnapshot,
-        this.createSessionForBinding(previousSession, sessionId, deviceId, platform),
+        this.createSessionForBinding(
+          previousSession,
+          sessionId,
+          deviceId,
+          platform,
+          allowSessionRebind,
+        ),
       );
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
@@ -2633,15 +2643,24 @@ export class DevicePool {
     sessionId: string,
     deviceId: string,
     platform: Platform,
+    allowSessionRebind: boolean,
   ): () => Promise<Session> {
     const previousDeviceId = previousSession?.assignedDevice;
     if (!previousDeviceId || previousDeviceId === deviceId) {
       return async () => await this.sessionManager.createSession(sessionId, deviceId, platform);
     }
 
+    if (!allowSessionRebind) {
+      return async () => {
+        throw new ActionableError(
+          `Session '${sessionId}' is already assigned to device '${previousDeviceId}'.`,
+        );
+      };
+    }
+
     return async () => {
       const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform);
-      await this.releaseDevice(previousDeviceId);
+      await this.releaseDevice(previousDeviceId, sessionId);
       return session;
     };
   }

@@ -118,8 +118,10 @@ describe("DevicePool", () => {
     pid = 12345;
     exitCode: number | null | undefined = undefined;
     signalCode: NodeJS.Signals | null | undefined = undefined;
+    killCount = 0;
     kill(): boolean {
-      return false;
+      this.killCount++;
+      return true;
     }
   }
 
@@ -248,9 +250,14 @@ describe("DevicePool", () => {
         this.bootedDevices = [];
         this.resolveRecoveryStarted();
       }
-      const childProcess = new FakeChildProcess();
+      const childProcess =
+        this.childProcesses.length === 1 ? this.createRecoveryChild() : new FakeChildProcess();
       this.childProcesses.push(childProcess);
       return childProcess;
+    }
+
+    protected createRecoveryChild(): FakeChildProcess {
+      return new FakeChildProcess();
     }
 
     override async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
@@ -277,6 +284,30 @@ describe("DevicePool", () => {
 
     releaseRecovery(): void {
       this.resolveRecoveryRelease();
+    }
+  }
+
+  class StubbornRecoveryChildProcess extends FakeChildProcess {
+    readonly signals: Array<NodeJS.Signals | number | undefined> = [];
+
+    constructor() {
+      super();
+      this.exitCode = null;
+      this.signalCode = null;
+    }
+
+    override kill(signal?: NodeJS.Signals | number): boolean {
+      this.killCount++;
+      this.signals.push(signal);
+      return true;
+    }
+  }
+
+  class DeferredRecoveryDeviceManagerWithStubbornChild extends DeferredRecoveryDeviceManager {
+    readonly recoveryChild = new StubbornRecoveryChildProcess();
+
+    protected override createRecoveryChild(): FakeChildProcess {
+      return this.recoveryChild;
     }
   }
 
@@ -2104,6 +2135,52 @@ describe("DevicePool", () => {
         await new Promise((resolve) => setImmediate(resolve));
 
         expect(manager.childProcesses).toHaveLength(2);
+        expect(manager.childProcesses[1]!.killCount).toBe(1);
+        expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      } finally {
+        manager.releaseRecovery();
+        if (originalRebootOnDeath === undefined) {
+          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+        } else {
+          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
+        }
+      }
+    });
+
+    test("does not retry recovery when cancelling the owned child fails", async () => {
+      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      fakeTimer.enableAutoAdvance();
+      const manager = new DeferredRecoveryDeviceManagerWithStubbornChild();
+      manager.deviceImages = [
+        {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          deviceId: "emulator-5554",
+          source: "local",
+        },
+      ];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      try {
+        await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+        await devicePool.releaseDevice("emulator-5554");
+
+        const recovery = devicePool.removeDisconnectedDevice("emulator-5554", false);
+        await manager.waitForRecoveryStart();
+        devicePool.markIntentionalShutdown("emulator-5554");
+        manager.releaseRecovery();
+
+        await expect(recovery).rejects.toThrow("did not exit after SIGKILL");
+        expect(manager.childProcesses).toHaveLength(2);
+        expect(manager.recoveryChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
       } finally {
         manager.releaseRecovery();

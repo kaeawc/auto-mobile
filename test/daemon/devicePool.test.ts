@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -382,6 +384,49 @@ describe("DevicePool", () => {
       expect(device?.sessionId).toBeNull();
       expect(device?.assignmentCount).toBe(0);
       expect(device?.errorCount).toBe(0);
+    });
+
+    test("notifies the removal listener so a device session epoch is retired", async () => {
+      const registry = new DeviceSessionRegistry(fakeTimer, new FakeIdGenerator(["uuid-a"]));
+      const removedDeviceIds: string[] = [];
+      let listenerObservedDeletedDevice = false;
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        (deviceId) => {
+          listenerObservedDeletedDevice = devicePool.getDevice(deviceId) === null;
+          removedDeviceIds.push(deviceId);
+          registry.onDeviceDisconnected(deviceId);
+        },
+      );
+      await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
+      const pooled = devicePool.getDevice("emulator-5554");
+      if (!pooled) {
+        throw new Error("expected pooled device");
+      }
+      const record = registry.onDeviceConnected({
+        deviceId: pooled.id,
+        platform: pooled.platform,
+        incarnation: pooled.incarnation,
+      });
+
+      const removal = devicePool.removeDevice(pooled.id);
+
+      expect(removedDeviceIds).toEqual([pooled.id]);
+      expect(listenerObservedDeletedDevice).toBe(true);
+      await removal;
+      expect(registry.list()).toEqual([]);
+      expect(registry.getByUuid(record.deviceSessionUuid)).toBeUndefined();
     });
 
     test("should initialize with multiple devices", async () => {

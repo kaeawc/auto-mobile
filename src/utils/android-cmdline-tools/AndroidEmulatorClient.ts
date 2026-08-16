@@ -2123,11 +2123,18 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           logger.debug(`Background polling error (will continue): ${error}`);
         }
 
-        // Always wait at least the minimum polling interval
+        const remainingPollingTimeMs = timeoutMs - (this.timer.now() - startTime);
+        if (remainingPollingTimeMs <= 0) {
+          pollingActive = false;
+          break;
+        }
+        const pollingDelayMs = Math.min(pollingIntervalMs, remainingPollingTimeMs);
+
+        // Never let the background poller sleep past the readiness deadline.
         logger.debug(
-          `Background polling cycle complete - sleeping ${pollingIntervalMs}ms before next check`,
+          `Background polling cycle complete - sleeping ${pollingDelayMs}ms before next check`,
         );
-        await this.sleep(pollingIntervalMs);
+        await this.sleep(pollingDelayMs);
       }
       logger.debug(
         `Background polling stopped - pollingActive: ${pollingActive}, foundDeviceId: ${foundDeviceId}`,

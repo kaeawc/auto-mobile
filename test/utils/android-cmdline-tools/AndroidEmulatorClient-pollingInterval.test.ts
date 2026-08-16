@@ -38,14 +38,14 @@ async function observePollingInterval(value: string | undefined): Promise<number
     timer,
     { create: () => new FakeAdbExecutor() } as AdbClientFactory,
   );
-  const readiness = client.waitForEmulatorReady("Missing", 1, null, "emulator-5554");
+  const readiness = client.waitForEmulatorReady("Missing", 1_000, null, "emulator-5554");
 
   for (let attempt = 0; attempt < 10 && timer.getSleepCallCount() < 2; attempt += 1) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
   const sleeps = timer.getSleepHistory();
-  timer.setCurrentTime(1);
+  timer.setCurrentTime(1_000);
   timer.resolveAll();
   await expect(readiness).rejects.toThrow("failed to become ready");
 
@@ -71,5 +71,9 @@ describe("AndroidEmulatorClient polling interval configuration", () => {
     expect(await observePollingInterval("99")).toBe(100);
     expect(await observePollingInterval("100")).toBe(100);
     expect(await observePollingInterval("250")).toBe(250);
+  });
+
+  test("bounds a large finite interval by the readiness deadline", async () => {
+    expect(await observePollingInterval("1e9")).toBe(1_000);
   });
 });

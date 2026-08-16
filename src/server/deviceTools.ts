@@ -25,6 +25,7 @@ import { DEVICE_CREATE_ENV_VAR, getDeviceCreationGate, type DeviceCreationGate }
 import { createDefaultDeviceProvisioner, type DeviceProvisioner } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
 import type { DevicePool, PooledDevice } from "../daemon/devicePool";
+import type { SessionManager } from "../daemon/sessionManager";
 import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -264,6 +265,7 @@ interface ShutdownDeadlineContext {
   timer: Timer;
   deadlineMs: number;
   requestAbortSignal: AbortSignal | undefined;
+  retainReservationUntil?: (operation: Promise<unknown>) => void;
 }
 
 function shouldPropagateShutdownPreparationError(
@@ -328,6 +330,7 @@ async function stopIosCtrlProxyBeforeShutdown(
   if (context.device.platform !== "ios") {
     return;
   }
+  let stop: Promise<void> | undefined;
   perf.startOperation("stopCtrlProxy");
   try {
     const xcTestManager = IOSCtrlProxyManager.getInstance({
@@ -336,16 +339,20 @@ async function stopIosCtrlProxyBeforeShutdown(
       deviceId: context.device.deviceId,
       source: "local",
     });
+    stop = xcTestManager.stop();
     await runWithinShutdownDeadline(
       context.device,
       context.timer,
       context.deadlineMs,
       "iOS CtrlProxy shutdown did not complete",
       context.requestAbortSignal,
-      async () => await xcTestManager.stop(),
+      async () => await stop,
     );
   } catch (error) {
     if (isShutdownTimeoutError(error)) {
+      if (stop) {
+        context.retainReservationUntil?.(stop);
+      }
       throw error;
     }
     logger.warn(`[DeviceTools] Failed to stop CtrlProxy iOS before kill: ${error}`);
@@ -559,11 +566,14 @@ async function rebuildSameIdReplacement(
   stopPerformanceMonitoring: (deviceId: string) => void,
 ): Promise<void> {
   const devicePool = daemonState.getDevicePool();
-  const rebuilt = await devicePool.replaceDeviceForShutdown(expectedPooledDevice, replacement);
+  const rebuilt = await devicePool.replaceDeviceForShutdown(
+    expectedPooledDevice,
+    replacement,
+    () => stopPerformanceMonitoring(device.deviceId),
+  );
   if (!rebuilt) {
     return;
   }
-  stopPerformanceMonitoring(device.deviceId);
   daemonState.getDeviceSessionRegistry().onDeviceConnected({
     deviceId: rebuilt.id,
     platform: rebuilt.platform,
@@ -623,7 +633,7 @@ function finishLateShutdownRetirement(
   stopPerformanceMonitoring: (deviceId: string) => void,
   retainReservationUntil: (retirement: Promise<void>) => void,
 ): void {
-  const lateRetirement = release.then(async () => {
+  const continueRetirement = async () => {
     await retireShutdownOwnership(
       device,
       expectedPooledDevice,
@@ -636,7 +646,8 @@ function finishLateShutdownRetirement(
       () => undefined,
       false,
     );
-  });
+  };
+  const lateRetirement = release.then(continueRetirement, continueRetirement);
   lateRetirement.catch(lateError => {
     logger.warn(
       `[DeviceTools] Failed to finish late shutdown retirement for ${device.deviceId}: ${lateError}`,
@@ -721,6 +732,8 @@ async function findReplacementOrRetainShutdownReservation(
 function preserveLateShutdownRetirement(
   error: unknown,
   requestAbortSignal: AbortSignal | undefined,
+  sessionManager: SessionManager,
+  sessionId: string,
   release: Promise<string | null>,
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
@@ -731,7 +744,11 @@ function preserveLateShutdownRetirement(
   stopPerformanceMonitoring: (deviceId: string) => void,
   retainReservationUntil: (retirement: Promise<void>) => void,
 ): void {
-  if (!isShutdownTimeoutError(error) && !requestAbortSignal?.aborted) {
+  if (
+    !isShutdownTimeoutError(error) &&
+    !requestAbortSignal?.aborted &&
+    sessionManager.getSessionForDevice(device.deviceId) === sessionId
+  ) {
     return;
   }
   // Session release removes its in-memory mapping before its durable write.
@@ -803,6 +820,8 @@ async function retireShutdownOwnership(
       preserveLateShutdownRetirement(
         error,
         abortSignal,
+        sessionManager,
+        sessionId,
         release,
         device,
         expectedPooledDevice,
@@ -1333,11 +1352,21 @@ export function registerDeviceTools() {
         async signal => await devicePool?.reserveDeviceForShutdown(args.device.deviceId, signal),
       );
       const expectedPooledDevice = shutdownReservation?.device ?? null;
-      const shutdownContext = {
+      const retainReservationUntil = (operation: Promise<unknown>): void => {
+        retainShutdownReservation = true;
+        void operation.then(
+          () => shutdownReservation?.release(),
+          error => logger.warn(
+            `[DeviceTools] Retaining shutdown reservation after late teardown failed: ${error}`,
+          ),
+        );
+      };
+      const shutdownContext: ShutdownDeadlineContext = {
         device: args.device,
         timer: deps.timer,
         deadlineMs: shutdownDeadlineMs,
         requestAbortSignal,
+        retainReservationUntil,
       };
       await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
       await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
@@ -1351,13 +1380,7 @@ export function registerDeviceTools() {
         expectedPooledDevice,
         shutdownDeadlineMs,
         retirement => {
-          retainShutdownReservation = true;
-          void retirement.then(
-            () => shutdownReservation?.release(),
-            error => logger.warn(
-              `[DeviceTools] Retaining shutdown reservation after late retirement failed: ${error}`,
-            ),
-          );
+          retainReservationUntil(retirement);
         },
       );
 

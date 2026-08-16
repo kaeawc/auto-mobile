@@ -2202,6 +2202,7 @@ export class DevicePool {
   async replaceDeviceForShutdown(
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
+    beforeReplacementPublishes?: () => void,
   ): Promise<PooledDevice | undefined> {
     return await this.assignmentMutex.runExclusive(async () => {
       if (this.devices.get(expectedDevice.id) !== expectedDevice) {
@@ -2212,6 +2213,7 @@ export class DevicePool {
       if (this.devices.has(expectedDevice.id)) {
         return undefined;
       }
+      beforeReplacementPublishes?.();
       await this.addDevice(
         replacement,
         this.sourceImageForSameAndroidReplacement(expectedDevice, replacement),

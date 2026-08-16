@@ -11,12 +11,12 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 const isWindows = platform() === "win32";
 
-function createFakeDaemonState() {
+function createFakeDaemonState(refreshDevices: () => Promise<number> = async () => 0) {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
     getDevicePool: () => ({
-      refreshDevices: async () => 0,
+      refreshDevices,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
     }),
@@ -26,14 +26,16 @@ function createFakeDaemonState() {
 describe("UnixSocketServer close", () => {
   let socketPath: string;
   let server: UnixSocketServer;
+  let timer: FakeTimer;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `socket-close-${randomUUID()}.sock`);
+    timer = new FakeTimer();
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
       createFakeDaemonState(),
-      new FakeTimer(),
+      timer,
     );
     await server.start();
   });
@@ -98,6 +100,102 @@ describe("UnixSocketServer close", () => {
       await Promise.all([closePromise, clientClosed]);
       expect(client.destroyed).toBe(true);
     } finally {
+      if (!client.destroyed) {
+        client.destroy();
+      }
+      await closePromise;
+    }
+  }, 1_000);
+
+  (isWindows ? test.skip : test)("drains an in-flight request before shutdown completes", async () => {
+    let releaseRefresh: () => void;
+    const refreshComplete = new Promise<number>(resolve => {
+      releaseRefresh = () => {resolve(0);};
+    });
+    let signalRefreshStarted: () => void;
+    const requestStarted = new Promise<void>(resolve => {
+      signalRefreshStarted = resolve;
+    });
+
+    await server.close();
+    timer = new FakeTimer();
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(async () => {
+        signalRefreshStarted();
+        return refreshComplete;
+      }),
+      timer,
+    );
+    await server.start();
+
+    const client = await connectClient(socketPath);
+    const clientClosed = once(client, "close");
+    client.write(`${JSON.stringify({ id: "refresh", type: "mcp_request", method: "daemon/refreshDevices" })}\n`);
+    await requestStarted;
+
+    let closeCompleted = false;
+    const closePromise = server.close().then(() => {
+      closeCompleted = true;
+    });
+
+    try {
+      await clientClosed;
+      await Promise.resolve();
+      expect(closeCompleted).toBe(false);
+
+      releaseRefresh();
+      await closePromise;
+    } finally {
+      releaseRefresh();
+      if (!client.destroyed) {
+        client.destroy();
+      }
+      await closePromise;
+    }
+  }, 1_000);
+
+  (isWindows ? test.skip : test)("bounds shutdown while an in-flight request does not settle", async () => {
+    let releaseRefresh: () => void;
+    const refreshComplete = new Promise<number>(resolve => {
+      releaseRefresh = () => {
+        resolve(0);
+      };
+    });
+    let signalRefreshStarted: () => void;
+    const requestStarted = new Promise<void>(resolve => {
+      signalRefreshStarted = resolve;
+    });
+
+    await server.close();
+    timer = new FakeTimer();
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(async () => {
+        signalRefreshStarted();
+        return refreshComplete;
+      }),
+      timer,
+    );
+    await server.start();
+
+    const client = await connectClient(socketPath);
+    const clientClosed = once(client, "close");
+    client.write(`${JSON.stringify({ id: "refresh", type: "mcp_request", method: "daemon/refreshDevices" })}\n`);
+    await requestStarted;
+
+    const closePromise = server.close();
+    try {
+      await clientClosed;
+      await Promise.resolve();
+      expect(timer.getPendingTimeoutCount()).toBe(1);
+
+      timer.advanceTime(1_000);
+      await closePromise;
+    } finally {
+      releaseRefresh();
       if (!client.destroyed) {
         client.destroy();
       }

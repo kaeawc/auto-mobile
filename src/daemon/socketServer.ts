@@ -90,6 +90,8 @@ import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice, ImeAction, ScreenScaleMetadata } from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
+/** Keep shutdown bounded if a request handler ignores its disconnected peer. */
+const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 
 /**
  * Unix Socket Server that proxies requests to the HTTP MCP server
@@ -210,6 +212,8 @@ export class UnixSocketServer {
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
+  /** Request handlers that can continue after their client socket is destroyed. */
+  private activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
   private listChangedUnsubscribe: (() => void) | null = null;
@@ -385,34 +389,37 @@ export class UnixSocketServer {
       socket.destroy();
     });
 
-    socket.on("data", async data => {
-      buffer += data.toString();
+    socket.on("data", data => {
+      const handler = (async () => {
+        buffer += data.toString();
 
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
-      for (const line of lines) {
-        if (!line.trim()) {
-          continue;
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+
+          let requestId = "unknown";
+          try {
+            const request: DaemonRequest = JSON.parse(line);
+            requestId = request.id;
+            const response = await this.handleRequest(sessionId, request);
+            this.writeFrame(socket, sessionId, response);
+          } catch (error) {
+            logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
+            const errorResponse: DaemonResponse = {
+              id: requestId,
+              type: "mcp_response",
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+            this.writeFrame(socket, sessionId, errorResponse);
+          }
         }
-
-        let requestId = "unknown";
-        try {
-          const request: DaemonRequest = JSON.parse(line);
-          requestId = request.id;
-          const response = await this.handleRequest(sessionId, request);
-          this.writeFrame(socket, sessionId, response);
-        } catch (error) {
-          logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
-          const errorResponse: DaemonResponse = {
-            id: requestId,
-            type: "mcp_response",
-            success: false,
-            error: error instanceof Error ? error.message : String(error),
-          };
-          this.writeFrame(socket, sessionId, errorResponse);
-        }
-      }
+      })();
+      this.trackRequestHandler(handler);
     });
 
     socket.on("close", () => {
@@ -433,6 +440,14 @@ export class UnixSocketServer {
         socket.destroy();
       }
     });
+  }
+
+  private trackRequestHandler(handler: Promise<void>): void {
+    this.activeRequestHandlers.add(handler);
+    void handler.then(
+      () => this.activeRequestHandlers.delete(handler),
+      () => this.activeRequestHandlers.delete(handler)
+    );
   }
 
   /**
@@ -2718,9 +2733,11 @@ export class UnixSocketServer {
 
     const ownsSocketPath = this.isOwnedSocketFile();
     const serverClosed = this.closeListeningServer(ownsSocketPath);
+    const requestHandlersDrained = this.drainActiveRequestHandlers();
 
     this.destroyClientSockets(clientSockets);
     await serverClosed;
+    await requestHandlersDrained;
     this.server = null;
 
     if (this.isOwnedSocketFile()) {
@@ -2752,6 +2769,31 @@ export class UnixSocketServer {
     for (const socket of clientSockets) {
       if (!socket.destroyed) {
         socket.destroy();
+      }
+    }
+  }
+
+  private async drainActiveRequestHandlers(): Promise<void> {
+    const handlers = Array.from(this.activeRequestHandlers);
+    if (handlers.length === 0) {
+      return;
+    }
+
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeout = new Promise<boolean>(resolve => {
+      timeoutHandle = this.timer.setTimeout(() => resolve(false), DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS);
+    });
+
+    try {
+      const drained = await Promise.race([Promise.allSettled(handlers).then(() => true), timeout]);
+      if (!drained) {
+        logger.warn(
+          `Timed out waiting for ${handlers.length} in-flight Unix socket request handler(s) to finish during shutdown`
+        );
+      }
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
       }
     }
   }

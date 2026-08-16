@@ -16,10 +16,13 @@ class FakeLogStream extends EventEmitter {
     return true;
   }
 
-  end(): this {
+  end(callback?: () => void): this {
     this.endCalls += 1;
     this.writableFinished = true;
-    queueMicrotask(() => this.emit("finish"));
+    queueMicrotask(() => {
+      callback?.();
+      this.emit("finish");
+    });
     return this;
   }
 }
@@ -143,7 +146,7 @@ describe("AUTOMOBILE_LOG_LEVEL is applied at process start (issue #3845)", () =>
       mod.logger.error("first queued line");
       mod.logger.error("second queued line");
 
-      const closed = mod.logger.close();
+      const closed = mod.logger.closeAfterFlush();
       expect(stream.endCalls).toBe(0);
 
       await closed;

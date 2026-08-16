@@ -34,7 +34,6 @@ import { parseArgs } from "./cli/parseArgs";
 import {
   installProcessLifecycleHandlers,
   installStdinShutdownHandlers,
-  runAllCleanupOperations,
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "./processLifecycle";
@@ -43,7 +42,7 @@ import { startStartupMaintenance } from "./utils/startupMaintenance";
 
 interface FatalLogger {
   error(...args: unknown[]): void;
-  close(): Promise<void>;
+  closeAfterFlush(): Promise<void>;
 }
 
 let fatalLogger: FatalLogger | undefined;
@@ -604,7 +603,7 @@ if (import.meta.main) {
   main().catch(async (err) => {
     console.error("Fatal error in main():", err);
     fatalLogger?.error("Fatal error in main():", err);
-    await fatalLogger?.close();
+    await fatalLogger?.closeAfterFlush();
     // An incomplete-extraction startup failure exits with a distinct, recoverable
     // code (EX_TEMPFAIL) so a wrapper can re-extract and retry (issue #2833);
     // every other fatal keeps exit 1. Resolved lazily to match this file's

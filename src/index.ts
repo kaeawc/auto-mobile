@@ -150,7 +150,7 @@ async function main() {
       ],
       (message, error) => logger.warn(message, error),
     );
-  });
+  }, () => logger.closeAfterFlush());
 
   try {
     // Parse command line arguments

@@ -210,10 +210,14 @@ describe("process lifecycle handlers", () => {
     const timer = new FakeTimer();
     const lifecycle = new ProcessLifecycleHandlers(fakeProcess, timer, 50);
     const consoleError = spyOn(console, "error").mockImplementation(() => {});
+    const timeoutFinalizers: string[] = [];
 
     try {
       lifecycle.installStdinShutdownHandlers(fakeStdin);
-      lifecycle.setShutdownHandler(async () => await new Promise<void>(() => {}));
+      lifecycle.setShutdownHandler(
+        async () => await new Promise<void>(() => {}),
+        () => timeoutFinalizers.push("logger"),
+      );
 
       fakeStdin.emit("close");
       await flushMicrotasks();
@@ -223,6 +227,7 @@ describe("process lifecycle handlers", () => {
       await flushMicrotasks();
 
       expect(fakeProcess.exitCodes).toEqual([0]);
+      expect(timeoutFinalizers).toEqual(["logger"]);
     } finally {
       consoleError.mockRestore();
     }

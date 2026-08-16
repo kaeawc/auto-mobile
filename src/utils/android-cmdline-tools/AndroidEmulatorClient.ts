@@ -24,6 +24,10 @@ const MAX_LAUNCH_OUTPUT_LINES = 50;
 const MAX_LAUNCH_OUTPUT_CHARS = 16_384;
 const ACCEL_CHECK_TIMEOUT_MS = 3_000;
 const EARLY_EXIT_DRAIN_TIMEOUT_MS = 1_000;
+const DEFAULT_EMULATOR_POLLING_INTERVAL_MS = 500;
+const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const MAX_POLLING_SLEEP_CHUNK_MS = 500;
 
 type LaunchFailureCategory =
   | "display_initialization_failed"
@@ -50,6 +54,18 @@ function outputFromUnknown(value: unknown): string {
     return value.toString();
   }
   return "";
+}
+
+function resolveEmulatorPollingInterval(value: string | undefined): number {
+  const configuredInterval = Number(value);
+  if (
+    !Number.isFinite(configuredInterval) ||
+    configuredInterval <= 0 ||
+    configuredInterval > MAX_TIMER_DELAY_MS
+  ) {
+    return DEFAULT_EMULATOR_POLLING_INTERVAL_MS;
+  }
+  return Math.max(configuredInterval, MIN_EMULATOR_POLLING_INTERVAL_MS);
 }
 
 /**
@@ -1876,15 +1892,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const perf = createGlobalPerformanceTracker();
 
     // Read polling interval from environment variable (default: 500ms, minimum: 100ms)
-    const pollingIntervalMs = Math.max(
-      parseInt(process.env.EMULATOR_POLLING_INTERVAL_MS || "500", 10),
-      100,
+    const pollingIntervalMs = resolveEmulatorPollingInterval(
+      process.env.EMULATOR_POLLING_INTERVAL_MS,
     );
     logger.info(
       `Waiting for emulator '${avdName}' to be ready... (polling interval: ${pollingIntervalMs}ms)`,
     );
 
     // Monitor child process for early exit if provided
+    let pollingActive = true;
     let processExitError: ActionableError | null = null;
     if (childProcess && childProcess.pid) {
       const processOutput: string[] = [];
@@ -1938,12 +1954,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           logger.error(
             `Emulator process exited during readiness wait: ${processExitError.message}`,
           );
+          pollingActive = false;
         }
       });
     }
 
     // Start background polling immediately with configurable intervals
-    let pollingActive = true;
     let foundDeviceId: string | null = null;
     const offlineTracker = { deviceId: null as string | null, since: null as number | null };
 
@@ -1953,6 +1969,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         try {
           this.recordLaunchError(childProcess, (error) => {
             processExitError = error;
+            pollingActive = false;
           });
           logger.debug(`Background polling iteration - checking for emulator '${avdName}'...`);
 
@@ -2114,11 +2131,25 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           logger.debug(`Background polling error (will continue): ${error}`);
         }
 
-        // Always wait at least the minimum polling interval
+        const remainingPollingTimeMs = timeoutMs - (this.timer.now() - startTime);
+        if (remainingPollingTimeMs <= 0) {
+          pollingActive = false;
+          break;
+        }
+        let remainingPollingDelayMs = Math.min(pollingIntervalMs, remainingPollingTimeMs);
+
+        // Never let the background poller sleep past the readiness deadline.
         logger.debug(
-          `Background polling cycle complete - sleeping ${pollingIntervalMs}ms before next check`,
+          `Background polling cycle complete - sleeping ${remainingPollingDelayMs}ms before next check`,
         );
-        await this.sleep(pollingIntervalMs);
+        while (pollingActive && !foundDeviceId && remainingPollingDelayMs > 0) {
+          const sleepChunkMs = Math.min(
+            remainingPollingDelayMs,
+            MAX_POLLING_SLEEP_CHUNK_MS,
+          );
+          await this.sleep(sleepChunkMs);
+          remainingPollingDelayMs -= sleepChunkMs;
+        }
       }
       logger.debug(
         `Background polling stopped - pollingActive: ${pollingActive}, foundDeviceId: ${foundDeviceId}`,

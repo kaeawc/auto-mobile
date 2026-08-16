@@ -249,14 +249,54 @@ async function notifyResourcesAfterShutdown(dependencies: DeviceToolsDependencie
   }
 }
 
+function shutdownTimeoutError(device: BootedDevice, detail: string): ActionableError {
+  return new ActionableError(
+    `Timed out waiting for ${device.platform} device '${device.name}' (${device.deviceId}) ` +
+    `to disappear after ${DEVICE_SHUTDOWN_TIMEOUT_MS}ms: ${detail}. ` +
+    "Verify the platform shutdown state and retry.",
+  );
+}
+
+async function getShutdownDiscovery(
+  deviceManager: PlatformDeviceManager,
+  device: BootedDevice,
+  timer: Timer,
+  deadlineMs: number,
+) {
+  const remainingMs = deadlineMs - timer.now();
+  if (remainingMs <= 0) {
+    throw shutdownTimeoutError(device, "platform discovery did not complete");
+  }
+  let timeout: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = timer.setTimeout(() => {
+      reject(shutdownTimeoutError(device, "platform discovery did not complete"));
+    }, remainingMs);
+  });
+  try {
+    return await Promise.race([
+      deviceManager.getBootedDevicesDetailed(device.platform),
+      timeoutPromise,
+    ]);
+  } finally {
+    if (timeout) {
+      timer.clearTimeout(timeout);
+    }
+  }
+}
+
 async function waitForDeviceShutdown(
   deviceManager: PlatformDeviceManager,
   device: BootedDevice,
   timer: Timer,
+  deadlineMs: number,
 ): Promise<void> {
-  const startedAt = timer.now();
+  let lastDiscoveryDetail = "platform discovery did not complete";
   for (;;) {
-    const discovery = await deviceManager.getBootedDevicesDetailed(device.platform);
+    if (timer.now() >= deadlineMs) {
+      throw shutdownTimeoutError(device, lastDiscoveryDetail);
+    }
+    const discovery = await getShutdownDiscovery(deviceManager, device, timer, deadlineMs);
     const platformWasDiscovered = discovery.succeededPlatforms.has(device.platform);
     const isStillBooted = discovery.devices.some(candidate =>
       candidate.platform === device.platform && candidate.deviceId === device.deviceId,
@@ -265,24 +305,23 @@ async function waitForDeviceShutdown(
       return;
     }
 
-    const elapsedMs = timer.now() - startedAt;
-    if (elapsedMs >= DEVICE_SHUTDOWN_TIMEOUT_MS) {
-      const discoveryDetail = platformWasDiscovered
-        ? "the device is still reported as booted"
-        : "platform discovery did not succeed";
-      throw new ActionableError(
-        `Timed out waiting for ${device.platform} device '${device.name}' (${device.deviceId}) ` +
-        `to disappear after ${DEVICE_SHUTDOWN_TIMEOUT_MS}ms: ${discoveryDetail}. ` +
-        "Verify the platform shutdown state and retry.",
-      );
+    lastDiscoveryDetail = platformWasDiscovered
+      ? "the device is still reported as booted"
+      : "platform discovery did not succeed";
+    const remainingMs = deadlineMs - timer.now();
+    if (remainingMs <= 0) {
+      throw shutdownTimeoutError(device, lastDiscoveryDetail);
     }
-    await timer.sleep(Math.min(DEVICE_SHUTDOWN_POLL_INTERVAL_MS, DEVICE_SHUTDOWN_TIMEOUT_MS - elapsedMs));
+    await timer.sleep(Math.min(DEVICE_SHUTDOWN_POLL_INTERVAL_MS, remainingMs));
   }
 }
 
 async function retireShutdownOwnership(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice | null,
+  deviceManager: PlatformDeviceManager,
+  timer: Timer,
+  deadlineMs: number,
 ): Promise<void> {
   if (!expectedPooledDevice) {
     return;
@@ -299,7 +338,7 @@ async function retireShutdownOwnership(
   }
 
   const sessionManager = daemonState.getSessionManager();
-  const sessionId = expectedPooledDevice?.sessionId;
+  const sessionId = expectedPooledDevice.sessionId;
   if (sessionId && sessionManager.getSessionForDevice(device.deviceId) === sessionId) {
     await sessionManager.releaseSession(sessionId, `device-stopped:${device.deviceId}`);
   }
@@ -307,11 +346,24 @@ async function retireShutdownOwnership(
     return;
   }
 
-  await devicePool.releaseDevice(device.deviceId);
-  await devicePool.removeDisconnectedDevice(device.deviceId, false);
+  // A same-ID replacement can boot while releasing the old session. Re-check
+  // physical disappearance after that await, then synchronously detach the
+  // captured pool entry before another lifecycle event can interleave.
+  await waitForDeviceShutdown(deviceManager, device, timer, deadlineMs);
+  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
+    return;
+  }
+  const poolRelease = devicePool.releaseDevice(device.deviceId);
+  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
+    await poolRelease;
+    return;
+  }
+  const poolRemoval = devicePool.removeDisconnectedDevice(device.deviceId, false);
   if (!devicePool.getDevice(device.deviceId)) {
     daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
   }
+  await poolRelease;
+  await poolRemoval;
 }
 
 async function killProcessAndRetireOwnership(
@@ -346,12 +398,19 @@ async function killProcessAndRetireOwnership(
     return alreadyStoppedMessage;
   }
 
+  const shutdownDeadlineMs = dependencies.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
   perf.startOperation("waitForShutdown");
-  await waitForDeviceShutdown(deviceManager, device, dependencies.timer);
+  await waitForDeviceShutdown(deviceManager, device, dependencies.timer, shutdownDeadlineMs);
   perf.endOperation("waitForShutdown");
 
   perf.startOperation("retireOwnership");
-  await retireShutdownOwnership(device, expectedPooledDevice);
+  await retireShutdownOwnership(
+    device,
+    expectedPooledDevice,
+    deviceManager,
+    dependencies.timer,
+    shutdownDeadlineMs,
+  );
   perf.endOperation("retireOwnership");
   return undefined;
 }

@@ -63,6 +63,13 @@ export interface Logger {
    * Closes the log stream
    */
   close(): void;
+
+  /**
+   * Flushes pending writes and waits until the log stream finishes closing.
+   * Use this before an explicit process exit so the final log entries reach
+   * the stream.
+   */
+  closeAfterFlush(): Promise<void>;
 }
 
 export const LogLevel = {
@@ -148,6 +155,27 @@ ensureDirExists(logsDir).catch(err => {
 const ownLogPrefix = resolveProcessLogPrefix(process.argv, process.pid);
 const logFilePath = path.join(logsDir, `${ownLogPrefix}.log`);
 let logStream = fs.createWriteStream(logFilePath, { flags: "a" });
+
+interface EndableLogStream {
+  end(callback: () => void): void;
+  once(event: "error", listener: (error: Error) => void): void;
+  off(event: "error", listener: (error: Error) => void): void;
+}
+
+/** Resolves when a log stream has finished, or rejects if closing it fails. */
+export function closeLogStream(stream: EndableLogStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error): void => {
+      stream.off("error", onError);
+      reject(error);
+    };
+    stream.once("error", onError);
+    stream.end(() => {
+      stream.off("error", onError);
+      resolve();
+    });
+  });
+}
 
 // Maximum log file size (10MB)
 const MAX_LOG_SIZE = 10 * 1024 * 1024;
@@ -384,5 +412,10 @@ export const logger: Logger = {
    */
   close(): void {
     logStream.end();
+  },
+
+  async closeAfterFlush(): Promise<void> {
+    await lastWrite;
+    await closeLogStream(logStream);
   }
 };

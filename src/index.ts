@@ -140,8 +140,7 @@ async function main() {
         {
           name: "logger",
           run: async () => {
-            await logger.flush();
-            logger.close();
+            await logger.closeAfterFlush();
           },
         },
       ],

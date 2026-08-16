@@ -1705,8 +1705,7 @@ export class Daemon {
           name: "logger",
           run: async () => {
             logger.info("Daemon stopped");
-            await logger.flush();
-            logger.close();
+            await logger.closeAfterFlush();
           },
         },
       ],

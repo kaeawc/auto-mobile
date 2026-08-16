@@ -73,6 +73,33 @@ class DelayedSuccessfulKillDeviceManager extends FailingKillDeviceManager {
   override async killDevice(): Promise<void> {}
 }
 
+class FailedDiscoveryThenReplacementDeviceManager extends DelayedSuccessfulKillDeviceManager {
+  private replacementSequenceStarted = false;
+  private failedDiscoveryReported = false;
+
+  constructor(private readonly replacement: BootedDevice) {
+    super();
+  }
+
+  beginReplacementSequence(): void {
+    this.replacementSequenceStarted = true;
+  }
+
+  override async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
+    if (!this.replacementSequenceStarted) {
+      return await super.getBootedDevicesDetailed(platform);
+    }
+    if (!this.failedDiscoveryReported) {
+      this.failedDiscoveryReported = true;
+      return { devices: [], succeededPlatforms: new Set() };
+    }
+    return {
+      devices: [this.replacement],
+      succeededPlatforms: new Set([this.replacement.platform]),
+    };
+  }
+}
+
 class HungDiscoveryKillDeviceManager extends DelayedSuccessfulKillDeviceManager {
   override getBootedDevicesDetailed(): Promise<BootedDeviceDiscovery> {
     return new Promise<BootedDeviceDiscovery>(() => {});
@@ -711,18 +738,94 @@ describe("killDevice handler", () => {
       throw new Error("killDevice not registered");
     }
 
-    await expect(tool.handler({
+    await expect(tool.handler(tool.schema.parse({
       device: {
         name: image.name,
         platform: "android",
         deviceId: image.deviceId!,
         transportId: "1",
       },
-    })).resolves.toBeDefined();
+    }))).resolves.toBeDefined();
 
     const current = pool.getDevice(image.deviceId!);
     expect(current).not.toBeNull();
     expect(current).not.toBe(original);
+    expect(sessionManager.getSessionForDevice(image.deviceId!)).toBeNull();
+    expect(registry.getByUuid(originalSession.deviceSessionUuid)).toBeUndefined();
+    expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();
+    expect(pool.getRecoveryEligibility(image.deviceId!)).toEqual({ eligible: true, action: "restart" });
+  });
+
+  test("rebuilds a replacement found after a failed post-release discovery", async () => {
+    const timer = new FakeTimer();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    const replacement: BootedDevice = {
+      name: "Pixel 8 replacement",
+      platform: "android",
+      deviceId: image.deviceId!,
+      transportId: "2",
+    };
+    const replacementManager = new FailedDiscoveryThenReplacementDeviceManager(replacement);
+    manager = replacementManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => replacementManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    replacementManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      replacementManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    const registry = new DeviceSessionRegistry(timer);
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const original = pool.getDevice(image.deviceId!);
+    if (!original) {
+      throw new Error("expected original device to be pooled");
+    }
+    const originalSession = registry.onDeviceConnected({
+      deviceId: original.id,
+      platform: original.platform,
+      incarnation: original.incarnation,
+    });
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    replacementManager.beginReplacementSequence();
+    const result = tool.handler(tool.schema.parse({
+      device: {
+        name: image.name,
+        platform: "android",
+        deviceId: image.deviceId!,
+        transportId: "1",
+      },
+    }));
+    await new Promise(resolve => setImmediate(resolve));
+    timer.advanceTime(1_000);
+    await expect(result).resolves.toBeDefined();
+
+    const current = pool.getDevice(image.deviceId!);
+    expect(current).not.toBeNull();
+    expect(current).not.toBe(original);
+    expect(current?.name).toBe(replacement.name);
     expect(sessionManager.getSessionForDevice(image.deviceId!)).toBeNull();
     expect(registry.getByUuid(originalSession.deviceSessionUuid)).toBeUndefined();
     expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();

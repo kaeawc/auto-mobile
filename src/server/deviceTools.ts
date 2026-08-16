@@ -109,7 +109,8 @@ export const killDeviceSchema = z.object({
   device: z.object({
     name: z.string().describe("Device image name"),
     deviceId: z.string(),
-    platform: platformSchema
+    platform: platformSchema,
+    transportId: z.string().optional(),
   })
 });
 
@@ -413,7 +414,21 @@ async function retireShutdownOwnership(
     return;
   }
   if (!discovery.succeededPlatforms.has(device.platform)) {
-    await waitForDeviceShutdown(deviceManager, device, timer, deadlineMs);
+    const replacementAfterRetry = await waitForDeviceShutdown(
+      deviceManager,
+      device,
+      timer,
+      deadlineMs,
+    );
+    if (replacementAfterRetry) {
+      await rebuildSameIdReplacement(
+        device,
+        expectedPooledDevice,
+        replacementAfterRetry,
+        daemonState,
+      );
+      return;
+    }
   }
   if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
     return;

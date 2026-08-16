@@ -2161,9 +2161,29 @@ export class DevicePool {
       if (this.devices.has(expectedDevice.id)) {
         return undefined;
       }
-      await this.addDevice(replacement);
+      await this.addDevice(replacement, this.sourceImageForSameAndroidReplacement(expectedDevice, replacement));
       return this.devices.get(replacement.deviceId);
     });
+  }
+
+  private sourceImageForSameAndroidReplacement(
+    expectedDevice: PooledDevice,
+    replacement: BootedDevice,
+  ): DeviceInfo | undefined {
+    if (
+      expectedDevice.platform !== "android" ||
+      replacement.platform !== "android" ||
+      !expectedDevice.avdName ||
+      !expectedDevice.androidImage ||
+      !this.criteriaMatcher.androidRediscoveryMatches(
+        replacement,
+        expectedDevice.id,
+        expectedDevice.avdName,
+      )
+    ) {
+      return undefined;
+    }
+    return expectedDevice.androidImage;
   }
 
   private releaseCapturedDeviceForShutdown(device: PooledDevice): void {

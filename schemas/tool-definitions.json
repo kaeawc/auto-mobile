@@ -2788,6 +2788,9 @@
                 "android",
                 "ios"
               ]
+            },
+            "transportId": {
+              "type": "string"
             }
           },
           "required": [

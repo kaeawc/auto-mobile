@@ -1786,9 +1786,7 @@ describe("DevicePool", () => {
         lastUsedAt: before?.lastUsedAt,
       };
 
-      await expect(devicePool.assignDeviceToSession("session-failure")).rejects.toThrow(
-        "Timed out waiting for device",
-      );
+      await expect(devicePool.assignDeviceToSession("session-failure")).rejects.toThrow("persist create failed");
 
       expect(devicePool.getDevice("emulator-5554")).toMatchObject(previousAssignment);
       expect(sessionManager.getSession("session-failure")).toBeNull();

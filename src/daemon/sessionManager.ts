@@ -115,7 +115,6 @@ export class SessionManager {
   private sessions: Map<string, Session> = new Map();
   private sessionDeviceMap: Map<string, string> = new Map(); // sessionId -> deviceId
   private deviceSessionMap: Map<string, string> = new Map(); // deviceId -> sessionId (reverse lookup)
-  private pendingSessionCreations: Map<string, Promise<Session>> = new Map();
   private cleanupTimer: NodeJS.Timeout | null = null;
   private timer: Timer;
   private releaseCallbacks: SessionReleaseCallback[] = [];
@@ -130,11 +129,13 @@ export class SessionManager {
   /** Sessions whose teardown has closed admission for further device-state setup. */
   private readonly releasingSessions: WeakSet<Session> = new WeakSet();
   /**
-   * Device work that outlived its bounded release phase. The pool keeps the
-   * device assigned until this settles, so no replacement session can race a
+    * Device work that outlived its bounded release phase. The pool keeps the
+    * device assigned until this settles, so no replacement session can race a
    * late setup or keep-awake restore.
-   */
+  */
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
+  /** Creation writes that must finish before a session becomes visible to callers. */
+  private readonly pendingSessionCreations: Map<string, Promise<Session>> = new Map();
   private deviceSessionRepository: DeviceSessionPersistence;
   private readonly getBarrier: () => DbWriteBarrier;
   private readonly keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer;
@@ -213,6 +214,11 @@ export class SessionManager {
       return this.sessions.get(sessionId)!;
     }
 
+    const pendingCreation = this.pendingSessionCreations.get(sessionId);
+    if (pendingCreation) {
+      return await pendingCreation;
+    }
+
     const now = this.timer.now();
     const sessionTimeoutMs = timeoutMs ?? this.SESSION_TIMEOUT_MS;
     const heartbeatTimeoutSource = heartbeatTimeoutMs === undefined ? "default" : "custom";
@@ -231,22 +237,23 @@ export class SessionManager {
       hasReceivedHeartbeat: false,
     };
 
-    this.sessions.set(sessionId, session);
-    this.sessionDeviceMap.set(sessionId, assignedDevice);
-    this.deviceSessionMap.set(assignedDevice, sessionId);
+    const creation = this.persistAndPublishSession(session);
+    this.pendingSessionCreations.set(sessionId, creation);
     try {
-      await this.persistSession(session);
-    } catch (error) {
-      // A release may have completed and the UUID may have been reused while
-      // the persistence write was pending. Only roll back the session instance
-      // that issued this write; removing by ID alone would delete its replacement.
-      if (this.sessions.get(sessionId) === session) {
-        this.removeSession(sessionId);
+      return await creation;
+    } finally {
+      if (this.pendingSessionCreations.get(sessionId) === creation) {
+        this.pendingSessionCreations.delete(sessionId);
       }
-      throw error;
     }
+  }
 
-    logger.info(`Created session ${sessionId} with device ${assignedDevice}`);
+  private async persistAndPublishSession(session: Session): Promise<Session> {
+    await this.persistSession(session);
+    this.sessions.set(session.sessionId, session);
+    this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
+    this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
+    logger.info(`Created session ${session.sessionId} with device ${session.assignedDevice}`);
     return session;
   }
 

@@ -1816,6 +1816,9 @@ export class DevicePool {
       if (result.error instanceof DevicePoolError && !result.error.isRetryable) {
         throw new ActionableError(result.error.message);
       }
+      if (result.error && !(result.error instanceof DevicePoolError && result.error.isRetryable)) {
+        throw result.error;
+      }
       // Timeout case - all attempts exhausted
       const stats = this.getStatsForPlatform(platform);
       throw new ActionableError(
@@ -1911,10 +1914,8 @@ export class DevicePool {
       let selection = await this.selectAssignableIdleDevice(candidates);
       let device = selection.device;
       livenessUnknown ||= selection.livenessUnknown;
-      if (!device) {
-        candidates = selectCandidates();
-        totalDevices = candidates.length;
-      }
+      candidates = selectCandidates();
+      totalDevices = candidates.length;
 
       // If no devices available and pool is empty, try to refresh
       // This handles race conditions during daemon startup

@@ -117,7 +117,7 @@ describe("SessionManager", () => {
       }
     });
 
-    test("does not remove a replacement session when an earlier write rejects", async () => {
+    test("keeps ownership unpublished while a creation write is pending", async () => {
       let rejectFirstWrite!: (error: Error) => void;
       const firstWrite = new Promise<void>((_resolve, reject) => {
         rejectFirstWrite = reject;
@@ -137,15 +137,17 @@ describe("SessionManager", () => {
 
       try {
         const initialCreate = manager.createSession("reused", "emulator-old", "android");
-        await manager.releaseSession("reused");
-        await manager.createSession("reused", "emulator-new", "android");
+        const duplicateCreate = manager.createSession("reused", "emulator-new", "android");
+
+        expect(manager.getSession("reused")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-old")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
 
         rejectFirstWrite(new Error("first persistence failed"));
-        await expect(initialCreate).rejects.toThrow("first persistence failed");
+        await expect(Promise.all([initialCreate, duplicateCreate])).rejects.toThrow("first persistence failed");
 
-        expect(manager.getSession("reused")?.assignedDevice).toBe("emulator-new");
-        expect(manager.getSessionForDevice("emulator-new")).toBe("reused");
-        expect(manager.getActiveSessionCount()).toBe(1);
+        expect(manager.getSession("reused")).toBeNull();
+        expect(manager.getActiveSessionCount()).toBe(0);
       } finally {
         manager.stopCleanupTimer();
       }

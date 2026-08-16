@@ -101,6 +101,10 @@ interface PendingSessionCreation {
   promise: Promise<Session>;
 }
 
+interface PendingSessionRelease {
+  promise: Promise<string | null>;
+}
+
 interface PendingSessionRebind {
   session: Session;
   promise: Promise<Session>;
@@ -151,7 +155,7 @@ export class SessionManager {
   /** Automatic device assignments that have not yet started their creation write. */
   private readonly pendingSessionAssignments: Map<string, Promise<Session>> = new Map();
   /** Releases received before a creation write has published its session. */
-  private readonly pendingCreationReleasePromises: Map<string, Promise<string | null>> = new Map();
+  private readonly pendingCreationReleases: Map<string, PendingSessionRelease> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
   private readonly pendingSessionRebinds: Map<string, PendingSessionRebind> = new Map();
   private deviceSessionRepository: DeviceSessionPersistence;
@@ -585,23 +589,25 @@ export class SessionManager {
       return null;
     }
 
-    const existingRelease = this.pendingCreationReleasePromises.get(sessionId);
+    const existingRelease = this.pendingCreationReleases.get(sessionId);
     if (existingRelease) {
-      return await existingRelease;
+      return await existingRelease.promise;
     }
 
-    const release = this.releaseAfterSessionCreation(
-      sessionId,
-      releaseReason,
-      allowExpired,
-      pendingCreation,
-    );
-    this.pendingCreationReleasePromises.set(sessionId, release);
+    const release: PendingSessionRelease = {
+      promise: this.releaseAfterSessionCreation(
+        sessionId,
+        releaseReason,
+        allowExpired,
+        pendingCreation,
+      ),
+    };
+    this.pendingCreationReleases.set(sessionId, release);
     try {
-      return await release;
+      return await release.promise;
     } finally {
-      if (this.pendingCreationReleasePromises.get(sessionId) === release) {
-        this.pendingCreationReleasePromises.delete(sessionId);
+      if (this.pendingCreationReleases.get(sessionId) === release) {
+        this.pendingCreationReleases.delete(sessionId);
       }
     }
   }
@@ -674,9 +680,9 @@ export class SessionManager {
 
   /** Wait for a release already admitted for this session, if any. */
   async waitForSessionRelease(sessionId: string): Promise<void> {
-    const pendingCreationRelease = this.pendingCreationReleasePromises.get(sessionId);
+    const pendingCreationRelease = this.pendingCreationReleases.get(sessionId);
     if (pendingCreationRelease) {
-      await pendingCreationRelease;
+      await pendingCreationRelease.promise;
       return;
     }
 

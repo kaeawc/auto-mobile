@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { createToolExecutionContext } from "../../src/server/ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { KeepScreenAwakeManager } from "../../src/utils/KeepScreenAwakeManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -135,5 +136,149 @@ describe("ToolExecutionContext", () => {
 
     expect(context.deviceId).toBe("device-1");
     expect(setupCalls).toBe(0);
+  });
+
+  test("runs first-session setup when a released UUID is recreated during context creation", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      } as any);
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    const original = await sessionManager.createSession("session-recreated", "device-1", "android");
+    let finishSetup!: () => void;
+    const setup = sessionManager.trackSessionSetup(
+      original,
+      () => new Promise<void>(resolve => { finishSetup = resolve; }),
+    );
+    const release = sessionManager.releaseSession("session-recreated");
+    await Promise.resolve();
+    const context = createToolExecutionContext(
+      "session-recreated",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
+    finishSetup();
+    await setup;
+    await release;
+
+    await expect(context).resolves.toMatchObject({ deviceId: "device-1" });
+    expect(setupCalls).toBe(1);
+  });
+
+  test("does not apply keep-awake after a session is released during setup", async () => {
+    let allowActivityWrite!: () => void;
+    const activityWrite = new Promise<void>(resolve => { allowActivityWrite = resolve; });
+    let activityStarted!: () => void;
+    const activityStartedPromise = new Promise<void>(resolve => { activityStarted = resolve; });
+    const repository = {
+      async upsertActiveSession(): Promise<void> {},
+      async recordActivity(): Promise<void> {
+        activityStarted();
+        await activityWrite;
+      },
+      async markReleased(): Promise<void> {},
+      async markStaleActiveSessionsExpired(): Promise<void> {},
+    };
+    const manager = new SessionManager(fakeTimer, repository);
+    const pool = new DevicePool(manager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, new FakeDeviceManager());
+    const applySpy = spyOn(KeepScreenAwakeManager.prototype, "apply").mockResolvedValue({
+      applied: false,
+      skipReason: "disabled",
+    });
+
+    try {
+      await pool.initializeWithDevices([createBootedDevice("device-race")]);
+      await manager.createSession("session-race", "device-race", "android");
+
+      const context = createToolExecutionContext("session-race", manager, pool, sessionOptions);
+      await activityStartedPromise;
+      await manager.releaseSession("session-race");
+      allowActivityWrite();
+
+      await expect(context).rejects.toThrow("released during setup");
+      expect(applySpy).not.toHaveBeenCalled();
+    } finally {
+      applySpy.mockRestore();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("bounds accessibility setup and rejects it after the session releases", async () => {
+    const boundedTimer = new FakeTimer();
+    const boundedSessionManager = new SessionManager(boundedTimer, {
+      async upsertActiveSession(): Promise<void> {},
+      async recordActivity(): Promise<void> {},
+      async markReleased(): Promise<void> {},
+      async markStaleActiveSessionsExpired(): Promise<void> {},
+    });
+    const boundedPool = new DevicePool(
+      boundedSessionManager,
+      "test-daemon-session-id",
+      boundedTimer,
+      fakeAppsRepo,
+      new FakeDeviceManager(),
+    );
+    await boundedPool.initializeWithDevices([createBootedDevice("device-1")]);
+    let finishSetup!: () => void;
+    const setupFinished = new Promise<void>(resolve => { finishSetup = resolve; });
+    let setupStarted!: () => void;
+    const setupStartedPromise = new Promise<void>(resolve => { setupStarted = resolve; });
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupStarted();
+          await setupFinished;
+          return { success: true, message: "ok" };
+        },
+      } as any);
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    try {
+      const context = createToolExecutionContext("session-setup-race", boundedSessionManager, boundedPool, sessionOptions);
+      await setupStartedPromise;
+      const release = boundedSessionManager.releaseSession("session-setup-race");
+      for (let attempt = 0; attempt < 10 && !boundedTimer.getPendingTimeouts().includes(1_000); attempt++) {
+        await Promise.resolve();
+      }
+      expect(boundedTimer.getPendingTimeouts()).toContain(1_000);
+      boundedTimer.advanceTime(1_000);
+      let releasedDevice: string | null | undefined;
+      void release.then(deviceId => { releasedDevice = deviceId; });
+      for (let attempt = 0; attempt < 10 && releasedDevice === undefined; attempt++) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      expect(releasedDevice).toBe("device-1");
+      await boundedPool.releaseDevice("device-1", "session-setup-race");
+
+      expect(boundedSessionManager.getSession("session-setup-race")).toBeNull();
+      expect(boundedPool.getDevice("device-1")).toMatchObject({
+        sessionId: "session-setup-race",
+        status: "busy",
+      });
+
+      finishSetup();
+      await expect(context).rejects.toThrow("released during setup");
+      await Promise.resolve();
+      expect(boundedPool.getDevice("device-1")).toMatchObject({
+        sessionId: null,
+        status: "idle",
+      });
+    } finally {
+      boundedSessionManager.stopCleanupTimer();
+    }
   });
 });

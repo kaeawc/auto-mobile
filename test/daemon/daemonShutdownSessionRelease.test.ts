@@ -157,7 +157,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     }
   });
 
-  test("releases the session when keep-awake restoration fails", async () => {
+  test("continues releasing remaining sessions when restoration fails", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
     const daemon = new Daemon(
@@ -168,26 +168,33 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     );
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
-    const sessionId = "restore-failure-shutdown-session";
-    const deviceId = "restore-failure-device";
+    const brokenSessionId = "broken-shutdown-session";
+    const healthySessionId = "healthy-shutdown-session";
     const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore")
-      .mockRejectedValue(new Error("simulated restore failure"));
+      .mockRejectedValueOnce(new Error("simulated restore failure"))
+      .mockResolvedValue(undefined);
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
-      await devicePool.initializeWithDevices([{
-        name: "Restore Failure Android",
-        deviceId,
-        platform: "android",
-      }]);
-      await devicePool.assignDeviceToSession(sessionId, "android");
-      sessionManager.setKeepScreenAwake(sessionId, { applied: true, method: "svc", svcWasEnabled: false });
+      await devicePool.initializeWithDevices([
+        { name: "Broken Android", deviceId: "broken-device", platform: "android" },
+        { name: "Healthy Android", deviceId: "healthy-device", platform: "android" },
+      ]);
+      await devicePool.assignDeviceToSession(brokenSessionId, "android");
+      await devicePool.assignDeviceToSession(healthySessionId, "android");
+      sessionManager.setKeepScreenAwake(brokenSessionId, { applied: true, method: "svc", svcWasEnabled: false });
+      sessionManager.setKeepScreenAwake(healthySessionId, { applied: true, method: "svc", svcWasEnabled: false });
 
       await expect(daemon.stop()).resolves.toBeUndefined();
 
-      expect(sessionManager.getSession(sessionId)).toBeNull();
-      expect(devicePool.getDevice(deviceId)).toMatchObject({ sessionId: null, status: "idle" });
-      expect(repository.sessions.get(sessionId)).toMatchObject({
+      expect(restoreSpy).toHaveBeenCalledTimes(2);
+      expect(sessionManager.getSession(brokenSessionId)).toBeNull();
+      expect(sessionManager.getSession(healthySessionId)).toBeNull();
+      expect(repository.sessions.get(brokenSessionId)).toMatchObject({
+        status: "released",
+        reason: "daemon-shutdown",
+      });
+      expect(repository.sessions.get(healthySessionId)).toMatchObject({
         status: "released",
         reason: "daemon-shutdown",
       });
@@ -197,7 +204,53 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     }
   });
 
-  test("releases sessions that expired after cleanup stopped", async () => {
+  test("drains a monitor release that removed its session before shutdown snapshots it", async () => {
+    const timer = new FakeTimer();
+    const repository = new FakeDeviceSessionRepository();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      repository as unknown as DeviceSessionRepository,
+    );
+    const sessionManager = daemon.getSessionManager();
+    let allowPersistence!: () => void;
+    const persistence = new Promise<void>(resolve => { allowPersistence = resolve; });
+    let persistenceStarted!: () => void;
+    const persistenceStartedPromise = new Promise<void>(resolve => { persistenceStarted = resolve; });
+    const originalMarkReleased = repository.markReleased.bind(repository);
+    const markReleasedSpy = spyOn(repository, "markReleased")
+      .mockImplementation(async (...args) => {
+        persistenceStarted();
+        await persistence;
+        await originalMarkReleased(...args);
+      });
+    const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
+      repository.events.push("closeDatabase");
+    });
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+
+    try {
+      await sessionManager.createSession("in-flight-session", "in-flight-device", "android");
+      const release = sessionManager.releaseSession("in-flight-session", "heartbeat");
+      await persistenceStartedPromise;
+
+      const stop = daemon.stop();
+      await Promise.resolve();
+      expect(closeDatabaseSpy).not.toHaveBeenCalled();
+
+      allowPersistence();
+      await release;
+      await stop;
+      expect(repository.events).toEqual(["markReleased", "closeDatabase"]);
+    } finally {
+      markReleasedSpy.mockRestore();
+      closeDatabaseSpy.mockRestore();
+      loggerCloseSpy.mockRestore();
+    }
+  });
+
+  test("releases expired sessions that remain in memory during shutdown", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
     const daemon = new Daemon(

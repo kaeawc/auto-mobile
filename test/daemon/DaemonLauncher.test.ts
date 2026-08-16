@@ -5,6 +5,7 @@ import {
   DaemonLauncher,
   type DaemonProcessSpawner,
 } from "../../src/daemon/DaemonLauncher";
+import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 class FakeDaemonProcess extends EventEmitter {
@@ -237,6 +238,69 @@ describe("DaemonLauncher", () => {
 
     expect(spawner.process.signals).toEqual(["SIGTERM", "SIGKILL"]);
     expect(spawner.process.exitCode).toBe(0);
+  });
+
+  test("bounds a stalled final readiness check before terminating the child", async () => {
+    const spawner = new FakeDaemonSpawner();
+    spawner.process.exitOnSignal = "SIGTERM";
+    const timer = new FakeTimer();
+    const launcher = new DaemonLauncher({
+      spawn: spawner.spawn.bind(spawner),
+      timer,
+    });
+
+    const launch = launcher.launchAndWait({
+      command: "auto-mobile",
+      args: ["--daemon-mode"],
+      spawnOptions: {},
+      timeoutMs: 100,
+      waitForReady: async () => false,
+      isReadyForLaunchedProcess: async () => new Promise<boolean>(() => {}),
+      formatFailure: async summary => new Error(summary),
+    });
+
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(spawner.process.signals).toEqual([]);
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+
+    timer.advanceTime(DAEMON_SHUTDOWN_TIMEOUT_MS);
+    await expect(launch).rejects.toThrow("Daemon failed to start within 100ms");
+
+    expect(spawner.process.signals).toEqual(["SIGTERM"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("escalates the detached POSIX process group to reap a package-runner child", async () => {
+    const spawner = new FakeDaemonSpawner();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const processGroupSignals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const launcher = new DaemonLauncher({
+      spawn: spawner.spawn.bind(spawner),
+      timer,
+      platform: "linux",
+      processGroupKiller: (pid, signal) => {
+        processGroupSignals.push({ pid, signal });
+        if (signal === "SIGKILL") {
+          spawner.process.emitExit(signal);
+        }
+      },
+    });
+
+    await expect(launcher.launchAndWait({
+      command: "bunx",
+      args: ["-y", "@kaeawc/auto-mobile@1.2.3", "--daemon-mode"],
+      spawnOptions: { detached: true },
+      timeoutMs: 100,
+      waitForReady: async () => false,
+      formatFailure: async summary => new Error(summary),
+    })).rejects.toThrow("Daemon failed to start within 100ms");
+
+    expect(processGroupSignals).toEqual([
+      { pid: 12345, signal: "SIGTERM" },
+      { pid: 12345, signal: "SIGKILL" },
+    ]);
+    expect(spawner.process.signals).toEqual([]);
   });
 
   test("keeps a launched child that becomes ready at the readiness deadline", async () => {

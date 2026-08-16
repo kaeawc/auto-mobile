@@ -2,8 +2,14 @@ import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:c
 import { existsSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import { ActionableError } from "../models";
-import { trackProcess, waitForExit, type TrackedChildProcess } from "../utils/ChildProcessTracker";
+import {
+  trackProcess,
+  waitForExit,
+  type StoppableProcess,
+  type TrackedChildProcess,
+} from "../utils/ChildProcessTracker";
 import { releaseVersion } from "../utils/mcpVersion";
+import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "./constants";
 
@@ -16,6 +22,9 @@ export interface DaemonProcessSpawner {
   spawn(command: string, args: string[], options: SpawnOptions): ChildProcess;
 }
 
+/** Signals the dedicated process group created by a detached POSIX spawn. */
+export type DaemonProcessGroupKiller = (pid: number, signal: NodeJS.Signals) => void;
+
 export interface DaemonLauncherDependencies {
   entryScript?: string | null;
   version?: string;
@@ -25,6 +34,7 @@ export interface DaemonLauncherDependencies {
   executableExists?: (path: string) => boolean;
   spawn?: DaemonProcessSpawner["spawn"];
   timer?: Timer;
+  processGroupKiller?: DaemonProcessGroupKiller;
 }
 
 export interface DaemonLaunchRequest {
@@ -98,6 +108,7 @@ export class DaemonLauncher {
   private readonly executableExists: (path: string) => boolean;
   private readonly spawn: DaemonProcessSpawner["spawn"];
   private readonly timer: Timer;
+  private readonly processGroupKiller: DaemonProcessGroupKiller;
 
   constructor(dependencies: DaemonLauncherDependencies = {}) {
     this.entryScript = dependencies.entryScript === undefined
@@ -110,6 +121,7 @@ export class DaemonLauncher {
     this.executableExists = dependencies.executableExists ?? existsSync;
     this.spawn = dependencies.spawn ?? nodeSpawn;
     this.timer = dependencies.timer ?? defaultTimer;
+    this.processGroupKiller = dependencies.processGroupKiller ?? defaultProcessGroupKiller;
   }
 
   resolveCommand(): DaemonLaunchCommand {
@@ -193,10 +205,10 @@ export class DaemonLauncher {
         readinessAbort.abort();
         // Keep the startup listeners installed while the final check awaits so
         // a late child error or exit cannot become unobserved in that window.
-        const isReadyAtDeadline = await Promise.race([
+        const isReadyAtDeadline = await this.waitForFinalReadinessCheck(
           request.isReadyForLaunchedProcess?.(daemonProcess.pid) ?? Promise.resolve(false),
           processFailure,
-        ]);
+        );
         if (processFailureObserved) {
           await processFailure;
         }
@@ -209,7 +221,7 @@ export class DaemonLauncher {
         // tracker sends SIGTERM, escalates to SIGKILL after the bounded daemon
         // shutdown grace, and waits for the corresponding exit observation.
         const tracker = trackProcess(daemonProcess as TrackedChildProcess);
-        await waitForExit(tracker.process, tracker.exitPromise, {
+        await waitForExit(this.shutdownTarget(tracker.process, daemonProcess.pid, request.spawnOptions.detached === true), tracker.exitPromise, {
           signal: "SIGTERM",
           timeoutMs: DAEMON_SHUTDOWN_TIMEOUT_MS,
           timer: this.timer,
@@ -221,4 +233,69 @@ export class DaemonLauncher {
       cleanupProcessListeners();
     }
   }
+
+  /**
+   * The final check is a grace-period race, not a second unbounded startup
+   * phase. The normal connection probe may wait for a long client timeout, so
+   * it must not delay cleanup of a child that already missed startup readiness.
+   */
+  private async waitForFinalReadinessCheck(
+    readinessCheck: Promise<boolean>,
+    processFailure: Promise<never>,
+  ): Promise<boolean> {
+    let timeout: NodeJS.Timeout | undefined;
+    const deadline = new Promise<boolean>(resolve => {
+      timeout = this.timer.setTimeout(() => resolve(false), DAEMON_SHUTDOWN_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([readinessCheck, processFailure, deadline]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
+  }
+
+  /**
+   * Detached POSIX spawns lead a new process group. Signalling that group keeps
+   * a `bunx`/`bun x` wrapper from leaving its daemon child behind. Windows has
+   * no negative-PID process-group signal API, so retain the direct-child path.
+   */
+  private shutdownTarget(
+    process: TrackedChildProcess,
+    pid: number | undefined,
+    detached: boolean,
+  ): StoppableProcess {
+    if (!detached || this.platform === "win32" || pid === undefined) {
+      return process;
+    }
+
+    const processGroupPid = pid;
+    return {
+      get exitCode() {
+        return process.exitCode;
+      },
+      get killed() {
+        return process.killed;
+      },
+      kill: signal => {
+        try {
+          this.processGroupKiller(processGroupPid, signal as NodeJS.Signals);
+          return true;
+        } catch (error) {
+          // A vanished group has no descendants left to reap. Fall back to the
+          // direct handle for unusual spawn implementations that do not create
+          // a process group despite receiving `detached: true`.
+          logger.debug(
+            `Daemon process-group signal failed for pid=${processGroupPid}; falling back to the direct child: ${error}`
+          );
+          return process.kill(signal);
+        }
+      },
+    };
+  }
 }
+
+const defaultProcessGroupKiller: DaemonProcessGroupKiller = (pid, signal) => {
+  process.kill(-pid, signal);
+};

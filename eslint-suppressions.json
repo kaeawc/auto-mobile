@@ -40,9 +40,6 @@
     "auto-mobile/catch-convention": {
       "count": 1
     },
-    "auto-mobile/no-accumulator-foreach": {
-      "count": 2
-    },
     "complexity": {
       "count": 1
     }
@@ -406,9 +403,6 @@
     },
     "@typescript-eslint/no-misused-promises": {
       "count": 1
-    },
-    "auto-mobile/no-accumulator-foreach": {
-      "count": 3
     },
     "complexity": {
       "count": 2

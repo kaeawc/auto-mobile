@@ -1367,11 +1367,13 @@ export class NavigationGraphManager implements NavigationGraphService {
       };
     }
 
+    // Narrowed by the guard above; bind once so the helper takes a plain string.
+    const appId = this.currentAppId;
     const limit = this.normalizeHistoryLimit(options.limit);
     const cursor = options.cursor ? this.parseHistoryCursor(options.cursor) : null;
 
     const { edges: dbEdges, hasMore } = await this.repository.getEdgesPage(
-      this.currentAppId,
+      appId,
       {
         cursor,
         limit,
@@ -1386,51 +1388,17 @@ export class NavigationGraphManager implements NavigationGraphService {
       timestamp: edge.timestamp,
     }));
 
-    const nodeNames = new Set<string>();
-    if (dbEdges.length > 0) {
-      nodeNames.add(dbEdges[0].from_screen);
-      dbEdges.forEach(edge => nodeNames.add(edge.to_screen));
-    }
+    // slice(0, 1) spreads to nothing on an empty page, so the seed screen needs
+    // no length guard. getNodesByScreenNames already returns [] for an empty
+    // list (navigationRepository.ts), so no size check is needed either.
+    const screenNames = [...new Set([
+      ...dbEdges.slice(0, 1).map(edge => edge.from_screen),
+      ...dbEdges.map(edge => edge.to_screen),
+    ])];
+    const dbNodes = await this.repository.getNodesByScreenNames(appId, screenNames);
+    const nodeIdMap = new Map<string, number>(dbNodes.map(node => [node.screen_name, node.id]));
 
-    const nodeIdMap = new Map<string, number>();
-    if (nodeNames.size > 0) {
-      const dbNodes = await this.repository.getNodesByScreenNames(
-        this.currentAppId,
-        Array.from(nodeNames)
-      );
-      dbNodes.forEach(node => {
-        nodeIdMap.set(node.screen_name, node.id);
-      });
-    }
-
-    const historyNodes: NavigationGraphHistoryNode[] = [];
-    if (dbEdges.length > 0) {
-      const firstEdge = dbEdges[0];
-      historyNodes.push({
-        id: nodeIdMap.get(firstEdge.from_screen) ?? null,
-        screenName: firstEdge.from_screen,
-        timestamp: firstEdge.timestamp,
-        edgeId: null,
-      });
-      dbEdges.forEach(edge => {
-        historyNodes.push({
-          id: nodeIdMap.get(edge.to_screen) ?? null,
-          screenName: edge.to_screen,
-          timestamp: edge.timestamp,
-          edgeId: edge.id,
-        });
-      });
-    } else if (this.currentScreen) {
-      const node = await this.repository.getNode(this.currentAppId, this.currentScreen);
-      if (node) {
-        historyNodes.push({
-          id: node.id,
-          screenName: node.screen_name,
-          timestamp: node.last_seen_at,
-          edgeId: null,
-        });
-      }
-    }
+    const historyNodes = await this.buildHistoryNodes(appId, dbEdges, nodeIdMap);
 
     const nextCursor =
       hasMore && dbEdges.length > 0 ? this.encodeHistoryCursor(dbEdges[dbEdges.length - 1]) : null;
@@ -1554,6 +1522,52 @@ export class NavigationGraphManager implements NavigationGraphService {
 
   private encodeHistoryCursor(edge: DBNavigationEdge): string {
     return `${edge.timestamp}:${edge.id}`;
+  }
+
+  /**
+   * The node list for a history page: the first edge's origin followed by one
+   * node per edge, or — when the page has no edges — the current screen alone.
+   *
+   * Each branch RETURNS its list rather than pushing into a shared mutable
+   * array, so the two shapes cannot interleave and the caller gets a const.
+   */
+  private async buildHistoryNodes(
+    appId: string,
+    dbEdges: DBNavigationEdge[],
+    nodeIdMap: Map<string, number>
+  ): Promise<NavigationGraphHistoryNode[]> {
+    if (dbEdges.length > 0) {
+      const firstEdge = dbEdges[0];
+      return [
+        {
+          id: nodeIdMap.get(firstEdge.from_screen) ?? null,
+          screenName: firstEdge.from_screen,
+          timestamp: firstEdge.timestamp,
+          edgeId: null,
+        },
+        ...dbEdges.map(edge => ({
+          id: nodeIdMap.get(edge.to_screen) ?? null,
+          screenName: edge.to_screen,
+          timestamp: edge.timestamp,
+          edgeId: edge.id,
+        })),
+      ];
+    }
+
+    if (!this.currentScreen) {
+      return [];
+    }
+
+    const node = await this.repository.getNode(appId, this.currentScreen);
+    if (!node) {
+      return [];
+    }
+    return [{
+      id: node.id,
+      screenName: node.screen_name,
+      timestamp: node.last_seen_at,
+      edgeId: null,
+    }];
   }
 
   private normalizeHistoryLimit(limit?: number): number {

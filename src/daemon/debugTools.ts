@@ -174,9 +174,7 @@ export function formatHealthReport(report: DaemonHealthReport): string {
   }
 
   lines.push("", "Recommendations:");
-  report.recommendations.forEach(rec => {
-    lines.push(`  • ${rec}`);
-  });
+  lines.push(...report.recommendations.map(rec => `  • ${rec}`));
 
   lines.push("", "File Locations:");
   lines.push(`  Socket: ${SOCKET_PATH}`);
@@ -272,9 +270,7 @@ export function formatSocketDiagnostics(diag: SocketDiagnostics): string {
 
   if (diag.issues.length > 0) {
     lines.push("", "Issues Found:");
-    diag.issues.forEach(issue => {
-      lines.push(`  ⚠ ${issue}`);
-    });
+    lines.push(...diag.issues.map(issue => `  ⚠ ${issue}`));
   }
 
   lines.push("", "Socket Path:", `  ${SOCKET_PATH}`);

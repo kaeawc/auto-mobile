@@ -1627,6 +1627,41 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("sim-1");
     });
 
+    test("keeps a shutdown reservation exclusive to direct binding and autolock", async () => {
+      const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      await initializeLiveDevices([device]);
+      const captured = devicePool.getDevice(device.deviceId);
+      if (!captured) {
+        throw new Error("expected shutdown device to be pooled");
+      }
+      const releaseReservation = await devicePool.reserveDeviceForShutdown(captured);
+
+      try {
+        expect(devicePool.getAvailableDeviceCount()).toBe(0);
+        await expect(
+          devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform),
+        ).rejects.toThrow(/shutting down/);
+
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+        await expect(
+          devicePool.autolockDevice(device.deviceId, device.platform, "mcp-session-1"),
+        ).rejects.toThrow(/shutting down/);
+      } finally {
+        await releaseReservation();
+        if (originalAutolock === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        }
+      }
+
+      expect(devicePool.getAvailableDeviceCount()).toBe(1);
+      await expect(
+        devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform),
+      ).resolves.toBe("session-1");
+    });
+
     test("rejects a changed runtime identity inside the assignment mutex", async () => {
       await devicePool.initializeWithDevices([
         createBootedDevice("emulator-5554", "android", "Old Pixel"),

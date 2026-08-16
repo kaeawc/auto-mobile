@@ -390,8 +390,11 @@ async function findReplacementAfterSessionRelease(
   );
   const discovery = await getShutdownDiscovery(deviceManager, device, timer, recheckDeadlineMs);
   const replacement = findDiscoveredDevice(discovery, device);
-  if (replacement || discovery.succeededPlatforms.has(device.platform)) {
+  if (replacement && !isSameBootedDeviceIdentity(device, replacement)) {
     return replacement;
+  }
+  if (!replacement && discovery.succeededPlatforms.has(device.platform)) {
+    return undefined;
   }
   return await waitForDeviceShutdown(deviceManager, device, timer, recheckDeadlineMs);
 }
@@ -500,27 +503,36 @@ async function killProcessAndRetireOwnership(
     }
 
     const shutdownDeadlineMs = dependencies.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
-    perf.startOperation("waitForShutdown");
-    await waitForDeviceShutdown(
-      deviceManager,
-      shutdownDevice,
-      dependencies.timer,
-      shutdownDeadlineMs,
-    );
-    perf.endOperation("waitForShutdown");
+    try {
+      perf.startOperation("waitForShutdown");
+      await waitForDeviceShutdown(
+        deviceManager,
+        shutdownDevice,
+        dependencies.timer,
+        shutdownDeadlineMs,
+      );
+      perf.endOperation("waitForShutdown");
 
-    perf.startOperation("retireOwnership");
-    await retireShutdownOwnership(
-      shutdownDevice,
-      expectedPooledDevice,
-      deviceManager,
-      dependencies.timer,
-      shutdownDeadlineMs,
-      abortSignal,
-      dependencies.stopPerformanceMonitoring,
-    );
-    perf.endOperation("retireOwnership");
-    return undefined;
+      perf.startOperation("retireOwnership");
+      await retireShutdownOwnership(
+        shutdownDevice,
+        expectedPooledDevice,
+        deviceManager,
+        dependencies.timer,
+        shutdownDeadlineMs,
+        abortSignal,
+        dependencies.stopPerformanceMonitoring,
+      );
+      perf.endOperation("retireOwnership");
+      return undefined;
+    } catch (error) {
+      // A failed disappearance confirmation leaves the original incarnation in
+      // the pool. It must remain eligible for normal unexpected-loss recovery.
+      if (device.platform === "android") {
+        devicePool?.clearIntentionalShutdown(device.deviceId);
+      }
+      throw error;
+    }
   });
 }
 
@@ -532,11 +544,7 @@ async function withShutdownPoolReservation<T>(
   if (!devicePool || !expectedPooledDevice) {
     return await operation();
   }
-  const releaseReservation = await devicePool.reserveDeviceForReadiness(expectedPooledDevice.id, {
-    deviceId: expectedPooledDevice.id,
-    name: expectedPooledDevice.name,
-    platform: expectedPooledDevice.platform,
-  });
+  const releaseReservation = await devicePool.reserveDeviceForShutdown(expectedPooledDevice);
   try {
     return await operation();
   } finally {

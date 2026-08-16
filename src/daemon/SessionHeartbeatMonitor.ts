@@ -1,6 +1,7 @@
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { getDefaultSessionHeartbeatTimeoutMs, type Session } from "./sessionManager";
+import { SingleFlightInterval } from "./SingleFlightInterval";
 
 /**
  * Minimal view of the session store the heartbeat monitor needs.
@@ -49,7 +50,7 @@ function readPositiveMsEnv(primaryName: string, legacyName: string): number | un
  * the daemon passes its default timer.
  */
 export class SessionHeartbeatMonitor {
-  private timerHandle: NodeJS.Timeout | null = null;
+  private readonly interval: SingleFlightInterval;
   private readonly checkIntervalMs: number;
   private readonly graceMs: number;
   private readonly preFirstHeartbeatGraceMs: number;
@@ -74,27 +75,17 @@ export class SessionHeartbeatMonitor {
     this.defaultHeartbeatTimeoutMs = config.heartbeatTimeoutMs
       ?? readPositiveMsEnv("AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS", "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS")
       ?? getDefaultSessionHeartbeatTimeoutMs();
+    this.interval = new SingleFlightInterval(this.timer, this.checkIntervalMs, () => this.tickOnce());
   }
 
   start(): void {
-    if (this.timerHandle) {
-      return;
-    }
-    this.timerHandle = this.timer.setInterval(() => {
-      void this.tick();
-    }, this.checkIntervalMs);
-
-    // Allow the process to exit even if the monitor is running.
-    const handle = this.timerHandle as { unref?: () => void };
-    if (handle && typeof handle.unref === "function") {
-      handle.unref();
-    }
+    this.interval.start();
   }
 
-  stop(): void {
-    if (this.timerHandle) {
-      this.timer.clearInterval(this.timerHandle);
-      this.timerHandle = null;
+  async stop(): Promise<void> {
+    const settled = await this.interval.stop();
+    if (!settled) {
+      logger.warn("Session heartbeat monitor did not settle before shutdown timeout");
     }
   }
 
@@ -103,6 +94,10 @@ export class SessionHeartbeatMonitor {
    * Exposed for deterministic testing; also invoked on each interval tick.
    */
   async tick(): Promise<void> {
+    return this.interval.run();
+  }
+
+  private async tickOnce(): Promise<void> {
     const now = this.timer.now();
 
     // Release idle/expired sessions promptly (e.g. autolocked devices whose idle

@@ -6,6 +6,7 @@ import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager } from "./sessionManager";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
+import { SingleFlightInterval } from "./SingleFlightInterval";
 import { DevicePool, type PooledDevice } from "./devicePool";
 import { parseDeviceRecoveryPolicy } from "./poolConfig";
 import { DaemonState } from "./daemonState";
@@ -135,7 +136,7 @@ export class Daemon {
   private debug: boolean;
   private healthCheckTimer: NodeJS.Timeout | null = null;
   private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
-  private deviceDisconnectTimer: NodeJS.Timeout | null = null;
+  private deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private pidFileWritten = false;
   private deviceDisconnectMisses: Map<string, number> = new Map();
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
@@ -1138,13 +1139,13 @@ export class Daemon {
   }
 
   private startDeviceDisconnectMonitor(): void {
-    if (this.deviceDisconnectTimer) {
+    if (this.deviceDisconnectMonitor) {
       return;
     }
 
     const deviceManager = new MultiPlatformDeviceManager();
 
-    this.deviceDisconnectTimer = defaultTimer.setInterval(async () => {
+    this.deviceDisconnectMonitor = new SingleFlightInterval(this.timer, DEVICE_DISCONNECT_POLL_INTERVAL_MS, async () => {
       try {
         if (serverConfig.isPlanExecutionActive()) {
           logger.debug("[DisconnectMonitor] Skipping — plan execution active");
@@ -1295,9 +1296,8 @@ export class Daemon {
       } catch (error) {
         logger.warn(`[Daemon] Device disconnect monitor failed: ${error}`);
       }
-    }, DEVICE_DISCONNECT_POLL_INTERVAL_MS);
-
-    this.deviceDisconnectTimer.unref();
+    });
+    this.deviceDisconnectMonitor.start();
   }
 
   private async shouldSkipStaleDisconnectCleanup(
@@ -1584,13 +1584,19 @@ export class Daemon {
 
     // Clear health check timer
     this.stopHealthCheckTimer();
-    if (this.heartbeatMonitor) {
-      this.heartbeatMonitor.stop();
-      this.heartbeatMonitor = null;
+    const heartbeatMonitor = this.heartbeatMonitor;
+    this.heartbeatMonitor = null;
+    const deviceDisconnectMonitor = this.deviceDisconnectMonitor;
+    this.deviceDisconnectMonitor = null;
+    const [heartbeatSettled, disconnectSettled] = await Promise.all([
+      heartbeatMonitor ? heartbeatMonitor.stop().then(() => true) : true,
+      deviceDisconnectMonitor ? deviceDisconnectMonitor.stop() : true,
+    ]);
+    if (!heartbeatSettled) {
+      logger.warn("Session heartbeat monitor did not settle before daemon shutdown");
     }
-    if (this.deviceDisconnectTimer) {
-      clearInterval(this.deviceDisconnectTimer);
-      this.deviceDisconnectTimer = null;
+    if (!disconnectSettled) {
+      logger.warn("Device disconnect monitor did not settle before daemon shutdown");
     }
     if (this.unsubscribeAdbMissingDevice) {
       this.unsubscribeAdbMissingDevice();

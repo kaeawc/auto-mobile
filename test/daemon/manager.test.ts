@@ -202,7 +202,40 @@ describe("DaemonManager stop", () => {
         [pid, "SIGTERM"],
         [pid, "SIGKILL"],
       ]);
-      expect(livenessChecks).toBe(12);
+      expect(livenessChecks).toBeGreaterThan(12);
+      expect(existsSync(pidFilePath)).toBe(false);
+      expect(existsSync(socketPath)).toBe(false);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("cleans metadata when the daemon exits at the post-SIGKILL deadline", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-deadline-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 4244;
+    const livePids = new Set([pid]);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "socket");
+    const manager = createManagerForStop(livePids, timer, pidFilePath, socketPath);
+    const killSpy = spyOn(process, "kill").mockImplementation((_targetPid, signal) => {
+      if (signal === "SIGKILL") {
+        timer.setTimeout(() => { livePids.delete(pid); }, 1_000);
+      }
+      return true;
+    });
+
+    try {
+      await expect(manager.stop(1_000)).resolves.toBeUndefined();
+
+      expect(killSpy.mock.calls.filter(([targetPid]) => targetPid === pid)).toEqual([
+        [pid, "SIGTERM"],
+        [pid, "SIGKILL"],
+      ]);
       expect(existsSync(pidFilePath)).toBe(false);
       expect(existsSync(socketPath)).toBe(false);
     } finally {

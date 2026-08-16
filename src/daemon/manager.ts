@@ -1088,7 +1088,7 @@ export class DaemonManager implements DaemonManagerLike {
       await this.timer.sleep(pollInterval);
     }
 
-    return false;
+    return !this.isProcessRunning(pid);
   }
 
   /**

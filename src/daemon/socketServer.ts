@@ -2706,33 +2706,54 @@ export class UnixSocketServer {
     this.mcpForwardIdleCloseKeys.clear();
     this.appendTextInputs.clear();
 
+    // Capture clients before clearing their session bookkeeping. server.close() stops
+    // accepting new connections, but waits for existing ones; destroy them before
+    // awaiting its callback so daemon shutdown cannot hang on an idle client.
+    const clientSockets = Array.from(this.clientSockets.values());
+
     // Clear sessions
     this.sessions.clear();
     this.clientSockets.clear();
     this.notificationSubscribers.clear();
 
     const ownsSocketPath = this.isOwnedSocketFile();
+    const serverClosed = this.closeListeningServer(ownsSocketPath);
 
-    if (this.server && (ownsSocketPath || !existsSync(this.socketPath))) {
-      await new Promise<void>(resolve => {
-        this.server!.close(() => {
-          logger.info("Unix socket server closed");
-          resolve();
-        });
-      });
-      this.server = null;
-    } else if (this.server) {
-      logger.warn(
-        `Unix socket path ${this.socketPath} no longer belongs to this server; leaving listener for process teardown`
-      );
-      this.server.unref();
-      this.server = null;
-    }
+    this.destroyClientSockets(clientSockets);
+    await serverClosed;
+    this.server = null;
 
     if (ownsSocketPath && existsSync(this.socketPath)) {
       await unlink(this.socketPath);
     }
     this.socketFileIdentity = null;
+  }
+
+  private closeListeningServer(ownsSocketPath: boolean): Promise<void> {
+    if (!this.server) {
+      return Promise.resolve();
+    }
+    if (!ownsSocketPath && existsSync(this.socketPath)) {
+      logger.warn(
+        `Unix socket path ${this.socketPath} no longer belongs to this server; leaving listener for process teardown`
+      );
+      this.server.unref();
+      return Promise.resolve();
+    }
+    return new Promise(resolve => {
+      this.server!.close(() => {
+        logger.info("Unix socket server closed");
+        resolve();
+      });
+    });
+  }
+
+  private destroyClientSockets(clientSockets: Socket[]): void {
+    for (const socket of clientSockets) {
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
+    }
   }
 
   private readSocketFileIdentity(): SocketFileIdentity | null {

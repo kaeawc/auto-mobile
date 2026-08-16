@@ -20,15 +20,12 @@ class DeferredDiscoveryDeviceManager extends FakeDeviceManager {
   private discoveryStarted = false;
   private readonly started = Promise.withResolvers<void>();
   private readonly release = Promise.withResolvers<void>();
-  private readonly completed = Promise.withResolvers<void>();
 
   override async getBootedDevicesDetailed(platform: SomePlatform) {
     this.discoveryStarted = true;
     this.started.resolve();
     await this.release.promise;
-    const discovery = await super.getBootedDevicesDetailed(platform);
-    this.completed.resolve();
-    return discovery;
+    return await super.getBootedDevicesDetailed(platform);
   }
 
   waitForDiscoveryStart(): Promise<void> {
@@ -43,9 +40,6 @@ class DeferredDiscoveryDeviceManager extends FakeDeviceManager {
     this.release.resolve();
   }
 
-  waitForDiscoveryCompletion(): Promise<void> {
-    return this.completed.promise;
-  }
 }
 
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
@@ -77,8 +71,16 @@ describe("Daemon startup device discovery", () => {
     const internals = daemon as unknown as DaemonStartupInternals;
     const manager = new DeferredDiscoveryDeviceManager();
     const device: BootedDevice = { deviceId: "android-device-1", name: "Pixel 8", platform: "android" };
-    manager.bootedDevices = [device];
+    const lateDevice: BootedDevice = { deviceId: "android-device-2", name: "Pixel 9", platform: "android" };
+    manager.bootedDevices = [device, lateDevice];
     (internals.devicePool as unknown as { deviceManager: DeferredDiscoveryDeviceManager }).deviceManager = manager;
+    const refreshCompleted = Promise.withResolvers<void>();
+    const originalRefresh = internals.devicePool.refreshDevices.bind(internals.devicePool);
+    internals.devicePool.refreshDevices = async () => {
+      const added = await originalRefresh();
+      refreshCompleted.resolve();
+      return added;
+    };
 
     const startup = internals.initializeDevicePoolWithTimeout(5_000);
     await Promise.resolve();
@@ -101,14 +103,16 @@ describe("Daemon startup device discovery", () => {
     const incarnation = assignedBeforeLateDiscovery?.incarnation;
 
     manager.releaseDiscovery();
-    await manager.waitForDiscoveryCompletion();
-    await Promise.resolve();
-    await Promise.resolve();
+    await refreshCompleted.promise;
 
     expect(internals.devicePool.getDevice(device.deviceId)).toMatchObject({
       sessionId: "live-session",
       status: "busy",
       incarnation,
+    });
+    expect(internals.devicePool.getDevice(lateDevice.deviceId)).toMatchObject({
+      sessionId: null,
+      status: "idle",
     });
   });
 });

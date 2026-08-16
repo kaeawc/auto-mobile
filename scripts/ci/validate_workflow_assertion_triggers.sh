@@ -4,8 +4,8 @@
 #
 # Guard the CI trigger contract for workflow-structure tests.
 #
-# RemindersPlanContentTests (run by the `ios-swift-packages` job) asserts the
-# structure of workflow YAML via loadRepositoryFile(".github/..."). That job is
+# Swift tests run by the `ios-swift-packages` job can assert the structure of
+# workflow YAML via loadRepositoryFile(".github/..."). That job is
 # gated on the `ios` paths-filter in .github/workflows/pull_request.yml. If an
 # asserted .github path is NOT covered by that filter, a change to the workflow
 # does not run the tests that validate it, so the drift only surfaces on nightly

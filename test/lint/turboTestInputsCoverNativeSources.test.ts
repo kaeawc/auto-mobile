@@ -60,7 +60,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   ] as const;
 
   interface TurboConfig {
-    readonly tasks: Record<string, { readonly inputs?: readonly string[]; readonly description?: string }>;
+    readonly tasks: Record<
+      string,
+      { readonly inputs?: readonly string[]; readonly description?: string }
+    >;
   }
 
   function loadTurbo(): TurboConfig {
@@ -81,7 +84,12 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
 
   function nativePathCandidates(source: string): string[] {
     const paths = new Set<string>();
-    const sourceFile = ts.createSourceFile("native-path-scan.ts", source, ts.ScriptTarget.Latest, true);
+    const sourceFile = ts.createSourceFile(
+      "native-path-scan.ts",
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
     interface ConstBinding {
       readonly declaration: ts.VariableDeclaration;
       readonly scope: ts.Node;
@@ -101,7 +109,8 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       );
     };
 
-    const isIdentifierCharacter = (character: string): boolean => character !== "/" && isPathCharacter(character);
+    const isIdentifierCharacter = (character: string): boolean =>
+      character !== "/" && isPathCharacter(character);
 
     const nativeRootInText = (text: string): string | undefined => {
       const normalized = text.replaceAll("\\", "/");
@@ -143,7 +152,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       if (!ts.isTemplateExpression(node)) {
         return undefined;
       }
-      const texts = [node.head.text, ...node.templateSpans.map(span => span.literal.text)];
+      const texts = [node.head.text, ...node.templateSpans.map((span) => span.literal.text)];
       if (texts.some(hasNativePathInText)) {
         return undefined;
       }
@@ -176,7 +185,12 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
 
     const lexicalScope = (node: ts.Node): ts.Node => {
       for (let current = node.parent; current; current = current.parent) {
-        if (ts.isSourceFile(current) || ts.isBlock(current) || ts.isModuleBlock(current) || ts.isCaseBlock(current)) {
+        if (
+          ts.isSourceFile(current) ||
+          ts.isBlock(current) ||
+          ts.isModuleBlock(current) ||
+          ts.isCaseBlock(current)
+        ) {
           return current;
         }
       }
@@ -206,20 +220,22 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     const bindingFor = (node: ts.Identifier): ConstBinding | undefined => {
       const position = node.getStart(sourceFile);
       return (bindings.get(node.text) ?? [])
-        .filter(binding =>
-          binding.scope.pos <= position &&
-          position < binding.scope.end &&
-          binding.declaration.getStart(sourceFile) < position
+        .filter(
+          (binding) =>
+            binding.scope.pos <= position &&
+            position < binding.scope.end &&
+            binding.declaration.getStart(sourceFile) < position,
         )
-        .sort((left, right) =>
-          (left.scope.end - left.scope.pos) - (right.scope.end - right.scope.pos) ||
-          right.declaration.getStart(sourceFile) - left.declaration.getStart(sourceFile)
+        .sort(
+          (left, right) =>
+            left.scope.end - left.scope.pos - (right.scope.end - right.scope.pos) ||
+            right.declaration.getStart(sourceFile) - left.declaration.getStart(sourceFile),
         )[0];
     };
 
     const resolveStaticText = (
       node: ts.Expression,
-      resolving = new Set<ts.VariableDeclaration>()
+      resolving = new Set<ts.VariableDeclaration>(),
     ): string | undefined => {
       if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
         return node.text;
@@ -239,8 +255,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
         return text;
       }
       if (ts.isCallExpression(node) && isJoinCall(node)) {
-        const segments = node.arguments.map(argument => resolveStaticText(argument, resolving));
-        return segments.every((segment): segment is string => segment !== undefined) ? segments.join("/") : undefined;
+        const segments = node.arguments.map((argument) => resolveStaticText(argument, resolving));
+        return segments.every((segment): segment is string => segment !== undefined)
+          ? segments.join("/")
+          : undefined;
       }
       if (ts.isIdentifier(node)) {
         const binding = bindingFor(node);
@@ -281,16 +299,21 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
             paths.add(nativeRoot);
           }
         }
-      } else if (ts.isCallExpression(node) && isJoinCall(node) && !(ts.isCallExpression(node.parent) && isJoinCall(node.parent))) {
-        const segments = node.arguments.map(argument => {
+      } else if (
+        ts.isCallExpression(node) &&
+        isJoinCall(node) &&
+        !(ts.isCallExpression(node.parent) && isJoinCall(node.parent))
+      ) {
+        const segments = node.arguments.map((argument) => {
           const leaves = stringLeaves(argument);
           return leaves.length === 1 ? leaves[0] : undefined;
         });
-        const start = segments.findIndex(segment =>
-          segment === "android" ||
-          segment === "ios" ||
-          segment?.startsWith("android/") ||
-          segment?.startsWith("ios/")
+        const start = segments.findIndex(
+          (segment) =>
+            segment === "android" ||
+            segment === "ios" ||
+            segment?.startsWith("android/") ||
+            segment?.startsWith("ios/"),
         );
         const unresolvedTemplateRoot = node.arguments
           .filter((_, index) => segments[index] === undefined)
@@ -314,9 +337,21 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     };
     visit(sourceFile);
 
-    const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source);
-    for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
-      if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
+    const scanner = ts.createScanner(
+      ts.ScriptTarget.Latest,
+      false,
+      ts.LanguageVariant.Standard,
+      source,
+    );
+    for (
+      let token = scanner.scan();
+      token !== ts.SyntaxKind.EndOfFileToken;
+      token = scanner.scan()
+    ) {
+      if (
+        token === ts.SyntaxKind.SingleLineCommentTrivia ||
+        token === ts.SyntaxKind.MultiLineCommentTrivia
+      ) {
         addPathsFromText(scanner.getTokenText());
       }
     }
@@ -328,7 +363,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     describe(`tasks.${taskName}.inputs`, () => {
       test("declares every native source tree a guard reads", () => {
         const inputs = loadTurbo().tasks[taskName]?.inputs ?? [];
-        const missing = REQUIRED_NATIVE_GLOBS.filter(glob => !inputs.includes(glob));
+        const missing = REQUIRED_NATIVE_GLOBS.filter((glob) => !inputs.includes(glob));
         expect(missing, `tasks.${taskName}.inputs is missing: ${missing.join(", ")}`).toEqual([]);
       });
 
@@ -413,10 +448,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       "join(ROOT, `android`, `desktop-core`, `src`, `test`, `kotlin`);",
       "const path = `${ROOT}/ios/control-proxy/Sources`;",
     ].join("\n");
-    expect(nativePathCandidates(source)).toEqual(expect.arrayContaining([
-      "android/desktop-core/src/test/kotlin",
-      "ios/control-proxy/Sources",
-    ]));
+    expect(nativePathCandidates(source)).toEqual(
+      expect.arrayContaining(["android/desktop-core/src/test/kotlin", "ios/control-proxy/Sources"]),
+    );
   });
 
   test("resolves a template literal with a constant interpolation", () => {
@@ -471,15 +505,17 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       const target = "android\\control-proxy\\src\\main\\kotlin";
       // ios\control-proxy\Sources
     `;
-    expect(nativePathCandidates(source)).toEqual(expect.arrayContaining([
-      "android/control-proxy/src/main/kotlin",
-      "ios/control-proxy/Sources",
-    ]));
+    expect(nativePathCandidates(source)).toEqual(
+      expect.arrayContaining([
+        "android/control-proxy/src/main/kotlin",
+        "ios/control-proxy/Sources",
+      ]),
+    );
   });
 
   /** Prefixes a declared glob matches, i.e. `foo/bar/**` covers `foo/bar` and below. */
   function coveredBy(inputs: readonly string[], path: string): boolean {
-    return inputs.some(glob => {
+    return inputs.some((glob) => {
       const prefix = glob.replace(/\/\*\*$/, "");
       return path === prefix || path.startsWith(`${prefix}/`);
     });
@@ -493,12 +529,34 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
    * blanket allow-list.
    */
   const NOT_READ_EXEMPTIONS: ReadonlyMap<string, string> = new Map([
-    ["android/video-server", "bare dir named in a comment / workflow-YAML string; the kotlin tree under it is a declared input"],
-    ["ios/control-proxy", "bare dir in a `cd ios/control-proxy && swift test` doc line; Sources/ under it is a declared input"],
-    ["ios/screen-capture", "named only inside the workflow-YAML text asserted by webrtcDeviceIntegrationWorkflow.test.ts"],
-    ["ios/control-proxy/project.yml", "xcodegen drift check creates a required spec copy in a temp repo"],
-    ["ios/control-proxy/CtrlProxy.xcodeproj", "xcodegen drift check rebuilds a copy in a temp dir; the tracked pbxproj is not a test cache input"],
-    ["ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj", "same xcodegen drift fixture, copied into a temp repo"],
+    [
+      "android/video-server",
+      "bare dir named in a comment / workflow-YAML string; the kotlin tree under it is a declared input",
+    ],
+    [
+      "ios/control-proxy",
+      "bare dir in a `cd ios/control-proxy && swift test` doc line; Sources/ under it is a declared input",
+    ],
+    [
+      "ios/screen-capture",
+      "named only inside the workflow-YAML text asserted by webrtcDeviceIntegrationWorkflow.test.ts",
+    ],
+    [
+      "ios/control-proxy/project.yml",
+      "xcodegen drift check creates a required spec copy in a temp repo",
+    ],
+    [
+      "ios/control-proxy/CtrlProxy.xcodeproj",
+      "xcodegen drift check rebuilds a copy in a temp dir; the tracked pbxproj is not a test cache input",
+    ],
+    [
+      "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj",
+      "same xcodegen drift fixture, copied into a temp repo",
+    ],
+    [
+      "ios/XCTestRunner/Sources/XCTestRunnerTests/Resources/Plans/launch-reminders-app.yaml",
+      "plan contract reads a YAML fixture; no native source tree is read",
+    ],
   ]);
 
   test("every native path a test references is a declared input or a documented not-read exemption", () => {
@@ -510,7 +568,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     expect(
       uncovered,
       `Native paths referenced by tests but neither a declared test input nor exempted:\n${uncovered.join("\n")}\n` +
-        `Add a narrow glob to REQUIRED_NATIVE_GLOBS (and turbo.json) if a test reads it, or a NOT_READ_EXEMPTIONS entry if it does not.`
+        `Add a narrow glob to REQUIRED_NATIVE_GLOBS (and turbo.json) if a test reads it, or a NOT_READ_EXEMPTIONS entry if it does not.`,
     ).toEqual([]);
   });
 
@@ -532,7 +590,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
 
   test("no not-read exemption is stale", () => {
     const referenced = referencedNativePaths();
-    const stale = [...NOT_READ_EXEMPTIONS.keys()].filter(path => !referenced.has(path));
-    expect(stale, `NOT_READ_EXEMPTIONS entries no longer referenced by any test — prune them: ${stale.join(", ")}`).toEqual([]);
+    const stale = [...NOT_READ_EXEMPTIONS.keys()].filter((path) => !referenced.has(path));
+    expect(
+      stale,
+      `NOT_READ_EXEMPTIONS entries no longer referenced by any test — prune them: ${stale.join(", ")}`,
+    ).toEqual([]);
   });
 });

@@ -8,7 +8,7 @@ import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
-import type { AvdConfigReader } from "./AvdConfigReader";
+import type { AvdConfig, AvdConfigReader } from "./AvdConfigReader";
 import { FileAvdConfigReader, MIN_AVD_RAM_MB } from "./AvdConfigReader";
 import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../../features/action/DeviceLockStore";
@@ -310,6 +310,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private modelNameCache = new Map<string, string>();
   private avdConfigReader: AvdConfigReader;
   private platform: NodeJS.Platform;
+  private hostArchitecture: string;
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
 
@@ -320,6 +321,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param timer - Timer for delays
    * @param adbFactory - Factory for creating AdbClient instances (for testing)
    * @param avdConfigReader - Reader for AVD config.ini files (for testing)
+   * @param platform - Host platform (for testing)
+   * @param hostArchitecture - Host CPU architecture (for testing)
    */
   constructor(
     execAsyncFn:
@@ -330,6 +333,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     avdConfigReader?: AvdConfigReader,
     platform: NodeJS.Platform = process.platform,
+    hostArchitecture: string = arch(),
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.spawnFn = spawnFn || spawn;
@@ -337,6 +341,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     this.adbFactory = adbFactory;
     this.avdConfigReader = avdConfigReader ?? new FileAvdConfigReader();
     this.platform = platform;
+    this.hostArchitecture = hostArchitecture;
     // Only set a fallback emulator path here; proper detection happens lazily
     this.emulatorPath = this.getFallbackEmulatorPath();
   }
@@ -542,7 +547,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @returns The host architecture string
    */
   private getHostArchitecture(): string {
-    return arch();
+    return this.hostArchitecture;
   }
 
   /**
@@ -550,7 +555,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param avdName - The AVD name to check
    * @returns Promise with compatibility result
    */
-  private async checkArchitectureCompatibility(avdName: string): Promise<{
+  private async checkArchitectureCompatibility(
+    avdName: string,
+    avdConfig?: AvdConfig | null,
+  ): Promise<{
     compatible: boolean;
     hostArch: string;
     avdArch?: string;
@@ -559,22 +567,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const hostArch = this.getHostArchitecture();
 
     try {
-      // Get AVD config to determine its architecture
-      const result = await this.executeCommand(["-avd", avdName, "-verbose"], 3000);
-      const output = result.stdout + result.stderr;
-
-      // Look for architecture information in the output
-      let avdArch: string | undefined;
-
-      // Check for target architecture in verbose output
-      const archMatch = output.match(/Found AVD target architecture: (\w+)/);
-      if (archMatch) {
-        avdArch = archMatch[1];
-      }
-
-      // If we couldn't determine from verbose output, try to infer from common patterns
+      const config =
+        avdConfig === undefined ? await this.avdConfigReader.readConfig(avdName) : avdConfig;
+      const avdArch = config?.architecture;
       if (!avdArch) {
-        // This is a fallback - we'll let the actual emulator start attempt reveal the issue
+        // Missing config metadata is non-fatal; the launch attempt provides definitive diagnostics.
         return {
           compatible: true,
           hostArch,
@@ -701,8 +698,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     );
   }
 
-  private async validateAvdMemory(avdName: string): Promise<void> {
-    const avdConfig = await this.avdConfigReader.readConfig(avdName);
+  private validateAvdMemory(avdName: string, avdConfig: AvdConfig | null): void {
     if (!avdConfig) {
       return;
     }
@@ -1339,11 +1335,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return null;
     }
 
-    await this.validateAvdMemory(avdName);
+    const avdConfig = await this.avdConfigReader.readConfig(avdName);
+    this.validateAvdMemory(avdName, avdConfig);
 
     // Check architecture compatibility before attempting to start
     perf.startOperation("architectureCheck");
-    const compatibility = await this.checkArchitectureCompatibility(avdName);
+    const compatibility = await this.checkArchitectureCompatibility(avdName, avdConfig);
     perf.endOperation("architectureCheck");
     if (!compatibility.compatible && compatibility.reason) {
       logger.error(`Architecture compatibility check failed: ${compatibility.reason}`);

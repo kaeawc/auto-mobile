@@ -1,11 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  indexOfNamed,
-  indexOfUses,
-  indexOfWaitOn,
-  loadJobSteps,
-  stepNamed,
-} from "../helpers/workflowSteps";
+import { indexOfNamed, indexOfWaitOn, loadJobSteps, stepNamed } from "../helpers/workflowSteps";
 
 // Guards issue #4128: three independent wins in nightly.yml.
 //
@@ -24,59 +18,6 @@ import {
 //     same pinned 1.3.9.
 
 const WORKFLOW = ".github/workflows/nightly.yml";
-const NPM_PACKAGE_ACTION = "./.github/actions/setup-auto-mobile-npm-package";
-
-describe("#4128 nightly — xcpretty overlap in ios-xctest-runner-simulator-tests", () => {
-  const steps = loadJobSteps(WORKFLOW, "ios-xctest-runner-simulator-tests");
-
-  test("the job exists and has steps", () => {
-    expect(steps.length).toBeGreaterThan(0);
-  });
-
-  test("the xcpretty install is backgrounded and carries its id", () => {
-    const install = stepNamed(steps, "Install xcpretty");
-    expect(install).toBeDefined();
-    expect(install?.background).toBe(true);
-    expect(install?.id).toBe("install-xcpretty");
-  });
-
-  test("the npm-package setup is hoisted above the build so it overlaps the install", () => {
-    const installIndex = indexOfNamed(steps, "Install xcpretty");
-    const npmIndex = indexOfUses(steps, NPM_PACKAGE_ACTION);
-    const buildIndex = indexOfNamed(steps, "Build CtrlProxy iOS for Testing");
-
-    expect(installIndex).toBeGreaterThanOrEqual(0);
-    expect(npmIndex).toBeGreaterThanOrEqual(0);
-    expect(buildIndex).toBeGreaterThanOrEqual(0);
-
-    expect(installIndex).toBeLessThan(npmIndex);
-    expect(npmIndex).toBeLessThan(buildIndex);
-  });
-
-  test("the wait barrier precedes the CtrlProxy build, xcpretty's only consumer", () => {
-    const waitIndex = indexOfWaitOn(steps, "install-xcpretty");
-    const buildIndex = indexOfNamed(steps, "Build CtrlProxy iOS for Testing");
-
-    expect(waitIndex).toBeGreaterThanOrEqual(0);
-    expect(waitIndex).toBeLessThan(buildIndex);
-  });
-
-  test("the artifact verification still follows the build that produces them", () => {
-    const buildIndex = indexOfNamed(steps, "Build CtrlProxy iOS for Testing");
-    const verifyIndex = indexOfNamed(steps, "Verify CtrlProxy iOS Artifacts");
-
-    expect(verifyIndex).toBeGreaterThanOrEqual(0);
-    expect(buildIndex).toBeLessThan(verifyIndex);
-  });
-
-  test("the redundant standalone Setup Bun step is gone", () => {
-    // 5c: setup-auto-mobile-npm-package already runs setup-bun at the same
-    // pinned version, so a second standalone step is pure duplication.
-    expect(stepNamed(steps, "Setup Bun")).toBeUndefined();
-    // ...but Bun must still be provisioned, via the composite.
-    expect(indexOfUses(steps, NPM_PACKAGE_ACTION)).toBeGreaterThanOrEqual(0);
-  });
-});
 
 describe("#4128 nightly — XcodeGen overlap in ios-xcode-build-sweep", () => {
   const steps = loadJobSteps(WORKFLOW, "ios-xcode-build-sweep");

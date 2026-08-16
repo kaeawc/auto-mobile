@@ -259,6 +259,94 @@ async function notifyResourcesAfterShutdown(dependencies: DeviceToolsDependencie
   }
 }
 
+interface ShutdownDeadlineContext {
+  device: BootedDevice;
+  timer: Timer;
+  deadlineMs: number;
+  requestAbortSignal: AbortSignal | undefined;
+}
+
+async function stopVideoRecordingBeforeShutdown(
+  recordingId: string,
+  context: ShutdownDeadlineContext,
+): Promise<void> {
+  try {
+    await runWithinShutdownDeadline(
+      context.device,
+      context.timer,
+      context.deadlineMs,
+      "video recording teardown did not complete",
+      context.requestAbortSignal,
+      async () => await stopVideoRecording(recordingId),
+    );
+  } catch (error) {
+    if (isShutdownTimeoutError(error)) {
+      throw error;
+    }
+    logger.warn(
+      `[DeviceTools] Failed to stop recording ${recordingId} before shutdown: ${error}`
+    );
+  }
+}
+
+async function stopVideoRecordingsBeforeShutdown(
+  context: ShutdownDeadlineContext,
+  perf: ReturnType<typeof createPerformanceTracker>,
+): Promise<void> {
+  perf.startOperation("stopRecordings");
+  try {
+    const activeRecordings = await runWithinShutdownDeadline(
+      context.device,
+      context.timer,
+      context.deadlineMs,
+      "recording discovery did not complete",
+      context.requestAbortSignal,
+      async () => await listActiveVideoRecordings({
+        deviceId: context.device.deviceId,
+        platform: context.device.platform,
+      }),
+    );
+    for (const recording of activeRecordings) {
+      await stopVideoRecordingBeforeShutdown(recording.recordingId, context);
+    }
+  } finally {
+    perf.endOperation("stopRecordings");
+  }
+}
+
+async function stopIosCtrlProxyBeforeShutdown(
+  context: ShutdownDeadlineContext,
+  perf: ReturnType<typeof createPerformanceTracker>,
+): Promise<void> {
+  if (context.device.platform !== "ios") {
+    return;
+  }
+  perf.startOperation("stopCtrlProxy");
+  try {
+    const xcTestManager = IOSCtrlProxyManager.getInstance({
+      name: context.device.name,
+      platform: "ios",
+      deviceId: context.device.deviceId,
+      source: "local",
+    });
+    await runWithinShutdownDeadline(
+      context.device,
+      context.timer,
+      context.deadlineMs,
+      "iOS CtrlProxy shutdown did not complete",
+      context.requestAbortSignal,
+      async () => await xcTestManager.stop(),
+    );
+  } catch (error) {
+    if (isShutdownTimeoutError(error)) {
+      throw error;
+    }
+    logger.warn(`[DeviceTools] Failed to stop CtrlProxy iOS before kill: ${error}`);
+  } finally {
+    perf.endOperation("stopCtrlProxy");
+  }
+}
+
 function shutdownTimeoutError(device: BootedDevice, detail: string): ActionableError {
   return new ActionableError(
     `Timed out waiting for ${device.platform} device '${device.name}' (${device.deviceId}) ` +
@@ -1030,66 +1118,14 @@ export function registerDeviceTools() {
         async () => await devicePool?.reserveDeviceForShutdown(args.device.deviceId),
       );
       const expectedPooledDevice = shutdownReservation?.device ?? null;
-
-      perf.startOperation("stopRecordings");
-      const activeRecordings = await runWithinShutdownDeadline(
-        args.device,
-        deps.timer,
-        shutdownDeadlineMs,
-        "recording discovery did not complete",
+      const shutdownContext = {
+        device: args.device,
+        timer: deps.timer,
+        deadlineMs: shutdownDeadlineMs,
         requestAbortSignal,
-        async () => await listActiveVideoRecordings({
-          deviceId: args.device.deviceId,
-          platform: args.device.platform,
-        }),
-      );
-      for (const recording of activeRecordings) {
-        try {
-          await runWithinShutdownDeadline(
-            args.device,
-            deps.timer,
-            shutdownDeadlineMs,
-            "video recording teardown did not complete",
-            requestAbortSignal,
-            async () => await stopVideoRecording(recording.recordingId),
-          );
-        } catch (error) {
-          if (isShutdownTimeoutError(error)) {
-            throw error;
-          }
-          logger.warn(
-            `[DeviceTools] Failed to stop recording ${recording.recordingId} before shutdown: ${error}`
-          );
-        }
-      }
-      perf.endOperation("stopRecordings");
-
-      // Stop CtrlProxy iOS before shutting down iOS simulators
-      if (args.device.platform === "ios") {
-        perf.startOperation("stopCtrlProxy");
-        try {
-          const xcTestManager = IOSCtrlProxyManager.getInstance({
-            name: args.device.name,
-            platform: "ios",
-            deviceId: args.device.deviceId,
-            source: "local",
-          });
-          await runWithinShutdownDeadline(
-            args.device,
-            deps.timer,
-            shutdownDeadlineMs,
-            "iOS CtrlProxy shutdown did not complete",
-            requestAbortSignal,
-            async () => await xcTestManager.stop(),
-          );
-        } catch (error) {
-          if (isShutdownTimeoutError(error)) {
-            throw error;
-          }
-          logger.warn(`[DeviceTools] Failed to stop CtrlProxy iOS before kill: ${error}`);
-        }
-        perf.endOperation("stopCtrlProxy");
-      }
+      };
+      await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
+      await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
 
       const alreadyStoppedMessage = await killProcessAndRetireOwnership(
         deps,

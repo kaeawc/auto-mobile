@@ -107,6 +107,11 @@ interface RollbackAssignment {
   session: Session;
 }
 
+type SessionAssignmentSnapshot = Pick<
+  PooledDevice,
+  "sessionId" | "status" | "lastUsedAt" | "assignmentCount" | "errorCount" | "autolockSessionId"
+>;
+
 interface IosLivenessSnapshot {
   discoverySucceeded: boolean;
   bootedDeviceIds: Set<string>;
@@ -2224,6 +2229,34 @@ export class DevicePool {
     });
   }
 
+  private snapshotSessionAssignment(device: PooledDevice): SessionAssignmentSnapshot {
+    return {
+      sessionId: device.sessionId,
+      status: device.status,
+      lastUsedAt: device.lastUsedAt,
+      assignmentCount: device.assignmentCount,
+      errorCount: device.errorCount,
+      autolockSessionId: device.autolockSessionId,
+    };
+  }
+
+  private restoreSessionAssignment(device: PooledDevice, snapshot: SessionAssignmentSnapshot): void {
+    Object.assign(device, snapshot);
+  }
+
+  private async createSessionOrRestore(
+    device: PooledDevice,
+    snapshot: SessionAssignmentSnapshot,
+    createSession: () => Promise<Session>,
+  ): Promise<Session> {
+    try {
+      return await createSession();
+    } catch (error) {
+      this.restoreSessionAssignment(device, snapshot);
+      throw error;
+    }
+  }
+
   /**
    * Release device from session
    *
@@ -2563,6 +2596,7 @@ export class DevicePool {
       );
     }
 
+    const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;
     device.status = "busy";
     device.lastUsedAt = this.nextLastUsedAt();
@@ -2740,12 +2774,14 @@ export class DevicePool {
     // (10s default) would reap the lock far sooner than the configured idle timeout.
     // Interactions still bump lastHeartbeat, so an active client stays locked while
     // a truly idle one is released after the idle timeout.
-    const session = await this.sessionManager.createSession(
-      sessionId,
-      deviceId,
-      platform,
-      timeoutMs,
-      timeoutMs,
+    const session = await this.createSessionOrRestore(device, assignmentSnapshot, () =>
+      this.sessionManager.createSession(
+        sessionId,
+        deviceId,
+        platform,
+        timeoutMs,
+        timeoutMs,
+      ),
     );
     if (mcpSessionId) {
       this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);

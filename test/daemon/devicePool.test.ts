@@ -7,6 +7,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -1760,6 +1761,38 @@ describe("DevicePool", () => {
         sessionId: null,
         status: "idle",
       });
+    });
+
+    test("restores the pooled device when session persistence rejects", async () => {
+      sessionManager.stopCleanupTimer();
+      const sessionPersistence = new FakeDeviceSessionPersistence();
+      sessionPersistence.failure = "create";
+      sessionManager = new SessionManager(fakeTimer, sessionPersistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([createBootedDevice("emulator-5554")]);
+      const before = devicePool.getDevice("emulator-5554");
+      const previousAssignment = {
+        sessionId: before?.sessionId,
+        status: before?.status,
+        assignmentCount: before?.assignmentCount,
+        errorCount: before?.errorCount,
+        lastUsedAt: before?.lastUsedAt,
+      };
+
+      await expect(devicePool.assignDeviceToSession("session-failure")).rejects.toThrow(
+        "Timed out waiting for device",
+      );
+
+      expect(devicePool.getDevice("emulator-5554")).toMatchObject(previousAssignment);
+      expect(sessionManager.getSession("session-failure")).toBeNull();
+      expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
     });
 
     test("should throw error when no devices available after timeout", async () => {

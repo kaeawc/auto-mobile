@@ -2,7 +2,7 @@ import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
-import { DeviceSessionRepository } from "../db/deviceSessionRepository";
+import { DeviceSessionRepository, type DeviceSessionPersistence } from "../db/deviceSessionRepository";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
@@ -135,7 +135,7 @@ export class SessionManager {
    * late setup or keep-awake restore.
    */
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
-  private deviceSessionRepository: DeviceSessionRepository;
+  private deviceSessionRepository: DeviceSessionPersistence;
   private readonly getBarrier: () => DbWriteBarrier;
   private readonly keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer;
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
@@ -150,7 +150,7 @@ export class SessionManager {
 
   constructor(
     timer: Timer = defaultTimer,
-    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
+    deviceSessionRepository: DeviceSessionPersistence = new DeviceSessionRepository(),
     // Resolve the shared barrier per write, not once at construction, so a
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
     // seen instead of a pinned drained instance (issue #2912). Because the barrier
@@ -234,7 +234,12 @@ export class SessionManager {
     this.sessions.set(sessionId, session);
     this.sessionDeviceMap.set(sessionId, assignedDevice);
     this.deviceSessionMap.set(assignedDevice, sessionId);
-    await this.persistSession(session);
+    try {
+      await this.persistSession(session);
+    } catch (error) {
+      this.removeSession(sessionId);
+      throw error;
+    }
 
     logger.info(`Created session ${sessionId} with device ${assignedDevice}`);
     return session;
@@ -510,7 +515,11 @@ export class SessionManager {
       }
       if (pendingCleanup.length > 0) {this.trackPendingDeviceCleanup(deviceId, pendingCleanup);}
 
-      await this.deviceSessionRepository.markReleased(sessionId, "released", this.timer.now(), releaseReason);
+      try {
+        await this.deviceSessionRepository.markReleased(sessionId, "released", this.timer.now(), releaseReason);
+      } catch (error) {
+        logger.warn(`[SessionManager] Failed to mark session released (${releaseReason}): ${error}`);
+      }
       for (const callback of this.releaseCallbacks) {
         try {
           callback(sessionId, deviceId);

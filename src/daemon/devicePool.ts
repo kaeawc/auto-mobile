@@ -2797,6 +2797,23 @@ export class DevicePool {
   }
 
   /**
+   * Whether a live MCP call owns this autolock session. The execution tracker
+   * keys socket-forwarded work by MCP session while SessionManager keys expiry
+   * by the generated device-session UUID, so this bridges those identities.
+   */
+  hasActiveAutolockMcpSessionExecution(
+    sessionId: string,
+    hasActiveMcpSessionExecution: (mcpSessionId: string) => boolean,
+  ): boolean {
+    for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
+      if (mappedSessionId === sessionId && hasActiveMcpSessionExecution(mcpSessionId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Free a device whose autolock session has been released or has expired.
    *
    * Invoked via the SessionManager release callback. Only acts on devices that

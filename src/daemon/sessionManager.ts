@@ -83,6 +83,7 @@ export interface Session {
  * while sharing centralized state in the daemon.
  */
 export type SessionReleaseCallback = (sessionId: string, deviceId: string) => void;
+export type ActiveSessionExecutionChecker = (sessionId: string) => boolean;
 
 export interface SessionDeviceAssigner {
   assignDeviceToSession(sessionId: string, platform?: Platform): Promise<string>;
@@ -127,6 +128,7 @@ export class SessionManager {
   private deviceSessionRepository: DeviceSessionRepository;
   private readonly getBarrier: () => DbWriteBarrier;
   private readonly keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer;
+  private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
 
   // Session timeout: 30 minutes
   private readonly SESSION_TIMEOUT_MS = 30 * 60 * 1000;
@@ -172,6 +174,15 @@ export class SessionManager {
   /** Return outstanding post-release device work, if the device must stay quarantined. */
   getPendingDeviceCleanup(deviceId: string): Promise<void> | null {
     return this.pendingDeviceCleanups.get(deviceId) ?? null;
+  }
+
+  /**
+   * Keep sessions assigned while their work is still running, even if their
+   * idle timeout elapses. The daemon supplies the execution tracker; tests can
+   * inject a deterministic checker.
+   */
+  setActiveSessionExecutionChecker(checker: ActiveSessionExecutionChecker): void {
+    this.activeSessionExecutionChecker = checker;
   }
 
   /**
@@ -761,7 +772,8 @@ export class SessionManager {
    * Check if session is expired
    */
   private isSessionExpired(session: Session): boolean {
-    return this.timer.now() > session.expiresAt;
+    return !this.activeSessionExecutionChecker(session.sessionId)
+      && this.timer.now() > session.expiresAt;
   }
 
   /**

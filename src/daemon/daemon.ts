@@ -218,6 +218,9 @@ export class Daemon {
     });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
+    this.sessionManager.setActiveSessionExecutionChecker(
+      sessionId => this.hasActiveSessionExecution(sessionId),
+    );
     // Register centralized cleanup for session-scoped state
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
       NavigationGraphManager.releaseSession(sessionId);
@@ -1202,7 +1205,7 @@ export class Daemon {
   private startHeartbeatMonitor(): void {
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
       this.sessionManager,
-      sessionId => executionTracker.hasActiveSessionUuidExecutions(sessionId),
+      sessionId => this.hasActiveSessionExecution(sessionId),
       sessionId => this.cancelAndReleaseSession(sessionId),
       this.timer,
     );
@@ -1224,6 +1227,14 @@ export class Daemon {
     );
     this.navigationRetentionMonitor = new NavigationRetentionMonitor(retention, this.timer);
     this.navigationRetentionMonitor.start();
+  }
+
+  private hasActiveSessionExecution(sessionId: string): boolean {
+    return executionTracker.hasActiveSessionUuidExecutions(sessionId)
+      || this.devicePool.hasActiveAutolockMcpSessionExecution(
+        sessionId,
+        mcpSessionId => executionTracker.hasActiveSessionExecutions(mcpSessionId),
+      );
   }
 
   private startDeviceDisconnectMonitor(): void {

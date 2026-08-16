@@ -134,6 +134,11 @@ export class ExecutionTracker {
     return executions !== undefined && executions.size > 0;
   }
 
+  hasActiveSessionExecutions(sessionId: string): boolean {
+    const executions = this.sessionExecutions.get(sessionId);
+    return executions !== undefined && executions.size > 0;
+  }
+
   hasActiveToolExecution(toolName: string, options: ExecutionScopeOptions): boolean {
     if (options.scope === "global") {
       return this.hasActiveToolExecutionGlobal(toolName);

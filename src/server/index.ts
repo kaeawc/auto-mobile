@@ -480,7 +480,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     }
 
     const executionSessionUuid = derivedLabelSessionUuid ?? providedSessionUuid ?? routingSessionUuid;
-    const execution = executionTracker.startExecution(name, sessionId, executionSessionUuid);
+    const executionSessionId = requestMcpSessionId ?? sessionId;
+    const execution = executionTracker.startExecution(name, executionSessionId, executionSessionUuid);
     const handlerParams = implicitAutolockMcpSessionId && parsedParams && typeof parsedParams === "object"
       ? { ...parsedParams, [INTERNAL_MCP_SESSION_PARAM]: implicitAutolockMcpSessionId }
       : parsedParams;

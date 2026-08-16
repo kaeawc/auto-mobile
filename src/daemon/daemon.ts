@@ -130,8 +130,10 @@ type DatabaseHealthFailureRecovery = (code: number) => void;
  */
 export class Daemon {
   private httpServer: HttpServer | null = null;
+  private httpServerClosePromise: Promise<void> | null = null;
   private socketServer: UnixSocketServer | null = null;
   private transports: Map<string, StreamableHTTPServerTransport> = new Map();
+  private acceptingHttpSessions = false;
   private port: number;
   private host: string;
   private debug: boolean;
@@ -505,6 +507,8 @@ export class Daemon {
    */
   private async startHttpServer(): Promise<void> {
     this.httpServer = createHttpServer();
+    this.httpServerClosePromise = null;
+    this.acceptingHttpSessions = true;
 
     // Disable default timeouts on this loopback-only server. Node.js 18+ sets
     // requestTimeout to 300 000 ms (5 min), which kills Streamable HTTP
@@ -575,6 +579,12 @@ export class Daemon {
       }
 
       if (url.pathname === MCP_STREAMABLE_PATH) {
+        if (!this.acceptingHttpSessions) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Daemon is shutting down" }));
+          return;
+        }
+
         // Get session ID from header
         const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
@@ -630,6 +640,15 @@ export class Daemon {
           }));
         };
 
+        // A request may have begun reading its body just before shutdown
+        // quiesced the listener. Recheck admission before it can create or use
+        // a transport after the shutdown session snapshot is taken.
+        if (!this.acceptingHttpSessions) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Daemon is shutting down" }));
+          return;
+        }
+
         if (sessionId && this.transports.has(sessionId)) {
           // Use existing transport
           streamableTransport = this.transports.get(sessionId)!;
@@ -652,7 +671,9 @@ export class Daemon {
           streamableTransport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => this.idGenerator.next(),
             onsessioninitialized: newSessionId => {
-              this.transports.set(newSessionId, streamableTransport);
+              if (!this.registerHttpTransport(newSessionId, streamableTransport)) {
+                return;
+              }
               sessionContext.sessionId = newSessionId;
               logger.info(
                 `Streamable HTTP session initialized: ${newSessionId}`
@@ -767,6 +788,37 @@ export class Daemon {
         reject(error);
       });
     });
+  }
+
+  private registerHttpTransport(
+    sessionId: string,
+    transport: StreamableHTTPServerTransport,
+  ): boolean {
+    if (!this.acceptingHttpSessions) {
+      void transport.close().catch(error => {
+        logger.warn(`Failed to close HTTP session ${sessionId} rejected during shutdown`, error);
+      });
+      return false;
+    }
+    this.transports.set(sessionId, transport);
+    return true;
+  }
+
+  private closeHttpListener(): Promise<void> {
+    if (!this.httpServer) {
+      return Promise.resolve();
+    }
+    this.httpServerClosePromise ??= new Promise<void>((resolve, reject) => {
+      this.httpServer!.close(error => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        logger.info("HTTP server stopped");
+        resolve();
+      });
+    });
+    return this.httpServerClosePromise;
   }
 
   /**
@@ -1624,6 +1676,16 @@ export class Daemon {
           run: () => this.sessionManager.stopCleanupTimer(),
         },
         {
+          name: "HTTP session admission",
+          run: () => {
+            this.acceptingHttpSessions = false;
+            // Start closing the listener now so it cannot admit a connection
+            // after the transport snapshot below. The later HTTP server stage
+            // awaits this same close once active transports have been closed.
+            void this.closeHttpListener().catch(() => {});
+          },
+        },
+        {
           name: "Unix socket server",
           run: async () => {
             if (this.socketServer) {
@@ -1649,23 +1711,20 @@ export class Daemon {
         },
         { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
         { name: "performance monitor", run: stopPerformanceMonitor },
-        ...Array.from(this.transports, ([sessionId, streamableTransport]) => ({
-          name: `Streamable HTTP session ${sessionId}`,
-          run: () => streamableTransport.close(),
-        })),
+        {
+          name: "active HTTP sessions",
+          run: () => runShutdownCleanupStages(
+            Array.from(this.transports, ([sessionId, streamableTransport]) => ({
+              name: `Streamable HTTP session ${sessionId}`,
+              run: () => streamableTransport.close(),
+            })),
+            (message, error) => logger.warn(message, error),
+          ),
+        },
         { name: "active HTTP session registry", run: () => this.transports.clear() },
         {
           name: "HTTP server",
-          run: async () => {
-            if (this.httpServer) {
-              await new Promise<void>((resolve) => {
-                this.httpServer!.close(() => {
-                  logger.info("HTTP server stopped");
-                  resolve();
-                });
-              });
-            }
-          },
+          run: () => this.closeHttpListener(),
         },
         { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },
         {

@@ -173,6 +173,11 @@ export class DevicePool {
    * marker that belonged to a device that is already gone.
    */
   private readonly intentionalShutdowns: Map<string, number> = new Map();
+  /** Releases waiting for late session teardown, bound to one pooled incarnation. */
+  private readonly deferredDeviceReleases: Map<
+    string,
+    { device: PooledDevice; sessionId: string; cleanup: Promise<void> }
+  > = new Map();
   private deviceIncarnationCounter = 0;
 
   // Max consecutive errors before marking device as failed
@@ -469,6 +474,7 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
+    this.deferredDeviceReleases.delete(deviceId);
     this.notifyDeviceRemoved(deviceId);
     this.deviceSessionStarts.delete(deviceId);
     this.refreshMissingDeviceMisses.delete(deviceId);
@@ -2035,6 +2041,28 @@ export class DevicePool {
       return;
     }
 
+    const existingDeferredRelease = this.deferredDeviceReleases.get(deviceId);
+    if (existingDeferredRelease) {
+      return;
+    }
+    const cleanup = this.sessionManager.getPendingDeviceCleanup(deviceId);
+    if (cleanup) {
+      const deferredRelease = { device, sessionId: expectedSessionId, cleanup };
+      this.deferredDeviceReleases.set(deviceId, deferredRelease);
+      void cleanup.then(() => {
+        if (
+          this.deferredDeviceReleases.get(deviceId) !== deferredRelease ||
+          this.devices.get(deviceId) !== device
+        ) {
+          return;
+        }
+        this.deferredDeviceReleases.delete(deviceId);
+        return this.releaseDevice(deviceId, expectedSessionId);
+      });
+      logger.info(`Keeping device ${deviceId} assigned until late session teardown completes`);
+      return;
+    }
+
     const sessionId = device.sessionId;
     device.sessionId = null;
     device.status = "idle";
@@ -2415,14 +2443,11 @@ export class DevicePool {
       return;
     }
 
-    device.sessionId = null;
-    device.status = "idle";
-    device.errorCount = 0;
     device.autolockSessionId = undefined;
-    this.lastReleasedDeviceId = deviceId;
     this.clearMcpAutolockMappings(sessionId);
-
-    logger.info(`Autolock idle timeout: released device ${deviceId} from session ${sessionId}`);
+    void this.releaseDevice(deviceId, sessionId).then(() => {
+      logger.info(`Autolock idle timeout: released device ${deviceId} from session ${sessionId}`);
+    });
   }
 
   private clearMcpAutolockMappings(sessionId: string): void {

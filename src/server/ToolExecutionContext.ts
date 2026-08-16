@@ -89,24 +89,14 @@ export async function createToolExecutionContext(
     sessionOptions.platform
   );
 
+  if (!sessionManager.isCurrentSession(session)) {
+    throw new ActionableError(`Session ${sessionUuid} was released during setup`);
+  }
+
   await sessionManager.trackSessionSetup(
     session,
-    () => ensureKeepScreenAwake(session, sessionManager, sessionOptions),
+    () => setupSession(session, existingSession !== null, sessionManager, sessionOptions),
   );
-
-  if (!existingSession) {
-    if (session.platform === "android") {
-      await ensureAccessibilityServiceReady(session.assignedDevice, sessionUuid, session.platform);
-    }
-
-    // Start test coverage session for navigation graph tracking
-    // This enables automatic tracking of screens and transitions during test execution
-    const navManager = NavigationGraphManager.getInstanceForSession(sessionUuid);
-    if (navManager.getCurrentAppId()) {
-      await navManager.startTestSession(sessionUuid);
-      logger.info(`[ToolExecutionContext] Started test coverage tracking for session ${sessionUuid}`);
-    }
-  }
 
   return {
     sessionId: sessionUuid,
@@ -115,6 +105,40 @@ export async function createToolExecutionContext(
     sessionManager,
     devicePool,
   };
+}
+
+async function setupSession(
+  session: Session,
+  existingSession: boolean,
+  sessionManager: SessionManager,
+  sessionOptions: SessionOptions,
+): Promise<void> {
+  await ensureKeepScreenAwake(session, sessionManager, sessionOptions);
+  if (existingSession) {
+    return;
+  }
+
+  ensureSessionIsCurrent(session, sessionManager);
+  if (session.platform === "android") {
+    await ensureAccessibilityServiceReady(session.assignedDevice, session.sessionId, session.platform);
+  }
+  ensureSessionIsCurrent(session, sessionManager);
+
+  // Start test coverage session for navigation graph tracking
+  // This enables automatic tracking of screens and transitions during test execution
+  const navManager = NavigationGraphManager.getInstanceForSession(session.sessionId);
+  if (navManager.getCurrentAppId()) {
+    ensureSessionIsCurrent(session, sessionManager);
+    await navManager.startTestSession(session.sessionId);
+    ensureSessionIsCurrent(session, sessionManager);
+    logger.info(`[ToolExecutionContext] Started test coverage tracking for session ${session.sessionId}`);
+  }
+}
+
+function ensureSessionIsCurrent(session: Session, sessionManager: SessionManager): void {
+  if (!sessionManager.isCurrentSession(session)) {
+    throw new ActionableError(`Session ${session.sessionId} was released during setup`);
+  }
 }
 
 const A11Y_TRANSIENT_ERROR_PATTERNS = [
@@ -218,6 +242,17 @@ async function ensureKeepScreenAwake(
   } catch (error) {
     logger.warn(`[ToolExecutionContext] Failed to apply keep-awake for ${device.deviceId}: ${error}`);
     state = { applied: false, skipReason: "failed" };
+  }
+
+  if (!sessionManager.isCurrentSession(session)) {
+    if (state.applied) {
+      try {
+        await manager.restore(state);
+      } catch (error) {
+        logger.warn(`[ToolExecutionContext] Failed to restore keep-awake after session release for ${device.deviceId}: ${error}`);
+      }
+    }
+    throw new ActionableError(`Session ${session.sessionId} was released during setup`);
   }
 
   sessionManager.setKeepScreenAwake(session.sessionId, state);

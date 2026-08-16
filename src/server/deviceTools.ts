@@ -321,8 +321,14 @@ async function waitForDeviceShutdown(
   }
 }
 
-function discoveryShowsDevice(discovery: BootedDeviceDiscovery, device: BootedDevice): boolean {
-  return discovery.succeededPlatforms.has(device.platform) && discovery.devices.some(candidate =>
+function findDiscoveredDevice(
+  discovery: BootedDeviceDiscovery,
+  device: BootedDevice,
+): BootedDevice | undefined {
+  if (!discovery.succeededPlatforms.has(device.platform)) {
+    return undefined;
+  }
+  return discovery.devices.find(candidate =>
     candidate.platform === device.platform && candidate.deviceId === device.deviceId,
   );
 }
@@ -330,6 +336,7 @@ function discoveryShowsDevice(discovery: BootedDeviceDiscovery, device: BootedDe
 async function rebuildSameIdReplacement(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
+  replacement: BootedDevice,
   daemonState: DaemonState,
 ): Promise<void> {
   const devicePool = daemonState.getDevicePool();
@@ -341,13 +348,13 @@ async function rebuildSameIdReplacement(
   if (!devicePool.getDevice(device.deviceId)) {
     daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
   }
-  await devicePool.refreshDevices();
-  const replacement = devicePool.getDevice(device.deviceId);
-  if (replacement) {
+  await devicePool.addDevice(replacement);
+  const rebuilt = devicePool.getDevice(device.deviceId);
+  if (rebuilt) {
     daemonState.getDeviceSessionRegistry().onDeviceConnected({
-      deviceId: replacement.id,
-      platform: replacement.platform,
-      incarnation: replacement.incarnation,
+      deviceId: rebuilt.id,
+      platform: rebuilt.platform,
+      incarnation: rebuilt.incarnation,
     });
   }
 }
@@ -358,6 +365,7 @@ async function retireShutdownOwnership(
   deviceManager: PlatformDeviceManager,
   timer: Timer,
   deadlineMs: number,
+  abortSignal: AbortSignal | undefined,
 ): Promise<void> {
   if (!expectedPooledDevice) {
     return;
@@ -379,7 +387,7 @@ async function retireShutdownOwnership(
     await executionTracker.cancelSessionUuidExecutions(
       sessionId,
       `device-disconnected:${device.deviceId}`,
-      { excludeToolName: "killDevice" },
+      { excludeSignal: abortSignal },
     );
     await sessionManager.releaseSession(sessionId, `device-stopped:${device.deviceId}`);
   }
@@ -391,8 +399,9 @@ async function retireShutdownOwnership(
   // retire only the captured incarnation, then immediately rediscover the
   // replacement so it owns a fresh pool and registry epoch.
   const discovery = await getShutdownDiscovery(deviceManager, device, timer, deadlineMs);
-  if (discoveryShowsDevice(discovery, device)) {
-    await rebuildSameIdReplacement(device, expectedPooledDevice, daemonState);
+  const replacement = findDiscoveredDevice(discovery, device);
+  if (replacement) {
+    await rebuildSameIdReplacement(device, expectedPooledDevice, replacement, daemonState);
     return;
   }
   if (!discovery.succeededPlatforms.has(device.platform)) {
@@ -415,6 +424,7 @@ async function killProcessAndRetireOwnership(
   dependencies: DeviceToolsDependencies,
   device: BootedDevice,
   perf: ReturnType<typeof createPerformanceTracker>,
+  abortSignal: AbortSignal | undefined,
 ): Promise<string | undefined> {
   const deviceManager = dependencies.deviceManagerFactory();
   const devicePool = DaemonState.getInstance().isInitialized()
@@ -455,6 +465,7 @@ async function killProcessAndRetireOwnership(
     deviceManager,
     dependencies.timer,
     shutdownDeadlineMs,
+    abortSignal,
   );
   perf.endOperation("retireOwnership");
   return undefined;
@@ -831,7 +842,11 @@ export function registerDeviceTools() {
   }
 
 
-  const killDeviceHandler = async (args: KillDeviceArgs) => {
+  const killDeviceHandler = async (
+    args: KillDeviceArgs,
+    _progress?: ProgressCallback,
+    abortSignal?: AbortSignal,
+  ) => {
     const perf = createPerformanceTracker(true);
     perf.serial("killDevice");
     try {
@@ -869,7 +884,12 @@ export function registerDeviceTools() {
       }
 
       const deps = getDeviceToolsDependencies();
-      const alreadyStoppedMessage = await killProcessAndRetireOwnership(deps, args.device, perf);
+      const alreadyStoppedMessage = await killProcessAndRetireOwnership(
+        deps,
+        args.device,
+        perf,
+        abortSignal,
+      );
 
       perf.startOperation("cleanup");
       await clearInstalledAppsAfterShutdown(deps, args.device.deviceId);

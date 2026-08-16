@@ -78,13 +78,13 @@ describe("ExecutionTracker", function() {
       new FakeTimer(),
       new FakeIdGenerator(["kill", "tap"]),
     );
-    const kill = tracker.startExecution("killDevice", undefined, "session-uuid");
+    const kill = tracker.startExecution("executePlan", undefined, "session-uuid");
     const tap = tracker.startExecution("tapOn", undefined, "session-uuid");
 
     const cancelled = await tracker.cancelSessionUuidExecutions(
       "session-uuid",
       "device-disconnected:emulator-5554",
-      { excludeToolName: "killDevice" },
+      { excludeSignal: kill.abortController.signal },
     );
 
     expect(cancelled).toBe(1);

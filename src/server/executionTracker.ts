@@ -36,7 +36,7 @@ export interface ExecutionCancellationOptions {
    * Keeps the control-plane operation that triggered a device shutdown alive
    * while cancelling the device-bound work that must fail fast.
    */
-  excludeToolName?: string;
+  excludeSignal?: AbortSignal;
 }
 
 export class ExecutionTracker {
@@ -197,7 +197,7 @@ export class ExecutionTracker {
       if (!execution) {
         continue;
       }
-      if (execution.toolName === options.excludeToolName) {
+      if (execution.abortController.signal === options.excludeSignal) {
         continue;
       }
       if (cancelReason.startsWith("device-disconnected:")) {

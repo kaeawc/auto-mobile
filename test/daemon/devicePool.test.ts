@@ -389,6 +389,7 @@ describe("DevicePool", () => {
     test("notifies the removal listener so a device session epoch is retired", async () => {
       const registry = new DeviceSessionRegistry(fakeTimer, new FakeIdGenerator(["uuid-a"]));
       const removedDeviceIds: string[] = [];
+      let listenerObservedDeletedDevice = false;
       devicePool = new DevicePool(
         sessionManager,
         "test-daemon-session-id",
@@ -403,6 +404,7 @@ describe("DevicePool", () => {
         undefined,
         undefined,
         (deviceId) => {
+          listenerObservedDeletedDevice = devicePool.getDevice(deviceId) === null;
           removedDeviceIds.push(deviceId);
           registry.onDeviceDisconnected(deviceId);
         },
@@ -418,9 +420,11 @@ describe("DevicePool", () => {
         incarnation: pooled.incarnation,
       });
 
-      await devicePool.removeDevice(pooled.id);
+      const removal = devicePool.removeDevice(pooled.id);
 
       expect(removedDeviceIds).toEqual([pooled.id]);
+      expect(listenerObservedDeletedDevice).toBe(true);
+      await removal;
       expect(registry.list()).toEqual([]);
       expect(registry.getByUuid(record.deviceSessionUuid)).toBeUndefined();
     });

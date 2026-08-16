@@ -388,6 +388,8 @@ export class DevicePool {
     try {
       this.onDeviceRemoved?.(deviceId);
     } catch (error) {
+      // Mirror the ready-listener contract: observers cannot roll back a removal
+      // after the pool has deleted the device, so keep mandatory cleanup running.
       logger.warn(`[DevicePool] Device-removed listener failed for ${deviceId}: ${error}`);
     }
   }

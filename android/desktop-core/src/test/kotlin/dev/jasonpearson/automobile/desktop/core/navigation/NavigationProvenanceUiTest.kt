@@ -13,8 +13,11 @@ import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
+import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
 import dev.jasonpearson.automobile.desktop.domain.NavigationGraph
 import org.junit.Test
 
@@ -36,6 +39,8 @@ class NavigationProvenanceUiTest {
       override val autoMobileClient = client
       override val settingsProvider = FakeSettingsProvider()
       override val dataSourceFactory = DefaultDataSourceFactory(client)
+      override val updateController = FakeUpdateController()
+      override val appVersionProvider = AppVersionProvider { AppVersion.Dev }
     }
   }
 

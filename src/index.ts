@@ -36,6 +36,7 @@ import {
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "./processLifecycle";
+import { runShutdownCleanupStages } from "./shutdownCleanup";
 import { startStartupMaintenance } from "./utils/startupMaintenance";
 
 interface FatalLogger {
@@ -124,14 +125,28 @@ async function main() {
   const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
   setProcessShutdownHandler(async (signal) => {
     logger.info(`Received ${signal} signal, shutting down`);
-    await stopVideoRecordingSocketServer();
-    await stopTestRecordingSocketServer();
-    await stopDeviceSnapshotSocketServer();
-    await stopAppearanceSocketServer();
-    await stopWebRtcStreamSocketServer();
-    stopAppearanceSyncScheduler();
-    await AndroidCtrlProxyManager.cleanupPrefetchedApk();
-    logger.close();
+    await runShutdownCleanupStages(
+      [
+        { name: "video recording socket server", run: stopVideoRecordingSocketServer },
+        { name: "test recording socket server", run: stopTestRecordingSocketServer },
+        { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
+        { name: "appearance socket server", run: stopAppearanceSocketServer },
+        { name: "WebRTC stream socket server", run: stopWebRtcStreamSocketServer },
+        { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
+        {
+          name: "prefetched Android CtrlProxy APK",
+          run: AndroidCtrlProxyManager.cleanupPrefetchedApk,
+        },
+        {
+          name: "logger",
+          run: async () => {
+            await logger.flush();
+            logger.close();
+          },
+        },
+      ],
+      (message, error) => logger.warn(message, error),
+    );
   });
 
   try {

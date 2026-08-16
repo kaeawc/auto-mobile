@@ -99,6 +99,7 @@ import {
 } from "./ObservationStreamHealth";
 import { onAdbMissingDevice } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { iosSimulatorCaptureHelperPool } from "../features/screen-stream";
+import { runShutdownCleanupStages } from "../shutdownCleanup";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -1578,111 +1579,147 @@ export class Daemon {
   async stop(): Promise<void> {
     logger.info("Stopping daemon...");
 
-    // Clear health check timer
-    this.stopHealthCheckTimer();
     const heartbeatMonitor = this.heartbeatMonitor;
     this.heartbeatMonitor = null;
     const deviceDisconnectMonitor = this.deviceDisconnectMonitor;
     this.deviceDisconnectMonitor = null;
-    const [heartbeatSettled, disconnectSettled] = await Promise.all([
-      heartbeatMonitor ? heartbeatMonitor.stop().then(() => true) : true,
-      deviceDisconnectMonitor ? deviceDisconnectMonitor.stop() : true,
-    ]);
-    if (!heartbeatSettled) {
-      logger.warn("Session heartbeat monitor did not settle before daemon shutdown");
-    }
-    if (!disconnectSettled) {
-      logger.warn("Device disconnect monitor did not settle before daemon shutdown");
-    }
-    if (this.unsubscribeAdbMissingDevice) {
-      this.unsubscribeAdbMissingDevice();
-      this.unsubscribeAdbMissingDevice = null;
-    }
-
-    // Stop the session cleanup interval before the DB drain below. It is the one
-    // best-effort DB writer that fires on its own timer rather than an external
-    // socket (which are all torn down here), so if left running it could route a
-    // tracked `markReleased` write through a freshly-resolved, non-draining
-    // barrier in the microtask window AFTER closeDatabase()'s resetDbWriteBarrier()
-    // and hit the just-closed connection (issue #2912; #2792 safety window).
-    this.sessionManager.stopCleanupTimer();
-
-    // Close Unix socket server
-    if (this.socketServer) {
-      await this.socketServer.close();
-    }
-
-    await stopVideoRecordingSocketServer();
-    await stopTestRecordingSocketServer();
-    await stopDeviceSnapshotSocketServer();
-    await stopAppearanceSocketServer();
-    await stopPerformanceStreamSocketServer();
-    await stopPerformancePushSocketServer();
-    await stopDeviceDataStreamSocketServer();
-    await stopFailuresStreamSocketServer();
-    await stopFailuresPushSocketServer();
-    await stopTelemetryPushSocketServer();
-    await stopWebRtcStreamSocketServer();
-    await stopVideoStreamSocketServer();
-    await iosSimulatorCaptureHelperPool.shutdown();
-    stopAppearanceSyncScheduler();
-    stopPerformanceMonitor();
-
-    // Close all active HTTP sessions
-    for (const [sessionId, streamableTransport] of this.transports) {
-      try {
-        await streamableTransport.close();
-      } catch (error) {
-        logger.warn(
-          `Error closing Streamable HTTP session ${sessionId}:`,
-          error
-        );
-      }
-    }
-    this.transports.clear();
-
-    // Close HTTP server
-    if (this.httpServer) {
-      await new Promise<void>(resolve => {
-        this.httpServer!.close(() => {
-          logger.info("HTTP server stopped");
-          resolve();
-        });
-      });
-    }
-
-    await cleanupDaemonFiles(this.getDaemonFileCleanupOptions());
-
-    // Quiesce in-flight best-effort DB writes (fire-and-forget telemetry ingest,
-    // background retention cleanup) BEFORE closing the connection, so a query
-    // queued in Kysely's ConnectionMutex can't strand shutdown on an unsettled
-    // promise (issue #2792). Bounded: a wedged write cannot itself hang shutdown.
-    const drained = await getDbWriteBarrier().drain(DB_WRITE_DRAIN_TIMEOUT_MS);
-    if (!drained) {
-      logger.warn(
-        `Timed out after ${DB_WRITE_DRAIN_TIMEOUT_MS}ms draining in-flight DB writes; closing database anyway`
-      );
-    }
-
-    // If a SIGTERM arrived mid cold-start migration, the detached migration
-    // connection is still open and writing on its own connection (its writes are
-    // NOT tracked by the write barrier drained above). Let it settle before
-    // closeDatabase() destroys the app connection, so their WAL writes/checkpoint
-    // can't contend and stall shutdown on busy_timeout (Windows; issue #3044).
-    // Bounded so a wedged migration cannot itself hang shutdown.
-    const migrationsSettled = await awaitInFlightMigrations(
-      MIGRATION_SETTLE_TIMEOUT_MS
+    await runShutdownCleanupStages(
+      [
+        {
+          name: "health check timer",
+          run: () => this.stopHealthCheckTimer(),
+        },
+        {
+          name: "shutdown monitors",
+          run: async () => {
+            const [heartbeatSettled, disconnectSettled] = await Promise.all([
+              heartbeatMonitor ? heartbeatMonitor.stop().then(() => true) : true,
+              deviceDisconnectMonitor ? deviceDisconnectMonitor.stop() : true,
+            ]);
+            if (!heartbeatSettled) {
+              logger.warn("Session heartbeat monitor did not settle before daemon shutdown");
+            }
+            if (!disconnectSettled) {
+              logger.warn("Device disconnect monitor did not settle before daemon shutdown");
+            }
+          },
+        },
+        {
+          name: "ADB missing-device subscription",
+          run: () => {
+            if (this.unsubscribeAdbMissingDevice) {
+              this.unsubscribeAdbMissingDevice();
+              this.unsubscribeAdbMissingDevice = null;
+            }
+          },
+        },
+        {
+          // Stop the session cleanup interval before the DB drain below. It is the one
+          // best-effort DB writer that fires on its own timer rather than an external
+          // socket (which are all torn down here), so if left running it could route a
+          // tracked `markReleased` write through a freshly-resolved, non-draining
+          // barrier in the microtask window AFTER closeDatabase()'s resetDbWriteBarrier()
+          // and hit the just-closed connection (issue #2912; #2792 safety window).
+          name: "session cleanup timer",
+          run: () => this.sessionManager.stopCleanupTimer(),
+        },
+        {
+          name: "Unix socket server",
+          run: async () => {
+            if (this.socketServer) {
+              await this.socketServer.close();
+            }
+          },
+        },
+        { name: "video recording socket server", run: stopVideoRecordingSocketServer },
+        { name: "test recording socket server", run: stopTestRecordingSocketServer },
+        { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
+        { name: "appearance socket server", run: stopAppearanceSocketServer },
+        { name: "performance stream socket server", run: stopPerformanceStreamSocketServer },
+        { name: "performance push socket server", run: stopPerformancePushSocketServer },
+        { name: "device data stream socket server", run: stopDeviceDataStreamSocketServer },
+        { name: "failures stream socket server", run: stopFailuresStreamSocketServer },
+        { name: "failures push socket server", run: stopFailuresPushSocketServer },
+        { name: "telemetry push socket server", run: stopTelemetryPushSocketServer },
+        { name: "WebRTC stream socket server", run: stopWebRtcStreamSocketServer },
+        { name: "video stream socket server", run: stopVideoStreamSocketServer },
+        {
+          name: "iOS simulator capture helper pool",
+          run: () => iosSimulatorCaptureHelperPool.shutdown(),
+        },
+        { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
+        { name: "performance monitor", run: stopPerformanceMonitor },
+        {
+          name: "active HTTP sessions",
+          run: async () => {
+            for (const [sessionId, streamableTransport] of this.transports) {
+              try {
+                await streamableTransport.close();
+              } catch (error) {
+                logger.warn(`Error closing Streamable HTTP session ${sessionId}:`, error);
+              }
+            }
+            this.transports.clear();
+          },
+        },
+        {
+          name: "HTTP server",
+          run: async () => {
+            if (this.httpServer) {
+              await new Promise<void>((resolve) => {
+                this.httpServer!.close(() => {
+                  logger.info("HTTP server stopped");
+                  resolve();
+                });
+              });
+            }
+          },
+        },
+        { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },
+        {
+          name: "database write drain",
+          run: async () => {
+            // Quiesce in-flight best-effort DB writes (fire-and-forget telemetry ingest,
+            // background retention cleanup) BEFORE closing the connection, so a query
+            // queued in Kysely's ConnectionMutex can't strand shutdown on an unsettled
+            // promise (issue #2792). Bounded: a wedged write cannot itself hang shutdown.
+            const drained = await getDbWriteBarrier().drain(DB_WRITE_DRAIN_TIMEOUT_MS);
+            if (!drained) {
+              logger.warn(
+                `Timed out after ${DB_WRITE_DRAIN_TIMEOUT_MS}ms draining in-flight DB writes; closing database anyway`,
+              );
+            }
+          },
+        },
+        {
+          name: "in-flight migrations",
+          run: async () => {
+            // If a SIGTERM arrived mid cold-start migration, the detached migration
+            // connection is still open and writing on its own connection (its writes are
+            // NOT tracked by the write barrier drained above). Let it settle before
+            // closeDatabase() destroys the app connection, so their WAL writes/checkpoint
+            // can't contend and stall shutdown on busy_timeout (Windows; issue #3044).
+            // Bounded so a wedged migration cannot itself hang shutdown.
+            const migrationsSettled = await awaitInFlightMigrations(MIGRATION_SETTLE_TIMEOUT_MS);
+            if (!migrationsSettled) {
+              logger.warn(
+                `Timed out after ${MIGRATION_SETTLE_TIMEOUT_MS}ms awaiting in-flight startup migration; closing database anyway`,
+              );
+            }
+          },
+        },
+        { name: "database", run: closeDatabase },
+        {
+          name: "logger",
+          run: async () => {
+            logger.info("Daemon stopped");
+            await logger.flush();
+            logger.close();
+          },
+        },
+      ],
+      (message, error) => logger.warn(message, error),
     );
-    if (!migrationsSettled) {
-      logger.warn(
-        `Timed out after ${MIGRATION_SETTLE_TIMEOUT_MS}ms awaiting in-flight startup migration; closing database anyway`
-      );
-    }
-
-    await closeDatabase();
-
-    logger.info("Daemon stopped");
-    logger.close();
   }
 
   private getDaemonFileCleanupOptions(): { expectedPid?: number } {

@@ -57,7 +57,7 @@ export async function cleanupDaemonChildProcesses(
     logger.warn(`[Daemon] Failed to list active recordings during shutdown: ${error}`);
   }
 
-  for (const recording of activeRecordings) {
+  await Promise.all(activeRecordings.map(async recording => {
     try {
       const result = await settleWithin(
         dependencies.stopVideoRecording(recording.recordingId),
@@ -65,7 +65,7 @@ export async function cleanupDaemonChildProcesses(
         timeoutMs
       );
       if (result.status === "fulfilled") {
-        continue;
+        return;
       }
       logger.warn(
         `[Daemon] Failed to stop recording ${recording.recordingId} during shutdown: ${result.error}`
@@ -83,7 +83,7 @@ export async function cleanupDaemonChildProcesses(
     } catch (error) {
       logger.warn(`[Daemon] Unexpected recording cleanup error during shutdown: ${error}`);
     }
-  }
+  }));
 
   const proxies = await settleWithin(dependencies.shutdownIOSCtrlProxies(), timer, timeoutMs);
   if (proxies.status !== "fulfilled") {

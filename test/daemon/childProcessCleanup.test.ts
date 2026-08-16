@@ -28,8 +28,8 @@ describe("cleanupDaemonChildProcesses", () => {
 
     expect(calls).toEqual([
       "stop:recording-a",
-      "interrupt:recording-a",
       "stop:recording-b",
+      "interrupt:recording-a",
       "shutdown-ios-ctrl-proxies",
     ]);
   });
@@ -60,8 +60,8 @@ describe("cleanupDaemonChildProcesses", () => {
 
     expect(calls).toEqual([
       "stop:recording-a",
-      "interrupt:recording-a",
       "stop:recording-b",
+      "interrupt:recording-a",
       "interrupt:recording-b",
       "shutdown-ios-ctrl-proxies",
     ]);
@@ -96,8 +96,8 @@ describe("cleanupDaemonChildProcesses", () => {
 
     expect(calls).toEqual([
       "stop:hung-recording",
-      "interrupt:hung-recording",
       "stop:later-recording",
+      "interrupt:hung-recording",
       "shutdown-ios-ctrl-proxies",
     ]);
   });

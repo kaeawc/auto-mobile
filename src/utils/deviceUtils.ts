@@ -79,7 +79,7 @@ export interface PlatformDeviceManager {
    * @param device - The booted device to kill
    * @returns Promise that resolves when the device has been stopped
    */
-  killDevice(device: BootedDevice): Promise<void>;
+  killDevice(device: BootedDevice): Promise<BootedDevice | void>;
 
   /**
    * Wait for a device to be ready for use after starting
@@ -336,7 +336,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    */
   async killDevice(
     device: BootedDevice
-  ): Promise<void> {
+  ): Promise<BootedDevice | void> {
     switch (device.platform) {
       case "android":
         return this.emulator.killDevice(device);

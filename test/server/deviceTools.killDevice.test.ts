@@ -21,7 +21,7 @@ import { DeviceSessionRepository } from "../../src/db/DeviceSessionRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import type { BootedDeviceDiscovery } from "../../src/utils/deviceUtils";
+import type { BootedDeviceDiscovery, BootedDeviceDiscoveryOptions } from "../../src/utils/deviceUtils";
 
 class FailingKillDeviceManager extends FakeDeviceUtils {
   readonly childProcess = new EventEmitter() as ChildProcess;
@@ -49,6 +49,56 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
 class SuccessfulKillDeviceManager extends FailingKillDeviceManager {
   override async killDevice(device: BootedDevice): Promise<void> {
     this.setBootedDevices(device.platform, []);
+  }
+}
+
+class ShutdownDiscoveryOptionsDeviceManager extends SuccessfulKillDeviceManager {
+  readonly shutdownDiscoveryOptions: Array<BootedDeviceDiscoveryOptions | undefined> = [];
+  private trackShutdownDiscovery = false;
+
+  beginTrackingShutdownDiscovery(): void {
+    this.trackShutdownDiscovery = true;
+  }
+
+  override async getBootedDevicesDetailed(
+    platform: SomePlatform,
+    options?: BootedDeviceDiscoveryOptions,
+  ): Promise<BootedDeviceDiscovery> {
+    if (this.trackShutdownDiscovery) {
+      this.shutdownDiscoveryOptions.push(options);
+    }
+    return await super.getBootedDevicesDetailed(platform);
+  }
+}
+
+class CurrentTransportKillDeviceManager extends FailingKillDeviceManager {
+  private shutdownPollsStarted = false;
+  private shutdownPollCount = 0;
+
+  constructor(private readonly currentDevice: BootedDevice) {
+    super();
+  }
+
+  beginShutdownPolls(): void {
+    this.shutdownPollsStarted = true;
+  }
+
+  override async killDevice(): Promise<BootedDevice> {
+    return this.currentDevice;
+  }
+
+  override async getBootedDevicesDetailed(
+    platform: SomePlatform,
+    options?: BootedDeviceDiscoveryOptions,
+  ): Promise<BootedDeviceDiscovery> {
+    if (!this.shutdownPollsStarted) {
+      return await super.getBootedDevicesDetailed(platform);
+    }
+    this.shutdownPollCount++;
+    return {
+      devices: this.shutdownPollCount === 1 ? [this.currentDevice] : [],
+      succeededPlatforms: new Set(["android"]),
+    };
   }
 }
 
@@ -308,6 +358,114 @@ describe("killDevice handler", () => {
 
     expect(successfulManager.getCallCount("startDevice")).toBe(1);
     expect(pool.getDevice("emulator-5554")).toBeNull();
+  });
+
+  test("bypasses the Android device-list cache while confirming shutdown", async () => {
+    const timer = new FakeTimer();
+    const cacheAwareManager = new ShutdownDiscoveryOptionsDeviceManager();
+    manager = cacheAwareManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => cacheAwareManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    cacheAwareManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      cacheAwareManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    cacheAwareManager.beginTrackingShutdownDiscovery();
+    await tool.handler({
+      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+    });
+
+    expect(cacheAwareManager.shutdownDiscoveryOptions).not.toBeEmpty();
+    expect(cacheAwareManager.shutdownDiscoveryOptions).toEqual(
+      expect.arrayContaining([{ bypassAndroidDeviceListCache: true }]),
+    );
+  });
+
+  test("waits for the transport that the Android kill preflight actually selected", async () => {
+    const timer = new FakeTimer();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    const currentDevice: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: image.deviceId!,
+      transportId: "2",
+    };
+    const currentTransportManager = new CurrentTransportKillDeviceManager(currentDevice);
+    manager = currentTransportManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => currentTransportManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    currentTransportManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      currentTransportManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    currentTransportManager.beginShutdownPolls();
+    const result = tool.handler(tool.schema.parse({
+      device: {
+        name: image.name,
+        platform: "android",
+        deviceId: image.deviceId!,
+        transportId: "1",
+      },
+    }));
+    await new Promise(resolve => setImmediate(resolve));
+    expect(pool.getDevice(image.deviceId!)).not.toBeNull();
+    timer.advanceTime(1_000);
+    await expect(result).resolves.toBeDefined();
+
+    expect(pool.getDevice(image.deviceId!)).toBeNull();
   });
 
   test("waits for physical exit before retiring the matching session, pool entry, and device session", async () => {

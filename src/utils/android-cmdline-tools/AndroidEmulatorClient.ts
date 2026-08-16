@@ -148,7 +148,7 @@ export interface AndroidEmulator {
    * @param device - The device to kill
    * @returns Promise that resolves when emulator is stopped
    */
-  killDevice(device: BootedDevice): Promise<void>;
+  killDevice(device: BootedDevice): Promise<BootedDevice>;
 
   /**
    * Wait for the emulator to be ready for use
@@ -1780,7 +1780,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param device - The device to kill
    * @returns Promise that resolves when emulator is stopped
    */
-  async killDevice(device: BootedDevice): Promise<void> {
+  async killDevice(device: BootedDevice): Promise<BootedDevice> {
     const runningEmulators = await this.getBootedDevicesChecked(false, {
       bypassDeviceListCache: true,
     });
@@ -1795,6 +1795,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     await adb.executeCommand("emu kill");
 
     logger.info(`Killed emulator '${device.name}'`);
+    return emulator;
   }
 
   private getLaunchTargetDeviceId(childProcess?: ChildProcess | null): string | undefined {

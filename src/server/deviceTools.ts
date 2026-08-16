@@ -281,7 +281,9 @@ async function getShutdownDiscovery(
   });
   try {
     return await Promise.race([
-      deviceManager.getBootedDevicesDetailed(device.platform),
+      deviceManager.getBootedDevicesDetailed(device.platform, {
+        bypassAndroidDeviceListCache: true,
+      }),
       timeoutPromise,
     ]);
   } finally {
@@ -360,7 +362,6 @@ async function rebuildSameIdReplacement(
   if (!rebuilt) {
     return;
   }
-  daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
   daemonState.getDeviceSessionRegistry().onDeviceConnected({
     deviceId: rebuilt.id,
     platform: rebuilt.platform,
@@ -463,10 +464,12 @@ async function killProcessAndRetireOwnership(
     devicePool?.markIntentionalShutdown(device.deviceId);
   }
 
+  let shutdownDevice = device;
   let alreadyStoppedMessage: string | undefined;
   perf.startOperation("killProcess");
   try {
-    await deviceManager.killDevice(device);
+    const killedDevice = await deviceManager.killDevice(device);
+    shutdownDevice = killedDevice ?? device;
   } catch (error) {
     if (isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)) {
       alreadyStoppedMessage = `Failed to kill ${device.platform} device: ${error}`;
@@ -485,7 +488,7 @@ async function killProcessAndRetireOwnership(
   perf.startOperation("waitForShutdown");
   const replacementObservedDuringShutdown = await waitForDeviceShutdown(
     deviceManager,
-    device,
+    shutdownDevice,
     dependencies.timer,
     shutdownDeadlineMs,
   );
@@ -493,7 +496,7 @@ async function killProcessAndRetireOwnership(
 
   perf.startOperation("retireOwnership");
   await retireShutdownOwnership(
-    device,
+    shutdownDevice,
     expectedPooledDevice,
     deviceManager,
     dependencies.timer,

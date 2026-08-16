@@ -163,6 +163,8 @@ export class DevicePool {
   private readonly recoveringAndroidImages: Map<string, DeviceInfo> = new Map();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
+  /** Latest refresh request; older discovery snapshots must not overwrite it. */
+  private refreshGeneration = 0;
   private readonly readinessReservationCounts: Map<string, number> = new Map();
   /**
    * Serials the user intentionally stopped, mapped to the pooled-device
@@ -278,6 +280,7 @@ export class DevicePool {
   private async refreshDevicesInternal(assignmentLockHeld: boolean): Promise<number> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
+    const refreshGeneration = ++this.refreshGeneration;
     try {
       logger.info("Refreshing device pool - discovering connected devices...");
 
@@ -297,6 +300,11 @@ export class DevicePool {
         `Device discovery completed in ${discoveryTime}ms, found ${bootedDevices.length} devices`,
       );
 
+      if (refreshGeneration !== this.refreshGeneration) {
+        logger.info("Discarding an out-of-date device discovery snapshot");
+        return 0;
+      }
+
       const now = this.seedLastUsedAt(this.timer.now());
       let addedCount = 0;
       let removedCount = 0;
@@ -313,17 +321,21 @@ export class DevicePool {
       for (const device of bootedDevices) {
         this.clearAutoStartSuppressionForBootedDevice(device);
         const updatePooledDevice = async () => {
+          if (refreshGeneration !== this.refreshGeneration) {
+            return false;
+          }
           let pooledDevice = this.devices.get(device.deviceId);
+          let runtimeReplaced = false;
           if (pooledDevice && !this.matchesRuntimeIdentity(pooledDevice, device)) {
-            await this.evictMissingPooledDevice(
+            runtimeReplaced = await this.replacePooledDeviceForRuntimeIdentity(
               pooledDevice,
-              `runtime identity changed to ${device.platform}:${device.name}`,
+              device,
             );
             pooledDevice = this.devices.get(device.deviceId);
           }
           if (pooledDevice) {
             pooledDevice.iosVersion = device.iosVersion;
-            return false;
+            return runtimeReplaced;
           }
           this.devices.set(device.deviceId, {
             id: device.deviceId,
@@ -457,6 +469,31 @@ export class DevicePool {
       device.avdName = sourceImage.name;
       device.androidImage = sourceImage;
     }
+  }
+
+  /**
+   * Replace a pooled connection whose stable serial now identifies a different
+   * runtime. Preserve AutoMobile-owned emulator state because the process and
+   * AVD did not change; only the ADB connection incarnation did.
+   */
+  private async replacePooledDeviceForRuntimeIdentity(
+    pooledDevice: PooledDevice,
+    bootedDevice: BootedDevice,
+  ): Promise<boolean> {
+    const sourceImage = pooledDevice.androidImage;
+    const startedProcess = this.startedDeviceProcesses.get(pooledDevice.id);
+    await this.evictMissingPooledDevice(
+      pooledDevice,
+      `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
+    );
+    if (this.devices.has(bootedDevice.deviceId)) {
+      return false;
+    }
+    await this.addDevice(bootedDevice, sourceImage);
+    if (startedProcess) {
+      this.startedDeviceProcesses.set(bootedDevice.deviceId, startedProcess);
+    }
+    return true;
   }
 
   /**
@@ -1231,9 +1268,15 @@ export class DevicePool {
       return true;
     }
 
-    if (discovery.devices.some((booted) => booted.deviceId === device.id)) {
+    const bootedDevice = discovery.devices.find((booted) => booted.deviceId === device.id);
+    if (bootedDevice && this.matchesRuntimeIdentity(device, bootedDevice)) {
       this.refreshMissingDeviceMisses.delete(device.id);
       return true;
+    }
+
+    if (bootedDevice) {
+      await this.replacePooledDeviceForRuntimeIdentity(device, bootedDevice);
+      return false;
     }
 
     if (deferRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {

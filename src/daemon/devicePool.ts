@@ -71,6 +71,8 @@ export interface PooledDevice {
   id: string; // Device ID (e.g., "emulator-5554")
   name: string; // Device name (e.g., "Pixel 7")
   platform: Platform; // Device platform
+  /** ADB transport identity for Android devices; changes when a serial reconnects. */
+  transportId?: string;
   sessionId: string | null; // Session currently using it, null if idle
   status: DeviceStatus; // Current status
   lastUsedAt: number; // Last usage timestamp
@@ -87,8 +89,8 @@ export interface PooledDevice {
    * Monotonic id for this pooled connection incarnation, assigned when the
    * device is first added to the pool. A serial (`id`) can be reused across
    * boots, so this distinguishes "the device we intentionally stopped" from a
-   * later same-serial replacement — see `intentionalShutdowns` (issue: DevicePool
-   * shutdown-marker same-serial-reuse race, follow-up to PR #5015).
+   * later same-serial or transport replacement — see `intentionalShutdowns`
+   * (issue: DevicePool shutdown-marker same-serial-reuse race, follow-up to PR #5015).
    */
   incarnation: number;
 }
@@ -240,6 +242,7 @@ export class DevicePool {
         id: device.deviceId,
         name: device.name,
         platform: device.platform,
+        transportId: device.transportId,
         sessionId: null,
         status: "idle",
         lastUsedAt: now,
@@ -284,7 +287,9 @@ export class DevicePool {
       logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
 
       perf.startOperation("deviceDiscovery");
-      const discovery = await this.deviceManager.getBootedDevicesDetailed("either");
+      const discovery = await this.deviceManager.getBootedDevicesDetailed("either", {
+        bypassAndroidDeviceListCache: true,
+      });
       perf.endOperation("deviceDiscovery");
       const bootedDevices = discovery.devices;
       const discoveryTime = this.timer.now() - startTime;
@@ -324,6 +329,7 @@ export class DevicePool {
             id: device.deviceId,
             name: device.name,
             platform: device.platform,
+            transportId: device.transportId,
             sessionId: null,
             status: "idle",
             lastUsedAt: now,
@@ -424,6 +430,7 @@ export class DevicePool {
         id: device.deviceId,
         name: device.name,
         platform: device.platform,
+        transportId: device.transportId,
         sessionId: null,
         status: "idle",
         lastUsedAt: now,
@@ -2153,26 +2160,27 @@ export class DevicePool {
 
   private assertRuntimeIdentity(
     pooled: PooledDevice,
-    expected: Pick<BootedDevice, "deviceId" | "name" | "platform"> | undefined,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId"> | undefined,
   ): void {
     if (!expected || this.matchesRuntimeIdentity(pooled, expected)) {
       return;
     }
     throw new ActionableError(
       `Device pool identity mismatch for '${expected.deviceId}': ` +
-        `resolved=[${expected.name} platform=${expected.platform}] ` +
-        `pooled=[${pooled.name} platform=${pooled.platform}].`,
+        `resolved=[${expected.name} platform=${expected.platform} transportId=${expected.transportId}] ` +
+        `pooled=[${pooled.name} platform=${pooled.platform} transportId=${pooled.transportId}].`,
     );
   }
 
   private matchesRuntimeIdentity(
     pooled: PooledDevice,
-    expected: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
   ): boolean {
     return (
       pooled.id === expected.deviceId &&
       pooled.name === expected.name &&
-      pooled.platform === expected.platform
+      pooled.platform === expected.platform &&
+      pooled.transportId === expected.transportId
     );
   }
 

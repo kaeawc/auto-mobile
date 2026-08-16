@@ -17,6 +17,7 @@ import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingM
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
+import { getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
 import { platformSchema } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
@@ -121,6 +122,7 @@ export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 // lifecycle, while bounding the wait so a wedged platform command is actionable.
 const DEVICE_SHUTDOWN_TIMEOUT_MS = 30_000;
 const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
+const DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS = 1_000;
 
 function isAlreadyStoppedDeviceError(
   platform: SomePlatform,
@@ -213,6 +215,7 @@ export interface DeviceToolsDependencies {
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
   clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
+  stopPerformanceMonitoring: (deviceId: string) => void;
   idGenerator: IdGenerator;
   timer: Timer;
 }
@@ -374,17 +377,21 @@ async function findReplacementAfterSessionRelease(
   device: BootedDevice,
   timer: Timer,
   deadlineMs: number,
-  replacementObservedDuringShutdown: BootedDevice | undefined,
 ): Promise<BootedDevice | undefined> {
-  if (timer.now() >= deadlineMs) {
-    return replacementObservedDuringShutdown;
-  }
-  const discovery = await getShutdownDiscovery(deviceManager, device, timer, deadlineMs);
+  // The absence observation only proves the old incarnation was gone before
+  // session release. A same-ID replacement can appear while that release
+  // awaits persistence, so reserve a short, bounded recheck even after the
+  // disappearance deadline was consumed.
+  const recheckDeadlineMs = Math.max(
+    deadlineMs,
+    timer.now() + DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS,
+  );
+  const discovery = await getShutdownDiscovery(deviceManager, device, timer, recheckDeadlineMs);
   const replacement = findDiscoveredDevice(discovery, device);
   if (replacement || discovery.succeededPlatforms.has(device.platform)) {
     return replacement;
   }
-  return await waitForDeviceShutdown(deviceManager, device, timer, deadlineMs);
+  return await waitForDeviceShutdown(deviceManager, device, timer, recheckDeadlineMs);
 }
 
 async function retireShutdownOwnership(
@@ -394,7 +401,7 @@ async function retireShutdownOwnership(
   timer: Timer,
   deadlineMs: number,
   abortSignal: AbortSignal | undefined,
-  replacementObservedDuringShutdown: BootedDevice | undefined,
+  stopPerformanceMonitoring: (deviceId: string) => void,
 ): Promise<void> {
   if (!expectedPooledDevice) {
     return;
@@ -427,15 +434,13 @@ async function retireShutdownOwnership(
   // A same-ID replacement can boot while releasing the old session. If so,
   // retire only the captured incarnation, then immediately rediscover the
   // replacement so it owns a fresh pool and registry epoch. Once shutdown was
-  // observed, an exhausted disappearance deadline must not prevent ownership
-  // cleanup; reuse that successful observation instead of starting another
-  // deadline-bound discovery.
+  // observed, a bounded post-release recheck protects against a replacement
+  // that boots at the disappearance deadline.
   const replacement = await findReplacementAfterSessionRelease(
     deviceManager,
     device,
     timer,
     deadlineMs,
-    replacementObservedDuringShutdown,
   );
   if (replacement) {
     await rebuildSameIdReplacement(device, expectedPooledDevice, replacement, daemonState);
@@ -445,6 +450,7 @@ async function retireShutdownOwnership(
     return;
   }
   if (await devicePool.retireDeviceForShutdown(expectedPooledDevice)) {
+    stopPerformanceMonitoring(device.deviceId);
     daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
   }
 }
@@ -486,7 +492,7 @@ async function killProcessAndRetireOwnership(
 
   const shutdownDeadlineMs = dependencies.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
   perf.startOperation("waitForShutdown");
-  const replacementObservedDuringShutdown = await waitForDeviceShutdown(
+  await waitForDeviceShutdown(
     deviceManager,
     shutdownDevice,
     dependencies.timer,
@@ -502,7 +508,7 @@ async function killProcessAndRetireOwnership(
     dependencies.timer,
     shutdownDeadlineMs,
     abortSignal,
-    replacementObservedDuringShutdown,
+    dependencies.stopPerformanceMonitoring,
   );
   perf.endOperation("retireOwnership");
   return undefined;
@@ -519,6 +525,7 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceCreationGateFactory: () => getDeviceCreationGate(),
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
+      stopPerformanceMonitoring: deviceId => getPerformanceMonitor().stopMonitoring(deviceId),
       idGenerator: defaultIdGenerator,
       timer: defaultTimer,
     };
@@ -537,6 +544,8 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
     clearInstalledAppsForDevice:
       deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
+    stopPerformanceMonitoring:
+      deps.stopPerformanceMonitoring ?? currentDeps.stopPerformanceMonitoring,
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
     timer: deps.timer ?? currentDeps.timer,
   };

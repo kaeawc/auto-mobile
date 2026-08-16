@@ -165,6 +165,7 @@ class DeadlineExhaustingShutdownDeviceManager extends DelayedSuccessfulKillDevic
     if (this.exhaustDeadlineOnNextDiscovery) {
       this.exhaustDeadlineOnNextDiscovery = false;
       this.timer.setCurrentTime(30_000);
+      this.setBootedDevices("android", []);
       return {
         devices: [],
         succeededPlatforms: new Set(platform === "either" ? ["android", "ios"] : [platform]),
@@ -1079,6 +1080,120 @@ describe("killDevice handler", () => {
     expect(pool.getDevice(image.deviceId!)).toBeNull();
     expect(sessionManager.getSessionForDevice(image.deviceId!)).toBeNull();
     expect(registry.getByUuid(deviceSession.deviceSessionUuid)).toBeUndefined();
+  });
+
+  test("rechecks for a replacement that boots while releasing ownership after the deadline", async () => {
+    const timer = new FakeTimer();
+    const deadlineManager = new DeadlineExhaustingShutdownDeviceManager(timer);
+    manager = deadlineManager;
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    const replacement: BootedDevice = {
+      name: "Pixel 8 replacement",
+      platform: "android",
+      deviceId: image.deviceId!,
+      transportId: "2",
+    };
+    const deviceSessionRepository = new ReplacingDeviceSessionRepository(async () => {
+      deadlineManager.setBootedDevices("android", [replacement]);
+    });
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => deadlineManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    deadlineManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      deadlineManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    const registry = new DeviceSessionRegistry(timer);
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const original = pool.getDevice(image.deviceId!);
+    if (!original) {
+      throw new Error("expected assigned device to be pooled");
+    }
+    const originalSession = registry.onDeviceConnected({
+      deviceId: original.id,
+      platform: original.platform,
+      incarnation: original.incarnation,
+    });
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    deadlineManager.exhaustDeadlineOnNextShutdownDiscovery();
+    await expect(tool.handler({
+      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+    })).resolves.toBeDefined();
+
+    const current = pool.getDevice(image.deviceId!);
+    expect(current).not.toBeNull();
+    expect(current).not.toBe(original);
+    expect(current?.name).toBe(replacement.name);
+    expect(registry.getByUuid(originalSession.deviceSessionUuid)).toBeUndefined();
+    expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();
+  });
+
+  test("stops performance monitoring after direct shutdown retirement", async () => {
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    const stoppedDeviceIds: string[] = [];
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      stopPerformanceMonitoring: deviceId => stoppedDeviceIds.push(deviceId),
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    successfulManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await expect(tool.handler({
+      device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+    })).resolves.toBeDefined();
+
+    expect(stoppedDeviceIds).toEqual([image.deviceId]);
   });
 
   test("keeps a replacement epoch created during shutdown cache cleanup", async () => {

@@ -73,6 +73,8 @@ export interface PooledDevice {
   id: string; // Device ID (e.g., "emulator-5554")
   name: string; // Device name (e.g., "Pixel 7")
   platform: Platform; // Device platform
+  /** ADB transport identity for Android devices; changes when a serial reconnects. */
+  transportId?: string;
   sessionId: string | null; // Session currently using it, null if idle
   status: DeviceStatus; // Current status
   lastUsedAt: number; // Last usage timestamp
@@ -89,8 +91,8 @@ export interface PooledDevice {
    * Monotonic id for this pooled connection incarnation, assigned when the
    * device is first added to the pool. A serial (`id`) can be reused across
    * boots, so this distinguishes "the device we intentionally stopped" from a
-   * later same-serial replacement — see `intentionalShutdowns` (issue: DevicePool
-   * shutdown-marker same-serial-reuse race, follow-up to PR #5015).
+   * later same-serial or transport replacement — see `intentionalShutdowns`
+   * (issue: DevicePool shutdown-marker same-serial-reuse race, follow-up to PR #5015).
    */
   incarnation: number;
 }
@@ -168,6 +170,8 @@ export class DevicePool {
   private readonly recoveringAndroidImages: Map<string, DeviceInfo> = new Map();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
+  /** Latest refresh request; older discovery snapshots must not overwrite it. */
+  private refreshGeneration = 0;
   private readonly readinessReservationCounts: Map<string, number> = new Map();
   /**
    * Serials the user intentionally stopped, mapped to the pooled-device
@@ -252,6 +256,7 @@ export class DevicePool {
         id: device.deviceId,
         name: device.name,
         platform: device.platform,
+        transportId: device.transportId,
         sessionId: null,
         status: "idle",
         lastUsedAt: now,
@@ -287,6 +292,7 @@ export class DevicePool {
   private async refreshDevicesInternal(assignmentLockHeld: boolean): Promise<number> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
+    const refreshGeneration = ++this.refreshGeneration;
     try {
       logger.info("Refreshing device pool - discovering connected devices...");
 
@@ -296,7 +302,9 @@ export class DevicePool {
       logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
 
       perf.startOperation("deviceDiscovery");
-      const discovery = await this.deviceManager.getBootedDevicesDetailed("either");
+      const discovery = await this.deviceManager.getBootedDevicesDetailed("either", {
+        bypassAndroidDeviceListCache: true,
+      });
       perf.endOperation("deviceDiscovery");
       const bootedDevices = discovery.devices;
       const discoveryTime = this.timer.now() - startTime;
@@ -311,31 +319,43 @@ export class DevicePool {
       const bootedPlatforms = new Set(bootedDevices.map((device) => device.platform));
 
       perf.startOperation("poolUpdate");
-      removedCount = await this.removeDevicesMissingFrom(
+      const removed = await this.removeMissingDevicesForRefresh(
+        assignmentLockHeld,
+        refreshGeneration,
         bootedDeviceIds,
         bootedPlatforms,
         discovery.succeededPlatforms,
       );
+      if (removed === undefined) {
+        logger.info("Discarding an out-of-date device discovery snapshot");
+        return 0;
+      }
+      removedCount = removed;
 
       for (const device of bootedDevices) {
         this.clearAutoStartSuppressionForBootedDevice(device);
         const updatePooledDevice = async () => {
+          if (refreshGeneration !== this.refreshGeneration) {
+            return false;
+          }
           let pooledDevice = this.devices.get(device.deviceId);
+          let runtimeReplaced = false;
           if (pooledDevice && !this.matchesRuntimeIdentity(pooledDevice, device)) {
-            await this.evictMissingPooledDevice(
+            runtimeReplaced = await this.replacePooledDeviceForRuntimeIdentity(
               pooledDevice,
-              `runtime identity changed to ${device.platform}:${device.name}`,
+              device,
             );
             pooledDevice = this.devices.get(device.deviceId);
           }
           if (pooledDevice) {
             pooledDevice.iosVersion = device.iosVersion;
-            return false;
+            return runtimeReplaced;
           }
           this.devices.set(device.deviceId, {
             id: device.deviceId,
             name: device.name,
             platform: device.platform,
+            transportId: device.transportId,
             sessionId: null,
             status: "idle",
             lastUsedAt: now,
@@ -436,6 +456,7 @@ export class DevicePool {
         id: device.deviceId,
         name: device.name,
         platform: device.platform,
+        transportId: device.transportId,
         sessionId: null,
         status: "idle",
         lastUsedAt: now,
@@ -462,6 +483,31 @@ export class DevicePool {
       device.avdName = sourceImage.name;
       device.androidImage = sourceImage;
     }
+  }
+
+  /**
+   * Replace a pooled connection whose stable serial now identifies a different
+   * runtime. Preserve AutoMobile-owned emulator state because the process and
+   * AVD did not change; only the ADB connection incarnation did.
+   */
+  private async replacePooledDeviceForRuntimeIdentity(
+    pooledDevice: PooledDevice,
+    bootedDevice: BootedDevice,
+  ): Promise<boolean> {
+    const sourceImage = pooledDevice.androidImage;
+    const startedProcess = this.startedDeviceProcesses.get(pooledDevice.id);
+    await this.evictMissingPooledDevice(
+      pooledDevice,
+      `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
+    );
+    if (this.devices.has(bootedDevice.deviceId)) {
+      return false;
+    }
+    await this.addDevice(bootedDevice, sourceImage);
+    if (startedProcess) {
+      this.startedDeviceProcesses.set(bootedDevice.deviceId, startedProcess);
+    }
+    return true;
   }
 
   /**
@@ -691,6 +737,28 @@ export class DevicePool {
     }
 
     return removedCount;
+  }
+
+  private async removeMissingDevicesForRefresh(
+    assignmentLockHeld: boolean,
+    refreshGeneration: number,
+    bootedDeviceIds: Set<string>,
+    bootedPlatforms: Set<Platform>,
+    succeededPlatforms: Set<Platform>,
+  ): Promise<number | undefined> {
+    const removeMissingDevices = async () => {
+      if (refreshGeneration !== this.refreshGeneration) {
+        return undefined;
+      }
+      return await this.removeDevicesMissingFrom(
+        bootedDeviceIds,
+        bootedPlatforms,
+        succeededPlatforms,
+      );
+    };
+    return assignmentLockHeld
+      ? await removeMissingDevices()
+      : await this.assignmentMutex.runExclusive(removeMissingDevices);
   }
 
   /**
@@ -1235,7 +1303,10 @@ export class DevicePool {
   }
 
   private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
-    return device.platform === "android" && consolePortFromSerial(device.id) !== null;
+    return (
+      device.platform === "android" &&
+      (consolePortFromSerial(device.id) !== null || device.transportId !== undefined)
+    );
   }
 
   private async ensurePooledDevicePresentForUse(
@@ -1255,9 +1326,15 @@ export class DevicePool {
       return true;
     }
 
-    if (discovery.devices.some((booted) => booted.deviceId === device.id)) {
+    const bootedDevice = discovery.devices.find((booted) => booted.deviceId === device.id);
+    if (bootedDevice && this.matchesRuntimeIdentity(device, bootedDevice)) {
       this.refreshMissingDeviceMisses.delete(device.id);
       return true;
+    }
+
+    if (bootedDevice) {
+      await this.replacePooledDeviceForRuntimeIdentity(device, bootedDevice);
+      return false;
     }
 
     if (deferRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
@@ -2162,12 +2239,16 @@ export class DevicePool {
    */
   async reserveDeviceForReadiness(
     deviceId: string,
-    expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
   ): Promise<() => Promise<void>> {
-    await this.assignmentMutex.runExclusive(() => {
+    await this.assignmentMutex.runExclusive(async () => {
       const pooled = this.devices.get(deviceId);
       if (pooled) {
-        this.assertRuntimeIdentity(pooled, expectedIdentity);
+        if (this.hasTransportOnlyIdentityChange(pooled, expectedIdentity)) {
+          await this.replacePooledDeviceForRuntimeIdentity(pooled, expectedIdentity);
+        } else {
+          this.assertRuntimeIdentity(pooled, expectedIdentity);
+        }
       }
       this.readinessReservationCounts.set(
         deviceId,
@@ -2317,26 +2398,39 @@ export class DevicePool {
 
   private assertRuntimeIdentity(
     pooled: PooledDevice,
-    expected: Pick<BootedDevice, "deviceId" | "name" | "platform"> | undefined,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId"> | undefined,
   ): void {
     if (!expected || this.matchesRuntimeIdentity(pooled, expected)) {
       return;
     }
     throw new ActionableError(
       `Device pool identity mismatch for '${expected.deviceId}': ` +
-        `resolved=[${expected.name} platform=${expected.platform}] ` +
-        `pooled=[${pooled.name} platform=${pooled.platform}].`,
+        `resolved=[${expected.name} platform=${expected.platform} transportId=${expected.transportId}] ` +
+        `pooled=[${pooled.name} platform=${pooled.platform} transportId=${pooled.transportId}].`,
     );
   }
 
   private matchesRuntimeIdentity(
     pooled: PooledDevice,
-    expected: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
   ): boolean {
     return (
       pooled.id === expected.deviceId &&
       pooled.name === expected.name &&
-      pooled.platform === expected.platform
+      pooled.platform === expected.platform &&
+      pooled.transportId === expected.transportId
+    );
+  }
+
+  private hasTransportOnlyIdentityChange(
+    pooled: PooledDevice,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
+  ): boolean {
+    return (
+      pooled.id === expected.deviceId &&
+      pooled.name === expected.name &&
+      pooled.platform === expected.platform &&
+      !this.matchesRuntimeIdentity(pooled, expected)
     );
   }
 

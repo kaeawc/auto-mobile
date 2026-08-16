@@ -468,7 +468,7 @@ export class DevicePool {
   /**
    * Remove device from pool
    */
-  async removeDevice(deviceId: string): Promise<void> {
+  async removeDevice(deviceId: string, awaitCacheCleanup: boolean = true): Promise<void> {
     const device = this.devices.get(deviceId);
     if (!device) {
       return;
@@ -487,7 +487,14 @@ export class DevicePool {
     if (this.lastReleasedDeviceId === deviceId) {
       this.lastReleasedDeviceId = null;
     }
-    await this.clearDeviceSessionCache(deviceId);
+    const cacheCleanup = this.clearDeviceSessionCache(deviceId);
+    if (awaitCacheCleanup) {
+      await cacheCleanup;
+    } else {
+      void cacheCleanup.catch((error) => {
+        logger.warn(`[DevicePool] Deferred cache cleanup failed for ${deviceId}: ${error}`, error);
+      });
+    }
     logger.info(`Removed device ${deviceId} from pool and cleared cached data`);
   }
 
@@ -2171,7 +2178,7 @@ export class DevicePool {
         return false;
       }
       this.releaseCapturedDeviceForShutdown(expectedDevice);
-      await this.removeDevice(expectedDevice.id);
+      await this.removeDevice(expectedDevice.id, false);
       return !this.devices.has(expectedDevice.id);
     });
   }
@@ -2190,7 +2197,7 @@ export class DevicePool {
         return undefined;
       }
       this.releaseCapturedDeviceForShutdown(expectedDevice);
-      await this.removeDevice(expectedDevice.id);
+      await this.removeDevice(expectedDevice.id, false);
       if (this.devices.has(expectedDevice.id)) {
         return undefined;
       }

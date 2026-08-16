@@ -18,6 +18,7 @@ import {
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { getAbortSignal } from "../../src/utils/AbortContext";
+import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { DeviceSessionRepository } from "../../src/db/DeviceSessionRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -1114,6 +1115,70 @@ describe("killDevice handler", () => {
 
     expect(pool.getDevice(image.deviceId!)).toBeNull();
     expect(registry.getByUuid(deviceSession.deviceSessionUuid)).toBeUndefined();
+  });
+
+  test("releases an iOS shutdown reservation after a late CtrlProxy teardown failure", async () => {
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    const image: DeviceInfo = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "ios-udid-1",
+      isRunning: false,
+      source: "local",
+    };
+    let rejectStop: (error: Error) => void;
+    const deferredStop = new Promise<void>((_, reject) => {
+      rejectStop = reject;
+    });
+    const originalGetInstance = IOSCtrlProxyManager.getInstance;
+    (IOSCtrlProxyManager as unknown as {
+      getInstance: typeof IOSCtrlProxyManager.getInstance;
+    }).getInstance = () => ({ stop: () => deferredStop }) as never;
+    try {
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => successfulManager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
+      successfulManager.setDeviceImages("ios", [image]);
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        timer,
+        new FakeInstalledAppsRepository(),
+        successfulManager,
+        new DefaultRetryExecutor(timer),
+        new FakeDeviceSessionRepository(),
+      );
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      await pool.assignMultipleDevices(["session-1"], 1_000, "ios");
+      await pool.releaseDevice(image.deviceId!, "session-1");
+      const tool = ToolRegistry.getTool("killDevice");
+      if (!tool) {
+        throw new Error("killDevice not registered");
+      }
+
+      const result = tool.handler({
+        device: { name: image.name, platform: "ios", deviceId: image.deviceId! },
+      });
+      await new Promise(resolve => setImmediate(resolve));
+      timer.advanceTime(30_000);
+      await expect(result).rejects.toThrow("iOS CtrlProxy shutdown did not complete");
+      expect(pool.getStats()).toMatchObject({ idle: 0, assigned: 1 });
+
+      rejectStop!(new Error("CtrlProxy stop failed"));
+      await deferredStop.catch(() => undefined);
+      expect(pool.getStats()).toMatchObject({ idle: 1, assigned: 0 });
+    } finally {
+      (IOSCtrlProxyManager as unknown as {
+        getInstance: typeof IOSCtrlProxyManager.getInstance;
+      }).getInstance = originalGetInstance;
+    }
   });
 
   test("bounds a hung shutdown discovery with the same actionable timeout", async () => {

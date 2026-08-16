@@ -265,7 +265,7 @@ interface ShutdownDeadlineContext {
   timer: Timer;
   deadlineMs: number;
   requestAbortSignal: AbortSignal | undefined;
-  retainReservationUntil?: (operation: Promise<unknown>) => void;
+  retainReservationUntil?: (operation: Promise<unknown>, releaseAfterFailure?: boolean) => void;
 }
 
 function shouldPropagateShutdownPreparationError(
@@ -349,9 +349,12 @@ async function stopIosCtrlProxyBeforeShutdown(
       async () => await stop,
     );
   } catch (error) {
-    if (isShutdownTimeoutError(error)) {
+    if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
       if (stop) {
-        context.retainReservationUntil?.(stop);
+        // CtrlProxy shutdown mutates process state after its caller stops waiting.
+        // Keep this device unavailable until it settles, but release it after a
+        // failed pre-kill teardown because the platform was never shut down.
+        context.retainReservationUntil?.(stop, true);
       }
       throw error;
     }
@@ -1352,13 +1355,22 @@ export function registerDeviceTools() {
         async signal => await devicePool?.reserveDeviceForShutdown(args.device.deviceId, signal),
       );
       const expectedPooledDevice = shutdownReservation?.device ?? null;
-      const retainReservationUntil = (operation: Promise<unknown>): void => {
+      const retainReservationUntil = (
+        operation: Promise<unknown>,
+        releaseAfterFailure = false,
+      ): void => {
         retainShutdownReservation = true;
         void operation.then(
           () => shutdownReservation?.release(),
-          error => logger.warn(
-            `[DeviceTools] Retaining shutdown reservation after late teardown failed: ${error}`,
-          ),
+          error => {
+            if (releaseAfterFailure) {
+              void shutdownReservation?.release();
+              return;
+            }
+            logger.warn(
+              `[DeviceTools] Retaining shutdown reservation after late teardown failed: ${error}`,
+            );
+          },
         );
       };
       const shutdownContext: ShutdownDeadlineContext = {

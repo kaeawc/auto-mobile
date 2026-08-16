@@ -1319,6 +1319,7 @@ export class DevicePool {
       }
       await this.removeDevice(device.id);
       let intentionallyStopped = false;
+      let intentionalShutdownCleanupError: unknown;
       const recovered = await this.androidDeviceReboot.run(target, async () => {
         if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
           intentionallyStopped = true;
@@ -1327,6 +1328,21 @@ export class DevicePool {
         const childProcess = await this.deviceManager.startDevice(target);
         let ready: BootedDevice | undefined;
         let readinessCompleted = false;
+        const stopCancelledRecovery = async (deviceToRemove?: BootedDevice): Promise<void> => {
+          intentionallyStopped = true;
+          if (deviceToRemove) {
+            try {
+              await this.removeDevice(deviceToRemove.deviceId);
+            } catch (error) {
+              intentionalShutdownCleanupError = error;
+            }
+          }
+          try {
+            await this.stopEmulatorProcess(childProcess);
+          } catch (error) {
+            intentionalShutdownCleanupError ??= error;
+          }
+        };
         try {
           ready = this.criteriaMatcher.withDeviceImageMetadata(
             await waitForDeviceReadyOrCancel(this.deviceManager, target, childProcess),
@@ -1336,26 +1352,20 @@ export class DevicePool {
           recoveryDeviceIds.add(ready.deviceId);
           this.recoveringAndroidDeviceIds.add(ready.deviceId);
           if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
-            intentionallyStopped = true;
-            await this.stopEmulatorProcess(childProcess);
+            await stopCancelledRecovery();
             return;
           }
           await this.addDevice(ready, recoveryImage);
           if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
-            intentionallyStopped = true;
-            await this.removeDevice(ready.deviceId);
-            await this.stopEmulatorProcess(childProcess);
+            await stopCancelledRecovery(ready);
             return;
           }
           await this.trackStartedDeviceProcess(ready, childProcess);
         } catch (error) {
           if (this.consumeIntentionalShutdown(recoveryDeviceIds)) {
             intentionallyStopped = true;
-            if (ready) {
-              await this.removeDevice(ready.deviceId);
-            }
             if (readinessCompleted) {
-              await this.stopEmulatorProcess(childProcess);
+              await stopCancelledRecovery(ready);
             }
             return;
           }
@@ -1363,6 +1373,9 @@ export class DevicePool {
         }
       });
       if (intentionallyStopped) {
+        if (intentionalShutdownCleanupError !== undefined) {
+          throw intentionalShutdownCleanupError;
+        }
         logger.info(
           `[DevicePool] Cancelled Android emulator ${avdName} recovery after intentional shutdown`,
         );

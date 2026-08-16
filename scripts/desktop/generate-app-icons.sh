@@ -96,12 +96,15 @@ iconutil --convert icns --output "${icons_dir}/app-icon.icns" "${iconset}"
 
 echo "==> app-icon.ico"
 render 256 "${workdir}/ico-256.png"
-magick "${workdir}/ico-256.png" -define icon:auto-resize=256,128,64,48,32,16 "${icons_dir}/app-icon.ico"
+# -strip drops the date/time chunks so regeneration is byte-stable (deterministic output).
+magick "${workdir}/ico-256.png" -strip -define icon:auto-resize=256,128,64,48,32,16 \
+  "${icons_dir}/app-icon.ico"
 
 echo "==> tray-truck.png (menu-bar mask)"
 printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">%s</svg>' "${truck_mono_frag}" \
   >"${workdir}/truck-mono.svg"
 rsvg-convert --width 512 --height 512 "${workdir}/truck-mono.svg" -o "${workdir}/tray-truck-full.png"
-magick "${workdir}/tray-truck-full.png" -trim +repage "${icons_dir}/tray-truck.png"
+# -strip drops the date/time chunks so regeneration is byte-stable (deterministic output).
+magick "${workdir}/tray-truck-full.png" -trim +repage -strip "${icons_dir}/tray-truck.png"
 
 echo "done. Wrote app-icon.{svg,png,icns,ico} and tray-truck.png to ${icons_dir}"

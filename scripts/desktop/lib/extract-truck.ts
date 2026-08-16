@@ -6,6 +6,7 @@
 //   truck-mono.frag   the outline + tires as one solid black silhouette for the tintable
 //                     menu-bar mask.
 import { readFileSync, writeFileSync } from "node:fs";
+import { parseStringPromise } from "xml2js";
 
 const logoPath = process.env.LOGO_SVG;
 const outDir = process.env.OUT_DIR;
@@ -13,12 +14,35 @@ if (!logoPath || !outDir) {
   throw new Error("LOGO_SVG and OUT_DIR must be set");
 }
 
-const svg = readFileSync(logoPath, "utf8");
-const pathRe = /<path\b[^>]*?\bd="([^"]+)"[^>]*?\bfill="(#[0-9a-fA-F]{6})"[^>]*?><\/path>/g;
+// Parse the SVG with the shared XML parser rather than a regex, so a semantics-preserving
+// re-export (reordered attributes, single quotes, self-closing tags) still regenerates cleanly.
+const doc = await parseStringPromise(readFileSync(logoPath, "utf8"), {
+  explicitArray: false,
+  mergeAttrs: false,
+});
+
+// Collect every <path>'s (fill -> d) regardless of nesting depth.
 const byFill = new Map<string, string>();
-for (const match of svg.matchAll(pathRe)) {
-  byFill.set(match[2].toLowerCase(), match[1]);
-}
+const visit = (node: unknown): void => {
+  if (Array.isArray(node)) {
+    node.forEach(visit);
+    return;
+  }
+  if (!node || typeof node !== "object") {
+    return;
+  }
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (key === "$") {
+      const attrs = value as Record<string, string>;
+      if (attrs.d && attrs.fill) {
+        byFill.set(attrs.fill.toLowerCase(), attrs.d);
+      }
+    } else {
+      visit(value);
+    }
+  }
+};
+visit(doc);
 
 const need = (fill: string): string => {
   const d = byFill.get(fill);

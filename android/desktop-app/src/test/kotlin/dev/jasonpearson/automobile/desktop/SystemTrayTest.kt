@@ -35,6 +35,21 @@ class SystemTrayTest {
   }
 
   @Test
+  fun `interpretWindowsSystemUsesLightTheme treats a light theme as not dark`() {
+    // SystemUsesLightTheme = 1 -> light taskbar -> dark icon -> not dark background.
+    assertFalse(
+      interpretWindowsSystemUsesLightTheme("    SystemUsesLightTheme    REG_DWORD    0x1")
+    )
+  }
+
+  @Test
+  fun `interpretWindowsSystemUsesLightTheme treats a dark or missing value as dark`() {
+    assertTrue(interpretWindowsSystemUsesLightTheme("    SystemUsesLightTheme    REG_DWORD    0x0"))
+    // A missing key (reg query prints an error) defaults to a dark tray.
+    assertTrue(interpretWindowsSystemUsesLightTheme("ERROR: The system was unable to find..."))
+  }
+
+  @Test
   fun `trayForegroundColor is light on dark menu bars and dark on light menu bars`() {
     val onDark = trayForegroundColor(darkMenuBar = true, connected = true)
     val onLight = trayForegroundColor(darkMenuBar = false, connected = true)

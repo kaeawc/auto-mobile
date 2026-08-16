@@ -1,7 +1,11 @@
 package dev.jasonpearson.automobile.desktop
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.toComposeImageBitmap
@@ -13,6 +17,9 @@ import java.awt.Color
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.IOException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 private val LOG = LoggerFactory.getLogger("SystemTray")
 
@@ -20,11 +27,11 @@ private val LOG = LoggerFactory.getLogger("SystemTray")
  * System tray icon rendering the AutoMobile truck logo, with a context menu for window visibility
  * and quit actions.
  *
- * macOS menu bar guidance: the icon is a monochrome, template-style silhouette so it reads on both
- * light and dark menu bars. AWT tray icons are not auto-templated by macOS, so [detectDarkMenuBar]
- * probes the menu bar's appearance and the truck is drawn light (on dark bars) or dark (on light
- * bars). Connection status — which the colored status dot used to carry — is kept as a subtle cue:
- * the truck is drawn at full strength when connected and dimmed when disconnected, and the tooltip
+ * Menu bar guidance: the icon is a monochrome, template-style silhouette so it reads on both light
+ * and dark menu bars. AWT tray icons are not auto-templated by the OS, so [detectDarkMenuBar]
+ * probes the system appearance and the truck is drawn light (on dark bars) or dark (on light bars).
+ * Connection status — which the colored status dot used to carry — is kept as a subtle cue: the
+ * truck is drawn at full strength when connected and dimmed when disconnected, and the tooltip
  * still spells it out.
  */
 @Composable
@@ -34,9 +41,16 @@ fun ApplicationScope.AutoMobileSystemTray(
   onToggleWindow: () -> Unit,
   onQuit: () -> Unit,
 ) {
-  // Probed once: menu bar appearance rarely changes mid-session, and re-shelling out to `defaults`
-  // on every recomposition (the daemon poll toggles connection state on a timer) would be wasteful.
-  val darkMenuBar = remember { detectDarkMenuBar() }
+  // Re-probe the appearance on a timer so the icon stays legible after the user (or the OS's
+  // automatic schedule) flips Light/Dark, without restarting the app. The probe shells out, so it
+  // runs off the UI thread and only occasionally rather than on every recomposition.
+  var darkMenuBar by remember { mutableStateOf(detectDarkMenuBar()) }
+  LaunchedEffect(Unit) {
+    while (true) {
+      delay(APPEARANCE_POLL_INTERVAL_MS)
+      darkMenuBar = withContext(Dispatchers.IO) { detectDarkMenuBar() }
+    }
+  }
   val icon = remember(isConnected, darkMenuBar) { truckTrayIcon(isConnected, darkMenuBar) }
   val tooltip = if (isConnected) "AutoMobile — Connected" else "AutoMobile — Disconnected"
 
@@ -54,33 +68,53 @@ fun ApplicationScope.AutoMobileSystemTray(
   )
 }
 
+/** How often the tray re-probes the system appearance so the icon follows Light/Dark switches. */
+private const val APPEARANCE_POLL_INTERVAL_MS = 10_000L
+
 /**
- * True when the tray truck should be drawn light. On macOS this reads the system-wide
- * `AppleInterfaceStyle`; on other platforms it assumes a dark tray background (the common case for
- * Windows/Linux system trays).
+ * True when the tray truck should be drawn light. macOS reads the system-wide
+ * `AppleInterfaceStyle`; Windows reads the `SystemUsesLightTheme` registry value (which drives the
+ * taskbar/tray). Linux desktop panels expose no portable theme API, so there we fall back to
+ * assuming a dark panel.
  */
 internal fun detectDarkMenuBar(): Boolean {
   val os = System.getProperty("os.name")?.lowercase().orEmpty()
-  if (!os.contains("mac")) return true
-  return try {
-    val process =
-      ProcessBuilder("defaults", "read", "-g", "AppleInterfaceStyle")
-        .redirectErrorStream(true)
-        .start()
+  return when {
+    os.contains("mac") ->
+      probeAppearance(listOf("defaults", "read", "-g", "AppleInterfaceStyle"))
+        ?.let(::interpretAppleInterfaceStyle) ?: true
+    os.contains("win") ->
+      probeAppearance(
+          listOf(
+            "reg",
+            "query",
+            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+            "/v",
+            "SystemUsesLightTheme",
+          )
+        )
+        ?.let(::interpretWindowsSystemUsesLightTheme) ?: true
+    else -> true
+  }
+}
+
+/** Runs an appearance-detection command and returns its (merged) output, or null on failure. */
+private fun probeAppearance(command: List<String>): String? =
+  try {
+    val process = ProcessBuilder(command).redirectErrorStream(true).start()
     val output = process.inputStream.bufferedReader().use { it.readText() }
     process.waitFor()
-    interpretAppleInterfaceStyle(output)
+    output
   } catch (e: IOException) {
-    // Best-effort probe: if `defaults` can't be run, fall back to the light-on-dark default.
+    // Best-effort probe: if the command can't be run, fall back to the light-on-dark default.
     LOG.debug("Could not read menu bar appearance; defaulting to dark: ${e.message}")
-    true
+    null
   } catch (e: InterruptedException) {
     // Restore the interrupt and fall back rather than failing icon rendering.
     Thread.currentThread().interrupt()
     LOG.debug("Interrupted reading menu bar appearance; defaulting to dark: ${e.message}")
-    true
+    null
   }
-}
 
 /**
  * Interprets the stdout of `defaults read -g AppleInterfaceStyle`. macOS prints `Dark` in dark mode
@@ -88,6 +122,14 @@ internal fun detectDarkMenuBar(): Boolean {
  */
 internal fun interpretAppleInterfaceStyle(output: String): Boolean =
   output.trim().equals("Dark", ignoreCase = true)
+
+/**
+ * Interprets the stdout of `reg query ... /v SystemUsesLightTheme`, which prints e.g.
+ * "SystemUsesLightTheme REG_DWORD 0x1". A value of 1 means the taskbar/tray is light, which wants a
+ * dark icon, so dark == not light (and an unreadable value defaults to dark).
+ */
+internal fun interpretWindowsSystemUsesLightTheme(output: String): Boolean =
+  !Regex("""SystemUsesLightTheme\s+REG_\w+\s+0x0*1\b""").containsMatchIn(output)
 
 /** Foreground color for the tray truck given the menu bar appearance and connection state. */
 internal fun trayForegroundColor(darkMenuBar: Boolean, connected: Boolean): Color {

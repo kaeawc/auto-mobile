@@ -271,7 +271,7 @@ export class DaemonLauncher {
       return;
     }
 
-    this.signalProcessGroup(process, pid, "SIGTERM");
+    const signalledProcessGroup = this.signalProcessGroup(process, pid, "SIGTERM");
     let timeout: NodeJS.Timeout | undefined;
     const deadline = new Promise<void>(resolve => {
       timeout = this.timer.setTimeout(resolve, DAEMON_SHUTDOWN_TIMEOUT_MS);
@@ -292,6 +292,8 @@ export class DaemonLauncher {
       await deadline;
       if (this.isProcessGroupAlive(pid)) {
         this.signalProcessGroup(process, pid, "SIGKILL");
+      } else if (!signalledProcessGroup && process.exitCode === null) {
+        process.kill("SIGKILL");
       }
       await exitPromise;
     } finally {
@@ -315,9 +317,10 @@ export class DaemonLauncher {
     process: TrackedChildProcess,
     pid: number,
     signal: NodeJS.Signals,
-  ): void {
+  ): boolean {
     try {
       this.processGroupKiller(pid, signal);
+      return true;
     } catch (error) {
       // A vanished group has no descendants left to reap. Fall back to the
       // direct handle for unusual spawn implementations that do not create a
@@ -326,6 +329,7 @@ export class DaemonLauncher {
         `Daemon process-group signal failed for pid=${pid}; falling back to the direct child: ${error}`
       );
       process.kill(signal);
+      return false;
     }
   }
 }

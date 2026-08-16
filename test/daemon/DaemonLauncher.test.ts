@@ -350,6 +350,40 @@ describe("DaemonLauncher", () => {
     expect(spawner.process.signals).toEqual([]);
   });
 
+  test("escalates the direct child when detached process-group signaling falls back", async () => {
+    const spawner = new FakeDaemonSpawner();
+    spawner.process.exitOnSignal = "SIGKILL";
+    const timer = new FakeTimer();
+    const processGroupSignals: Array<NodeJS.Signals | 0> = [];
+    const launcher = new DaemonLauncher({
+      spawn: spawner.spawn.bind(spawner),
+      timer,
+      platform: "linux",
+      processGroupKiller: (_pid, signal) => {
+        processGroupSignals.push(signal);
+        throw new Error("ESRCH");
+      },
+    });
+
+    const launch = launcher.launchAndWait({
+      command: "bunx",
+      args: ["-y", "@kaeawc/auto-mobile@1.2.3", "--daemon-mode"],
+      spawnOptions: { detached: true },
+      timeoutMs: 100,
+      waitForReady: async () => false,
+      formatFailure: async summary => new Error(summary),
+    });
+
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(spawner.process.signals).toEqual(["SIGTERM"]);
+
+    timer.advanceTime(DAEMON_SHUTDOWN_TIMEOUT_MS);
+    await expect(launch).rejects.toThrow("Daemon failed to start within 100ms");
+
+    expect(processGroupSignals).toEqual(["SIGTERM", 0]);
+    expect(spawner.process.signals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
   test("keeps a launched child that becomes ready at the readiness deadline", async () => {
     const spawner = new FakeDaemonSpawner();
     const launcher = new DaemonLauncher({ spawn: spawner.spawn.bind(spawner) });

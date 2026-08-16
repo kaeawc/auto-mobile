@@ -136,8 +136,10 @@ export class DaemonLauncher {
 
     const readinessAbort = new AbortController();
     let cleanupProcessListeners = () => {};
+    let processFailureObserved = false;
     const processFailure = new Promise<never>((_, reject) => {
       const rejectWithContext = (summary: string) => {
+        processFailureObserved = true;
         void request.formatFailure(summary).then(
           error => {
             reject(error);
@@ -153,6 +155,7 @@ export class DaemonLauncher {
         rejectWithContext(`Daemon subprocess failed to spawn: ${formatRawSpawnError(error)}`);
       };
       const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+        processFailureObserved = true;
         if (request.formatExitFailure) {
           void request.formatExitFailure(code, signal).then(
             error => {
@@ -188,10 +191,19 @@ export class DaemonLauncher {
         // PID-recorded daemon and its connection before signalling the exact
         // spawned handle, so a daemon that became healthy at the deadline lives.
         readinessAbort.abort();
-        cleanupProcessListeners();
-        if (await request.isReadyForLaunchedProcess?.(daemonProcess.pid) ?? false) {
+        // Keep the startup listeners installed while the final check awaits so
+        // a late child error or exit cannot become unobserved in that window.
+        const isReadyAtDeadline = await Promise.race([
+          request.isReadyForLaunchedProcess?.(daemonProcess.pid) ?? Promise.resolve(false),
+          processFailure,
+        ]);
+        if (processFailureObserved) {
+          await processFailure;
+        }
+        if (isReadyAtDeadline) {
           return;
         }
+        cleanupProcessListeners();
 
         // Keep startup ownership until the child has actually exited. The shared
         // tracker sends SIGTERM, escalates to SIGKILL after the bounded daemon

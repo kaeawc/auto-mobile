@@ -14,18 +14,23 @@ class FakeDaemonProcess extends EventEmitter {
   killed = false;
   readonly signals: NodeJS.Signals[] = [];
   exitOnSignal: NodeJS.Signals | undefined;
+  emitExitImmediately = true;
 
   unref(): void {}
 
   kill(signal: NodeJS.Signals): boolean {
     this.killed = true;
     this.signals.push(signal);
-    if (this.exitOnSignal === signal) {
-      this.exitCode = 0;
-      this.signalCode = signal;
-      this.emit("exit", 0, signal);
+    if (this.exitOnSignal === signal && this.emitExitImmediately) {
+      this.emitExit(signal);
     }
     return true;
+  }
+
+  emitExit(signal: NodeJS.Signals): void {
+    this.exitCode = 0;
+    this.signalCode = signal;
+    this.emit("exit", 0, signal);
   }
 }
 
@@ -180,6 +185,37 @@ describe("DaemonLauncher", () => {
     expect(spawner.process.exitCode).toBe(0);
   });
 
+  test("does not release startup ownership until the timed-out child exits", async () => {
+    const spawner = new FakeDaemonSpawner();
+    spawner.process.exitOnSignal = "SIGTERM";
+    spawner.process.emitExitImmediately = false;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const launcher = new DaemonLauncher({
+      spawn: spawner.spawn.bind(spawner),
+      timer,
+    });
+    let settled = false;
+    const launch = launcher.launchAndWait({
+      command: "auto-mobile",
+      args: ["--daemon-mode"],
+      spawnOptions: {},
+      timeoutMs: 100,
+      waitForReady: async () => false,
+      formatFailure: async summary => new Error(summary),
+    }).finally(() => {
+      settled = true;
+    });
+
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(spawner.process.signals).toEqual(["SIGTERM"]);
+    expect(settled).toBe(false);
+
+    spawner.process.emitExit("SIGTERM");
+    await expect(launch).rejects.toThrow("Daemon failed to start within 100ms");
+    expect(settled).toBe(true);
+  });
+
   test("escalates to SIGKILL when the timed-out child ignores SIGTERM", async () => {
     const spawner = new FakeDaemonSpawner();
     spawner.process.exitOnSignal = "SIGKILL";
@@ -223,5 +259,28 @@ describe("DaemonLauncher", () => {
 
     expect(finalChecks).toEqual([12345]);
     expect(spawner.process.signals).toEqual([]);
+  });
+
+  test("keeps child error observation while the final readiness check is pending", async () => {
+    const spawner = new FakeDaemonSpawner();
+    const launcher = new DaemonLauncher({ spawn: spawner.spawn.bind(spawner) });
+
+    await expect(launcher.launchAndWait({
+      command: "auto-mobile",
+      args: ["--daemon-mode"],
+      spawnOptions: {},
+      timeoutMs: 100,
+      waitForReady: async () => false,
+      isReadyForLaunchedProcess: async () => {
+        await Promise.resolve();
+        spawner.process.emit("error", new Error("late child error"));
+        return false;
+      },
+      formatFailure: async summary => new Error(`formatted: ${summary}`),
+    })).rejects.toThrow("formatted: Daemon subprocess failed to spawn: late child error");
+
+    expect(spawner.process.signals).toEqual([]);
+    expect(spawner.process.listenerCount("error")).toBe(0);
+    expect(spawner.process.listenerCount("exit")).toBe(0);
   });
 });

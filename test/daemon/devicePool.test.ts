@@ -1129,6 +1129,42 @@ describe("DevicePool", () => {
         androidImage: sourceImage,
       });
     });
+
+    test("rekeys a transport-only mismatch before reserving startDevice readiness", async () => {
+      const firstConnection = {
+        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
+        transportId: "1",
+      };
+      const reconnected = { ...firstConnection, transportId: "2" };
+      await initializeLiveDevices([firstConnection]);
+
+      const releaseReservation = await devicePool.reserveDeviceForReadiness(
+        reconnected.deviceId,
+        reconnected,
+      );
+
+      expect(devicePool.getDevice(reconnected.deviceId)?.transportId).toBe("2");
+      await releaseReservation();
+    });
+
+    test("rekeys a non-emulator Android transport reconnect before allocation", async () => {
+      const firstConnection = {
+        ...createBootedDevice("R5CT123456", "android", "Pixel 8"),
+        transportId: "1",
+      };
+      const reconnected = { ...firstConnection, transportId: "2" };
+      await initializeLiveDevices([firstConnection]);
+      fakeDeviceManager.bootedDevices = [reconnected];
+
+      await expect(devicePool.assignDeviceToSession("session-usb", "android")).resolves.toBe(
+        reconnected.deviceId,
+      );
+
+      expect(devicePool.getDevice(reconnected.deviceId)).toMatchObject({
+        transportId: "2",
+        sessionId: "session-usb",
+      });
+    });
   });
 
   describe("device-ready notifications", () => {

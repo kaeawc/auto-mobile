@@ -300,11 +300,6 @@ export class DevicePool {
         `Device discovery completed in ${discoveryTime}ms, found ${bootedDevices.length} devices`,
       );
 
-      if (refreshGeneration !== this.refreshGeneration) {
-        logger.info("Discarding an out-of-date device discovery snapshot");
-        return 0;
-      }
-
       const now = this.seedLastUsedAt(this.timer.now());
       let addedCount = 0;
       let removedCount = 0;
@@ -312,11 +307,18 @@ export class DevicePool {
       const bootedPlatforms = new Set(bootedDevices.map((device) => device.platform));
 
       perf.startOperation("poolUpdate");
-      removedCount = await this.removeDevicesMissingFrom(
+      const removed = await this.removeMissingDevicesForRefresh(
+        assignmentLockHeld,
+        refreshGeneration,
         bootedDeviceIds,
         bootedPlatforms,
         discovery.succeededPlatforms,
       );
+      if (removed === undefined) {
+        logger.info("Discarding an out-of-date device discovery snapshot");
+        return 0;
+      }
+      removedCount = removed;
 
       for (const device of bootedDevices) {
         this.clearAutoStartSuppressionForBootedDevice(device);
@@ -709,6 +711,28 @@ export class DevicePool {
     }
 
     return removedCount;
+  }
+
+  private async removeMissingDevicesForRefresh(
+    assignmentLockHeld: boolean,
+    refreshGeneration: number,
+    bootedDeviceIds: Set<string>,
+    bootedPlatforms: Set<Platform>,
+    succeededPlatforms: Set<Platform>,
+  ): Promise<number | undefined> {
+    const removeMissingDevices = async () => {
+      if (refreshGeneration !== this.refreshGeneration) {
+        return undefined;
+      }
+      return await this.removeDevicesMissingFrom(
+        bootedDeviceIds,
+        bootedPlatforms,
+        succeededPlatforms,
+      );
+    };
+    return assignmentLockHeld
+      ? await removeMissingDevices()
+      : await this.assignmentMutex.runExclusive(removeMissingDevices);
   }
 
   /**
@@ -1248,7 +1272,10 @@ export class DevicePool {
   }
 
   private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
-    return device.platform === "android" && consolePortFromSerial(device.id) !== null;
+    return (
+      device.platform === "android" &&
+      (consolePortFromSerial(device.id) !== null || device.transportId !== undefined)
+    );
   }
 
   private async ensurePooledDevicePresentForUse(
@@ -2064,12 +2091,16 @@ export class DevicePool {
    */
   async reserveDeviceForReadiness(
     deviceId: string,
-    expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
   ): Promise<() => Promise<void>> {
-    await this.assignmentMutex.runExclusive(() => {
+    await this.assignmentMutex.runExclusive(async () => {
       const pooled = this.devices.get(deviceId);
       if (pooled) {
-        this.assertRuntimeIdentity(pooled, expectedIdentity);
+        if (this.hasTransportOnlyIdentityChange(pooled, expectedIdentity)) {
+          await this.replacePooledDeviceForRuntimeIdentity(pooled, expectedIdentity);
+        } else {
+          this.assertRuntimeIdentity(pooled, expectedIdentity);
+        }
       }
       this.readinessReservationCounts.set(
         deviceId,
@@ -2224,6 +2255,18 @@ export class DevicePool {
       pooled.name === expected.name &&
       pooled.platform === expected.platform &&
       pooled.transportId === expected.transportId
+    );
+  }
+
+  private hasTransportOnlyIdentityChange(
+    pooled: PooledDevice,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
+  ): boolean {
+    return (
+      pooled.id === expected.deviceId &&
+      pooled.name === expected.name &&
+      pooled.platform === expected.platform &&
+      !this.matchesRuntimeIdentity(pooled, expected)
     );
   }
 

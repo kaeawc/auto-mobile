@@ -555,7 +555,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param avdName - The AVD name to check
    * @returns Promise with compatibility result
    */
-  private async checkArchitectureCompatibility(avdName: string, avdConfig?: AvdConfig | null): Promise<{
+  private async checkArchitectureCompatibility(
+    avdName: string,
+    avdConfig?: AvdConfig | null,
+  ): Promise<{
     compatible: boolean;
     hostArch: string;
     avdArch?: string;

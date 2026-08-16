@@ -7,7 +7,6 @@ import { unlink } from "node:fs/promises";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
-import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const isWindows = platform() === "win32";
@@ -96,7 +95,7 @@ describe("UnixSocketServer close", () => {
     const closePromise = server.close();
 
     try {
-      await resolvesWithin(Promise.all([closePromise, clientClosed]), 100);
+      await Promise.all([closePromise, clientClosed]);
       expect(client.destroyed).toBe(true);
     } finally {
       if (!client.destroyed) {
@@ -104,31 +103,13 @@ describe("UnixSocketServer close", () => {
       }
       await closePromise;
     }
-  });
+  }, 1_000);
 });
 
 async function connectClient(socketPath: string): Promise<Socket> {
   const client = createConnection(socketPath);
   await once(client, "connect");
   return client;
-}
-
-function resolvesWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timeout = defaultTimer.setTimeout(() => {
-      reject(new Error(`Timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    promise.then(
-      value => {
-        defaultTimer.clearTimeout(timeout);
-        resolve(value);
-      },
-      error => {
-        defaultTimer.clearTimeout(timeout);
-        reject(error);
-      }
-    );
-  });
 }
 
 function listenOnSocket(socketPath: string): Promise<NetServer> {

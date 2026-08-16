@@ -359,6 +359,33 @@ describe("disconnect monitor miss counting", () => {
     expect(deviceDisconnectMissIncarnations.get("sim-1")).toBe(2);
   });
 
+  test("clears miss state after a candidate stops being tracked", () => {
+    const misses = new Map<string, number>([["sim-1", 2]]);
+
+    runDisconnectPoll(misses, new Set(["emulator-5554"]), new Set(), new Set(["android"]));
+
+    expect(misses.has("sim-1")).toBe(false);
+  });
+
+  test("clears a confirmed marker for a newly pooled candidate", () => {
+    const confirmedDisconnectedDeviceIds = new Set(["sim-1"]);
+    const misses = new Map<string, number>();
+
+    evaluateDeviceDisconnects({
+      deviceDisconnectMisses: misses,
+      confirmedDisconnectedDeviceIds,
+      bootedDeviceIds: new Set(["emulator-5554"]),
+      candidateDeviceIds: new Set(["sim-1"]),
+      succeededPlatforms: new Set(["android" as const, "ios" as const]),
+      candidatePlatforms: new Map([["sim-1", "ios" as const]]),
+      candidateIncarnations: new Map([["sim-1", 2]]),
+      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
+    });
+
+    expect(confirmedDisconnectedDeviceIds.has("sim-1")).toBe(false);
+    expect(misses.get("sim-1")).toBe(1);
+  });
+
   test("keeps returning a threshold-missed stale candidate until caller settles cleanup", () => {
     const misses = new Map<string, number>();
     const confirmedDisconnectedDeviceIds = new Set<string>();

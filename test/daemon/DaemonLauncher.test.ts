@@ -5,9 +5,28 @@ import {
   DaemonLauncher,
   type DaemonProcessSpawner,
 } from "../../src/daemon/DaemonLauncher";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 class FakeDaemonProcess extends EventEmitter {
+  pid = 12345;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  killed = false;
+  readonly signals: NodeJS.Signals[] = [];
+  exitOnSignal: NodeJS.Signals | undefined;
+
   unref(): void {}
+
+  kill(signal: NodeJS.Signals): boolean {
+    this.killed = true;
+    this.signals.push(signal);
+    if (this.exitOnSignal === signal) {
+      this.exitCode = 0;
+      this.signalCode = signal;
+      this.emit("exit", 0, signal);
+    }
+    return true;
+  }
 }
 
 class FakeDaemonSpawner implements DaemonProcessSpawner {
@@ -130,5 +149,79 @@ describe("DaemonLauncher", () => {
     expect(readinessSignal?.aborted).toBe(true);
     expect(spawner.process.listenerCount("error")).toBe(0);
     expect(spawner.process.listenerCount("exit")).toBe(0);
+  });
+
+  test("terminates and observes a child that remains alive after readiness times out", async () => {
+    const spawner = new FakeDaemonSpawner();
+    spawner.process.exitOnSignal = "SIGTERM";
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const launcher = new DaemonLauncher({
+      spawn: spawner.spawn.bind(spawner),
+      timer,
+    });
+    const finalChecks: Array<number | undefined> = [];
+
+    await expect(launcher.launchAndWait({
+      command: "auto-mobile",
+      args: ["--daemon-mode"],
+      spawnOptions: {},
+      timeoutMs: 100,
+      waitForReady: async () => false,
+      isReadyForLaunchedProcess: async pid => {
+        finalChecks.push(pid);
+        return false;
+      },
+      formatFailure: async summary => new Error(`formatted: ${summary}`),
+    })).rejects.toThrow("formatted: Daemon failed to start within 100ms");
+
+    expect(finalChecks).toEqual([12345]);
+    expect(spawner.process.signals).toEqual(["SIGTERM"]);
+    expect(spawner.process.exitCode).toBe(0);
+  });
+
+  test("escalates to SIGKILL when the timed-out child ignores SIGTERM", async () => {
+    const spawner = new FakeDaemonSpawner();
+    spawner.process.exitOnSignal = "SIGKILL";
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const launcher = new DaemonLauncher({
+      spawn: spawner.spawn.bind(spawner),
+      timer,
+    });
+
+    await expect(launcher.launchAndWait({
+      command: "auto-mobile",
+      args: ["--daemon-mode"],
+      spawnOptions: {},
+      timeoutMs: 100,
+      waitForReady: async () => false,
+      formatFailure: async summary => new Error(summary),
+    })).rejects.toThrow("Daemon failed to start within 100ms");
+
+    expect(spawner.process.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(spawner.process.exitCode).toBe(0);
+  });
+
+  test("keeps a launched child that becomes ready at the readiness deadline", async () => {
+    const spawner = new FakeDaemonSpawner();
+    const launcher = new DaemonLauncher({ spawn: spawner.spawn.bind(spawner) });
+    const finalChecks: Array<number | undefined> = [];
+
+    await launcher.launchAndWait({
+      command: "auto-mobile",
+      args: ["--daemon-mode"],
+      spawnOptions: {},
+      timeoutMs: 100,
+      waitForReady: async () => false,
+      isReadyForLaunchedProcess: async pid => {
+        finalChecks.push(pid);
+        return true;
+      },
+      formatFailure: async summary => new Error(summary),
+    });
+
+    expect(finalChecks).toEqual([12345]);
+    expect(spawner.process.signals).toEqual([]);
   });
 });

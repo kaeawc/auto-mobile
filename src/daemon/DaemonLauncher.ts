@@ -2,8 +2,10 @@ import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:c
 import { existsSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import { ActionableError } from "../models";
+import { trackProcess, waitForExit, type TrackedChildProcess } from "../utils/ChildProcessTracker";
 import { releaseVersion } from "../utils/mcpVersion";
-import { DAEMON_VERSION } from "./constants";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "./constants";
 
 export interface DaemonLaunchCommand {
   command: string;
@@ -22,6 +24,7 @@ export interface DaemonLauncherDependencies {
   processExecPath?: string;
   executableExists?: (path: string) => boolean;
   spawn?: DaemonProcessSpawner["spawn"];
+  timer?: Timer;
 }
 
 export interface DaemonLaunchRequest {
@@ -30,6 +33,11 @@ export interface DaemonLaunchRequest {
   spawnOptions: SpawnOptions;
   timeoutMs: number;
   waitForReady: (timeoutMs: number, signal: AbortSignal) => Promise<boolean>;
+  /**
+   * Rechecks that the exact spawned PID is now the reachable daemon before the
+   * launcher terminates it for a readiness timeout.
+   */
+  isReadyForLaunchedProcess?: (pid: number | undefined) => Promise<boolean>;
   formatFailure: (summary: string) => Promise<Error>;
   formatExitFailure?: (code: number | null, signal: NodeJS.Signals | null) => Promise<Error>;
 }
@@ -89,6 +97,7 @@ export class DaemonLauncher {
   private readonly processExecPath: string;
   private readonly executableExists: (path: string) => boolean;
   private readonly spawn: DaemonProcessSpawner["spawn"];
+  private readonly timer: Timer;
 
   constructor(dependencies: DaemonLauncherDependencies = {}) {
     this.entryScript = dependencies.entryScript === undefined
@@ -100,6 +109,7 @@ export class DaemonLauncher {
     this.processExecPath = dependencies.processExecPath ?? process.execPath;
     this.executableExists = dependencies.executableExists ?? existsSync;
     this.spawn = dependencies.spawn ?? nodeSpawn;
+    this.timer = dependencies.timer ?? defaultTimer;
   }
 
   resolveCommand(): DaemonLaunchCommand {
@@ -174,6 +184,24 @@ export class DaemonLauncher {
         processFailure,
       ]);
       if (!ready) {
+        // A readiness timeout can race the child binding its socket. Recheck the
+        // PID-recorded daemon and its connection before signalling the exact
+        // spawned handle, so a daemon that became healthy at the deadline lives.
+        readinessAbort.abort();
+        cleanupProcessListeners();
+        if (await request.isReadyForLaunchedProcess?.(daemonProcess.pid) ?? false) {
+          return;
+        }
+
+        // Keep startup ownership until the child has actually exited. The shared
+        // tracker sends SIGTERM, escalates to SIGKILL after the bounded daemon
+        // shutdown grace, and waits for the corresponding exit observation.
+        const tracker = trackProcess(daemonProcess as TrackedChildProcess);
+        await waitForExit(tracker.process, tracker.exitPromise, {
+          signal: "SIGTERM",
+          timeoutMs: DAEMON_SHUTDOWN_TIMEOUT_MS,
+          timer: this.timer,
+        });
         throw await request.formatFailure(`Daemon failed to start within ${request.timeoutMs}ms`);
       }
     } finally {

@@ -1260,6 +1260,32 @@ describe("DevicePool", () => {
       expect(devicePool.getTotalDeviceCount()).toBe(0);
     });
 
+    test("defers refresh eviction while a shutdown reservation owns the incarnation", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      await devicePool.initializeWithDevices([device]);
+      const captured = devicePool.getDevice(device.deviceId);
+      if (!captured) {
+        throw new Error("expected shutdown device to be pooled");
+      }
+      const reservation = await devicePool.reserveDeviceForShutdown(captured.id);
+      if (!reservation) {
+        throw new Error("expected shutdown reservation");
+      }
+      fakeDeviceManager.bootedDevices = [];
+
+      try {
+        await devicePool.refreshDevices();
+        await devicePool.refreshDevices();
+
+        expect(devicePool.getDevice(captured.id)).toBe(captured);
+      } finally {
+        await reservation.release();
+      }
+
+      await devicePool.refreshDevices();
+      expect(devicePool.getDevice(captured.id)).toBeNull();
+    });
+
     test("retains devices on first partial platform discovery miss", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
       fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];

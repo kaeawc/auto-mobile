@@ -359,6 +359,13 @@ function isShutdownTimeoutError(error: unknown): error is ActionableError {
   return error instanceof ActionableError && String(error.message).startsWith("Timed out waiting for");
 }
 
+function shouldClearIntentionalShutdownAfterFailure(
+  platform: SomePlatform,
+  requestAbortSignal: AbortSignal | undefined,
+): boolean {
+  return platform === "android" && !requestAbortSignal?.aborted;
+}
+
 function abortPromise(signal: AbortSignal | undefined): {
   promise: Promise<never> | undefined;
   cleanup: () => void;
@@ -714,7 +721,9 @@ async function killProcessAndRetireOwnership(
   } catch (error) {
     // A failed disappearance confirmation leaves the original incarnation in
     // the pool. It must remain eligible for normal unexpected-loss recovery.
-    if (device.platform === "android") {
+    // Caller cancellation is different: the platform command may already have
+    // succeeded, so retain the marker for its later process-exit cleanup.
+    if (shouldClearIntentionalShutdownAfterFailure(device.platform, requestAbortSignal)) {
       devicePool?.clearIntentionalShutdown(device.deviceId);
     }
     throw error;

@@ -1293,6 +1293,13 @@ export class DevicePool {
     reason: string,
     recoverAndroidEmulator: boolean = false,
   ): Promise<void> {
+    if (this.isReservedForShutdown(device)) {
+      // killDevice alone owns a shutdown-reserved incarnation until it either
+      // retires it or atomically hands off a same-ID replacement. Discovery
+      // pruning must not remove it in the middle of that handoff.
+      logger.debug(`Deferring eviction of shutdown-reserved device ${device.id}: ${reason}`);
+      return;
+    }
     logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
     if (device.sessionId) {
       await this.releaseSessionForDisconnectedDevice(

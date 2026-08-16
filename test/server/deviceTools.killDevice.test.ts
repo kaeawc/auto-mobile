@@ -1183,6 +1183,8 @@ describe("killDevice handler", () => {
   test("preserves caller cancellation while shutdown discovery is pending", async () => {
     const timer = new FakeTimer();
     const abortAwareManager = new AbortAwareHungDiscoveryKillDeviceManager();
+    let markedIntentionalShutdown = 0;
+    let clearedIntentionalShutdown = 0;
     manager = abortAwareManager;
     setDeviceToolsDependencies({
       deviceManagerFactory: () => abortAwareManager,
@@ -1191,6 +1193,15 @@ describe("killDevice handler", () => {
       clearInstalledAppsForDevice: async () => {},
       timer,
     });
+    DaemonState.getInstance().initialize({} as SessionManager, {
+      markIntentionalShutdown: () => {
+        markedIntentionalShutdown++;
+      },
+      clearIntentionalShutdown: () => {
+        clearedIntentionalShutdown++;
+      },
+      reserveDeviceForShutdown: async () => undefined,
+    } as never);
     const controller = new AbortController();
     const tool = ToolRegistry.getTool("killDevice");
     if (!tool) {
@@ -1198,13 +1209,15 @@ describe("killDevice handler", () => {
     }
 
     const result = tool.handler({
-      device: { name: "iPhone 16", platform: "ios", deviceId: "IOS-UDID" },
+      device: { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
     }, undefined, controller.signal);
     await new Promise(resolve => setImmediate(resolve));
     controller.abort(new Error("caller cancelled shutdown"));
 
     await expect(result).rejects.toThrow("caller cancelled shutdown");
     expect(abortAwareManager.discoveryWasAborted).toBe(true);
+    expect(markedIntentionalShutdown).toBe(1);
+    expect(clearedIntentionalShutdown).toBe(0);
   });
 
   test("does not retire ownership when shutdown discovery fails", async () => {

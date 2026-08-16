@@ -421,6 +421,56 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     }
   });
 
+  test("keeps post-validation exit finalization bounded after a child error", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    child.emit("exit", 1, null);
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
+    let rejection: Error | undefined;
+    void readiness.catch((error) => {
+      rejection = error instanceof Error ? error : new Error(String(error));
+    });
+    child.emit("error", new Error("stdio failed after exit"));
+
+    try {
+      await timer.advanceTimeAsync(1_000);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(rejection?.message).toContain("exited with code: 1");
+    } finally {
+      child.emit("close", 1, null);
+      await readiness.catch(() => undefined);
+    }
+  });
+
+  test("prefers finalized diagnostics for exits observed during readiness", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    const launchedChild = await client.startEmulator(avdName);
+    const readiness = expectRejection(
+      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
+    );
+
+    for (let turn = 0; turn < 10 && timer.getSleepCallCount() < 2; turn += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    child.emit("exit", 1, null);
+    child.stderr!.emit(
+      "data",
+      Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
+    );
+    child.emit("close", 1, null);
+    await timer.advanceTimeAsync(500);
+
+    const error = await readiness;
+    expect(error.message).toContain("hypervisor");
+    expect(error.message).toContain("sandbox");
+  });
+
   test("removes readiness listeners after observing a process exit", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {
@@ -441,7 +491,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     await timer.advanceTimeAsync(500);
 
     const error = await readinessError;
-    expect(error.message).toContain("exited with code 1");
+    expect(error.message).toContain("exited with code: 1");
     expect(child.listenerCount("exit")).toBe(baselineExitListeners);
     expect(child.stdout!.listenerCount("data")).toBe(baselineStdoutListeners);
     expect(child.stderr!.listenerCount("data")).toBe(baselineStderrListeners);

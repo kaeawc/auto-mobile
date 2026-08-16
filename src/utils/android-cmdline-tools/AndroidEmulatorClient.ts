@@ -1842,12 +1842,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       child.on("error", (error) => {
         this.timer.clearTimeout(startupTimeout);
-        clearExitDrainTimeout();
-        if (!startupValidationComplete) {
-          startupValidationComplete = true;
-          perf.endOperation("panicDetection");
-          reject(new ActionableError(`Emulator failed to start: ${error.message}`));
+        if (startupValidationComplete) {
+          finalizePostValidationExit(flushLaunchOutput());
+          return;
         }
+        clearExitDrainTimeout();
+        startupValidationComplete = true;
+        perf.endOperation("panicDetection");
+        reject(new ActionableError(`Emulator failed to start: ${error.message}`));
       });
     });
   }
@@ -1892,6 +1894,17 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     if (error) {
       throw error;
     }
+  }
+
+  private async finalizedReadinessExitError(
+    childProcess: ChildProcess | null | undefined,
+    fallback: ActionableError,
+  ): Promise<ActionableError> {
+    const finalization = this.getLaunchErrorFinalization(childProcess);
+    const finalizedError = finalization
+      ? await finalization
+      : this.getLaunchError(childProcess);
+    return finalizedError ?? fallback;
   }
 
   private recordLaunchError(
@@ -2275,9 +2288,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       if (readinessFailure) {
         pollingActive = false;
         await pollingPromise;
+        const finalizedReadinessFailure = await this.finalizedReadinessExitError(
+          childProcess,
+          readinessFailure,
+        );
         perf.endOperation("devicePolling");
         cleanupProcessListeners();
-        throw readinessFailure;
+        throw finalizedReadinessFailure;
       }
 
       if (foundDeviceId) {

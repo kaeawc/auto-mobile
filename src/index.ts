@@ -113,6 +113,7 @@ async function main() {
   const { AndroidCtrlProxyManager } = await import("./utils/CtrlProxyManager");
   const { IOSCtrlProxyBuilder } = await import("./utils/IOSCtrlProxyBuilder");
   const { IOSCtrlProxyManager } = await import("./utils/IOSCtrlProxyManager");
+  const { cleanupDaemonChildProcesses } = await import("./daemon/childProcessCleanup");
   startupBenchmark.endPhase("moduleImports");
 
   const { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } =
@@ -125,6 +126,7 @@ async function main() {
   const { startWebRtcStreamSocketServer, stopWebRtcStreamSocketServer } = webrtcStreamSocketServer;
   const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
   let stdioProxy: { close(): Promise<void> } | undefined;
+  let directModeActive = false;
   let shutdownCleanupFailed = false;
   setProcessShutdownHandler(async (signal) => {
     shutdownCleanupFailed = false;
@@ -137,6 +139,14 @@ async function main() {
         { name: "appearance socket server", run: stopAppearanceSocketServer },
         { name: "WebRTC stream socket server", run: stopWebRtcStreamSocketServer },
         { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
+        {
+          name: "direct-mode capture and iOS CtrlProxy children",
+          run: async () => {
+            if (directModeActive) {
+              await cleanupDaemonChildProcesses();
+            }
+          },
+        },
         {
           name: "prefetched Android CtrlProxy APK",
           run: AndroidCtrlProxyManager.cleanupPrefetchedApk,

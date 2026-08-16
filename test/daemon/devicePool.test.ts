@@ -56,7 +56,7 @@ describe("DevicePool", () => {
     await devicePool.initializeWithDevices(devices);
   };
 
-  const failIosLivenessAfterFirstSession = (): void => {
+  const configureAfterFirstSession = (configure: () => void): void => {
     const createSession = sessionManager.createSession.bind(sessionManager);
     let sessionCreates = 0;
     sessionManager.createSession = async (
@@ -75,10 +75,14 @@ describe("DevicePool", () => {
       );
       sessionCreates++;
       if (sessionCreates === 1) {
-        fakeDeviceManager.failedPlatforms.add("ios");
+        configure();
       }
       return session;
     };
+  };
+
+  const failIosLivenessAfterFirstSession = (): void => {
+    configureAfterFirstSession(() => fakeDeviceManager.failedPlatforms.add("ios"));
   };
 
   class FakeDeviceManagerWithMinimalReadyDevice extends FakeDeviceManager {
@@ -1765,6 +1769,82 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-b")).toBeNull();
       expect(devicePool.getDevice("sim-1")).toMatchObject({ sessionId: null, status: "idle" });
       expect(devicePool.getDevice("sim-2")).toMatchObject({ sessionId: null, status: "idle" });
+    });
+
+    test("rolls back the completed assignment when platform allocation exhausts retries", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("device-a"),
+        createBootedDevice("device-b"),
+      ]);
+      configureAfterFirstSession(() => {
+        const unavailable = devicePool.getDevice("device-b");
+        if (!unavailable) {
+          throw new Error("expected second pooled device");
+        }
+        unavailable.status = "busy";
+      });
+
+      await expect(
+        devicePool.assignMultipleDevices(["session-a", "session-b"], 1000, "android"),
+      ).rejects.toThrow(/Timed out allocating devices/);
+
+      expect(sessionManager.getSession("session-a")).toBeNull();
+      expect(devicePool.getDevice("device-a")).toMatchObject({ sessionId: null, status: "idle" });
+    });
+
+    test("rolls back the completed assignment when criteria allocation times out", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("device-a"),
+        createBootedDevice("device-b"),
+      ]);
+      configureAfterFirstSession(() => {
+        const unavailable = devicePool.getDevice("device-b");
+        if (!unavailable) {
+          throw new Error("expected second pooled device");
+        }
+        unavailable.status = "busy";
+        fakeTimer.advanceTime(1001);
+      });
+
+      await expect(
+        devicePool.assignMultipleDevicesByCriteria(
+          [
+            { sessionId: "session-a", criteria: { platform: "android" } },
+            { sessionId: "session-b", criteria: { platform: "android" } },
+          ],
+          1000,
+        ),
+      ).rejects.toThrow(/Timed out allocating devices/);
+
+      expect(sessionManager.getSession("session-a")).toBeNull();
+      expect(devicePool.getDevice("device-a")).toMatchObject({ sessionId: null, status: "idle" });
+    });
+
+    test("rolls back the completed assignment when criteria allocation becomes non-retryable", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("device-a"),
+        createBootedDevice("device-b", "ios", "iPhone 16"),
+      ]);
+      configureAfterFirstSession(() => {
+        const unavailable = devicePool.getDevice("device-b");
+        if (!unavailable) {
+          throw new Error("expected second pooled device");
+        }
+        unavailable.status = "error";
+      });
+
+      await expect(
+        devicePool.assignMultipleDevicesByCriteria(
+          [
+            { sessionId: "session-a", criteria: { platform: "android" } },
+            { sessionId: "session-b", criteria: { platform: "ios" } },
+          ],
+          1000,
+        ),
+      ).rejects.toThrow(/Failed to allocate device for session session-b/);
+
+      expect(sessionManager.getSession("session-a")).toBeNull();
+      expect(devicePool.getDevice("device-a")).toMatchObject({ sessionId: null, status: "idle" });
     });
 
     test("evicts a started emulator when its process exits after readiness", async () => {

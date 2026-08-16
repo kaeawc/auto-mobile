@@ -1,5 +1,8 @@
 import { describe, expect, test, spyOn } from "bun:test";
+import { readFile } from "fs/promises";
+import path from "path";
 import { LogLevel, parseAutomobileLogLevel, resolveProcessLogPrefix } from "../../src/utils/logger";
+import { getTempDir, TEMP_SUBDIRS } from "../../src/utils/tempDir";
 
 // Re-import the logger module with AUTOMOBILE_LOG_LEVEL set so the module-load
 // seed (`currentLogLevel = parseAutomobileLogLevel(...) ?? INFO`) re-evaluates
@@ -106,6 +109,23 @@ describe("AUTOMOBILE_LOG_LEVEL is applied at process start (issue #3845)", () =>
   test("still emits an ERROR line when seeded to error", async () => {
     const emitted = await captureEmit("error", l => l.error("loglevel-3845-error"));
     expect(emitted).toContain("loglevel-3845-error");
+  });
+
+  test("close waits for queued file-log writes", async () => {
+    const marker = `logger-close-${crypto.randomUUID()}`;
+    const mod = await loggerWithEnvLevel("error");
+
+    for (let index = 0; index < 2_000; index += 1) {
+      mod.logger.error(`${marker}-${index}`);
+    }
+    await mod.logger.close();
+
+    const logFile = path.join(
+      getTempDir(TEMP_SUBDIRS.LOGS),
+      `${mod.resolveProcessLogPrefix(process.argv, process.pid)}.log`,
+    );
+    const contents = await readFile(logFile, "utf8");
+    expect(contents).toContain(`${marker}-1999`);
   });
 });
 

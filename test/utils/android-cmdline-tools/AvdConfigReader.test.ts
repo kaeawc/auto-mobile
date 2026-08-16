@@ -22,6 +22,22 @@ describe("parseAvdConfig", () => {
     expect(config.osVersion).toBe("14");
   });
 
+  it("parses architecture from abi.type", () => {
+    const config = parseAvdConfig(
+      "abi.type=arm64-v8a\nimage.sysdir.1=system-images/android-34/google_apis/x86_64/",
+    );
+
+    expect(config.architecture).toBe("arm64-v8a");
+  });
+
+  it("falls back to image.sysdir.1 when abi.type is absent", () => {
+    const config = parseAvdConfig(
+      "image.sysdir.1=system-images/android-34/google_apis_playstore/x86_64/",
+    );
+
+    expect(config.architecture).toBe("x86_64");
+  });
+
   it("parses device name and tag", () => {
     const content = [
       "hw.device.name=pixel_6",

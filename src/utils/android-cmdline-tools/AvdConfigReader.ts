@@ -9,6 +9,8 @@ export const MIN_AVD_RAM_MB = 2048;
 export interface AvdConfig {
   apiLevel?: number;
   osVersion?: string;
+  /** System-image ABI used by the AVD. */
+  architecture?: string;
   screenWidth?: number;
   screenHeight?: number;
   screenDensity?: number;
@@ -138,6 +140,7 @@ export function parseAvdConfig(content: string): AvdConfig {
     ...parseRamSize(props),
     ...parseDeviceMetadata(props),
     ...parseApiMetadata(props),
+    ...parseArchitecture(props),
   };
 }
 
@@ -212,4 +215,15 @@ function parseApiMetadata(props: Map<string, string>): Pick<AvdConfig, "apiLevel
   if (!match) {return {};}
   const level = Number.parseInt(match[1], 10);
   return { apiLevel: level, osVersion: apiLevelToVersion(level) ?? String(level) };
+}
+
+function parseArchitecture(props: Map<string, string>): Pick<AvdConfig, "architecture"> {
+  const configuredAbi = props.get("abi.type");
+  if (configuredAbi) {
+    return { architecture: configuredAbi };
+  }
+
+  const imagePathSegments = props.get("image.sysdir.1")?.split(/[\\/]/).filter(Boolean);
+  const architecture = imagePathSegments?.at(-1);
+  return architecture ? { architecture } : {};
 }

@@ -25,6 +25,7 @@ export interface WorkflowStep {
   wait?: string | string[];
   if?: string | boolean;
   env?: Record<string, string | number | boolean>;
+  with?: Record<string, string | number | boolean>;
 }
 
 const repoRoot = join(import.meta.dir, "../..");

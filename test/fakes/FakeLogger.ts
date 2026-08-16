@@ -43,6 +43,7 @@ export class FakeLogger implements Logger {
   // Writes are synchronous in the fake, so there is nothing in flight to await.
   async flush(): Promise<void> {}
   close(): void {}
+  async closeAfterFlush(): Promise<void> {}
 
   /** Messages emitted at the given level. */
   at(level: LoggedMessage["level"]): LoggedMessage[] {

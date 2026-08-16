@@ -120,6 +120,26 @@ describe("process lifecycle handlers", () => {
     expect(fakeProcess.exitCodes).toEqual([0]);
   });
 
+  test("exits with failure after shutdown cleanup reports an aggregate failure", async () => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+    const consoleError = spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      lifecycle.install();
+      lifecycle.setShutdownHandler(() => {
+        throw new AggregateError([new Error("socket cleanup failed")], "cleanup failed");
+      });
+
+      fakeProcess.emit("SIGTERM");
+      await flushMicrotasks();
+
+      expect(fakeProcess.exitCodes).toEqual([1]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   test("delegates fatal process events without forcing an exit", async () => {
     const fakeProcess = new FakeProcess();
     const lifecycle = new ProcessLifecycleHandlers(fakeProcess);

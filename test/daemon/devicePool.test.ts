@@ -1279,6 +1279,24 @@ describe("DevicePool", () => {
       expect(device?.errorCount).toBe(0);
     });
 
+    test("concurrent same-session creation converges on one assigned device", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("emulator-5554"),
+        createBootedDevice("emulator-5556"),
+      ]);
+
+      const [first, second] = await Promise.all([
+        sessionManager.getOrCreateSession("shared-session", devicePool),
+        sessionManager.getOrCreateSession("shared-session", devicePool),
+      ]);
+
+      expect(first.sessionId).toBe("shared-session");
+      expect(second).toBe(first);
+      expect(first.assignedDevice).toBe(second.assignedDevice);
+      expect(devicePool.getAvailableDeviceCount()).toBe(1);
+      expect(devicePool.getDevice(first.assignedDevice)?.status).toBe("busy");
+    });
+
     test("should throw error when no devices available after timeout", async () => {
       // Use manual mode so we can control time advancement
 

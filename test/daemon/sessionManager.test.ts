@@ -1,5 +1,9 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { SessionManager, type KeepScreenAwakeRestorer } from "../../src/daemon/sessionManager";
+import {
+  SessionManager,
+  type KeepScreenAwakeRestorer,
+  type SessionDeviceAssigner,
+} from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
@@ -141,6 +145,66 @@ describe("SessionManager", () => {
         expect(error instanceof Error).toBe(true);
         expect((error as Error).message).toContain("not found");
       }
+    });
+
+    test("allows distinct unseen session IDs to begin assignment independently", async () => {
+      const assignedSessionIds: string[] = [];
+      let releaseAssignments!: () => void;
+      const assignmentsReleased = new Promise<void>((resolve) => {
+        releaseAssignments = resolve;
+      });
+      let signalBothAssignmentsStarted!: () => void;
+      const bothAssignmentsStarted = new Promise<void>((resolve) => {
+        signalBothAssignmentsStarted = resolve;
+      });
+      const devicePool: SessionDeviceAssigner = {
+        assignDeviceToSession: async (sessionId: string): Promise<string> => {
+          assignedSessionIds.push(sessionId);
+          if (assignedSessionIds.length === 2) {
+            signalBothAssignmentsStarted();
+          }
+          await assignmentsReleased;
+          const session = await sessionManager.createSession(sessionId, `device-${sessionId}`, "android");
+          return session.assignedDevice;
+        },
+      };
+
+      const sessionsPromise = Promise.all([
+        sessionManager.getOrCreateSession("session-a", devicePool),
+        sessionManager.getOrCreateSession("session-b", devicePool),
+      ]);
+
+      await bothAssignmentsStarted;
+      expect(assignedSessionIds).toEqual(["session-a", "session-b"]);
+
+      releaseAssignments();
+      const [first, second] = await sessionsPromise;
+      expect(first.assignedDevice).toBe("device-session-a");
+      expect(second.assignedDevice).toBe("device-session-b");
+    });
+
+    test("allows a retry after an unseen-session assignment fails", async () => {
+      let attempts = 0;
+      const devicePool: SessionDeviceAssigner = {
+        assignDeviceToSession: async (sessionId: string): Promise<string> => {
+          attempts++;
+          if (attempts === 1) {
+            throw new Error("first assignment failed");
+          }
+          const session = await sessionManager.createSession(sessionId, "retry-device", "android");
+          return session.assignedDevice;
+        },
+      };
+
+      await expect(sessionManager.getOrCreateSession("retry-session", devicePool)).rejects.toThrow(
+        "first assignment failed",
+      );
+
+      await expect(sessionManager.getOrCreateSession("retry-session", devicePool)).resolves.toMatchObject({
+        sessionId: "retry-session",
+        assignedDevice: "retry-device",
+      });
+      expect(attempts).toBe(2);
     });
 
     test("should return null session when expired session requested", async () => {

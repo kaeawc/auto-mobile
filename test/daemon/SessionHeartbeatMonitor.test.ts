@@ -188,10 +188,46 @@ describe("SessionHeartbeatMonitor", () => {
       await Promise.resolve();
       expect(reaped).toEqual([]);
 
-      timer.advanceTime(2);
+      // FakeTimer catches up interval callbacks synchronously. Drive each
+      // scheduled epoch separately so a completed async tick gets its normal
+      // event-loop turn before the next interval callback.
+      timer.advanceTime(1);
+      await Promise.resolve();
+      timer.advanceTime(1);
       await Promise.resolve();
       expect(reaped).toEqual(["s1"]);
       monitor.stop();
+    });
+
+    it("does not overlap a heartbeat reap with the next interval tick", async () => {
+      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+      let resolveReap!: () => void;
+      const blockedReap = new Promise<void>(resolve => { resolveReap = resolve; });
+      let reapCount = 0;
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async () => {
+          reapCount++;
+          return blockedReap;
+        },
+        timer,
+        { checkIntervalMs: 1, preFirstHeartbeatGraceMs: 0 },
+      );
+
+      monitor.start();
+      timer.advanceTime(1);
+      expect(reapCount).toBe(1);
+
+      timer.advanceTime(1);
+      expect(reapCount).toBe(1);
+
+      resolveReap();
+      await new Promise<void>(resolve => setImmediate(resolve));
+      timer.advanceTime(1);
+      expect(reapCount).toBe(2);
+
+      await monitor.stop();
     });
   });
 

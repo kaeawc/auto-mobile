@@ -4,7 +4,6 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
-import { createTestDatabase } from "../db/testDbHelper";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
 describe("Daemon UUID source", function() {
@@ -39,7 +38,7 @@ describe("Daemon UUID source", function() {
       {},
       new FakeInstalledAppsRepository(),
       timer,
-      new DeviceSessionRepository(await createTestDatabase()),
+      undefined,
       idGenerator,
     );
     const pool = daemon.getDevicePool();

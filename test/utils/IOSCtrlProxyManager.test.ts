@@ -299,6 +299,29 @@ describe("IOSCtrlProxyManager", function() {
       expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
       expect(IOSCtrlProxyManager.getInstance(second.device)).not.toBe(second);
     });
+
+    test("clears all instances when one stop never settles", async function() {
+      const first = IOSCtrlProxyManager.getInstance(testDevice);
+      const second = IOSCtrlProxyManager.getInstance({
+        deviceId: "33333333-3333-3333-3333-333333333333",
+        platform: "ios",
+        name: "Hung iPhone",
+      });
+      const timer = new FakeTimer();
+      const firstStop = spyOn(first, "stop").mockImplementation(async () => {
+        await new Promise<void>(() => {});
+      });
+      const secondStop = spyOn(second, "stop").mockResolvedValue();
+      const shutdown = IOSCtrlProxyManager.shutdownAll(timer);
+
+      await Promise.resolve();
+      timer.advanceTime(10_000);
+      await shutdown;
+
+      expect(firstStop).toHaveBeenCalledTimes(1);
+      expect(secondStop).toHaveBeenCalledTimes(1);
+      expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
+    });
   });
 
   describe("getServicePort", function() {

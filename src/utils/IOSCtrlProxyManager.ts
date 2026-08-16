@@ -26,6 +26,7 @@ import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 export const MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES = 20;
 export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
+const SHUTDOWN_STOP_TIMEOUT_MS = 10_000;
 
 /**
  * iOS-specific setup result; carries the build result alongside the
@@ -406,13 +407,36 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   /**
    * Stop all active instances (for shutdown)
    */
-  public static async shutdownAll(): Promise<void> {
+  public static async shutdownAll(timer: Timer = defaultTimer): Promise<void> {
     const instances = Array.from(IOSCtrlProxyManager.instances.values());
-    const results = await Promise.allSettled(instances.map(instance => instance.stop()));
+    const results = await Promise.all(
+      instances.map(instance => IOSCtrlProxyManager.stopWithinShutdownDeadline(instance, timer))
+    );
     IOSCtrlProxyManager.instances.clear();
     for (const result of results) {
-      if (result.status === "rejected") {
-        logger.warn(`[IOSCtrlProxy] Failed to stop instance during shutdown: ${result.reason}`);
+      if (result !== null) {
+        logger.warn(`[IOSCtrlProxy] Failed to stop instance during shutdown: ${result}`);
+      }
+    }
+  }
+
+  private static async stopWithinShutdownDeadline(
+    instance: IOSCtrlProxyManager,
+    timer: Timer
+  ): Promise<unknown | null> {
+    let timeout: NodeJS.Timeout | undefined;
+    const settled = instance.stop().then(() => null, error => error);
+    const timedOut = new Promise<Error>(resolve => {
+      timeout = timer.setTimeout(
+        () => resolve(new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`)),
+        SHUTDOWN_STOP_TIMEOUT_MS
+      );
+    });
+    try {
+      return await Promise.race([settled, timedOut]);
+    } finally {
+      if (timeout) {
+        timer.clearTimeout(timeout);
       }
     }
   }

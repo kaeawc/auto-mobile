@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { cleanupDaemonChildProcesses } from "../../src/daemon/childProcessCleanup";
 import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("cleanupDaemonChildProcesses", () => {
   test("stops every recording, interrupts failed stops, and still shuts down iOS CtrlProxy", async () => {
@@ -62,6 +63,41 @@ describe("cleanupDaemonChildProcesses", () => {
       "interrupt:recording-a",
       "stop:recording-b",
       "interrupt:recording-b",
+      "shutdown-ios-ctrl-proxies",
+    ]);
+  });
+
+  test("continues after a recording cleanup times out", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const calls: string[] = [];
+    const cleanup = cleanupDaemonChildProcesses({
+      listActiveVideoRecordings: async () => [
+        { recordingId: "hung-recording" },
+        { recordingId: "later-recording" },
+      ] as VideoRecordingRecord[],
+      stopVideoRecording: async recordingId => {
+        calls.push(`stop:${recordingId}`);
+        if (recordingId === "hung-recording") {
+          await new Promise<void>(() => {});
+        }
+      },
+      interruptVideoRecording: async recordingId => {
+        calls.push(`interrupt:${recordingId}`);
+      },
+      shutdownIOSCtrlProxies: async () => {
+        calls.push("shutdown-ios-ctrl-proxies");
+      },
+      timer,
+      timeoutMs: 10,
+    });
+
+    await cleanup;
+
+    expect(calls).toEqual([
+      "stop:hung-recording",
+      "interrupt:hung-recording",
+      "stop:later-recording",
       "shutdown-ios-ctrl-proxies",
     ]);
   });

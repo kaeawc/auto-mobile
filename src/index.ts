@@ -534,6 +534,7 @@ async function main() {
       // The daemon manages device state and tool execution
       // In no-proxy mode (--no-proxy flag), the MCP server executes tools directly
       const useProxyMode = !noProxy;
+      directModeActive = !useProxyMode;
 
       if (useProxyMode) {
         logger.info("Starting MCP server in proxy mode (connecting to daemon)");

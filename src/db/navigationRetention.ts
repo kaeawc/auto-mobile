@@ -13,17 +13,22 @@
 //      unbounded surface — one row per (build, device, session) per node/edge —
 //      so they are pruned by age, and build keys orphaned by that prune are
 //      swept. Nodes/edges themselves are bounded (one per screen/transition) and
-//      durable, so they are intentionally NOT age-deleted here.
+//      durable, so they are intentionally NOT age-deleted here. The TTL tier
+//      spares the active build key entirely (never age-delete what is current).
 //   3. Global LRU size cap — a backstop enforcing a per-app AND a global budget
-//      on the (evictable) observation rows, evicting oldest by `last_seen_at`.
+//      on the observation rows, evicting oldest by `last_seen_at`. Unlike the TTL
+//      tier, the cap counts the active build key's rows too (otherwise a
+//      continuously-used single-build app would never be bounded), but it never
+//      evicts the *active* rows themselves — see `computeActiveObservationIds`.
 //
-// Active-data safety (AC3): the most-recently-seen build key per app is treated
-// as the active context and NEVER pruned by any tier. Because in-flight writes
-// land on the current build key (which has the newest `last_seen_at`), this
-// protects whatever is being observed right now without a separate liveness
-// signal. The whole pass runs in one transaction (atomic, no torn graph);
-// observations are deleted before their orphaned build keys (FK-safe order), and
-// file unlinks run AFTER commit as side effects (never inside the txn).
+// Active-data safety (AC3): the most-recently-seen build key per app is the
+// active context. The TTL tier and the orphan-build-key sweep never touch it, and
+// the size cap never evicts its newest observation(s). Because in-flight writes
+// land on the current build key (newest `last_seen_at`), this protects whatever is
+// being observed right now without a separate liveness signal. The whole pass runs
+// in one transaction (atomic, no torn graph); observations are deleted before
+// their orphaned build keys (FK-safe order), and file unlinks run AFTER commit as
+// side effects (never inside the txn).
 
 import type { Kysely } from "kysely";
 import type { Database } from "./types";
@@ -35,10 +40,17 @@ export interface NavigationRetentionConfig {
   screenshotTtlMs: number;
   /** LONG tier: max age of an observation row before it is pruned. */
   structureTtlMs: number;
-  /** Backstop: max evictable observation rows kept per app. */
+  /** Backstop: max observation rows kept per app. */
   perAppMaxObservations: number;
-  /** Backstop: max evictable observation rows kept across all apps. */
+  /** Backstop: max observation rows kept across all apps. */
   globalMaxObservations: number;
+  /**
+   * Max victim ids bound in one DELETE. Kept well under bun:sqlite's
+   * `MAX_VARIABLE_NUMBER` (250_000) so a runaway eviction can never overflow the
+   * bind limit and roll back the whole retention transaction. Overridable mainly
+   * so tests can exercise the batching loop without a quarter-million rows.
+   */
+  evictionChunkSize: number;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -50,6 +62,7 @@ export const DEFAULT_SCREENSHOT_TTL_MS = 7 * DAY_MS; // 7 days
 export const DEFAULT_STRUCTURE_TTL_MS = 90 * DAY_MS; // ~3 months
 export const DEFAULT_PER_APP_MAX_OBSERVATIONS = 50_000;
 export const DEFAULT_GLOBAL_MAX_OBSERVATIONS = 500_000;
+export const DEFAULT_EVICTION_CHUNK_SIZE = 5_000;
 
 /** Default cadence of the background pass: every 6 hours. */
 export const DEFAULT_NAV_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -81,46 +94,72 @@ function emptySummary(prunedAt: number): NavigationRetentionSummary {
   };
 }
 
-function readPositiveIntEnv(name: string): number | undefined {
-  const raw = process.env[name];
-  if (!raw) {
+/** A positive safe integer, or undefined for anything else (0, negative, NaN, float). */
+function sanitizePositiveInt(value: number | undefined): number | undefined {
+  if (value === undefined) {
     return undefined;
   }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * Strict env read: the ENTIRE trimmed value must be a run of digits, so partial
+ * parses that `Number.parseInt` would silently accept ("1e6" -> 1, "12abc" -> 12)
+ * are rejected and fall back to the default rather than becoming a 1ms interval.
+ */
+function readPositiveIntEnv(name: string): number | undefined {
+  const raw = process.env[name]?.trim();
+  if (!raw || !/^\d+$/.test(raw)) {
+    return undefined;
+  }
+  return sanitizePositiveInt(Number.parseInt(raw, 10));
 }
 
 /**
  * Resolve the retention config from explicit overrides, then env, then the
- * conservative defaults above. Overrides win so tests stay hermetic.
+ * conservative defaults. Every source is validated the same way (positive safe
+ * integer), so a stray `perAppMaxObservations: 0` or `NaN` override falls back to
+ * the default instead of evicting everything / no-op'ing.
  */
 export function resolveNavigationRetentionConfig(
   overrides: Partial<NavigationRetentionConfig> = {}
 ): NavigationRetentionConfig {
+  const resolve = (override: number | undefined, envName: string, def: number): number =>
+    sanitizePositiveInt(override) ?? readPositiveIntEnv(envName) ?? def;
+
   return {
-    screenshotTtlMs:
-      overrides.screenshotTtlMs
-      ?? readPositiveIntEnv("AUTOMOBILE_NAV_RETENTION_SCREENSHOT_TTL_MS")
-      ?? DEFAULT_SCREENSHOT_TTL_MS,
-    structureTtlMs:
-      overrides.structureTtlMs
-      ?? readPositiveIntEnv("AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS")
-      ?? DEFAULT_STRUCTURE_TTL_MS,
-    perAppMaxObservations:
-      overrides.perAppMaxObservations
-      ?? readPositiveIntEnv("AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS")
-      ?? DEFAULT_PER_APP_MAX_OBSERVATIONS,
-    globalMaxObservations:
-      overrides.globalMaxObservations
-      ?? readPositiveIntEnv("AUTOMOBILE_NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS")
-      ?? DEFAULT_GLOBAL_MAX_OBSERVATIONS,
+    screenshotTtlMs: resolve(
+      overrides.screenshotTtlMs,
+      "AUTOMOBILE_NAV_RETENTION_SCREENSHOT_TTL_MS",
+      DEFAULT_SCREENSHOT_TTL_MS
+    ),
+    structureTtlMs: resolve(
+      overrides.structureTtlMs,
+      "AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS",
+      DEFAULT_STRUCTURE_TTL_MS
+    ),
+    perAppMaxObservations: resolve(
+      overrides.perAppMaxObservations,
+      "AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS",
+      DEFAULT_PER_APP_MAX_OBSERVATIONS
+    ),
+    globalMaxObservations: resolve(
+      overrides.globalMaxObservations,
+      "AUTOMOBILE_NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS",
+      DEFAULT_GLOBAL_MAX_OBSERVATIONS
+    ),
+    evictionChunkSize: resolve(
+      overrides.evictionChunkSize,
+      "AUTOMOBILE_NAV_RETENTION_EVICTION_CHUNK_SIZE",
+      DEFAULT_EVICTION_CHUNK_SIZE
+    ),
   };
 }
 
-/** Resolve the background-pass interval (ms) from env or the default. */
+/** Resolve the background-pass interval (ms) from override, env, or the default. */
 export function resolveNavigationRetentionIntervalMs(override?: number): number {
   return (
-    override
+    sanitizePositiveInt(override)
     ?? readPositiveIntEnv("AUTOMOBILE_NAV_RETENTION_INTERVAL_MS")
     ?? DEFAULT_NAV_RETENTION_INTERVAL_MS
   );
@@ -135,6 +174,12 @@ interface EvictionCandidate {
   isNode: boolean;
   id: number;
   lastSeenAt: number;
+}
+
+/** The newest observation-row ids per protected build key, kept out of eviction. */
+interface ActiveObservationIds {
+  nodeIds: number[];
+  edgeIds: number[];
 }
 
 /**
@@ -158,10 +203,6 @@ export class NavigationRetention {
     this.config = resolveNavigationRetentionConfig(config);
   }
 
-  getConfig(): NavigationRetentionConfig {
-    return this.config;
-  }
-
   /**
    * Run every tier once against `now` (ms). Returns a per-pass summary. All DB
    * work is a single transaction; screenshot files are unlinked AFTER commit so
@@ -177,11 +218,10 @@ export class NavigationRetention {
       // newest between the read and the deletes.
       const buildKeys = await loadBuildKeys(trx);
       const protectedIds = await computeProtectedBuildKeyIds(trx, buildKeys);
-      const protectedSet = new Set(protectedIds);
 
       filesToRemove = await this.pruneScreenshots(trx, now, protectedIds, summary);
       await this.pruneObservationsByTtl(trx, now, protectedIds, summary);
-      await this.enforceCaps(trx, buildKeys, protectedSet, summary);
+      await this.enforceCaps(trx, buildKeys, protectedIds, summary);
       await this.pruneOrphanBuildKeys(trx, protectedIds, summary);
     });
 
@@ -284,69 +324,82 @@ export class NavigationRetention {
 
   /**
    * Backstop: enforce the per-app budget first, then the global budget, evicting
-   * the oldest evictable observation rows by `last_seen_at`.
+   * the oldest observation rows by `last_seen_at`. The budgets count ALL of an
+   * app's rows (so a single-build app is still bounded), but the newest row of
+   * each protected build key is shielded so the active context is never evicted.
    */
   private async enforceCaps(
     trx: Kysely<Database>,
     buildKeys: BuildKeyRow[],
-    protectedSet: Set<number>,
+    protectedIds: number[],
     summary: NavigationRetentionSummary
   ): Promise<void> {
-    // Per-app: each app's evictable build keys (its own keys minus the protected
-    // one). Observations are scoped by `build_key_id IN (...)`, so no join needed.
-    const evictableByApp = new Map<string, number[]>();
+    const activeIds = await computeActiveObservationIds(trx, protectedIds);
+
+    const buildKeysByApp = new Map<string, number[]>();
     for (const bk of buildKeys) {
-      if (protectedSet.has(bk.id)) {
-        continue;
-      }
-      const list = evictableByApp.get(bk.appId) ?? [];
+      const list = buildKeysByApp.get(bk.appId) ?? [];
       list.push(bk.id);
-      evictableByApp.set(bk.appId, list);
+      buildKeysByApp.set(bk.appId, list);
     }
 
-    for (const [, buildKeyIds] of evictableByApp) {
-      const count = await countObservations(trx, buildKeyIds);
+    for (const [, ids] of buildKeysByApp) {
+      const count = await countObservations(trx, ids);
       const overflow = count - this.config.perAppMaxObservations;
       if (overflow > 0) {
-        await this.evictOldest(trx, buildKeyIds, overflow, summary);
+        await this.evictOldest(trx, ids, activeIds, overflow, summary);
       }
     }
 
-    // Global: every evictable build key across all apps.
-    const globalEvictable = buildKeys.filter(bk => !protectedSet.has(bk.id)).map(bk => bk.id);
-    const globalCount = await countObservations(trx, globalEvictable);
+    const globalCount = await countObservations(trx, null);
     const globalOverflow = globalCount - this.config.globalMaxObservations;
     if (globalOverflow > 0) {
-      await this.evictOldest(trx, globalEvictable, globalOverflow, summary);
+      await this.evictOldest(trx, null, activeIds, globalOverflow, summary);
     }
   }
 
+  /**
+   * Evict `count` oldest observation rows in scope, in bounded batches so a single
+   * DELETE never binds more ids than {@link NavigationRetentionConfig.evictionChunkSize}.
+   * The loop terminates when the target is met or no evictable rows remain (the
+   * active rows are excluded, so a scope can be irreducible below its active set).
+   *
+   * Perf note: each batch does an ordered scan of the observation tables. A
+   * `(build_key_id, last_seen_at)` index would turn this into an index range scan;
+   * deferred as a small follow-up migration (issue #5309).
+   */
   private async evictOldest(
     trx: Kysely<Database>,
-    buildKeyIds: number[],
+    scopeBuildKeyIds: number[] | null,
+    activeIds: ActiveObservationIds,
     count: number,
     summary: NavigationRetentionSummary
   ): Promise<void> {
-    if (buildKeyIds.length === 0 || count <= 0) {
-      return;
-    }
-    const victims = await collectOldestEvictable(trx, buildKeyIds, count);
+    let remaining = count;
+    while (remaining > 0) {
+      const batch = Math.min(remaining, this.config.evictionChunkSize);
+      const victims = await collectOldestEvictable(trx, scopeBuildKeyIds, activeIds, batch);
+      if (victims.length === 0) {
+        return;
+      }
 
-    const nodeIds = victims.filter(v => v.isNode).map(v => v.id);
-    const edgeIds = victims.filter(v => !v.isNode).map(v => v.id);
-    if (nodeIds.length > 0) {
-      const deleted = await trx
-        .deleteFrom("navigation_node_observations")
-        .where("id", "in", nodeIds)
-        .executeTakeFirst();
-      summary.nodeObservationsDeleted += Number(deleted.numDeletedRows ?? 0);
-    }
-    if (edgeIds.length > 0) {
-      const deleted = await trx
-        .deleteFrom("navigation_edge_observations")
-        .where("id", "in", edgeIds)
-        .executeTakeFirst();
-      summary.edgeObservationsDeleted += Number(deleted.numDeletedRows ?? 0);
+      const nodeIds = victims.filter(v => v.isNode).map(v => v.id);
+      const edgeIds = victims.filter(v => !v.isNode).map(v => v.id);
+      if (nodeIds.length > 0) {
+        const deleted = await trx
+          .deleteFrom("navigation_node_observations")
+          .where("id", "in", nodeIds)
+          .executeTakeFirst();
+        summary.nodeObservationsDeleted += Number(deleted.numDeletedRows ?? 0);
+      }
+      if (edgeIds.length > 0) {
+        const deleted = await trx
+          .deleteFrom("navigation_edge_observations")
+          .where("id", "in", edgeIds)
+          .executeTakeFirst();
+        summary.edgeObservationsDeleted += Number(deleted.numDeletedRows ?? 0);
+      }
+      remaining -= victims.length;
     }
   }
 
@@ -390,7 +443,7 @@ async function loadBuildKeys(db: Kysely<Database>): Promise<BuildKeyRow[]> {
 /**
  * The active/most-recent build key per app: the one whose observations have the
  * greatest `last_seen_at` (ties and no-observation apps fall back to the newest
- * build-key id). These are never pruned.
+ * build-key id). These are never age-pruned or orphan-swept.
  */
 export async function computeProtectedBuildKeyIds(
   db: Kysely<Database>,
@@ -449,50 +502,134 @@ async function loadMaxSeenByBuildKey(db: Kysely<Database>): Promise<Map<number, 
   return maxSeen;
 }
 
-/** Count observation rows (node + edge) whose build key is in `buildKeyIds`. */
+/**
+ * For each protected build key, the observation-row ids whose `last_seen_at` is
+ * that build key's maximum, per table — the "active" rows the size cap must never
+ * evict (ties keep all rows at the max instant). Small: at most a few rows per
+ * protected build key, and protected build keys number ~one per app.
+ */
+async function computeActiveObservationIds(
+  trx: Kysely<Database>,
+  protectedIds: number[]
+): Promise<ActiveObservationIds> {
+  if (protectedIds.length === 0) {
+    return { nodeIds: [], edgeIds: [] };
+  }
+
+  const nodeMax = await trx
+    .selectFrom("navigation_node_observations")
+    .select(eb => ["build_key_id", eb.fn.max("last_seen_at").as("m")])
+    .where("build_key_id", "in", protectedIds)
+    .groupBy("build_key_id")
+    .execute();
+  const nodeIds = nodeMax.length === 0
+    ? []
+    : (await trx
+        .selectFrom("navigation_node_observations")
+        .select("id")
+        .where(eb =>
+          eb.or(
+            nodeMax.map(r =>
+              eb.and([
+                eb("build_key_id", "=", r.build_key_id),
+                eb("last_seen_at", "=", Number(r.m)),
+              ])
+            )
+          )
+        )
+        .execute()).map(r => r.id);
+
+  const edgeMax = await trx
+    .selectFrom("navigation_edge_observations")
+    .select(eb => ["build_key_id", eb.fn.max("last_seen_at").as("m")])
+    .where("build_key_id", "in", protectedIds)
+    .groupBy("build_key_id")
+    .execute();
+  const edgeIds = edgeMax.length === 0
+    ? []
+    : (await trx
+        .selectFrom("navigation_edge_observations")
+        .select("id")
+        .where(eb =>
+          eb.or(
+            edgeMax.map(r =>
+              eb.and([
+                eb("build_key_id", "=", r.build_key_id),
+                eb("last_seen_at", "=", Number(r.m)),
+              ])
+            )
+          )
+        )
+        .execute()).map(r => r.id);
+
+  return { nodeIds, edgeIds };
+}
+
+/**
+ * Count observation rows (node + edge). `scopeBuildKeyIds === null` counts every
+ * row (global); otherwise only rows whose build key is in the list (one app).
+ */
 async function countObservations(
   trx: Kysely<Database>,
-  buildKeyIds: number[]
+  scopeBuildKeyIds: number[] | null
 ): Promise<number> {
-  if (buildKeyIds.length === 0) {
+  if (scopeBuildKeyIds !== null && scopeBuildKeyIds.length === 0) {
     return 0;
   }
-  const nodeRow = await trx
+
+  let nodeQuery = trx
     .selectFrom("navigation_node_observations")
-    .select(eb => eb.fn.countAll<number>().as("c"))
-    .where("build_key_id", "in", buildKeyIds)
-    .executeTakeFirst();
-  const edgeRow = await trx
+    .select(eb => eb.fn.countAll<number>().as("c"));
+  let edgeQuery = trx
     .selectFrom("navigation_edge_observations")
-    .select(eb => eb.fn.countAll<number>().as("c"))
-    .where("build_key_id", "in", buildKeyIds)
-    .executeTakeFirst();
+    .select(eb => eb.fn.countAll<number>().as("c"));
+  if (scopeBuildKeyIds !== null) {
+    nodeQuery = nodeQuery.where("build_key_id", "in", scopeBuildKeyIds);
+    edgeQuery = edgeQuery.where("build_key_id", "in", scopeBuildKeyIds);
+  }
+
+  const nodeRow = await nodeQuery.executeTakeFirst();
+  const edgeRow = await edgeQuery.executeTakeFirst();
   return Number(nodeRow?.c ?? 0) + Number(edgeRow?.c ?? 0);
 }
 
 /**
  * Collect the `limit` oldest evictable observation rows (by last_seen_at, then
- * id) whose build key is in `buildKeyIds`. Fetches at most `limit` rows per table
- * then merges, so it never loads the whole table — only the overflow being
- * evicted.
+ * id), optionally scoped to one app's build keys, excluding the active rows.
+ * Fetches at most `limit` rows per table then merges, so it never loads the whole
+ * table — only the batch being evicted.
  */
 async function collectOldestEvictable(
   trx: Kysely<Database>,
-  buildKeyIds: number[],
+  scopeBuildKeyIds: number[] | null,
+  activeIds: ActiveObservationIds,
   limit: number
 ): Promise<EvictionCandidate[]> {
-  const nodeRows = await trx
+  let nodeQuery = trx
     .selectFrom("navigation_node_observations")
-    .select(["id", "last_seen_at"])
-    .where("build_key_id", "in", buildKeyIds)
+    .select(["id", "last_seen_at"]);
+  if (scopeBuildKeyIds !== null) {
+    nodeQuery = nodeQuery.where("build_key_id", "in", scopeBuildKeyIds);
+  }
+  if (activeIds.nodeIds.length > 0) {
+    nodeQuery = nodeQuery.where("id", "not in", activeIds.nodeIds);
+  }
+  const nodeRows = await nodeQuery
     .orderBy("last_seen_at", "asc")
     .orderBy("id", "asc")
     .limit(limit)
     .execute();
-  const edgeRows = await trx
+
+  let edgeQuery = trx
     .selectFrom("navigation_edge_observations")
-    .select(["id", "last_seen_at"])
-    .where("build_key_id", "in", buildKeyIds)
+    .select(["id", "last_seen_at"]);
+  if (scopeBuildKeyIds !== null) {
+    edgeQuery = edgeQuery.where("build_key_id", "in", scopeBuildKeyIds);
+  }
+  if (activeIds.edgeIds.length > 0) {
+    edgeQuery = edgeQuery.where("id", "not in", activeIds.edgeIds);
+  }
+  const edgeRows = await edgeQuery
     .orderBy("last_seen_at", "asc")
     .orderBy("id", "asc")
     .limit(limit)

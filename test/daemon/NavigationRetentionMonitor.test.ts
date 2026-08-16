@@ -1,10 +1,17 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { NavigationRetentionMonitor } from "../../src/daemon/NavigationRetentionMonitor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import type {
   NavigationRetention,
   NavigationRetentionSummary,
 } from "../../src/db/navigationRetention";
+
+// The monitor registers each pass with the shared DB write barrier; reset it
+// around every test so a barrier left draining by another suite can't skip our
+// (fake) prune, and so we don't leak state to later suites.
+beforeEach(() => resetDbWriteBarrier());
+afterEach(() => resetDbWriteBarrier());
 
 /**
  * Minimal stand-in for {@link NavigationRetention} that records the clock values

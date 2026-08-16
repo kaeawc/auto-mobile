@@ -6,11 +6,13 @@ import { NavigationRepository } from "../../src/db/navigationRepository";
 import {
   NavigationRetention,
   resolveNavigationRetentionConfig,
+  resolveNavigationRetentionIntervalMs,
   computeProtectedBuildKeyIds,
   DEFAULT_SCREENSHOT_TTL_MS,
   DEFAULT_STRUCTURE_TTL_MS,
   DEFAULT_PER_APP_MAX_OBSERVATIONS,
   DEFAULT_GLOBAL_MAX_OBSERVATIONS,
+  DEFAULT_NAV_RETENTION_INTERVAL_MS,
 } from "../../src/db/navigationRetention";
 
 const APP = "com.example.app";
@@ -31,6 +33,8 @@ describe("navigationRetention config", () => {
     "AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS",
     "AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS",
     "AUTOMOBILE_NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS",
+    "AUTOMOBILE_NAV_RETENTION_EVICTION_CHUNK_SIZE",
+    "AUTOMOBILE_NAV_RETENTION_INTERVAL_MS",
   ];
   const saved: Record<string, string | undefined> = {};
 
@@ -76,6 +80,33 @@ describe("navigationRetention config", () => {
     expect(resolveNavigationRetentionConfig().perAppMaxObservations).toBe(
       DEFAULT_PER_APP_MAX_OBSERVATIONS
     );
+  });
+
+  test("rejects partial-parse env values (strict full-string integer)", () => {
+    // Number.parseInt would accept these as 1 / 12 — strict validation must not.
+    process.env.AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS = "1e6";
+    expect(resolveNavigationRetentionConfig().structureTtlMs).toBe(DEFAULT_STRUCTURE_TTL_MS);
+    process.env.AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS = "12abc";
+    expect(resolveNavigationRetentionConfig().structureTtlMs).toBe(DEFAULT_STRUCTURE_TTL_MS);
+    process.env.AUTOMOBILE_NAV_RETENTION_INTERVAL_MS = "1e6";
+    expect(resolveNavigationRetentionIntervalMs()).toBe(DEFAULT_NAV_RETENTION_INTERVAL_MS);
+  });
+
+  test("rejects invalid EXPLICIT overrides (0 / negative / NaN / float) -> default", () => {
+    expect(resolveNavigationRetentionConfig({ perAppMaxObservations: 0 }).perAppMaxObservations).toBe(
+      DEFAULT_PER_APP_MAX_OBSERVATIONS
+    );
+    expect(
+      resolveNavigationRetentionConfig({ perAppMaxObservations: -3 }).perAppMaxObservations
+    ).toBe(DEFAULT_PER_APP_MAX_OBSERVATIONS);
+    expect(
+      resolveNavigationRetentionConfig({ globalMaxObservations: Number.NaN }).globalMaxObservations
+    ).toBe(DEFAULT_GLOBAL_MAX_OBSERVATIONS);
+    expect(resolveNavigationRetentionConfig({ structureTtlMs: 1.5 }).structureTtlMs).toBe(
+      DEFAULT_STRUCTURE_TTL_MS
+    );
+    // A valid override still wins.
+    expect(resolveNavigationRetentionConfig({ perAppMaxObservations: 7 }).perAppMaxObservations).toBe(7);
   });
 });
 
@@ -226,35 +257,110 @@ describe("NavigationRetention prune", () => {
 
   // ---- LRU size cap (backstop) ----
 
-  test("per-app LRU cap evicts oldest evictable observations by last_seen", async () => {
+  test("per-app LRU cap evicts oldest observations by last_seen, keeps the active row", async () => {
     const nodeId = await seedNode("Home", 1);
     const bkOld = await buildKey(APP, 1);
     const bkNew = await buildKey(APP, 2);
-    await nodeObs(nodeId, bkNew, "protected", 10_000); // protected
-    // 5 evictable observations, recent (within TTL) so only the cap can evict them.
+    await nodeObs(nodeId, bkNew, "active", 10_000); // newest -> active, protected build
     for (let i = 0; i < 5; i++) {
       await nodeObs(nodeId, bkOld, `s${i}`, 1_000 + i);
     }
 
     // structureTtl huge so only the cap can evict (isolates the LRU backstop).
+    // Cap counts ALL 6 rows; overflow 4 evicts the 4 oldest; the active row and
+    // the newest evictable row survive.
     const summary = await retention({
       ...CONFIG,
       structureTtlMs: 10_000_000,
       perAppMaxObservations: 2,
     }).prune(11_000);
 
-    // 5 evictable - cap 2 = 3 oldest evicted; protected untouched.
-    expect(summary.nodeObservationsDeleted).toBe(3);
+    expect(summary.nodeObservationsDeleted).toBe(4);
     const remaining = await db
       .selectFrom("navigation_node_observations")
       .select(["session_uuid", "last_seen_at"])
       .orderBy("last_seen_at", "asc")
       .execute();
     const sessions = remaining.map(r => r.session_uuid).sort();
-    expect(sessions).toEqual(["protected", "s3", "s4"]); // oldest s0,s1,s2 gone
+    expect(sessions).toEqual(["active", "s4"]); // oldest s0..s3 gone; newest kept
   });
 
-  test("global LRU cap evicts oldest across apps, sparing protected builds", async () => {
+  test("cap bounds a continuously-used SINGLE-build app, keeping the most recent", async () => {
+    // Regression: the cap must bound an app whose only build key is the protected
+    // one — otherwise a single-build app grows unbounded until the long TTL.
+    const nodeId = await seedNode("Home", 1);
+    const bk = await buildKey(APP, 1); // the ONLY build key => it is the protected one
+    for (let i = 0; i < 6; i++) {
+      await nodeObs(nodeId, bk, `s${i}`, 100 + i);
+    }
+
+    const summary = await retention({
+      ...CONFIG,
+      structureTtlMs: 10_000_000,
+      perAppMaxObservations: 3,
+    }).prune(1_000_000);
+
+    // total 6, cap 3 -> evict 3 oldest; the 3 newest (incl active s5) survive.
+    expect(summary.nodeObservationsDeleted).toBe(3);
+    const remaining = await db
+      .selectFrom("navigation_node_observations")
+      .select("session_uuid")
+      .execute();
+    expect(remaining.map(r => r.session_uuid).sort()).toEqual(["s3", "s4", "s5"]);
+    // (c) the protected build key is never orphan-swept even after thinning.
+    const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
+    expect(keys.map(k => k.id)).toEqual([bk]);
+  });
+
+  test("never evicts the active row even under an aggressive cap", async () => {
+    const nodeId = await seedNode("Home", 1);
+    const bk = await buildKey(APP, 1);
+    await nodeObs(nodeId, bk, "old1", 100);
+    await nodeObs(nodeId, bk, "old2", 200);
+    await nodeObs(nodeId, bk, "active", 300); // newest -> active
+
+    // total 3, cap 1 -> overflow 2 evicts old1/old2; the active row is shielded
+    // even though the app still exceeds the cap afterward.
+    const summary = await retention({
+      ...CONFIG,
+      structureTtlMs: 10_000_000,
+      perAppMaxObservations: 1,
+    }).prune(1_000_000);
+
+    expect(summary.nodeObservationsDeleted).toBe(2);
+    const remaining = await db
+      .selectFrom("navigation_node_observations")
+      .select("session_uuid")
+      .execute();
+    expect(remaining.map(r => r.session_uuid)).toEqual(["active"]);
+  });
+
+  test("evicts in bounded batches (chunk loop) without missing rows", async () => {
+    const nodeId = await seedNode("Home", 1);
+    const bk = await buildKey(APP, 1);
+    for (let i = 0; i < 7; i++) {
+      await nodeObs(nodeId, bk, `s${i}`, 100 + i);
+    }
+
+    // chunkSize 2 forces several batches; each DELETE binds <= 2 ids. cap 1 ->
+    // evict 6 oldest, keep the active row (s6). Proves the loop deletes the full
+    // victim set without exceeding the per-statement variable limit.
+    const summary = await retention({
+      ...CONFIG,
+      structureTtlMs: 10_000_000,
+      perAppMaxObservations: 1,
+      evictionChunkSize: 2,
+    }).prune(1_000_000);
+
+    expect(summary.nodeObservationsDeleted).toBe(6);
+    const remaining = await db
+      .selectFrom("navigation_node_observations")
+      .select("session_uuid")
+      .execute();
+    expect(remaining.map(r => r.session_uuid)).toEqual(["s6"]);
+  });
+
+  test("global LRU cap evicts oldest across apps, sparing each app's active build", async () => {
     // App 1
     const n1 = await seedNode("A", 1);
     const bk1old = await buildKey(APP, 1);
@@ -270,21 +376,23 @@ describe("NavigationRetention prune", () => {
     await repo.recordNodeObservation(n2.id, bk2new, "d", "p2", 9_500);
     await repo.recordNodeObservation(n2.id, bk2old, "d", "b-200", 200);
 
-    // 3 evictable rows total (a-100, a-300, b-200); global cap 2 -> evict 1 oldest (a-100).
+    // total 5; global cap 2 -> overflow 3 evicts the 3 oldest non-active rows
+    // (a-100, b-200, a-300). Each app's active build (p1, p2) is shielded even
+    // though p1 is globally older than app 2's p2.
     const summary = await retention({
       ...CONFIG,
-      structureTtlMs: 10_000_000, // isolate the global cap from the TTL tier
+      structureTtlMs: 10_000_000,
       perAppMaxObservations: 1_000,
       globalMaxObservations: 2,
     }).prune(10_000);
 
-    expect(summary.nodeObservationsDeleted).toBe(1);
+    expect(summary.nodeObservationsDeleted).toBe(3);
     const rows = await db
       .selectFrom("navigation_node_observations")
       .select("session_uuid")
       .execute();
     const sessions = rows.map(r => r.session_uuid).sort();
-    expect(sessions).toEqual(["a-300", "b-200", "p1", "p2"]);
+    expect(sessions).toEqual(["p1", "p2"]);
   });
 
   // ---- FK-safe orphan build-key cleanup + idempotency ----

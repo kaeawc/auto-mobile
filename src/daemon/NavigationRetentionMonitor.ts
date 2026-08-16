@@ -1,5 +1,6 @@
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { getDbWriteBarrier } from "../db";
 import {
   type NavigationRetention,
   type NavigationRetentionSummary,
@@ -58,6 +59,11 @@ export class NavigationRetentionMonitor {
    * Run a single prune pass. Exposed for deterministic testing; also invoked on
    * each interval tick. Overlapping invocations are dropped, and any failure is
    * logged and swallowed — retention is best-effort and must not crash the daemon.
+   *
+   * The pass is registered with the DB write barrier so an in-flight prune DRAINS
+   * within the shutdown budget (`Daemon.stop()` → barrier.drain → closeDatabase),
+   * rather than racing the connection close. When the barrier is already draining,
+   * `track` short-circuits (returns undefined) and the pass is skipped.
    */
   async tick(): Promise<void> {
     if (this.running) {
@@ -65,7 +71,12 @@ export class NavigationRetentionMonitor {
     }
     this.running = true;
     try {
-      this.lastSummary = await this.retention.prune(this.timer.now());
+      const summary = await getDbWriteBarrier().track(() =>
+        this.retention.prune(this.timer.now())
+      );
+      if (summary) {
+        this.lastSummary = summary;
+      }
     } catch (error) {
       logger.warn(`Navigation retention pass failed: ${error}`, error);
     } finally {

@@ -148,6 +148,7 @@ export class Daemon {
   private deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private pidFileWritten = false;
   private deviceDisconnectMisses: Map<string, number> = new Map();
+  private deviceDisconnectMissIncarnations: Map<string, number> = new Map();
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
   private forceDisconnectedDeviceIds: Set<string> = new Set();
   private stoppingRecordings: Set<string> = new Set();
@@ -1242,6 +1243,7 @@ export class Daemon {
         const missingByDevice = new Map<string, string[]>();
         const candidateDeviceIds = new Set<string>();
         const candidatePlatforms = new Map<string, "android" | "ios">();
+        const candidateIncarnations = new Map<string, number>();
         for (const recording of activeRecordings) {
           candidateDeviceIds.add(recording.deviceId);
           candidatePlatforms.set(recording.deviceId, recording.platform);
@@ -1249,6 +1251,7 @@ export class Daemon {
         for (const device of this.devicePool.getAllDevices()) {
           candidateDeviceIds.add(device.id);
           candidatePlatforms.set(device.id, device.platform);
+          candidateIncarnations.set(device.id, device.incarnation);
         }
         for (const deviceId of this.sessionManager.getAssignedDevices()) {
           candidateDeviceIds.add(deviceId);
@@ -1261,6 +1264,8 @@ export class Daemon {
           candidateDeviceIds,
           succeededPlatforms,
           candidatePlatforms,
+          candidateIncarnations,
+          deviceDisconnectMissIncarnations: this.deviceDisconnectMissIncarnations,
           forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
           missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
         });
@@ -1361,6 +1366,7 @@ export class Daemon {
           if (deviceCleanupSucceeded) {
             this.confirmedDisconnectedDeviceIds.add(deviceId);
             this.deviceDisconnectMisses.delete(deviceId);
+            this.deviceDisconnectMissIncarnations.delete(deviceId);
             this.forceDisconnectedDeviceIds.delete(deviceId);
           }
         }

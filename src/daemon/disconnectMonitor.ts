@@ -13,6 +13,8 @@ export interface DisconnectMonitorEvaluationInput {
   candidateDeviceIds: Set<string>;
   succeededPlatforms: Set<Platform>;
   candidatePlatforms: Map<string, Platform>;
+  candidateIncarnations?: Map<string, number>;
+  deviceDisconnectMissIncarnations?: Map<string, number>;
   forceDisconnectedDeviceIds?: Set<string>;
   missThreshold: number;
 }
@@ -23,17 +25,24 @@ export function evaluateDeviceDisconnects(
   const disconnected: string[] = [];
   const missed: Array<{ deviceId: string; misses: number }> = [];
   const forceDisconnectedDeviceIds = input.forceDisconnectedDeviceIds ?? new Set<string>();
+  const candidateIncarnations = input.candidateIncarnations ?? new Map<string, number>();
+  const deviceDisconnectMissIncarnations =
+    input.deviceDisconnectMissIncarnations ?? new Map<string, number>();
+  const clearMiss = (deviceId: string): void => {
+    input.deviceDisconnectMisses.delete(deviceId);
+    deviceDisconnectMissIncarnations.delete(deviceId);
+  };
 
   for (const deviceId of input.candidateDeviceIds) {
     if (input.bootedDeviceIds.has(deviceId)) {
-      input.deviceDisconnectMisses.delete(deviceId);
+      clearMiss(deviceId);
       input.confirmedDisconnectedDeviceIds.delete(deviceId);
       forceDisconnectedDeviceIds.delete(deviceId);
       continue;
     }
 
     if (forceDisconnectedDeviceIds.has(deviceId)) {
-      input.deviceDisconnectMisses.delete(deviceId);
+      clearMiss(deviceId);
       disconnected.push(deviceId);
       continue;
     }
@@ -53,27 +62,37 @@ export function evaluateDeviceDisconnects(
 
   for (const deviceId of input.candidateDeviceIds) {
     if (input.bootedDeviceIds.has(deviceId)) {
-      input.deviceDisconnectMisses.delete(deviceId);
+      clearMiss(deviceId);
       input.confirmedDisconnectedDeviceIds.delete(deviceId);
       continue;
     }
 
     if (input.confirmedDisconnectedDeviceIds.has(deviceId)) {
-      input.deviceDisconnectMisses.delete(deviceId);
+      clearMiss(deviceId);
       continue;
     }
 
     const platform = input.candidatePlatforms.get(deviceId);
     if (platform && !input.succeededPlatforms.has(platform)) {
-      input.deviceDisconnectMisses.delete(deviceId);
+      clearMiss(deviceId);
       continue;
     }
 
+    const candidateIncarnation = candidateIncarnations.get(deviceId);
+    const priorMisses =
+      candidateIncarnation === deviceDisconnectMissIncarnations.get(deviceId)
+        ? (input.deviceDisconnectMisses.get(deviceId) ?? 0)
+        : 0;
     const misses = Math.min(
-      (input.deviceDisconnectMisses.get(deviceId) ?? 0) + 1,
+      priorMisses + 1,
       input.missThreshold
     );
     input.deviceDisconnectMisses.set(deviceId, misses);
+    if (candidateIncarnation === undefined) {
+      deviceDisconnectMissIncarnations.delete(deviceId);
+    } else {
+      deviceDisconnectMissIncarnations.set(deviceId, candidateIncarnation);
+    }
     missed.push({ deviceId, misses });
     if (misses >= input.missThreshold) {
       disconnected.push(deviceId);

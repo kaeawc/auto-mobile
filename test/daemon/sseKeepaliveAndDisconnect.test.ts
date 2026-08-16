@@ -135,6 +135,8 @@ describe("disconnect monitor miss counting", () => {
     candidateDeviceIds: Set<string>,
     succeededPlatforms: Set<string> = new Set(),
     candidatePlatforms: Map<string, string> = new Map(),
+    candidateIncarnations: Map<string, number> = new Map(),
+    deviceDisconnectMissIncarnations: Map<string, number> = new Map(),
   ): { disconnected: string[]; skippedAllDiscoveryFailed: boolean } => {
     return evaluateDeviceDisconnects({
       deviceDisconnectMisses,
@@ -143,6 +145,8 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds,
       succeededPlatforms: succeededPlatforms as Set<"android" | "ios">,
       candidatePlatforms: candidatePlatforms as Map<string, "android" | "ios">,
+      candidateIncarnations,
+      deviceDisconnectMissIncarnations,
       missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
   };
@@ -332,6 +336,26 @@ describe("disconnect monitor miss counting", () => {
 
     runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
     expect(misses.get("device-1")).toBe(1);
+  });
+
+  test("does not carry misses from a replaced device incarnation", () => {
+    const misses = new Map<string, number>([["sim-1", 2]]);
+    const candidateIncarnations = new Map<string, number>([["sim-1", 2]]);
+    const deviceDisconnectMissIncarnations = new Map<string, number>([["sim-1", 1]]);
+
+    const result = runDisconnectPoll(
+      misses,
+      new Set(["emulator-5554"]),
+      new Set(["sim-1"]),
+      new Set(["android", "ios"]),
+      new Map([["sim-1", "ios"]]),
+      candidateIncarnations,
+      deviceDisconnectMissIncarnations,
+    );
+
+    expect(result.disconnected).toEqual([]);
+    expect(misses.get("sim-1")).toBe(1);
+    expect(deviceDisconnectMissIncarnations.get("sim-1")).toBe(2);
   });
 
   test("keeps returning a threshold-missed stale candidate until caller settles cleanup", () => {

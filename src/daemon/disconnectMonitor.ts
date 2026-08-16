@@ -1,5 +1,35 @@
 import type { Platform } from "../models";
 
+export type DisconnectCandidateIncarnation = number | string;
+
+interface RecordingDisconnectCandidate {
+  deviceId: string;
+  recordingId: string;
+}
+
+/**
+ * Derive a stable lifecycle marker for recording-only candidates. A device ID
+ * can be reused immediately after a recording stops, so its active recording
+ * IDs are the only identity evidence available when it is not pooled.
+ */
+export function recordingCandidateIncarnations(
+  recordings: Iterable<RecordingDisconnectCandidate>,
+): Map<string, DisconnectCandidateIncarnation> {
+  const recordingIdsByDevice = new Map<string, string[]>();
+  for (const recording of recordings) {
+    const recordingIds = recordingIdsByDevice.get(recording.deviceId) ?? [];
+    recordingIds.push(recording.recordingId);
+    recordingIdsByDevice.set(recording.deviceId, recordingIds);
+  }
+
+  return new Map(
+    [...recordingIdsByDevice].map(([deviceId, recordingIds]) => [
+      deviceId,
+      `recordings:${recordingIds.sort().join("\u0000")}`,
+    ]),
+  );
+}
+
 export interface DisconnectMonitorEvaluation {
   disconnected: string[];
   missed: Array<{ deviceId: string; misses: number }>;
@@ -13,8 +43,8 @@ export interface DisconnectMonitorEvaluationInput {
   candidateDeviceIds: Set<string>;
   succeededPlatforms: Set<Platform>;
   candidatePlatforms: Map<string, Platform>;
-  candidateIncarnations?: Map<string, number>;
-  deviceDisconnectMissIncarnations?: Map<string, number>;
+  candidateIncarnations?: Map<string, DisconnectCandidateIncarnation>;
+  deviceDisconnectMissIncarnations?: Map<string, DisconnectCandidateIncarnation>;
   forceDisconnectedDeviceIds?: Set<string>;
   missThreshold: number;
 }

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
-import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
+import {
+  evaluateDeviceDisconnects,
+  recordingCandidateIncarnations,
+} from "../../src/daemon/disconnectMonitor";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 
@@ -357,6 +360,33 @@ describe("disconnect monitor miss counting", () => {
     expect(result.disconnected).toEqual([]);
     expect(misses.get("sim-1")).toBe(1);
     expect(deviceDisconnectMissIncarnations.get("sim-1")).toBe(2);
+  });
+
+  test("does not carry misses to a replacement recording-only lifecycle", () => {
+    const misses = new Map<string, number>([["sim-1", 2]]);
+    const priorIncarnations = recordingCandidateIncarnations([
+      { deviceId: "sim-1", recordingId: "recording-old" },
+    ]);
+    const replacementIncarnations = recordingCandidateIncarnations([
+      { deviceId: "sim-1", recordingId: "recording-new" },
+    ]);
+    const deviceDisconnectMissIncarnations = new Map([
+      ["sim-1", priorIncarnations.get("sim-1")!],
+    ]);
+
+    const result = runDisconnectPoll(
+      misses,
+      new Set(["emulator-5554"]),
+      new Set(["sim-1"]),
+      new Set(["android", "ios"]),
+      new Map([["sim-1", "ios"]]),
+      replacementIncarnations,
+      deviceDisconnectMissIncarnations,
+    );
+
+    expect(result.disconnected).toEqual([]);
+    expect(misses.get("sim-1")).toBe(1);
+    expect(deviceDisconnectMissIncarnations.get("sim-1")).toBe(replacementIncarnations.get("sim-1"));
   });
 
   test("clears miss state after a candidate stops being tracked", () => {

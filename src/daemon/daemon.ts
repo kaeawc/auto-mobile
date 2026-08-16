@@ -80,7 +80,11 @@ import { startPerformanceMonitor, stopPerformanceMonitor, getPerformanceMonitor 
 import { interruptVideoRecording, listActiveVideoRecordings, stopVideoRecording } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
-import { evaluateDeviceDisconnects } from "./disconnectMonitor";
+import {
+  evaluateDeviceDisconnects,
+  recordingCandidateIncarnations,
+  type DisconnectCandidateIncarnation,
+} from "./disconnectMonitor";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
@@ -148,7 +152,7 @@ export class Daemon {
   private deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private pidFileWritten = false;
   private deviceDisconnectMisses: Map<string, number> = new Map();
-  private deviceDisconnectMissIncarnations: Map<string, number> = new Map();
+  private deviceDisconnectMissIncarnations: Map<string, DisconnectCandidateIncarnation> = new Map();
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
   private forceDisconnectedDeviceIds: Set<string> = new Set();
   private forceDisconnectedDeviceGenerations: Map<string, number> = new Map();
@@ -1244,7 +1248,7 @@ export class Daemon {
         const missingByDevice = new Map<string, string[]>();
         const candidateDeviceIds = new Set<string>();
         const candidatePlatforms = new Map<string, "android" | "ios">();
-        const candidateIncarnations = new Map<string, number>();
+        const candidateIncarnations = recordingCandidateIncarnations(activeRecordings);
         for (const recording of activeRecordings) {
           candidateDeviceIds.add(recording.deviceId);
           candidatePlatforms.set(recording.deviceId, recording.platform);

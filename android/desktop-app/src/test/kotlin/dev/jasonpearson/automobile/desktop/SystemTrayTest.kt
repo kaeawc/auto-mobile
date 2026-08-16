@@ -7,6 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * Covers the pure tray-icon helpers: appearance parsing, foreground color selection, and the truck
@@ -16,38 +17,42 @@ import kotlin.test.assertTrue
 class SystemTrayTest {
 
   @Test
-  fun `interpretAppleInterfaceStyle treats only Dark as dark`() {
-    assertTrue(interpretAppleInterfaceStyle("Dark"))
-    assertTrue(interpretAppleInterfaceStyle("Dark\n"))
-    assertTrue(interpretAppleInterfaceStyle("  dark  "))
+  fun `macOS dark mode (exit 0, Dark) draws a light icon`() {
+    assertTrue(detectDarkMenuBar("Mac OS X", probeReturning(AppearanceProbeResult(0, "Dark\n"))))
   }
 
   @Test
-  fun `interpretAppleInterfaceStyle treats light-mode output as light`() {
-    // Light mode: the key is absent and `defaults` prints an error to (merged) stdout.
-    assertFalse(interpretAppleInterfaceStyle(""))
-    assertFalse(interpretAppleInterfaceStyle("Light"))
-    assertFalse(
-      interpretAppleInterfaceStyle(
-        "The domain/default pair of (kCFPreferencesAnyApplication, AppleInterfaceStyle) does not exist"
-      )
-    )
+  fun `macOS light mode (absent key) draws a dark icon`() {
+    val absent = AppearanceProbeResult(1, "... (..., AppleInterfaceStyle) does not exist")
+    assertFalse(detectDarkMenuBar("Mac OS X", probeReturning(absent)))
   }
 
   @Test
-  fun `interpretWindowsSystemUsesLightTheme treats a light theme as not dark`() {
-    // SystemUsesLightTheme = 1 -> light taskbar -> dark icon -> not dark background.
-    assertFalse(
-      interpretWindowsSystemUsesLightTheme("    SystemUsesLightTheme    REG_DWORD    0x1")
-    )
+  fun `macOS unexpected probe failure falls back to dark instead of light`() {
+    // A non-zero exit that is NOT the absent-key case must not be read as light.
+    assertTrue(detectDarkMenuBar("Mac OS X", probeReturning(AppearanceProbeResult(1, "boom"))))
+    assertTrue(detectDarkMenuBar("Mac OS X", probeReturning(null)))
   }
 
   @Test
-  fun `interpretWindowsSystemUsesLightTheme treats a dark or missing value as dark`() {
-    assertTrue(interpretWindowsSystemUsesLightTheme("    SystemUsesLightTheme    REG_DWORD    0x0"))
-    // A missing key (reg query prints an error) defaults to a dark tray.
-    assertTrue(interpretWindowsSystemUsesLightTheme("ERROR: The system was unable to find..."))
+  fun `Windows light taskbar draws a dark icon`() {
+    val light = AppearanceProbeResult(0, "    SystemUsesLightTheme    REG_DWORD    0x1")
+    assertFalse(detectDarkMenuBar("Windows 11", probeReturning(light)))
   }
+
+  @Test
+  fun `Windows dark taskbar and probe failures default to dark`() {
+    val dark = AppearanceProbeResult(0, "    SystemUsesLightTheme    REG_DWORD    0x0")
+    assertTrue(detectDarkMenuBar("Windows 11", probeReturning(dark)))
+    assertTrue(detectDarkMenuBar("Windows 11", probeReturning(AppearanceProbeResult(1, "ERROR"))))
+  }
+
+  @Test
+  fun `Linux falls back to dark without probing`() {
+    assertTrue(detectDarkMenuBar("Linux") { fail("Linux must not shell out for appearance") })
+  }
+
+  private fun probeReturning(result: AppearanceProbeResult?) = AppearanceProbe { result }
 
   @Test
   fun `trayForegroundColor is light on dark menu bars and dark on light menu bars`() {
@@ -98,6 +103,27 @@ class SystemTrayTest {
       0,
       alphaOf(image.getRGB(TRAY_ICON_SIZE - 1, TRAY_ICON_SIZE - 1)),
       "bottom-right corner must be transparent",
+    )
+  }
+
+  @Test
+  fun `the real truck mask stays legible at a small tray size`() {
+    // Regression for a thin-outline mask that all but vanished once downsized to a ~16px slot.
+    val mask = requireNotNull(loadBundledImage(TRAY_TRUCK_RESOURCE))
+    val fg = trayForegroundColor(darkMenuBar = true, connected = false) // dimmed: the worst case
+    val image = tintTrayTruck(mask, 16, fg)
+
+    var opaque = 0
+    var maxAlpha = 0
+    for (index in 0 until 16 * 16) {
+      val alpha = alphaOf(image.getRGB(index % 16, index / 16))
+      if (alpha > 0) opaque++
+      if (alpha > maxAlpha) maxAlpha = alpha
+    }
+    assertTrue(opaque >= 40, "truck should fill the tray slot; only $opaque/256 px were painted")
+    assertTrue(
+      maxAlpha >= 110,
+      "a solid silhouette should reach full tint; max alpha was $maxAlpha",
     )
   }
 

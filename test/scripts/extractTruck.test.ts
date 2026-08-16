@@ -19,8 +19,9 @@ describe("extractTruckFragments", () => {
     expect(colorFrag).toContain(`fill="#ffffff" fill-rule="nonzero"`);
     expect((colorFrag.match(/<path /g) ?? []).length).toBe(6);
 
-    // The mono mask is the outline + tires in solid black.
+    // The mono mask is a solid black silhouette (filled body + filled tires), not a thin outline.
     expect((monoFrag.match(/fill="#000000"/g) ?? []).length).toBe(2);
+    expect(monoFrag).toContain(`fill="#000000" fill-rule="nonzero"`);
 
     // The body contour is lifted as an absolute moveto (the logo uses absolute coordinates).
     expect(colorFrag.startsWith(`<path d="M`)).toBe(true);

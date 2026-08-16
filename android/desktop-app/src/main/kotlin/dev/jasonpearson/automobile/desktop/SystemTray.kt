@@ -78,39 +78,22 @@ private const val DEFAULT_DARK_MENU_BAR = true
 /** Upper bound on the appearance subprocess so a hung `defaults`/`reg` can't wedge the probe. */
 private const val APPEARANCE_PROBE_TIMEOUT_MS = 2_000L
 
+/** Result of an appearance-detection subprocess: its exit code and merged stdout/stderr. */
+internal data class AppearanceProbeResult(val exitCode: Int, val output: String)
+
 /**
- * True when the tray truck should be drawn light. macOS reads the system-wide
- * `AppleInterfaceStyle`; Windows reads the `SystemUsesLightTheme` registry value (which drives the
- * taskbar/tray). Linux desktop panels expose no portable theme API, so there we fall back to
- * assuming a dark panel.
+ * Runs an appearance-detection command, or returns null if it can't be launched or times out. A
+ * `fun interface` so tests can inject canned exit-code/output pairs without spawning a process.
  */
-internal fun detectDarkMenuBar(): Boolean {
-  val os = System.getProperty("os.name")?.lowercase().orEmpty()
-  return when {
-    os.contains("mac") ->
-      probeAppearance(listOf("defaults", "read", "-g", "AppleInterfaceStyle"))
-        ?.let(::interpretAppleInterfaceStyle) ?: true
-    os.contains("win") ->
-      probeAppearance(
-          listOf(
-            "reg",
-            "query",
-            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-            "/v",
-            "SystemUsesLightTheme",
-          )
-        )
-        ?.let(::interpretWindowsSystemUsesLightTheme) ?: true
-    else -> true
-  }
+internal fun interface AppearanceProbe {
+  fun run(command: List<String>): AppearanceProbeResult?
 }
 
 /**
- * Runs an appearance-detection command and returns its (merged) output, or null on failure. Bounded
- * by [APPEARANCE_PROBE_TIMEOUT_MS] so a hung subprocess is killed rather than blocking the caller
- * (the probe runs off the UI thread, but an unbounded wait would still leak a stuck process).
+ * Production probe: runs the command bounded by [APPEARANCE_PROBE_TIMEOUT_MS], killing it on
+ * expiry.
  */
-private fun probeAppearance(command: List<String>): String? =
+private val systemAppearanceProbe = AppearanceProbe { command ->
   try {
     val process = ProcessBuilder(command).redirectErrorStream(true).start()
     if (!process.waitFor(APPEARANCE_PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
@@ -118,7 +101,8 @@ private fun probeAppearance(command: List<String>): String? =
       LOG.debug("menu bar appearance probe timed out; defaulting to dark")
       null
     } else {
-      process.inputStream.bufferedReader().use { it.readText() }
+      val output = process.inputStream.bufferedReader().use { it.readText() }
+      AppearanceProbeResult(process.exitValue(), output)
     }
   } catch (e: IOException) {
     // Best-effort probe: if the command can't be run, fall back to the light-on-dark default.
@@ -130,21 +114,64 @@ private fun probeAppearance(command: List<String>): String? =
     LOG.debug("Interrupted reading menu bar appearance; defaulting to dark: ${e.message}")
     null
   }
+}
 
 /**
- * Interprets the stdout of `defaults read -g AppleInterfaceStyle`. macOS prints `Dark` in dark mode
- * and errors ("... does not exist") in light mode, so anything that is not exactly `Dark` is light.
+ * True when the tray truck should be drawn light. macOS reads `AppleInterfaceStyle`; Windows reads
+ * the `SystemUsesLightTheme` registry value; other platforms (and any unreadable probe) fall back
+ * to [DEFAULT_DARK_MENU_BAR]. [osName] and [probe] are injectable so the decision is testable
+ * off-host.
  */
-internal fun interpretAppleInterfaceStyle(output: String): Boolean =
-  output.trim().equals("Dark", ignoreCase = true)
+internal fun detectDarkMenuBar(
+  osName: String = System.getProperty("os.name").orEmpty(),
+  probe: AppearanceProbe = systemAppearanceProbe,
+): Boolean {
+  val os = osName.lowercase()
+  return when {
+    os.contains("mac") ->
+      probe.run(listOf("defaults", "read", "-g", "AppleInterfaceStyle"))?.let {
+        interpretMacAppearance(it.exitCode, it.output)
+      } ?: DEFAULT_DARK_MENU_BAR
+    os.contains("win") ->
+      probe
+        .run(
+          listOf(
+            "reg",
+            "query",
+            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+            "/v",
+            "SystemUsesLightTheme",
+          )
+        )
+        ?.let { interpretWindowsAppearance(it.exitCode, it.output) } ?: DEFAULT_DARK_MENU_BAR
+    else -> DEFAULT_DARK_MENU_BAR
+  }
+}
 
 /**
- * Interprets the stdout of `reg query ... /v SystemUsesLightTheme`, which prints e.g.
- * "SystemUsesLightTheme REG_DWORD 0x1". A value of 1 means the taskbar/tray is light, which wants a
- * dark icon, so dark == not light (and an unreadable value defaults to dark).
+ * Interprets `defaults read -g AppleInterfaceStyle`. Dark mode exits 0 and prints "Dark"; light
+ * mode leaves the key absent, so it exits non-zero with "... does not exist". Any *other* non-zero
+ * result is an unexpected failure that falls back to [DEFAULT_DARK_MENU_BAR] rather than being read
+ * as light (which would draw a dark icon on a dark menu bar).
  */
-internal fun interpretWindowsSystemUsesLightTheme(output: String): Boolean =
-  !Regex("""SystemUsesLightTheme\s+REG_\w+\s+0x0*1\b""").containsMatchIn(output)
+internal fun interpretMacAppearance(exitCode: Int, output: String): Boolean =
+  when {
+    exitCode == 0 -> output.trim().equals("Dark", ignoreCase = true)
+    output.contains("does not exist", ignoreCase = true) -> false
+    else -> DEFAULT_DARK_MENU_BAR
+  }
+
+/**
+ * Interprets `reg query ... /v SystemUsesLightTheme`, which exits 0 and prints e.g.
+ * "SystemUsesLightTheme REG_DWORD 0x1" (1 = light taskbar, wanting a dark icon). A non-zero exit
+ * (missing value or other error) falls back to [DEFAULT_DARK_MENU_BAR].
+ */
+internal fun interpretWindowsAppearance(exitCode: Int, output: String): Boolean =
+  if (exitCode != 0) {
+    DEFAULT_DARK_MENU_BAR
+  } else {
+    !Regex("""SystemUsesLightTheme\s+REG_\w+\s+0x0*1\b""").containsMatchIn(output)
+  }
 
 /** Foreground color for the tray truck given the menu bar appearance and connection state. */
 internal fun trayForegroundColor(darkMenuBar: Boolean, connected: Boolean): Color {

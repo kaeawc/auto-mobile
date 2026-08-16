@@ -112,8 +112,11 @@ export async function extractTruckFragments(svgText: string): Promise<TruckFragm
     pathEl(shadeLight, "#f09e98") +
     pathEl(shadeMid, "#df7c71");
 
-  // Solid black silhouette (outline + tires) for the tintable menu-bar mask.
-  const monoFrag = pathEl(redOutline, "#000000") + pathEl(darkTires, "#000000");
+  // Solid black silhouette (filled body + filled tires) for the tintable menu-bar mask. Filling
+  // the body and tires — rather than just the thin outline strokes — keeps the truck legible once
+  // the OS downsizes it to a ~16px status slot and the disconnected tint dims it.
+  const monoFrag =
+    pathEl(bodyFill, "#000000", "nonzero") + pathEl(tireFill, "#000000", "nonzero");
 
   return { colorFrag, monoFrag };
 }

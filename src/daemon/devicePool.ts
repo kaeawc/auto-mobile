@@ -113,6 +113,10 @@ interface DeviceReadyListener {
   (deviceId: string): void;
 }
 
+interface DeviceRemovedListener {
+  (deviceId: string): void;
+}
+
 /**
  * Marker incarnation used when an intentional shutdown is recorded while no
  * pooled device is present (only an in-flight recovery). Such a marker applies
@@ -151,6 +155,7 @@ export class DevicePool {
   private readonly criteriaMatcher: DeviceCriteriaMatcher;
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
+  private readonly onDeviceRemoved: DeviceRemovedListener | undefined;
   private readonly androidDeviceReboot: AndroidDeviceReboot;
   private readonly recoveryPolicy: DeviceRecoveryPolicy;
   private readonly recoveringAndroidImages: Map<string, DeviceInfo> = new Map();
@@ -189,6 +194,7 @@ export class DevicePool {
     onDeviceReady?: DeviceReadyListener,
     androidDeviceReboot?: AndroidDeviceReboot,
     recoveryPolicy?: DeviceRecoveryPolicy,
+    onDeviceRemoved?: DeviceRemovedListener,
   ) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
@@ -199,6 +205,7 @@ export class DevicePool {
     this.deviceSessionRepository = deviceSessionRepository;
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
+    this.onDeviceRemoved = onDeviceRemoved;
     // Resolve recovery policy once so retries and status agree even if the
     // process environment changes after construction.
     this.recoveryPolicy = { ...(recoveryPolicy ?? getDeviceRecoveryPolicy()) };
@@ -376,6 +383,15 @@ export class DevicePool {
     }
   }
 
+  /** Notify consumers that a device has been removed from the pool. */
+  private notifyDeviceRemoved(deviceId: string): void {
+    try {
+      this.onDeviceRemoved?.(deviceId);
+    } catch (error) {
+      logger.warn(`[DevicePool] Device-removed listener failed for ${deviceId}: ${error}`);
+    }
+  }
+
   /**
    * Add a new device to the pool
    */
@@ -449,6 +465,7 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
+    this.notifyDeviceRemoved(deviceId);
     this.deviceSessionStarts.delete(deviceId);
     this.refreshMissingDeviceMisses.delete(deviceId);
     this.startedDeviceProcesses.delete(deviceId);

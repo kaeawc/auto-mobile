@@ -242,6 +242,7 @@ export class Daemon {
       deviceId => this.onDeviceReadyForSessionRegistry(deviceId),
       undefined,
       recoveryConfiguration.policy,
+      deviceId => this.deviceSessionRegistry.onDeviceDisconnected(deviceId),
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(
@@ -1280,11 +1281,6 @@ export class Daemon {
             // device is live again, so retiring here would delete that just-minted
             // epoch; skip the retire and let cleanup fail so the monitor retries.
             deviceCleanupSucceeded = false;
-          } else {
-            // Confirmed gone: retire the device-session epoch so a stale
-            // deviceSessionUuid stops resolving and listDeviceSessions drops the
-            // device (epic #5256).
-            this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
           }
           if (deviceCleanupSucceeded) {
             this.confirmedDisconnectedDeviceIds.add(deviceId);

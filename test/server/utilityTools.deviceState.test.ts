@@ -9,6 +9,7 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 
 const createBootedDevice = (
   deviceId: string,
@@ -52,7 +53,7 @@ describe("device state tools", () => {
 
   test("setActiveDevice binds a refreshed session device in the pool", async () => {
     const fakeTimer = new FakeTimer();
-    const sessionManager = new SessionManager(fakeTimer);
+    const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     const fakeDeviceManager = new FakeDeviceManager(
       [],
       [createBootedDevice("sim-new", "ios", "iPhone 16")]
@@ -83,7 +84,7 @@ describe("device state tools", () => {
 
   test("setActiveDevice rejects devices owned by another live session", async () => {
     const fakeTimer = new FakeTimer();
-    const sessionManager = new SessionManager(fakeTimer);
+    const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     const fakeDeviceManager = new FakeDeviceManager(
       [],
       [

@@ -237,7 +237,12 @@ export class SessionManager {
     try {
       await this.persistSession(session);
     } catch (error) {
-      this.removeSession(sessionId);
+      // A release may have completed and the UUID may have been reused while
+      // the persistence write was pending. Only roll back the session instance
+      // that issued this write; removing by ID alone would delete its replacement.
+      if (this.sessions.get(sessionId) === session) {
+        this.removeSession(sessionId);
+      }
       throw error;
     }
 

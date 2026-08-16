@@ -2596,7 +2596,6 @@ export class DevicePool {
       );
     }
 
-    const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;
     device.status = "busy";
     device.lastUsedAt = this.nextLastUsedAt();
@@ -2762,6 +2761,7 @@ export class DevicePool {
       );
     }
 
+    const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;
     device.status = "busy";
     device.lastUsedAt = this.nextLastUsedAt();

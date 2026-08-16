@@ -8,6 +8,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 
@@ -76,7 +77,7 @@ describe("ToolRegistry capability routing and enforcement (#4611)", () => {
 
   test("Gap A end-to-end: a real deviceId-only call enforces the device's owning session", async () => {
     const timer = new FakeTimer();
-    const sessionManager = new SessionManager(timer);
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [device]);
     const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
@@ -204,7 +205,7 @@ describe("ToolRegistry capability routing and enforcement (#4611)", () => {
   // union gate entirely.
   const initializeDaemonWithLabeledBase = async () => {
     const timer = new FakeTimer();
-    const sessionManager = new SessionManager(timer);
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [device]);
     const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);

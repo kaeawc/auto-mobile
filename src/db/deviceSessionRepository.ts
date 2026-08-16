@@ -102,6 +102,7 @@ export class DeviceSessionRepository {
         .execute();
     } catch (error) {
       logger.warn(`[DeviceSessionRepository] Failed to upsert device session ${record.sessionUuid}: ${error}`);
+      throw error;
     }
   }
 

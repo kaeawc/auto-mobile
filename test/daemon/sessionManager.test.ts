@@ -9,6 +9,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
 
@@ -41,7 +43,7 @@ describe("SessionManager", () => {
   beforeEach(() => {
     clearHeartbeatEnv();
     fakeTimer = new FakeTimer();
-    sessionManager = new SessionManager(fakeTimer);
+    sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
   });
 
   afterEach(() => {
@@ -95,6 +97,58 @@ describe("SessionManager", () => {
 
       expect(session.heartbeatTimeoutMs).toBe(15_000);
       expect(session.heartbeatTimeoutSource).toBe("custom");
+    });
+
+    test("removes every ownership mapping when persistence rejects", async () => {
+      const repository = new FakeDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+      repository.failure = "create";
+
+      try {
+        await expect(manager.createSession("session-failure", "emulator-5554", "android")).rejects.toThrow(
+          "persist create failed",
+        );
+
+        expect(manager.getSession("session-failure")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-5554")).toBeNull();
+        expect(manager.getActiveSessionCount()).toBe(0);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("does not remove a replacement session when an earlier write rejects", async () => {
+      let rejectFirstWrite!: (error: Error) => void;
+      const firstWrite = new Promise<void>((_resolve, reject) => {
+        rejectFirstWrite = reject;
+      });
+      let firstWritePending = true;
+      const repository: DeviceSessionPersistence = {
+        upsertActiveSession: async () => {
+          if (firstWritePending) {
+            firstWritePending = false;
+            await firstWrite;
+          }
+        },
+        recordActivity: async () => {},
+        markReleased: async () => {},
+      };
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        const initialCreate = manager.createSession("reused", "emulator-old", "android");
+        await manager.releaseSession("reused");
+        await manager.createSession("reused", "emulator-new", "android");
+
+        rejectFirstWrite(new Error("first persistence failed"));
+        await expect(initialCreate).rejects.toThrow("first persistence failed");
+
+        expect(manager.getSession("reused")?.assignedDevice).toBe("emulator-new");
+        expect(manager.getSessionForDevice("emulator-new")).toBe("reused");
+        expect(manager.getActiveSessionCount()).toBe(1);
+      } finally {
+        manager.stopCleanupTimer();
+      }
     });
   });
 

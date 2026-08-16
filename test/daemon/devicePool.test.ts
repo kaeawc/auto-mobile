@@ -499,7 +499,7 @@ describe("DevicePool", () => {
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
-    sessionManager = new SessionManager(fakeTimer);
+    sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     fakeAppsRepo = new FakeInstalledAppsRepository();
     fakeDeviceManager = new FakeDeviceManager();
     // Create a RetryExecutor that uses the fakeTimer so time advancement works correctly

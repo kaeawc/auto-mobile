@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { logger } from "../../src/utils/logger";
 
@@ -19,7 +20,7 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
 
   beforeEach(async () => {
     timer = new FakeTimer();
-    sessionManager = new SessionManager(timer);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     fakeDeviceUtils = new FakeDeviceUtils();
     pool = new DevicePool(sessionManager, "daemon-session-1", timer, undefined, fakeDeviceUtils);
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);

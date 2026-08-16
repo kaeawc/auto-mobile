@@ -8,6 +8,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { registerToolCapabilityTools } from "../../src/server/toolCapabilityTools";
 import { getToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
@@ -414,7 +415,7 @@ describe("capability union at the MCP boundary (#4611)", () => {
   beforeEach(async () => {
     ToolRegistry.clearTools();
     const timer = new FakeTimer();
-    sessionManager = new SessionManager(timer);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [device]);
     const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);

@@ -2723,7 +2723,7 @@ export class UnixSocketServer {
     await serverClosed;
     this.server = null;
 
-    if (ownsSocketPath && existsSync(this.socketPath)) {
+    if (this.isOwnedSocketFile()) {
       await unlink(this.socketPath);
     }
     this.socketFileIdentity = null;

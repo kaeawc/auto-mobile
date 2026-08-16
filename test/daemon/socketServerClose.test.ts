@@ -71,6 +71,25 @@ describe("UnixSocketServer close", () => {
     }
   });
 
+  (isWindows ? test.skip : test)("does not remove a successor socket bound during close", async () => {
+    const listener = (server as unknown as { server: NetServer | null }).server;
+    expect(listener).not.toBeNull();
+
+    const replacementServer = createServer();
+    const originalClose = listener!.close.bind(listener);
+    listener!.close = callback => originalClose(error => {
+      replacementServer.listen(socketPath, () => callback?.(error));
+    });
+
+    try {
+      await server.close();
+
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      await closeServer(replacementServer);
+    }
+  });
+
   (isWindows ? test.skip : test)("destroys active clients before waiting for server shutdown", async () => {
     const client = await connectClient(socketPath);
     const clientClosed = once(client, "close");

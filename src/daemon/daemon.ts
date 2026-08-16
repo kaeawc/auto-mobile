@@ -1649,19 +1649,11 @@ export class Daemon {
         },
         { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
         { name: "performance monitor", run: stopPerformanceMonitor },
-        {
-          name: "active HTTP sessions",
-          run: async () => {
-            for (const [sessionId, streamableTransport] of this.transports) {
-              try {
-                await streamableTransport.close();
-              } catch (error) {
-                logger.warn(`Error closing Streamable HTTP session ${sessionId}:`, error);
-              }
-            }
-            this.transports.clear();
-          },
-        },
+        ...Array.from(this.transports, ([sessionId, streamableTransport]) => ({
+          name: `Streamable HTTP session ${sessionId}`,
+          run: () => streamableTransport.close(),
+        })),
+        { name: "active HTTP session registry", run: () => this.transports.clear() },
         {
           name: "HTTP server",
           run: async () => {

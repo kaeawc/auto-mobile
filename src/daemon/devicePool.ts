@@ -1,7 +1,7 @@
 import type { ChildProcess } from "child_process";
 import { randomUUID } from "node:crypto";
 import { logger } from "../utils/logger";
-import { SessionManager } from "./sessionManager";
+import { SessionManager, type Session } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
 import { Mutex } from "async-mutex";
 import {
@@ -93,6 +93,11 @@ export interface PooledDevice {
    * shutdown-marker same-serial-reuse race, follow-up to PR #5015).
    */
   incarnation: number;
+}
+
+interface RollbackAssignment {
+  deviceId: string;
+  session: Session;
 }
 
 interface IosLivenessSnapshot {
@@ -700,6 +705,7 @@ export class DevicePool {
   ): Promise<Map<string, string>> {
     const startTime = this.timer.now();
     const assignments = new Map<string, string>();
+    const assignmentsToRollback = new Map<string, RollbackAssignment>();
     const requiredCount = sessionIds.length;
 
     logger.info(
@@ -763,6 +769,12 @@ export class DevicePool {
           if (assignResult.success) {
             assigned.add(sessionId);
             assignments.set(sessionId, assignResult.deviceId!);
+            if (assignResult.session) {
+              assignmentsToRollback.set(sessionId, {
+                deviceId: assignResult.deviceId!,
+                session: assignResult.session,
+              });
+            }
             logger.info(
               `[DevicePool] Allocated device ${assignResult.deviceId} to session ${sessionId} ` +
                 `(${assigned.size}/${requiredCount})`,
@@ -813,10 +825,7 @@ export class DevicePool {
     );
 
     if (!result.success) {
-      // Release any devices we've assigned so far
-      for (const [sessionId, deviceId] of assignments) {
-        await this.releaseDevice(deviceId, sessionId);
-      }
+      await this.rollbackAssignments(assignmentsToRollback);
 
       // Check if it was a non-retryable error
       if (result.error instanceof DevicePoolError && !result.error.isRetryable) {
@@ -864,6 +873,7 @@ export class DevicePool {
   ): Promise<Map<string, string>> {
     const startTime = this.timer.now();
     const assignments = new Map<string, string>();
+    const assignmentsToRollback = new Map<string, RollbackAssignment>();
     const requiredCount = requests.length;
 
     if (requiredCount === 0) {
@@ -924,9 +934,7 @@ export class DevicePool {
       const elapsed = this.timer.now() - startTime;
 
       if (elapsed > timeoutMs) {
-        for (const [sessionId, deviceId] of assignments) {
-          await this.releaseDevice(deviceId, sessionId);
-        }
+        await this.rollbackAssignments(assignmentsToRollback);
         throw new ActionableError(
           `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
             `Required: ${requiredCount} devices, allocated: ${assignments.size}\n` +
@@ -948,22 +956,24 @@ export class DevicePool {
 
         if (result.success) {
           assignments.set(request.sessionId, result.deviceId!);
+          if (result.session) {
+            assignmentsToRollback.set(request.sessionId, {
+              deviceId: result.deviceId!,
+              session: result.session,
+            });
+          }
           assignedThisRound++;
           logger.info(
             `[DevicePool] Allocated device ${result.deviceId} to session ${request.sessionId} ` +
               `(${assignments.size}/${requiredCount})`,
           );
         } else if (result.livenessUnknown) {
-          for (const [sessionId, deviceId] of assignments) {
-            await this.releaseDevice(deviceId, sessionId);
-          }
+          await this.rollbackAssignments(assignmentsToRollback);
           throw new ActionableError(
             `Unable to verify iOS simulator liveness for session ${request.sessionId}; iOS discovery failed.`,
           );
         } else if (!result.shouldWait) {
-          for (const [sessionId, deviceId] of assignments) {
-            await this.releaseDevice(deviceId, sessionId);
-          }
+          await this.rollbackAssignments(assignmentsToRollback);
           const summary = this.criteriaMatcher.formatCriteriaSummary(request.criteria);
           throw new ActionableError(
             `Failed to allocate device for session ${request.sessionId}${summary}.\n` +
@@ -1693,6 +1703,7 @@ export class DevicePool {
   ): Promise<{
     success: boolean;
     deviceId?: string;
+    session?: Session;
     shouldWait: boolean;
     totalDevices: number;
     livenessUnknown?: boolean;
@@ -1711,6 +1722,7 @@ export class DevicePool {
   ): Promise<{
     success: boolean;
     deviceId?: string;
+    session?: Session;
     shouldWait: boolean;
     totalDevices: number;
     livenessUnknown?: boolean;
@@ -1742,6 +1754,7 @@ export class DevicePool {
   ): Promise<{
     success: boolean;
     deviceId?: string;
+    session?: Session;
     shouldWait: boolean;
     totalDevices: number;
     livenessUnknown?: boolean;
@@ -1801,13 +1814,14 @@ export class DevicePool {
         };
       }
 
-      const assignedDeviceId = await this.claimSelectedDeviceForSession(sessionId, device);
+      const assignment = await this.claimSelectedDeviceForSession(sessionId, device);
 
       logger.info(`Assigned device ${device.id} to session ${sessionId}`);
 
       return {
         success: true,
-        deviceId: assignedDeviceId,
+        deviceId: assignment.deviceId,
+        session: assignment.session,
         shouldWait: false,
         totalDevices,
       };
@@ -1862,16 +1876,17 @@ export class DevicePool {
   private async claimSelectedDeviceForSession(
     sessionId: string,
     device: PooledDevice,
-  ): Promise<string> {
+  ): Promise<{ deviceId: string; session?: Session }> {
     // Create the session before claiming the device. A direct binding can
     // create the same session while this allocator waits for the mutex; in
     // that case, its device remains the sole owner.
+    const existingSession = this.sessionManager.getSession(sessionId);
     const session = await this.sessionManager.createSession(sessionId, device.id, device.platform);
     if (session.assignedDevice !== device.id) {
       logger.info(
         `Reusing session ${sessionId} already assigned to device ${session.assignedDevice}`,
       );
-      return session.assignedDevice;
+      return { deviceId: session.assignedDevice };
     }
 
     device.sessionId = sessionId;
@@ -1879,7 +1894,7 @@ export class DevicePool {
     device.lastUsedAt = this.nextLastUsedAt();
     device.assignmentCount++;
     device.errorCount = 0;
-    return device.id;
+    return existingSession === session ? { deviceId: device.id } : { deviceId: device.id, session };
   }
 
   private selectIdleDevice(candidates: PooledDevice[]): PooledDevice | undefined {
@@ -2011,6 +2026,66 @@ export class DevicePool {
   }
 
   /**
+   * Undo the completed portion of a failed multi-device allocation.
+   *
+   * The mutex keeps a new allocation from taking ownership between releasing
+   * the session and returning its device to the idle pool. The recorded Session
+   * object prevents a reused UUID from making this rollback release a replacement
+   * allocation.
+   */
+  private async rollbackAssignments(assignments: ReadonlyMap<string, RollbackAssignment>): Promise<void> {
+    await this.assignmentMutex.runExclusive(async () => {
+      for (const [sessionId, allocation] of assignments) {
+        const { deviceId, session: allocatedSession } = allocation;
+        const device = this.devices.get(deviceId);
+        if (!device || device.sessionId !== sessionId) {
+          logger.warn(
+            `[DevicePool] Skipping allocation rollback for ${sessionId}: ` +
+              `device ${deviceId} is no longer owned by that session`,
+          );
+          continue;
+        }
+
+        const currentSession = this.sessionManager.getSession(sessionId);
+        if (currentSession !== allocatedSession) {
+          if (currentSession?.assignedDevice === deviceId) {
+            logger.warn(
+              `[DevicePool] Preserving replacement session ${sessionId} on ${deviceId} ` +
+                `during allocation rollback`,
+            );
+            continue;
+          }
+          logger.warn(
+            `[DevicePool] Releasing stale allocation of ${deviceId} for replaced session ${sessionId}`,
+          );
+          await this.releaseDevice(deviceId, sessionId);
+          continue;
+        }
+
+        if (allocatedSession.assignedDevice !== deviceId) {
+          logger.warn(
+            `[DevicePool] Preserving session ${sessionId} on ${allocatedSession.assignedDevice} ` +
+              `while releasing stale allocation of ${deviceId}`,
+          );
+          await this.releaseDevice(deviceId, sessionId);
+          continue;
+        }
+
+        await this.sessionManager.releaseSession(sessionId, "allocation-rollback");
+        const replacementSession = this.sessionManager.getSession(sessionId);
+        if (replacementSession?.assignedDevice === deviceId) {
+          logger.warn(
+            `[DevicePool] Preserving replacement session ${sessionId} on ${deviceId} ` +
+              `during allocation rollback`,
+          );
+          continue;
+        }
+        await this.releaseDevice(deviceId, sessionId);
+      }
+    });
+  }
+
+  /**
    * Release device from session
    *
    * Called when a session completes or times out.
@@ -2020,6 +2095,14 @@ export class DevicePool {
     const device = this.devices.get(deviceId);
     if (!device) {
       logger.warn(`Cannot release device ${deviceId}: not in pool`);
+      return;
+    }
+
+    if (expectedSessionId !== undefined && device.sessionId !== expectedSessionId) {
+      logger.warn(
+        `Cannot release device ${deviceId}: expected session ${expectedSessionId}, ` +
+          `but it is owned by ${device.sessionId ?? "no session"}`,
+      );
       return;
     }
 

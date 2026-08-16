@@ -8,7 +8,7 @@ import {
   resolveNavigationRetentionConfig,
   resolveNavigationRetentionIntervalMs,
   computeProtectedBuildKeyIds,
-  computeActiveObservationIds,
+  buildOldestNodeEvictableQuery,
   DEFAULT_SCREENSHOT_TTL_MS,
   DEFAULT_STRUCTURE_TTL_MS,
   DEFAULT_PER_APP_MAX_OBSERVATIONS,
@@ -487,48 +487,60 @@ describe("NavigationRetention prune", () => {
   });
 });
 
-describe("computeActiveObservationIds at scale", () => {
+describe("eviction active-row exclusion is relational (bounded bind params)", () => {
   let db: Kysely<Database>;
 
   beforeEach(async () => {
-    db = await createTestDatabase();
+    db = await createTestDatabase({ foreignKeys: true });
   });
   afterEach(async () => {
     await db.destroy();
   });
 
-  test("handles >1000 protected build keys with one relational query (no OR-depth blowup)", async () => {
-    // A per-row `(build_key_id=? AND last_seen_at=?) OR …` chain would exceed
-    // SQLite's expression-tree depth (~1000) here and throw; the relational
-    // max-join form must not. Bulk-insert stays well under MAX_VARIABLE_NUMBER.
-    const N = 1_200;
-    const buildKeyRows = Array.from({ length: N }, (_, i) => ({
-      app_id: `app.${i}`,
-      version_code: 1,
-      content_hash: `h${i}`,
-    }));
-    await db.insertInto("navigation_build_keys").values(buildKeyRows).execute();
+  test("the oldest-evictable query binds O(protected apps), not O(active rows)", () => {
+    // Compile the actual eviction-selection query. Its bound parameters must be
+    // just the app scope + the protected id list + limit — NEVER one param per
+    // active/observation row (which a `NOT IN (activeIds)` list would produce and
+    // could exceed bun:sqlite's MAX_VARIABLE_NUMBER of 250_000).
+    const protectedIds = [1, 2, 3, 4, 5];
+    const compiled = buildOldestNodeEvictableQuery(db, "com.example.app", protectedIds, 100).compile();
+    // app id (1) + protectedIds (5) + limit (1) = 7; the correlated max subquery
+    // and the app-scope subquery bind no per-row params.
+    expect(compiled.parameters.length).toBe(protectedIds.length + 2);
+    // Bind shape does not depend on active-row count: a larger protected set grows
+    // the param count by exactly its own size, nothing more.
+    const bigger = buildOldestNodeEvictableQuery(db, "com.example.app", [1, 2, 3, 4, 5, 6, 7], 100).compile();
+    expect(bigger.parameters.length).toBe(7 + 2);
+  });
 
-    const bks = await db
-      .selectFrom("navigation_build_keys")
-      .select("id")
-      .orderBy("id", "asc")
+  test("never evicts active rows even when MANY tie at the build key's max last_seen", async () => {
+    const repo = new NavigationRepository(db);
+    await repo.getOrCreateApp(APP);
+    const node = await repo.getOrCreateNode(APP, "Home", 1);
+    const bk = await repo.getOrCreateBuildKey(APP, 1, "h"); // only build key -> protected
+
+    // 300 observations all tied at the max instant (all "active") + 5 older rows.
+    for (let i = 0; i < 300; i++) {
+      await repo.recordNodeObservation(node.id, bk.id, "d", `active-${i}`, 10_000);
+    }
+    for (let i = 0; i < 5; i++) {
+      await repo.recordNodeObservation(node.id, bk.id, "d", `old-${i}`, 1_000 + i);
+    }
+
+    // Aggressive cap; structure TTL huge so only the cap acts. All 300 tied-max
+    // rows are active and must survive; the 5 older rows are evicted.
+    const summary = await new NavigationRetention(db, {
+      ...CONFIG,
+      structureTtlMs: 10_000_000,
+      perAppMaxObservations: 1,
+    }).prune(1_000_000);
+
+    expect(summary.nodeObservationsDeleted).toBe(5);
+    const survivors = await db
+      .selectFrom("navigation_node_observations")
+      .select(["session_uuid", "last_seen_at"])
       .execute();
-    const obsRows = bks.map((bk, i) => ({
-      node_id: i + 1,
-      build_key_id: bk.id,
-      device_id: "d",
-      session_uuid: "s",
-      first_seen_at: 100,
-      last_seen_at: 100,
-    }));
-    await db.insertInto("navigation_node_observations").values(obsRows).execute();
-
-    const protectedIds = bks.map(b => b.id);
-    const active = await computeActiveObservationIds(db, protectedIds);
-
-    // One active (max-last_seen) node observation per protected build key.
-    expect(active.nodeIds.length).toBe(N);
-    expect(active.edgeIds.length).toBe(0);
+    expect(survivors.length).toBe(300);
+    expect(survivors.every(r => r.last_seen_at === 10_000)).toBe(true);
   });
 });

@@ -230,7 +230,7 @@ describe("process lifecycle handlers", () => {
       timer.advanceTime(50);
       await flushMicrotasks();
 
-      expect(fakeProcess.exitCodes).toEqual([0]);
+      expect(fakeProcess.exitCodes).toEqual([1]);
       expect(timeoutFinalizers).toEqual(["logger"]);
     } finally {
       consoleError.mockRestore();
@@ -298,7 +298,7 @@ describe("process lifecycle handlers", () => {
 
       timer.advanceTime(50);
       await flushMicrotasks();
-      expect(fakeProcess.exitCodes).toEqual([0]);
+      expect(fakeProcess.exitCodes).toEqual([1]);
     } finally {
       consoleError.mockRestore();
     }
@@ -348,7 +348,7 @@ describe("process lifecycle handlers", () => {
       timer.advanceTime(50);
       await flushMicrotasks();
 
-      expect(fakeProcess.exitCodes).toEqual([0]);
+      expect(fakeProcess.exitCodes).toEqual([1]);
     } finally {
       consoleError.mockRestore();
     }

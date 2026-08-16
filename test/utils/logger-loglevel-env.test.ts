@@ -133,6 +133,7 @@ describe("AUTOMOBILE_LOG_LEVEL is applied at process start (issue #3845)", () =>
 
   test("close waits for queued file-log writes", async () => {
     const stream = new FakeLogStream();
+    const logFileExists = spyOn(fs, "existsSync").mockReturnValue(false);
     const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(
       stream as unknown as fs.WriteStream,
     );
@@ -150,6 +151,7 @@ describe("AUTOMOBILE_LOG_LEVEL is applied at process start (issue #3845)", () =>
       expect(stream.endCalls).toBe(1);
     } finally {
       createWriteStream.mockRestore();
+      logFileExists.mockRestore();
     }
   });
 });

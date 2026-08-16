@@ -141,7 +141,7 @@ export class ProcessLifecycleHandlers {
       let exitCode = 0;
       if (!shutdownCompleted) {
         console.error(`Shutdown timed out after ${this.shutdownTimeoutMs}ms; forcing exit`);
-        exitCode = (await this.runShutdownTimeoutHandler())?.exitCode ?? 0;
+        exitCode = (await this.runShutdownTimeoutHandler())?.exitCode ?? 1;
       }
       this.lifecycleProcess.exit(exitCode);
     } catch (error) {

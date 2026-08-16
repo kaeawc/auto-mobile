@@ -359,12 +359,14 @@ async function rebuildSameIdReplacement(
   expectedPooledDevice: PooledDevice,
   replacement: BootedDevice,
   daemonState: DaemonState,
+  stopPerformanceMonitoring: (deviceId: string) => void,
 ): Promise<void> {
   const devicePool = daemonState.getDevicePool();
   const rebuilt = await devicePool.replaceDeviceForShutdown(expectedPooledDevice, replacement);
   if (!rebuilt) {
     return;
   }
+  stopPerformanceMonitoring(device.deviceId);
   daemonState.getDeviceSessionRegistry().onDeviceConnected({
     deviceId: rebuilt.id,
     platform: rebuilt.platform,
@@ -443,7 +445,13 @@ async function retireShutdownOwnership(
     deadlineMs,
   );
   if (replacement) {
-    await rebuildSameIdReplacement(device, expectedPooledDevice, replacement, daemonState);
+    await rebuildSameIdReplacement(
+      device,
+      expectedPooledDevice,
+      replacement,
+      daemonState,
+      stopPerformanceMonitoring,
+    );
     return;
   }
   if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {

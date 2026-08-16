@@ -1086,6 +1086,7 @@ describe("killDevice handler", () => {
     const timer = new FakeTimer();
     const deadlineManager = new DeadlineExhaustingShutdownDeviceManager(timer);
     manager = deadlineManager;
+    const stoppedDeviceIds: string[] = [];
     const image: DeviceInfo = {
       name: "Pixel 8",
       platform: "android",
@@ -1107,6 +1108,7 @@ describe("killDevice handler", () => {
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
+      stopPerformanceMonitoring: deviceId => stoppedDeviceIds.push(deviceId),
       timer,
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
@@ -1148,6 +1150,7 @@ describe("killDevice handler", () => {
     expect(current?.name).toBe(replacement.name);
     expect(registry.getByUuid(originalSession.deviceSessionUuid)).toBeUndefined();
     expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();
+    expect(stoppedDeviceIds).toEqual([image.deviceId]);
   });
 
   test("stops performance monitoring after direct shutdown retirement", async () => {

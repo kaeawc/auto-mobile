@@ -321,6 +321,33 @@ describe("SessionManager", () => {
       expect(attempts).toBe(2);
     });
 
+    test("releases a session after its pending automatic assignment finishes", async () => {
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const assignmentStarted = Promise.withResolvers<void>();
+      const finishAssignment = Promise.withResolvers<void>();
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(sessionId: string): Promise<string> {
+          assignmentStarted.resolve();
+          await finishAssignment.promise;
+          return (await manager.createSession(sessionId, "emulator-5554", "android")).assignedDevice;
+        },
+      };
+
+      try {
+        const assignment = manager.getOrCreateSession("pending-assignment", devicePool);
+        await assignmentStarted.promise;
+        const release = manager.releaseSession("pending-assignment", "device-disconnected");
+        finishAssignment.resolve();
+
+        await expect(assignment).resolves.toMatchObject({ assignedDevice: "emulator-5554" });
+        await expect(release).resolves.toBe("emulator-5554");
+        expect(manager.getSession("pending-assignment")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-5554")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("should return null session when expired session requested", async () => {
       const session = await sessionManager.createSession("session-1", "emulator-5554", "android");
       // Force expiration by setting expiresAt to past
@@ -446,6 +473,30 @@ describe("SessionManager", () => {
 
         fakeTimer.advanceTime(2);
         manager.cleanupExpiredSessions();
+        repository.finishUpsert();
+
+        await expect(rebinding).resolves.toMatchObject({ assignedDevice: "emulator-new" });
+        await expect(manager.drainReleasePromises(10)).resolves.toBe(true);
+        expect(manager.getSession("session-1")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-old")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("does not remove rebind ownership when lazy expiry observes the pending rebind", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android", 1);
+        repository.deferNextUpsert();
+        const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
+        await repository.waitForUpsert();
+
+        fakeTimer.advanceTime(2);
+        expect(manager.getSession("session-1")).toBeNull();
         repository.finishUpsert();
 
         await expect(rebinding).resolves.toMatchObject({ assignedDevice: "emulator-new" });

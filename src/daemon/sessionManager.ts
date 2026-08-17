@@ -154,8 +154,8 @@ export class SessionManager {
   private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
   /** Automatic device assignments that have not yet started their creation write. */
   private readonly pendingSessionAssignments: Map<string, Promise<Session>> = new Map();
-  /** Releases received before a creation write has published its session. */
-  private readonly pendingCreationReleases: Map<string, PendingSessionRelease> = new Map();
+  /** Releases received before an assignment has published its session. */
+  private readonly pendingSessionReleases: Map<string, PendingSessionRelease> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
   private readonly pendingSessionRebinds: Map<string, PendingSessionRebind> = new Map();
   private deviceSessionRepository: DeviceSessionPersistence;
@@ -323,6 +323,13 @@ export class SessionManager {
       // incarnation with the same UUID before teardown completes.
       if (this.releasingSessions.has(session)) {
         return session;
+      }
+      if (this.pendingSessionRebinds.get(sessionId)?.session === session) {
+        const release = this.releaseSession(sessionId, "lazy-expiry", true);
+        void this.getBarrier()
+          .trackExisting(release)
+          .catch(error => logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`));
+        return null;
       }
       logger.info(`Session ${sessionId} has expired, removing`);
       const deviceId = session.assignedDevice;
@@ -531,11 +538,7 @@ export class SessionManager {
   ): Promise<string | null> {
     const session = allowExpired ? this.sessions.get(sessionId) ?? null : this.getSession(sessionId);
     if (!session) {
-      const inFlightRelease = this.releasePromises.get(sessionId);
-      if (inFlightRelease) {
-        return await inFlightRelease.promise;
-      }
-      return await this.releasePendingSessionCreation(sessionId, releaseReason, allowExpired);
+      return await this.releaseUnpublishedSession(sessionId, releaseReason, allowExpired);
     }
 
     const inFlightRelease = this.releasePromises.get(sessionId);
@@ -578,51 +581,65 @@ export class SessionManager {
     return await this.releaseSession(sessionId, releaseReason);
   }
 
-  private async releasePendingSessionCreation(
+  private async releaseUnpublishedSession(
     sessionId: string,
     releaseReason: string,
     allowExpired: boolean,
   ): Promise<string | null> {
+    const inFlightRelease = this.releasePromises.get(sessionId);
+    if (inFlightRelease) {
+      return await inFlightRelease.promise;
+    }
+    const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     const pendingCreation = this.pendingSessionCreations.get(sessionId);
-    if (!pendingCreation) {
+    const pendingSession = pendingAssignment ?? pendingCreation?.promise;
+    if (!pendingSession) {
       logger.warn(`Cannot release session ${sessionId}: not found`);
       return null;
     }
+    return await this.releasePendingSessionWork(sessionId, releaseReason, allowExpired, pendingSession);
+  }
 
-    const existingRelease = this.pendingCreationReleases.get(sessionId);
+  private async releasePendingSessionWork(
+    sessionId: string,
+    releaseReason: string,
+    allowExpired: boolean,
+    pendingSession: Promise<Session>,
+  ): Promise<string | null> {
+    const existingRelease = this.pendingSessionReleases.get(sessionId);
     if (existingRelease) {
       return await existingRelease.promise;
     }
 
     const release: PendingSessionRelease = {
-      promise: this.releaseAfterSessionCreation(
+      promise: this.releaseAfterPendingSessionWork(
         sessionId,
         releaseReason,
         allowExpired,
-        pendingCreation,
+        pendingSession,
       ),
     };
-    this.pendingCreationReleases.set(sessionId, release);
+    this.pendingSessionReleases.set(sessionId, release);
     try {
       return await release.promise;
     } finally {
-      if (this.pendingCreationReleases.get(sessionId) === release) {
-        this.pendingCreationReleases.delete(sessionId);
+      if (this.pendingSessionReleases.get(sessionId) === release) {
+        this.pendingSessionReleases.delete(sessionId);
       }
     }
   }
 
-  private async releaseAfterSessionCreation(
+  private async releaseAfterPendingSessionWork(
     sessionId: string,
     releaseReason: string,
     allowExpired: boolean,
-    pendingCreation: PendingSessionCreation,
+    pendingSession: Promise<Session>,
   ): Promise<string | null> {
     try {
-      await pendingCreation.promise;
+      await pendingSession;
       return await this.releaseSession(sessionId, releaseReason, allowExpired);
     } catch (error) {
-      logger.warn(`Session ${sessionId} creation failed before release: ${error}`);
+      logger.warn(`Session ${sessionId} assignment failed before release: ${error}`);
       return null;
     }
   }
@@ -680,9 +697,9 @@ export class SessionManager {
 
   /** Wait for a release already admitted for this session, if any. */
   async waitForSessionRelease(sessionId: string): Promise<void> {
-    const pendingCreationRelease = this.pendingCreationReleases.get(sessionId);
-    if (pendingCreationRelease) {
-      await pendingCreationRelease.promise;
+    const pendingSessionRelease = this.pendingSessionReleases.get(sessionId);
+    if (pendingSessionRelease) {
+      await pendingSessionRelease.promise;
       return;
     }
 

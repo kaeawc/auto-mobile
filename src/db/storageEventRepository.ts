@@ -145,13 +145,16 @@ async function insertStorageEventWithPreviousValue(
 }
 
 export async function getStorageEvents(
-  query: { deviceId?: string; sinceTimestamp?: number; limit?: number },
+  query: { deviceId?: string; sessionId?: string; sinceTimestamp?: number; limit?: number },
   db?: Kysely<Database>
 ): Promise<RecordStorageEventInput[]> {
   let q = getDb(db).selectFrom("storage_events").selectAll();
 
   if (query.deviceId) {
     q = q.where("device_id", "=", query.deviceId);
+  }
+  if (query.sessionId) {
+    q = q.where("session_id", "=", query.sessionId);
   }
   if (query.sinceTimestamp) {
     q = q.where("timestamp", ">=", query.sinceTimestamp);

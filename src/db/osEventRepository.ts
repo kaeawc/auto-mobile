@@ -52,13 +52,16 @@ export async function recordOsEvents(
 }
 
 export async function getOsEvents(
-  query: { deviceId?: string; sinceTimestamp?: number; category?: string; limit?: number },
+  query: { deviceId?: string; sessionId?: string; sinceTimestamp?: number; category?: string; limit?: number },
   db?: Kysely<Database>
 ): Promise<RecordOsEventInput[]> {
   let q = getDb(db).selectFrom("os_events").selectAll();
 
   if (query.deviceId) {
     q = q.where("device_id", "=", query.deviceId);
+  }
+  if (query.sessionId) {
+    q = q.where("session_id", "=", query.sessionId);
   }
   if (query.sinceTimestamp) {
     q = q.where("timestamp", ">=", query.sinceTimestamp);

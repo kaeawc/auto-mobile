@@ -501,7 +501,7 @@ describe("TelemetryPushSocketServer", () => {
  * again without a red test.
  */
 describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
-  it("carries the originating session id on backfilled crash events", async () => {
+  it("applies the session filter before limiting backfilled crash events", async () => {
     await withInMemorySingletonDatabase(async () => {
       const db = getDatabase() as unknown as Kysely<Database>;
       await runMigrations(db as unknown as Kysely<unknown>);
@@ -542,6 +542,27 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
           duration_ms: null,
           tool_args_json: null,
         })
+        .execute();
+      await db
+        .insertInto("failure_occurrences")
+        .values(
+          Array.from({ length: 100 }, (_, index) => ({
+            id: `occ-other-${index}`,
+            group_id: "group-1",
+            timestamp: 2000 + index,
+            device_id: "emulator-5554",
+            device_model: "Pixel",
+            os: "34",
+            app_version: "1.0.0",
+            session_id: "session-other",
+            screen_at_failure: "MainActivity",
+            test_name: null,
+            test_execution_id: null,
+            error_code: null,
+            duration_ms: null,
+            tool_args_json: null,
+          })),
+        )
         .execute();
 
       const server = new TestableTelemetryPushSocketServer(new FakeTimer());

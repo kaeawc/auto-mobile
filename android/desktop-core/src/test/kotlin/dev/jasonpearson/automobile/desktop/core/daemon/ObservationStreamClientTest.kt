@@ -55,6 +55,7 @@ class ObservationStreamClientTest {
       StreamRequest(
         id = "req-3",
         command = "update_cadence",
+        subscriptionId = "devicedatastream-1",
         deviceId = "emulator-5554",
         screenshotIntervalMs = 500L,
       )
@@ -62,8 +63,20 @@ class ObservationStreamClientTest {
     val encoded = wireJson.encodeToString(StreamRequest.serializer(), request)
 
     assertTrue(encoded.contains("\"command\":\"update_cadence\""), encoded)
+    assertTrue(encoded.contains("\"subscriptionId\":\"devicedatastream-1\""), encoded)
     assertTrue(encoded.contains("\"screenshotIntervalMs\":500"), encoded)
     assertFalse(encoded.contains("hierarchyIntervalMs"), encoded)
+  }
+
+  @Test
+  fun `subscription response decodes the server minted subscription ID`() {
+    val response =
+      wireJson.decodeFromString(
+        StreamResponse.serializer(),
+        """{"type":"subscription_response","success":true,"subscriptionId":"devicedatastream-1"}""",
+      )
+
+    assertEquals("devicedatastream-1", response.subscriptionId)
   }
 
   @Test

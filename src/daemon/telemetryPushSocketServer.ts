@@ -166,6 +166,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   ): Promise<void> {
     const limit = 100;
     const deviceId = filter.deviceId ?? undefined;
+    const sessionId = filter.sessionId ?? undefined;
     const events: TelemetryEvent[] = [];
 
     const shouldInclude = (category: string) =>
@@ -173,9 +174,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
 
     // Run independent backfill queries in parallel
     const [networkRows, logRows, osRows] = await Promise.all([
-      shouldInclude("network") ? getNetworkEvents({ deviceId, limit }) : [],
-      shouldInclude("log") ? getLogEvents({ deviceId, limit }) : [],
-      shouldInclude("os") ? getOsEvents({ deviceId, limit }) : [],
+      shouldInclude("network") ? getNetworkEvents({ deviceId, sessionId, limit }) : [],
+      shouldInclude("log") ? getLogEvents({ deviceId, sessionId, limit }) : [],
+      shouldInclude("os") ? getOsEvents({ deviceId, sessionId, limit }) : [],
     ]);
     for (const r of networkRows) {
       events.push({
@@ -206,7 +207,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     }
 
     if (shouldInclude("navigation")) {
-      const rows = await getNavigationEvents({ deviceId, limit });
+      const rows = await getNavigationEvents({ deviceId, sessionId, limit });
       // Look up screenshot node IDs for navigation events
       const screenshotUris: Map<string, string> = new Map();
       if (rows.length > 0) {
@@ -277,6 +278,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
             .where("failure_occurrences.device_id", "is not", null)
             .where("failure_occurrences.device_id", "!=", "");
         }
+        if (sessionId) {
+          q = q.where("failure_occurrences.session_id", "=", sessionId);
+        }
 
         const rows = await q
           .orderBy("failure_occurrences.timestamp", "desc")
@@ -330,8 +334,8 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     await Promise.all(failureTypes.map(failureBackfillFn));
 
     const [storageRows, layoutRows] = await Promise.all([
-      shouldInclude("storage") ? getStorageEvents({ deviceId, limit }) : [],
-      shouldInclude("layout") ? getLayoutEvents({ deviceId, limit }) : [],
+      shouldInclude("storage") ? getStorageEvents({ deviceId, sessionId, limit }) : [],
+      shouldInclude("layout") ? getLayoutEvents({ deviceId, sessionId, limit }) : [],
     ]);
     for (const r of storageRows) {
       events.push({

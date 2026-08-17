@@ -104,6 +104,7 @@ class ObservationStreamClient : ObservationStream {
   // Requested observation cadence, remembered so it is re-applied on every (re)subscribe (so the
   // cadence survives reconnects). Managed via setCadence(); null means "use the daemon's default".
   private var subscribedDeviceId: String? = null
+  private var subscriptionId: String? = null
   private var requestedScreenshotIntervalMs: Long? = null
   private var requestedHierarchyIntervalMs: Long? = null
 
@@ -148,6 +149,7 @@ class ObservationStreamClient : ObservationStream {
 
       // Send subscribe request (carries any cadence configured via setCadence)
       subscribedDeviceId = deviceId
+      subscriptionId = null
       subscribe(deviceId)
 
       // Start reading messages
@@ -168,10 +170,12 @@ class ObservationStreamClient : ObservationStream {
     try {
       // Send unsubscribe request
       if (previousState is ConnectionState.Connected && previousState.subscribed) {
+        val currentSubscriptionId = subscriptionId
         val request =
           StreamRequest(
             id = UUID.randomUUID().toString(),
             command = "unsubscribe",
+            subscriptionId = currentSubscriptionId,
           )
         sendRequest(request)
       }
@@ -184,6 +188,7 @@ class ObservationStreamClient : ObservationStream {
     channel = null
     reader = null
     writer = null
+    subscriptionId = null
     _connectionState.update { ConnectionState.Disconnected() }
   }
 
@@ -238,11 +243,13 @@ class ObservationStreamClient : ObservationStream {
     requestedHierarchyIntervalMs = hierarchyIntervalMs
 
     if (!_connectionState.value.isConnected) return
+    val currentSubscriptionId = subscriptionId ?: return
 
     val request =
       StreamRequest(
         id = UUID.randomUUID().toString(),
         command = "update_cadence",
+        subscriptionId = currentSubscriptionId,
         deviceId = subscribedDeviceId,
         screenshotIntervalMs = screenshotIntervalMs,
         hierarchyIntervalMs = hierarchyIntervalMs,
@@ -305,6 +312,8 @@ class ObservationStreamClient : ObservationStream {
         log.info("Subscription response: success=${response.success}")
         if (response.success != true) {
           log.warn("Subscription failed: ${response.error}")
+        } else if (response.subscriptionId != null) {
+          subscriptionId = response.subscriptionId
         }
       }
       "hierarchy_update" -> {
@@ -550,6 +559,7 @@ class ObservationStreamClient : ObservationStream {
 data class StreamRequest(
   val id: String,
   val command: String,
+  val subscriptionId: String? = null,
   val deviceId: String? = null,
   val appId: String? = null,
   val screenshotIntervalMs: Long? = null,
@@ -562,6 +572,7 @@ data class StreamResponse(
   val type: String,
   val success: Boolean? = null,
   val error: String? = null,
+  val subscriptionId: String? = null,
   val deviceId: String? = null,
   val timestamp: Long? = null,
   val data: JsonElement? = null,

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager, type KeepScreenAwakeRestorer } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { ActionableError } from "../../src/models";
 
@@ -83,6 +84,7 @@ describe("DevicePool autolock", () => {
     // has no autolockSessionId, but must still return its matching device to the pool.
     timer.advanceTime(31 * 60 * 1000);
     expect(sessionManager.getSession("test-session")).toBeNull();
+    await sessionManager.waitForSessionRelease("test-session");
     expect(pool.getDevice("emulator-5554")).toMatchObject({
       sessionId: null,
       status: "idle",
@@ -100,6 +102,7 @@ describe("DevicePool autolock", () => {
     // Advance past the 30-minute timeout and the five-minute cleanup interval
     // without reading the session, so the periodic callback owns the expiry.
     timer.advanceTime(36 * 60 * 1000);
+    await sessionManager.waitForSessionRelease("test-session");
 
     expect(pool.getDevice("emulator-5554")).toMatchObject({
       sessionId: null,
@@ -107,6 +110,52 @@ describe("DevicePool autolock", () => {
     });
     await expect(pool.assignDeviceToSession("replacement-session", "android"))
       .resolves.toBe("emulator-5554");
+  });
+
+  it("restores expired session state before returning its device to the pool", async () => {
+    let finishRestore!: () => void;
+    const restoreFinished = new Promise<void>(resolve => { finishRestore = resolve; });
+    let restoreCalls = 0;
+    const restorer: KeepScreenAwakeRestorer = {
+      async restore(): Promise<void> {
+        restoreCalls++;
+        await restoreFinished;
+      },
+    };
+    const restoringManager = new SessionManager(
+      timer,
+      new FakeDeviceSessionPersistence(),
+      () => new FakeDbWriteBarrier(),
+      () => restorer,
+    );
+    const restoringPool = new DevicePool(
+      restoringManager,
+      "daemon-session-1",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    await restoringPool.initializeWithDevices([androidDevice]);
+    await restoringPool.assignDeviceToSession("test-session", "android");
+    restoringManager.setKeepScreenAwake("test-session", { applied: true, method: "svc", svcWasEnabled: false });
+
+    timer.advanceTime(31 * 60 * 1000);
+    expect(restoringManager.getSession("test-session")).toBeNull();
+    await Promise.resolve();
+    expect(restoreCalls).toBe(1);
+    expect(restoringPool.getDevice("emulator-5554")).toMatchObject({
+      sessionId: "test-session",
+      status: "busy",
+    });
+
+    finishRestore();
+    await restoringManager.waitForSessionRelease("test-session");
+    expect(restoringPool.getDevice("emulator-5554")).toMatchObject({
+      sessionId: null,
+      status: "idle",
+    });
+    restoringManager.stopCleanupTimer();
   });
 
   it("leaves explicit session release to its caller's ordered pool cleanup", async () => {
@@ -275,6 +324,7 @@ describe("DevicePool autolock", () => {
 
       timer.advanceTime(61 * 1000);
       expect(sessionManager.getSession(sessionId!)).toBeNull();
+      await sessionManager.waitForSessionRelease(sessionId!);
 
       expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeUndefined();
     });
@@ -283,10 +333,11 @@ describe("DevicePool autolock", () => {
       await initializeLiveAndroidDevice();
       sessionManager.setActiveSessionExecutionChecker((_sessionId, startedAtOrBefore) => startedAtOrBefore === undefined);
 
-      await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+      const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
       timer.advanceTime(61 * 1000);
 
       expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeUndefined();
+      await sessionManager.waitForSessionRelease(sessionId!);
       expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
     });
 
@@ -410,6 +461,7 @@ describe("DevicePool autolock", () => {
       // Advance past both the idle timeout (60s) and the cleanup interval (5 min),
       // so the periodic cleanup fires and releases the expired session's device.
       timer.advanceTime(6 * 60 * 1000);
+      await sessionManager.waitForSessionRelease(sessionId!);
 
       const device = pool.getDevice("emulator-5554")!;
       expect(device.status).toBe("idle");
@@ -428,6 +480,7 @@ describe("DevicePool autolock", () => {
 
       // Touching the expired session lazily expires it and fires the release callback.
       expect(sessionManager.getSession(sessionId!)).toBeNull();
+      await sessionManager.waitForSessionRelease(sessionId!);
 
       const device = pool.getDevice("emulator-5554")!;
       expect(device.status).toBe("idle");

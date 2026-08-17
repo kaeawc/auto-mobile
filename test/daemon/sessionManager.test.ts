@@ -1015,6 +1015,7 @@ describe("SessionManager", () => {
       // Accessing the expired session should trigger cleanup + callback
       const result = sessionManager.getSession("session-expiry");
       expect(result).toBeNull();
+      await sessionManager.waitForSessionRelease("session-expiry");
       expect(released).toHaveLength(1);
       expect(released[0].sessionId).toBe("session-expiry");
       expect(released[0].deviceId).toBe("emulator-5554");
@@ -1030,6 +1031,7 @@ describe("SessionManager", () => {
 
       // Advance past session timeout + cleanup interval (30min + 5min)
       fakeTimer.advanceTime(36 * 60 * 1000);
+      await sessionManager.waitForSessionRelease("session-timer");
 
       expect(released).toHaveLength(1);
       expect(released[0].sessionId).toBe("session-timer");
@@ -1101,12 +1103,11 @@ describe("SessionManager", () => {
         await mgr.createSession("s1", "emulator-5554", "android");
         // Past session timeout (30m) + cleanup interval (5m): the timer fires.
         fakeTimer.advanceTime(36 * 60 * 1000);
-        await Promise.resolve();
+        await mgr.waitForSessionRelease("s1");
         expect(released).toContain("s1");
-        // Exactly one barrier-tracked write: the cleanup sweep releases the single
-        // expired session once, routing one fire-and-forget markReleased through the
-        // barrier. A duplicate-write regression would push this to 2.
-        expect(barrier.ran.length).toBe(1);
+        // Exactly one release promise is registered before daemon shutdown can
+        // begin draining. A duplicate release regression would push this to 2.
+        expect(barrier.trackedExisting.length).toBe(1);
       } finally {
         mgr.stopCleanupTimer();
       }

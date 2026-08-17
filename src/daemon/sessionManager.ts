@@ -325,27 +325,11 @@ export class SessionManager {
       if (this.releasingSessions.has(session)) {
         return session;
       }
-      if (this.pendingSessionRebinds.get(sessionId)?.session === session) {
-        const release = this.releaseSession(sessionId, "lazy-expiry", true);
-        void this.getBarrier()
-          .trackExisting(release)
-          .catch(error => logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`));
-        return null;
-      }
-      logger.info(`Session ${sessionId} has expired, removing`);
-      const deviceId = session.assignedDevice;
-      this.removeSession(sessionId);
+      logger.info(`Session ${sessionId} has expired, releasing`);
+      const release = this.releaseSession(sessionId, "lazy-expiry", true);
       void this.getBarrier()
-        .track(() => this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "lazy-expiry"))
-        .catch(error => logger.warn(`[SessionManager] Failed to mark session released (lazy-expiry): ${error}`));
-      // Notify release callbacks so session-scoped state is cleaned up
-      for (const callback of this.releaseCallbacks) {
-        try {
-          callback(sessionId, deviceId, "lazy-expiry");
-        } catch (error) {
-          logger.warn(`Session expiry callback failed for ${sessionId}: ${error}`);
-        }
-      }
+        .trackExisting(release)
+        .catch(error => logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`));
       return null;
     }
     return session;
@@ -1142,27 +1126,10 @@ export class SessionManager {
       if (!session) {
         continue;
       }
-      if (this.pendingSessionRebinds.get(sessionId)?.session === session) {
-        const release = this.releaseSession(sessionId, "cleanup-expired", true);
-        void this.getBarrier()
-          .trackExisting(release)
-          .catch(error => logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`));
-        continue;
-      }
-
-      const deviceId = session.assignedDevice;
-      this.removeSession(sessionId);
-      // Notify release callbacks so session-scoped state is cleaned up.
+      const release = this.releaseSession(sessionId, "cleanup-expired", true);
       void this.getBarrier()
-        .track(() => this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "cleanup-expired"))
-        .catch(error => logger.warn(`[SessionManager] Failed to mark session released (cleanup-expired): ${error}`));
-      for (const callback of this.releaseCallbacks) {
-        try {
-          callback(sessionId, deviceId, "cleanup-expired");
-        } catch (error) {
-          logger.warn(`Session cleanup callback failed for ${sessionId}: ${error}`);
-        }
-      }
+        .trackExisting(release)
+        .catch(error => logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`));
     }
   }
 

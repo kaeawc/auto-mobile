@@ -105,6 +105,7 @@ class ObservationStreamClient : ObservationStream {
   // cadence survives reconnects). Managed via setCadence(); null means "use the daemon's default".
   private var subscribedDeviceId: String? = null
   private var subscriptionId: String? = null
+  private var pendingCadenceUpdate = false
   private var requestedScreenshotIntervalMs: Long? = null
   private var requestedHierarchyIntervalMs: Long? = null
 
@@ -150,6 +151,7 @@ class ObservationStreamClient : ObservationStream {
       // Send subscribe request (carries any cadence configured via setCadence)
       subscribedDeviceId = deviceId
       subscriptionId = null
+      pendingCadenceUpdate = false
       subscribe(deviceId)
 
       // Start reading messages
@@ -189,6 +191,7 @@ class ObservationStreamClient : ObservationStream {
     reader = null
     writer = null
     subscriptionId = null
+    pendingCadenceUpdate = false
     _connectionState.update { ConnectionState.Disconnected() }
   }
 
@@ -243,22 +246,32 @@ class ObservationStreamClient : ObservationStream {
     requestedHierarchyIntervalMs = hierarchyIntervalMs
 
     if (!_connectionState.value.isConnected) return
-    val currentSubscriptionId = subscriptionId ?: return
+    val currentSubscriptionId = subscriptionId
+    if (currentSubscriptionId == null) {
+      pendingCadenceUpdate = true
+      return
+    }
 
+    sendCadenceUpdate(currentSubscriptionId)
+  }
+
+  private fun sendCadenceUpdate(currentSubscriptionId: String): Boolean {
     val request =
       StreamRequest(
         id = UUID.randomUUID().toString(),
         command = "update_cadence",
         subscriptionId = currentSubscriptionId,
         deviceId = subscribedDeviceId,
-        screenshotIntervalMs = screenshotIntervalMs,
-        hierarchyIntervalMs = hierarchyIntervalMs,
+        screenshotIntervalMs = requestedScreenshotIntervalMs,
+        hierarchyIntervalMs = requestedHierarchyIntervalMs,
       )
     if (sendRequest(request)) {
       log.info(
-        "Requested observation cadence update (screenshot=$screenshotIntervalMs, hierarchy=$hierarchyIntervalMs)"
+        "Requested observation cadence update (screenshot=$requestedScreenshotIntervalMs, hierarchy=$requestedHierarchyIntervalMs)"
       )
+      return true
     }
+    return false
   }
 
   private fun sendRequest(request: StreamRequest): Boolean {
@@ -314,6 +327,9 @@ class ObservationStreamClient : ObservationStream {
           log.warn("Subscription failed: ${response.error}")
         } else if (response.subscriptionId != null) {
           subscriptionId = response.subscriptionId
+          if (pendingCadenceUpdate) {
+            pendingCadenceUpdate = !sendCadenceUpdate(response.subscriptionId)
+          }
         }
       }
       "hierarchy_update" -> {

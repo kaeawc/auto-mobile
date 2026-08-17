@@ -24,6 +24,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { ProgressCallback } from "./toolRegistry";
+import { getToolCapabilityContext } from "../features/toolCapabilities/toolCapabilityContext";
 import type { Plan } from "../models/Plan";
 import { isDeviceLostError } from "./deviceLossOutcome";
 
@@ -513,7 +514,8 @@ export class PlanExecutionOrchestrator {
       this.request.sessionUuid,
       effectiveLabels,
       this.request.device,
-      { keepScreenAwake: this.request.keepScreenAwake, platform: this.request.platform }
+      { keepScreenAwake: this.request.keepScreenAwake, platform: this.request.platform },
+      getToolCapabilityContext()?.execution,
     );
 
     return deviceMapping;

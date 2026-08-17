@@ -3,9 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { BootedDevice } from "../../src/models";
 import type { TestExecutionRecord, TestExecutionRepository } from "../../src/db/testExecutionRepository";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
 
 // Mock planUtils so the orchestrator's runPlan() phase is observable without
 // spinning up a real PlanExecutor. The companion test
@@ -233,6 +238,76 @@ steps:
     const result = await orchestrator.execute();
     expect(result.success).toBe(false);
     expect(result.error).toContain("Device label requires a devices list");
+  });
+
+  test("keeps every labeled session assigned when allocation crosses idle expiry", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const secondAndroidDevice: BootedDevice = {
+      ...androidDevice,
+      deviceId: "emulator-5556",
+      name: "Android Emulator 2",
+    };
+    const devicePool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+    );
+    DaemonState.getInstance().initialize(sessionManager, devicePool);
+    sessionManager.setActiveSessionExecutionChecker(() => true);
+
+    devicePool.assignMultipleDevices = async sessionIds => {
+      const assignments = new Map<string, string>();
+      for (const [index, sessionId] of sessionIds.entries()) {
+        const device = index === 0 ? androidDevice : secondAndroidDevice;
+        const session = await sessionManager.createSession(sessionId, device.deviceId, "android");
+        session.expiresAt = timer.now();
+        assignments.set(sessionId, device.deviceId);
+      }
+      timer.advanceTime(1);
+      return assignments;
+    };
+    devicePool.assignDeviceToSession = async () => {
+      throw new Error("expired labeled sessions must not be recreated");
+    };
+
+    const multiDevicePlan = `
+name: multi-device-test
+devices:
+  - A
+  - B
+steps:
+  - tool: observe
+    device: A
+    params: {}
+`;
+
+    try {
+      const result = await runWithToolCapabilityContext(
+        { execution: { executionId: "plan-execution", startTime: 0 } },
+        () => new PlanExecutionOrchestrator(
+          {
+            device: androidDevice,
+            request: {
+              ...baseRequest,
+              planContent: multiDevicePlan,
+              platform: "android",
+              sessionUuid: "base",
+              device: "A",
+              devices: ["A", "B"],
+            },
+          },
+          { ...baseDeps(), timer },
+        ).execute(),
+      );
+
+      expect(result.success).toBe(true);
+      expect(sessionManager.getSession("base")).not.toBeNull();
+      expect(sessionManager.getSession("base:B")).not.toBeNull();
+    } finally {
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
   });
 
   test("execute() records test execution to the repository when metadata is provided", async () => {

@@ -2,7 +2,7 @@ import { DaemonState } from "../daemon/daemonState";
 import { ActionableError } from "../models";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import type { SessionOptions } from "./ToolExecutionContext";
-import type { DeviceLabelMap } from "../daemon/sessionManager";
+import type { DeviceLabelMap, SessionExecutionMetadata } from "../daemon/sessionManager";
 import { logger } from "../utils/logger";
 
 const buildDeviceLabelList = (labels: string[]): string[] => {
@@ -60,7 +60,8 @@ export const registerDeviceLabelMap = async (
   baseSessionUuid: string,
   labels: string[],
   primaryLabel?: string,
-  sessionOptions: SessionOptions = {}
+  sessionOptions: SessionOptions = {},
+  execution?: SessionExecutionMetadata,
 ): Promise<DeviceLabelMap> => {
   if (!DaemonState.getInstance().isInitialized()) {
     throw new ActionableError("Device labels require an active daemon session.");
@@ -76,14 +77,14 @@ export const registerDeviceLabelMap = async (
 
   // Ensure the base session is set up (accessibility/keep-awake side effects),
   // then store the label map in its typed `deviceLabels` slot (issue #2973).
-  await createToolExecutionContext(baseSessionUuid, sessionManager, devicePool, sessionOptions);
+  await createToolExecutionContext(baseSessionUuid, sessionManager, devicePool, sessionOptions, execution);
   sessionManager.setDeviceLabels(baseSessionUuid, deviceLabelMap);
 
   const assignedSessions = new Set(Object.values(deviceLabelMap));
   assignedSessions.delete(baseSessionUuid);
 
   for (const sessionUuid of assignedSessions) {
-    await createToolExecutionContext(sessionUuid, sessionManager, devicePool, sessionOptions);
+    await createToolExecutionContext(sessionUuid, sessionManager, devicePool, sessionOptions, execution);
   }
 
   logger.info(`[DeviceLabelMap] Registered labels for session ${baseSessionUuid}: ${Object.keys(deviceLabelMap).join(", ")}`);

@@ -33,7 +33,7 @@ detekt = "2.0.0-alpha.6"
 # AndroidX versions
 androidx-core = "1.19.0"
 androidx-activity-compose = "1.13.0"
-androidx-compose-bom = "2026.06.01"
+androidx-compose-bom = "2026.08.00"
 androidx-lifecycle = "2.11.0"
 androidx-startup = "1.2.0"
 

@@ -165,6 +165,19 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       return signals;
     }
 
+    test("forceStop sends SIGKILL to both the device recorder and host adb process", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeProcess = new FakeChildProcess();
+      const backend = new PlatformVideoCaptureBackend(fakeFactory);
+      const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
+      const signals = spyOnKill(fakeProcess);
+
+      await backend.forceStop(handle);
+
+      expect(fakeFactory.getFakeClient().wasCommandExecuted("shell pkill -9 screenrecord")).toBe(true);
+      expect(signals).toContain("SIGKILL");
+    });
+
     test("sends device-side `pkill -2 screenrecord` as the first ADB command on stop", async () => {
       const fakeFactory = new FakeAdbClientFactory();
       const fakeClient = fakeFactory.getFakeClient();

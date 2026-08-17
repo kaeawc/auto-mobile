@@ -12,6 +12,7 @@ import type {
 export class FakeVideoCaptureBackend implements VideoCaptureBackend {
   readonly startCalls: VideoCaptureConfig[] = [];
   readonly stopCalls: RecordingHandle[] = [];
+  readonly forceStopCalls: RecordingHandle[] = [];
   /** The exact handle objects returned by start(), for identity assertions. */
   readonly startResults: RecordingHandle[] = [];
   private stopResolvers: Array<(handle: RecordingHandle) => void> = [];
@@ -68,6 +69,10 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
     }
 
     return baseResult;
+  }
+
+  async forceStop(handle: RecordingHandle): Promise<void> {
+    this.forceStopCalls.push(handle);
   }
 
   waitForStopCall(): Promise<RecordingHandle> {

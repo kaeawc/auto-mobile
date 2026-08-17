@@ -196,6 +196,9 @@ interface VideoRecordingHighlightSession {
 
 let moduleDependencies: VideoRecordingManagerDependencies | null = null;
 let managerInitialized = false;
+let acceptingVideoRecordingStarts = true;
+let inFlightVideoRecordingStarts = 0;
+let resolveVideoRecordingStartDrain: (() => void) | null = null;
 
 const autoStopTimers = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
 const highlightSessions = new Map<string, VideoRecordingHighlightSession>();
@@ -316,7 +319,35 @@ function resetVideoRecordingManagerState(): void {
   }
   highlightSessions.clear();
   highlightSessionsByDeviceId.clear();
+  acceptingVideoRecordingStarts = true;
+  inFlightVideoRecordingStarts = 0;
+  resolveVideoRecordingStartDrain?.();
+  resolveVideoRecordingStartDrain = null;
   managerInitialized = false;
+}
+
+function beginVideoRecordingStart(): () => void {
+  if (!acceptingVideoRecordingStarts) {
+    throw new ActionableError("Video recording is unavailable while the daemon shuts down.");
+  }
+  inFlightVideoRecordingStarts++;
+  return () => {
+    inFlightVideoRecordingStarts--;
+    if (inFlightVideoRecordingStarts === 0) {
+      resolveVideoRecordingStartDrain?.();
+      resolveVideoRecordingStartDrain = null;
+    }
+  };
+}
+
+export async function stopAcceptingVideoRecordingStarts(): Promise<void> {
+  acceptingVideoRecordingStarts = false;
+  if (inFlightVideoRecordingStarts === 0) {
+    return;
+  }
+  await new Promise<void>(resolve => {
+    resolveVideoRecordingStartDrain = resolve;
+  });
 }
 
 export function resetVideoRecordingManagerDependencies(): void {
@@ -795,6 +826,8 @@ export async function updateVideoRecordingConfig(
 export async function startVideoRecording(
   request: StartVideoRecordingRequest
 ): Promise<ActiveVideoRecording> {
+  const completeStart = beginVideoRecordingStart();
+  try {
   const deps = await getVideoRecordingDependencies();
   const { videoRecorderService, recordingRepository, timer } = deps;
   const existing = await recordingRepository.listRecordings({
@@ -864,6 +897,9 @@ export async function startVideoRecording(
   scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
 
   return active;
+  } finally {
+    completeStart();
+  }
 }
 
 export async function stopVideoRecording(
@@ -936,6 +972,12 @@ export async function interruptVideoRecording(recordingId: string): Promise<void
   });
 
   await notifyVideoRecordingResources([recordingId]);
+}
+
+/** Force-stops the owning capture process before its recording is marked interrupted. */
+export async function forceStopVideoRecording(recordingId: string): Promise<void> {
+  const { videoRecorderService } = await getVideoRecordingDependencies();
+  await videoRecorderService.forceStopRecording(recordingId);
 }
 
 export async function recordVideoRecordingHighlightAdded(

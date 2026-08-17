@@ -2,13 +2,18 @@ import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import {
   interruptVideoRecording,
   listActiveVideoRecordings,
+  forceStopVideoRecording,
+  stopAcceptingVideoRecordingStarts,
   stopVideoRecording,
 } from "../server/videoRecordingManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
-const CHILD_PROCESS_CLEANUP_TIMEOUT_MS = 10_000;
+// DaemonManager and stdin lifecycle both force-exit after five seconds. Keep each
+// best-effort stage short enough for the fallback force-stop to run before that
+// outer deadline, even when listing, graceful stop, and interruption all stall.
+const CHILD_PROCESS_CLEANUP_TIMEOUT_MS = 750;
 
 /**
  * Process owners which must be cleaned up before the daemon closes its database.
@@ -16,8 +21,10 @@ const CHILD_PROCESS_CLEANUP_TIMEOUT_MS = 10_000;
  * without starting real capture or iOS runner processes.
  */
 export interface DaemonChildProcessCleanupDependencies {
+  stopAcceptingVideoRecordingStarts(): Promise<void>;
   listActiveVideoRecordings(): Promise<VideoRecordingRecord[]>;
   stopVideoRecording(recordingId: string): Promise<unknown>;
+  forceStopVideoRecording(recordingId: string): Promise<void>;
   interruptVideoRecording(recordingId: string): Promise<void>;
   shutdownIOSCtrlProxies(): Promise<void>;
   timer?: Timer;
@@ -25,8 +32,10 @@ export interface DaemonChildProcessCleanupDependencies {
 }
 
 const defaultDependencies: DaemonChildProcessCleanupDependencies = {
+  stopAcceptingVideoRecordingStarts,
   listActiveVideoRecordings,
   stopVideoRecording,
+  forceStopVideoRecording,
   interruptVideoRecording,
   shutdownIOSCtrlProxies: () => IOSCtrlProxyManager.shutdownAll(),
 };
@@ -43,6 +52,14 @@ export async function cleanupDaemonChildProcesses(
   const timeoutMs = dependencies.timeoutMs ?? CHILD_PROCESS_CLEANUP_TIMEOUT_MS;
   let activeRecordings: VideoRecordingRecord[] = [];
   try {
+    const admission = await settleWithin(
+      dependencies.stopAcceptingVideoRecordingStarts(),
+      timer,
+      timeoutMs
+    );
+    if (admission.status !== "fulfilled") {
+      logger.warn(`[Daemon] Failed to quiesce recording starts during shutdown: ${admission.error}`);
+    }
     const result = await settleWithin(
       dependencies.listActiveVideoRecordings(),
       timer,
@@ -70,6 +87,16 @@ export async function cleanupDaemonChildProcesses(
       logger.warn(
         `[Daemon] Failed to stop recording ${recording.recordingId} during shutdown: ${result.error}`
       );
+      const forceStopped = await settleWithin(
+        dependencies.forceStopVideoRecording(recording.recordingId),
+        timer,
+        timeoutMs
+      );
+      if (forceStopped.status !== "fulfilled") {
+        logger.warn(
+          `[Daemon] Failed to force-stop recording ${recording.recordingId} during shutdown: ${forceStopped.error}`
+        );
+      }
       const interrupted = await settleWithin(
         dependencies.interruptVideoRecording(recording.recordingId),
         timer,

@@ -367,6 +367,20 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     };
   }
 
+  async forceStop(handle: RecordingHandle): Promise<void> {
+    const backendHandle = handle.backendHandle as FfmpegBackendHandle | undefined;
+    if (!backendHandle) {
+      throw new Error("Missing backend handle for FFmpeg video recording.");
+    }
+
+    const trackers = [backendHandle.ffmpegTracker, backendHandle.captureTracker];
+    for (const tracker of trackers) {
+      if (tracker && tracker.process.exitCode === null && !tracker.process.killed) {
+        tracker.process.kill("SIGKILL");
+      }
+    }
+  }
+
   private async startAndroid(
     device: BootedDevice,
     config: VideoCaptureConfig

@@ -47,6 +47,7 @@ export interface RecordingResult {
 export interface VideoCaptureBackend {
   start(config: VideoCaptureConfig): Promise<RecordingHandle>;
   stop(handle: RecordingHandle): Promise<RecordingResult>;
+  forceStop?(handle: RecordingHandle): Promise<void>;
 }
 
 export interface StartVideoRecordingOptions {
@@ -250,6 +251,19 @@ export class VideoRecorderService {
     this.activeRecordings.delete(recordingId);
 
     return metadata;
+  }
+
+  async forceStopRecording(recordingId: string): Promise<void> {
+    const active = this.activeRecordings.get(recordingId);
+    if (!active) {
+      throw new Error(`No active recording found for id ${recordingId}`);
+    }
+    if (!this.backend.forceStop) {
+      throw new Error("Video capture backend does not support force stopping recordings.");
+    }
+
+    await this.backend.forceStop(active.handle);
+    this.activeRecordings.delete(recordingId);
   }
 
   private getRecordingDir(name: string): string {

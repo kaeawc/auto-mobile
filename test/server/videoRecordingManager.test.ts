@@ -18,6 +18,7 @@ import {
   runRetentionSweep,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
+  stopAcceptingVideoRecordingStarts,
   stopVideoRecording,
   type VideoRetentionPolicy,
 } from "../../src/server/videoRecordingManager";
@@ -148,6 +149,14 @@ describe("videoRecordingManager", () => {
     expect(record?.status).toBe("interrupted");
     expect(record?.endedAt).toBe(new Date(fakeTimer.now()).toISOString());
     expect(record?.durationMs).toBe(1000);
+  });
+
+  test("rejects recording starts once shutdown begins", async () => {
+    await stopAcceptingVideoRecordingStarts();
+
+    await expect(startVideoRecording({ device: testDevice })).rejects.toThrow(
+      "unavailable while the daemon shuts down"
+    );
   });
 
   test("records highlight timelines for scheduled highlights", async () => {

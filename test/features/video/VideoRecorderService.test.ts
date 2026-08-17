@@ -124,6 +124,17 @@ describe("VideoRecorderService", () => {
     });
   });
 
+  test("force-stops an active capture and removes its handle", async () => {
+    const recording = await service.startRecording();
+
+    await service.forceStopRecording(recording.recordingId);
+
+    expect(backend.forceStopCalls).toEqual([backend.startResults[0]]);
+    await expect(service.stopRecording(recording.recordingId)).rejects.toThrow(
+      "No active recording found"
+    );
+  });
+
   afterEach(async () => {
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
   });

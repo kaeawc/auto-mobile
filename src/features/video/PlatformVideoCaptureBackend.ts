@@ -210,6 +210,23 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     };
   }
 
+  async forceStop(handle: RecordingHandle): Promise<void> {
+    const backendHandle = handle.backendHandle as BackendHandle | undefined;
+    if (!backendHandle || backendHandle.kind !== "android") {
+      throw new Error("Missing backend handle for video recording.");
+    }
+
+    const adb = this.adbFactory.create(backendHandle.device);
+    try {
+      await adb.executeCommand("shell pkill -9 screenrecord", 8000);
+    } catch (error) {
+      logger.warn(`[VideoCapture] Device-side force-stop failed: ${error}`);
+    }
+    if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
+      backendHandle.process.kill("SIGKILL");
+    }
+  }
+
   private async startAndroid(
     device: BootedDevice,
     config: VideoCaptureConfig

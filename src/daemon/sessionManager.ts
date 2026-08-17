@@ -321,9 +321,10 @@ export class SessionManager {
     if (this.shouldExpireSession(session, expireDespiteActiveExecution, execution)) {
       // Release owns this exact session object until it has restored device state
       // and removed its assignment. Keep expiry cleanup from creating a second
-      // incarnation with the same UUID before teardown completes.
+      // incarnation with the same UUID before teardown completes, without
+      // exposing the expired session to callers during that teardown.
       if (this.releasingSessions.has(session)) {
-        return session;
+        return null;
       }
       logger.info(`Session ${sessionId} has expired, releasing`);
       const release = this.releaseSession(sessionId, "lazy-expiry", true);
@@ -379,6 +380,12 @@ export class SessionManager {
       existing.expiresAt = now + existing.sessionTimeoutMs;
       await this.recordSessionActivity(existing);
       return existing;
+    }
+
+    const inFlightRelease = this.releasePromises.get(sessionId);
+    if (inFlightRelease && inFlightRelease.session === this.sessions.get(sessionId)) {
+      await inFlightRelease.promise;
+      return await this.getOrCreateSession(sessionId, devicePool, platform);
     }
 
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);

@@ -1379,6 +1379,9 @@ export class Daemon {
             undefined,
             "absent",
           );
+          if (await this.shouldSkipStaleDisconnectCleanup(pooledDeviceAtDisconnect, deviceId)) {
+            continue;
+          }
           const sessionId = this.sessionManager.getSessionForDevice(deviceId);
           if (sessionId) {
             logger.warn(

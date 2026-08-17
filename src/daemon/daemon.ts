@@ -1635,22 +1635,22 @@ export class Daemon {
       try {
         logger.info(`[Daemon] Setting up CtrlProxy iOS for iOS device ${device.id}`);
 
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          const timer = defaultTimer.setTimeout(() => {
-            reject(new Error(`Timeout after ${PER_DEVICE_TIMEOUT_MS}ms`));
-          }, PER_DEVICE_TIMEOUT_MS);
-          // Allow process to exit even if this timer is pending
-          if (typeof (timer as { unref?: () => void }).unref === "function") {
-            (timer as { unref: () => void }).unref();
-          }
-        });
-
-        await Promise.race([
-          deviceSessionManager.verifyIosDevice(device.id, {
-            skipCtrlProxyDownload: true  // Skip app download during startup, use cached version
-          }),
-          timeoutPromise
-        ]);
+        const controller = new AbortController();
+        const timer = defaultTimer.setTimeout(() => {
+          controller.abort(new Error(`Timeout after ${PER_DEVICE_TIMEOUT_MS}ms`));
+        }, PER_DEVICE_TIMEOUT_MS);
+        // Allow process to exit even if this timer is pending.
+        if (typeof (timer as { unref?: () => void }).unref === "function") {
+          (timer as { unref: () => void }).unref();
+        }
+        try {
+          await deviceSessionManager.verifyIosDevice(device.id, {
+            skipCtrlProxyDownload: true, // Skip app download during startup, use cached version
+            signal: controller.signal,
+          });
+        } finally {
+          defaultTimer.clearTimeout(timer);
+        }
         logger.info(`[Daemon] CtrlProxy iOS ready for iOS device ${device.id}`);
       } catch (error) {
         // Log but don't fail - service will be set up on first tool call if needed

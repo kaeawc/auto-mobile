@@ -22,6 +22,8 @@ type RunnerReadinessPhase =
   | "runner-connect"
   | "runner-health";
 
+export class RunnerReadinessError extends ActionableError {}
+
 export interface AndroidCompatibilityResult {
   status:
     | "skipped"
@@ -59,6 +61,7 @@ export interface ReadinessAndroidManager {
 
 export interface ReadinessIosManager {
   isInstalled(): Promise<boolean>;
+  resetSetupState(): void;
   start(options?: {
     signal?: AbortSignal;
     minimumHealthPollDurationMs?: number;
@@ -91,6 +94,8 @@ export interface RunnerReadinessDependencies {
 export interface RunnerReadinessRequest {
   device: BootedDevice;
   requestedIdentity: string;
+  /** User-visible operation that requires the runner to become responsive. */
+  operationName?: string;
   /** Absolute deadline shared with device boot. */
   totalDeadlineMs: number;
   /** Maximum time allocated to runner readiness within the total deadline. */
@@ -98,6 +103,7 @@ export interface RunnerReadinessRequest {
   skipCtrlProxyDownload?: boolean;
   perf?: PerformanceTracker;
   signal?: AbortSignal;
+  onRunnerSetup?: () => void;
 }
 
 interface ReadinessAttemptContext extends RunnerReadinessRequest {
@@ -388,6 +394,7 @@ export class RunnerReadinessService {
       if (ready) {
         return;
       }
+      manager.resetSetupState();
     }
 
     if (context.skipCtrlProxyDownload) {
@@ -398,6 +405,7 @@ export class RunnerReadinessService {
     const setup = await this.runPhase(context, "runner-setup", 1, (signal) =>
       manager.setup(false, context.perf, signal, this.remaining(context)),
     );
+    context.onRunnerSetup?.();
     if (!setup.success) {
       this.fail(context, "runner-setup", 1, setup.error ?? setup.message);
     }
@@ -542,8 +550,8 @@ export class RunnerReadinessService {
     const mapping =
       `platform=${device.platform} requested=[${context.requestedIdentity}] ` +
       `resolved=[${device.name} (${device.deviceId})]`;
-    throw new ActionableError(
-      `startDevice automation runner readiness failed: ${mapping} phase=${phase} ` +
+    throw new RunnerReadinessError(
+      `${context.operationName ?? "startDevice"} automation runner readiness failed: ${mapping} phase=${phase} ` +
         `attempts=${attempts} remainingBudgetMs=${this.remaining(context)}: ${normalizeDiagnostic(detail)}`,
     );
   }

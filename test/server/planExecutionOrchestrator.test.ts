@@ -11,6 +11,8 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
+import { resolveCapabilityBaseSessionUuid } from "../../src/features/toolCapabilities/capabilitySessionResolver";
+import { ExecutionTracker } from "../../src/server/executionTracker";
 
 // Mock planUtils so the orchestrator's runPlan() phase is observable without
 // spinning up a real PlanExecutor. The companion test
@@ -254,7 +256,14 @@ steps:
       timer,
     );
     DaemonState.getInstance().initialize(sessionManager, devicePool);
-    sessionManager.setActiveSessionExecutionChecker(() => true);
+    const executionTracker = new ExecutionTracker(timer);
+    executionTracker.startExecution("executePlan", undefined, "base");
+    sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
+      executionTracker.hasActiveSessionUuidExecutions(
+        resolveCapabilityBaseSessionUuid(sessionId, sessionManager),
+        query,
+      ),
+    );
 
     devicePool.assignMultipleDevices = async sessionIds => {
       const assignments = new Map<string, string>();
@@ -269,6 +278,13 @@ steps:
     };
     devicePool.assignDeviceToSession = async () => {
       throw new Error("expired labeled sessions must not be recreated");
+    };
+    const trackSessionSetup = sessionManager.trackSessionSetup.bind(sessionManager);
+    sessionManager.trackSessionSetup = async (session, setup) => {
+      await trackSessionSetup(session, setup);
+      if (session.sessionId === "base") {
+        sessionManager.cleanupExpiredSessions();
+      }
     };
 
     const multiDevicePlan = `
@@ -301,7 +317,7 @@ steps:
         ).execute(),
       );
 
-      expect(result.success).toBe(true);
+      expect(result).toMatchObject({ success: true });
       expect(sessionManager.getSession("base")).not.toBeNull();
       expect(sessionManager.getSession("base:B")).not.toBeNull();
     } finally {

@@ -75,10 +75,11 @@ export const registerDeviceLabelMap = async (
     return deviceLabelMap;
   }
 
-  // Ensure the base session is set up (accessibility/keep-awake side effects),
-  // then store the label map in its typed `deviceLabels` slot (issue #2973).
-  await createToolExecutionContext(baseSessionUuid, sessionManager, devicePool, sessionOptions, execution);
+  // Publish the base-to-derived relationship before the first setup await. The
+  // expiry checker uses it to keep every labeled session alive for the active
+  // base-plan execution while allocation/setup crosses an idle deadline.
   sessionManager.setDeviceLabels(baseSessionUuid, deviceLabelMap);
+  await createToolExecutionContext(baseSessionUuid, sessionManager, devicePool, sessionOptions, execution);
 
   const assignedSessions = new Set(Object.values(deviceLabelMap));
   assignedSessions.delete(baseSessionUuid);

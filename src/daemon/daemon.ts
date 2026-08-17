@@ -28,6 +28,7 @@ import { getCurrentBuildIdentity } from "./buildIdentity";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { resolveCapabilityBaseSessionUuid } from "../features/toolCapabilities/capabilitySessionResolver";
 import {
   awaitInFlightMigrations,
   closeDatabase,
@@ -1238,7 +1239,8 @@ export class Daemon {
   }
 
   private hasActiveSessionExecution(sessionId: string, query?: ActiveSessionExecutionQuery): boolean {
-    return executionTracker.hasActiveSessionUuidExecutions(sessionId, query)
+    const executionSessionId = resolveCapabilityBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
+    return executionTracker.hasActiveSessionUuidExecutions(executionSessionId, query)
       || this.devicePool.hasActiveAutolockMcpSessionExecution(
         sessionId,
         (mcpSessionId, executionQuery) => executionTracker.hasActiveSessionExecutions(mcpSessionId, executionQuery),

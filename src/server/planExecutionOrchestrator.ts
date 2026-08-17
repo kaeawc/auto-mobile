@@ -485,6 +485,11 @@ export class PlanExecutionOrchestrator {
       );
     }
 
+    // The plan execution is tracked on its base session. Publish its derived
+    // label-session ownership before any expiry-aware session read so cleanup
+    // keeps every allocation alive while this plan is still running.
+    sessionManager.setDeviceLabels(this.request.sessionUuid, labelToSessionMap);
+
     for (const sessionUuid of sessionToDeviceMap.keys()) {
       if (!sessionManager.getSession(sessionUuid)) {
         throw new ActionableError(

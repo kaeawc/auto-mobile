@@ -2759,9 +2759,22 @@ export class DevicePool {
   ): boolean {
     return (
       pooled.id === expected.deviceId &&
-      pooled.name === expected.name &&
       pooled.platform === expected.platform &&
+      this.hasSameOrUnknownEmulatorName(pooled.name, expected.name, pooled.id) &&
       !this.matchesRuntimeIdentity(pooled, expected)
+    );
+  }
+
+  private hasSameOrUnknownEmulatorName(
+    pooledName: string,
+    expectedName: string,
+    deviceId: string,
+  ): boolean {
+    const unknownName = `Unknown (${deviceId})`;
+    return (
+      pooledName === expectedName ||
+      (deviceId.startsWith("emulator-") &&
+        (pooledName === unknownName || expectedName === unknownName))
     );
   }
 
@@ -2821,7 +2834,7 @@ export class DevicePool {
     }
 
     // Assign the device to the generated session
-    const device = this.devices.get(deviceId);
+    let device = this.devices.get(deviceId);
     if (!device) {
       throw new ActionableError(
         `Device '${deviceId}' is not available for autolock.\n` +
@@ -2858,16 +2871,16 @@ export class DevicePool {
         `The device may have been shut down or disconnected.`,
     );
 
-    if (!(await this.ensurePooledDevicePresentForUse(device))) {
-      throw new ActionableError(
-        `Device '${deviceId}' is not available for autolock.\n` +
-          `The device may have been shut down or disconnected.\n\n` +
-          `Options:\n` +
-          `  - Use 'startDevice' with the same criteria to boot a new device\n` +
-          `  - Use 'startDevice' with deviceId to restart this specific device\n` +
-          `  - Use 'listDevices' to see currently available devices`,
-      );
-    }
+    device = await this.validateOrReloadIdlePooledDevice(
+      device,
+      expectedIdentity,
+      `Device '${deviceId}' is not available for autolock.\n` +
+        `The device may have been shut down or disconnected.\n\n` +
+        `Options:\n` +
+        `  - Use 'startDevice' with the same criteria to boot a new device\n` +
+        `  - Use 'startDevice' with deviceId to restart this specific device\n` +
+        `  - Use 'listDevices' to see currently available devices`,
+    );
 
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;

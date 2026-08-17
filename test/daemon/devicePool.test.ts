@@ -1332,6 +1332,35 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice(replacement.deviceId)?.avdName).toBeUndefined();
     });
 
+    test("keeps AutoMobile-owned metadata when emulator name discovery is unknown", async () => {
+      const sourceImage: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        source: "local",
+      };
+      const firstConnection = {
+        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
+        transportId: "1",
+      };
+      const rediscoveredWithUnknownName = {
+        ...firstConnection,
+        name: "Unknown (emulator-5554)",
+        transportId: "2",
+      };
+      await devicePool.addDevice(firstConnection, sourceImage);
+      fakeDeviceManager.bootedDevices = [rediscoveredWithUnknownName];
+
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice(firstConnection.deviceId)).toMatchObject({
+        name: "Unknown (emulator-5554)",
+        transportId: "2",
+        androidImage: sourceImage,
+        avdName: "Pixel 8",
+      });
+    });
+
     test("rekeys a transport-only mismatch before reserving startDevice readiness", async () => {
       const firstConnection = {
         ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
@@ -2194,6 +2223,35 @@ describe("DevicePool", () => {
         status: "busy",
       });
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe(reconnected.deviceId);
+    });
+
+    test("autolocks a same-serial transport reconnect without reacquiring the assignment mutex", async () => {
+      const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      const firstConnection = {
+        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
+        transportId: "1",
+      };
+      const reconnected = { ...firstConnection, transportId: "2" };
+      try {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+        await initializeLiveDevices([firstConnection]);
+        fakeDeviceManager.bootedDevices = [reconnected];
+
+        await expect(
+          devicePool.autolockDevice(reconnected.deviceId, "android", "mcp-session-1"),
+        ).resolves.toBeDefined();
+
+        expect(devicePool.getDevice(reconnected.deviceId)).toMatchObject({
+          transportId: "2",
+          status: "busy",
+        });
+      } finally {
+        if (originalAutolock === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        }
+      }
     });
 
     test("rejects a changed runtime identity inside the assignment mutex", async () => {

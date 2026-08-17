@@ -123,6 +123,23 @@ describe("ExecutionTracker", function() {
     expect(tracker.hasActiveSessionExecutions("session-id", { startedAtOrBefore: 5 })).toBe(false);
   });
 
+  test("tracks an implicit execution under its resolved autolock session", function() {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["execution-1"]),
+    );
+    const execution = tracker.startExecution("tapOn", "mcp-session");
+
+    tracker.setResolvedAutolockSessionUuid(execution.id, "autolock-session");
+
+    expect(tracker.hasActiveAutolockSessionExecutions("autolock-session")).toBe(true);
+    expect(tracker.hasActiveAutolockSessionExecutions("replacement-session")).toBe(false);
+
+    tracker.endExecution(execution.id);
+
+    expect(tracker.hasActiveAutolockSessionExecutions("autolock-session")).toBe(false);
+  });
+
   // #4183 item 6 (A3): the scope fallback in hasActiveToolExecution (executionTracker.ts)
   // had no table coverage. The scope order is: explicit "global" → sessionUuid map →
   // sessionId map → global fallback when neither key is provided.

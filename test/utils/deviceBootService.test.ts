@@ -122,6 +122,47 @@ describe("DeviceBootService", () => {
     expect(killCount).toBe(1);
   });
 
+  it("cancels the owned process when a pending progress callback is externally aborted", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const controller = new AbortController();
+    let killCount = 0;
+    let progressStarted = false;
+    let outcome: "pending" | "rejected" = "pending";
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.setMockChildProcess(image.name, {
+      kill: () => {
+        killCount++;
+        return true;
+      },
+      pid: 12,
+    } as any);
+
+    const boot = service(devices, matcher).boot(
+      { platform: "android", signal: controller.signal },
+      {
+        report: async (current) => {
+          if (current === 60) {
+            progressStarted = true;
+            await new Promise<void>(() => {});
+          }
+        },
+      },
+    );
+    void boot.catch(() => {
+      outcome = "rejected";
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(progressStarted).toBe(true);
+    controller.abort(new Error("request cancelled"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(outcome).toBe("rejected");
+    expect(killCount).toBe(1);
+  });
+
   it("cancels the owned process when final progress reporting fails", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();

@@ -13,7 +13,6 @@ import type { DeviceProvisioner } from "./deviceProvisioning";
 import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { runWithAbortSignal } from "./AbortContext";
-import { logger } from "./logger";
 
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 
@@ -402,15 +401,35 @@ export class DeviceBootService {
     const cancellation = createPhaseCancellation(context.signal, phase);
     cancellation.throwIfCancelled();
     const controller = new AbortController();
-    const signal = context.signal
-      ? AbortSignal.any([context.signal, controller.signal])
+    const externalSignal = context.signal;
+    const signal = externalSignal
+      ? AbortSignal.any([externalSignal, controller.signal])
       : controller.signal;
     let timeoutHandle: NodeJS.Timeout | undefined;
+    let removeExternalAbortListener: (() => void) | undefined;
+    const externalAbortPromise = externalSignal
+      ? new Promise<never>((_resolve, reject) => {
+          const rejectForAbort = () => {
+            reject(
+              externalSignal.reason ??
+                new ActionableError(`startDevice request cancelled while ${phase}`),
+            );
+          };
+          if (externalSignal.aborted) {
+            rejectForAbort();
+            return;
+          }
+          externalSignal.addEventListener("abort", rejectForAbort, { once: true });
+          removeExternalAbortListener = () =>
+            externalSignal.removeEventListener("abort", rejectForAbort);
+        })
+      : undefined;
     const operationPromise = runWithAbortSignal(signal, () => operation(signal));
     void operationPromise.catch(() => {});
     try {
       return await Promise.race([
         operationPromise,
+        ...(externalAbortPromise ? [externalAbortPromise] : []),
         new Promise<never>((_resolve, reject) => {
           timeoutHandle = this.timer.setTimeout(() => {
             controller.abort(new Error(`startDevice timeout exhausted while ${phase}`));
@@ -439,6 +458,7 @@ export class DeviceBootService {
         this.timer.clearTimeout(timeoutHandle);
       }
       cancellation.dispose();
+      removeExternalAbortListener?.();
     }
   }
 

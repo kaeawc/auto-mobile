@@ -11,6 +11,7 @@ import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreenCache } from "../fakes/FakeObserveScreenCache";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeSimctl } from "../fakes/FakeSimctl";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { BootedDevice, AppearanceConfigInput } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -443,6 +444,105 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
   });
 });
 
+describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
+  const iosDevice: BootedDevice = {
+    deviceId: "ios-ready-1",
+    name: "iPhone 15",
+    platform: "ios",
+  };
+
+  function createManager(
+    iosManager: FakeIOSCtrlProxyManager,
+    iosClient: FakeIOSCtrlProxy,
+  ): DeviceSessionManager {
+    const fakeAdb = new FakeAdbExecutor();
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    const fakeSimctl = new FakeSimctl();
+    fakeSimctl.setAvailableSimulators([iosDevice]);
+    fakeSimctl.setBootedSimulators([iosDevice]);
+    fakeSimctl.setDeviceInfo(iosDevice.deviceId, {
+      udid: iosDevice.deviceId,
+      name: iosDevice.name,
+      state: "Booted",
+      isAvailable: true,
+    });
+    const simctl = Object.assign(fakeSimctl, {
+      openSimulatorApp: async () => {},
+    });
+    const provider = new FakeDeviceClientProvider(
+      fakeAdb,
+      fakeDeviceUtils,
+      simctl as never,
+      {
+        iosCtrlProxyManager: iosManager,
+        iosCtrlProxyClient: iosClient,
+      },
+    );
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+
+    return DeviceSessionManager.createInstance(provider, undefined, {
+      runnerReadinessTimer: timer,
+      runnerReadinessTimeoutMs: 1_000,
+    });
+  }
+
+  test("fails auto-start with the original CtrlProxy setup diagnostic", async () => {
+    const iosManager = new FakeIOSCtrlProxyManager();
+    iosManager.setSetupShouldFail(true);
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(false);
+    const manager = createManager(iosManager, iosClient);
+
+    await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(
+      /phase=runner-setup.*Mock setup failure/,
+    );
+  });
+
+  test("fails auto-start when CtrlProxy setup throws", async () => {
+    const iosManager = new FakeIOSCtrlProxyManager();
+    iosManager.setup = async () => {
+      throw new Error("xcodebuild exited 65");
+    };
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(false);
+    const manager = createManager(iosManager, iosClient);
+
+    await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(
+      /phase=runner-setup.*xcodebuild exited 65/,
+    );
+  });
+
+  test("fails auto-start when CtrlProxy never connects", async () => {
+    const iosManager = new FakeIOSCtrlProxyManager();
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(false);
+    const manager = createManager(iosManager, iosClient);
+
+    await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(/phase=runner-connect/);
+  });
+
+  test("fails auto-start when a connected CtrlProxy never becomes healthy", async () => {
+    const iosManager = new FakeIOSCtrlProxyManager();
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(true);
+    spyOn(iosClient, "verifyServiceReady").mockResolvedValue(false);
+    const manager = createManager(iosManager, iosClient);
+
+    await expect(manager.ensureDeviceReady("ios")).rejects.toThrow(/phase=runner-health/);
+  });
+
+  test("keeps an already-responsive CtrlProxy on the fast path", async () => {
+    const iosManager = new FakeIOSCtrlProxyManager();
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(true);
+    const manager = createManager(iosManager, iosClient);
+
+    await expect(manager.ensureDeviceReady("ios")).resolves.toEqual(iosDevice);
+    expect(iosManager.wasMethodCalled("setup")).toBe(false);
+  });
+});
+
 describe("DeviceSessionManager iOS openSimulatorApp", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeDeviceUtils: FakeDeviceUtils;
@@ -471,9 +571,8 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     fakeSimctl: FakeSimCtlClient
   ): FakeDeviceClientProvider {
     const iosManager = new FakeIOSCtrlProxyManager();
-    iosManager.setSetupShouldFail(true); // skip the setup path in these tests
     const iosClient = new FakeIOSCtrlProxy();
-    iosClient.setConnected(false);
+    iosClient.setConnected(true);
     return new FakeDeviceClientProvider(
       fakeAdb,
       fakeDeviceUtils,
@@ -626,9 +725,8 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     fakeCtrlProxy.setVersionCompatible(true);
 
     const fakeIosManager = new FakeIOSCtrlProxyManager();
-    fakeIosManager.setSetupShouldFail(true);
     const fakeIosClient = new FakeIOSCtrlProxy();
-    fakeIosClient.setConnected(false);
+    fakeIosClient.setConnected(true);
 
     return new FakeDeviceClientProvider(
       fakeAdb,

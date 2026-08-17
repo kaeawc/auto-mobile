@@ -23,6 +23,9 @@ import { storeSetupTiming } from "../server/ToolExecutionContext";
 import { applyAppearanceOnConnect } from "./appearance/applyAppearanceOnConnect";
 import { disableStylusHandwriting } from "./disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
+import { RunnerReadinessService } from "./RunnerReadinessService";
+import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "./runnerReadinessConfig";
+import { defaultTimer, type Timer } from "./SystemTimer";
 
 /**
  * Render a device list for a "not found" error.
@@ -215,6 +218,11 @@ export interface DeviceReadyOptions {
   skipAccessibilitySetup?: boolean;
 }
 
+export interface DeviceSessionManagerOptions {
+  runnerReadinessTimer?: Timer;
+  runnerReadinessTimeoutMs?: number;
+}
+
 export class DeviceSessionManager implements DeviceSessionManager {
   private currentDevice: BootedDevice | undefined;
   private currentPlatform: Platform | undefined;
@@ -222,15 +230,34 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private static defaultProvider: DeviceClientProvider | undefined;
   private readonly provider: DeviceClientProvider;
   private readonly adbFactory: AdbClientFactory;
+  private readonly runnerReadinessService: RunnerReadinessService;
+  private readonly runnerReadinessTimer: Timer;
+  private readonly runnerReadinessTimeoutMs: number;
   private _adb: AdbExecutor | undefined;
   private simulatorAppOpened = false;
 
   // Track devices that have push update listeners registered
   private static pushUpdateListenersRegistered: Set<string> = new Set();
 
-  private constructor(provider: DeviceClientProvider, adbFactory: AdbClientFactory = defaultAdbClientFactory) {
+  private constructor(
+    provider: DeviceClientProvider,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    options: DeviceSessionManagerOptions = {},
+  ) {
     this.provider = provider;
     this.adbFactory = adbFactory;
+    this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
+    this.runnerReadinessTimeoutMs =
+      options.runnerReadinessTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
+    this.runnerReadinessService = new RunnerReadinessService({
+      timer: this.runnerReadinessTimer,
+      getAndroidManager: (device) => this.provider.getAndroidCtrlProxyManager(device),
+      getAndroidClient: (device) => this.provider.getAndroidCtrlProxyClient(device),
+      getIosManager: (device) => this.provider.getIOSCtrlProxyManager(device),
+      getIosClient: (device, port) => this.provider.getIOSCtrlProxyClient(device, port),
+      checkIosOverride: checkIosCtrlProxyOverride,
+      awaitIosStartupMaintenance: () => IOSCtrlProxyManager.awaitStartupOrphanRunnerReap(),
+    });
   }
 
   private get adb(): AdbExecutor {
@@ -262,8 +289,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
     return DeviceSessionManager.instance;
   }
 
-  public static createInstance(provider: DeviceClientProvider, adbFactory?: AdbClientFactory): DeviceSessionManager {
-    return new DeviceSessionManager(provider, adbFactory);
+  public static createInstance(
+    provider: DeviceClientProvider,
+    adbFactory?: AdbClientFactory,
+    options?: DeviceSessionManagerOptions,
+  ): DeviceSessionManager {
+    return new DeviceSessionManager(provider, adbFactory, options);
   }
 
   /**
@@ -709,121 +740,32 @@ export class DeviceSessionManager implements DeviceSessionManager {
       platform: "ios"
     };
 
-    // Always track setup timing (one-time per session, valuable for debugging)
+    // Pass the tracker through to CtrlProxy setup while keeping the legacy
+    // session path subject to the same strict readiness contract as startDevice.
     const perf = createPerformanceTracker(true);
     perf.serial("ensureCtrlProxy iOS");
     let didSetup = false;
 
     try {
-      const skipCtrlProxyIOSSetup = options?.skipCtrlProxyDownload ?? options?.skipAccessibilityDownload ?? options?.skipAccessibilitySetup;
-
-      await IOSCtrlProxyManager.awaitStartupOrphanRunnerReap();
-      const manager = this.provider.getIOSCtrlProxyManager(device);
-      const xcTestClient = this.provider.getIOSCtrlProxyClient(device, manager.getServicePort());
-
-      // Check if WebSocket is already connected
-      if (xcTestClient.isConnected()) {
-        // WebSocket appears connected, verify service is actually responsive
-        logger.info(`[DeviceSessionManager] CtrlProxy iOS WebSocket connected for ${deviceId}, verifying service is responsive`);
-        const isReady = await perf.track("verifyConnectedService", () =>
-          xcTestClient.verifyServiceReady(2, 200, 2000)
-        );
-        if (isReady) {
-          logger.info(`[DeviceSessionManager] CtrlProxy iOS verified responsive for ${deviceId}`);
-          this.registerPushUpdateListener(device);
-          perf.end();
-          return;
-        }
-        // Service not responsive despite connected socket - fall through to normal flow
-        logger.warn(`[DeviceSessionManager] WebSocket connected but CtrlProxy iOS not responsive for ${deviceId}, checking status`);
-      }
-
-      // Check current status
-      const isRunning = await perf.track("checkRunning", () => manager.isRunning());
-
-      if (isRunning) {
-        logger.info(`[DeviceSessionManager] CtrlProxy iOS already running for ${deviceId}, verifying WebSocket connection`);
-        // Service is running, try to connect WebSocket
-        const connected = await perf.track("verifyConnection", () => xcTestClient.waitForConnection(3, 200));
-        if (connected) {
-          // Verify service is responsive and cache hierarchy for fast first observe
-          logger.info(`[DeviceSessionManager] Verifying CtrlProxy iOS is responsive for ${deviceId}`);
-          const ready = await perf.track("verifyServiceReady", () => xcTestClient.verifyServiceReady(3, 500, 3000));
-          if (ready) {
-            logger.info(`[DeviceSessionManager] CtrlProxy iOS running, connected, and verified for ${deviceId}`);
-            this.registerPushUpdateListener(device);
-            perf.end();
-            return;
-          }
-          logger.warn(`[DeviceSessionManager] CtrlProxy iOS running and connected but not responsive for ${deviceId}`);
-        }
-        // WebSocket won't connect despite service running - may need restart
-        logger.warn(`[DeviceSessionManager] CtrlProxy iOS running but WebSocket failed for ${deviceId}, will attempt restart`);
-        manager.resetSetupState();
-      }
-
-      if (skipCtrlProxyIOSSetup) {
-        // When download is disabled, only start from cached artifacts — never trigger
-        // needsRebuild() or download. Use start() directly to avoid the build path.
-        const isRunningNow = await manager.isRunning();
-        if (!isRunningNow) {
-          const isInstalled = await manager.isInstalled();
-          if (isInstalled) {
-            logger.info(`[DeviceSessionManager] CtrlProxy iOS installed (cached), starting without download for ${deviceId}`);
-            try {
-              await manager.start();
-            } catch (error) {
-              logger.warn(`[DeviceSessionManager] Failed to start cached CtrlProxy iOS for ${deviceId}: ${error}`);
-            }
-          } else {
-            logger.info(`[DeviceSessionManager] Skipping CtrlProxy iOS setup for ${deviceId} (not installed, download disabled)`);
-          }
-        }
-        perf.end();
-        return;
-      }
-
-      // Setup the service (will start if not running, may download if needed)
-      logger.info(`[DeviceSessionManager] Setting up CtrlProxy iOS for ${deviceId}`);
-      const setupResult = await manager.setup(false, perf);
-      didSetup = true;
-
-      if (!setupResult.success) {
-        // Log build-specific errors if available
-        if (setupResult.buildResult && !setupResult.buildResult.success) {
-          logger.warn(`[DeviceSessionManager] CtrlProxy iOS build failed for ${deviceId}: ${setupResult.buildResult.error}`);
-        } else {
-          logger.warn(`[DeviceSessionManager] CtrlProxy iOS setup failed for ${deviceId}: ${setupResult.error}`);
-        }
-        // Don't throw - allow observe to fall back to other methods
-        perf.end();
-        return;
-      }
-
-      // Wait for WebSocket connection after setup
-      // After fresh setup, WebSocket may need extra time to initialize
-      logger.info(`[DeviceSessionManager] Waiting for CtrlProxy iOS WebSocket connection after setup for ${deviceId}`);
-      const connected = await perf.track("waitForConnection", () => xcTestClient.waitForConnection(5, 1000));
-      if (connected) {
-        // Verify service is actually ready to respond (not just WebSocket connected)
-        logger.info(`[DeviceSessionManager] Verifying CtrlProxy iOS is responsive for ${deviceId}`);
-        const ready = await perf.track("verifyServiceReady", () => xcTestClient.verifyServiceReady(5, 1000, 5000));
-        if (!ready) {
-          logger.warn(`[DeviceSessionManager] CtrlProxy iOS not responsive after setup for ${deviceId}`);
-        } else {
-          logger.info(`[DeviceSessionManager] CtrlProxy iOS setup complete and verified for ${deviceId}`);
-          this.registerPushUpdateListener(device);
-        }
-      } else {
-        logger.warn(`[DeviceSessionManager] WebSocket connection failed after CtrlProxy iOS setup for ${deviceId}`);
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`[DeviceSessionManager] Failed to setup CtrlProxy iOS: ${errorMessage}`);
-      // Don't throw - allow observe to fall back to other methods
+      const totalDeadlineMs =
+        this.runnerReadinessTimer.now() + this.runnerReadinessTimeoutMs;
+      await this.runnerReadinessService.ensureReady({
+        device,
+        requestedIdentity: `platform=ios deviceId=${deviceId}`,
+        totalDeadlineMs,
+        readinessTimeoutMs: this.runnerReadinessTimeoutMs,
+        skipCtrlProxyDownload:
+          options?.skipCtrlProxyDownload ??
+          options?.skipAccessibilityDownload ??
+          options?.skipAccessibilitySetup,
+        perf,
+        onRunnerSetup: () => {
+          didSetup = true;
+        },
+      });
+      this.registerPushUpdateListener(device);
     } finally {
       perf.end();
-      // Store timing if we actually did setup work
       if (didSetup) {
         const timings = perf.getTimings();
         if (timings) {

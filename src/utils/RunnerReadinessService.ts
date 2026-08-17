@@ -98,6 +98,7 @@ export interface RunnerReadinessRequest {
   skipCtrlProxyDownload?: boolean;
   perf?: PerformanceTracker;
   signal?: AbortSignal;
+  onRunnerSetup?: () => void;
 }
 
 interface ReadinessAttemptContext extends RunnerReadinessRequest {
@@ -398,6 +399,7 @@ export class RunnerReadinessService {
     const setup = await this.runPhase(context, "runner-setup", 1, (signal) =>
       manager.setup(false, context.perf, signal, this.remaining(context)),
     );
+    context.onRunnerSetup?.();
     if (!setup.success) {
       this.fail(context, "runner-setup", 1, setup.error ?? setup.message);
     }

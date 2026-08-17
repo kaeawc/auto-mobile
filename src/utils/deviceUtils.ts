@@ -97,6 +97,38 @@ export interface PlatformDeviceManager {
   waitForDeviceReady(device: DeviceInfo, timeoutMs?: number, childProcess?: ChildProcess | null): Promise<BootedDevice>;
 }
 
+interface ReadinessCancellation {
+  promise: Promise<never>;
+  throwIfCancelled(): void;
+  dispose(): void;
+}
+
+function createReadinessCancellation(signal: AbortSignal | undefined): ReadinessCancellation {
+  const never = new Promise<never>(() => undefined);
+  const throwIfCancelled = () => {
+    if (signal?.aborted) {
+      throw new ActionableError("Device readiness was cancelled.");
+    }
+  };
+  if (!signal || signal.aborted) {
+    return { promise: never, throwIfCancelled, dispose: () => {} };
+  }
+
+  let rejectCancellation!: (error: ActionableError) => void;
+  const promise = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const abort = () => {
+    rejectCancellation(new ActionableError("Device readiness was cancelled."));
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  return {
+    promise,
+    throwIfCancelled,
+    dispose: () => signal.removeEventListener("abort", abort),
+  };
+}
+
 /**
  * Wait for a freshly-started device to become ready, actively cancelling the
  * boot if readiness fails (issue #3952).
@@ -116,6 +148,7 @@ export interface PlatformDeviceManager {
  * @param device - The device that was started
  * @param handle - The start handle from `startDevice` (null for adopted devices)
  * @param timeoutMs - Optional readiness timeout
+ * @param signal - Optional cancellation signal for a non-cooperative readiness wait
  * @returns The booted device once ready
  * @throws Re-throws the original readiness error after cancelling the boot
  */
@@ -124,9 +157,13 @@ export async function waitForDeviceReadyOrCancel(
   device: DeviceInfo,
   handle: ChildProcess | null,
   timeoutMs?: number,
+  signal?: AbortSignal,
 ): Promise<BootedDevice> {
+  const cancellation = createReadinessCancellation(signal);
   try {
-    return await deviceManager.waitForDeviceReady(device, timeoutMs, handle);
+    cancellation.throwIfCancelled();
+    const readiness = deviceManager.waitForDeviceReady(device, timeoutMs, handle);
+    return await Promise.race([readiness, cancellation.promise]);
   } catch (error) {
     if (handle) {
       logger.warn(
@@ -137,6 +174,8 @@ export async function waitForDeviceReadyOrCancel(
       handle.kill();
     }
     throw error;
+  } finally {
+    cancellation.dispose();
   }
 }
 

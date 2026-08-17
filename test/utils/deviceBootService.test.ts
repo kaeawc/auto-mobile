@@ -1,8 +1,9 @@
+import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "bun:test";
 import { DeviceBootService } from "../../src/utils/deviceBootService";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import type { DeviceInfo } from "../../src/models";
+import type { BootedDevice, DeviceInfo } from "../../src/models";
 import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import type { DeviceBootRecovery } from "../../src/utils/deviceBootRecovery";
 import type { Timer } from "../../src/utils/SystemTimer";
@@ -128,6 +129,82 @@ describe("DeviceBootService", () => {
     expect(provisionSignal?.aborted).toBe(true);
     expect(provisionSettled).toBe(true);
     expect(created).toBe(false);
+  });
+
+  it("preempts a non-cooperative discovery phase after external cancellation", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const controller = new AbortController();
+    const running: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    let resolveDiscovery!: (devices: BootedDevice[]) => void;
+    let markDiscoveryStarted!: () => void;
+    const discoveryStarted = new Promise<void>(resolve => {
+      markDiscoveryStarted = resolve;
+    });
+    const pendingDiscovery = new Promise<BootedDevice[]>(resolve => {
+      resolveDiscovery = resolve;
+    });
+    devices.setDeviceImages("android", [image]);
+    matcher.setBootedResult(running);
+    devices.getBootedDevices = async () => {
+      markDiscoveryStarted();
+      return pendingDiscovery;
+    };
+
+    const boot = service(devices, matcher).boot({ platform: "android", signal: controller.signal });
+    await discoveryStarted;
+    controller.abort();
+
+    await expect(boot).rejects.toThrow("startDevice cancelled while discovering running devices");
+    resolveDiscovery([running]);
+    await Promise.resolve();
+
+    expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
+    expect(devices.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  it("cancels a late start handle after external cancellation", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const controller = new AbortController();
+    let resolveStart!: (handle: ChildProcess | null) => void;
+    let markStartStarted!: () => void;
+    const startStarted = new Promise<void>(resolve => {
+      markStartStarted = resolve;
+    });
+    const pendingStart = new Promise<ChildProcess | null>(resolve => {
+      resolveStart = resolve;
+    });
+    let killCount = 0;
+    const handle = {
+      pid: 12,
+      kill: () => {
+        killCount++;
+        return true;
+      },
+    } as ChildProcess;
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.startDevice = async () => {
+      markStartStarted();
+      return pendingStart;
+    };
+
+    const boot = service(devices, matcher).boot({ platform: "android", signal: controller.signal });
+    await startStarted;
+    controller.abort();
+
+    await expect(boot).rejects.toThrow("startDevice cancelled while starting the device");
+    resolveStart(handle);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(killCount).toBe(1);
+    expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
   });
 
   it("adopts and awaits a matching running device", async () => {

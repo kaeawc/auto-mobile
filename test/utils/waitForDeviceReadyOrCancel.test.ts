@@ -69,4 +69,64 @@ describe("waitForDeviceReadyOrCancel", () => {
       waitForDeviceReadyOrCancel(deviceManager, iosImage, null, 30_000),
     ).rejects.toThrow("readiness timeout");
   });
+
+  it("kills an owned handle when external cancellation preempts non-cooperative readiness", async () => {
+    const deviceManager = new FakeDeviceUtils();
+    const controller = new AbortController();
+    const { handle, killed } = spyHandle();
+    let resolveReadiness!: () => void;
+    const pendingReadiness = new Promise<void>(resolve => {
+      resolveReadiness = resolve;
+    });
+    deviceManager.waitForDeviceReady = async () => {
+      await pendingReadiness;
+      return {
+        name: iosImage.name,
+        platform: "ios",
+        deviceId: iosImage.deviceId!,
+      };
+    };
+
+    const readiness = waitForDeviceReadyOrCancel(
+      deviceManager,
+      iosImage,
+      handle,
+      30_000,
+      controller.signal,
+    );
+    controller.abort();
+
+    await expect(readiness).rejects.toThrow();
+    expect(killed()).toBe(true);
+    resolveReadiness();
+  });
+
+  it("does not touch an adopted device when external cancellation preempts readiness", async () => {
+    const deviceManager = new FakeDeviceUtils();
+    const controller = new AbortController();
+    let resolveReadiness!: () => void;
+    const pendingReadiness = new Promise<void>(resolve => {
+      resolveReadiness = resolve;
+    });
+    deviceManager.waitForDeviceReady = async () => {
+      await pendingReadiness;
+      return {
+        name: iosImage.name,
+        platform: "ios",
+        deviceId: iosImage.deviceId!,
+      };
+    };
+
+    const readiness = waitForDeviceReadyOrCancel(
+      deviceManager,
+      iosImage,
+      null,
+      30_000,
+      controller.signal,
+    );
+    controller.abort();
+
+    await expect(readiness).rejects.toThrow();
+    resolveReadiness();
+  });
 });

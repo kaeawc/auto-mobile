@@ -72,10 +72,13 @@ describe("startDevice handler", () => {
     daemonSessionManager?.stopCleanupTimer();
   });
 
-  async function callStartDevice(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async function callStartDevice(
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
     const tool = ToolRegistry.getTool("startDevice");
     if (!tool) {throw new Error("startDevice not registered");}
-    const result = await tool.handler(args);
+    const result = await tool.handler(args, undefined, signal);
     return JSON.parse(typeof result === "string" ? result : (result as any).content?.[0]?.text ?? "{}");
   }
 
@@ -122,6 +125,47 @@ describe("startDevice handler", () => {
     expect(result.osVersion).toBe("14");
     expect(result.sessionId).toBeDefined();
     expect(typeof result.sessionId).toBe("string");
+  });
+
+  it("does not reach runner readiness or session binding after an externally cancelled boot", async () => {
+    const controller = new AbortController();
+    let resolveImages!: (images: DeviceInfo[]) => void;
+    let markImageListingStarted!: () => void;
+    const imageListingStarted = new Promise<void>(resolve => {
+      markImageListingStarted = resolve;
+    });
+    const pendingImages = new Promise<DeviceInfo[]>(resolve => {
+      resolveImages = resolve;
+    });
+    let runnerReadinessCalls = 0;
+    let sessionIdCalls = 0;
+    fakeDeviceUtils.listDeviceImages = async () => {
+      markImageListingStarted();
+      return pendingImages;
+    };
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        runnerReadinessCalls++;
+      },
+      idGenerator: {
+        next: () => {
+          sessionIdCalls++;
+          return `session-${sessionIdCalls}`;
+        },
+      },
+    });
+    registerDeviceTools();
+
+    const start = callStartDevice({ platform: "android" }, controller.signal);
+    await imageListingStarted;
+    controller.abort();
+
+    await expect(start).rejects.toThrow("startDevice cancelled while listing device images");
+    resolveImages([androidImage]);
+    await Promise.resolve();
+
+    expect(runnerReadinessCalls).toBe(0);
+    expect(sessionIdCalls).toBe(0);
   });
 
   it("sources the fallback sessionId from the injected IdGenerator", async () => {

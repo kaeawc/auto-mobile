@@ -68,6 +68,38 @@ interface BootDeadlineContext {
   signal?: AbortSignal;
 }
 
+interface PhaseCancellation {
+  promise: Promise<never>;
+  throwIfCancelled(): void;
+  dispose(): void;
+}
+
+function createPhaseCancellation(signal: AbortSignal | undefined, phase: string): PhaseCancellation {
+  const never = new Promise<never>(() => undefined);
+  const throwIfCancelled = () => {
+    if (signal?.aborted) {
+      throw new ActionableError(`startDevice cancelled while ${phase}`);
+    }
+  };
+  if (!signal || signal.aborted) {
+    return { promise: never, throwIfCancelled, dispose: () => {} };
+  }
+
+  let rejectCancellation!: (error: ActionableError) => void;
+  const promise = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const abort = () => {
+    rejectCancellation(new ActionableError(`startDevice cancelled while ${phase}`));
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  return {
+    promise,
+    throwIfCancelled,
+    dispose: () => signal.removeEventListener("abort", abort),
+  };
+}
+
 /**
  * Product boot boundary shared by MCP and daemon-free callers.
  *
@@ -248,7 +280,7 @@ export class DeviceBootService {
         ),
       );
       return { device: { ...device, ...ready }, source: "booted", provisioned: false };
-    });
+    }, context.signal);
   }
 
   private async bootImage(
@@ -260,8 +292,10 @@ export class DeviceBootService {
     if (image.platform === "ios" && !image.deviceId) {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
     }
-    return this.bootRecovery.run(image, async () =>
-      this.bootImageOnce(image, context, progress, provisioned),
+    return this.bootRecovery.run(
+      image,
+      async () => this.bootImageOnce(image, context, progress, provisioned),
+      context.signal,
     );
   }
 
@@ -271,19 +305,24 @@ export class DeviceBootService {
     progress: DeviceBootProgress | undefined,
     provisioned: boolean,
   ): Promise<DeviceBootResult> {
-    const handle = await this.runPhase(context, "starting the device", () =>
-      this.dependencies.deviceManager.startDevice(
+    const handle = await this.runPhase(context, "starting the device", async signal => {
+      const started = await this.dependencies.deviceManager.startDevice(
         image,
         this.remaining(context.deadlineMs, "starting the device"),
-      ),
-    );
+      );
+      if (signal.aborted && started) {
+        started.kill();
+      }
+      return started;
+    });
     await progress?.report(60, 100, "Device started, waiting for readiness...");
-    const ready = await this.runPhase(context, "waiting for device boot readiness", () =>
+    const ready = await this.runPhase(context, "waiting for device boot readiness", signal =>
       waitForDeviceReadyOrCancel(
         this.dependencies.deviceManager,
         image,
         handle,
         this.remaining(context.deadlineMs, "waiting for device boot readiness"),
+        signal,
       ),
     );
     await progress?.report(100, 100, "Device is ready for use");
@@ -312,6 +351,8 @@ export class DeviceBootService {
     phase: string,
     operation: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
+    const cancellation = createPhaseCancellation(context.signal, phase);
+    cancellation.throwIfCancelled();
     const remainingMs = this.remaining(context.deadlineMs, phase);
     const controller = new AbortController();
     const signal = context.signal
@@ -333,8 +374,10 @@ export class DeviceBootService {
             );
           }, remainingMs);
         }),
+        cancellation.promise,
       ]);
     } catch (error) {
+      cancellation.throwIfCancelled();
       if (controller.signal.aborted) {
         await this.awaitAbortSettlement(operationPromise);
         throw new ActionableError(
@@ -346,6 +389,7 @@ export class DeviceBootService {
       if (timeoutHandle) {
         this.timer.clearTimeout(timeoutHandle);
       }
+      cancellation.dispose();
     }
   }
 

@@ -11,12 +11,12 @@ const CI_SIMULATOR_NAME = "AutoMobile CI iPhone";
 
 /** Recovery policy for a cold device boot. Product callers default to no recovery. */
 export interface DeviceBootRecovery {
-  run<T>(target: DeviceInfo, boot: () => Promise<T>): Promise<T>;
+  run<T>(target: DeviceInfo, boot: () => Promise<T>, signal?: AbortSignal): Promise<T>;
 }
 
 /** The default product policy: surface the first boot failure unchanged. */
 export class NoopDeviceBootRecovery implements DeviceBootRecovery {
-  run<T>(_target: DeviceInfo, boot: () => Promise<T>): Promise<T> {
+  run<T>(_target: DeviceInfo, boot: () => Promise<T>, _signal?: AbortSignal): Promise<T> {
     return boot();
   }
 }
@@ -35,7 +35,7 @@ export interface CiIosBootRecoveryDependencies {
 export class CiIosBootRecovery implements DeviceBootRecovery {
   constructor(private readonly dependencies: CiIosBootRecoveryDependencies) {}
 
-  async run<T>(target: DeviceInfo, boot: () => Promise<T>): Promise<T> {
+  async run<T>(target: DeviceInfo, boot: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     if (!this.isOwnedTarget(target)) {
       return boot();
     }
@@ -43,6 +43,9 @@ export class CiIosBootRecovery implements DeviceBootRecovery {
     try {
       return await boot();
     } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
       firstFailure = error;
     }
     await this.recover(() => this.dependencies.shutdown(target));

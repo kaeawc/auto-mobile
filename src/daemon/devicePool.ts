@@ -182,7 +182,7 @@ export class DevicePool {
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   /** Latest refresh request; older discovery snapshots must not overwrite it. */
   private refreshGeneration = 0;
-  private readonly readinessReservations: Map<string, Promise<void>> = new Map();
+  private readonly readinessReservationCounts: Map<string, number> = new Map();
   /**
    * Captured incarnations that an explicit shutdown is retiring. Unlike a
    * readiness reservation, this excludes direct startDevice/autolock binding
@@ -1699,6 +1699,14 @@ export class DevicePool {
     }
   }
 
+  hasStartedDeviceProcess(
+    deviceId: string,
+    childProcess: ChildProcess | null | undefined,
+  ): boolean {
+    return childProcess !== null && childProcess !== undefined &&
+      this.startedDeviceProcesses.get(deviceId) === childProcess;
+  }
+
   private getCompletedProcessExit(
     childProcess: ChildProcess,
   ): { code: number | null; signal: NodeJS.Signals | null } | undefined {
@@ -2464,54 +2472,47 @@ export class DevicePool {
 
   /**
    * Keep an exact device out of general pool allocation while startDevice
-   * verifies its runner. Reservations for one device run exclusively, while
-   * independent devices continue their readiness work in parallel.
+   * verifies its runner. The reservation does not create a user-visible
+   * session; session ownership is transferred only after readiness succeeds.
    */
   async reserveDeviceForReadiness(
     deviceId: string,
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
   ): Promise<() => Promise<void>> {
-    const predecessor = this.readinessReservations.get(deviceId);
-    let releaseReservation!: () => void;
-    const reservation = new Promise<void>((resolve) => {
-      releaseReservation = resolve;
+    await this.assignmentMutex.runExclusive(async () => {
+      const pooled = this.devices.get(deviceId);
+      if (pooled) {
+        if (this.hasTransportOnlyIdentityChange(pooled, expectedIdentity)) {
+          await this.replacePooledDeviceForRuntimeIdentity(pooled, expectedIdentity);
+        } else {
+          this.assertRuntimeIdentity(pooled, expectedIdentity);
+        }
+      }
+      this.readinessReservationCounts.set(
+        deviceId,
+        (this.readinessReservationCounts.get(deviceId) ?? 0) + 1,
+      );
     });
-    this.readinessReservations.set(deviceId, reservation);
-    await predecessor;
 
     let released = false;
-    const release = async () => {
+    return async () => {
       if (released) {
         return;
       }
       released = true;
-      if (this.readinessReservations.get(deviceId) === reservation) {
-        this.readinessReservations.delete(deviceId);
-      }
-      releaseReservation();
-    };
-
-    try {
-      await this.assignmentMutex.runExclusive(async () => {
-        const pooled = this.devices.get(deviceId);
-        if (pooled) {
-          if (this.hasTransportOnlyIdentityChange(pooled, expectedIdentity)) {
-            await this.replacePooledDeviceForRuntimeIdentity(pooled, expectedIdentity);
-          } else {
-            this.assertRuntimeIdentity(pooled, expectedIdentity);
-          }
+      await this.assignmentMutex.runExclusive(() => {
+        const count = this.readinessReservationCounts.get(deviceId);
+        if (count === undefined || count <= 1) {
+          this.readinessReservationCounts.delete(deviceId);
+          return;
         }
+        this.readinessReservationCounts.set(deviceId, count - 1);
       });
-    } catch (error) {
-      await release();
-      throw error;
-    }
-
-    return release;
+    };
   }
 
   private isReservedForReadiness(deviceId: string): boolean {
-    return this.readinessReservations.has(deviceId);
+    return (this.readinessReservationCounts.get(deviceId) ?? 0) > 0;
   }
 
   /**
@@ -2725,8 +2726,9 @@ export class DevicePool {
     sourceImage?: DeviceInfo,
   ): Promise<string> {
     if (sourceImage) {
-      logger.info(
-        `Transferring freshly started device ${deviceId} to existing session ${existingSessionId}`,
+      throw new ActionableError(
+        `Freshly started device '${deviceId}' was assigned to session ` +
+          `${existingSessionId} before its owning session could reserve it.`,
       );
     }
     const refreshedSession = await this.sessionManager.getOrCreateSession(existingSessionId);
@@ -2876,6 +2878,7 @@ export class DevicePool {
     if (this.devices.get(deviceId) !== device) {
       throw new ActionableError(`Device '${deviceId}' exited before it could be autolocked.`);
     }
+    this.throwIfFreshStartAlreadyBound(device, sourceImage);
     await this.assertIdleDeviceAssignable(
       device,
       `Device '${deviceId}' is not available for autolock.\n` +
@@ -2928,6 +2931,26 @@ export class DevicePool {
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
     );
     return sessionId;
+  }
+
+  private throwIfFreshStartAlreadyBound(
+    device: PooledDevice,
+    sourceImage: DeviceInfo | undefined,
+  ): void {
+    if (!sourceImage || !device.sessionId) {
+      return;
+    }
+    const existingSession = this.sessionManager.getSession(device.sessionId);
+    if (
+      existingSession &&
+      existingSession.assignedDevice === device.id &&
+      existingSession.platform === device.platform
+    ) {
+      throw new ActionableError(
+        `Freshly started device '${device.id}' was assigned to session ` +
+          `${existingSession.sessionId} before its owning session could reserve it.`,
+      );
+    }
   }
 
   /**

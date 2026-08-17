@@ -11,6 +11,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
+import type { DeviceSessionStatus } from "../../src/db/types";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
 
@@ -372,6 +373,143 @@ describe("SessionManager", () => {
 
       expect(released).toEqual(["session-1"]);
       expect(sessionManager.getActiveSessionCount()).toBe(0);
+    });
+
+    test("keeps an expired session unavailable while its teardown restores device state", async () => {
+      let finishRestore!: () => void;
+      const restoration = new Promise<void>(resolve => { finishRestore = resolve; });
+      let restoreStarted!: () => void;
+      const restorationStarted = new Promise<void>(resolve => { restoreStarted = resolve; });
+      const activity: string[] = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        {
+          async upsertActiveSession(): Promise<void> {},
+          async recordActivity(sessionId: string): Promise<void> { activity.push(sessionId); },
+          async markReleased(): Promise<void> {},
+          async markStaleActiveSessionsExpired(): Promise<void> {},
+        },
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async (): Promise<void> => {
+          restoreStarted();
+          await restoration;
+        } }),
+      );
+      const assignedSessionIds: string[] = [];
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(sessionId: string): Promise<string> {
+          assignedSessionIds.push(sessionId);
+          const replacement = await manager.createSession(sessionId, "device-2", "android");
+          return replacement.assignedDevice;
+        },
+      };
+      try {
+        const session = await manager.createSession("s1", "device-1", "android", 1);
+        manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
+        await Promise.resolve();
+        activity.length = 0;
+        fakeTimer.advanceTime(2);
+
+        expect(manager.getSession("s1")).toBeNull();
+        await restorationStarted;
+        expect(manager.getSession("s1")).toBeNull();
+        expect(manager.getSessionForNewExecution("s1")).toBeNull();
+
+        const expiresAt = session.expiresAt;
+        manager.recordHeartbeat("s1");
+        await Promise.resolve();
+        expect(session.expiresAt).toBe(expiresAt);
+        expect(activity).toEqual([]);
+
+        const replacement = manager.getOrCreateSession("s1", devicePool);
+        await Promise.resolve();
+        expect(assignedSessionIds).toEqual([]);
+
+        finishRestore();
+        await expect(replacement).resolves.toMatchObject({
+          sessionId: "s1",
+          assignedDevice: "device-2",
+        });
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("keeps a periodically expired session unavailable during teardown", async () => {
+      let finishRestore!: () => void;
+      const restoration = new Promise<void>(resolve => { finishRestore = resolve; });
+      let restoreStarted!: () => void;
+      const restorationStarted = new Promise<void>(resolve => { restoreStarted = resolve; });
+      const manager = new SessionManager(
+        fakeTimer,
+        {
+          async upsertActiveSession(): Promise<void> {},
+          async recordActivity(): Promise<void> {},
+          async markReleased(): Promise<void> {},
+          async markStaleActiveSessionsExpired(): Promise<void> {},
+        },
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async (): Promise<void> => {
+          restoreStarted();
+          await restoration;
+        } }),
+      );
+      try {
+        const session = await manager.createSession("s1", "device-1", "android", 1);
+        manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
+        fakeTimer.advanceTime(5 * 60 * 1000);
+
+        await restorationStarted;
+        expect(manager.getSession("s1")).toBeNull();
+        expect(manager.getSessionForNewExecution("s1")).toBeNull();
+        manager.recordHeartbeat("s1");
+        expect(session.expiresAt).toBe(1);
+
+        finishRestore();
+        await manager.waitForSessionRelease("s1");
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("waits for expired session terminal work before recreating its UUID", async () => {
+      const persistenceStarted = Promise.withResolvers<void>();
+      const finishPersistence = Promise.withResolvers<void>();
+      const manager = new SessionManager(fakeTimer, {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(): Promise<void> {
+          persistenceStarted.resolve();
+          await finishPersistence.promise;
+        },
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      }, () => new FakeDbWriteBarrier());
+      const assignedSessionIds: string[] = [];
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(sessionId: string): Promise<string> {
+          assignedSessionIds.push(sessionId);
+          const replacement = await manager.createSession(sessionId, "device-2", "android");
+          return replacement.assignedDevice;
+        },
+      };
+      try {
+        await manager.createSession("s1", "device-1", "android", 1);
+        fakeTimer.advanceTime(2);
+        expect(manager.getSession("s1")).toBeNull();
+        await persistenceStarted.promise;
+
+        const replacement = manager.getOrCreateSession("s1", devicePool);
+        await Promise.resolve();
+        expect(assignedSessionIds).toEqual([]);
+
+        finishPersistence.resolve();
+        await expect(replacement).resolves.toMatchObject({
+          sessionId: "s1",
+          assignedDevice: "device-2",
+        });
+      } finally {
+        manager.stopCleanupTimer();
+      }
     });
 
     test("keeps a session when work began before its expiry deadline", async () => {
@@ -1015,6 +1153,7 @@ describe("SessionManager", () => {
       // Accessing the expired session should trigger cleanup + callback
       const result = sessionManager.getSession("session-expiry");
       expect(result).toBeNull();
+      await sessionManager.waitForSessionRelease("session-expiry");
       expect(released).toHaveLength(1);
       expect(released[0].sessionId).toBe("session-expiry");
       expect(released[0].deviceId).toBe("emulator-5554");
@@ -1030,10 +1169,41 @@ describe("SessionManager", () => {
 
       // Advance past session timeout + cleanup interval (30min + 5min)
       fakeTimer.advanceTime(36 * 60 * 1000);
+      await sessionManager.waitForSessionRelease("session-timer");
 
       expect(released).toHaveLength(1);
       expect(released[0].sessionId).toBe("session-timer");
       expect(released[0].deviceId).toBe("emulator-5556");
+    });
+
+    test("persists expired status for lazy and periodic session expiry", async () => {
+      const releases: Array<{ sessionId: string; status: DeviceSessionStatus; reason: string }> = [];
+      const repository: DeviceSessionPersistence = {
+        async upsertActiveSession(): Promise<void> {},
+        async recordActivity(): Promise<void> {},
+        async markReleased(sessionId, status, _releasedAtMs, reason): Promise<void> {
+          releases.push({ sessionId, status, reason });
+        },
+        async markStaleActiveSessionsExpired(): Promise<void> {},
+      };
+      const manager = new SessionManager(fakeTimer, repository);
+      try {
+        await manager.createSession("lazy-expiry", "emulator-5554", "android");
+        fakeTimer.advanceTime(31 * 60 * 1000);
+        expect(manager.getSession("lazy-expiry")).toBeNull();
+        await manager.waitForSessionRelease("lazy-expiry");
+
+        await manager.createSession("periodic-expiry", "emulator-5556", "android");
+        fakeTimer.advanceTime(36 * 60 * 1000);
+        await manager.waitForSessionRelease("periodic-expiry");
+
+        expect(releases).toEqual([
+          { sessionId: "lazy-expiry", status: "expired", reason: "lazy-expiry" },
+          { sessionId: "periodic-expiry", status: "expired", reason: "cleanup-expired" },
+        ]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
     });
   });
 
@@ -1101,12 +1271,11 @@ describe("SessionManager", () => {
         await mgr.createSession("s1", "emulator-5554", "android");
         // Past session timeout (30m) + cleanup interval (5m): the timer fires.
         fakeTimer.advanceTime(36 * 60 * 1000);
-        await Promise.resolve();
+        await mgr.waitForSessionRelease("s1");
         expect(released).toContain("s1");
-        // Exactly one barrier-tracked write: the cleanup sweep releases the single
-        // expired session once, routing one fire-and-forget markReleased through the
-        // barrier. A duplicate-write regression would push this to 2.
-        expect(barrier.ran.length).toBe(1);
+        // Exactly one release promise is registered before daemon shutdown can
+        // begin draining. A duplicate release regression would push this to 2.
+        expect(barrier.trackedExisting.length).toBe(1);
       } finally {
         mgr.stopCleanupTimer();
       }

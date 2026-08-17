@@ -249,9 +249,15 @@ export class DevicePool {
         await this.sessionManager.releaseSession(sessionId, releaseReason);
       });
 
-    // Free autolocked devices when their session expires (idle timeout auto-release).
-    this.sessionManager.onSessionRelease((sessionId, deviceId) => {
-      this.releaseAutolockedDevice(sessionId, deviceId);
+    // Expiry has no caller available to return the device to the pool. Explicit
+    // release callers retain their ordered cleanup and release flow, while
+    // autolock metadata is still removed when their session ends.
+    this.sessionManager.onSessionRelease((sessionId, deviceId, releaseReason) => {
+      if (releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired") {
+        this.releaseExpiredSessionDevice(sessionId, deviceId);
+      } else {
+        this.clearReleasedAutolockState(sessionId, deviceId);
+      }
     });
   }
 
@@ -3012,13 +3018,44 @@ export class DevicePool {
   }
 
   /**
-   * Free a device whose autolock session has been released or has expired.
+   * Free a device whose current session has expired.
    *
-   * Invoked via the SessionManager release callback. Only acts on devices that
-   * were locked by the released session, so non-autolock sessions and devices
-   * that have since been re-locked by a different session are left untouched.
+   * Invoked via the SessionManager expiry callback. Only acts when the device
+   * is still owned by the released session, so a stale callback cannot free a
+   * replacement owner. Autolock-specific state is cleared when the device is
+   * actually returned to idle.
    */
-  private releaseAutolockedDevice(sessionId: string, deviceId: string): void {
+  private releaseExpiredSessionDevice(sessionId: string, deviceId: string): void {
+    const device = this.devices.get(deviceId);
+    if (!device || device.sessionId !== sessionId) {
+      return;
+    }
+
+    const cleanup = this.sessionManager.getPendingDeviceCleanup(deviceId);
+    const release = this.releaseDevice(deviceId, sessionId);
+    void release.then(() => {
+      if (!cleanup) {
+        this.clearExpiredAutolockStateWhenIdle(sessionId, deviceId);
+      }
+      logger.info(`Released device ${deviceId} from session ${sessionId}`);
+    });
+    if (cleanup) {
+      void cleanup.then(() => this.clearExpiredAutolockStateWhenIdle(sessionId, deviceId));
+    }
+  }
+
+  private clearExpiredAutolockStateWhenIdle(sessionId: string, deviceId: string): void {
+    const device = this.devices.get(deviceId);
+    if (!device || device.sessionId !== null || device.autolockSessionId !== sessionId) {
+      return;
+    }
+
+    device.autolockSessionId = undefined;
+    this.clearMcpAutolockMappings(sessionId);
+  }
+
+  /** Clear autolock-only state for an explicit release without freeing early. */
+  private clearReleasedAutolockState(sessionId: string, deviceId: string): void {
     const device = this.devices.get(deviceId);
     if (!device || device.autolockSessionId !== sessionId) {
       return;
@@ -3026,9 +3063,6 @@ export class DevicePool {
 
     device.autolockSessionId = undefined;
     this.clearMcpAutolockMappings(sessionId);
-    void this.releaseDevice(deviceId, sessionId).then(() => {
-      logger.info(`Autolock idle timeout: released device ${deviceId} from session ${sessionId}`);
-    });
   }
 
   private clearMcpAutolockMappings(sessionId: string): void {

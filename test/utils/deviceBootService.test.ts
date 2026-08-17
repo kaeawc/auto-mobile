@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "bun:test";
-import { DeviceBootService } from "../../src/utils/deviceBootService";
+import { DeviceBootService, type DeviceBootProgress } from "../../src/utils/deviceBootService";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
@@ -203,6 +203,45 @@ describe("DeviceBootService", () => {
     await Promise.resolve();
     await Promise.resolve();
 
+    expect(killCount).toBe(1);
+    expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
+  });
+
+  it("cancels a started handle when external cancellation lands during progress reporting", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const controller = new AbortController();
+    let resolveProgress!: () => void;
+    let markProgressStarted!: () => void;
+    const progressStarted = new Promise<void>(resolve => {
+      markProgressStarted = resolve;
+    });
+    const pendingProgress = new Promise<void>(resolve => {
+      resolveProgress = resolve;
+    });
+    let killCount = 0;
+    const progress: DeviceBootProgress = {
+      report: async () => {
+        markProgressStarted();
+        await pendingProgress;
+      },
+    };
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.setMockChildProcess(image.name, {
+      pid: 12,
+      kill: () => {
+        killCount++;
+        return true;
+      },
+    } as ChildProcess);
+
+    const boot = service(devices, matcher).boot({ platform: "android", signal: controller.signal }, progress);
+    await progressStarted;
+    controller.abort();
+    resolveProgress();
+
+    await expect(boot).rejects.toThrow("startDevice cancelled while waiting for device boot readiness");
     expect(killCount).toBe(1);
     expect(devices.wasMethodCalled("waitForDeviceReady")).toBe(false);
   });

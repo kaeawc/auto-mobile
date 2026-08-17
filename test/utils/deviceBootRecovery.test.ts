@@ -36,4 +36,46 @@ describe("CiIosBootRecovery", () => {
 
     expect(recovered).toEqual([]);
   });
+
+  it("stops recovery when cancellation arrives during shutdown", async () => {
+    const controller = new AbortController();
+    let markShutdownStarted!: () => void;
+    let releaseShutdown!: () => void;
+    const shutdownStarted = new Promise<void>(resolve => {
+      markShutdownStarted = resolve;
+    });
+    const pendingShutdown = new Promise<void>(resolve => {
+      releaseShutdown = () => {
+        resolve();
+      };
+    });
+    let bootAttempts = 0;
+    const recovered: string[] = [];
+    const recovery = new CiIosBootRecovery({
+      ownedSimulatorName: target.name,
+      shutdown: async () => {
+        markShutdownStarted();
+        await pendingShutdown;
+      },
+      erase: async () => {
+        recovered.push("erase");
+      },
+    });
+
+    const boot = recovery.run(
+      target,
+      async () => {
+        bootAttempts++;
+        throw new Error("boot failed");
+      },
+      controller.signal,
+    );
+    await shutdownStarted;
+    controller.abort();
+    releaseShutdown();
+
+    await expect(boot).rejects.toThrow("boot failed");
+    expect(recovered).toEqual([]);
+    expect(bootAttempts).toBe(1);
+  });
 });

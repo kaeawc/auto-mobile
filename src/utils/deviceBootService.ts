@@ -315,25 +315,41 @@ export class DeviceBootService {
       }
       return started;
     });
-    await progress?.report(60, 100, "Device started, waiting for readiness...");
-    const ready = await this.runPhase(context, "waiting for device boot readiness", signal =>
-      waitForDeviceReadyOrCancel(
-        this.dependencies.deviceManager,
-        image,
-        handle,
-        this.remaining(context.deadlineMs, "waiting for device boot readiness"),
-        signal,
-      ),
-    );
-    await progress?.report(100, 100, "Device is ready for use");
-    return {
-      device: enrichBootedDevice(ready, image),
-      source: "cold-boot",
-      sourceImage: image,
-      processHandle: handle,
-      processId: handle?.pid,
-      provisioned,
+    let handleCancelled = false;
+    const cancelHandle = () => {
+      if (handle && !handleCancelled) {
+        handleCancelled = true;
+        handle.kill();
+      }
     };
+    context.signal?.addEventListener("abort", cancelHandle, { once: true });
+    try {
+      await progress?.report(60, 100, "Device started, waiting for readiness...");
+      const ready = await this.runPhase(context, "waiting for device boot readiness", signal =>
+        waitForDeviceReadyOrCancel(
+          this.dependencies.deviceManager,
+          image,
+          handle,
+          this.remaining(context.deadlineMs, "waiting for device boot readiness"),
+          signal,
+          cancelHandle,
+        ),
+      );
+      await progress?.report(100, 100, "Device is ready for use");
+      return {
+        device: enrichBootedDevice(ready, image),
+        source: "cold-boot",
+        sourceImage: image,
+        processHandle: handle,
+        processId: handle?.pid,
+        provisioned,
+      };
+    } catch (error) {
+      cancelHandle();
+      throw error;
+    } finally {
+      context.signal?.removeEventListener("abort", cancelHandle);
+    }
   }
 
   private remaining(deadlineMs: number, phase: string): number {
@@ -351,9 +367,9 @@ export class DeviceBootService {
     phase: string,
     operation: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
+    const remainingMs = this.remaining(context.deadlineMs, phase);
     const cancellation = createPhaseCancellation(context.signal, phase);
     cancellation.throwIfCancelled();
-    const remainingMs = this.remaining(context.deadlineMs, phase);
     const controller = new AbortController();
     const signal = context.signal
       ? AbortSignal.any([context.signal, controller.signal])

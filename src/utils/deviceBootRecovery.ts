@@ -49,7 +49,13 @@ export class CiIosBootRecovery implements DeviceBootRecovery {
       firstFailure = error;
     }
     await this.recover(() => this.dependencies.shutdown(target));
+    if (signal?.aborted) {
+      throw firstFailure;
+    }
     await this.recover(() => this.dependencies.erase(target.deviceId!));
+    if (signal?.aborted) {
+      throw firstFailure;
+    }
     try {
       return await boot();
     } catch {

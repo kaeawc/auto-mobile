@@ -149,6 +149,7 @@ function createReadinessCancellation(signal: AbortSignal | undefined): Readiness
  * @param handle - The start handle from `startDevice` (null for adopted devices)
  * @param timeoutMs - Optional readiness timeout
  * @param signal - Optional cancellation signal for a non-cooperative readiness wait
+ * @param cancelOwnedBoot - Optional idempotent cleanup for the owned launch handle
  * @returns The booted device once ready
  * @throws Re-throws the original readiness error after cancelling the boot
  */
@@ -158,6 +159,7 @@ export async function waitForDeviceReadyOrCancel(
   handle: ChildProcess | null,
   timeoutMs?: number,
   signal?: AbortSignal,
+  cancelOwnedBoot?: () => void,
 ): Promise<BootedDevice> {
   const cancellation = createReadinessCancellation(signal);
   try {
@@ -171,7 +173,7 @@ export async function waitForDeviceReadyOrCancel(
         `cancelling boot via handle.kill()`,
         error,
       );
-      handle.kill();
+      (cancelOwnedBoot ?? (() => handle.kill()))();
     }
     throw error;
   } finally {

@@ -28,7 +28,42 @@ export interface WorkflowStep {
   with?: Record<string, string | number | boolean>;
 }
 
+export interface WorkflowPermissions {
+  actions?: string;
+  contents?: string;
+  pages?: string;
+  "id-token"?: string;
+}
+
+export interface WorkflowConcurrency {
+  group?: string;
+  "cancel-in-progress"?: boolean;
+}
+
+/** A job's own configuration, minus its steps. */
+export interface WorkflowJob {
+  "timeout-minutes"?: number;
+  /** Set when the job delegates to a reusable workflow. */
+  uses?: string;
+  if?: string | boolean;
+  concurrency?: WorkflowConcurrency;
+  permissions?: WorkflowPermissions;
+  env?: Record<string, string | number | boolean>;
+  steps?: WorkflowStep[];
+}
+
+export interface WorkflowDefinition {
+  permissions?: WorkflowPermissions;
+  concurrency?: WorkflowConcurrency;
+  jobs?: Record<string, WorkflowJob | undefined>;
+}
+
 const repoRoot = join(import.meta.dir, "../..");
+
+/** Parse one workflow through the repository's canonical YAML reader. */
+export function loadWorkflow(workflowRelativePath: string): WorkflowDefinition {
+  return load(readFileSync(join(repoRoot, workflowRelativePath), "utf8")) as WorkflowDefinition;
+}
 
 /**
  * Steps of one job, or an empty array when the workflow or job is missing.
@@ -37,18 +72,8 @@ const repoRoot = join(import.meta.dir, "../..");
  * otherwise a renamed job would let every other assertion pass vacuously.
  */
 export function loadJobSteps(workflowRelativePath: string, jobId: string): WorkflowStep[] {
-  const document = load(readFileSync(join(repoRoot, workflowRelativePath), "utf8")) as {
-    jobs?: Record<string, { steps?: WorkflowStep[] } | undefined>;
-  };
+  const document = loadWorkflow(workflowRelativePath);
   return document.jobs?.[jobId]?.steps ?? [];
-}
-
-/** A job's own configuration, minus its steps. */
-export interface WorkflowJob {
-  "timeout-minutes"?: number;
-  /** Set when the job delegates to a reusable workflow. */
-  uses?: string;
-  env?: Record<string, string | number | boolean>;
 }
 
 /**
@@ -59,9 +84,7 @@ export interface WorkflowJob {
  * built on one reports success for a job it never looked at.
  */
 export function loadJobs(workflowRelativePath: string): Record<string, WorkflowJob> {
-  const document = load(readFileSync(join(repoRoot, workflowRelativePath), "utf8")) as {
-    jobs?: Record<string, WorkflowJob | undefined>;
-  };
+  const document = loadWorkflow(workflowRelativePath);
   const jobs: Record<string, WorkflowJob> = {};
   for (const [id, job] of Object.entries(document.jobs ?? {})) {
     if (job) {
@@ -75,9 +98,7 @@ export function loadJobs(workflowRelativePath: string): Record<string, WorkflowJ
 export function loadAllJobSteps(
   workflowRelativePath: string
 ): { jobId: string; step: WorkflowStep }[] {
-  const document = load(readFileSync(join(repoRoot, workflowRelativePath), "utf8")) as {
-    jobs?: Record<string, { steps?: WorkflowStep[] } | undefined>;
-  };
+  const document = loadWorkflow(workflowRelativePath);
   return Object.entries(document.jobs ?? {}).flatMap(([jobId, job]) =>
     (job?.steps ?? []).map(step => ({ jobId, step }))
   );

@@ -22,8 +22,6 @@ on:
 permissions:
   actions: read
   contents: read
-  pages: write
-  id-token: write
 
 jobs:
   check:
@@ -52,6 +50,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: [check]
     if: github.ref == 'refs/heads/main' && needs.check.outputs.changed == 'true'
+    permissions:
+      actions: read
+      contents: read
+      pages: write
+      id-token: write
     # Overlapping runs (a manual dispatch racing the nightly schedule) each reach
     # actions/deploy-pages@v4, and GitHub Pages allows only one in-progress
     # deployment per environment. Serialize via a job-scoped concurrency block

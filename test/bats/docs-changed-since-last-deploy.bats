@@ -25,10 +25,13 @@ setup() {
   OUT_FILE="$(mktemp)"
   export GITHUB_OUTPUT="$OUT_FILE"
 
-  # Stub `gh`: emit whatever headSha the test placed in GH_STUB_HEADSHA. An
-  # empty value models "no prior successful run".
-  cat > "$STUB_DIR/gh" <<'EOF'
+# Stub `gh`: emit whatever headSha the test placed in GH_STUB_HEADSHA. An
+# empty value models "no prior successful run".
+cat > "$STUB_DIR/gh" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${GH_STUB_FAIL:-}" == "true" ]]; then
+  exit 23
+fi
 printf '%s' "${GH_STUB_HEADSHA:-}"
 EOF
   chmod +x "$STUB_DIR/gh"
@@ -72,6 +75,12 @@ changed_value() {
   run bash "$ABS_SCRIPT"
   [ "$status" -eq 0 ]
   [ "$(changed_value)" = "true" ]
+}
+
+@test "workflow lookup failure stops rather than republishing" {
+  export GH_STUB_FAIL="true"
+  run bash "$ABS_SCRIPT"
+  [ "$status" -ne 0 ]
 }
 
 @test "unreachable last-deployed commit republishes" {

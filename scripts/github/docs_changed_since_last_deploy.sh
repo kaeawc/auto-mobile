@@ -62,7 +62,10 @@ if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
   gh_args+=(--repo "$GITHUB_REPOSITORY")
 fi
 
-last_sha="$(gh "${gh_args[@]}" 2>/dev/null || true)"
+if ! last_sha="$(gh "${gh_args[@]}")"; then
+  echo "[docs-changed] failed to query the most recent successful docs deploy" >&2
+  exit 1
+fi
 
 if [[ -z "$last_sha" ]]; then
   emit true "no prior successful deploy"

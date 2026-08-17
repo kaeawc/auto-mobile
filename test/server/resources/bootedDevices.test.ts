@@ -3,6 +3,7 @@ import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { setDeviceManager, setDeviceLockProbe, notifyBootedDeviceResourcesUpdated, BootedDevicesResourceContent, DeviceLockStatesResourceContent } from "../../../src/server/bootedDeviceResources";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
@@ -457,7 +458,7 @@ describe("MCP Booted Device Resources", () => {
 
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
-      const sessionManager = new SessionManager(fakeTimer);
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
       const { FakeInstalledAppsRepository } = await import("../../fakes/FakeInstalledAppsRepository");
       const fakeAppsRepo = new FakeInstalledAppsRepository();
       const devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceUtils);
@@ -517,7 +518,7 @@ describe("MCP Booted Device Resources", () => {
 
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
-      const sessionManager = new SessionManager(fakeTimer);
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
       const { FakeInstalledAppsRepository } = await import("../../fakes/FakeInstalledAppsRepository");
       const fakeAppsRepo = new FakeInstalledAppsRepository();
       const devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo);
@@ -564,7 +565,7 @@ describe("MCP Booted Device Resources", () => {
 
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
-      const sessionManager = new SessionManager(fakeTimer);
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
       const { FakeInstalledAppsRepository } = await import("../../fakes/FakeInstalledAppsRepository");
       const fakeAppsRepo = new FakeInstalledAppsRepository();
       const devicePool = new DevicePool(

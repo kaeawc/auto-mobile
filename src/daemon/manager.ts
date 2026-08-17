@@ -361,10 +361,12 @@ export class DaemonManager implements DaemonManagerLike {
     this.launchCommandResolver = typeof launcher === "function" ? launcher : undefined;
     this.launcher = (typeof launcher === "object" ? launcher : undefined) ?? new DaemonLauncher({
       spawn: processSpawner?.spawn.bind(processSpawner),
+      timer,
     });
     this.fallbackLauncher = new DaemonLauncher({
       entryScript: null,
       spawn: processSpawner?.spawn.bind(processSpawner),
+      timer,
     });
     this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath));
   }
@@ -590,6 +592,7 @@ export class DaemonManager implements DaemonManagerLike {
             },
             timeoutMs: DAEMON_STARTUP_TIMEOUT_MS,
             waitForReady: (timeoutMs, signal) => this.waitForReady(timeoutMs, signal),
+            isReadyForLaunchedProcess: pid => this.isLaunchedProcessReady(pid),
             formatFailure: summary => this.createDaemonStartupFailure(summary, logPath),
             formatExitFailure: (code, signal) => this.createDaemonExitFailure(code, signal, logPath),
           });
@@ -844,8 +847,9 @@ export class DaemonManager implements DaemonManagerLike {
         stderrLog(`Daemon did not stop gracefully, sending SIGKILL...`);
         process.kill(pid, "SIGKILL");
 
-        // Wait a bit more
-        await this.timer.sleep(1000);
+        if (!(await this.waitForStop(pid, 1000))) {
+          throw new Error(`Daemon process ${pid} did not exit after SIGKILL`);
+        }
       }
 
       await cleanupDaemonFiles({
@@ -1050,6 +1054,15 @@ export class DaemonManager implements DaemonManagerLike {
     return false;
   }
 
+  private async isLaunchedProcessReady(pid: number | undefined): Promise<boolean> {
+    if (pid === undefined) {
+      return false;
+    }
+
+    const status = await this.status();
+    return status.running === true && status.pid === pid && await this.verifyDaemonConnection();
+  }
+
   /**
    * Remove a daemon socket path that failed the readiness probe.
    *
@@ -1087,7 +1100,7 @@ export class DaemonManager implements DaemonManagerLike {
       await this.timer.sleep(pollInterval);
     }
 
-    return false;
+    return !this.isProcessRunning(pid);
   }
 
   /**
@@ -1493,7 +1506,7 @@ export async function runDaemonCommand(
           }
           const deviceId = session.assignedDevice;
           sessionManager.releaseSession(sessionId);
-          pool.releaseDevice(deviceId);
+          pool.releaseDevice(deviceId, sessionId);
           console.log(`Session ${sessionId} released`);
           console.log(`Device ${deviceId} is now available`);
         } else {

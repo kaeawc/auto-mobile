@@ -30,10 +30,15 @@ import {
   NavigationAppSummary,
   NavigationAppListProvider,
   NavigationSuggestionInfo,
+  NavigationProvenanceRecord,
   UIState,
   ScrollPosition,
   SelectedElement,
 } from "../../utils/interfaces/NavigationGraph";
+import type {
+  NavigationNodeProvenanceRow,
+  NavigationEdgeProvenanceRow,
+} from "../../db/navigationRepository";
 
 // Re-export types for convenience
 export type {
@@ -132,6 +137,128 @@ interface ResolvedProvenance {
   contentHash: string;
   deviceId: string;
   sessionUuid: string;
+}
+
+/**
+ * Composite identity of a single provenance observation, used to dedup records
+ * unioned across the multiple edge rows that aggregate into one summary transition
+ * (#4985). Nodes never need this (one node_id → one summary node), but edges do.
+ */
+function provenanceDedupKey(record: NavigationProvenanceRecord): string {
+  const { packageId, versionCode, contentHash } = record.buildKey;
+  return `${packageId}\u0000${versionCode}\u0000${contentHash}\u0000${record.deviceId}\u0000${record.sessionUuid}`;
+}
+
+/** Deterministic recency-first ordering: newest lastSeen, then build/device/session. */
+function compareProvenanceRecords(
+  a: NavigationProvenanceRecord,
+  b: NavigationProvenanceRecord
+): number {
+  if (a.lastSeen !== b.lastSeen) {
+    return b.lastSeen - a.lastSeen;
+  }
+  if (a.buildKey.packageId !== b.buildKey.packageId) {
+    return a.buildKey.packageId < b.buildKey.packageId ? -1 : 1;
+  }
+  if (a.buildKey.versionCode !== b.buildKey.versionCode) {
+    return b.buildKey.versionCode - a.buildKey.versionCode;
+  }
+  if (a.buildKey.contentHash !== b.buildKey.contentHash) {
+    return a.buildKey.contentHash < b.buildKey.contentHash ? -1 : 1;
+  }
+  if (a.deviceId !== b.deviceId) {
+    return a.deviceId < b.deviceId ? -1 : 1;
+  }
+  if (a.sessionUuid !== b.sessionUuid) {
+    return a.sessionUuid < b.sessionUuid ? -1 : 1;
+  }
+  return 0;
+}
+
+function nodeProvenanceRowToRecord(
+  row: NavigationNodeProvenanceRow
+): NavigationProvenanceRecord {
+  return {
+    buildKey: {
+      packageId: row.package_id,
+      versionCode: row.version_code,
+      contentHash: row.content_hash,
+    },
+    deviceId: row.device_id,
+    sessionUuid: row.session_uuid,
+    lastSeen: row.last_seen_at,
+  };
+}
+
+function edgeProvenanceRowToRecord(
+  row: NavigationEdgeProvenanceRow
+): NavigationProvenanceRecord {
+  return {
+    buildKey: {
+      packageId: row.package_id,
+      versionCode: row.version_code,
+      contentHash: row.content_hash,
+    },
+    deviceId: row.device_id,
+    sessionUuid: row.session_uuid,
+    lastSeen: row.last_seen_at,
+  };
+}
+
+/** Group node-observation join rows into a per-node provenance map (#4985). */
+function groupNodeProvenance(
+  rows: NavigationNodeProvenanceRow[]
+): Map<number, NavigationProvenanceRecord[]> {
+  const byNodeId = new Map<number, NavigationProvenanceRecord[]>();
+  for (const row of rows) {
+    const bucket = byNodeId.get(row.node_id);
+    const record = nodeProvenanceRowToRecord(row);
+    if (bucket) {
+      bucket.push(record);
+    } else {
+      byNodeId.set(row.node_id, [record]);
+    }
+  }
+  for (const records of byNodeId.values()) {
+    records.sort(compareProvenanceRecords);
+  }
+  return byNodeId;
+}
+
+/** Group edge-observation join rows into a per-edge-row provenance map (#4985). */
+function groupEdgeProvenance(
+  rows: NavigationEdgeProvenanceRow[]
+): Map<number, NavigationProvenanceRecord[]> {
+  const byEdgeId = new Map<number, NavigationProvenanceRecord[]>();
+  for (const row of rows) {
+    const bucket = byEdgeId.get(row.edge_id);
+    const record = edgeProvenanceRowToRecord(row);
+    if (bucket) {
+      bucket.push(record);
+    } else {
+      byEdgeId.set(row.edge_id, [record]);
+    }
+  }
+  return byEdgeId;
+}
+
+/**
+ * Dedup provenance records (keeping the max lastSeen per identity) and return them
+ * in deterministic recency-first order. Used when unioning provenance across the
+ * edge rows that collapse into one summary transition (#4985).
+ */
+function mergeProvenanceRecords(
+  records: NavigationProvenanceRecord[]
+): NavigationProvenanceRecord[] {
+  const byKey = new Map<string, NavigationProvenanceRecord>();
+  for (const record of records) {
+    const key = provenanceDedupKey(record);
+    const existing = byKey.get(key);
+    if (!existing || record.lastSeen > existing.lastSeen) {
+      byKey.set(key, record);
+    }
+  }
+  return Array.from(byKey.values()).sort(compareProvenanceRecords);
 }
 
 /**
@@ -266,10 +393,8 @@ export class NavigationGraphManager implements NavigationGraphService {
     NavigationGraphManager.releasedSessions.delete(sessionId);
   }
 
-  /**
-   * Release a session-scoped instance and its transient state.
-   */
-  public static releaseSession(sessionId: string): void {
+  /** Clear a live session's device-scoped navigation state without tombstoning it. */
+  public static resetSession(sessionId: string): void {
     const instance = NavigationGraphManager.sessionInstances.get(sessionId);
     if (instance) {
       instance.activeTestSession = null;
@@ -277,8 +402,15 @@ export class NavigationGraphManager implements NavigationGraphService {
       instance.activeNavigation = null;
       instance.graphUpdateListeners = [];
       NavigationGraphManager.sessionInstances.delete(sessionId);
-      logger.debug(`[NAV_GRAPH] Released session instance: ${sessionId}`);
+      logger.debug(`[NAV_GRAPH] Reset session instance: ${sessionId}`);
     }
+  }
+
+  /**
+   * Release a session-scoped instance and its transient state.
+   */
+  public static releaseSession(sessionId: string): void {
+    NavigationGraphManager.resetSession(sessionId);
     // Mark released even if no instance existed yet, so a later stray event for this
     // session resolves to the unattributed global rather than minting a manager for
     // the ended session (#4984). Bounded FIFO to cap long-daemon growth.
@@ -1545,6 +1677,15 @@ export class NavigationGraphManager implements NavigationGraphService {
     const dbNodes = await this.repository.getNodes(appId);
     const dbEdges = await this.repository.getEdges(appId);
 
+    // Provenance (#4985): one typed join each for node/edge observations, grouped
+    // in-memory. Attached additively so pre-provenance consumers are unaffected.
+    const nodeProvenanceByNodeId = groupNodeProvenance(
+      await this.repository.getNodeProvenanceForApp(appId)
+    );
+    const edgeProvenanceByEdgeId = groupEdgeProvenance(
+      await this.repository.getEdgeProvenanceForApp(appId)
+    );
+
     const nodes: NavigationGraphSummaryNode[] = dbNodes.map(node => ({
       id: node.id,
       screenName: node.screen_name,
@@ -1553,16 +1694,20 @@ export class NavigationGraphManager implements NavigationGraphService {
       screenshotPath: node.screenshot_path
         ? `automobile:navigation/nodes/${node.id}/screenshot`
         : null,
+      provenance: nodeProvenanceByNodeId.get(node.id) ?? [],
     }));
 
-    // Aggregate edges by (from, to, toolName) to get unique transitions with counts
-    const edgeAggregation = new Map<string, { id: number; from: string; to: string; toolName: string | null; count: number }>();
+    // Aggregate edges by (from, to, toolName) to get unique transitions with counts.
+    // Track every underlying edge id per group so provenance can be unioned across
+    // the multiple edge rows that collapse into a single summary transition.
+    const edgeAggregation = new Map<string, { id: number; from: string; to: string; toolName: string | null; count: number; edgeIds: number[] }>();
 
     for (const edge of dbEdges) {
       const key = `${edge.from_screen}|${edge.to_screen}|${edge.tool_name ?? ""}`;
       const existing = edgeAggregation.get(key);
       if (existing) {
         existing.count++;
+        existing.edgeIds.push(edge.id);
       } else {
         edgeAggregation.set(key, {
           id: edge.id, // Use first edge's ID as representative
@@ -1570,6 +1715,7 @@ export class NavigationGraphManager implements NavigationGraphService {
           to: edge.to_screen,
           toolName: edge.tool_name,
           count: 1,
+          edgeIds: [edge.id],
         });
       }
     }
@@ -1580,6 +1726,9 @@ export class NavigationGraphManager implements NavigationGraphService {
       to: agg.to,
       toolName: agg.toolName,
       traversalCount: agg.count,
+      provenance: mergeProvenanceRecords(
+        agg.edgeIds.flatMap(edgeId => edgeProvenanceByEdgeId.get(edgeId) ?? [])
+      ),
     }));
 
     // Only include currentScreen if this is the currently active app

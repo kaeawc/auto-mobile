@@ -281,6 +281,54 @@ describe("IOSCtrlProxyManager", function() {
     });
   });
 
+  describe("shutdownAll", function() {
+    test("stops every instance and clears them when one stop fails", async function() {
+      const first = IOSCtrlProxyManager.getInstance(testDevice);
+      const otherDevice = {
+        deviceId: "22222222-2222-2222-2222-222222222222",
+        platform: "ios",
+        name: "Other iPhone",
+      } as const;
+      const second = IOSCtrlProxyManager.getInstance(otherDevice);
+      const firstStop = spyOn(first, "stop").mockRejectedValue(new Error("iproxy stop failed"));
+      const forceStop = spyOn(first as any, "forceStopForShutdown").mockResolvedValue();
+      const secondStop = spyOn(second, "stop").mockResolvedValue();
+
+      await expect(IOSCtrlProxyManager.shutdownAll()).resolves.toBeUndefined();
+
+      expect(firstStop).toHaveBeenCalledTimes(1);
+      expect(forceStop).toHaveBeenCalledTimes(1);
+      expect(secondStop).toHaveBeenCalledTimes(1);
+      expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
+      expect(IOSCtrlProxyManager.getInstance(otherDevice)).not.toBe(second);
+    });
+
+    test("clears all instances when one stop never settles", async function() {
+      const first = IOSCtrlProxyManager.getInstance(testDevice);
+      const second = IOSCtrlProxyManager.getInstance({
+        deviceId: "33333333-3333-3333-3333-333333333333",
+        platform: "ios",
+        name: "Hung iPhone",
+      });
+      const timer = new FakeTimer();
+      const firstStop = spyOn(first, "stop").mockImplementation(async () => {
+        await new Promise<void>(() => {});
+      });
+      const forceStop = spyOn(first as any, "forceStopForShutdown").mockImplementation(() => {});
+      const secondStop = spyOn(second, "stop").mockResolvedValue();
+      const shutdown = IOSCtrlProxyManager.shutdownAll(timer);
+
+      await Promise.resolve();
+      timer.advanceTime(1_500);
+      await shutdown;
+
+      expect(firstStop).toHaveBeenCalledTimes(1);
+      expect(forceStop).toHaveBeenCalledTimes(1);
+      expect(secondStop).toHaveBeenCalledTimes(1);
+      expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
+    });
+  });
+
   describe("getServicePort", function() {
     test("should return default port 8765", function() {
       const manager = IOSCtrlProxyManager.getInstance(testDevice);

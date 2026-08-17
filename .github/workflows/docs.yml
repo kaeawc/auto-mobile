@@ -1,0 +1,155 @@
+name: "Deploy Documentation"
+
+# Documentation is republished on a nightly schedule rather than on every merge
+# to main. An LFS-backed checkout is required (the site embeds LFS-tracked
+# images), and doing that plus a full MkDocs build + Pages deploy on every merge
+# both wastes CI time and spends the repo's GitHub LFS budget. The nightly run
+# first checks whether any docs source changed since the last successful deploy
+# and skips the whole publish when nothing did. A manual dispatch always
+# publishes.
+#
+# Trade-off (deliberate, see the "let them lag" decision): the README coverage
+# badges are served from the published site, so they only refresh when the site
+# republishes. Between doc changes they may be a few days stale.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 08:00 UTC — offset from the midnight "Nightly" workflow to avoid runner
+    # contention with the heavy build/sweep jobs there.
+    - cron: "0 8 * * *"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  check:
+    name: "Check Docs Changed"
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.decide.outputs.changed }}
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          # Full history so the last-deployed commit is reachable for the diff.
+          fetch-depth: 0
+
+      - name: "Decide whether docs changed since last deploy"
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: scripts/github/docs_changed_since_last_deploy.sh
+
+  deploy-docs:
+    name: "Deploy Documentation"
+    runs-on: ubuntu-latest
+    needs: [check]
+    if: github.ref == 'refs/heads/main' && needs.check.outputs.changed == 'true'
+    permissions:
+      actions: read
+      contents: read
+      pages: write
+      id-token: write
+    # Overlapping runs (a manual dispatch racing the nightly schedule) each reach
+    # actions/deploy-pages@v4, and GitHub Pages allows only one in-progress
+    # deployment per environment. Serialize via a job-scoped concurrency block
+    # (group "pages", cancel-in-progress: false) so deploys queue instead of
+    # racing (issue #3578).
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: true
+          fetch-depth: 0  # Fetch full history for git-revision-date-localized plugin
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Independent of each other: setup-uv fetches a standalone binary and
+      # never reads the Python toolchain. Both are joined before `uv sync --locked`.
+      - name: "Setup Python"
+        uses: actions/setup-python@v6
+        background: true
+        id: setup-python
+        with:
+          python-version: '3.11'
+
+      - name: "Install uv"
+        uses: astral-sh/setup-uv@v7
+        background: true
+        id: setup-uv
+        with:
+          enable-cache: true
+
+      - wait: [setup-python, setup-uv]
+
+      - name: "Install MkDocs and dependencies"
+        working-directory: scripts/github
+        run: uv sync --locked
+
+      - name: "Build documentation"
+        run: scripts/github/deploy_pages.py build
+
+      # The coverage badges are produced by the "On Merge" workflow's coverage
+      # jobs, not this run. Resolve the most recent successful On Merge run and
+      # pull its badge artifacts. Per the "let them lag" decision, this refreshes
+      # the badges only when the site republishes.
+      - name: "Resolve latest coverage badge run"
+        id: badge-run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          run_id="$(gh run list --repo "${{ github.repository }}" \
+            --workflow merge.yml --branch main --status success \
+            --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "$run_id" ]; then
+            echo "::error::No successful On Merge run found to source coverage badges from" >&2
+            exit 1
+          fi
+          echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+
+      # Distinct artifacts landing on distinct filenames, so they overlap. They
+      # must stay AFTER "Build documentation" -- mkdocs regenerates/cleans
+      # site/, which would delete a badge that landed early.
+      - name: "Download Kotlin Coverage Badge"
+        uses: actions/download-artifact@v7
+        background: true
+        id: dl-kotlin-badge
+        with:
+          name: kotlin-coverage-badge
+          path: site
+          run-id: ${{ steps.badge-run.outputs.run-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Download Swift Coverage Badge"
+        uses: actions/download-artifact@v7
+        background: true
+        id: dl-swift-badge
+        with:
+          name: swift-coverage-badge
+          path: site
+          run-id: ${{ steps.badge-run.outputs.run-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - wait: [dl-kotlin-badge, dl-swift-badge]
+
+      - name: "Setup Pages"
+        uses: actions/configure-pages@v5
+
+      - name: "Upload artifact"
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: './site'
+
+      - name: "Deploy to GitHub Pages"
+        id: deployment
+        uses: actions/deploy-pages@v4

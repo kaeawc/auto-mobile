@@ -2,8 +2,15 @@ import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:c
 import { existsSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import { ActionableError } from "../models";
+import {
+  trackProcess,
+  waitForExit,
+  type TrackedChildProcess,
+} from "../utils/ChildProcessTracker";
 import { releaseVersion } from "../utils/mcpVersion";
-import { DAEMON_VERSION } from "./constants";
+import { logger } from "../utils/logger";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "./constants";
 
 export interface DaemonLaunchCommand {
   command: string;
@@ -14,6 +21,9 @@ export interface DaemonProcessSpawner {
   spawn(command: string, args: string[], options: SpawnOptions): ChildProcess;
 }
 
+/** Signals or probes the dedicated process group created by a detached POSIX spawn. */
+export type DaemonProcessGroupKiller = (pid: number, signal: NodeJS.Signals | 0) => void;
+
 export interface DaemonLauncherDependencies {
   entryScript?: string | null;
   version?: string;
@@ -22,6 +32,8 @@ export interface DaemonLauncherDependencies {
   processExecPath?: string;
   executableExists?: (path: string) => boolean;
   spawn?: DaemonProcessSpawner["spawn"];
+  timer?: Timer;
+  processGroupKiller?: DaemonProcessGroupKiller;
 }
 
 export interface DaemonLaunchRequest {
@@ -30,6 +42,11 @@ export interface DaemonLaunchRequest {
   spawnOptions: SpawnOptions;
   timeoutMs: number;
   waitForReady: (timeoutMs: number, signal: AbortSignal) => Promise<boolean>;
+  /**
+   * Rechecks that the exact spawned PID is now the reachable daemon before the
+   * launcher terminates it for a readiness timeout.
+   */
+  isReadyForLaunchedProcess?: (pid: number | undefined) => Promise<boolean>;
   formatFailure: (summary: string) => Promise<Error>;
   formatExitFailure?: (code: number | null, signal: NodeJS.Signals | null) => Promise<Error>;
 }
@@ -89,6 +106,8 @@ export class DaemonLauncher {
   private readonly processExecPath: string;
   private readonly executableExists: (path: string) => boolean;
   private readonly spawn: DaemonProcessSpawner["spawn"];
+  private readonly timer: Timer;
+  private readonly processGroupKiller: DaemonProcessGroupKiller;
 
   constructor(dependencies: DaemonLauncherDependencies = {}) {
     this.entryScript = dependencies.entryScript === undefined
@@ -100,6 +119,8 @@ export class DaemonLauncher {
     this.processExecPath = dependencies.processExecPath ?? process.execPath;
     this.executableExists = dependencies.executableExists ?? existsSync;
     this.spawn = dependencies.spawn ?? nodeSpawn;
+    this.timer = dependencies.timer ?? defaultTimer;
+    this.processGroupKiller = dependencies.processGroupKiller ?? defaultProcessGroupKiller;
   }
 
   resolveCommand(): DaemonLaunchCommand {
@@ -126,8 +147,10 @@ export class DaemonLauncher {
 
     const readinessAbort = new AbortController();
     let cleanupProcessListeners = () => {};
+    let processFailureObserved = false;
     const processFailure = new Promise<never>((_, reject) => {
       const rejectWithContext = (summary: string) => {
+        processFailureObserved = true;
         void request.formatFailure(summary).then(
           error => {
             reject(error);
@@ -143,6 +166,7 @@ export class DaemonLauncher {
         rejectWithContext(`Daemon subprocess failed to spawn: ${formatRawSpawnError(error)}`);
       };
       const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+        processFailureObserved = true;
         if (request.formatExitFailure) {
           void request.formatExitFailure(code, signal).then(
             error => {
@@ -174,6 +198,34 @@ export class DaemonLauncher {
         processFailure,
       ]);
       if (!ready) {
+        // A readiness timeout can race the child binding its socket. Recheck the
+        // PID-recorded daemon and its connection before signalling the exact
+        // spawned handle, so a daemon that became healthy at the deadline lives.
+        readinessAbort.abort();
+        // Keep the startup listeners installed while the final check awaits so
+        // a late child error or exit cannot become unobserved in that window.
+        const isReadyAtDeadline = await this.waitForFinalReadinessCheck(
+          request.isReadyForLaunchedProcess?.(daemonProcess.pid) ?? Promise.resolve(false),
+          processFailure,
+        );
+        if (processFailureObserved) {
+          await processFailure;
+        }
+        if (isReadyAtDeadline) {
+          return;
+        }
+        cleanupProcessListeners();
+
+        // Keep startup ownership until the child has actually exited. Detached
+        // POSIX launchers also keep process-group escalation armed after their
+        // package-runner wrapper exits, so the daemon descendant is reaped.
+        const tracker = trackProcess(daemonProcess as TrackedChildProcess);
+        await this.stopTimedOutProcess(
+          tracker.process,
+          tracker.exitPromise,
+          daemonProcess.pid,
+          request.spawnOptions.detached === true,
+        );
         throw await request.formatFailure(`Daemon failed to start within ${request.timeoutMs}ms`);
       }
     } finally {
@@ -181,4 +233,107 @@ export class DaemonLauncher {
       cleanupProcessListeners();
     }
   }
+
+  /**
+   * The final check is a grace-period race, not a second unbounded startup
+   * phase. The normal connection probe may wait for a long client timeout, so
+   * it must not delay cleanup of a child that already missed startup readiness.
+   */
+  private async waitForFinalReadinessCheck(
+    readinessCheck: Promise<boolean>,
+    processFailure: Promise<never>,
+  ): Promise<boolean> {
+    let timeout: NodeJS.Timeout | undefined;
+    const deadline = new Promise<boolean>(resolve => {
+      timeout = this.timer.setTimeout(() => resolve(false), DAEMON_SHUTDOWN_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([readinessCheck, processFailure, deadline]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
+  }
+
+  private async stopTimedOutProcess(
+    process: TrackedChildProcess,
+    exitPromise: Promise<void>,
+    pid: number | undefined,
+    detached: boolean,
+  ): Promise<void> {
+    if (!detached || this.platform === "win32" || pid === undefined) {
+      await waitForExit(process, exitPromise, {
+        signal: "SIGTERM",
+        timeoutMs: DAEMON_SHUTDOWN_TIMEOUT_MS,
+        timer: this.timer,
+      });
+      return;
+    }
+
+    const signalledProcessGroup = this.signalProcessGroup(process, pid, "SIGTERM");
+    let timeout: NodeJS.Timeout | undefined;
+    const deadline = new Promise<void>(resolve => {
+      timeout = this.timer.setTimeout(resolve, DAEMON_SHUTDOWN_TIMEOUT_MS);
+    });
+
+    try {
+      const wrapperExited = await Promise.race([
+        exitPromise.then(() => true),
+        deadline.then(() => false),
+      ]);
+
+      // A `bunx`/`bun x` wrapper can exit while its daemon remains in the same
+      // detached group. Keep the grace timer alive when that group still exists.
+      if (wrapperExited && !this.isProcessGroupAlive(pid)) {
+        return;
+      }
+
+      await deadline;
+      if (this.isProcessGroupAlive(pid)) {
+        this.signalProcessGroup(process, pid, "SIGKILL");
+      } else if (!signalledProcessGroup && process.exitCode === null) {
+        process.kill("SIGKILL");
+      }
+      await exitPromise;
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
+  }
+
+  private isProcessGroupAlive(pid: number): boolean {
+    try {
+      this.processGroupKiller(pid, 0);
+      return true;
+    } catch (error) {
+      logger.debug(`Daemon process group is no longer alive for pid=${pid}: ${error}`);
+      return false;
+    }
+  }
+
+  private signalProcessGroup(
+    process: TrackedChildProcess,
+    pid: number,
+    signal: NodeJS.Signals,
+  ): boolean {
+    try {
+      this.processGroupKiller(pid, signal);
+      return true;
+    } catch (error) {
+      // A vanished group has no descendants left to reap. Fall back to the
+      // direct handle for unusual spawn implementations that do not create a
+      // group despite receiving `detached: true`.
+      logger.debug(
+        `Daemon process-group signal failed for pid=${pid}; falling back to the direct child: ${error}`
+      );
+      process.kill(signal);
+      return false;
+    }
+  }
 }
+
+const defaultProcessGroupKiller: DaemonProcessGroupKiller = (pid, signal) => {
+  process.kill(-pid, signal);
+};

@@ -59,7 +59,8 @@ final class RemindersPlanContentTests: XCTestCase {
     func testAddReminderPlanWaitsForAndTapsAddOrDoneSaveControl() throws {
         let steps = try PlanStepSequence.parse(loadAddReminderPlan())
 
-        guard let saveTapIndex = steps.firstIndex(where: { $0.tool == "tapOn" && $0.mentionsAll(["Add", "Done"]) }) else {
+        guard let saveTapIndex = steps.firstIndex(where: { $0.tool == "tapOn" && $0.mentionsAll(["Add", "Done"]) })
+        else {
             XCTFail("Plan is missing a tapOn save step that accepts both \"Add\" and \"Done\"")
             return
         }
@@ -90,7 +91,8 @@ final class RemindersPlanContentTests: XCTestCase {
             "RemindersAddPlanTests must provide the title parameter used by add-reminder.yaml"
         )
 
-        guard let inputIndex = steps.firstIndex(where: { $0.tool == "inputText" && $0.mentions("${REMINDER_TITLE}") }) else {
+        guard let inputIndex = steps.firstIndex(where: { $0.tool == "inputText" && $0.mentions("${REMINDER_TITLE}") })
+        else {
             XCTFail("Plan must type ${REMINDER_TITLE}")
             return
         }
@@ -158,20 +160,18 @@ final class RemindersPlanContentTests: XCTestCase {
         XCTAssertTrue(guardStep.mentions("Title"), "The title input guard must target the Title field")
     }
 
-    /// Reminders tests default to single-attempt plans for local runs, but CI can opt into a bounded
-    /// retry for known cold-runner flakes through `AUTOMOBILE_TEST_RETRY_COUNT`.
-    func testRemindersPlansDefaultToZeroRetries() {
+    /// The opt-in Reminders integration defaults to a single attempt for local runs.
+    func testRemindersAddPlanDefaultsToZeroRetries() {
         // An explicit env override legitimately wins, so only assert the default when unset.
         let env = ProcessInfo.processInfo.environment
         if env["AUTOMOBILE_TEST_RETRY_COUNT"] != nil || env["RETRY_COUNT"] != nil {
             return
         }
-        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 0)
         XCTAssertEqual(RemindersAddPlanTests().retryCount, 0)
     }
 
     /// An explicit retry override wins — including 0 to disable retries for CI/local repro runs.
-    func testExplicitRetryOverrideIsStillHonored() {
+    func testExplicitRetryOverrideIsStillHonoredByRemindersAddPlan() {
         let key = "AUTOMOBILE_TEST_RETRY_COUNT"
         let original = ProcessInfo.processInfo.environment[key]
         setenv(key, "0", 1)
@@ -183,149 +183,23 @@ final class RemindersPlanContentTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 0)
         XCTAssertEqual(RemindersAddPlanTests().retryCount, 0)
 
         setenv(key, "3", 1)
-        XCTAssertEqual(RemindersLaunchPlanTests().retryCount, 3)
         XCTAssertEqual(RemindersAddPlanTests().retryCount, 3)
     }
 
-    /// If Reminders retries are explicitly re-enabled, each attempt must be capped so the whole
-    /// attempt budget still fits under the 10-minute GitHub Actions step.
-    func testExplicitRemindersRetryTimeoutFitsWorkflowStepCap() {
-        let retryKey = "AUTOMOBILE_TEST_RETRY_COUNT"
-        let timeoutKey = "AUTOMOBILE_TEST_TIMEOUT_SECONDS"
-        let originalRetry = ProcessInfo.processInfo.environment[retryKey]
-        let originalTimeout = ProcessInfo.processInfo.environment[timeoutKey]
-        setenv(retryKey, "1", 1)
-        setenv(timeoutKey, "300", 1)
-        defer {
-            restoreEnvironmentValue(originalRetry, for: retryKey)
-            restoreEnvironmentValue(originalTimeout, for: timeoutKey)
-        }
-
-        assertRemindersTimeoutFitsWorkflowStepCap(RemindersLaunchPlanTests(), expectedTimeoutSeconds: 134)
-        assertRemindersTimeoutFitsWorkflowStepCap(RemindersAddPlanTests(), expectedTimeoutSeconds: 134)
-    }
-
-    func testExplicitLowerRemindersTimeoutIsPreserved() {
-        let retryKey = "AUTOMOBILE_TEST_RETRY_COUNT"
-        let timeoutKey = "AUTOMOBILE_TEST_TIMEOUT_SECONDS"
-        let originalRetry = ProcessInfo.processInfo.environment[retryKey]
-        let originalTimeout = ProcessInfo.processInfo.environment[timeoutKey]
-        setenv(retryKey, "1", 1)
-        setenv(timeoutKey, "120", 1)
-        defer {
-            restoreEnvironmentValue(originalRetry, for: retryKey)
-            restoreEnvironmentValue(originalTimeout, for: timeoutKey)
-        }
-
-        XCTAssertEqual(RemindersLaunchPlanTests().timeoutSeconds, 120)
-        XCTAssertEqual(RemindersAddPlanTests().timeoutSeconds, 120)
-    }
-
-    /// CI enables Reminders retries through workflow env, not a test-class override. The integration
-    /// base should only own simulator/daemon readiness; retry behavior comes from `AutoMobileTestCase`.
+    /// The integration base only owns simulator/daemon readiness; retry behavior comes from
+    /// `AutoMobileTestCase` and remains configurable for opt-in local runs.
     func testRemindersIntegrationBaseDoesNotOverrideRetryCount() throws {
         let source = try loadRemindersIntegrationTestSource()
 
         XCTAssertFalse(classBody(named: "RemindersIntegrationBase", in: source).contains("override var retryCount"))
         XCTAssertFalse(classBody(named: "RemindersIntegrationBase", in: source).contains("var defaultRetryCount"))
         XCTAssertFalse(
-            classBody(named: "RemindersLaunchPlanTests", in: source).contains("override var retryCount"),
-            "RemindersLaunchPlanTests should inherit AutoMobileTestCase retry behavior"
-        )
-        XCTAssertFalse(
             classBody(named: "RemindersAddPlanTests", in: source).contains("override var retryCount"),
             "RemindersAddPlanTests should inherit AutoMobileTestCase retry behavior"
         )
-    }
-
-    /// The CI job must warm Reminders itself before the single-attempt timed plan. Warming only
-    /// CtrlProxy still leaves the first target-app launch/observe on the clock.
-    func testPullRequestWorkflowWarmsTargetAppBeforeRemindersRuns() throws {
-        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
-
-        assertWorkflowUsesLocalCtrlProxyBuildForRemindersRun(workflow)
-        assertWorkflowWarmsTargetAppBeforeRemindersRun(
-            workflow,
-            warmupStepName: "Warm up Reminders target app (Xcode 26.5)",
-            runStepName: "Run Reminders integration tests (Xcode 26.5)"
-        )
-    }
-
-    /// The XCTest bundle must be compiled before the target-app warm-up (#3851 direction 4):
-    /// otherwise `swift test` in the timed Reminders step compiles first, re-cooling the
-    /// freshly-warmed simulator/app and reintroducing the cold observe timeout. The pre-build
-    /// must also follow the leg's CtrlProxy warm-up (which runs after the leg's Xcode is
-    /// selected) so the build cache matches the `swift test` that follows.
-    func testPullRequestWorkflowPreBuildsXCTestBundleBeforeWarmUp() throws {
-        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
-
-        assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
-            workflow,
-            preBuildStepName: "Pre-build Reminders XCTest bundle (Xcode 26.5)",
-            afterCtrlProxyStepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
-            warmupStepName: "Warm up Reminders target app (Xcode 26.5)"
-        )
-    }
-
-    func testPullRequestWorkflowRetriesRemindersRunsOnce() throws {
-        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
-
-        assertWorkflowRetriesRemindersRunOnce(
-            workflow,
-            runStepName: "Run Reminders integration tests (Xcode 26.5)"
-        )
-        assertWorkflowRunsGuardedRemindersTest(
-            workflow,
-            runStepName: "Run Reminders integration tests (Xcode 26.5)"
-        )
-    }
-
-    /// The PR job dropped its Xcode 26.2 Reminders leg (#4078), so the 26.5 leg is now the
-    /// only one. Its `!cancelled()` guards still matter: they keep the Reminders segment
-    /// independent of the CtrlProxy UI test that runs earlier in the same job, while still
-    /// skipping on cancellation (and, via #4082, on a doomed shared CtrlProxy build).
-    func testPullRequestWorkflowRunsRemindersLegAfterEarlierFailureUnlessCancelled() throws {
-        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
-
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Ensure AutoMobile daemon ready (Xcode 26.5)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Warm up iOS CtrlProxy (Xcode 26.5)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Warm up Reminders target app (Xcode 26.5)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Run Reminders integration tests (Xcode 26.5)"
-        )
-    }
-
-    /// The PR workflow must not reintroduce the Xcode 26.2 leg that #4078 removed: it made
-    /// the 26.5 Reminders run the job's third simulator boot, which owned the job's entire
-    /// slow tail. 26.2 coverage lives in nightly.yml, which does not gate merges.
-    func testPullRequestWorkflowHasNoXcode262RemindersLeg() throws {
-        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
-
-        for stepName in [
-            "iOS simulator bring-up (Xcode 26.2)",
-            "Pre-build Reminders XCTest bundle (Xcode 26.2)",
-            "Warm up Reminders target app (Xcode 26.2)",
-            "Run Reminders integration tests (Xcode 26.2)",
-        ] {
-            XCTAssertFalse(
-                workflowHasStep(workflow, stepName: stepName),
-                "pull_request.yml must not reintroduce the Xcode 26.2 Reminders leg (step: \(stepName))"
-            )
-        }
     }
 
     /// Xcode 26.5 can turn a filtered SwiftPM XCTest run into "Executed 0 tests" when the custom
@@ -354,94 +228,8 @@ final class RemindersPlanContentTests: XCTestCase {
         XCTAssertLessThan(inactiveGuardRange.lowerBound, testsReadRange.lowerBound)
     }
 
-    func testNightlyWorkflowWarmsTargetAppBeforeRemindersRuns() throws {
-        let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
-
-        assertWorkflowWarmsTargetAppBeforeRemindersRun(
-            workflow,
-            warmupStepName: "Warm up Reminders target app (Xcode 26.2)",
-            runStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowWarmsTargetAppBeforeRemindersRun(
-            workflow,
-            warmupStepName: "Warm up Reminders target app (Xcode 26.5)",
-            runStepName: "Run Reminders integration tests (Xcode 26.5)"
-        )
-    }
-
-    /// See `testPullRequestWorkflowPreBuildsXCTestBundleBeforeWarmUp` — same invariant for the
-    /// nightly workflow, whose second leg brings the sim up via the composite bring-up action.
-    func testNightlyWorkflowPreBuildsXCTestBundleBeforeWarmUp() throws {
-        let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
-
-        assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
-            workflow,
-            preBuildStepName: "Pre-build Reminders XCTest bundle (Xcode 26.2)",
-            afterCtrlProxyStepName: "Warm up iOS CtrlProxy",
-            warmupStepName: "Warm up Reminders target app (Xcode 26.2)"
-        )
-        assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
-            workflow,
-            preBuildStepName: "Pre-build Reminders XCTest bundle (Xcode 26.5)",
-            afterCtrlProxyStepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
-            warmupStepName: "Warm up Reminders target app (Xcode 26.5)"
-        )
-    }
-
-    func testNightlyWorkflowRetriesRemindersRunsOnce() throws {
-        let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
-
-        assertWorkflowRetriesRemindersRunOnce(
-            workflow,
-            runStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowRetriesRemindersRunOnce(
-            workflow,
-            runStepName: "Run Reminders integration tests (Xcode 26.5)"
-        )
-        assertWorkflowRunsGuardedRemindersTest(
-            workflow,
-            runStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowRunsGuardedRemindersTest(
-            workflow,
-            runStepName: "Run Reminders integration tests (Xcode 26.5)"
-        )
-    }
-
-    func testNightlyWorkflowRunsSecondRemindersLegAfterFirstLegFailureUnlessCancelled() throws {
-        let workflow = try loadRepositoryFile(".github/workflows/nightly.yml")
-
-        assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(workflow)
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Warm up iOS CtrlProxy (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Warm up Reminders target app (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "Run Reminders integration tests (Xcode 26.5)",
-            afterStepName: "Run Reminders integration tests (Xcode 26.2)"
-        )
-    }
-
-    /// PR integration runs build CtrlProxy locally before daemon startup. The daemon must use that
-    /// derived-data build instead of attempting a release IPA download for the package version under
-    /// test; otherwise source-only PRs can fail when no matching release artifact exists yet.
-    func testPullRequestWorkflowUsesLocalCtrlProxyBuildForRemindersRun() throws {
-        let workflow = try loadRepositoryFile(".github/workflows/pull_request.yml")
-
-        assertWorkflowUsesLocalCtrlProxyBuildForRemindersRun(workflow)
-    }
-
-    /// Regression guard preserving the flake-vs-regression distinction: warm-up handles target-app
-    /// bring-up before the plan, but the plan must keep its bounded `observe`/`waitFor` guard so a
-    /// genuinely broken observe still fails instead of hanging or silently passing.
+    /// The contract fixture keeps a bounded `observe`/`waitFor` guard so request construction
+    /// continues to cover a realistic launch, observation, and cleanup sequence.
     func testLaunchRemindersPlanIsGuardedAndBounded() throws {
         let content = try loadLaunchRemindersPlan()
         let steps = PlanStepSequence.parse(content)
@@ -750,62 +538,6 @@ private func loadRemindersIntegrationTestSource() throws -> String {
     return try String(contentsOf: sourceURL, encoding: .utf8)
 }
 
-private func restoreEnvironmentValue(_ value: String?, for key: String) {
-    if let value = value {
-        setenv(key, value, 1)
-    } else {
-        unsetenv(key)
-    }
-}
-
-private func assertRemindersTimeoutFitsWorkflowStepCap(
-    _ testCase: RemindersIntegrationBase,
-    expectedTimeoutSeconds: TimeInterval,
-    file: StaticString = #filePath,
-    line: UInt = #line
-) {
-    let attempts = testCase.retryCount + 1
-    let retryDelayBudget = max(0, attempts - 1) * Int(testCase.retryDelaySeconds.rounded(.up))
-    let executorTimeoutConsumersPerAttempt = 2
-    let workflowStepReservedOverheadSeconds = 60
-    let totalAttemptBudget = Int(testCase.timeoutSeconds.rounded(.up)) * attempts * executorTimeoutConsumersPerAttempt +
-        retryDelayBudget + workflowStepReservedOverheadSeconds
-
-    XCTAssertLessThan(
-        totalAttemptBudget,
-        600,
-        "Reminders retries must fit inside the 10-minute workflow step cap",
-        file: file,
-        line: line
-    )
-    XCTAssertEqual(testCase.timeoutSeconds, expectedTimeoutSeconds, file: file, line: line)
-}
-
-private func assertWorkflowUsesLocalCtrlProxyBuildForRemindersRun(
-    _ workflow: String,
-    file: StaticString = #filePath,
-    line: UInt = #line
-) {
-    guard let jobRange = workflow.range(of: "ios-xctest-runner-simulator-tests:") else {
-        XCTFail("Workflow is missing the XCTestRunner simulator job", file: file, line: line)
-        return
-    }
-    guard let runRange = workflow.range(of: #"name: "Run Reminders integration tests (Xcode 26.5)""#) else {
-        XCTFail("Workflow is missing the Xcode 26.5 Reminders run step", file: file, line: line)
-        return
-    }
-
-    let jobBlock = workflow[jobRange.lowerBound ..< runRange.lowerBound]
-    // Deliberately exact: this is a boolean switch, and "true" is the only value
-    // that means "skip the release-IPA download". There is no narrower property.
-    XCTAssertTrue(
-        jobBlock.contains("AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD: \"true\""),
-        "The PR XCTestRunner job must use the locally built CtrlProxy artifacts instead of downloading a release IPA",
-        file: file,
-        line: line
-    )
-}
-
 private func loadRepositoryFile(_ path: String) throws -> String {
     let currentFile = URL(fileURLWithPath: #filePath)
     let repositoryRoot = currentFile
@@ -842,311 +574,4 @@ private func classBody(named className: String, in source: String) -> String {
         index = source.index(after: index)
     }
     return ""
-}
-
-private func assertWorkflowWarmsTargetAppBeforeRemindersRun(
-    _ workflow: String,
-    warmupStepName: String,
-    runStepName: String,
-    file: StaticString = #filePath,
-    line: UInt = #line
-) {
-    guard let warmupRange = workflow.range(of: #"name: "\#(warmupStepName)""#) else {
-        XCTFail("Workflow is missing step named \(warmupStepName)", file: file, line: line)
-        return
-    }
-    guard let runRange = workflow.range(of: #"name: "\#(runStepName)""#) else {
-        XCTFail("Workflow is missing step named \(runStepName)", file: file, line: line)
-        return
-    }
-
-    XCTAssertLessThan(
-        warmupRange.lowerBound,
-        runRange.lowerBound,
-        "\(warmupStepName) must run before \(runStepName)",
-        file: file,
-        line: line
-    )
-
-    let warmupBlock = workflow[warmupRange.lowerBound ..< runRange.lowerBound]
-    XCTAssertTrue(
-        warmupBlock.contains("./scripts/ci/warm-reminders-target-app.sh"),
-        "\(warmupStepName) must invoke the target-app warm-up helper",
-        file: file,
-        line: line
-    )
-
-    let nextStepRange = workflow[runRange.upperBound...].range(of: "\n      - name:")
-    let runBlockEnd = nextStepRange?.lowerBound ?? workflow.endIndex
-    let runBlock = workflow[runRange.lowerBound ..< runBlockEnd]
-    // Deliberately exact: 10 minutes is the number
-    // `assertRemindersTimeoutFitsWorkflowStepCap` computes its 600s budget
-    // against. A looser matcher would let the two drift apart silently.
-    XCTAssertTrue(
-        runBlock.contains("timeout-minutes: 10"),
-        "\(runStepName) must keep the Reminders step cap aligned with the retry timeout guard",
-        file: file,
-        line: line
-    )
-}
-
-private func assertWorkflowPreBuildsXCTestBundleBeforeWarmUp(
-    _ workflow: String,
-    preBuildStepName: String,
-    afterCtrlProxyStepName: String,
-    warmupStepName: String,
-    file: StaticString = #filePath,
-    line: UInt = #line
-) {
-    guard let ctrlProxyRange = workflow.range(of: #"name: "\#(afterCtrlProxyStepName)""#) else {
-        XCTFail("Workflow is missing step named \(afterCtrlProxyStepName)", file: file, line: line)
-        return
-    }
-    guard let preBuildRange = workflow.range(of: #"name: "\#(preBuildStepName)""#) else {
-        XCTFail("Workflow is missing step named \(preBuildStepName)", file: file, line: line)
-        return
-    }
-    guard let warmupRange = workflow.range(of: #"name: "\#(warmupStepName)""#) else {
-        XCTFail("Workflow is missing step named \(warmupStepName)", file: file, line: line)
-        return
-    }
-
-    XCTAssertLessThan(
-        ctrlProxyRange.lowerBound,
-        preBuildRange.lowerBound,
-        "\(preBuildStepName) must run after \(afterCtrlProxyStepName) so the leg's Xcode toolchain "
-            + "is already selected and the pre-build cache matches the swift test that follows",
-        file: file,
-        line: line
-    )
-    XCTAssertLessThan(
-        preBuildRange.lowerBound,
-        warmupRange.lowerBound,
-        "\(preBuildStepName) must run before \(warmupStepName) so the swift-test compile can't "
-            + "re-cool the freshly-warmed simulator/app",
-        file: file,
-        line: line
-    )
-
-    let preBuildBlock = workflow[preBuildRange.lowerBound ..< warmupRange.lowerBound]
-    XCTAssertTrue(
-        preBuildBlock.contains("./scripts/ci/prebuild-reminders-xctest-bundle.sh"),
-        "\(preBuildStepName) must invoke the XCTest-bundle pre-build helper",
-        file: file,
-        line: line
-    )
-}
-
-private func assertWorkflowRetriesRemindersRunOnce(
-    _ workflow: String,
-    runStepName: String,
-    file: StaticString = #filePath,
-    line: UInt = #line
-) {
-    let runBlock = workflowStepBlock(workflow, stepName: runStepName, file: file, line: line)
-    // Deliberately exact: the whole point of this assertion is that the retry
-    // budget is exactly one. `2` or `0` are both regressions, so any looser
-    // matcher (prefix/contains) would defeat the test rather than harden it.
-    XCTAssertTrue(
-        stepBlockHasActiveEnvValue(runBlock, key: "AUTOMOBILE_TEST_RETRY_COUNT", value: "\"1\""),
-        "\(runStepName) must enable exactly one bounded retry for cold first-leg bring-up flakes",
-        file: file,
-        line: line
-    )
-}
-
-private func assertWorkflowRunsGuardedRemindersTest(
-    _ workflow: String,
-    runStepName: String,
-    file: StaticString = #filePath,
-    line: UInt = #line
-) {
-    let runBlock = workflowStepBlock(workflow, stepName: runStepName, file: file, line: line)
-    XCTAssertTrue(
-        stepBlockRunsScript(runBlock, script: "./scripts/ci/run-reminders-launch-plan-tests.sh"),
-        "\(runStepName) must run the guarded Reminders runner, which fails when the filtered "
-            + "Reminders test command executes zero XCTest cases",
-        file: file,
-        line: line
-    )
-}
-
-/// Scan anchor for the PR workflow's Reminders leg.
-///
-/// `afterStepName` anchors the scan past duplicated step names. nightly.yml is a
-/// matrix and genuinely repeats names ("Select Xcode ${{ matrix.config.xcode }}",
-/// "Ensure iOS Simulator runtime", ...), so it keeps the anchor and passes the
-/// Xcode 26.2 Reminders run step it still has.
-///
-/// pull_request.yml passes nil: #4114 removed the leg's redundant "Select Xcode
-/// 26.5" / "Ensure iOS Simulator runtime (Xcode 26.5)", which were its only
-/// duplicated step names, so a plain by-name lookup is unambiguous there. That
-/// invariant is enforced by the no-duplicate-step-names test in
-/// test/bats/xctest-shared-prereq-gate.bats -- if a duplicate is reintroduced,
-/// the lookup would silently resolve to the first occurrence.
-private func assertWorkflowSecondRemindersBringUpRunsWhenNotCancelled(
-    _ workflow: String,
-    afterStepName: String? = "Run Reminders integration tests (Xcode 26.2)",
-    file: StaticString = #filePath,
-    line: UInt = #line
-) {
-    if workflowHasStep(workflow, stepName: "iOS simulator bring-up (Xcode 26.5)", afterStepName: afterStepName) {
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: "iOS simulator bring-up (Xcode 26.5)",
-            afterStepName: afterStepName,
-            file: file,
-            line: line
-        )
-        return
-    }
-
-    for stepName in [
-        "Boot iOS Simulator (Xcode 26.5)",
-        "Ensure AutoMobile daemon ready (Xcode 26.5)",
-    ] {
-        assertWorkflowStepRunsWhenNotCancelled(
-            workflow,
-            stepName: stepName,
-            afterStepName: afterStepName,
-            file: file,
-            line: line
-        )
-    }
-}
-
-private func assertWorkflowStepRunsWhenNotCancelled(
-    _ workflow: String,
-    stepName: String,
-    afterStepName: String? = nil,
-    file: StaticString = #filePath,
-    line: UInt = #line
-) {
-    let stepBlock = workflowStepBlock(
-        workflow,
-        stepName: stepName,
-        afterStepName: afterStepName,
-        file: file,
-        line: line
-    )
-    XCTAssertTrue(
-        stepBlockRespectsCancellation(stepBlock),
-        "\(stepName) must run after an earlier Reminders leg fails, but still respect cancellation",
-        file: file,
-        line: line
-    )
-}
-
-private func workflowHasStep(_ workflow: String, stepName: String, afterStepName: String? = nil) -> Bool {
-    let searchStart: String.Index
-    if let afterStepName {
-        guard let afterRange = workflow.range(of: #"name: "\#(afterStepName)""#) else {
-            return false
-        }
-        searchStart = afterRange.upperBound
-    } else {
-        searchStart = workflow.startIndex
-    }
-
-    return workflow[searchStart...].range(of: #"name: "\#(stepName)""#) != nil
-}
-
-private func workflowStepBlock(
-    _ workflow: String,
-    stepName: String,
-    afterStepName: String? = nil,
-    file: StaticString = #filePath,
-    line: UInt = #line
-) -> Substring {
-    let searchStart: String.Index
-    if let afterStepName {
-        guard let afterRange = workflow.range(of: #"name: "\#(afterStepName)""#) else {
-            XCTFail("Workflow is missing step named \(afterStepName)", file: file, line: line)
-            return ""
-        }
-        searchStart = afterRange.upperBound
-    } else {
-        searchStart = workflow.startIndex
-    }
-
-    guard let stepRange = workflow[searchStart...].range(of: #"name: "\#(stepName)""#) else {
-        XCTFail("Workflow is missing step named \(stepName)", file: file, line: line)
-        return ""
-    }
-
-    let nextStepRange = workflow[stepRange.upperBound...].range(of: "\n      - name:")
-    let stepBlockEnd = nextStepRange?.lowerBound ?? workflow.endIndex
-    return workflow[stepRange.lowerBound ..< stepBlockEnd]
-}
-
-/// The value of an active top-level `key:` in a step block, or nil when absent.
-/// Single place that knows the step-key indent, so the matchers below cannot
-/// drift apart.
-private func stepBlockActiveTopLevelValue(_ stepBlock: Substring, key: String) -> String? {
-    let prefix = "\(key): "
-    for line in stepBlockActiveLines(stepBlock) where line.hasPrefix("        \(key):") {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix(prefix) else { continue }
-        return String(trimmed.dropFirst(prefix.count))
-    }
-    return nil
-}
-
-/// Whether a step's `run:` invokes `script` as its command.
-///
-/// Pinning the whole `run:` value by equality was a landmine (#4102): adding any
-/// flag or argument to the invocation broke every call site at once, even though
-/// the property under test -- that this step shells out to the guarded Reminders
-/// runner -- was unchanged. That is the same shape of false failure #4088 caused
-/// for `if:` conditions.
-///
-/// So match the invocation instead of the literal: the script must be the *first*
-/// token of the command. Arguments stay free to come and go, while repointing the
-/// step at a different script, or merely mentioning this script as an argument to
-/// something else, still fails. Callers that care about a specific argument should
-/// assert that argument explicitly rather than widening this matcher.
-///
-/// A multi-line `run: |` block is deliberately not accepted: these are
-/// single-command steps, and the value of a block scalar is `|`, not a command.
-private func stepBlockRunsScript(_ stepBlock: Substring, script: String) -> Bool {
-    guard let command = stepBlockActiveTopLevelValue(stepBlock, key: "run") else { return false }
-    return command.split(separator: " ", maxSplits: 1).first.map(String.init) == script
-}
-
-/// Whether a step's `if:` guarantees cancellation skips it.
-///
-/// Asserting the whole condition by equality is too strict -- #4082 conjoined a
-/// shared-prerequisite guard, making the 26.5 leg
-/// `${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}`, which does
-/// not change the failure-vs-cancellation semantics. But a bare `contains` is too
-/// loose: it is operator-blind, and `${{ !cancelled() || X }}` evaluates to `X`
-/// when cancelled, so the step can still run -- exactly what callers forbid.
-///
-/// So require `!cancelled()` as the leading term of a `${{ ... }}` expression
-/// (the braces were pinned by the old equality assertion and are kept) and reject
-/// any disjunction. Extra `&&` conjuncts remain free to come and go.
-private func stepBlockRespectsCancellation(_ stepBlock: Substring) -> Bool {
-    guard let condition = stepBlockActiveTopLevelValue(stepBlock, key: "if") else { return false }
-    return condition.hasPrefix("${{ !cancelled()") && !condition.contains("||")
-}
-
-private func stepBlockHasActiveEnvValue(_ stepBlock: Substring, key: String, value: String) -> Bool {
-    var inEnv = false
-    for line in stepBlockActiveLines(stepBlock) {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if line.hasPrefix("        ") && !line.hasPrefix("          ") {
-            inEnv = trimmed == "env:"
-            continue
-        }
-        if inEnv, line.hasPrefix("          "), trimmed == "\(key): \(value)" {
-            return true
-        }
-    }
-    return false
-}
-
-private func stepBlockActiveLines(_ stepBlock: Substring) -> [String] {
-    return stepBlock.split(separator: "\n", omittingEmptySubsequences: false)
-        .map(String.init)
-        .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
 }

@@ -3,7 +3,9 @@ package dev.jasonpearson.automobile.desktop.core.datasource
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponent
+import dev.jasonpearson.automobile.desktop.core.navigation.ProvenanceBuildKey
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
+import dev.jasonpearson.automobile.desktop.core.navigation.ScreenProvenance
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenTransition
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.Serializable
@@ -72,6 +74,7 @@ class RealNavigationDataSource(
             transitionCount = outgoingEdgeCounts[node.screenName] ?: 0,
             discoveredAt = System.currentTimeMillis(), // Not available from summary
             screenshotUri = node.screenshotPath, // MCP resource URI for screenshot
+            provenance = node.provenance.map { it.toScreenProvenance() },
           )
         }
 
@@ -87,6 +90,7 @@ class RealNavigationDataSource(
             avgLatencyMs = 0, // Not available from MCP yet
             failureRate = 0f, // Not available from MCP yet
             traversalCount = edge.traversalCount,
+            provenance = edge.provenance.map { it.toScreenProvenance() },
           )
         }
 
@@ -182,6 +186,9 @@ private data class McpNavigationNode(
   val screenName: String,
   val visitCount: Int,
   val screenshotPath: String? = null, // MCP resource URI for screenshot thumbnail
+  // Per-(build, device, session) provenance (#4985). Additive: absent on pre-provenance daemons,
+  // defaulting to an empty list, so the node simply renders without fade.
+  val provenance: List<McpNavigationProvenance> = emptyList(),
 )
 
 @Serializable
@@ -191,6 +198,39 @@ private data class McpNavigationEdge(
   val to: String,
   val toolName: String?,
   val traversalCount: Int = 1,
+  // Provenance unioned across the edge rows aggregated into this transition (#4985). Additive.
+  val provenance: List<McpNavigationProvenance> = emptyList(),
+)
+
+// Matches the additive provenance shape on the `automobile:navigation/graph` resource (#4985):
+// { "buildKey": { "packageId", "versionCode", "contentHash" }, "deviceId", "sessionUuid",
+//   "lastSeen" }.
+@Serializable
+private data class McpNavigationProvenance(
+  val buildKey: McpNavigationBuildKey,
+  val deviceId: String,
+  val sessionUuid: String,
+  val lastSeen: Long,
+) {
+  fun toScreenProvenance(): ScreenProvenance =
+    ScreenProvenance(
+      buildKey =
+        ProvenanceBuildKey(
+          packageId = buildKey.packageId,
+          versionCode = buildKey.versionCode,
+          contentHash = buildKey.contentHash,
+        ),
+      deviceId = deviceId,
+      sessionUuid = sessionUuid,
+      lastSeen = lastSeen,
+    )
+}
+
+@Serializable
+private data class McpNavigationBuildKey(
+  val packageId: String,
+  val versionCode: Int,
+  val contentHash: String,
 )
 
 // Matches the device-optional `automobile:navigation/apps` resource (issue #4910 contract):

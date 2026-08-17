@@ -33,14 +33,16 @@ import { EVENT_ALL_MARKERS_FLAG } from "./utils/eventAllMarkers";
 import { parseArgs } from "./cli/parseArgs";
 import {
   installProcessLifecycleHandlers,
+  installStdinShutdownHandlers,
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "./processLifecycle";
+import { runShutdownCleanupStages } from "./shutdownCleanup";
 import { startStartupMaintenance } from "./utils/startupMaintenance";
 
 interface FatalLogger {
   error(...args: unknown[]): void;
-  close(): void;
+  closeAfterFlush(): Promise<void>;
 }
 
 let fatalLogger: FatalLogger | undefined;
@@ -111,6 +113,7 @@ async function main() {
   const { AndroidCtrlProxyManager } = await import("./utils/CtrlProxyManager");
   const { IOSCtrlProxyBuilder } = await import("./utils/IOSCtrlProxyBuilder");
   const { IOSCtrlProxyManager } = await import("./utils/IOSCtrlProxyManager");
+  const { cleanupDaemonChildProcesses } = await import("./daemon/childProcessCleanup");
   startupBenchmark.endPhase("moduleImports");
 
   const { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } =
@@ -122,16 +125,48 @@ async function main() {
   const { startAppearanceSocketServer, stopAppearanceSocketServer } = appearanceSocketServer;
   const { startWebRtcStreamSocketServer, stopWebRtcStreamSocketServer } = webrtcStreamSocketServer;
   const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
+  let stdioProxy: { close(): Promise<void> } | undefined;
+  let directModeActive = false;
+  let shutdownCleanupFailed = false;
   setProcessShutdownHandler(async (signal) => {
+    shutdownCleanupFailed = false;
     logger.info(`Received ${signal} signal, shutting down`);
-    await stopVideoRecordingSocketServer();
-    await stopTestRecordingSocketServer();
-    await stopDeviceSnapshotSocketServer();
-    await stopAppearanceSocketServer();
-    await stopWebRtcStreamSocketServer();
-    stopAppearanceSyncScheduler();
-    await AndroidCtrlProxyManager.cleanupPrefetchedApk();
-    logger.close();
+    await runShutdownCleanupStages(
+      [
+        {
+          name: "direct-mode capture and iOS CtrlProxy children",
+          run: async () => {
+            if (directModeActive) {
+              await cleanupDaemonChildProcesses();
+            }
+          },
+        },
+        { name: "video recording socket server", run: stopVideoRecordingSocketServer },
+        { name: "test recording socket server", run: stopTestRecordingSocketServer },
+        { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
+        { name: "appearance socket server", run: stopAppearanceSocketServer },
+        { name: "WebRTC stream socket server", run: stopWebRtcStreamSocketServer },
+        { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
+        {
+          name: "prefetched Android CtrlProxy APK",
+          run: AndroidCtrlProxyManager.cleanupPrefetchedApk,
+        },
+        { name: "stdio proxy", run: async () => await stdioProxy?.close() },
+        {
+          name: "logger",
+          run: async () => {
+            await logger.closeAfterFlush();
+          },
+        },
+      ],
+      (message, error) => {
+        shutdownCleanupFailed = true;
+        logger.warn(message, error);
+      },
+    );
+  }, async () => {
+    await logger.closeAfterFlush();
+    return shutdownCleanupFailed ? { exitCode: 1 } : undefined;
   });
 
   try {
@@ -445,7 +480,7 @@ async function main() {
       await runDaemonCommand(daemonCommand, daemonArgs);
       // Exit explicitly after daemon command completes to prevent process from hanging
       // Same issue as CLI mode - event loop may have pending operations
-      logger.close();
+      await logger.closeAfterFlush();
       process.exit(0);
     }
 
@@ -502,13 +537,14 @@ async function main() {
       // CRITICAL: Exit explicitly after CLI command completes to prevent process from hanging
       // The event loop may have pending operations (ADB connections, file descriptors) that
       // prevent Node.js from exiting naturally. Force exit with code 0 to ensure clean termination.
-      logger.close();
+      await logger.closeAfterFlush();
       process.exit(0);
     } else {
       // In proxy mode (default), the MCP server proxies requests to the daemon
       // The daemon manages device state and tool execution
       // In no-proxy mode (--no-proxy flag), the MCP server executes tools directly
       const useProxyMode = !noProxy;
+      directModeActive = !useProxyMode;
 
       if (useProxyMode) {
         logger.info("Starting MCP server in proxy mode (connecting to daemon)");
@@ -524,21 +560,12 @@ async function main() {
       }
 
       // Detect when the MCP client disconnects (stdin closes / pipe breaks).
-      // Without this, the bun process stays alive indefinitely as an orphan
-      // when the client (Claude Code, Cursor, etc.) exits or crashes.
-      const shutdownOnStdinClose = () => {
-        logger.info("stdin closed — MCP client disconnected, shutting down");
-        logger.close();
-        process.exit(0);
-      };
-      process.stdin.on("end", shutdownOnStdinClose);
-      process.stdin.on("error", shutdownOnStdinClose);
-      process.stdin.on("close", shutdownOnStdinClose);
+      // This uses the shared lifecycle handler so resources close before exit.
+      installStdinShutdownHandlers();
 
       // Run as MCP server with STDIO transport
       const stdioTransport = new StdioServerTransport();
       let server;
-      let stdioProxy: ReturnType<typeof createProxyMcpServer>["proxy"] | undefined;
       try {
         if (useProxyMode) {
           const result = createProxyMcpServer({
@@ -570,14 +597,6 @@ async function main() {
           transport: "stdio",
           mode: useProxyMode ? "proxy" : "direct",
         });
-
-        // Register cleanup for proxy mode
-        if (stdioProxy) {
-          const cleanupProxy = async () => {
-            await stdioProxy!.close();
-          };
-          process.on("beforeExit", cleanupProxy);
-        }
       } catch (error) {
         logger.error("MCP server connect failed:", error);
         throw error;
@@ -595,7 +614,7 @@ if (import.meta.main) {
   main().catch(async (err) => {
     console.error("Fatal error in main():", err);
     fatalLogger?.error("Fatal error in main():", err);
-    fatalLogger?.close();
+    await fatalLogger?.closeAfterFlush();
     // An incomplete-extraction startup failure exits with a distinct, recoverable
     // code (EX_TEMPFAIL) so a wrapper can re-extract and retry (issue #2833);
     // every other fatal keeps exit 1. Resolved lazily to match this file's

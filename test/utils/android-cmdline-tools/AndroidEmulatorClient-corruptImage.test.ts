@@ -480,6 +480,41 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(error.message).toContain("exited with code 1");
   });
 
+  test("reports child exit without waiting for a large polling interval", async () => {
+    const previousPollingInterval = process.env.EMULATOR_POLLING_INTERVAL_MS;
+    process.env.EMULATOR_POLLING_INTERVAL_MS = "1e9";
+    const fakeChild = createFakeChildProcess();
+    const execAsync = async (): Promise<ExecResult> => createExecResult("");
+    const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
+    const readiness = client.waitForEmulatorReady("Pixel_9_Pro", 60_000, fakeChild);
+    let rejection: Error | undefined;
+    void readiness.catch(error => {
+      rejection = error instanceof Error ? error : new Error(String(error));
+    });
+
+    try {
+      for (let attempt = 0; attempt < 10 && fakeTimer.getSleepCallCount() < 2; attempt += 1) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+
+      fakeChild.emit("exit", 1);
+      expect(fakeTimer.getSleepHistory()[1]).toBeLessThanOrEqual(500);
+      await fakeTimer.advanceTimeAsync(500);
+      await new Promise<void>(resolve => setImmediate(resolve));
+
+      expect(rejection?.message).toContain("exited with code 1");
+    } finally {
+      fakeTimer.resolveAll();
+      await readiness.catch(() => undefined);
+      if (previousPollingInterval === undefined) {
+        delete process.env.EMULATOR_POLLING_INTERVAL_MS;
+      } else {
+        process.env.EMULATOR_POLLING_INTERVAL_MS = previousPollingInterval;
+      }
+    }
+  });
+
   test("works normally without child process (backward compatible)", async () => {
     const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
       if (args.join(" ").includes("adb devices")) {
@@ -497,8 +532,25 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(error.message).toContain("failed to become ready within 100ms");
   });
 
+  test("removes child process listeners after readiness times out", async () => {
+    const fakeChild = createFakeChildProcess();
+    fakeTimer.enableAutoAdvance();
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
+
+    const error = await expectRejection(
+      client.waitForEmulatorReady("Pixel_9_Pro", 100, fakeChild),
+    );
+
+    expect(error.message).toContain("failed to become ready within 100ms");
+    expect(fakeChild.listenerCount("exit")).toBe(0);
+    expect(fakeChild.stdout!.listenerCount("data")).toBe(0);
+    expect(fakeChild.stderr!.listenerCount("data")).toBe(0);
+  });
+
   test("waits for Android boot-complete signals before reporting readiness", async () => {
     fakeTimer.enableAutoAdvance();
+    const fakeChild = createFakeChildProcess();
     fakeAdb.setDevices([{
       name: "Pixel_9_Pro",
       platform: "android",
@@ -521,7 +573,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const result = await client.waitForEmulatorReady(
       "Pixel_9_Pro",
       5_000,
-      undefined,
+      fakeChild,
       undefined,
       controller.signal,
     );
@@ -542,6 +594,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       fakeAdb.getExecutedCommands()
         .filter(command => command.includes("shell getprop sys.boot_completed")),
     ).toHaveLength(2);
+    expect(fakeChild.listenerCount("exit")).toBe(0);
+    expect(fakeChild.stdout!.listenerCount("data")).toBe(0);
+    expect(fakeChild.stderr!.listenerCount("data")).toBe(0);
   });
 
   test("targets the selected emulator deviceId during already-running readiness waits", async () => {

@@ -59,6 +59,18 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
     return this.platformBackend.stop(hybridHandle.handle);
   }
 
+  async forceStop(handle: RecordingHandle): Promise<void> {
+    const hybridHandle = handle.backendHandle as HybridBackendHandle | undefined;
+    if (!hybridHandle || hybridHandle.kind !== "hybrid") {
+      throw new Error("Missing backend handle for hybrid video recording.");
+    }
+    const backend = hybridHandle.backend === "ffmpeg" ? this.ffmpegBackend : this.platformBackend;
+    if (!backend.forceStop) {
+      throw new Error("Selected video capture backend does not support force stopping recordings.");
+    }
+    await backend.forceStop(hybridHandle.handle);
+  }
+
   private selectBackend(device: BootedDevice): VideoCaptureBackend {
     if (device.platform === "ios") {
       return this.ffmpegBackend;

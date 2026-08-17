@@ -216,6 +216,43 @@ interface NavigationToolCallRecorder {
   record(name: string, args: any, device: BootedDevice | undefined, sessionUuid: string | undefined): void;
 }
 
+/** Removes routing and execution implementation details before persisting a navigation edge. */
+export function stripNavigationInternalParams(args: Record<string, unknown>): Record<string, unknown> {
+  const clean = { ...args };
+  delete clean.__mcpSessionId;
+  delete clean.__executionId;
+  delete clean.__executionStartTime;
+  delete clean[INTERNAL_NO_DIFF_PARAM];
+  return clean;
+}
+
+function withAmbientDeviceContext(
+  args: Record<string, unknown>,
+  routingSessionUuid: string | undefined,
+  execution: { executionId: string; startTime: number } | undefined,
+): Record<string, unknown> {
+  const needsRoutingSession = routingSessionUuid && args.sessionUuid !== routingSessionUuid;
+  const needsExecution = execution && (
+    args.__executionId !== execution.executionId
+    || args.__executionStartTime !== execution.startTime
+  );
+  if (!needsRoutingSession && !needsExecution) {
+    return args;
+  }
+  return {
+    ...args,
+    ...(needsRoutingSession
+      ? { sessionUuid: routingSessionUuid }
+      : {}),
+    ...(needsExecution
+      ? {
+        __executionId: execution!.executionId,
+        __executionStartTime: execution!.startTime,
+      }
+      : {}),
+  };
+}
+
 interface AfterToolCallInput {
   name: string;
   args: any;
@@ -307,6 +344,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     const deviceLabel = typeof args.device === "string" ? args.device : undefined;
     const declaredDeviceLabels = Array.isArray(args.devices) ? args.devices : undefined;
     const mcpSessionId = typeof args.__mcpSessionId === "string" ? args.__mcpSessionId : undefined;
+    const execution = typeof args.__executionId === "string" && typeof args.__executionStartTime === "number"
+      ? { executionId: args.__executionId, startTime: args.__executionStartTime }
+      : undefined;
     // Internal tool-to-tool marker (#3053 / #3087): internal callers (PlanExecutor
     // steps, navigation/setup replays) set this via `markInternalToolCall` so a
     // plan/navigation step's finalized envelope is never diffed/stripped and never
@@ -351,7 +391,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     let platform: SomePlatform = args.platform || "either";
 
     if (shouldResolveDevice) {
-      const implicitSessionUuid = this.resolveImplicitAutolockSession(platform, sessionUuid, providedDeviceId, mcpSessionId);
+      const implicitSessionUuid = this.resolveImplicitAutolockSession(platform, sessionUuid, providedDeviceId, mcpSessionId, execution);
       if (implicitSessionUuid) {
         sessionUuid = implicitSessionUuid;
         logger.info(`[ToolRegistry] Resolved implicit autolock session for MCP session ${mcpSessionId}: ${implicitSessionUuid}`);
@@ -376,7 +416,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       const context = await createToolExecutionContext(sessionUuid, sessionManager, devicePool, {
         keepScreenAwake,
         platform: platform === "android" || platform === "ios" ? platform : undefined
-      });
+      }, execution);
       if (context.deviceId && !providedDeviceId) {
         providedDeviceId = context.deviceId;
         logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
@@ -502,7 +542,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     platform: SomePlatform,
     sessionUuid: string | undefined,
     providedDeviceId: string | undefined,
-    mcpSessionId: string | undefined
+    mcpSessionId: string | undefined,
+    execution?: import("../daemon/sessionManager").SessionExecutionMetadata,
   ): string | undefined {
     if (sessionUuid) {
       return undefined;
@@ -514,7 +555,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     const platformFilter = platform === "android" || platform === "ios" ? platform : undefined;
     const sessionId = DaemonState.getInstance()
       .getDevicePool()
-      .resolveAutolockSessionForMcpSession(mcpSessionId, platformFilter);
+      .resolveAutolockSessionForMcpSession(mcpSessionId, platformFilter, execution);
     if (!sessionId) {
       return undefined;
     }
@@ -643,7 +684,7 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
     const navManager = sessionUuid
       ? NavigationGraphManager.getInstanceForSession(sessionUuid)
       : NavigationGraphManager.getInstance();
-    navManager.recordToolCall(name, args, uiState);
+    navManager.recordToolCall(name, stripNavigationInternalParams(args), uiState);
   }
 }
 
@@ -825,7 +866,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
           // detector cleanup) complete — and any rejection is caught by this try —
           // before the device is freed (#4984).
           await sessionManager.releaseSession(session.sessionId);
-          await devicePool.releaseDevice(deviceId);
+          await devicePool.releaseDevice(deviceId, session.sessionId);
           NavigationGraphManager.releaseSession(releaseSessionUuid);
           // CtrlProxy client binding + detector cleanup for the released session is
           // handled centrally in the daemon's onSessionRelease hook (#4984), which
@@ -956,9 +997,11 @@ export class ToolRegistryClass {
       // Re-inject the ambient ROUTING session (issue #4611 Gap C) so a nested
       // device-aware call keeps the outer call's derived/label routing identity
       // rather than reverting to the base session.
-      const handlerArgs = capabilityContext?.routingSessionUuid && args.sessionUuid !== capabilityContext.routingSessionUuid
-        ? { ...args, sessionUuid: capabilityContext.routingSessionUuid }
-        : args;
+      const handlerArgs: any = withAmbientDeviceContext(
+        args,
+        capabilityContext?.routingSessionUuid,
+        capabilityContext?.execution,
+      );
       const toolStartMs = this.timer.now();
       const toolCallTimestamp = new Date().toISOString();
       let toolDurationMs: number | undefined;

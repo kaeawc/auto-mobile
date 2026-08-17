@@ -294,18 +294,6 @@ jobs:
               - 'scripts/ios/**'
               - '.swiftformat'
               - '.swiftlint.yml'
-              # RemindersPlanContentTests (in the ios-swift-packages job) asserts the
-              # structure of these workflow files via loadRepositoryFile(). Listing them
-              # here makes an edit to either file run the iOS macOS job set (swiftlint,
-              # swift-code-coverage, ios-swift-packages, ios-xcode-build,
-              # ios-spm-root-package-build — all gated on ios_should_run) so the
-              # assertions are validated pre-merge; otherwise the drift only surfaces on
-              # nightly (see #3862 — #3850 broke nightly this way). Trade-off: any edit
-              # to these files, even a comment, now triggers that macOS job set. The
-              # workflow-assertion-triggers fast-validation check enforces that every
-              # asserted .github path stays listed here.
-              - '.github/workflows/nightly.yml'
-              - '.github/workflows/pull_request.yml'
 
       # The MCP server (src/**) is what drives real devices end-to-end. A change to
       # the device discovery / observe / gesture-action / iOS-runner / schema surface
@@ -1198,7 +1186,10 @@ jobs:
     name: "Node TypeScript Build and Test (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
-    timeout-minutes: 10
+    # The full isolated Bun suite can approach fifteen minutes on a contended
+    # hosted macOS runner. Keep the cross-platform lane intact while allowing
+    # enough headroom to finish after setup, lint, and build (issue #5328).
+    timeout-minutes: 25
     env:
       RUN_MCP_BUILD_TEST: ${{ needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' }}
     strategy:
@@ -1217,6 +1208,9 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+          # Lint runs boundary guards that compare the working tree with
+          # origin/main. Keep that ref available on every matrix platform.
+          fetch-depth: 0
 
       # Disjoint cache paths, so the two restores overlap each other. The
       # barrier must precede "Setup Auto Mobile": that composite runs
@@ -1860,7 +1854,7 @@ jobs:
         run: ./scripts/ios/video-recording-start-stop-integration.sh
 
       # This is a freshly-booted sim, so bring the daemon to ready and warm
-      # CtrlProxy before the Reminders run. Pre-starting the daemon and waiting
+      # CtrlProxy before the downstream simulator workflows. Pre-starting the daemon and waiting
       # for readiness makes a startup failure surface loudly here instead of
       # silently skipping the test (#2730); `auto-mobile` (installed to ~/.bun/bin
       # by `bun add -g .`) is thereby on PATH for the swift-test step.
@@ -1872,7 +1866,6 @@ jobs:
           # These integration workflows exercise advanced tools deliberately;
           # keep the daemon's ordinary session surface core-only.
           AUTOMOBILE_TOOLSET_NAVIGATION_MODELING: "1"
-          AUTOMOBILE_TOOLSET_TEST_AUTHORING: "1"
         run: ./scripts/ci/ensure-daemon-ready.sh
 
       # Launch CtrlProxy on the booted sim now (a slow, one-time xcodebuild launch)
@@ -1893,34 +1886,6 @@ jobs:
           AUTOMOBILE_TOOLSET_NAVIGATION_MODELING: "1"
         run: |
           ./scripts/ios/navigation-graph-sdk-event-integration.sh "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
-
-      # Compile the XCTest bundle BEFORE the target-app warm-up. Otherwise `swift test`
-      # in the timed Reminders step spends tens of seconds compiling first, letting the
-      # freshly-warmed simulator/app go cold again and reintroducing the cold observe
-      # timeout (#3851 direction 4). Runs after the leg's Xcode is selected so the build
-      # cache matches the `swift test` that follows.
-      - name: "Pre-build Reminders XCTest bundle (Xcode 26.5)"
-        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
-        timeout-minutes: 15
-        run: ./scripts/ci/prebuild-reminders-xctest-bundle.sh
-
-      # Keep target-app cold bring-up outside the timed Reminders plan. CtrlProxy
-      # is already warm above; this leaves Reminders foregrounded so the plan's
-      # first launch/observe no longer pays the first app launch cost (#3028).
-      - name: "Warm up Reminders target app (Xcode 26.5)"
-        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
-        timeout-minutes: 5
-        run: ./scripts/ci/warm-reminders-target-app.sh
-
-      - name: "Run Reminders integration tests (Xcode 26.5)"
-        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
-        timeout-minutes: 10
-        env:
-          AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
-          AUTOMOBILE_TEST_RETRY_COUNT: "1"
-          # The plan calls executePlan, an advanced test-authoring tool.
-          AUTOMOBILE_TOOLSET_TEST_AUTHORING: "1"
-        run: ./scripts/ci/run-reminders-launch-plan-tests.sh
 
       # Daemon-internal logs (CtrlProxy startup/health/observe timing) are the only
       # way to diagnose iOS observe failures — the swift-test stdout doesn't include

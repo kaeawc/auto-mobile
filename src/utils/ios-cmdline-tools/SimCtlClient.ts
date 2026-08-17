@@ -12,6 +12,7 @@ import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
 import { PlistClient, type PlistReader } from "./PlistClient";
 import { isIosSimulatorUdid } from "./iosDeviceType";
 import { getAbortSignal } from "../AbortContext";
+import { Mutex } from "async-mutex";
 
 export interface AppleDevice {
   udid: string;
@@ -113,14 +114,14 @@ export interface SimCtl {
    * @param udid - Device UDID to start
    * @returns Promise that resolves when simulator is started
    */
-  startSimulator(udid: string, timeoutMs?: number): Promise<any>;
+  startSimulator(udid: string, timeoutMs?: number): Promise<ChildProcess>;
 
   /**
    * Kill a simulator
    * @param device - Device to kill
    * @returns Promise that resolves when kill is complete
    */
-  killSimulator(device: BootedDevice): Promise<void>;
+  killSimulator(device: BootedDevice, options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<void>;
 
   /** Erase all data from a simulator. Reserved for CI-owned recovery flows. */
   eraseSimulator(udid: string): Promise<void>;
@@ -142,9 +143,10 @@ export interface SimCtl {
 
   /**
    * Get the list of available (booted and shutdown) simulator UDIDs
+   * @param timeoutMs - Optional timeout for simulator discovery
    * @returns Promise with an array of device info
    */
-  listSimulatorImages(): Promise<DeviceInfo[]>;
+  listSimulatorImages(timeoutMs?: number): Promise<DeviceInfo[]>;
 
   /**
    * Get the list of booted simulator UDIDs
@@ -264,7 +266,7 @@ export interface SimCtl {
    * With multiple simulators booted, this ensures the right device is visible.
    * @param udid - Optional device UDID to focus
    */
-  openSimulatorApp(udid?: string): Promise<void>;
+  openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<void>;
 
   /**
    * Deliver a simulated remote push notification to a booted simulator.
@@ -483,6 +485,17 @@ export const DEFAULT_SIMCTL_BOOT_OPTIONS: SimCtlBootOptions = {
   retryBackoffMs: 2000,
 };
 
+interface SimulatorBootState {
+  mutex: Mutex;
+  lastBootSucceeded: boolean;
+  ownerToken: object | undefined;
+}
+
+interface SimulatorBootLease {
+  state: SimulatorBootState;
+  release(): void;
+}
+
 export class SimCtlClient implements SimCtl {
   device: BootedDevice | null;
   execAsync: (
@@ -508,6 +521,7 @@ export class SimCtlClient implements SimCtl {
   private static deviceListCache: { devices: DeviceInfo[]; timestamp: number } | null = null;
   private static readonly DEVICE_LIST_CACHE_TTL = 5000; // 5 seconds
   private static localSimctlAvailability: Promise<void> | null = null;
+  private static readonly simulatorBoots = new Map<string, SimulatorBootState>();
 
   /**
    * Create an IosUtils instance
@@ -765,9 +779,43 @@ export class SimCtlClient implements SimCtl {
     udid: string,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ): Promise<ChildProcess> {
+    const deadlineMs = this.bootDeadline(timeoutMs);
+    const startSignal = getAbortSignal();
+    const lease = await this.acquireSimulatorBoot(udid, deadlineMs, startSignal);
+    try {
+      if (this.timer.now() >= deadlineMs) {
+        throw new Error(`Timed out waiting to start iOS simulator ${udid}`);
+      }
+      if (startSignal?.aborted) {
+        throw startSignal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
+      }
+      if (lease.state.lastBootSucceeded) {
+        const simulatorStillBooted = (
+          await this.getBootedSimulatorsChecked(this.remainingBootTimeoutMs(deadlineMs))
+        ).some((simulator) => simulator.deviceId === udid);
+        if (simulatorStillBooted) {
+          throw new ActionableError(`iOS simulator ${udid} is already running`);
+        }
+        lease.state.lastBootSucceeded = false;
+        lease.state.ownerToken = undefined;
+      }
+      await this.startSimulatorExclusive(udid, deadlineMs, startSignal);
+      const ownerToken = {};
+      lease.state.lastBootSucceeded = true;
+      lease.state.ownerToken = ownerToken;
+      return this.createSimulatorHandle(udid, ownerToken);
+    } finally {
+      lease.release();
+    }
+  }
+
+  private async startSimulatorExclusive(
+    udid: string,
+    deadlineMs: number,
+    startSignal: AbortSignal | undefined,
+  ): Promise<void> {
     logger.debug(`Starting iOS simulator ${udid}`);
     const perf = createGlobalPerformanceTracker();
-    const startSignal = getAbortSignal();
 
     // `bootstatus -b` is idempotent: it boots shutdown simulators, accepts
     // already-booted simulators, and waits until CoreSimulator reports ready.
@@ -776,12 +824,7 @@ export class SimCtlClient implements SimCtl {
     // {@link bootAndVerify}.
     perf.startOperation("bootstatus");
     try {
-      await this.bootAndVerify(udid, this.bootDeadline(timeoutMs));
-    } catch (error) {
-      if (startSignal?.aborted) {
-        await this.shutdownAfterAbortedStart(udid);
-      }
-      throw error;
+      await this.runOwnedBoot(udid, () => this.bootAndVerify(udid, deadlineMs));
     } finally {
       perf.endOperation("bootstatus");
     }
@@ -789,17 +832,67 @@ export class SimCtlClient implements SimCtl {
     // Open Simulator.app focused on this specific device (no-op on headless hosts)
     try {
       perf.startOperation("openSimulatorApp");
-      await this.openSimulatorApp(udid);
+      await this.openSimulatorAppBeforeDeadline(udid, deadlineMs, startSignal);
       perf.endOperation("openSimulatorApp");
     } catch {
       perf.endOperation("openSimulatorApp");
       logger.debug("Could not open Simulator.app (non-fatal)");
     }
     if (startSignal?.aborted) {
-      await this.shutdownAfterAbortedStart(udid);
+      await this.shutdownAfterFailedStart(udid);
       throw startSignal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
     }
+  }
 
+  private async openSimulatorAppBeforeDeadline(
+    udid: string,
+    deadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    const remainingMs = this.remainingBootTimeoutMs(deadlineMs);
+    if (signal?.aborted) {
+      throw signal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
+    }
+
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    let abortListener: (() => void) | undefined;
+    const timeoutController = new AbortController();
+    const operationSignal = signal
+      ? AbortSignal.any([signal, timeoutController.signal])
+      : timeoutController.signal;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutHandle = this.timer.setTimeout(() => {
+        timeoutController.abort();
+        reject(new Error(`Timed out opening Simulator.app for ${udid}`));
+      }, remainingMs);
+    });
+    const contenders: Array<Promise<void>> = [
+      this.openSimulatorApp(udid, operationSignal),
+      timeout,
+    ];
+    if (signal) {
+      contenders.push(
+        new Promise<never>((_resolve, reject) => {
+          abortListener = () =>
+            reject(signal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`));
+          signal.addEventListener("abort", abortListener, { once: true });
+        }),
+      );
+    }
+
+    try {
+      await Promise.race(contenders);
+    } finally {
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+      if (signal && abortListener) {
+        signal.removeEventListener("abort", abortListener);
+      }
+    }
+  }
+
+  private createSimulatorHandle(udid: string, ownerToken: object): ChildProcess {
     // `simctl bootstatus -b` is synchronous, so there is no long-lived OS child
     // process to hand back. Rather than fabricate a mock handle whose `kill()` is
     // a no-op (issue #3938), return an honest handle: `pid` is undefined (no OS
@@ -812,9 +905,11 @@ export class SimCtlClient implements SimCtl {
       kill: (): boolean => {
         // Cancellation cleanup must not inherit an already-aborted request signal.
         const cleanupSignal = new AbortController().signal;
-        void this.executeCommandArgs(["shutdown", udid], 10_000, cleanupSignal).catch((error) => {
-          logger.debug(`[iOS] handle.kill() shutdown failed for ${udid}: ${error}`);
-        });
+        void this.shutdownSimulatorCoordinated(udid, 10_000, cleanupSignal, ownerToken).catch(
+          (error) => {
+            logger.debug(`[iOS] handle.kill() shutdown failed for ${udid}: ${error}`);
+          },
+        );
         return true;
       },
       killed: false,
@@ -827,19 +922,187 @@ export class SimCtlClient implements SimCtl {
     > as ChildProcess;
   }
 
-  private async shutdownAfterAbortedStart(udid: string): Promise<void> {
+  private async runOwnedBoot<T>(udid: string, operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      await this.shutdownAfterFailedStart(udid);
+      throw error;
+    }
+  }
+
+  private async runCoordinatedBoot<T>(
+    udid: string,
+    deadlineMs: number,
+    signal: AbortSignal | undefined,
+    ownsBoot: boolean,
+    operation: () => Promise<T>,
+    adoptPriorSuccess?: () => Promise<T>,
+  ): Promise<T> {
+    const lease = await this.acquireSimulatorBoot(udid, deadlineMs, signal);
+    const priorBootSucceeded = lease.state.lastBootSucceeded;
+    if (!priorBootSucceeded) {
+      lease.state.lastBootSucceeded = false;
+    }
+    try {
+      if (this.timer.now() >= deadlineMs) {
+        throw new Error(`Timed out waiting to start iOS simulator ${udid}`);
+      }
+      if (signal?.aborted) {
+        throw signal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
+      }
+      if (priorBootSucceeded && adoptPriorSuccess) {
+        const simulatorStillBooted = (
+          await this.getBootedSimulatorsChecked(this.remainingBootTimeoutMs(deadlineMs))
+        ).some((simulator) => simulator.deviceId === udid);
+        if (simulatorStillBooted) {
+          return await adoptPriorSuccess();
+        }
+        lease.state.lastBootSucceeded = false;
+        lease.state.ownerToken = undefined;
+      }
+      if (lease.state.lastBootSucceeded && ownsBoot) {
+        throw new ActionableError(`iOS simulator ${udid} is already running`);
+      }
+      const result = ownsBoot ? await this.runOwnedBoot(udid, operation) : await operation();
+      lease.state.lastBootSucceeded = true;
+      return result;
+    } finally {
+      lease.release();
+    }
+  }
+
+  private async acquireSimulatorBoot(
+    udid: string,
+    deadlineMs: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<SimulatorBootLease> {
+    if (signal?.aborted) {
+      throw signal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
+    }
+
+    let state = SimCtlClient.simulatorBoots.get(udid);
+    if (!state) {
+      state = { mutex: new Mutex(), lastBootSucceeded: false, ownerToken: undefined };
+      SimCtlClient.simulatorBoots.set(udid, state);
+    }
+
+    let abandoned = false;
+    let acquiredRelease: (() => void) | undefined;
+    const acquirePromise = state.mutex.acquire().then((release) => {
+      acquiredRelease = release;
+      if (abandoned) {
+        acquiredRelease = undefined;
+        this.releaseSimulatorBoot(udid, state, release);
+      }
+      return release;
+    });
+
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    let abortListener: (() => void) | undefined;
+    const contenders: Array<Promise<() => void>> = [acquirePromise];
+    if (deadlineMs !== undefined) {
+      const remainingMs = Math.max(0, deadlineMs - this.timer.now());
+      contenders.push(
+        new Promise<never>((_resolve, reject) => {
+          timeoutHandle = this.timer.setTimeout(
+            () => reject(new Error(`Timed out waiting to start iOS simulator ${udid}`)),
+            remainingMs,
+          );
+        }),
+      );
+    }
+    if (signal) {
+      contenders.push(
+        new Promise<never>((_resolve, reject) => {
+          abortListener = () =>
+            reject(signal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`));
+          signal.addEventListener("abort", abortListener, { once: true });
+        }),
+      );
+    }
+
+    let acquired = false;
+    try {
+      const release = await Promise.race(contenders);
+      acquired = true;
+      acquiredRelease = undefined;
+      return {
+        state,
+        release: () => this.releaseSimulatorBoot(udid, state, release),
+      };
+    } finally {
+      abandoned = !acquired;
+      if (abandoned && acquiredRelease) {
+        const release = acquiredRelease;
+        acquiredRelease = undefined;
+        this.releaseSimulatorBoot(udid, state, release);
+      }
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+      if (signal && abortListener) {
+        signal.removeEventListener("abort", abortListener);
+      }
+    }
+  }
+
+  private releaseSimulatorBoot(udid: string, state: SimulatorBootState, release: () => void): void {
+    release();
+    if (
+      !state.lastBootSucceeded &&
+      !state.mutex.isLocked() &&
+      SimCtlClient.simulatorBoots.get(udid) === state
+    ) {
+      SimCtlClient.simulatorBoots.delete(udid);
+    }
+  }
+
+  private async shutdownAfterFailedStart(udid: string): Promise<void> {
     try {
       // Cleanup must not inherit the already-aborted request signal.
       const cleanupSignal = new AbortController().signal;
       await this.executeCommandArgs(["shutdown", udid], 10_000, cleanupSignal);
     } catch (error) {
-      logger.warn(`[iOS] Failed to shut down simulator ${udid} after aborted start: ${error}`);
+      logger.warn(`[iOS] Failed to shut down simulator ${udid} after unsuccessful start: ${error}`);
     }
   }
 
-  async killSimulator(device: BootedDevice): Promise<void> {
+  private async shutdownSimulatorCoordinated(
+    udid: string,
+    timeoutMs: number,
+    signal: AbortSignal | undefined,
+    expectedOwnerToken?: object,
+  ): Promise<void> {
+    // Waiting for an active boot must not consume the shutdown command's own
+    // timeout. The caller's abort signal bounds the queue wait; once acquired,
+    // simctl shutdown receives the complete timeout budget.
+    const lease = await this.acquireSimulatorBoot(udid, undefined, signal);
+    try {
+      if (
+        expectedOwnerToken !== undefined &&
+        (!lease.state.lastBootSucceeded || lease.state.ownerToken !== expectedOwnerToken)
+      ) {
+        return;
+      }
+      await this.executeCommandArgs(["shutdown", udid], timeoutMs, signal);
+      lease.state.lastBootSucceeded = false;
+      lease.state.ownerToken = undefined;
+    } finally {
+      lease.release();
+    }
+  }
+
+  async killSimulator(
+    device: BootedDevice,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<void> {
     logger.debug(`Killing iOS simulator ${device.deviceId}`);
-    await this.executeCommandArgs(["shutdown", device.deviceId]);
+    await this.shutdownSimulatorCoordinated(
+      device.deviceId,
+      options.timeoutMs ?? 10_000,
+      options.signal ?? getAbortSignal(),
+    );
   }
 
   async eraseSimulator(udid: string): Promise<void> {
@@ -860,18 +1123,22 @@ export class SimCtlClient implements SimCtl {
     // boot wait with its own independent timeout budget (issue #3938 follow-up),
     // so skip straight to metadata resolution.
     if (options?.assumeBooted) {
-      return this.resolveReadySimulator(udid);
+      const deadlineMs = this.bootDeadline(timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS);
+      return this.runCoordinatedBoot(udid, deadlineMs, getAbortSignal(), false, () =>
+        this.resolveReadySimulator(udid, this.remainingBootTimeoutMs(deadlineMs)),
+      );
     }
 
     // Use `simctl bootstatus -b` which blocks until the simulator is fully
     // booted (data migration complete, system app ready, springboard launched).
     // This is far more reliable than polling `simctl list devices` for state.
+    const deadlineMs = this.bootDeadline(timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS);
     perf.startOperation("bootstatus");
     try {
-      await this.bootAndVerify(
-        udid,
-        this.bootDeadline(timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS),
-      );
+      return await this.runCoordinatedBoot(udid, deadlineMs, getAbortSignal(), false, async () => {
+        await this.bootAndVerify(udid, deadlineMs);
+        return this.resolveReadySimulator(udid, this.remainingBootTimeoutMs(deadlineMs));
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // "Invalid device" means the UDID doesn't exist at all
@@ -882,8 +1149,6 @@ export class SimCtlClient implements SimCtl {
     } finally {
       perf.endOperation("bootstatus");
     }
-
-    return this.resolveReadySimulator(udid);
   }
 
   /**
@@ -1086,10 +1351,12 @@ export class SimCtlClient implements SimCtl {
    * as a BootedDevice. Shared by the cold-boot (assumeBooted) and already-running
    * branches of {@link waitForSimulatorReady}.
    */
-  private async resolveReadySimulator(udid: string): Promise<BootedDevice> {
+  private async resolveReadySimulator(udid: string, timeoutMs?: number): Promise<BootedDevice> {
     const perf = createGlobalPerformanceTracker();
     perf.startOperation("deviceLookup");
-    const simulator = (await this.listSimulatorImages()).find((device) => device.deviceId === udid);
+    const simulator = (await this.listSimulatorImages(timeoutMs)).find(
+      (device) => device.deviceId === udid,
+    );
     perf.endOperation("deviceLookup");
 
     if (!simulator) {
@@ -1107,7 +1374,7 @@ export class SimCtlClient implements SimCtl {
    * Get the list of available (booted and shutdown) simulator UDIDs
    * @returns Promise with an array of device UDIDs
    */
-  async listSimulatorImages(): Promise<DeviceInfo[]> {
+  async listSimulatorImages(timeoutMs?: number): Promise<DeviceInfo[]> {
     // Check cache first
     if (SimCtlClient.deviceListCache) {
       const cacheAge = this.timer.now() - SimCtlClient.deviceListCache.timestamp;
@@ -1120,7 +1387,7 @@ export class SimCtlClient implements SimCtl {
     logger.debug("Getting list of iOS simulators");
 
     try {
-      const simulatorList = await this.listSimulators();
+      const simulatorList = await this.listSimulators(timeoutMs);
       const devices: DeviceInfo[] = [];
 
       // Extract all devices from all runtime versions
@@ -1254,11 +1521,30 @@ export class SimCtlClient implements SimCtl {
     // shown up in the booted list -- neither a wait nor a proof of readiness.
     const deadlineMs = this.bootDeadline(DEFAULT_DEVICE_READY_TIMEOUT_MS);
     perf.startOperation("simctlBoot");
-    await this.bootAndVerify(udid, deadlineMs);
-    perf.endOperation("simctlBoot");
+    return this.runCoordinatedBoot(
+      udid,
+      deadlineMs,
+      getAbortSignal(),
+      true,
+      async () => {
+        await this.bootAndVerify(udid, deadlineMs);
+        perf.endOperation("simctlBoot");
+        return this.resolveRegisteredBootSimulator(udid, deadlineMs, perf);
+      },
+      () => {
+        perf.endOperation("simctlBoot");
+        return this.resolveRegisteredBootSimulator(udid, deadlineMs, perf);
+      },
+    );
+  }
 
+  private async resolveRegisteredBootSimulator(
+    udid: string,
+    deadlineMs: number,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+  ): Promise<BootedDevice> {
     perf.startOperation("bootRegistration");
-    const bootedSimulators = await this.getBootedSimulators(
+    const bootedSimulators = await this.getBootedSimulatorsChecked(
       this.remainingBootTimeoutMs(deadlineMs),
     );
     const bootedSimulator = bootedSimulators.find((device) => device.deviceId === udid);
@@ -1575,25 +1861,33 @@ export class SimCtlClient implements SimCtl {
     }
   }
 
-  async openSimulatorApp(udid?: string): Promise<void> {
+  async openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<void> {
     // On a headless macOS host (no Aqua GUI session, e.g. a launchd daemon or
     // SSH context) `open -a Simulator` fails with OSLaunchdErrorDomain Code=125
     // after a slow retry, wasting wall-clock against the daemon-start budget.
     // The booted simulator + CtrlProxy work without the GUI, so skip the launch.
-    if (await this.isHeadlessSession()) {
+    if (await this.isHeadlessSession(signal)) {
       logger.debug("Skipping open -a Simulator: headless session (no Aqua GUI)");
       return;
     }
 
     // Ensure Simulator.app is open (creates windows for all booted devices)
-    await this.execAsync("open", ["-a", "Simulator"]);
+    await this.execAsync("open", ["-a", "Simulator"], undefined, signal);
     // If a specific device is requested, focus it by switching to it
     // --args -CurrentDeviceUDID only works on fresh launch; for already-running
     // Simulator, we activate the app which brings all device windows forward
     if (udid) {
       try {
-        await this.execAsync("osascript", ["-e", 'tell application "Simulator" to activate']);
+        await this.execAsync(
+          "osascript",
+          ["-e", 'tell application "Simulator" to activate'],
+          undefined,
+          signal,
+        );
       } catch (error) {
+        if (signal?.aborted) {
+          throw error;
+        }
         logger.debug(`[iOS] Could not activate Simulator.app for ${udid}: ${error}`);
       }
     }
@@ -1616,7 +1910,7 @@ export class SimCtlClient implements SimCtl {
    * If detection itself fails we assume a GUI session to preserve the prior
    * behavior. The result is cached so launchctl is probed at most once.
    */
-  private async isHeadlessSession(): Promise<boolean> {
+  private async isHeadlessSession(signal?: AbortSignal): Promise<boolean> {
     if (this.platform !== "darwin") {
       return true;
     }
@@ -1627,18 +1921,21 @@ export class SimCtlClient implements SimCtl {
     }
 
     if (this.headlessSessionCache === null) {
-      this.headlessSessionCache = await this.detectHeadlessSession();
+      this.headlessSessionCache = await this.detectHeadlessSession(signal);
     }
     return this.headlessSessionCache;
   }
 
-  private async detectHeadlessSession(): Promise<boolean> {
+  private async detectHeadlessSession(signal?: AbortSignal): Promise<boolean> {
     try {
-      const result = await this.execAsync("launchctl", ["managername"]);
+      const result = await this.execAsync("launchctl", ["managername"], undefined, signal);
       const managerName = (result.stdout || "").trim();
       // "Aqua" is the GUI login session manager; "System"/"Background" are not.
       return managerName !== "Aqua";
     } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
       // Can't determine the session type; assume a GUI session so we preserve
       // the historical behavior rather than silently suppressing the launch.
       logger.debug(`launchctl managername probe failed, assuming GUI session: ${error}`);

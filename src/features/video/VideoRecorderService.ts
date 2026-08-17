@@ -25,6 +25,8 @@ export interface VideoCaptureConfig extends VideoRecordingConfig {
   startedAt: string;
   device?: BootedDevice;
   maxDurationSeconds?: number;
+  /** Aborts a capture which has spawned but has not completed startup yet. */
+  abortSignal?: AbortSignal;
 }
 
 export interface RecordingHandle {
@@ -47,6 +49,7 @@ export interface RecordingResult {
 export interface VideoCaptureBackend {
   start(config: VideoCaptureConfig): Promise<RecordingHandle>;
   stop(handle: RecordingHandle): Promise<RecordingResult>;
+  forceStop?(handle: RecordingHandle): Promise<void>;
 }
 
 export interface StartVideoRecordingOptions {
@@ -54,6 +57,7 @@ export interface StartVideoRecordingOptions {
   config?: VideoRecordingConfigInput | null;
   device?: BootedDevice;
   maxDurationSeconds?: number;
+  abortSignal?: AbortSignal;
 }
 
 export interface ActiveVideoRecording {
@@ -76,6 +80,7 @@ export interface VideoRecorderServiceDependencies {
 
 interface ActiveRecordingState extends ActiveVideoRecording {
   handle: RecordingHandle;
+  forceStopRequested: boolean;
 }
 
 export const DEFAULT_VIDEO_RECORDING_CONFIG: VideoRecordingConfig = {
@@ -91,32 +96,27 @@ const QUALITY_PRESETS = new Set<VideoQualityPreset>(["low", "medium", "high"]);
 const VIDEO_FORMATS = new Set<VideoFormat>(["mp4"]);
 
 export function parseVideoRecordingConfig(
-  input: VideoRecordingConfigInput | null | undefined
+  input: VideoRecordingConfigInput | null | undefined,
 ): VideoRecordingConfig {
-  const safeInput: VideoRecordingConfigInput =
-    input && typeof input === "object" ? input : {};
+  const safeInput: VideoRecordingConfigInput = input && typeof input === "object" ? input : {};
 
   const qualityPreset = parseQualityPreset(safeInput.qualityPreset);
   const maxThroughputMbps = parsePositiveNumber(
     safeInput.maxThroughputMbps,
     DEFAULT_VIDEO_RECORDING_CONFIG.maxThroughputMbps,
-    true
+    true,
   );
   const requestedBitrateKbps = parsePositiveNumber(
     safeInput.targetBitrateKbps,
     DEFAULT_VIDEO_RECORDING_CONFIG.targetBitrateKbps,
-    true
+    true,
   );
   const targetBitrateKbps = capBitrateKbps(requestedBitrateKbps, maxThroughputMbps);
-  const fps = parsePositiveNumber(
-    safeInput.fps,
-    DEFAULT_VIDEO_RECORDING_CONFIG.fps,
-    false
-  );
+  const fps = parsePositiveNumber(safeInput.fps, DEFAULT_VIDEO_RECORDING_CONFIG.fps, false);
   const maxArchiveSizeMb = parsePositiveNumber(
     safeInput.maxArchiveSizeMb,
     DEFAULT_VIDEO_RECORDING_CONFIG.maxArchiveSizeMb,
-    true
+    true,
   );
   const format = parseFormat(safeInput.format);
   const resolution = parseResolution(safeInput.resolution);
@@ -140,21 +140,20 @@ export class VideoRecorderService {
   private now: () => Date;
   private securePermissions: SecurePermissions;
   private activeRecordings = new Map<string, ActiveRecordingState>();
+  private stoppingRecordings = new Map<string, Promise<VideoRecordingMetadata>>();
+  private forceStoppingRecordings = new Map<string, Promise<void>>();
 
   constructor(dependencies: VideoRecorderServiceDependencies) {
     this.backend = dependencies.backend;
     this.archiveRoot =
-      dependencies.archiveRoot ??
-      path.join(os.homedir(), ".auto-mobile", "video-archive");
+      dependencies.archiveRoot ?? path.join(os.homedir(), ".auto-mobile", "video-archive");
     this.log = dependencies.logger ?? logger;
     this.idGenerator = normalizeIdGenerator(dependencies.idGenerator);
     this.now = dependencies.now ?? (() => new Date());
     this.securePermissions = dependencies.securePermissions ?? defaultSecurePermissions;
   }
 
-  async startRecording(
-    options: StartVideoRecordingOptions = {}
-  ): Promise<ActiveVideoRecording> {
+  async startRecording(options: StartVideoRecordingOptions = {}): Promise<ActiveVideoRecording> {
     const config = parseVideoRecordingConfig(options.config);
     const recordingId = this.idGenerator.next();
     const startedAt = this.now().toISOString();
@@ -181,6 +180,7 @@ export class VideoRecorderService {
       startedAt,
       device: options.device,
       maxDurationSeconds: options.maxDurationSeconds,
+      abortSignal: options.abortSignal,
       ...config,
     });
 
@@ -195,6 +195,7 @@ export class VideoRecorderService {
       config,
       outputName: options.outputName,
       handle,
+      forceStopRequested: false,
     };
 
     this.activeRecordings.set(recordingId, active);
@@ -210,12 +211,30 @@ export class VideoRecorderService {
   }
 
   async stopRecording(recordingId: string): Promise<VideoRecordingMetadata> {
+    const stopping = this.stoppingRecordings.get(recordingId);
+    if (stopping) {
+      return stopping;
+    }
     const active = this.activeRecordings.get(recordingId);
     if (!active) {
       throw new Error(`No active recording found for id ${recordingId}`);
     }
 
+    const stop = this.stopActiveRecording(active);
+    this.stoppingRecordings.set(recordingId, stop);
+    try {
+      return await stop;
+    } finally {
+      this.stoppingRecordings.delete(recordingId);
+    }
+  }
+
+  private async stopActiveRecording(active: ActiveRecordingState): Promise<VideoRecordingMetadata> {
+    const recordingId = active.recordingId;
     const stopResult = await this.backend.stop(active.handle);
+    if (this.activeRecordings.get(recordingId) !== active || active.forceStopRequested) {
+      throw new Error(`Recording ${recordingId} was force-stopped while it was stopping.`);
+    }
     const endedAt = stopResult.endedAt ?? this.now().toISOString();
     const outputPath = stopResult.outputPath || active.outputPath;
     const fileName = path.basename(outputPath);
@@ -227,9 +246,7 @@ export class VideoRecorderService {
     const fileStats = await this.safeStat(outputPath);
     const sizeBytes = stopResult.sizeBytes ?? fileStats?.size ?? 0;
 
-    const durationMs =
-      stopResult.durationMs ??
-      calculateDurationMs(active.startedAt, endedAt);
+    const durationMs = stopResult.durationMs ?? calculateDurationMs(active.startedAt, endedAt);
 
     const metadata: VideoRecordingMetadata = {
       recordingId: active.recordingId,
@@ -250,6 +267,47 @@ export class VideoRecorderService {
     this.activeRecordings.delete(recordingId);
 
     return metadata;
+  }
+
+  async forceStopRecording(recordingId: string): Promise<void> {
+    const forceStopping = this.forceStoppingRecordings.get(recordingId);
+    if (forceStopping) {
+      return forceStopping;
+    }
+    const active = this.activeRecordings.get(recordingId);
+    if (!active) {
+      throw new Error(`No active recording found for id ${recordingId}`);
+    }
+    const backendForceStop = this.backend.forceStop;
+    if (!backendForceStop) {
+      throw new Error("Video capture backend does not support force stopping recordings.");
+    }
+
+    // Set this before awaiting the backend: the graceful stop may resolve while
+    // a device-side force-stop command is still in flight.
+    active.forceStopRequested = true;
+    const forceStop = this.forceStopActiveRecording(active, backendForceStop);
+    this.forceStoppingRecordings.set(recordingId, forceStop);
+    try {
+      await forceStop;
+    } finally {
+      this.forceStoppingRecordings.delete(recordingId);
+    }
+  }
+
+  private async forceStopActiveRecording(
+    active: ActiveRecordingState,
+    backendForceStop: NonNullable<VideoCaptureBackend["forceStop"]>
+  ): Promise<void> {
+    try {
+      await backendForceStop.call(this.backend, active.handle);
+      this.activeRecordings.delete(active.recordingId);
+    } catch (error) {
+      if (this.activeRecordings.get(active.recordingId) === active) {
+        active.forceStopRequested = false;
+      }
+      throw error;
+    }
   }
 
   private getRecordingDir(name: string): string {
@@ -276,9 +334,7 @@ const normalizeIdGenerator = (idGenerator?: IdGenerator | (() => string)): IdGen
   return idGenerator;
 };
 
-function parseQualityPreset(
-  value: VideoRecordingConfigInput["qualityPreset"]
-): VideoQualityPreset {
+function parseQualityPreset(value: VideoRecordingConfigInput["qualityPreset"]): VideoQualityPreset {
   if (typeof value === "string" && QUALITY_PRESETS.has(value as VideoQualityPreset)) {
     return value as VideoQualityPreset;
   }
@@ -286,9 +342,7 @@ function parseQualityPreset(
   return DEFAULT_VIDEO_RECORDING_CONFIG.qualityPreset;
 }
 
-function parseFormat(
-  value: VideoRecordingConfigInput["format"]
-): VideoFormat {
+function parseFormat(value: VideoRecordingConfigInput["format"]): VideoFormat {
   if (typeof value === "string" && VIDEO_FORMATS.has(value as VideoFormat)) {
     return value as VideoFormat;
   }
@@ -297,7 +351,7 @@ function parseFormat(
 }
 
 function parseResolution(
-  value: VideoRecordingConfigInput["resolution"]
+  value: VideoRecordingConfigInput["resolution"],
 ): VideoResolution | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
@@ -325,7 +379,7 @@ function capBitrateKbps(targetBitrateKbps: number, maxThroughputMbps: number): n
 function parsePositiveNumber(
   value: number | string | undefined,
   defaultValue: number,
-  allowFloat: boolean
+  allowFloat: boolean,
 ): number {
   if (value === null || value === undefined) {
     return defaultValue;
@@ -339,11 +393,7 @@ function parsePositiveNumber(
   return allowFloat ? parsed : Math.round(parsed);
 }
 
-function buildRecordingFileName(
-  name: string,
-  startedAt: string,
-  format: VideoFormat
-): string {
+function buildRecordingFileName(name: string, startedAt: string, format: VideoFormat): string {
   const timestamp = formatTimestampForFilename(startedAt);
   return `${name}-${timestamp}.${format}`;
 }

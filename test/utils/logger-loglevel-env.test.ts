@@ -1,5 +1,31 @@
 import { describe, expect, test, spyOn } from "bun:test";
+import fs from "fs";
+import { EventEmitter } from "node:events";
 import { LogLevel, parseAutomobileLogLevel, resolveProcessLogPrefix } from "../../src/utils/logger";
+
+class FakeLogStream extends EventEmitter {
+  writableFinished = false;
+  destroyed = false;
+  writable = true;
+  readonly writes: string[] = [];
+  endCalls = 0;
+
+  write(chunk: unknown, callback?: (error: Error | null) => void): boolean {
+    this.writes.push(String(chunk));
+    queueMicrotask(() => callback?.(null));
+    return true;
+  }
+
+  end(callback?: () => void): this {
+    this.endCalls += 1;
+    this.writableFinished = true;
+    queueMicrotask(() => {
+      callback?.();
+      this.emit("finish");
+    });
+    return this;
+  }
+}
 
 // Re-import the logger module with AUTOMOBILE_LOG_LEVEL set so the module-load
 // seed (`currentLogLevel = parseAutomobileLogLevel(...) ?? INFO`) re-evaluates
@@ -106,6 +132,30 @@ describe("AUTOMOBILE_LOG_LEVEL is applied at process start (issue #3845)", () =>
   test("still emits an ERROR line when seeded to error", async () => {
     const emitted = await captureEmit("error", l => l.error("loglevel-3845-error"));
     expect(emitted).toContain("loglevel-3845-error");
+  });
+
+  test("close waits for queued file-log writes", async () => {
+    const stream = new FakeLogStream();
+    const logFileExists = spyOn(fs, "existsSync").mockReturnValue(false);
+    const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(
+      stream as unknown as fs.WriteStream,
+    );
+
+    try {
+      const mod = await loggerWithEnvLevel("error");
+      mod.logger.error("first queued line");
+      mod.logger.error("second queued line");
+
+      const closed = mod.logger.closeAfterFlush();
+      expect(stream.endCalls).toBe(0);
+
+      await closed;
+      expect(stream.writes).toHaveLength(2);
+      expect(stream.endCalls).toBe(1);
+    } finally {
+      createWriteStream.mockRestore();
+      logFileExists.mockRestore();
+    }
   });
 });
 

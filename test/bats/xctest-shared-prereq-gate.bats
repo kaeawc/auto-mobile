@@ -1,13 +1,12 @@
 #!/usr/bin/env bats
 #
-# Guards issue #4082: the Xcode 26.5 leg of `ios-xctest-runner-simulator-tests`
-# uses `if: !cancelled()` so it runs even when an earlier step in the job failed
-# (deliberate independence from the CtrlProxy UI test that precedes it; before
-# #4078 this also covered the now-removed Xcode 26.2 Reminders leg). But a bare
+# Guards issue #4082: the downstream steps of `ios-xctest-runner-simulator-tests`
+# use `if: !cancelled()` so they run even when an earlier step in the job failed
+# (deliberate independence from the CtrlProxy UI test that precedes them). But a bare
 # `!cancelled()` also bypasses a
 # SHARED-prerequisite failure (XcodeGen drift check / CtrlProxy build), so the
 # 26.5 block ran on a broken build and emitted misleading secondary failures
-# (e.g. a spurious "Run Reminders integration tests (Xcode 26.5)" failure whose
+# (e.g. a spurious downstream simulator-test failure whose
 # real cause was the drift check).
 #
 # The fix gates every such step additionally on the shared CtrlProxy build
@@ -58,7 +57,7 @@ step_if_condition() {
   ' "$WORKFLOW"
 }
 
-# Every Xcode 26.5 leg step that must not run on a doomed shared prerequisite.
+# Every downstream step that must not run on a doomed shared prerequisite.
 # Named explicitly: a global count cannot tell "each of these is guarded" from
 # "the total happens to add up", so one step could lose its guard while an
 # unrelated step gained one and the suite would stay green.
@@ -66,9 +65,7 @@ xcode_265_leg_steps() {
   cat <<'STEPS'
 Ensure AutoMobile daemon ready (Xcode 26.5)
 Warm up iOS CtrlProxy (Xcode 26.5)
-Pre-build Reminders XCTest bundle (Xcode 26.5)
-Warm up Reminders target app (Xcode 26.5)
-Run Reminders integration tests (Xcode 26.5)
+Run iOS navigation graph Simulator workflow
 STEPS
 }
 
@@ -111,9 +108,7 @@ STEPS
 }
 
 @test "every 26.5-leg step still respects cancellation" {
-  # The other half of the condition. RemindersPlanContentTests owns this too (via
-  # stepBlockRespectsCancellation); asserted here so a Swift-only or bats-only run
-  # cannot lose the property silently.
+  # The other half of the condition: a cancelled workflow must skip these steps.
   local offenders=""
   while IFS= read -r step; do
     [ -n "$step" ] || continue

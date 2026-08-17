@@ -60,9 +60,16 @@ export interface Logger {
   flush(): Promise<void>;
 
   /**
-   * Closes the log stream
+   * Flushes queued writes and closes the log stream.
    */
   close(): void;
+
+  /**
+   * Flushes pending writes and waits until the log stream finishes closing.
+   * Use this before an explicit process exit so the final log entries reach
+   * the stream.
+   */
+  closeAfterFlush(): Promise<void>;
 }
 
 export const LogLevel = {
@@ -148,6 +155,26 @@ ensureDirExists(logsDir).catch(err => {
 const ownLogPrefix = resolveProcessLogPrefix(process.argv, process.pid);
 const logFilePath = path.join(logsDir, `${ownLogPrefix}.log`);
 let logStream = fs.createWriteStream(logFilePath, { flags: "a" });
+interface EndableLogStream {
+  end(callback: () => void): void;
+  once(event: "error", listener: (error: Error) => void): void;
+  off(event: "error", listener: (error: Error) => void): void;
+}
+
+/** Resolves when a log stream has finished, or rejects if closing it fails. */
+export function closeLogStream(stream: EndableLogStream): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error): void => {
+      stream.off("error", onError);
+      reject(error);
+    };
+    stream.once("error", onError);
+    stream.end(() => {
+      stream.off("error", onError);
+      resolve();
+    });
+  });
+}
 
 // Maximum log file size (10MB)
 const MAX_LOG_SIZE = 10 * 1024 * 1024;
@@ -287,7 +314,15 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
       logMessage = logMessage.substring(0, 1000) + "... (truncated)";
     }
     const safeLogMessage = logMessage.replace(/[\r\n\t]/g, " ");
-    logStream.write(safeLogMessage + "\n");
+    await new Promise<void>((resolve, reject) => {
+      logStream.write(safeLogMessage + "\n", error => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
 
     // Also write to STDOUT if enabled
     if (logToStdout) {
@@ -380,9 +415,14 @@ export const logger: Logger = {
   },
 
   /**
-   * Closes the log stream
+   * Flushes queued writes and closes the log stream.
    */
   close(): void {
     logStream.end();
+  },
+
+  async closeAfterFlush(): Promise<void> {
+    await lastWrite;
+    await closeLogStream(logStream);
   }
 };

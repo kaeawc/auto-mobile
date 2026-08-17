@@ -910,16 +910,19 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const perf = createGlobalPerformanceTracker();
 
     perf.startOperation("listSimulators");
-    const allDevices = await this.simctl.listSimulatorImages();
+    const simulatorImages = await this.simctl.listSimulatorImages();
     perf.endOperation("listSimulators");
-    allDevices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
+    const unavailableDevices = simulatorImages.filter(device => device.isAvailable === false);
+    const availableDevices = simulatorImages
+      .filter(device => device.isAvailable !== false)
+      .sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
 
-    if (allDevices.length === 0) {
+    if (availableDevices.length === 0) {
       // No CLI flag reaches this path, so the opt-in is env-var only here.
       const gate = getDeviceCreationGate();
       if (gate.isCreationAllowed()) {
         logger.info(
-          `[DeviceSessionManager] No iOS simulators found; creating one (gate: ${gate.describeSource()})`
+          `[DeviceSessionManager] No available iOS simulators found; creating one (gate: ${gate.describeSource()})`
         );
         const provisioner = createDefaultDeviceProvisioner(() => this.simctl);
         const provisioned = await provisioner.provision({ platform: "ios" });
@@ -930,6 +933,13 @@ export class DeviceSessionManager implements DeviceSessionManager {
         await this.verifyIosDevice(provisioned.deviceId!, options);
         perf.endOperation("verifyDevice");
         return createdDevice;
+      }
+
+      if (unavailableDevices.length > 0) {
+        const diagnostics = unavailableDevices
+          .map(device => `${device.name} (${device.deviceId ?? "unknown ID"}): ${device.availabilityError ?? "unavailable"}`)
+          .join("; ");
+        throw new ActionableError(`No available iOS simulators. Unavailable simulators: ${diagnostics}.`);
       }
 
       throw new ActionableError(
@@ -954,7 +964,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     // No booted devices - boot the first available simulator
-    const device = allDevices[0];
+    const device = availableDevices[0];
     const deviceId = device.deviceId!;
     logger.info(`[DeviceSessionManager] Booting iOS simulator ${device.name} (${deviceId})...`);
 

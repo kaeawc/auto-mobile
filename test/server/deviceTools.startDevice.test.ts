@@ -10,6 +10,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
@@ -208,7 +209,7 @@ describe("startDevice handler", () => {
     }
 
     const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       daemonSessionManager,
       "daemon-session",
@@ -252,7 +253,7 @@ describe("startDevice handler", () => {
 
   it("reserves a public cold boot before resource notifications", async () => {
     const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const readyDeviceIds: string[] = [];
     const pool = new DevicePool(
       daemonSessionManager,
@@ -306,7 +307,7 @@ describe("startDevice handler", () => {
   it("reserves a pooled device while runner readiness is in flight", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       daemonSessionManager,
       "daemon-session",
@@ -354,7 +355,7 @@ describe("startDevice handler", () => {
 
   it("releases a pooled-device reservation when runner readiness fails", async () => {
     const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       daemonSessionManager,
       "daemon-session",
@@ -821,7 +822,7 @@ describe("startDevice handler", () => {
   it("registers the generated autolock session for the MCP session", async () => {
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
     await pool.initializeWithDevices([androidDevice]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
@@ -840,7 +841,7 @@ describe("startDevice handler", () => {
 
   it("rejects stale pooled platform metadata before session binding", async () => {
     const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       daemonSessionManager,
       "daemon-session",
@@ -865,7 +866,7 @@ describe("startDevice handler", () => {
 
   it("rejects a stale same-platform pool identity before session reuse", async () => {
     const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       daemonSessionManager,
       "daemon-session",
@@ -899,7 +900,7 @@ describe("startDevice handler", () => {
 
   it("reuses the returned sessionId for repeated startDevice calls when autolock is disabled", async () => {
     const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
     await pool.initializeWithDevices([iosDevice]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);

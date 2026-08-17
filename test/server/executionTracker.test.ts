@@ -73,6 +73,56 @@ describe("ExecutionTracker", function() {
     expect(tracker.hasActiveSessionUuidExecutions("session-uuid")).toBe(false);
   });
 
+  test("keeps the shutdown control operation alive while cancelling device work", async function() {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["kill", "tap"]),
+    );
+    const kill = tracker.startExecution("executePlan", undefined, "session-uuid");
+    const tap = tracker.startExecution("tapOn", undefined, "session-uuid");
+
+    const cancelled = await tracker.cancelSessionUuidExecutions(
+      "session-uuid",
+      "device-disconnected:emulator-5554",
+      { excludeSignal: kill.abortController.signal },
+    );
+
+    expect(cancelled).toBe(1);
+    expect(kill.abortController.signal.aborted).toBe(false);
+    expect(tap.abortController.signal.aborted).toBe(true);
+  });
+
+  test("cancels a forwarded execution when its transport session closes", async function() {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
+    const execution = tracker.startExecution(
+      "tapOn",
+      "forwarded-mcp-session",
+      undefined,
+      "streamable-http-session",
+    );
+
+    expect(tracker.hasActiveSessionExecutions("forwarded-mcp-session")).toBe(true);
+    expect(tracker.hasActiveSessionExecutions("streamable-http-session")).toBe(true);
+
+    await tracker.cancelSessionExecutions("streamable-http-session", "streamable_http_onclose");
+
+    expect(execution.abortController.signal.aborted).toBe(true);
+  });
+
+  test("distinguishes executions that began before a session deadline", function() {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["before", "after"]));
+    tracker.startExecution("tapOn", "session-id");
+    timer.advanceTime(10);
+
+    expect(tracker.hasActiveSessionExecutions("session-id", { startedAtOrBefore: 5 })).toBe(true);
+
+    tracker.endExecution("before");
+    tracker.startExecution("tapOn", "session-id");
+
+    expect(tracker.hasActiveSessionExecutions("session-id", { startedAtOrBefore: 5 })).toBe(false);
+  });
+
   // #4183 item 6 (A3): the scope fallback in hasActiveToolExecution (executionTracker.ts)
   // had no table coverage. The scope order is: explicit "global" → sessionUuid map →
   // sessionId map → global fallback when neither key is provided.

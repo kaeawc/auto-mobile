@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { ActionableError } from "../../src/models";
 
@@ -35,7 +36,7 @@ describe("DevicePool autolock", () => {
   beforeEach(() => {
     clearAutolockEnv();
     timer = new FakeTimer();
-    sessionManager = new SessionManager(timer);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     fakeDeviceUtils = new FakeDeviceUtils();
 
     pool = new DevicePool(
@@ -130,7 +131,7 @@ describe("DevicePool autolock", () => {
     fakeDeviceUtils.markDeviceAsStopped("Medium_Phone_API_35");
     fakeDeviceUtils.markDeviceAsStopped("emulator-5554");
     await pool.removeDisconnectedDevice("emulator-5554");
-    await pool.releaseDevice("emulator-5554");
+    await pool.releaseDevice("emulator-5554", "active-session");
     await pool.removeDevice("emulator-5554");
 
     const assignments = await pool.assignMultipleDevices(["next-session"], 1000, "android");
@@ -240,6 +241,32 @@ describe("DevicePool autolock", () => {
       expect(sessionManager.getSession(sessionId!)).toBeNull();
 
       expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeUndefined();
+    });
+
+    it("does not route a new MCP request through an expired autolock held by older work", async () => {
+      await initializeLiveAndroidDevice();
+      sessionManager.setActiveSessionExecutionChecker((_sessionId, startedAtOrBefore) => startedAtOrBefore === undefined);
+
+      await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+      timer.advanceTime(61 * 1000);
+
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeUndefined();
+      expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
+    });
+
+    it("rejects a late MCP request while earlier work still owns the expired autolock", async () => {
+      await initializeLiveAndroidDevice();
+      sessionManager.setActiveSessionExecutionChecker((_sessionId, query) => query?.excludeExecutionId === "late");
+
+      await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+      timer.advanceTime(61 * 1000);
+
+      expect(() => pool.resolveAutolockSessionForMcpSession(
+        "mcp-session-1",
+        "android",
+        { executionId: "late", startTime: timer.now() },
+      )).toThrow("earlier work is still active");
+      expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
     });
 
     it("aligns the session heartbeat timeout with the idle timeout", async () => {

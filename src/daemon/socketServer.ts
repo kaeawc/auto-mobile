@@ -90,6 +90,8 @@ import type { KeyValueType } from "../features/storage/storageTypes";
 import type { BootedDevice, ImeAction, ScreenScaleMetadata } from "../models";
 import type { DeviceService } from "../features/observe/DeviceService";
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
+/** Keep shutdown bounded if a request handler ignores its disconnected peer. */
+const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 
 /**
  * Unix Socket Server that proxies requests to the HTTP MCP server
@@ -210,6 +212,8 @@ export class UnixSocketServer {
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
+  /** Request handlers that can continue after their client socket is destroyed. */
+  private activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
   private listChangedUnsubscribe: (() => void) | null = null;
@@ -385,34 +389,37 @@ export class UnixSocketServer {
       socket.destroy();
     });
 
-    socket.on("data", async data => {
-      buffer += data.toString();
+    socket.on("data", data => {
+      const handler = (async () => {
+        buffer += data.toString();
 
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
-      for (const line of lines) {
-        if (!line.trim()) {
-          continue;
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+
+          let requestId = "unknown";
+          try {
+            const request: DaemonRequest = JSON.parse(line);
+            requestId = request.id;
+            const response = await this.handleRequest(sessionId, request);
+            this.writeFrame(socket, sessionId, response);
+          } catch (error) {
+            logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
+            const errorResponse: DaemonResponse = {
+              id: requestId,
+              type: "mcp_response",
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+            this.writeFrame(socket, sessionId, errorResponse);
+          }
         }
-
-        let requestId = "unknown";
-        try {
-          const request: DaemonRequest = JSON.parse(line);
-          requestId = request.id;
-          const response = await this.handleRequest(sessionId, request);
-          this.writeFrame(socket, sessionId, response);
-        } catch (error) {
-          logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
-          const errorResponse: DaemonResponse = {
-            id: requestId,
-            type: "mcp_response",
-            success: false,
-            error: error instanceof Error ? error.message : String(error),
-          };
-          this.writeFrame(socket, sessionId, errorResponse);
-        }
-      }
+      })();
+      this.trackRequestHandler(handler);
     });
 
     socket.on("close", () => {
@@ -433,6 +440,14 @@ export class UnixSocketServer {
         socket.destroy();
       }
     });
+  }
+
+  private trackRequestHandler(handler: Promise<void>): void {
+    this.activeRequestHandlers.add(handler);
+    void handler.then(
+      () => this.activeRequestHandlers.delete(handler),
+      () => this.activeRequestHandlers.delete(handler)
+    );
   }
 
   /**
@@ -2706,33 +2721,81 @@ export class UnixSocketServer {
     this.mcpForwardIdleCloseKeys.clear();
     this.appendTextInputs.clear();
 
+    // Capture clients before clearing their session bookkeeping. server.close() stops
+    // accepting new connections, but waits for existing ones; destroy them before
+    // awaiting its callback so daemon shutdown cannot hang on an idle client.
+    const clientSockets = Array.from(this.clientSockets.values());
+
     // Clear sessions
     this.sessions.clear();
     this.clientSockets.clear();
     this.notificationSubscribers.clear();
 
     const ownsSocketPath = this.isOwnedSocketFile();
+    const serverClosed = this.closeListeningServer(ownsSocketPath);
+    const requestHandlersDrained = this.drainActiveRequestHandlers();
 
-    if (this.server && (ownsSocketPath || !existsSync(this.socketPath))) {
-      await new Promise<void>(resolve => {
-        this.server!.close(() => {
-          logger.info("Unix socket server closed");
-          resolve();
-        });
-      });
-      this.server = null;
-    } else if (this.server) {
+    this.destroyClientSockets(clientSockets);
+    await serverClosed;
+    await requestHandlersDrained;
+    this.server = null;
+
+    // The listener removes the socket it created as part of close(). Do not
+    // unlink the pathname afterward: a successor can bind in the interval and
+    // filesystems are allowed to reuse the original socket inode immediately.
+    this.socketFileIdentity = null;
+  }
+
+  private closeListeningServer(ownsSocketPath: boolean): Promise<void> {
+    if (!this.server) {
+      return Promise.resolve();
+    }
+    if (!ownsSocketPath && existsSync(this.socketPath)) {
       logger.warn(
         `Unix socket path ${this.socketPath} no longer belongs to this server; leaving listener for process teardown`
       );
       this.server.unref();
-      this.server = null;
+      return Promise.resolve();
+    }
+    return new Promise(resolve => {
+      this.server!.close(() => {
+        logger.info("Unix socket server closed");
+        resolve();
+      });
+    });
+  }
+
+  private destroyClientSockets(clientSockets: Socket[]): void {
+    for (const socket of clientSockets) {
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
+    }
+  }
+
+  private async drainActiveRequestHandlers(): Promise<void> {
+    const handlers = Array.from(this.activeRequestHandlers);
+    if (handlers.length === 0) {
+      return;
     }
 
-    if (ownsSocketPath && existsSync(this.socketPath)) {
-      await unlink(this.socketPath);
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeout = new Promise<boolean>(resolve => {
+      timeoutHandle = this.timer.setTimeout(() => resolve(false), DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS);
+    });
+
+    try {
+      const drained = await Promise.race([Promise.allSettled(handlers).then(() => true), timeout]);
+      if (!drained) {
+        logger.warn(
+          `Timed out waiting for ${handlers.length} in-flight Unix socket request handler(s) to finish during shutdown`
+        );
+      }
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
     }
-    this.socketFileIdentity = null;
   }
 
   private readSocketFileIdentity(): SocketFileIdentity | null {

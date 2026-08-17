@@ -16,6 +16,11 @@ import type { SessionToolProfileService } from "./SessionToolProfileService";
  */
 type ToolCapabilityContext = {
   routingSessionUuid?: string;
+  /** Identity of the outer execution, used to keep an autolock session alive across nested calls. */
+  execution?: {
+    executionId: string;
+    startTime: number;
+  };
   /** Connection-scoped profile used for policy, distinct from device routing. */
   capabilitySessionUuid?: string;
   /** An admitted executePlan may invoke its nested plan steps without per-step opt-ins. */
@@ -33,6 +38,7 @@ export const runWithToolCapabilityContext = async <T>(
   const parent = toolCapabilityContext.getStore();
   return toolCapabilityContext.run({
     routingSessionUuid: context.routingSessionUuid ?? parent?.routingSessionUuid,
+    execution: context.execution ?? parent?.execution,
     capabilitySessionUuid: context.capabilitySessionUuid ?? parent?.capabilitySessionUuid,
     planCapabilitiesAuthorized: context.planCapabilitiesAuthorized
       ?? parent?.planCapabilitiesAuthorized,

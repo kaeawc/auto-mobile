@@ -114,11 +114,13 @@ export async function createCiIosBootConfiguration(
     }),
     recovery: new CiIosBootRecovery({
       ownedSimulatorName,
-      shutdown: target => deviceManager.killDevice({
-        name: target.name,
-        platform: "ios",
-        deviceId: target.deviceId!,
-      }),
+      shutdown: async target => {
+        await deviceManager.killDevice({
+          name: target.name,
+          platform: "ios",
+          deviceId: target.deviceId!,
+        });
+      },
       erase: udid => simctl.eraseSimulator(udid),
     }),
   };

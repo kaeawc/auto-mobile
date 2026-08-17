@@ -291,10 +291,10 @@ describe("DeviceSessionRepository", () => {
     expect(row!.status).toBe("active");
   });
 
-  test("upsertActiveSession is best-effort: a write failure is logged and swallowed, not propagated", async () => {
-    // A session-persist throw must NOT take down the daemon hot path
-    // (deviceSessionRepository.ts:91-93). Destroy the connection so the write
-    // throws, then assert the call still resolves and logs a warning.
+  test("upsertActiveSession logs and propagates a write failure for session rollback", async () => {
+    // SessionManager owns the in-memory rollback after this awaited write fails.
+    // Destroy the table so the insert rejects, then preserve the diagnostic log
+    // while asserting the failure reaches that rollback path.
     const warnSpy = spyOn(logger, "warn");
     try {
       await db.schema.dropTable("device_sessions").execute(); // force the insert to throw
@@ -310,7 +310,7 @@ describe("DeviceSessionRepository", () => {
           heartbeatTimeoutMs: 60_000,
           hasReceivedHeartbeat: false,
         })
-      ).resolves.toBeUndefined();
+      ).rejects.toThrow(/no such table/);
       expect(warnSpy).toHaveBeenCalled();
       const logged = warnSpy.mock.calls.map(c => String(c[0])).join("\n");
       expect(logged).toContain("session-fail");

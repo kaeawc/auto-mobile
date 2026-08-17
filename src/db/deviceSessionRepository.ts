@@ -27,6 +27,17 @@ export interface DeviceSessionActivityUpdate {
   hasReceivedHeartbeat: boolean;
 }
 
+export interface DeviceSessionPersistence {
+  upsertActiveSession(record: DeviceSessionRecord): Promise<void>;
+  recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
+  markReleased(
+    sessionUuid: string,
+    status: DeviceSessionStatus,
+    releasedAtMs: number,
+    reason: string,
+  ): Promise<void>;
+}
+
 export class DeviceSessionRepository {
   private db: Kysely<Database> | null;
 
@@ -91,6 +102,7 @@ export class DeviceSessionRepository {
         .execute();
     } catch (error) {
       logger.warn(`[DeviceSessionRepository] Failed to upsert device session ${record.sessionUuid}: ${error}`);
+      throw error;
     }
   }
 

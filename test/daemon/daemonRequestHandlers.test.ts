@@ -6,6 +6,7 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -13,7 +14,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 class FakeDevicePool {
   stats: DevicePoolStats;
   refreshedCount = 0;
-  releasedDevices: string[] = [];
+  releasedDevices: Array<{ deviceId: string; expectedSessionId: string }> = [];
   addedDevices: number;
   recoveryPolicy: DeviceRecoveryPolicy = { onLoss: false, maxAttempts: 2 };
   devices: PooledDevice[] = [];
@@ -32,8 +33,8 @@ class FakeDevicePool {
     return this.stats;
   }
 
-  async releaseDevice(deviceId: string): Promise<void> {
-    this.releasedDevices.push(deviceId);
+  async releaseDevice(deviceId: string, expectedSessionId: string): Promise<void> {
+    this.releasedDevices.push({ deviceId, expectedSessionId });
   }
 
   getRecoveryPolicy(): DeviceRecoveryPolicy {
@@ -104,7 +105,7 @@ describe("handleDaemonRequest", () => {
   beforeEach(() => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    sessionManager = new SessionManager(fakeTimer);
+    sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
   });
 
   afterEach(() => {
@@ -233,7 +234,7 @@ describe("handleDaemonRequest", () => {
       device: deviceId,
       alreadyReleased: false,
     });
-    expect(devicePool.releasedDevices).toEqual([deviceId]);
+    expect(devicePool.releasedDevices).toEqual([{ deviceId, expectedSessionId: sessionId }]);
     expect(sessionManager.getSession(sessionId)).toBeNull();
   });
 

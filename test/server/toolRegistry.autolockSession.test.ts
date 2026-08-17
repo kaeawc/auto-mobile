@@ -7,6 +7,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
 const AUTOLOCK_ENV_KEYS = [
@@ -144,7 +145,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
 
     const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
     const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
@@ -178,7 +179,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
 
     const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
     const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
@@ -212,7 +213,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
 
     const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
     const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);

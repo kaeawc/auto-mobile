@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
 const AUTOLOCK_ENV_KEYS = [
@@ -33,7 +35,7 @@ describe("SessionHeartbeatMonitor", () => {
   beforeEach(() => {
     clearAutolockEnv();
     timer = new FakeTimer();
-    sessionManager = new SessionManager(timer);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   });
 
   afterEach(() => {
@@ -188,10 +190,46 @@ describe("SessionHeartbeatMonitor", () => {
       await Promise.resolve();
       expect(reaped).toEqual([]);
 
-      timer.advanceTime(2);
+      // FakeTimer catches up interval callbacks synchronously. Drive each
+      // scheduled epoch separately so a completed async tick gets its normal
+      // event-loop turn before the next interval callback.
+      timer.advanceTime(1);
+      await Promise.resolve();
+      timer.advanceTime(1);
       await Promise.resolve();
       expect(reaped).toEqual(["s1"]);
       monitor.stop();
+    });
+
+    it("does not overlap a heartbeat reap with the next interval tick", async () => {
+      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+      let resolveReap!: () => void;
+      const blockedReap = new Promise<void>(resolve => { resolveReap = resolve; });
+      let reapCount = 0;
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async () => {
+          reapCount++;
+          return blockedReap;
+        },
+        timer,
+        { checkIntervalMs: 1, preFirstHeartbeatGraceMs: 0 },
+      );
+
+      monitor.start();
+      timer.advanceTime(1);
+      expect(reapCount).toBe(1);
+
+      timer.advanceTime(1);
+      expect(reapCount).toBe(1);
+
+      resolveReap();
+      await new Promise<void>(resolve => setImmediate(resolve));
+      timer.advanceTime(1);
+      expect(reapCount).toBe(2);
+
+      await monitor.stop();
     });
   });
 
@@ -212,7 +250,7 @@ describe("SessionHeartbeatMonitor", () => {
     const reapVia = (mgr: SessionManager, devicePool: DevicePool) => async (sid: string): Promise<void> => {
       const deviceId = await mgr.releaseSession(sid);
       if (deviceId) {
-        await devicePool.releaseDevice(deviceId);
+        await devicePool.releaseDevice(deviceId, sid);
       }
     };
 
@@ -249,6 +287,42 @@ describe("SessionHeartbeatMonitor", () => {
         await monitor.tick();
         expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
       }
+    });
+
+    it("keeps an expired autolocked session assigned until active work completes", async () => {
+      const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+      const executionTracker = new ExecutionTracker(timer);
+      const hasActiveExecutions = (sessionUuid: string): boolean =>
+        executionTracker.hasActiveSessionUuidExecutions(sessionUuid)
+        || pool.hasActiveAutolockMcpSessionExecution(
+          sessionUuid,
+          mcpSessionId => executionTracker.hasActiveSessionExecutions(mcpSessionId),
+        );
+      sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        hasActiveExecutions,
+        reapVia(sessionManager, pool),
+        timer,
+      );
+      const execution = executionTracker.startExecution("tapOn", "mcp-session-1");
+
+      timer.advanceTime(60_001); // Past the autolock idle timeout.
+      await monitor.tick();
+
+      const activeDevice = pool.getDevice("emulator-5554")!;
+      expect(activeDevice.status).toBe("busy");
+      expect(activeDevice.autolockSessionId).toBe(sessionId);
+      expect(sessionManager.getActiveSessionCount()).toBe(1);
+      expect(sessionManager.getSession(sessionId!)).not.toBeNull();
+
+      executionTracker.endExecution(execution.id);
+      await monitor.tick();
+
+      const releasedDevice = pool.getDevice("emulator-5554")!;
+      expect(releasedDevice.status).toBe("idle");
+      expect(releasedDevice.autolockSessionId).toBeUndefined();
+      expect(sessionManager.getActiveSessionCount()).toBe(0);
     });
   });
 });

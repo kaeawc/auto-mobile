@@ -49,6 +49,9 @@ android/playground/app/src/main/res/mipmap-*/ic_launcher*.png -filter -diff -mer
 ios/Playground/Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png -filter -diff -merge -text
 android/desktop-app/src/main/resources/icons/app-icon.png -filter -diff -merge -text
 android/desktop-app/src/main/resources/icons/app-icon.ico -filter -diff -merge -text
+# Menu-bar truck mask read from the runtime classpath by SystemTray.kt via ImageIO — a
+# checked-out LFS pointer would decode to null and drop the tray to its fallback dot.
+android/desktop-app/src/main/resources/icons/tray-truck.png -filter -diff -merge -text
 # Playground hand-drawn font — consumed by AAPT/actool at build time (jobs check out lfs: false)
 android/playground/design/assets/src/main/res/font/*.ttf -filter -diff -merge -text
 ios/Playground/Sources/Resources/Fonts/*.ttf -filter -diff -merge -text

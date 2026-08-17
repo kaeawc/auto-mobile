@@ -29,6 +29,12 @@ export interface BootedDeviceDiscoveryOptions {
   bypassAndroidDeviceListCache?: boolean;
 }
 
+/** Bounds and cancels a platform shutdown command. */
+export interface DeviceShutdownOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 /**
  * Interface for device utility operations
  * Provides platform-agnostic device management for Android emulators and iOS simulators
@@ -80,7 +86,7 @@ export interface PlatformDeviceManager {
    * @param device - The booted device to kill
    * @returns Promise that resolves when the device has been stopped
    */
-  killDevice(device: BootedDevice): Promise<void>;
+  killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<BootedDevice | void>;
 
   /**
    * Wait for a device to be ready for use after starting
@@ -305,7 +311,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       try {
         const emulators = await this.emulator.getBootedDevicesChecked(false, {
           bypassDeviceListCache: options.bypassAndroidDeviceListCache,
-        });
+        }, getAbortSignal());
         devices.push(...emulators);
         succeededPlatforms.add("android");
       } catch (error) {
@@ -379,13 +385,14 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * @returns Promise that resolves when device is stopped
    */
   async killDevice(
-    device: BootedDevice
-  ): Promise<void> {
+    device: BootedDevice,
+    options?: DeviceShutdownOptions,
+  ): Promise<BootedDevice | void> {
     switch (device.platform) {
       case "android":
-        return this.emulator.killDevice(device);
+        return this.emulator.killDevice(device, options);
       case "ios":
-        return this.simctl.killSimulator(device);
+        return this.simctl.killSimulator(device, options);
     }
   }
 

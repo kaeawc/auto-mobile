@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadJobs } from "../helpers/workflowSteps";
+import { loadJobSteps, loadJobs, stepNamed } from "../helpers/workflowSteps";
 
 // Guards issue #4155: every job must declare `timeout-minutes`.
 //
@@ -35,6 +35,11 @@ describe("pull_request job timeouts", () => {
       .map(([id]) => id);
 
     expect(missing).toEqual([]);
+  });
+
+  test("cross-platform Node validation fetches the main comparison ref", () => {
+    const checkout = stepNamed(loadJobSteps(WORKFLOW, "mcp-build-and-test"), "Git Checkout");
+    expect(checkout?.with?.["fetch-depth"]).toBe(0);
   });
 
 });

@@ -1,5 +1,5 @@
 import { SessionManager } from "../daemon/sessionManager";
-import type { Session } from "../daemon/sessionManager";
+import type { Session, SessionExecutionMetadata } from "../daemon/sessionManager";
 import { DevicePool } from "../daemon/devicePool";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
@@ -74,36 +74,31 @@ export async function createToolExecutionContext(
   sessionUuid: string | undefined,
   sessionManager: SessionManager,
   devicePool: DevicePool,
-  sessionOptions: SessionOptions = {}
+  sessionOptions: SessionOptions = {},
+  execution?: SessionExecutionMetadata,
 ): Promise<ToolExecutionContext> {
   if (!sessionUuid) {
     return {};
   }
 
-  const existingSession = sessionManager.getSession(sessionUuid);
+  const existingSession = sessionManager.getSessionForNewExecution(sessionUuid, execution);
 
   // Get or create session
   const session = await sessionManager.getOrCreateSession(
     sessionUuid,
     devicePool,
-    sessionOptions.platform
+    sessionOptions.platform,
+    execution,
   );
 
-  await ensureKeepScreenAwake(session, sessionManager, sessionOptions);
-
-  if (!existingSession) {
-    if (session.platform === "android") {
-      await ensureAccessibilityServiceReady(session.assignedDevice, sessionUuid, session.platform);
-    }
-
-    // Start test coverage session for navigation graph tracking
-    // This enables automatic tracking of screens and transitions during test execution
-    const navManager = NavigationGraphManager.getInstanceForSession(sessionUuid);
-    if (navManager.getCurrentAppId()) {
-      await navManager.startTestSession(sessionUuid);
-      logger.info(`[ToolExecutionContext] Started test coverage tracking for session ${sessionUuid}`);
-    }
+  if (!sessionManager.isCurrentSession(session)) {
+    throw new ActionableError(`Session ${sessionUuid} was released during setup`);
   }
+
+  await sessionManager.trackSessionSetup(
+    session,
+    () => setupSession(session, existingSession === session, sessionManager, sessionOptions),
+  );
 
   return {
     sessionId: sessionUuid,
@@ -112,6 +107,40 @@ export async function createToolExecutionContext(
     sessionManager,
     devicePool,
   };
+}
+
+async function setupSession(
+  session: Session,
+  existingSession: boolean,
+  sessionManager: SessionManager,
+  sessionOptions: SessionOptions,
+): Promise<void> {
+  await ensureKeepScreenAwake(session, sessionManager, sessionOptions);
+  if (existingSession) {
+    return;
+  }
+
+  ensureSessionIsCurrent(session, sessionManager);
+  if (session.platform === "android") {
+    await ensureAccessibilityServiceReady(session.assignedDevice, session.sessionId, session.platform);
+  }
+  ensureSessionIsCurrent(session, sessionManager);
+
+  // Start test coverage session for navigation graph tracking
+  // This enables automatic tracking of screens and transitions during test execution
+  const navManager = NavigationGraphManager.getInstanceForSession(session.sessionId);
+  if (navManager.getCurrentAppId()) {
+    ensureSessionIsCurrent(session, sessionManager);
+    await navManager.startTestSession(session.sessionId);
+    ensureSessionIsCurrent(session, sessionManager);
+    logger.info(`[ToolExecutionContext] Started test coverage tracking for session ${session.sessionId}`);
+  }
+}
+
+function ensureSessionIsCurrent(session: Session, sessionManager: SessionManager): void {
+  if (!sessionManager.isCurrentSession(session)) {
+    throw new ActionableError(`Session ${session.sessionId} was released during setup`);
+  }
 }
 
 const A11Y_TRANSIENT_ERROR_PATTERNS = [
@@ -215,6 +244,17 @@ async function ensureKeepScreenAwake(
   } catch (error) {
     logger.warn(`[ToolExecutionContext] Failed to apply keep-awake for ${device.deviceId}: ${error}`);
     state = { applied: false, skipReason: "failed" };
+  }
+
+  if (!sessionManager.isCurrentSession(session)) {
+    if (state.applied) {
+      try {
+        await manager.restore(state);
+      } catch (error) {
+        logger.warn(`[ToolExecutionContext] Failed to restore keep-awake after session release for ${device.deviceId}: ${error}`);
+      }
+    }
+    throw new ActionableError(`Session ${session.sessionId} was released during setup`);
   }
 
   sessionManager.setKeepScreenAwake(session.sessionId, state);

@@ -216,6 +216,43 @@ interface NavigationToolCallRecorder {
   record(name: string, args: any, device: BootedDevice | undefined, sessionUuid: string | undefined): void;
 }
 
+/** Removes routing and execution implementation details before persisting a navigation edge. */
+export function stripNavigationInternalParams(args: Record<string, unknown>): Record<string, unknown> {
+  const clean = { ...args };
+  delete clean.__mcpSessionId;
+  delete clean.__executionId;
+  delete clean.__executionStartTime;
+  delete clean[INTERNAL_NO_DIFF_PARAM];
+  return clean;
+}
+
+function withAmbientDeviceContext(
+  args: Record<string, unknown>,
+  routingSessionUuid: string | undefined,
+  execution: { executionId: string; startTime: number } | undefined,
+): Record<string, unknown> {
+  const needsRoutingSession = routingSessionUuid && args.sessionUuid !== routingSessionUuid;
+  const needsExecution = execution && (
+    args.__executionId !== execution.executionId
+    || args.__executionStartTime !== execution.startTime
+  );
+  if (!needsRoutingSession && !needsExecution) {
+    return args;
+  }
+  return {
+    ...args,
+    ...(needsRoutingSession
+      ? { sessionUuid: routingSessionUuid }
+      : {}),
+    ...(needsExecution
+      ? {
+        __executionId: execution!.executionId,
+        __executionStartTime: execution!.startTime,
+      }
+      : {}),
+  };
+}
+
 interface AfterToolCallInput {
   name: string;
   args: any;
@@ -647,7 +684,7 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
     const navManager = sessionUuid
       ? NavigationGraphManager.getInstanceForSession(sessionUuid)
       : NavigationGraphManager.getInstance();
-    navManager.recordToolCall(name, args, uiState);
+    navManager.recordToolCall(name, stripNavigationInternalParams(args), uiState);
   }
 }
 
@@ -960,9 +997,11 @@ export class ToolRegistryClass {
       // Re-inject the ambient ROUTING session (issue #4611 Gap C) so a nested
       // device-aware call keeps the outer call's derived/label routing identity
       // rather than reverting to the base session.
-      const handlerArgs = capabilityContext?.routingSessionUuid && args.sessionUuid !== capabilityContext.routingSessionUuid
-        ? { ...args, sessionUuid: capabilityContext.routingSessionUuid }
-        : args;
+      const handlerArgs: any = withAmbientDeviceContext(
+        args,
+        capabilityContext?.routingSessionUuid,
+        capabilityContext?.execution,
+      );
       const toolStartMs = this.timer.now();
       const toolCallTimestamp = new Date().toISOString();
       let toolDurationMs: number | undefined;

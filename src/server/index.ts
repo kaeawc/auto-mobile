@@ -528,6 +528,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         () => runWithToolCapabilityContext(
           {
             routingSessionUuid,
+            execution: {
+              executionId: execution.id,
+              startTime: execution.startTime,
+            },
             // A routing session already carries its own base/label union in
             // ToolRegistry. Carry only a distinct connection profile so it
             // cannot suppress that derived-label resolution.

@@ -1414,6 +1414,37 @@ describe("DevicePool", () => {
       await releaseReservation();
     });
 
+    test("serializes same-device readiness reservations without blocking another emulator", async () => {
+      const firstDevice = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const otherDevice = createBootedDevice("emulator-5556", "android", "Pixel 9");
+      await initializeLiveDevices([firstDevice, otherDevice]);
+
+      const releaseFirst = await devicePool.reserveDeviceForReadiness(
+        firstDevice.deviceId,
+        firstDevice,
+      );
+      let secondReservationAcquired = false;
+      const secondReservation = devicePool
+        .reserveDeviceForReadiness(firstDevice.deviceId, firstDevice)
+        .then((release) => {
+          secondReservationAcquired = true;
+          return release;
+        });
+
+      const releaseOther = await devicePool.reserveDeviceForReadiness(
+        otherDevice.deviceId,
+        otherDevice,
+      );
+
+      expect(secondReservationAcquired).toBe(false);
+      await releaseOther();
+      await releaseFirst();
+
+      const releaseSecond = await secondReservation;
+      expect(secondReservationAcquired).toBe(true);
+      await releaseSecond();
+    });
+
     test("rekeys a non-emulator Android transport reconnect before allocation", async () => {
       const firstConnection = {
         ...createBootedDevice("R5CT123456", "android", "Pixel 8"),

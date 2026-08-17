@@ -259,7 +259,7 @@ steps:
     DaemonState.getInstance().initialize(sessionManager, devicePool);
     await sessionManager.createSession("base", androidDevice.deviceId, "android");
     const executionTracker = new ExecutionTracker(timer);
-    executionTracker.startExecution("executePlan", undefined, "base");
+    const execution = executionTracker.startExecution("executePlan", undefined, "base");
     const hasActiveExecution = (sessionId: string, query?: { excludeExecutionId?: string }) =>
       executionTracker.hasActiveSessionUuidExecutions(
         resolveCapabilityBaseSessionUuid(sessionId, sessionManager),
@@ -330,6 +330,12 @@ steps:
       expect(result).toMatchObject({ success: true });
       expect(sessionManager.getSession("base")).not.toBeNull();
       expect(sessionManager.getSession("base:B")).not.toBeNull();
+
+      executionTracker.endExecution(execution.id);
+      timer.advanceTime(30 * 60 * 1000 + 1);
+      sessionManager.cleanupExpiredSessions();
+      expect(sessionManager.getSession("base")).toBeNull();
+      expect(sessionManager.getSession("base:B")).toBeNull();
     } finally {
       DaemonState.getInstance().reset();
       sessionManager.stopCleanupTimer();

@@ -2761,21 +2761,25 @@ export class DevicePool {
     return (
       pooled.id === expected.deviceId &&
       pooled.platform === expected.platform &&
-      this.hasSameOrUnknownEmulatorName(pooled.name, expected.name, pooled.id) &&
+      this.hasSameOrUnknownEmulatorName(pooled, expected) &&
       !this.matchesRuntimeIdentity(pooled, expected)
     );
   }
 
   private hasSameOrUnknownEmulatorName(
-    pooledName: string,
-    expectedName: string,
-    deviceId: string,
+    pooled: PooledDevice,
+    expected: Pick<BootedDevice, "deviceId" | "name">,
   ): boolean {
-    const unknownName = `Unknown (${deviceId})`;
+    if (pooled.name === expected.name) {
+      return true;
+    }
+    if (!pooled.id.startsWith("emulator-")) {
+      return false;
+    }
+    const unknownName = `Unknown (${pooled.id})`;
     return (
-      pooledName === expectedName ||
-      (deviceId.startsWith("emulator-") &&
-        (pooledName === unknownName || expectedName === unknownName))
+      expected.name === unknownName ||
+      (pooled.name === unknownName && pooled.avdName === expected.name)
     );
   }
 

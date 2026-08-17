@@ -1361,6 +1361,42 @@ describe("DevicePool", () => {
       });
     });
 
+    test("does not transfer ownership from an unknown-name emulator to a different known AVD", async () => {
+      const sourceImage: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        source: "local",
+      };
+      const firstConnection = {
+        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
+        transportId: "1",
+      };
+      const rediscoveredWithUnknownName = {
+        ...firstConnection,
+        name: "Unknown (emulator-5554)",
+        transportId: "2",
+      };
+      const differentAvd = {
+        ...firstConnection,
+        name: "Pixel 9",
+        transportId: "3",
+      };
+      await devicePool.addDevice(firstConnection, sourceImage);
+      fakeDeviceManager.bootedDevices = [rediscoveredWithUnknownName];
+      await devicePool.refreshDevices();
+      fakeDeviceManager.bootedDevices = [differentAvd];
+
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice(differentAvd.deviceId)).toMatchObject({
+        name: "Pixel 9",
+        transportId: "3",
+      });
+      expect(devicePool.getDevice(differentAvd.deviceId)?.androidImage).toBeUndefined();
+      expect(devicePool.getDevice(differentAvd.deviceId)?.avdName).toBeUndefined();
+    });
+
     test("rekeys a transport-only mismatch before reserving startDevice readiness", async () => {
       const firstConnection = {
         ...createBootedDevice("emulator-5554", "android", "Pixel 8"),

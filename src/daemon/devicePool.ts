@@ -1391,11 +1391,12 @@ export class DevicePool {
     }
 
     if (bootedDevice) {
-      return !(await this.replaceIdlePooledDeviceForLivenessCheck(
+      const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
         device,
         bootedDevice,
         assignmentLockHeld,
-      ));
+      );
+      return !replaced && this.devices.get(device.id) === device;
     }
 
     if (deferRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {

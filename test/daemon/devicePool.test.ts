@@ -2254,6 +2254,41 @@ describe("DevicePool", () => {
       }
     });
 
+    test("assigns the current replacement after liveness discovery supersedes a captured device", async () => {
+      const firstConnection = {
+        ...createBootedDevice("emulator-5554", "android", "Pixel 8"),
+        transportId: "1",
+      };
+      const reconnected = { ...firstConnection, transportId: "2" };
+      const manager = new DeferredReconnectionDiscoveryFakeDeviceManager(
+        [reconnected],
+        [reconnected],
+      );
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await devicePool.addDevice(firstConnection);
+
+      const assignment = devicePool.assignDeviceToSession("session-1", "android");
+      await manager.waitForDiscoveryStart();
+      await devicePool.removeDevice(firstConnection.deviceId);
+      await devicePool.addDevice(reconnected);
+
+      manager.releaseDiscovery();
+
+      await expect(assignment).resolves.toBe(reconnected.deviceId);
+      expect(devicePool.getDevice(reconnected.deviceId)).toMatchObject({
+        transportId: "2",
+        sessionId: "session-1",
+        status: "busy",
+      });
+    });
+
     test("rejects a changed runtime identity inside the assignment mutex", async () => {
       await devicePool.initializeWithDevices([
         createBootedDevice("emulator-5554", "android", "Old Pixel"),

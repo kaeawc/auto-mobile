@@ -68,6 +68,41 @@ interface BootDeadlineContext {
   signal?: AbortSignal;
 }
 
+interface PhaseCancellation {
+  promise: Promise<never>;
+  throwIfCancelled(): void;
+  dispose(): void;
+}
+
+function createPhaseCancellation(
+  signal: AbortSignal | undefined,
+  phase: string,
+): PhaseCancellation {
+  const never = new Promise<never>(() => undefined);
+  const throwIfCancelled = () => {
+    if (signal?.aborted) {
+      throw new ActionableError(`startDevice cancelled while ${phase}`);
+    }
+  };
+  if (!signal || signal.aborted) {
+    return { promise: never, throwIfCancelled, dispose: () => {} };
+  }
+
+  let rejectCancellation!: (error: ActionableError) => void;
+  const promise = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const abort = () => {
+    rejectCancellation(new ActionableError(`startDevice cancelled while ${phase}`));
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  return {
+    promise,
+    throwIfCancelled,
+    dispose: () => signal.removeEventListener("abort", abort),
+  };
+}
+
 /**
  * Product boot boundary shared by MCP and daemon-free callers.
  *
@@ -175,7 +210,11 @@ export class DeviceBootService {
     if (!match) {
       return undefined;
     }
-    await progress?.report(100, 100, "Found matching running device");
+    if (progress) {
+      await this.runPhase(context, "reporting matching device progress", async () =>
+        progress.report(100, 100, "Found matching running device"),
+      );
+    }
     return this.waitForRunningDevice(match, context, progress);
   }
 
@@ -236,19 +275,23 @@ export class DeviceBootService {
   ): Promise<DeviceBootResult> {
     const recoveryTarget: DeviceInfo = { ...device, isRunning: true };
     let attempts = 0;
-    return this.bootRecovery.run(recoveryTarget, async () => {
-      attempts++;
-      if (attempts > 1) {
-        return this.bootImageOnce(recoveryTarget, context, progress, false);
-      }
-      const ready = await this.runPhase(context, "waiting for a running device", () =>
-        this.dependencies.deviceManager.waitForDeviceReady(
-          { ...device, isRunning: true },
-          this.remaining(context.deadlineMs, "waiting for a running device"),
-        ),
-      );
-      return { device: { ...device, ...ready }, source: "booted", provisioned: false };
-    });
+    return this.bootRecovery.run(
+      recoveryTarget,
+      async () => {
+        attempts++;
+        if (attempts > 1) {
+          return this.bootImageOnce(recoveryTarget, context, progress, false);
+        }
+        const ready = await this.runPhase(context, "waiting for a running device", () =>
+          this.dependencies.deviceManager.waitForDeviceReady(
+            { ...device, isRunning: true },
+            this.remaining(context.deadlineMs, "waiting for a running device"),
+          ),
+        );
+        return { device: { ...device, ...ready }, source: "booted", provisioned: false };
+      },
+      context.signal,
+    );
   }
 
   private async bootImage(
@@ -260,8 +303,10 @@ export class DeviceBootService {
     if (image.platform === "ios" && !image.deviceId) {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
     }
-    return this.bootRecovery.run(image, async () =>
-      this.bootImageOnce(image, context, progress, provisioned),
+    return this.bootRecovery.run(
+      image,
+      async () => this.bootImageOnce(image, context, progress, provisioned),
+      context.signal,
     );
   }
 
@@ -271,30 +316,67 @@ export class DeviceBootService {
     progress: DeviceBootProgress | undefined,
     provisioned: boolean,
   ): Promise<DeviceBootResult> {
-    const handle = await this.runPhase(context, "starting the device", () =>
-      this.dependencies.deviceManager.startDevice(
+    let disposeStartHandleCancellation = () => {};
+    const handle = await this.runPhase(context, "starting the device", async (signal) => {
+      const started = await this.dependencies.deviceManager.startDevice(
         image,
         this.remaining(context.deadlineMs, "starting the device"),
-      ),
-    );
-    await progress?.report(60, 100, "Device started, waiting for readiness...");
-    const ready = await this.runPhase(context, "waiting for device boot readiness", () =>
-      waitForDeviceReadyOrCancel(
-        this.dependencies.deviceManager,
-        image,
-        handle,
-        this.remaining(context.deadlineMs, "waiting for device boot readiness"),
-      ),
-    );
-    await progress?.report(100, 100, "Device is ready for use");
-    return {
-      device: enrichBootedDevice(ready, image),
-      source: "cold-boot",
-      sourceImage: image,
-      processHandle: handle,
-      processId: handle?.pid,
-      provisioned,
+      );
+      const cancelStarted = () => {
+        started?.kill();
+      };
+      if (signal.aborted) {
+        cancelStarted();
+      } else {
+        signal.addEventListener("abort", cancelStarted, { once: true });
+        disposeStartHandleCancellation = () => signal.removeEventListener("abort", cancelStarted);
+      }
+      return started;
+    });
+    disposeStartHandleCancellation();
+    let handleCancelled = false;
+    const cancelHandle = () => {
+      if (handle && !handleCancelled) {
+        handleCancelled = true;
+        handle.kill();
+      }
     };
+    context.signal?.addEventListener("abort", cancelHandle, { once: true });
+    try {
+      if (progress) {
+        await this.runPhase(context, "reporting device start progress", async () =>
+          progress.report(60, 100, "Device started, waiting for readiness..."),
+        );
+      }
+      const ready = await this.runPhase(context, "waiting for device boot readiness", (signal) =>
+        waitForDeviceReadyOrCancel(
+          this.dependencies.deviceManager,
+          image,
+          handle,
+          this.remaining(context.deadlineMs, "waiting for device boot readiness"),
+          signal,
+          cancelHandle,
+        ),
+      );
+      if (progress) {
+        await this.runPhase(context, "reporting device readiness progress", async () =>
+          progress.report(100, 100, "Device is ready for use"),
+        );
+      }
+      return {
+        device: enrichBootedDevice(ready, image),
+        source: "cold-boot",
+        sourceImage: image,
+        processHandle: handle,
+        processId: handle?.pid,
+        provisioned,
+      };
+    } catch (error) {
+      cancelHandle();
+      throw error;
+    } finally {
+      context.signal?.removeEventListener("abort", cancelHandle);
+    }
   }
 
   private remaining(deadlineMs: number, phase: string): number {
@@ -313,6 +395,8 @@ export class DeviceBootService {
     operation: (signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
     const remainingMs = this.remaining(context.deadlineMs, phase);
+    const cancellation = createPhaseCancellation(context.signal, phase);
+    cancellation.throwIfCancelled();
     const controller = new AbortController();
     const signal = context.signal
       ? AbortSignal.any([context.signal, controller.signal])
@@ -333,8 +417,10 @@ export class DeviceBootService {
             );
           }, remainingMs);
         }),
+        cancellation.promise,
       ]);
     } catch (error) {
+      cancellation.throwIfCancelled();
       if (controller.signal.aborted) {
         await this.awaitAbortSettlement(operationPromise);
         throw new ActionableError(
@@ -346,6 +432,7 @@ export class DeviceBootService {
       if (timeoutHandle) {
         this.timer.clearTimeout(timeoutHandle);
       }
+      cancellation.dispose();
     }
   }
 

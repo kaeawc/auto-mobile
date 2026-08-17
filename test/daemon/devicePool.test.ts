@@ -7,6 +7,8 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -232,6 +234,33 @@ describe("DevicePool", () => {
       this.killCount++;
       return true;
     }
+  }
+
+  class DeferredDeviceSessionPersistence implements DeviceSessionPersistence {
+    private readonly writeStarted = Promise.withResolvers<void>();
+    private readonly writeFinished = Promise.withResolvers<void>();
+    private deferWrite = true;
+
+    async waitForUpsert(): Promise<void> {
+      await this.writeStarted.promise;
+    }
+
+    finishUpsert(): void {
+      this.writeFinished.resolve();
+    }
+
+    async upsertActiveSession(): Promise<void> {
+      if (!this.deferWrite) {
+        return;
+      }
+      this.deferWrite = false;
+      this.writeStarted.resolve();
+      await this.writeFinished.promise;
+    }
+
+    async recordActivity(): Promise<void> {}
+
+    async markReleased(): Promise<void> {}
   }
 
   class FakeDeviceManagerWithStartedProcess extends FakeDeviceManagerWithMinimalReadyDevice {
@@ -498,7 +527,7 @@ describe("DevicePool", () => {
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
-    sessionManager = new SessionManager(fakeTimer);
+    sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     fakeAppsRepo = new FakeInstalledAppsRepository();
     fakeDeviceManager = new FakeDeviceManager();
     // Create a RetryExecutor that uses the fakeTimer so time advancement works correctly
@@ -1762,6 +1791,36 @@ describe("DevicePool", () => {
       });
     });
 
+    test("restores the pooled device when session persistence rejects", async () => {
+      sessionManager.stopCleanupTimer();
+      const sessionPersistence = new FakeDeviceSessionPersistence();
+      sessionPersistence.failure = "create";
+      sessionManager = new SessionManager(fakeTimer, sessionPersistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([createBootedDevice("emulator-5554")]);
+      const before = devicePool.getDevice("emulator-5554");
+      const previousAssignment = {
+        sessionId: before?.sessionId,
+        status: before?.status,
+        assignmentCount: before?.assignmentCount,
+        errorCount: before?.errorCount,
+        lastUsedAt: before?.lastUsedAt,
+      };
+
+      await expect(devicePool.assignDeviceToSession("session-failure")).rejects.toThrow("persist create failed");
+
+      expect(devicePool.getDevice("emulator-5554")).toMatchObject(previousAssignment);
+      expect(sessionManager.getSession("session-failure")).toBeNull();
+      expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
+    });
+
     test("should throw error when no devices available after timeout", async () => {
       // Use manual mode so we can control time advancement
 
@@ -2016,6 +2075,28 @@ describe("DevicePool", () => {
       await expect(
         devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform),
       ).resolves.toBe("session-1");
+    });
+
+    test("releases the old pooled device after rebinding an existing session", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("emulator-old"),
+        createBootedDevice("emulator-new"),
+      ]);
+      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-old", "android");
+
+      await devicePool.bindOrReuseDeviceSession(
+        "session-1",
+        "emulator-new",
+        "android",
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
+
+      expect(devicePool.getDevice("emulator-old")).toMatchObject({ sessionId: null, status: "idle" });
+      expect(devicePool.getDevice("emulator-new")).toMatchObject({ sessionId: "session-1", status: "busy" });
+      expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-new");
     });
 
     test("rejects a changed runtime identity inside the assignment mutex", async () => {
@@ -2297,6 +2378,79 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("device-a")).toMatchObject({ sessionId: null, status: "idle" });
     });
 
+    test("releases earlier session ownership when a later persistence write rejects", async () => {
+      sessionManager.stopCleanupTimer();
+      const sessionPersistence = new FakeDeviceSessionPersistence();
+      sessionPersistence.createFailureOnAttempt = 2;
+      sessionManager = new SessionManager(fakeTimer, sessionPersistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([
+        createBootedDevice("emulator-5554"),
+        createBootedDevice("emulator-5556"),
+      ]);
+
+      await expect(
+        devicePool.assignMultipleDevices(["session-a", "session-b"], 1_000, "android"),
+      ).rejects.toThrow("persist create failed");
+
+      expect(sessionManager.getSession("session-a")).toBeNull();
+      expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
+      expect(devicePool.getDevice("emulator-5554")?.status).toBe("idle");
+    });
+
+    test("releases the old device without rolling back a replacement session with the same UUID", async () => {
+      const secondWriteStarted = Promise.withResolvers<void>();
+      const secondWriteFinished = Promise.withResolvers<void>();
+      let writeCount = 0;
+      const sessionPersistence: DeviceSessionPersistence = {
+        async upsertActiveSession(): Promise<void> {
+          writeCount++;
+          if (writeCount === 2) {
+            secondWriteStarted.resolve();
+            await secondWriteFinished.promise;
+            throw new Error("persist create failed");
+          }
+        },
+        async recordActivity(): Promise<void> {},
+        async markReleased(): Promise<void> {},
+      };
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, sessionPersistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await initializeLiveDevices([
+        createBootedDevice("emulator-5554"),
+        createBootedDevice("emulator-5556"),
+        createBootedDevice("emulator-5558"),
+      ]);
+
+      const allocation = devicePool.assignMultipleDevices(["session-a", "session-b"], 1_000, "android");
+      await secondWriteStarted.promise;
+
+      await sessionManager.releaseSession("session-a");
+      await sessionManager.createSession("session-a", "emulator-5558", "android");
+      secondWriteFinished.resolve();
+
+      await expect(allocation).rejects.toThrow("persist create failed");
+      expect(sessionManager.getSession("session-a")?.assignedDevice).toBe("emulator-5558");
+      expect(devicePool.getDevice("emulator-5554")?.status).toBe("idle");
+    });
+  });
+
+  describe("assignMultipleDevices", () => {
     test("evicts a started emulator when its process exits after readiness", async () => {
       const images: DeviceInfo[] = [
         {
@@ -2384,6 +2538,39 @@ describe("DevicePool", () => {
       } finally {
         await reservation.release();
       }
+    });
+
+    test("does not publish a session when its started emulator exits during persistence", async () => {
+      const images: DeviceInfo[] = [{
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        deviceId: "emulator-5554",
+        source: "local",
+      }];
+      const manager = new FakeDeviceManagerWithStartedProcess(images);
+      const persistence = new DeferredDeviceSessionPersistence();
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+
+      const assignment = devicePool.assignMultipleDevices(["session-1"], 1000, "android");
+      await persistence.waitForUpsert();
+      manager.childProcess.emit("exit", 0, null);
+      await new Promise(resolve => setImmediate(resolve));
+      persistence.finishUpsert();
+
+      await expect(assignment).rejects.toThrow("disconnected while its session was being created");
+      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(sessionManager.getSession("session-1")).toBeNull();
+      expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
     });
 
     test("keeps criteria auto-start available after a process exit when recovery is disabled", async () => {

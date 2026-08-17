@@ -9,8 +9,44 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
+
+class DeferredDeviceSessionPersistence implements DeviceSessionPersistence {
+  private deferredWrite: Promise<void> | null = null;
+  private resolveDeferredWrite: (() => void) | null = null;
+  private readonly writeStarted = Promise.withResolvers<void>();
+
+  deferNextUpsert(): void {
+    this.deferredWrite = new Promise<void>(resolve => {
+      this.resolveDeferredWrite = resolve;
+    });
+  }
+
+  async waitForUpsert(): Promise<void> {
+    await this.writeStarted.promise;
+  }
+
+  finishUpsert(): void {
+    this.resolveDeferredWrite?.();
+  }
+
+  async upsertActiveSession(): Promise<void> {
+    const deferredWrite = this.deferredWrite;
+    if (!deferredWrite) {
+      return;
+    }
+    this.deferredWrite = null;
+    this.writeStarted.resolve();
+    await deferredWrite;
+  }
+
+  async recordActivity(): Promise<void> {}
+
+  async markReleased(): Promise<void> {}
+}
 
 function makeHierarchy(label: string): ViewHierarchyResult {
   return {
@@ -41,7 +77,7 @@ describe("SessionManager", () => {
   beforeEach(() => {
     clearHeartbeatEnv();
     fakeTimer = new FakeTimer();
-    sessionManager = new SessionManager(fakeTimer);
+    sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
   });
 
   afterEach(() => {
@@ -95,6 +131,81 @@ describe("SessionManager", () => {
 
       expect(session.heartbeatTimeoutMs).toBe(15_000);
       expect(session.heartbeatTimeoutSource).toBe("custom");
+    });
+
+    test("removes every ownership mapping when persistence rejects", async () => {
+      const repository = new FakeDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+      repository.failure = "create";
+
+      try {
+        await expect(manager.createSession("session-failure", "emulator-5554", "android")).rejects.toThrow(
+          "persist create failed",
+        );
+
+        expect(manager.getSession("session-failure")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-5554")).toBeNull();
+        expect(manager.getActiveSessionCount()).toBe(0);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("releases a session after its pending creation finishes", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        repository.deferNextUpsert();
+        const creation = manager.createSession("session-pending-release", "emulator-5554", "android");
+        await repository.waitForUpsert();
+        const release = manager.releaseSession("session-pending-release");
+
+        repository.finishUpsert();
+
+        await expect(creation).resolves.toMatchObject({ sessionId: "session-pending-release" });
+        await expect(release).resolves.toBe("emulator-5554");
+        expect(manager.getSession("session-pending-release")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-5554")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("keeps ownership unpublished while a creation write is pending", async () => {
+      let rejectFirstWrite!: (error: Error) => void;
+      const firstWrite = new Promise<void>((_resolve, reject) => {
+        rejectFirstWrite = reject;
+      });
+      let firstWritePending = true;
+      const repository: DeviceSessionPersistence = {
+        upsertActiveSession: async () => {
+          if (firstWritePending) {
+            firstWritePending = false;
+            await firstWrite;
+          }
+        },
+        recordActivity: async () => {},
+        markReleased: async () => {},
+      };
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        const initialCreate = manager.createSession("reused", "emulator-old", "android");
+        const duplicateCreate = manager.createSession("reused", "emulator-new", "android");
+
+        expect(manager.getSession("reused")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-old")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
+
+        rejectFirstWrite(new Error("first persistence failed"));
+        await expect(Promise.all([initialCreate, duplicateCreate])).rejects.toThrow("first persistence failed");
+
+        expect(manager.getSession("reused")).toBeNull();
+        expect(manager.getActiveSessionCount()).toBe(0);
+      } finally {
+        manager.stopCleanupTimer();
+      }
     });
   });
 
@@ -210,6 +321,33 @@ describe("SessionManager", () => {
       expect(attempts).toBe(2);
     });
 
+    test("releases a session after its pending automatic assignment finishes", async () => {
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const assignmentStarted = Promise.withResolvers<void>();
+      const finishAssignment = Promise.withResolvers<void>();
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(sessionId: string): Promise<string> {
+          assignmentStarted.resolve();
+          await finishAssignment.promise;
+          return (await manager.createSession(sessionId, "emulator-5554", "android")).assignedDevice;
+        },
+      };
+
+      try {
+        const assignment = manager.getOrCreateSession("pending-assignment", devicePool);
+        await assignmentStarted.promise;
+        const release = manager.releaseSession("pending-assignment", "device-disconnected");
+        finishAssignment.resolve();
+
+        await expect(assignment).resolves.toMatchObject({ assignedDevice: "emulator-5554" });
+        await expect(release).resolves.toBe("emulator-5554");
+        expect(manager.getSession("pending-assignment")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-5554")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("should return null session when expired session requested", async () => {
       const session = await sessionManager.createSession("session-1", "emulator-5554", "android");
       // Force expiration by setting expiresAt to past
@@ -264,6 +402,129 @@ describe("SessionManager", () => {
       )).rejects.toThrow("earlier work is still active");
 
       expect(sessionManager.getActiveSessionCount()).toBe(1);
+    });
+  });
+
+  describe("rebindSession", () => {
+    test("retains the existing binding when replacement persistence rejects", async () => {
+      const repository = new FakeDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android");
+        repository.failure = "create";
+
+        await expect(manager.rebindSession("session-1", "emulator-new", "android")).rejects.toThrow(
+          "persist create failed",
+        );
+
+        expect(manager.getSession("session-1")?.assignedDevice).toBe("emulator-old");
+        expect(manager.getSessionForDevice("emulator-old")).toBe("session-1");
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("serializes a pending rebind with release and clears device-scoped state", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const restoredDevices: string[] = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        repository,
+        undefined,
+        device => ({ restore: async () => { restoredDevices.push(device.deviceId); } }),
+      );
+      const unboundDevices: string[] = [];
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android");
+        manager.setLastHierarchy("session-1", makeHierarchy("old"));
+        manager.setKeepScreenAwake("session-1", { applied: true });
+        manager.onSessionDeviceUnbound((_sessionId, deviceId) => unboundDevices.push(deviceId));
+        repository.deferNextUpsert();
+
+        const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
+        await repository.waitForUpsert();
+        const releasing = manager.releaseSession("session-1");
+        repository.finishUpsert();
+
+        await expect(rebinding).resolves.toMatchObject({ assignedDevice: "emulator-new", cacheData: {} });
+        await expect(releasing).resolves.toBe("emulator-new");
+        expect(restoredDevices).toEqual(["emulator-old"]);
+        expect(unboundDevices).toEqual(["emulator-old"]);
+        expect(manager.getSession("session-1")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-old")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("serializes expiry cleanup with a pending rebind", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository, () => new FakeDbWriteBarrier());
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android", 1);
+        repository.deferNextUpsert();
+        const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
+        await repository.waitForUpsert();
+
+        fakeTimer.advanceTime(2);
+        manager.cleanupExpiredSessions();
+        repository.finishUpsert();
+
+        await expect(rebinding).resolves.toMatchObject({ assignedDevice: "emulator-new" });
+        await expect(manager.drainReleasePromises(10)).resolves.toBe(true);
+        expect(manager.getSession("session-1")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-old")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("does not remove rebind ownership when lazy expiry observes the pending rebind", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android", 1);
+        repository.deferNextUpsert();
+        const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
+        await repository.waitForUpsert();
+
+        fakeTimer.advanceTime(2);
+        expect(manager.getSession("session-1")).toBeNull();
+        repository.finishUpsert();
+
+        await expect(rebinding).resolves.toMatchObject({ assignedDevice: "emulator-new" });
+        await expect(manager.drainReleasePromises(10)).resolves.toBe(true);
+        expect(manager.getSession("session-1")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-old")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("does not recreate a session when a release wins the rebind race", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        await manager.createSession("session-1", "emulator-old", "android");
+        const releasing = manager.releaseSession("session-1");
+        await expect(manager.rebindSession("session-1", "emulator-new", "android")).rejects.toThrow(
+          "Cannot rebind released session session-1",
+        );
+        await expect(releasing).resolves.toBe("emulator-old");
+        expect(manager.getSession("session-1")).toBeNull();
+        expect(manager.getSessionForDevice("emulator-new")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
     });
   });
 
@@ -532,10 +793,11 @@ describe("SessionManager", () => {
         await firstPersistenceStartedPromise;
         const replacement = manager.createSession("s1", "device-2", "android");
 
-        expect(manager.getSession("s1")).toMatchObject({ assignedDevice: "device-2" });
+        expect(manager.getSession("s1")).toBeNull();
         finishFirstPersistence();
         await expect(first).resolves.toBe("device-1");
         await expect(replacement).resolves.toMatchObject({ assignedDevice: "device-2" });
+        expect(manager.getSession("s1")).toMatchObject({ assignedDevice: "device-2" });
         await expect(manager.releaseSession("s1", "second")).resolves.toBe("device-2");
         expect(releases).toEqual(["first", "second"]);
       } finally {

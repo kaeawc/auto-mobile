@@ -2,6 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { BootedDevice } from "../../../src/models";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
@@ -20,7 +21,7 @@ describe("Parallel Execution Across Multiple Devices", function() {
 
   beforeEach(async function() {
     fakeTimer = new FakeTimer();
-    sessionManager = new SessionManager(fakeTimer);
+    sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     fakeAppsRepo = new FakeInstalledAppsRepository();
     // Create a RetryExecutor that uses the fakeTimer so time advancement works correctly
     const retryExecutor = new DefaultRetryExecutor(fakeTimer);

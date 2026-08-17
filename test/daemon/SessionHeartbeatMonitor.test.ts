@@ -4,6 +4,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
 const AUTOLOCK_ENV_KEYS = [
@@ -34,7 +35,7 @@ describe("SessionHeartbeatMonitor", () => {
   beforeEach(() => {
     clearAutolockEnv();
     timer = new FakeTimer();
-    sessionManager = new SessionManager(timer);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   });
 
   afterEach(() => {

@@ -2,7 +2,7 @@ import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
-import { DeviceSessionRepository } from "../db/deviceSessionRepository";
+import { DeviceSessionRepository, type DeviceSessionPersistence } from "../db/deviceSessionRepository";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
@@ -95,6 +95,21 @@ export interface ActiveSessionExecutionQuery {
 
 export type ActiveSessionExecutionChecker = (sessionId: string, query?: ActiveSessionExecutionQuery) => boolean;
 
+export type SessionDeviceUnboundCallback = (sessionId: string, deviceId: string) => void;
+
+interface PendingSessionCreation {
+  promise: Promise<Session>;
+}
+
+interface PendingSessionRelease {
+  promise: Promise<string | null>;
+}
+
+interface PendingSessionRebind {
+  session: Session;
+  promise: Promise<Session>;
+}
+
 export interface SessionDeviceAssigner {
   assignDeviceToSession(sessionId: string, platform?: Platform): Promise<string>;
 }
@@ -115,10 +130,10 @@ export class SessionManager {
   private sessions: Map<string, Session> = new Map();
   private sessionDeviceMap: Map<string, string> = new Map(); // sessionId -> deviceId
   private deviceSessionMap: Map<string, string> = new Map(); // deviceId -> sessionId (reverse lookup)
-  private pendingSessionCreations: Map<string, Promise<Session>> = new Map();
   private cleanupTimer: NodeJS.Timeout | null = null;
   private timer: Timer;
   private releaseCallbacks: SessionReleaseCallback[] = [];
+  private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
   private readonly releasePromises: Map<
     string,
     { session: Session; promise: Promise<string | null> }
@@ -130,12 +145,20 @@ export class SessionManager {
   /** Sessions whose teardown has closed admission for further device-state setup. */
   private readonly releasingSessions: WeakSet<Session> = new WeakSet();
   /**
-   * Device work that outlived its bounded release phase. The pool keeps the
-   * device assigned until this settles, so no replacement session can race a
+    * Device work that outlived its bounded release phase. The pool keeps the
+    * device assigned until this settles, so no replacement session can race a
    * late setup or keep-awake restore.
-   */
+  */
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
-  private deviceSessionRepository: DeviceSessionRepository;
+  /** Creation writes that must finish before a session becomes visible to callers. */
+  private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
+  /** Automatic device assignments that have not yet started their creation write. */
+  private readonly pendingSessionAssignments: Map<string, Promise<Session>> = new Map();
+  /** Releases received before an assignment has published its session. */
+  private readonly pendingSessionReleases: Map<string, PendingSessionRelease> = new Map();
+  /** Rebinds that a release must await before it can remove the live binding. */
+  private readonly pendingSessionRebinds: Map<string, PendingSessionRebind> = new Map();
+  private deviceSessionRepository: DeviceSessionPersistence;
   private readonly getBarrier: () => DbWriteBarrier;
   private readonly keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer;
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
@@ -150,7 +173,7 @@ export class SessionManager {
 
   constructor(
     timer: Timer = defaultTimer,
-    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
+    deviceSessionRepository: DeviceSessionPersistence = new DeviceSessionRepository(),
     // Resolve the shared barrier per write, not once at construction, so a
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
     // seen instead of a pinned drained instance (issue #2912). Because the barrier
@@ -196,6 +219,15 @@ export class SessionManager {
   }
 
   /**
+    * Register cleanup for a device a session stopped using without ending that
+    * session. This intentionally excludes session-wide cleanup and transport
+    * unbinding, which must remain attached to a real session release.
+   */
+  onSessionDeviceUnbound(callback: SessionDeviceUnboundCallback): void {
+    this.deviceUnboundCallbacks.push(callback);
+  }
+
+  /**
    * Create a new session with an assigned device
    *
    * This is called by the daemon when a session UUID is first used.
@@ -211,6 +243,11 @@ export class SessionManager {
     if (this.sessions.has(sessionId)) {
       logger.warn(`Session ${sessionId} already exists, returning existing session`);
       return this.sessions.get(sessionId)!;
+    }
+
+    const pendingCreation = this.pendingSessionCreations.get(sessionId);
+    if (pendingCreation) {
+      return await pendingCreation.promise;
     }
 
     const now = this.timer.now();
@@ -231,12 +268,23 @@ export class SessionManager {
       hasReceivedHeartbeat: false,
     };
 
-    this.sessions.set(sessionId, session);
-    this.sessionDeviceMap.set(sessionId, assignedDevice);
-    this.deviceSessionMap.set(assignedDevice, sessionId);
-    await this.persistSession(session);
+    const creation: PendingSessionCreation = { promise: this.persistAndPublishSession(session) };
+    this.pendingSessionCreations.set(sessionId, creation);
+    try {
+      return await creation.promise;
+    } finally {
+      if (this.pendingSessionCreations.get(sessionId) === creation) {
+        this.pendingSessionCreations.delete(sessionId);
+      }
+    }
+  }
 
-    logger.info(`Created session ${sessionId} with device ${assignedDevice}`);
+  private async persistAndPublishSession(session: Session): Promise<Session> {
+    await this.persistSession(session);
+    this.sessions.set(session.sessionId, session);
+    this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
+    this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
+    logger.info(`Created session ${session.sessionId} with device ${session.assignedDevice}`);
     return session;
   }
 
@@ -262,19 +310,27 @@ export class SessionManager {
     execution?: SessionExecutionMetadata,
   ): Session | null {
     const session = this.sessions.get(sessionId);
-    if (session && expireDespiteActiveExecution && this.isLateExecutionWhileEarlierWorkIsActive(session, execution)) {
+    if (!session) {
+      return null;
+    }
+    if (expireDespiteActiveExecution && this.isLateExecutionWhileEarlierWorkIsActive(session, execution)) {
       throw new Error(
         `Session ${sessionId} expired before this execution began while earlier work is still active.`,
       );
     }
-    if (session && (expireDespiteActiveExecution
-      ? this.isSessionExpiredForNewExecution(session, execution)
-      : this.isSessionExpired(session))) {
+    if (this.shouldExpireSession(session, expireDespiteActiveExecution, execution)) {
       // Release owns this exact session object until it has restored device state
       // and removed its assignment. Keep expiry cleanup from creating a second
       // incarnation with the same UUID before teardown completes.
       if (this.releasingSessions.has(session)) {
         return session;
+      }
+      if (this.pendingSessionRebinds.get(sessionId)?.session === session) {
+        const release = this.releaseSession(sessionId, "lazy-expiry", true);
+        void this.getBarrier()
+          .trackExisting(release)
+          .catch(error => logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`));
+        return null;
       }
       logger.info(`Session ${sessionId} has expired, removing`);
       const deviceId = session.assignedDevice;
@@ -292,7 +348,17 @@ export class SessionManager {
       }
       return null;
     }
-    return session || null;
+    return session;
+  }
+
+  private shouldExpireSession(
+    session: Session,
+    expireDespiteActiveExecution: boolean,
+    execution?: SessionExecutionMetadata,
+  ): boolean {
+    return expireDespiteActiveExecution
+      ? this.isSessionExpiredForNewExecution(session, execution)
+      : this.isSessionExpired(session);
   }
 
   /**
@@ -331,18 +397,23 @@ export class SessionManager {
       return existing;
     }
 
-    const pendingCreation = this.pendingSessionCreations.get(sessionId);
-    if (pendingCreation) {
-      return await pendingCreation;
+    const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
+    if (pendingAssignment) {
+      return await pendingAssignment;
     }
 
-    const creation = this.createUnseenSession(sessionId, devicePool, platform).finally(() => {
-      if (this.pendingSessionCreations.get(sessionId) === creation) {
-        this.pendingSessionCreations.delete(sessionId);
+    const pendingCreation = this.pendingSessionCreations.get(sessionId);
+    if (pendingCreation) {
+      return await pendingCreation.promise;
+    }
+
+    const assignment = this.createUnseenSession(sessionId, devicePool, platform).finally(() => {
+      if (this.pendingSessionAssignments.get(sessionId) === assignment) {
+        this.pendingSessionAssignments.delete(sessionId);
       }
     });
-    this.pendingSessionCreations.set(sessionId, creation);
-    return await creation;
+    this.pendingSessionAssignments.set(sessionId, assignment);
+    return await assignment;
   }
 
   private async createUnseenSession(
@@ -372,6 +443,75 @@ export class SessionManager {
 
     logger.info(`[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`);
     return session;
+  }
+
+  async rebindSession(
+    sessionId: string,
+    assignedDevice: string,
+    platform: Platform,
+  ): Promise<Session> {
+    const existing = this.sessions.get(sessionId);
+    if (!existing) {
+      return await this.createSession(sessionId, assignedDevice, platform);
+    }
+    if (existing.assignedDevice === assignedDevice) {
+      return existing;
+    }
+
+    const pendingRebind = this.pendingSessionRebinds.get(sessionId);
+    if (pendingRebind) {
+      await pendingRebind.promise;
+      return await this.rebindSession(sessionId, assignedDevice, platform);
+    }
+
+    const inFlightRelease = this.releasePromises.get(sessionId);
+    if (inFlightRelease?.session === existing) {
+      await inFlightRelease.promise;
+      throw new Error(`Cannot rebind released session ${sessionId}.`);
+    }
+
+    const promise = this.persistAndPublishRebind(existing, assignedDevice, platform);
+    const rebind = { session: existing, promise };
+    this.pendingSessionRebinds.set(sessionId, rebind);
+    try {
+      return await promise;
+    } finally {
+      if (this.pendingSessionRebinds.get(sessionId) === rebind) {
+        this.pendingSessionRebinds.delete(sessionId);
+      }
+    }
+  }
+
+  private async persistAndPublishRebind(
+    existing: Session,
+    assignedDevice: string,
+    platform: Platform,
+  ): Promise<Session> {
+    const replacement: Session = {
+      ...existing,
+      assignedDevice,
+      platform,
+      cacheData: {},
+    };
+    await this.persistSession(replacement);
+
+    try {
+      await this.restoreKeepScreenAwake(existing);
+    } catch (error) {
+      logger.warn(`Failed to restore keep-awake state for rebound session ${existing.sessionId}: ${error}`);
+    }
+
+    const previousDevice = existing.assignedDevice;
+    // Preserve object identity so an already-started release observes the
+    // rebinding and frees its live replacement rather than a stale snapshot.
+    Object.assign(existing, replacement);
+    this.sessionDeviceMap.set(existing.sessionId, assignedDevice);
+    if (this.deviceSessionMap.get(previousDevice) === existing.sessionId) {
+      this.deviceSessionMap.delete(previousDevice);
+    }
+    this.deviceSessionMap.set(assignedDevice, existing.sessionId);
+    this.notifySessionDeviceUnbound(existing.sessionId, previousDevice);
+    return existing;
   }
 
   /**
@@ -409,12 +549,7 @@ export class SessionManager {
   ): Promise<string | null> {
     const session = allowExpired ? this.sessions.get(sessionId) ?? null : this.getSession(sessionId);
     if (!session) {
-      const inFlightRelease = this.releasePromises.get(sessionId);
-      if (inFlightRelease) {
-        return await inFlightRelease.promise;
-      }
-      logger.warn(`Cannot release session ${sessionId}: not found`);
-      return null;
+      return await this.releaseUnpublishedSession(sessionId, releaseReason, allowExpired);
     }
 
     const inFlightRelease = this.releasePromises.get(sessionId);
@@ -423,7 +558,13 @@ export class SessionManager {
     }
 
     this.releasingSessions.add(session);
-    const promise = this.releaseSessionInternal(sessionId, session, releaseReason);
+    const pendingRebind = this.pendingSessionRebinds.get(sessionId);
+    const promise = pendingRebind?.session === session
+      ? pendingRebind.promise.then(
+        () => this.releaseSessionInternal(sessionId, session, releaseReason),
+        () => this.releaseSessionInternal(sessionId, session, releaseReason),
+      )
+      : this.releaseSessionInternal(sessionId, session, releaseReason);
     const release = { session, promise };
     this.releasePromises.set(sessionId, release);
     this.activeReleasePromises.add(release);
@@ -434,6 +575,83 @@ export class SessionManager {
       if (this.releasePromises.get(sessionId) === release) {
         this.releasePromises.delete(sessionId);
       }
+    }
+  }
+
+  /** Release only the recorded session incarnation while it still owns the device. */
+  async releaseSessionIfOwned(
+    sessionId: string,
+    expectedSession: Session,
+    expectedDeviceId: string,
+    releaseReason: string = "explicit-release",
+  ): Promise<string | null> {
+    const session = this.sessions.get(sessionId);
+    if (session !== expectedSession || session.assignedDevice !== expectedDeviceId) {
+      return null;
+    }
+    return await this.releaseSession(sessionId, releaseReason);
+  }
+
+  private async releaseUnpublishedSession(
+    sessionId: string,
+    releaseReason: string,
+    allowExpired: boolean,
+  ): Promise<string | null> {
+    const inFlightRelease = this.releasePromises.get(sessionId);
+    if (inFlightRelease) {
+      return await inFlightRelease.promise;
+    }
+    const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
+    const pendingCreation = this.pendingSessionCreations.get(sessionId);
+    const pendingSession = pendingAssignment ?? pendingCreation?.promise;
+    if (!pendingSession) {
+      logger.warn(`Cannot release session ${sessionId}: not found`);
+      return null;
+    }
+    return await this.releasePendingSessionWork(sessionId, releaseReason, allowExpired, pendingSession);
+  }
+
+  private async releasePendingSessionWork(
+    sessionId: string,
+    releaseReason: string,
+    allowExpired: boolean,
+    pendingSession: Promise<Session>,
+  ): Promise<string | null> {
+    const existingRelease = this.pendingSessionReleases.get(sessionId);
+    if (existingRelease) {
+      return await existingRelease.promise;
+    }
+
+    const release: PendingSessionRelease = {
+      promise: this.releaseAfterPendingSessionWork(
+        sessionId,
+        releaseReason,
+        allowExpired,
+        pendingSession,
+      ),
+    };
+    this.pendingSessionReleases.set(sessionId, release);
+    try {
+      return await release.promise;
+    } finally {
+      if (this.pendingSessionReleases.get(sessionId) === release) {
+        this.pendingSessionReleases.delete(sessionId);
+      }
+    }
+  }
+
+  private async releaseAfterPendingSessionWork(
+    sessionId: string,
+    releaseReason: string,
+    allowExpired: boolean,
+    pendingSession: Promise<Session>,
+  ): Promise<string | null> {
+    try {
+      await pendingSession;
+      return await this.releaseSession(sessionId, releaseReason, allowExpired);
+    } catch (error) {
+      logger.warn(`Session ${sessionId} assignment failed before release: ${error}`);
+      return null;
     }
   }
 
@@ -487,6 +705,21 @@ export class SessionManager {
       }
     }
   }
+
+  /** Wait for a release already admitted for this session, if any. */
+  async waitForSessionRelease(sessionId: string): Promise<void> {
+    const pendingSessionRelease = this.pendingSessionReleases.get(sessionId);
+    if (pendingSessionRelease) {
+      await pendingSessionRelease.promise;
+      return;
+    }
+
+    const release = this.releasePromises.get(sessionId);
+    if (release) {
+      await release.promise;
+    }
+  }
+
   private async releaseSessionInternal(
     sessionId: string,
     session: Session,
@@ -510,7 +743,11 @@ export class SessionManager {
       }
       if (pendingCleanup.length > 0) {this.trackPendingDeviceCleanup(deviceId, pendingCleanup);}
 
-      await this.deviceSessionRepository.markReleased(sessionId, "released", this.timer.now(), releaseReason);
+      try {
+        await this.deviceSessionRepository.markReleased(sessionId, "released", this.timer.now(), releaseReason);
+      } catch (error) {
+        logger.warn(`[SessionManager] Failed to mark session released (${releaseReason}): ${error}`);
+      }
       for (const callback of this.releaseCallbacks) {
         try {
           callback(sessionId, deviceId);
@@ -595,6 +832,16 @@ export class SessionManager {
         this.pendingDeviceCleanups.delete(deviceId);
       }
     });
+  }
+
+  private notifySessionDeviceUnbound(sessionId: string, deviceId: string): void {
+    for (const callback of this.deviceUnboundCallbacks) {
+      try {
+        callback(sessionId, deviceId);
+      } catch (error) {
+        logger.warn(`Session device-unbound callback failed for ${sessionId}: ${error}`);
+      }
+    }
   }
 
   /**
@@ -838,7 +1085,9 @@ export class SessionManager {
     if (!session || (expectedSession && session !== expectedSession)) {
       return false;
     }
-    this.deviceSessionMap.delete(session.assignedDevice);
+    if (this.deviceSessionMap.get(session.assignedDevice) === sessionId) {
+      this.deviceSessionMap.delete(session.assignedDevice);
+    }
     this.sessions.delete(sessionId);
     this.sessionDeviceMap.delete(sessionId);
     return true;
@@ -890,19 +1139,28 @@ export class SessionManager {
 
     for (const sessionId of expiredSessions) {
       const session = this.sessions.get(sessionId);
-      const deviceId = session?.assignedDevice;
-      this.removeSession(sessionId);
-      // Notify release callbacks so session-scoped state is cleaned up
-      if (deviceId) {
+      if (!session) {
+        continue;
+      }
+      if (this.pendingSessionRebinds.get(sessionId)?.session === session) {
+        const release = this.releaseSession(sessionId, "cleanup-expired", true);
         void this.getBarrier()
-          .track(() => this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "cleanup-expired"))
-          .catch(error => logger.warn(`[SessionManager] Failed to mark session released (cleanup-expired): ${error}`));
-        for (const callback of this.releaseCallbacks) {
-          try {
-            callback(sessionId, deviceId);
-          } catch (error) {
-            logger.warn(`Session cleanup callback failed for ${sessionId}: ${error}`);
-          }
+          .trackExisting(release)
+          .catch(error => logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`));
+        continue;
+      }
+
+      const deviceId = session.assignedDevice;
+      this.removeSession(sessionId);
+      // Notify release callbacks so session-scoped state is cleaned up.
+      void this.getBarrier()
+        .track(() => this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "cleanup-expired"))
+        .catch(error => logger.warn(`[SessionManager] Failed to mark session released (cleanup-expired): ${error}`));
+      for (const callback of this.releaseCallbacks) {
+        try {
+          callback(sessionId, deviceId);
+        } catch (error) {
+          logger.warn(`Session cleanup callback failed for ${sessionId}: ${error}`);
         }
       }
     }

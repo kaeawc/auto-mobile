@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { SessionManager, type DeviceLabelMap, type KeepScreenAwakeRestorer } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
 
@@ -44,7 +45,7 @@ describe("SessionCacheData typed slots (issue #2973)", () => {
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
-    sessionManager = new SessionManager(fakeTimer);
+    sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
   });
 
   afterEach(() => {

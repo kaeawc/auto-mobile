@@ -7,6 +7,7 @@ import { registerInteractionTools } from "../../src/server/interactionTools";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -55,7 +56,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   async function setupAutolockedSession(): Promise<string> {
     fakeDeviceSessionManager.setConnectedDevices([androidA]);
     const timer = new FakeTimer();
-    daemonSessionManager = new SessionManager(timer);
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
     const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);

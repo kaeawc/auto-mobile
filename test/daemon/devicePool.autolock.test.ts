@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { ActionableError } from "../../src/models";
 
@@ -35,7 +36,7 @@ describe("DevicePool autolock", () => {
   beforeEach(() => {
     clearAutolockEnv();
     timer = new FakeTimer();
-    sessionManager = new SessionManager(timer);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     fakeDeviceUtils = new FakeDeviceUtils();
 
     pool = new DevicePool(

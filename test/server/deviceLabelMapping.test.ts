@@ -4,6 +4,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { BootedDevice } from "../../src/models";
 import { buildDeviceLabelMap, getDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 
@@ -19,7 +20,7 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
 
   beforeEach(async () => {
     const timer = new FakeTimer();
-    sessionManager = new SessionManager(timer);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
     const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);

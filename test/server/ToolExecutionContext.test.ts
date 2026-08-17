@@ -7,6 +7,7 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { KeepScreenAwakeManager } from "../../src/utils/KeepScreenAwakeManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice } from "../../src/models";
 
@@ -27,7 +28,7 @@ describe("ToolExecutionContext", () => {
   beforeEach(async () => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    sessionManager = new SessionManager(fakeTimer);
+    sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     fakeAppsRepo = new FakeInstalledAppsRepository();
     const fakeDeviceManager = new FakeDeviceManager();
     devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager);

@@ -107,6 +107,11 @@ interface RollbackAssignment {
   session: Session;
 }
 
+type SessionAssignmentSnapshot = Pick<
+  PooledDevice,
+  "sessionId" | "status" | "lastUsedAt" | "assignmentCount" | "errorCount" | "autolockSessionId"
+>;
+
 interface IosLivenessSnapshot {
   discoverySucceeded: boolean;
   bootedDeviceIds: Set<string>;
@@ -947,6 +952,9 @@ export class DevicePool {
       // Check if it was a non-retryable error
       if (result.error instanceof DevicePoolError && !result.error.isRetryable) {
         throw new ActionableError(result.error.message);
+      }
+      if (result.error && !(result.error instanceof DevicePoolError && result.error.isRetryable)) {
+        throw result.error;
       }
 
       // Timeout case
@@ -1811,6 +1819,9 @@ export class DevicePool {
       if (result.error instanceof DevicePoolError && !result.error.isRetryable) {
         throw new ActionableError(result.error.message);
       }
+      if (result.error && !(result.error instanceof DevicePoolError && result.error.isRetryable)) {
+        throw result.error;
+      }
       // Timeout case - all attempts exhausted
       const stats = this.getStatsForPlatform(platform);
       throw new ActionableError(
@@ -1906,10 +1917,8 @@ export class DevicePool {
       let selection = await this.selectAssignableIdleDevice(candidates);
       let device = selection.device;
       livenessUnknown ||= selection.livenessUnknown;
-      if (!device) {
-        candidates = selectCandidates();
-        totalDevices = candidates.length;
-      }
+      candidates = selectCandidates();
+      totalDevices = candidates.length;
 
       // If no devices available and pool is empty, try to refresh
       // This handles race conditions during daemon startup
@@ -2016,23 +2025,20 @@ export class DevicePool {
     sessionId: string,
     device: PooledDevice,
   ): Promise<{ deviceId: string; session?: Session }> {
-    // Create the session before claiming the device. A direct binding can
-    // create the same session while this allocator waits for the mutex; in
-    // that case, its device remains the sole owner.
     const existingSession = this.sessionManager.getSession(sessionId);
-    const session = await this.sessionManager.createSession(sessionId, device.id, device.platform);
-    if (session.assignedDevice !== device.id) {
-      logger.info(
-        `Reusing session ${sessionId} already assigned to device ${session.assignedDevice}`,
-      );
-      return { deviceId: session.assignedDevice };
-    }
-
+    const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;
     device.status = "busy";
     device.lastUsedAt = this.nextLastUsedAt();
     device.assignmentCount++;
     device.errorCount = 0;
+    const session = await this.createSessionOrRestore(device, assignmentSnapshot, () =>
+      this.sessionManager.createSession(sessionId, device.id, device.platform),
+    );
+    if (session.assignedDevice !== device.id) {
+      this.restoreSessionAssignment(device, assignmentSnapshot);
+      return { deviceId: session.assignedDevice };
+    }
     return existingSession === session ? { deviceId: device.id } : { deviceId: device.id, session };
   }
 
@@ -2222,6 +2228,70 @@ export class DevicePool {
         await this.releaseDevice(deviceId, sessionId);
       }
     });
+  }
+
+  private snapshotSessionAssignment(device: PooledDevice): SessionAssignmentSnapshot {
+    return {
+      sessionId: device.sessionId,
+      status: device.status,
+      lastUsedAt: device.lastUsedAt,
+      assignmentCount: device.assignmentCount,
+      errorCount: device.errorCount,
+      autolockSessionId: device.autolockSessionId,
+    };
+  }
+
+  private restoreSessionAssignment(device: PooledDevice, snapshot: SessionAssignmentSnapshot): void {
+    Object.assign(device, snapshot);
+  }
+
+  private async createSessionOrRestore(
+    device: PooledDevice,
+    snapshot: SessionAssignmentSnapshot,
+    createSession: () => Promise<Session>,
+  ): Promise<Session> {
+    const attemptedSessionId = device.sessionId;
+    try {
+      const session = await createSession();
+      if (session.assignedDevice !== device.id) {
+        if (this.devices.get(device.id) === device && device.sessionId === attemptedSessionId) {
+          this.restoreSessionAssignment(device, snapshot);
+        }
+        return session;
+      }
+      const currentSession = this.sessionManager.getSession(session.sessionId);
+      if (currentSession !== session && currentSession?.assignedDevice === device.id) {
+        // The attempted incarnation was replaced while its write completed.
+        // Return the attempted object so rollback can preserve the replacement.
+        return session;
+      }
+      await this.sessionManager.waitForSessionRelease(session.sessionId);
+      // A tracked process can exit while the durable session write is pending.
+      // Do not publish success for a device that eviction already removed or
+      // released; undo the just-published session before restoring the pool.
+      if (!this.isSessionAssignmentCurrent(device, session)) {
+        await this.sessionManager.releaseSession(
+          session.sessionId,
+          `device-disconnected-during-session-create:${device.id}`,
+        );
+        throw new ActionableError(`Device '${device.id}' disconnected while its session was being created.`);
+      }
+      return session;
+    } catch (error) {
+      if (this.devices.get(device.id) === device && device.sessionId === attemptedSessionId) {
+        this.restoreSessionAssignment(device, snapshot);
+      }
+      throw error;
+    }
+  }
+
+  private isSessionAssignmentCurrent(device: PooledDevice, session: Session): boolean {
+    return (
+      this.devices.get(device.id) === device &&
+      device.sessionId === session.sessionId &&
+      device.status === "busy" &&
+      this.sessionManager.getSession(session.sessionId) === session
+    );
   }
 
   /**
@@ -2475,6 +2545,7 @@ export class DevicePool {
     sourceImage?: DeviceInfo,
     childProcess?: ChildProcess | null,
     expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    allowSessionRebind = false,
   ): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
       const alreadyPooled = this.devices.has(deviceId);
@@ -2542,32 +2613,55 @@ export class DevicePool {
         device.status = "idle";
       }
 
-      await this.claimKnownDeviceForSession(sessionId, device, platform);
+      const assignmentSnapshot = this.snapshotSessionAssignment(device);
+      const previousSession = this.sessionManager.getSession(sessionId);
+      device.sessionId = sessionId;
+      device.status = "busy";
+      device.lastUsedAt = this.nextLastUsedAt();
+      device.assignmentCount++;
+      device.errorCount = 0;
 
+      await this.createSessionOrRestore(
+        device,
+        assignmentSnapshot,
+        this.createSessionForBinding(
+          previousSession,
+          sessionId,
+          deviceId,
+          platform,
+          allowSessionRebind,
+        ),
+      );
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
       return sessionId;
     });
   }
 
-  private async claimKnownDeviceForSession(
+  private createSessionForBinding(
+    previousSession: Session | null,
     sessionId: string,
-    device: PooledDevice,
+    deviceId: string,
     platform: Platform,
-  ): Promise<void> {
-    // Create the session before claiming the device so a session created by
-    // the automatic allocator cannot leave this device reserved as well.
-    const session = await this.sessionManager.createSession(sessionId, device.id, platform);
-    if (session.assignedDevice !== device.id) {
-      throw new ActionableError(
-        `Session '${sessionId}' is already assigned to device '${session.assignedDevice}'.`,
-      );
+    allowSessionRebind: boolean,
+  ): () => Promise<Session> {
+    const previousDeviceId = previousSession?.assignedDevice;
+    if (!previousDeviceId || previousDeviceId === deviceId) {
+      return async () => await this.sessionManager.createSession(sessionId, deviceId, platform);
     }
 
-    device.sessionId = sessionId;
-    device.status = "busy";
-    device.lastUsedAt = this.nextLastUsedAt();
-    device.assignmentCount++;
-    device.errorCount = 0;
+    if (!allowSessionRebind) {
+      return async () => {
+        throw new ActionableError(
+          `Session '${sessionId}' is already assigned to device '${previousDeviceId}'.`,
+        );
+      };
+    }
+
+    return async () => {
+      const session = await this.sessionManager.rebindSession(sessionId, deviceId, platform);
+      await this.releaseDevice(previousDeviceId, sessionId);
+      return session;
+    };
   }
 
   private async reuseExistingDeviceSession(
@@ -2728,6 +2822,7 @@ export class DevicePool {
       );
     }
 
+    const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;
     device.status = "busy";
     device.lastUsedAt = this.nextLastUsedAt();
@@ -2740,12 +2835,14 @@ export class DevicePool {
     // (10s default) would reap the lock far sooner than the configured idle timeout.
     // Interactions still bump lastHeartbeat, so an active client stays locked while
     // a truly idle one is released after the idle timeout.
-    const session = await this.sessionManager.createSession(
-      sessionId,
-      deviceId,
-      platform,
-      timeoutMs,
-      timeoutMs,
+    const session = await this.createSessionOrRestore(device, assignmentSnapshot, () =>
+      this.sessionManager.createSession(
+        sessionId,
+        deviceId,
+        platform,
+        timeoutMs,
+        timeoutMs,
+      ),
     );
     if (mcpSessionId) {
       this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);

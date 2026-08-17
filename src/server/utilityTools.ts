@@ -144,14 +144,19 @@ export function registerUtilityTools() {
             );
           }
         }
-        // Release any existing session for this sessionUuid before rebinding
+        // The pool persists a replacement binding before it releases the previous
+        // one, so a failed write leaves the caller's existing session intact.
         const existing = sessionManager.getSession(args.sessionUuid);
-        if (existing && existing.assignedDevice !== args.deviceId) {
-          await sessionManager.releaseSession(existing.sessionId);
-          await devicePool.releaseDevice(existing.assignedDevice, existing.sessionId);
-        }
         if (!existing || existing.assignedDevice !== args.deviceId) {
-          const boundSession = await devicePool.bindOrReuseDeviceSession(args.sessionUuid, args.deviceId, args.platform);
+          const boundSession = await devicePool.bindOrReuseDeviceSession(
+            args.sessionUuid,
+            args.deviceId,
+            args.platform,
+            undefined,
+            undefined,
+            undefined,
+            true,
+          );
           if (boundSession !== args.sessionUuid) {
             throw new ActionableError(
               `Device '${args.deviceId}' is already assigned to session ${boundSession}`

@@ -6,6 +6,7 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -104,7 +105,7 @@ describe("handleDaemonRequest", () => {
   beforeEach(() => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    sessionManager = new SessionManager(fakeTimer);
+    sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
   });
 
   afterEach(() => {

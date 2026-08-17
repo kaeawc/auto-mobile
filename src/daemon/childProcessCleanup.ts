@@ -76,8 +76,9 @@ export async function cleanupDaemonChildProcesses(
 
   await Promise.all(activeRecordings.map(async recording => {
     try {
+      const stop = dependencies.stopVideoRecording(recording.recordingId);
       const result = await settleWithin(
-        dependencies.stopVideoRecording(recording.recordingId),
+        stop,
         timer,
         timeoutMs
       );
@@ -95,6 +96,18 @@ export async function cleanupDaemonChildProcesses(
       if (forceStopped.status !== "fulfilled") {
         logger.warn(
           `[Daemon] Failed to force-stop recording ${recording.recordingId} during shutdown: ${forceStopped.error}`
+        );
+      }
+      // A timed stop can have already finalized the backend and still be
+      // persisting archive metadata. Do not race that finalization with an
+      // interruption or database closure; the outer daemon deadline remains
+      // the bounded escape hatch for a permanently wedged finalizer.
+      try {
+        await stop;
+        return;
+      } catch (error) {
+        logger.warn(
+          `[Daemon] Recording ${recording.recordingId} did not finish after force-stop: ${error}`
         );
       }
       const interrupted = await settleWithin(

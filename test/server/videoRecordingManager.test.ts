@@ -131,6 +131,32 @@ describe("videoRecordingManager", () => {
     expect(fakeBackend.stopCalls.length).toBe(1);
   });
 
+  test("shares manager finalization when shutdown overlaps a user stop", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    const originalUpdate = fakeRepository.updateRecording.bind(fakeRepository);
+    let resolveUpdate: (() => void) | undefined;
+    let completeUpdates = 0;
+    let signalUpdateStarted: (() => void) | undefined;
+    const updateStarted = new Promise<void>(resolve => { signalUpdateStarted = resolve; });
+    fakeRepository.updateRecording = async (recordingId, update) => {
+      if (update.status === "completed") {
+        completeUpdates++;
+        signalUpdateStarted?.();
+        await new Promise<void>(resolve => { resolveUpdate = resolve; });
+      }
+      await originalUpdate(recordingId, update);
+    };
+
+    const userStop = stopVideoRecording(active.recordingId);
+    await updateStarted;
+    const shutdownStop = stopVideoRecording(active.recordingId);
+    expect(completeUpdates).toBe(1);
+    resolveUpdate?.();
+
+    await expect(Promise.all([userStop, shutdownStop])).resolves.toHaveLength(2);
+    expect(completeUpdates).toBe(1);
+  });
+
   test("interrupt marks active recording inactive without calling capture stop", async () => {
     const active = await startVideoRecording({
       device: testDevice,

@@ -84,10 +84,11 @@ describe("cleanupDaemonChildProcesses", () => {
     ]);
   });
 
-  test("continues after a recording cleanup times out", async () => {
+  test("waits for a timed stop before marking a recording interrupted", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const calls: string[] = [];
+    let rejectStop: ((error: Error) => void) | undefined;
     const cleanup = cleanupDaemonChildProcesses({
       stopAcceptingVideoRecordingStarts: async () => {
         calls.push("stop-recording-starts");
@@ -99,7 +100,7 @@ describe("cleanupDaemonChildProcesses", () => {
       stopVideoRecording: async recordingId => {
         calls.push(`stop:${recordingId}`);
         if (recordingId === "hung-recording") {
-          await new Promise<void>(() => {});
+          await new Promise<void>((_resolve, reject) => { rejectStop = reject; });
         }
       },
       forceStopVideoRecording: async recordingId => {
@@ -115,6 +116,19 @@ describe("cleanupDaemonChildProcesses", () => {
       timeoutMs: 10,
     });
 
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    timer.advanceTime(10);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(calls).toEqual([
+      "stop-recording-starts",
+      "stop:hung-recording",
+      "stop:later-recording",
+      "force-stop:hung-recording",
+    ]);
+
+    rejectStop?.(new Error("force-stop cancelled finalization"));
     await cleanup;
 
     expect(calls).toEqual([

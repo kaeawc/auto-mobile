@@ -204,6 +204,7 @@ const inFlightVideoRecordingStartControllers = new Set<AbortController>();
 const autoStopTimers = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
 const highlightSessions = new Map<string, VideoRecordingHighlightSession>();
 const highlightSessionsByDeviceId = new Map<string, string>();
+const stoppingVideoRecordings = new Map<string, Promise<StopVideoRecordingResult>>();
 // In-progress size-cap monitors, keyed by recordingId (issue #4762). Each is a
 // periodic timer that stops a live capture once it reaches its cap so one long
 // recording cannot fill the disk.
@@ -320,6 +321,7 @@ function resetVideoRecordingManagerState(): void {
   }
   highlightSessions.clear();
   highlightSessionsByDeviceId.clear();
+  stoppingVideoRecordings.clear();
   acceptingVideoRecordingStarts = true;
   inFlightVideoRecordingStarts = 0;
   for (const controller of inFlightVideoRecordingStartControllers) {
@@ -920,9 +922,26 @@ export async function startVideoRecording(
 export async function stopVideoRecording(
   recordingId?: string
 ): Promise<StopVideoRecordingResult> {
+  const resolvedId = await resolveActiveRecordingId(recordingId);
+  const stopping = stoppingVideoRecordings.get(resolvedId);
+  if (stopping) {
+    return stopping;
+  }
+
+  const stop = stopActiveVideoRecording(resolvedId);
+  stoppingVideoRecordings.set(resolvedId, stop);
+  try {
+    return await stop;
+  } finally {
+    stoppingVideoRecordings.delete(resolvedId);
+  }
+}
+
+async function stopActiveVideoRecording(
+  resolvedId: string
+): Promise<StopVideoRecordingResult> {
   const { videoRecorderService, recordingRepository, now } =
     await getVideoRecordingDependencies();
-  const resolvedId = await resolveActiveRecordingId(recordingId);
 
   clearAutoStop(resolvedId);
   clearInProgressSizeCap(resolvedId);

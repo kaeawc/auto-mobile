@@ -81,6 +81,99 @@ describe("DeviceBootService", () => {
     expect(devices.getWaitForDeviceReadySignal()?.aborted).toBe(false);
   });
 
+  it("bounds a pending start progress callback by the shared deadline and cancels its owned process", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const timer = new FakeTimer();
+    let killCount = 0;
+    let progressStarted = false;
+    let outcome: "pending" | "rejected" = "pending";
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.setMockChildProcess(image.name, {
+      kill: () => {
+        killCount++;
+        return true;
+      },
+      pid: 12,
+    } as any);
+
+    const boot = service(devices, matcher, undefined, timer).boot(
+      { platform: "android", timeoutMs: 10_000 },
+      {
+        report: async (current) => {
+          if (current === 60) {
+            progressStarted = true;
+            await new Promise<void>(() => {});
+          }
+        },
+      },
+    );
+    void boot.catch(() => {
+      outcome = "rejected";
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(progressStarted).toBe(true);
+    timer.advanceTime(10_000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(outcome).toBe("rejected");
+    expect(killCount).toBe(1);
+  });
+
+  it("cancels the owned process when final progress reporting fails", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    let killCount = 0;
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.setMockChildProcess(image.name, {
+      kill: () => {
+        killCount++;
+        return true;
+      },
+      pid: 12,
+    } as any);
+
+    await expect(
+      service(devices, matcher).boot(
+        { platform: "android" },
+        {
+          report: async (current) => {
+            if (current === 100) {
+              throw new Error("progress failed");
+            }
+          },
+        },
+      ),
+    ).rejects.toThrow("progress failed");
+
+    expect(killCount).toBe(1);
+  });
+
+  it("preserves successful cold-boot progress reporting", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const reports: Array<{ current: number; total: number; message: string }> = [];
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+
+    await service(devices, matcher).boot(
+      { platform: "android" },
+      {
+        report: async (current, total, message) => {
+          reports.push({ current, total, message });
+        },
+      },
+    );
+
+    expect(reports).toEqual([
+      { current: 60, total: 100, message: "Device started, waiting for readiness..." },
+      { current: 100, total: 100, message: "Device is ready for use" },
+    ]);
+  });
+
   it("aborts provisioning at the shared absolute deadline", async () => {
     const devices = new FakeDeviceUtils();
     const timer = new FakeTimer();

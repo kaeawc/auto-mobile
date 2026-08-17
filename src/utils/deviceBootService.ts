@@ -7,16 +7,13 @@ import type {
   MatchingStrategy,
 } from "../models/DeviceMatchCriteria";
 import type { DeviceCreationGate } from "./deviceCreationGate";
-import {
-  DEFAULT_DEVICE_READY_TIMEOUT_MS,
-  type PlatformDeviceManager,
-  waitForDeviceReadyOrCancel,
-} from "./deviceUtils";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS, type PlatformDeviceManager } from "./deviceUtils";
 import type { DeviceMatcher } from "./deviceMatcher";
 import type { DeviceProvisioner } from "./deviceProvisioning";
 import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { runWithAbortSignal } from "./AbortContext";
+import { logger } from "./logger";
 
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 
@@ -210,11 +207,7 @@ export class DeviceBootService {
     if (!match) {
       return undefined;
     }
-    if (progress) {
-      await this.runPhase(context, "reporting matching device progress", async () =>
-        progress.report(100, 100, "Found matching running device"),
-      );
-    }
+    await this.reportProgress(context, progress, 100, "Found matching running device");
     return this.waitForRunningDevice(match, context, progress);
   }
 
@@ -343,11 +336,7 @@ export class DeviceBootService {
     };
     context.signal?.addEventListener("abort", cancelHandle, { once: true });
     try {
-      if (progress) {
-        await this.runPhase(context, "reporting device start progress", async () =>
-          progress.report(60, 100, "Device started, waiting for readiness..."),
-        );
-      }
+      await this.reportProgress(context, progress, 60, "Device started, waiting for readiness...");
       const ready = await this.runPhase(context, "waiting for device boot readiness", (signal) =>
         waitForDeviceReadyOrCancel(
           this.dependencies.deviceManager,
@@ -359,11 +348,7 @@ export class DeviceBootService {
           cancelHandle,
         ),
       );
-      if (progress) {
-        await this.runPhase(context, "reporting device readiness progress", async () =>
-          progress.report(100, 100, "Device is ready for use"),
-        );
-      }
+      await this.reportProgress(context, progress, 100, "Device is ready for use");
       return {
         device: enrichBootedDevice(ready, image),
         source: "cold-boot",
@@ -380,6 +365,23 @@ export class DeviceBootService {
     }
   }
 
+  private async reportProgress(
+    context: BootDeadlineContext,
+    progress: DeviceBootProgress | undefined,
+    current: number,
+    message: string,
+  ): Promise<void> {
+    if (!progress) {
+      return;
+    }
+    await this.runPhase(
+      context,
+      `reporting ${current}% device boot progress`,
+      () => progress.report(current, 100, message),
+      false,
+    );
+  }
+
   private remaining(deadlineMs: number, phase: string): number {
     const remainingMs = Math.floor(deadlineMs - this.timer.now());
     if (remainingMs <= 0) {
@@ -394,6 +396,7 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     phase: string,
     operation: (signal: AbortSignal) => Promise<T>,
+    awaitAbortSettlement = true,
   ): Promise<T> {
     const remainingMs = this.remaining(context.deadlineMs, phase);
     const cancellation = createPhaseCancellation(context.signal, phase);
@@ -423,7 +426,9 @@ export class DeviceBootService {
     } catch (error) {
       cancellation.throwIfCancelled();
       if (controller.signal.aborted) {
-        await this.awaitAbortSettlement(operationPromise);
+        if (awaitAbortSettlement) {
+          await this.awaitAbortSettlement(operationPromise);
+        }
         throw new ActionableError(
           `startDevice timeout exhausted while ${phase}; remainingBudgetMs=0`,
         );

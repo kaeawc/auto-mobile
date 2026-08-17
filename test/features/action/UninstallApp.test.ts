@@ -1,16 +1,26 @@
 import { expect, describe, test, beforeEach } from "bun:test";
-import { UninstallApp as ProductionUninstallApp, DeviceAppUninstaller } from "../../../src/features/action/UninstallApp";
+import {
+  UninstallApp as ProductionUninstallApp,
+  DeviceAppUninstaller,
+} from "../../../src/features/action/UninstallApp";
 import type { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
+import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 
 // Keep action tests isolated from the production SQLite repository even when a
 // scenario does not need to inspect stale-marker rows explicitly.
 class UninstallApp extends ProductionUninstallApp {
   constructor(...args: ConstructorParameters<typeof ProductionUninstallApp>) {
     const [device, adbFactory, simctl, deviceAppUninstaller, repository] = args;
-    super(device, adbFactory, simctl, deviceAppUninstaller, repository ?? new FakeInstalledAppsRepository());
+    super(
+      device,
+      adbFactory,
+      simctl,
+      deviceAppUninstaller,
+      repository ?? new FakeInstalledAppsRepository(),
+    );
   }
 }
 
@@ -27,13 +37,13 @@ class FakeDeviceAppUninstaller implements DeviceAppUninstaller {
 }
 
 const fakeAdbFactory = (fakeAdb: FakeAdbClient) => ({ create: () => fakeAdb as any });
-const nullAdbFactory = { create: () => ({} as any) };
+const nullAdbFactory = { create: () => ({}) as any };
 
 describe("UninstallApp (iOS simulator)", () => {
   const iosSimDevice: BootedDevice = {
     deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
     name: "iPhone 15",
-    platform: "ios"
+    platform: "ios",
   };
 
   let fakeSimctl: FakeSimctl;
@@ -55,7 +65,13 @@ describe("UninstallApp (iOS simulator)", () => {
 
     const repo = new FakeInstalledAppsRepository();
     await repo.upsertInstalledApp(iosSimDevice.deviceId, 0, "com.example.app", false, 1_000);
-    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller, repo);
+    const uninstall = new UninstallApp(
+      iosSimDevice,
+      nullAdbFactory,
+      fakeSimctl,
+      fakeUninstaller,
+      repo,
+    );
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -130,14 +146,14 @@ describe("UninstallApp (unsupported platform)", () => {
     const webDevice = {
       deviceId: "web-device-1",
       name: "web",
-      platform: "web"
+      platform: "web",
     } as unknown as BootedDevice;
 
     const uninstall = new UninstallApp(
       webDevice,
       nullAdbFactory,
       new FakeSimctl(),
-      new FakeDeviceAppUninstaller()
+      new FakeDeviceAppUninstaller(),
     );
 
     await expect(uninstall.execute("com.example.app")).rejects.toThrow("Unsupported platform: web");
@@ -148,7 +164,7 @@ describe("UninstallApp (iOS physical device)", () => {
   const iosPhysicalDevice: BootedDevice = {
     deviceId: "00008110001234560A",
     name: "Jason's iPhone",
-    platform: "ios"
+    platform: "ios",
   };
 
   let fakeSimctl: FakeSimctl;
@@ -167,7 +183,12 @@ describe("UninstallApp (iOS physical device)", () => {
       fakeSimctl.setInstalledApps([]);
     };
 
-    const uninstall = new UninstallApp(iosPhysicalDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const uninstall = new UninstallApp(
+      iosPhysicalDevice,
+      nullAdbFactory,
+      fakeSimctl,
+      fakeUninstaller,
+    );
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -183,19 +204,16 @@ describe("UninstallApp (Android)", () => {
   const androidDevice: BootedDevice = {
     deviceId: "emulator-5554",
     name: "Pixel 7",
-    platform: "android"
+    platform: "android",
   };
 
   let fakeAdb: FakeAdbClient;
 
   function setupNoApp(adb: FakeAdbClient, userId: number): void {
-    adb.setCommandResult(
-      `shell pm list packages --user ${userId}`,
-      "package:com.android.settings"
-    );
+    adb.setCommandResult(`shell pm list packages --user ${userId}`, "package:com.android.settings");
     adb.setCommandResult(
       `shell pm list packages -s --user ${userId}`,
-      "package:com.android.settings"
+      "package:com.android.settings",
     );
   }
 
@@ -209,7 +227,7 @@ describe("UninstallApp (Android)", () => {
     // Pre-uninstall the app is present; the post-uninstall re-check sees it gone.
     fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
       { stdout: "package:com.example.app\npackage:com.android.settings" },
-      { stdout: "package:com.android.settings" }
+      { stdout: "package:com.android.settings" },
     ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
@@ -221,7 +239,7 @@ describe("UninstallApp (Android)", () => {
     expect(result.userId).toBe(0);
 
     // Assert the exact emitted commands — no -k because keepData is false.
-    const commands = fakeAdb.getCommandCalls().map(call => call.command);
+    const commands = fakeAdb.getCommandCalls().map((call) => call.command);
     expect(commands).toContain("shell am force-stop --user 0 com.example.app");
     expect(commands).toContain("shell pm uninstall --user 0 com.example.app");
     expect(commands).not.toContain("shell pm uninstall --user 0 -k com.example.app");
@@ -232,7 +250,7 @@ describe("UninstallApp (Android)", () => {
     await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
     fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
       { stdout: "package:com.example.app\npackage:com.android.settings" },
-      { stdout: "package:com.android.settings" }
+      { stdout: "package:com.android.settings" },
     ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb), null, null, repo);
@@ -251,7 +269,7 @@ describe("UninstallApp (Android)", () => {
         timeoutMs?: number,
         maxBuffer?: number,
         noRetry?: boolean,
-        signal?: AbortSignal
+        signal?: AbortSignal,
       ) {
         if (command === "shell pm list packages --user 0") {
           this.listPackagesCalls++;
@@ -280,7 +298,7 @@ describe("UninstallApp (Android)", () => {
     fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
     fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
       { stdout: "package:com.example.app\npackage:com.android.settings" },
-      { stdout: "package:com.android.settings" }
+      { stdout: "package:com.android.settings" },
     ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
@@ -290,9 +308,142 @@ describe("UninstallApp (Android)", () => {
     expect(result.keepData).toBe(true);
 
     // The -k flag preserves app data; assert the exact command carried it.
-    const commands = fakeAdb.getCommandCalls().map(call => call.command);
+    const commands = fakeAdb.getCommandCalls().map((call) => call.command);
     expect(commands).toContain("shell pm uninstall --user 0 -k com.example.app");
     expect(commands).not.toContain("shell pm uninstall --user 0 com.example.app");
+  });
+
+  test("reports success when a timed-out uninstall removed the package", async () => {
+    class TimeoutUninstallAdb extends FakeAdbClient {
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal,
+      ) {
+        if (command === "shell pm uninstall --user 0 com.example.app") {
+          await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+          throw new AdbCommandTimeoutError("Command timed out");
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+
+    const adb = new TimeoutUninstallAdb();
+    adb.setCommandResultSequence("shell pm list packages --user 0", [
+      "package:com.example.app",
+      "package:com.android.settings",
+    ]);
+
+    const result = await new UninstallApp(androidDevice, fakeAdbFactory(adb)).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({ success: true, wasInstalled: true, userId: 0 });
+    expect(
+      adb
+        .getCommandCalls()
+        .filter((call) => call.command === "shell pm uninstall --user 0 com.example.app"),
+    ).toHaveLength(1);
+  });
+
+  test("retries a timed-out uninstall once only after confirming the package remains installed", async () => {
+    class TimeoutThenSuccessAdb extends FakeAdbClient {
+      private uninstallAttempts = 0;
+
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal,
+      ) {
+        if (command === "shell pm uninstall --user 0 com.example.app") {
+          this.uninstallAttempts++;
+          if (this.uninstallAttempts === 1) {
+            await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+            throw new AdbCommandTimeoutError("Command timed out");
+          }
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+
+    const adb = new TimeoutThenSuccessAdb();
+    adb.setCommandResultSequence("shell pm list packages --user 0", [
+      "package:com.example.app",
+      "package:com.example.app",
+      "package:com.android.settings",
+    ]);
+
+    const result = await new UninstallApp(androidDevice, fakeAdbFactory(adb)).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({ success: true, wasInstalled: true, userId: 0 });
+    expect(
+      adb
+        .getCommandCalls()
+        .filter((call) => call.command === "shell pm uninstall --user 0 com.example.app"),
+    ).toHaveLength(2);
+  });
+
+  test("returns actionable diagnostics when the bounded retry also times out", async () => {
+    class AlwaysTimeoutUninstallAdb extends FakeAdbClient {
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal,
+      ) {
+        if (command === "shell pm uninstall --user 0 com.example.app") {
+          await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+          throw new AdbCommandTimeoutError("Command timed out");
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+
+    const adb = new AlwaysTimeoutUninstallAdb();
+    adb.setCommandResultSequence("shell pm list packages --user 0", [
+      "package:com.example.app",
+      "package:com.example.app",
+    ]);
+
+    const result = await new UninstallApp(androidDevice, fakeAdbFactory(adb)).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      userId: 0,
+      error:
+        "Android uninstall timed out after 20000ms for package com.example.app (user 0). One bounded retry failed: Command timed out",
+    });
+    const uninstallCalls = adb
+      .getCommandCalls()
+      .filter((call) => call.command === "shell pm uninstall --user 0 com.example.app");
+    expect(uninstallCalls).toEqual([
+      expect.objectContaining({ timeoutMs: 20_000, noRetry: true }),
+      expect.objectContaining({ timeoutMs: 5_000, noRetry: true }),
+    ]);
+  });
+
+  test("preserves an already-aborted caller signal without issuing commands", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("caller cancelled"));
+
+    await expect(
+      new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb)).execute(
+        "com.example.app",
+        false,
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow("caller cancelled");
+    expect(fakeAdb.getCommandCalls()).toHaveLength(0);
   });
 
   test("returns not installed when package is missing", async () => {
@@ -315,13 +466,13 @@ describe("UninstallApp (Android)", () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([
       { userId: 0, name: "Owner", running: true },
-      { userId: 10, name: "Work", flags: 0x30, running: true }
+      { userId: 10, name: "Work", flags: 0x30, running: true },
     ]);
     // App installed under work profile (userId 10)
     setupNoApp(fakeAdb, 0);
     fakeAdb.setCommandResultSequence("shell pm list packages --user 10", [
       { stdout: "package:com.example.app\npackage:com.android.settings" },
-      { stdout: "package:com.android.settings" }
+      { stdout: "package:com.android.settings" },
     ]);
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
@@ -329,7 +480,7 @@ describe("UninstallApp (Android)", () => {
 
     expect(result.userId).toBe(10);
     // The uninstall must target the work-profile user, not user 0.
-    const commands = fakeAdb.getCommandCalls().map(call => call.command);
+    const commands = fakeAdb.getCommandCalls().map((call) => call.command);
     expect(commands).toContain("shell pm uninstall --user 10 com.example.app");
     expect(commands).not.toContain("shell pm uninstall --user 0 com.example.app");
   });

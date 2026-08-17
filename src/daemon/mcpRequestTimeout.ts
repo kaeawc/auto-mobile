@@ -31,6 +31,14 @@ export const MIN_START_DEVICE_MCP_TIMEOUT_MS = 180_000;
 export const MIN_LAUNCH_APP_MCP_TIMEOUT_MS = 90_000;
 
 /**
+ * Floor for `uninstallApp` — the Android command has a 20s local deadline,
+ * followed by bounded package-state reconciliation (and, if still installed,
+ * one retry). The default 30s MCP deadline can otherwise abort recovery after
+ * Android has already removed the package, causing a false failure.
+ */
+export const MIN_UNINSTALL_APP_MCP_TIMEOUT_MS = 60_000;
+
+/**
  * Floor for `openLink` — deep links can trigger sign-in, onboarding, data sync,
  * or other post-open navigation before the final observation settles. A sign-in
  * deeplink that launches the app and performs a backend token exchange was
@@ -79,6 +87,8 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
       return MIN_START_DEVICE_MCP_TIMEOUT_MS;
     case "launchApp":
       return MIN_LAUNCH_APP_MCP_TIMEOUT_MS;
+    case "uninstallApp":
+      return MIN_UNINSTALL_APP_MCP_TIMEOUT_MS;
     case "openLink":
       return resolveEnvTimeoutFloorMs(
         OPEN_LINK_MCP_TIMEOUT_ENV_VAR,

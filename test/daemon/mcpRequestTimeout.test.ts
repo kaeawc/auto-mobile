@@ -8,6 +8,7 @@ import {
   MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
   MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
   MIN_START_DEVICE_MCP_TIMEOUT_MS,
+  MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
@@ -67,6 +68,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     { name: "executePlan floor when timeoutMs omitted", tool: "executePlan", expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS },
     { name: "startDevice floor when timeoutMs omitted", tool: "startDevice", expected: MIN_START_DEVICE_MCP_TIMEOUT_MS },
     { name: "launchApp floor when timeoutMs omitted", tool: "launchApp", expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS },
+    { name: "uninstallApp floor when timeoutMs omitted", tool: "uninstallApp", expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS },
     { name: "observe default floor when timeoutMs omitted", tool: "observe", expected: DEFAULT_OBSERVE_MCP_TIMEOUT_MS },
     { name: "openLink default floor when timeoutMs omitted", tool: "openLink", expected: DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS },
 
@@ -74,6 +76,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     { name: "raises short executePlan to floor", tool: "executePlan", timeoutMs: 180_000, expected: MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS },
     { name: "raises short startDevice to floor", tool: "startDevice", timeoutMs: 60_000, expected: MIN_START_DEVICE_MCP_TIMEOUT_MS },
     { name: "raises short launchApp to floor", tool: "launchApp", timeoutMs: 10_000, expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS },
+    { name: "raises short uninstallApp to floor", tool: "uninstallApp", timeoutMs: 30_000, expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS },
     { name: "raises short observe to floor", tool: "observe", timeoutMs: 30_000, expected: DEFAULT_OBSERVE_MCP_TIMEOUT_MS },
     { name: "raises short openLink to floor", tool: "openLink", timeoutMs: 10_000, expected: DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS },
 
@@ -81,6 +84,7 @@ describe("resolveMcpRequestTimeoutMs", () => {
     { name: "preserves executePlan above floor", tool: "executePlan", timeoutMs: 900_000, expected: 900_000 },
     { name: "preserves startDevice above floor", tool: "startDevice", timeoutMs: 300_000, expected: 300_000 },
     { name: "preserves launchApp above floor", tool: "launchApp", timeoutMs: 150_000, expected: 150_000 },
+    { name: "preserves uninstallApp above floor", tool: "uninstallApp", timeoutMs: 90_000, expected: 90_000 },
     { name: "preserves observe above floor", tool: "observe", timeoutMs: 150_000, expected: 150_000 },
 
     // --- Boundary: base exactly equal to the floor stays put (Math.max is idempotent) ---

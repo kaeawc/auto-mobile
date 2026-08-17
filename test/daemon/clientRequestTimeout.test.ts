@@ -2,7 +2,11 @@ import { describe, expect, test, beforeEach } from "bun:test";
 import { Duplex } from "node:stream";
 import { DaemonClient } from "../../src/daemon/client";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
-import { MIN_START_DEVICE_MCP_TIMEOUT_MS, DEFAULT_MCP_REQUEST_TIMEOUT_MS } from "../../src/daemon/mcpRequestTimeout";
+import {
+  DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+  MIN_START_DEVICE_MCP_TIMEOUT_MS,
+  MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
+} from "../../src/daemon/mcpRequestTimeout";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 function createBlackHoleSocket(): Duplex {
@@ -40,6 +44,26 @@ describe("DaemonClient per-request timeout", () => {
       const timeoutErr = err as McpTimeoutError;
       expect(timeoutErr.toolName).toBe("startDevice");
       expect(timeoutErr.timeoutMs).toBe(MIN_START_DEVICE_MCP_TIMEOUT_MS);
+      expect(timeoutErr.origin).toBe("DaemonClient.sendRequest");
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("uninstallApp uses MIN_UNINSTALL_APP_MCP_TIMEOUT_MS", async () => {
+    const client = createConnectedClient(fakeTimer);
+
+    const promise = client.callTool("uninstallApp", { appId: "com.example.app" });
+    fakeTimer.advanceTime(MIN_UNINSTALL_APP_MCP_TIMEOUT_MS);
+
+    try {
+      await promise;
+      expect.unreachable("should have timed out");
+    } catch (err) {
+      expect(err).toBeInstanceOf(McpTimeoutError);
+      const timeoutErr = err as McpTimeoutError;
+      expect(timeoutErr.toolName).toBe("uninstallApp");
+      expect(timeoutErr.timeoutMs).toBe(MIN_UNINSTALL_APP_MCP_TIMEOUT_MS);
       expect(timeoutErr.origin).toBe("DaemonClient.sendRequest");
     } finally {
       await client.close();

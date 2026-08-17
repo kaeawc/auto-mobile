@@ -1,4 +1,7 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { UninstallAppResult } from "../../models/UninstallAppResult";
@@ -13,6 +16,11 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
+import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
+import { throwIfAborted } from "../../utils/toolUtils";
+
+const ANDROID_UNINSTALL_TIMEOUT_MS = 20_000;
+const ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS = 5_000;
 
 export interface DeviceAppUninstaller {
   uninstallApp(deviceUdid: string, bundleId: string, isSimulator?: boolean): Promise<void>;
@@ -31,7 +39,7 @@ export class UninstallApp {
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     simctl: SimCtlClient | null = null,
     deviceAppUninstaller: DeviceAppUninstaller | null = null,
-    installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository()
+    installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository(),
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -54,8 +62,10 @@ export class UninstallApp {
   async execute(
     packageName: string,
     keepData: boolean = false,
-    userId?: number
+    userId?: number,
+    signal?: AbortSignal,
   ): Promise<UninstallAppResult> {
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("uninstallApp");
 
@@ -67,7 +77,7 @@ export class UninstallApp {
         packageName: packageName || "",
         wasInstalled: false,
         keepData,
-        error: "Invalid package name provided"
+        error: "Invalid package name provided",
       };
     }
 
@@ -75,7 +85,9 @@ export class UninstallApp {
       case "ios":
         return perf.track("iOSUninstall", () => this.executeiOS(packageName));
       case "android":
-        return perf.track("androidUninstall", () => this.executeAndroid(packageName, keepData, userId));
+        return perf.track("androidUninstall", () =>
+          this.executeAndroid(packageName, keepData, userId, signal),
+        );
       default:
         perf.end();
         throw new Error(`Unsupported platform: ${this.device.platform}`);
@@ -93,16 +105,20 @@ export class UninstallApp {
       // Check if app is installed. Keep the cache disabled so the pre-uninstall
       // check always reflects live device state (the previous executor-arg path
       // left caching off; passing the default factory would silently enable it).
-      const listApps = new ListInstalledApps(this.device, this.adbFactory, this.simctl, { cacheEnabled: false });
-      const installed = (await listApps.execute()).find(app => app === bundleId) !== undefined;
+      const listApps = new ListInstalledApps(this.device, this.adbFactory, this.simctl, {
+        cacheEnabled: false,
+      });
+      const installed = (await listApps.execute()).find((app) => app === bundleId) !== undefined;
 
       if (!installed) {
-        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(bundleId);
+        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
+          bundleId,
+        );
         return {
           success: true,
           packageName: bundleId,
           wasInstalled: false,
-          keepData: false
+          keepData: false,
         };
       }
 
@@ -120,7 +136,8 @@ export class UninstallApp {
       await this.markInstalledAppsCacheStale();
 
       // Verify the app was uninstalled
-      const isStillInstalled = (await listApps.execute()).find(app => app === bundleId) !== undefined;
+      const isStillInstalled =
+        (await listApps.execute()).find((app) => app === bundleId) !== undefined;
 
       if (isStillInstalled) {
         return {
@@ -128,17 +145,19 @@ export class UninstallApp {
           packageName: bundleId,
           wasInstalled: true,
           keepData: false,
-          error: "Failed to uninstall application"
+          error: "Failed to uninstall application",
         };
       }
 
-      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(bundleId);
+      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
+        bundleId,
+      );
 
       return {
         success: true,
         packageName: bundleId,
         wasInstalled: true,
-        keepData: false // iOS doesn't support keeping data during uninstall
+        keepData: false, // iOS doesn't support keeping data during uninstall
       };
     } catch (error) {
       return {
@@ -146,7 +165,7 @@ export class UninstallApp {
         packageName: bundleId,
         wasInstalled: true,
         keepData: false,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       };
     }
   }
@@ -157,12 +176,23 @@ export class UninstallApp {
    * @param keepData - Whether to keep app data
    * @param userId - Optional Android user ID (auto-detected if not provided)
    */
-  private async executeAndroid(packageName: string, keepData: boolean, userId?: number): Promise<UninstallAppResult> {
+  private async executeAndroid(
+    packageName: string,
+    keepData: boolean,
+    userId?: number,
+    signal?: AbortSignal,
+  ): Promise<UninstallAppResult> {
     try {
       // Auto-detect target user if not specified
-      const targetUserId = (await new AndroidUserTargetResolver(this.adb).resolve({ packageName, explicitUserId: userId })).userId;
+      const targetUserId = (
+        await new AndroidUserTargetResolver(this.adb).resolve({
+          packageName,
+          explicitUserId: userId,
+          signal,
+        })
+      ).userId;
 
-      const installed = await this.isInstalledForUser(packageName, targetUserId);
+      const installed = await this.isInstalledForUser(packageName, targetUserId, undefined, signal);
 
       if (!installed) {
         return {
@@ -170,23 +200,48 @@ export class UninstallApp {
           packageName,
           wasInstalled: false,
           keepData,
-          userId: targetUserId
+          userId: targetUserId,
         };
       }
 
       // TODO: query if app was running and needed to be stopped
-      await this.adb.executeCommand(`shell am force-stop --user ${targetUserId} ${packageName}`);
+      await this.adb.executeCommand(
+        `shell am force-stop --user ${targetUserId} ${packageName}`,
+        undefined,
+        undefined,
+        false,
+        signal,
+      );
 
-      const cmd = keepData ?
-        `shell pm uninstall --user ${targetUserId} -k ${packageName}` :
-        `shell pm uninstall --user ${targetUserId} ${packageName}`;
+      const cmd = keepData
+        ? `shell pm uninstall --user ${targetUserId} -k ${packageName}`
+        : `shell pm uninstall --user ${targetUserId} ${packageName}`;
 
-      await this.adb.executeCommand(cmd);
+      try {
+        await this.adb.executeCommand(cmd, ANDROID_UNINSTALL_TIMEOUT_MS, undefined, true, signal);
+      } catch (error) {
+        throwIfAborted(signal);
+        if (error instanceof AdbCommandTimeoutError) {
+          return this.recoverTimedOutAndroidUninstall(
+            packageName,
+            keepData,
+            targetUserId,
+            cmd,
+            signal,
+          );
+        }
+        throw error;
+      }
 
       await this.markInstalledAppsCacheStale();
 
       // Verify the app was uninstalled
-      const isStillInstalled = await this.isInstalledForUser(packageName, targetUserId);
+      const isStillInstalled = await this.isInstalledForUser(
+        packageName,
+        targetUserId,
+        undefined,
+        signal,
+      );
 
       if (isStillInstalled) {
         return {
@@ -195,7 +250,7 @@ export class UninstallApp {
           wasInstalled: true,
           keepData,
           userId: targetUserId,
-          error: "Failed to uninstall application"
+          error: "Failed to uninstall application",
         };
       }
 
@@ -204,35 +259,160 @@ export class UninstallApp {
         packageName,
         wasInstalled: true,
         keepData,
-        userId: targetUserId
+        userId: targetUserId,
       };
     } catch (error) {
+      throwIfAborted(signal);
       return {
         success: false,
         packageName,
         wasInstalled: true,
         keepData,
-        error: "Error occurred during application uninstallation"
+        error: error instanceof Error ? error.message : String(error),
       };
     }
   }
 
-  private async isInstalledForUser(packageName: string, userId: number): Promise<boolean> {
+  private async recoverTimedOutAndroidUninstall(
+    packageName: string,
+    keepData: boolean,
+    userId: number,
+    command: string,
+    signal?: AbortSignal,
+  ): Promise<UninstallAppResult> {
+    await this.markInstalledAppsCacheStale();
+
+    let isStillInstalled: boolean;
+    try {
+      isStillInstalled = await this.isInstalledForUser(
+        packageName,
+        userId,
+        ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS,
+        signal,
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      return this.androidUninstallTimeoutFailure(
+        packageName,
+        keepData,
+        userId,
+        `Package-state check failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (!isStillInstalled) {
+      return this.successfulAndroidUninstall(packageName, keepData, userId);
+    }
+
+    logger.warn(
+      `[UninstallApp] Android uninstall timed out for ${packageName} (user ${userId}); package remains installed, retrying once.`,
+    );
+    let retryTimedOut = false;
+    try {
+      await this.adb.executeCommand(
+        command,
+        ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS,
+        undefined,
+        true,
+        signal,
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      if (!(error instanceof AdbCommandTimeoutError)) {
+        return this.androidUninstallTimeoutFailure(
+          packageName,
+          keepData,
+          userId,
+          `One bounded retry failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      retryTimedOut = true;
+    }
+
+    await this.markInstalledAppsCacheStale();
+    try {
+      isStillInstalled = await this.isInstalledForUser(
+        packageName,
+        userId,
+        ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS,
+        signal,
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      return this.androidUninstallTimeoutFailure(
+        packageName,
+        keepData,
+        userId,
+        `Post-retry package-state check failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (!isStillInstalled) {
+      return this.successfulAndroidUninstall(packageName, keepData, userId);
+    }
+
+    return this.androidUninstallTimeoutFailure(
+      packageName,
+      keepData,
+      userId,
+      retryTimedOut
+        ? "Package remains installed after one bounded retry timed out."
+        : "Package remains installed after one bounded retry.",
+    );
+  }
+
+  private successfulAndroidUninstall(
+    packageName: string,
+    keepData: boolean,
+    userId: number,
+  ): UninstallAppResult {
+    return {
+      success: true,
+      packageName,
+      wasInstalled: true,
+      keepData,
+      userId,
+    };
+  }
+
+  private androidUninstallTimeoutFailure(
+    packageName: string,
+    keepData: boolean,
+    userId: number,
+    detail: string,
+  ): UninstallAppResult {
+    return {
+      success: false,
+      packageName,
+      wasInstalled: true,
+      keepData,
+      userId,
+      error: `Android uninstall timed out after ${ANDROID_UNINSTALL_TIMEOUT_MS}ms for package ${packageName} (user ${userId}). ${detail}`,
+    };
+  }
+
+  private async isInstalledForUser(
+    packageName: string,
+    userId: number,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     const result = await this.adb.executeCommand(
       `shell pm list packages --user ${userId}`,
+      timeoutMs,
       undefined,
-      undefined,
-      true
+      true,
+      signal,
     );
-    return result.stdout.split("\n").some(line => line.trim() === `package:${packageName}`);
+    return result.stdout.split("\n").some((line) => line.trim() === `package:${packageName}`);
   }
 
   private async markInstalledAppsCacheStale(): Promise<void> {
     try {
       await getInstalledAppsCacheWriteCoordinator().invalidate(this.device.deviceId, () =>
-        getDbWriteBarrier().track(() =>
-          this.installedAppsRepository.markDeviceStale(this.device.deviceId)
-        ).then(() => undefined)
+        getDbWriteBarrier()
+          .track(() => this.installedAppsRepository.markDeviceStale(this.device.deviceId))
+          .then(() => undefined),
       );
     } catch (error) {
       logger.warn(`[UninstallApp] Failed to invalidate installed apps cache: ${error}`);

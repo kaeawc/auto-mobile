@@ -13,6 +13,7 @@ interface ActiveExecution {
   sessionId?: string;
   transportSessionId?: string;
   sessionUuid?: string;
+  resolvedAutolockSessionUuid?: string;
   startTime: number;
   abortController: AbortController;
   /**
@@ -49,6 +50,7 @@ export class ExecutionTracker {
   private executions = new Map<string, ActiveExecution>();
   private sessionExecutions = new Map<string, Set<string>>();
   private sessionUuidExecutions = new Map<string, Set<string>>();
+  private autolockSessionExecutions = new Map<string, Set<string>>();
   private timer: Timer;
   private idGenerator: IdGenerator;
 
@@ -116,6 +118,10 @@ export class ExecutionTracker {
         this.sessionUuidExecutions.delete(execution.sessionUuid);
       }
     }
+
+    if (execution.resolvedAutolockSessionUuid) {
+      this.unregisterAutolockSessionExecution(execution.resolvedAutolockSessionUuid, executionId);
+    }
   }
 
   /**
@@ -145,6 +151,28 @@ export class ExecutionTracker {
 
   hasActiveSessionExecutions(sessionId: string, query?: ActiveExecutionQuery): boolean {
     return this.hasActiveExecutionsForKey(this.sessionExecutions, sessionId, query);
+  }
+
+  /**
+   * Records the concrete autolock UUID selected after an implicit MCP call begins.
+   * This association must not follow later changes to the MCP-session routing map.
+   */
+  setResolvedAutolockSessionUuid(executionId: string, sessionUuid: string): void {
+    const execution = this.executions.get(executionId);
+    if (!execution || execution.resolvedAutolockSessionUuid === sessionUuid) {
+      return;
+    }
+    if (execution.resolvedAutolockSessionUuid) {
+      this.unregisterAutolockSessionExecution(execution.resolvedAutolockSessionUuid, executionId);
+    }
+    execution.resolvedAutolockSessionUuid = sessionUuid;
+    const executions = this.autolockSessionExecutions.get(sessionUuid) ?? new Set<string>();
+    executions.add(executionId);
+    this.autolockSessionExecutions.set(sessionUuid, executions);
+  }
+
+  hasActiveAutolockSessionExecutions(sessionUuid: string, query?: ActiveExecutionQuery): boolean {
+    return this.hasActiveExecutionsForKey(this.autolockSessionExecutions, sessionUuid, query);
   }
 
   hasActiveToolExecution(toolName: string, options: ExecutionScopeOptions): boolean {
@@ -183,6 +211,14 @@ export class ExecutionTracker {
     sessionSet?.delete(executionId);
     if (sessionSet?.size === 0) {
       this.sessionExecutions.delete(sessionId);
+    }
+  }
+
+  private unregisterAutolockSessionExecution(sessionUuid: string, executionId: string): void {
+    const executions = this.autolockSessionExecutions.get(sessionUuid);
+    executions?.delete(executionId);
+    if (executions?.size === 0) {
+      this.autolockSessionExecutions.delete(sessionUuid);
     }
   }
 

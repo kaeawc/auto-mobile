@@ -1242,13 +1242,10 @@ export class Daemon {
   private hasActiveSessionExecution(sessionId: string, query?: ActiveSessionExecutionQuery): boolean {
     const executionSessionId = resolveCapabilityBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
     return executionTracker.hasActiveSessionUuidExecutions(sessionId, query)
+      || executionTracker.hasActiveAutolockSessionExecutions(sessionId, query)
       || (executionSessionId !== sessionId
-        && executionTracker.hasActiveSessionUuidExecutions(executionSessionId, query))
-      || this.devicePool.hasActiveAutolockMcpSessionExecution(
-        sessionId,
-        (mcpSessionId, executionQuery) => executionTracker.hasActiveSessionExecutions(mcpSessionId, executionQuery),
-        query,
-      );
+        && (executionTracker.hasActiveSessionUuidExecutions(executionSessionId, query)
+          || executionTracker.hasActiveAutolockSessionExecutions(executionSessionId, query)));
   }
 
   private startDeviceDisconnectMonitor(): void {

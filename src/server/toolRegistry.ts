@@ -48,6 +48,7 @@ import {
   runWithToolCapabilityContext,
 } from "../features/toolCapabilities/toolCapabilityContext";
 import { isDeviceLostError } from "./deviceLossOutcome";
+import { executionTracker } from "./executionTracker";
 
 // Re-exported for backward compatibility; the implementation now lives in
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
@@ -394,6 +395,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       const implicitSessionUuid = this.resolveImplicitAutolockSession(platform, sessionUuid, providedDeviceId, mcpSessionId, execution);
       if (implicitSessionUuid) {
         sessionUuid = implicitSessionUuid;
+        if (execution) {
+          executionTracker.setResolvedAutolockSessionUuid(execution.executionId, implicitSessionUuid);
+        }
         logger.info(`[ToolRegistry] Resolved implicit autolock session for MCP session ${mcpSessionId}: ${implicitSessionUuid}`);
       }
       if (sessionUuid) {

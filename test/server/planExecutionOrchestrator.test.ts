@@ -9,6 +9,7 @@ import type { TestExecutionRecord, TestExecutionRepository } from "../../src/db/
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithToolCapabilityContext } from "../../src/features/toolCapabilities/toolCapabilityContext";
 import { resolveCapabilityBaseSessionUuid } from "../../src/features/toolCapabilities/capabilitySessionResolver";
@@ -256,24 +257,33 @@ steps:
       timer,
     );
     DaemonState.getInstance().initialize(sessionManager, devicePool);
+    await sessionManager.createSession("base", androidDevice.deviceId, "android");
     const executionTracker = new ExecutionTracker(timer);
     executionTracker.startExecution("executePlan", undefined, "base");
-    sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
+    const hasActiveExecution = (sessionId: string, query?: { excludeExecutionId?: string }) =>
       executionTracker.hasActiveSessionUuidExecutions(
         resolveCapabilityBaseSessionUuid(sessionId, sessionManager),
         query,
-      ),
+      );
+    sessionManager.setActiveSessionExecutionChecker(hasActiveExecution);
+    const heartbeatMonitor = new SessionHeartbeatMonitor(
+      sessionManager,
+      hasActiveExecution,
+      sessionId => sessionManager.releaseSession(sessionId),
+      timer,
     );
 
     devicePool.assignMultipleDevices = async sessionIds => {
       const assignments = new Map<string, string>();
       for (const [index, sessionId] of sessionIds.entries()) {
         const device = index === 0 ? androidDevice : secondAndroidDevice;
-        const session = await sessionManager.createSession(sessionId, device.deviceId, "android");
-        session.expiresAt = timer.now();
+        if (!sessionManager.getSession(sessionId)) {
+          await sessionManager.createSession(sessionId, device.deviceId, "android");
+        }
         assignments.set(sessionId, device.deviceId);
       }
-      timer.advanceTime(1);
+      timer.advanceTime(6_000);
+      await heartbeatMonitor.tick();
       return assignments;
     };
     devicePool.assignDeviceToSession = async () => {
@@ -320,6 +330,51 @@ steps:
       expect(result).toMatchObject({ success: true });
       expect(sessionManager.getSession("base")).not.toBeNull();
       expect(sessionManager.getSession("base:B")).not.toBeNull();
+    } finally {
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("restores the previous device-label map when allocation fails", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const devicePool = new DevicePool(sessionManager, "daemon-session", timer);
+    DaemonState.getInstance().initialize(sessionManager, devicePool);
+    await sessionManager.createSession("base", androidDevice.deviceId, "android");
+    const previousDeviceLabels = { existing: "base" };
+    sessionManager.setDeviceLabels("base", previousDeviceLabels);
+    devicePool.assignMultipleDevices = async () => {
+      throw new Error("allocation failed");
+    };
+
+    try {
+      const result = await new PlanExecutionOrchestrator(
+        {
+          device: androidDevice,
+          request: {
+            ...baseRequest,
+            planContent: `
+name: multi-device-test
+devices:
+  - A
+  - B
+steps:
+  - tool: observe
+    device: A
+    params: {}
+`,
+            platform: "android",
+            sessionUuid: "base",
+            device: "A",
+            devices: ["A", "B"],
+          },
+        },
+        { ...baseDeps(), timer },
+      ).execute();
+
+      expect(result.success).toBe(false);
+      expect(sessionManager.getDeviceLabels("base")).toEqual(previousDeviceLabels);
     } finally {
       DaemonState.getInstance().reset();
       sessionManager.stopCleanupTimer();

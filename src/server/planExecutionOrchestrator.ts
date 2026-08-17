@@ -14,6 +14,8 @@ type NormalizedPlanDevices = ReturnType<typeof normalizePlanDevices>;
 import { buildDeviceLabelMap, registerDeviceLabelMap } from "./deviceLabelMapping";
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { DaemonState } from "../daemon/daemonState";
+import type { DevicePool } from "../daemon/devicePool";
+import type { SessionManager } from "../daemon/sessionManager";
 import { AndroidSegmentedPlanVideoSession } from "./androidSegmentedPlanVideoSession";
 import { type StoppedSegment, writeSegmentManifest } from "./segmentManifest";
 import {
@@ -413,20 +415,21 @@ export class PlanExecutionOrchestrator {
    * plan with no labels.
    */
   private async allocateDevices(_plan: Plan): Promise<Record<string, string> | undefined> {
-    const normalized = this.normalizedDevices ?? { labels: [], hasDefinitions: false, definitions: [] };
+    const normalized = this.normalizedDevices ?? normalizePlanDevices();
     const planDeviceLabels = normalized.labels;
     const effectiveLabels = this.request.devices && this.request.devices.length > 0
       ? this.request.devices
       : planDeviceLabels;
 
-    if (!effectiveLabels || effectiveLabels.length === 0) {
+    if (effectiveLabels.length === 0) {
       if (this.request.device) {
         throw new ActionableError("Device label requires a devices list to be provided.");
       }
       return undefined;
     }
 
-    if (!this.request.sessionUuid) {
+    const sessionUuid = this.request.sessionUuid;
+    if (!sessionUuid) {
       throw new ActionableError("Device labels require a sessionUuid to be provided.");
     }
     if (this.request.device && !effectiveLabels.includes(this.request.device)) {
@@ -443,53 +446,106 @@ export class PlanExecutionOrchestrator {
 
     const devicePool = DaemonState.getInstance().getDevicePool();
     const sessionManager = DaemonState.getInstance().getSessionManager();
-    const labelToSessionMap = buildDeviceLabelMap(effectiveLabels, this.request.sessionUuid, this.request.device);
+    const labelToSessionMap = buildDeviceLabelMap(effectiveLabels, sessionUuid, this.request.device);
     const sessionIds = Object.values(labelToSessionMap);
+
+    // The plan execution is tracked on its base session. Publish its derived
+    // label-session ownership before the allocator's first await so heartbeat
+    // and idle cleanup keep partial allocations alive while this plan runs.
+    const previousDeviceLabels = sessionManager.getDeviceLabels(sessionUuid);
+    sessionManager.setDeviceLabels(sessionUuid, labelToSessionMap);
 
     logger.info(
       `Requesting allocation of ${sessionIds.length} devices for labels: ${Object.keys(labelToSessionMap).join(", ")} ` +
       `(timeout: ${this.request.deviceAllocationTimeoutMs / 1000}s)`
     );
 
-    let sessionToDeviceMap: Map<string, string>;
-    if (normalized.hasDefinitions) {
-      const definitionMap = new Map(
-        normalized.definitions.map(definition => [definition.label, definition])
-      );
-      const requests = effectiveLabels.map(label => {
-        const definition = definitionMap.get(label);
-        if (!definition) {
-          throw new ActionableError(
-            `Device definition for label '${label}' not found in plan devices.`
-          );
-        }
-        return {
-          sessionId: labelToSessionMap[label],
-          criteria: {
-            platform: definition.platform,
-            simulatorType: definition.simulatorType,
-            iosVersion: definition.iosVersion,
-          },
-        };
-      });
+    const restorePreviousDeviceLabels = (error: unknown): never => {
+      if (previousDeviceLabels) {
+        sessionManager.setDeviceLabels(sessionUuid, previousDeviceLabels);
+      } else {
+        sessionManager.clearSessionCache(sessionUuid, "deviceLabels");
+      }
+      throw error;
+    };
 
-      sessionToDeviceMap = await devicePool.assignMultipleDevicesByCriteria(
-        requests,
-        this.request.deviceAllocationTimeoutMs
-      );
-    } else {
-      sessionToDeviceMap = await devicePool.assignMultipleDevices(
+    const allocation = Promise.resolve().then(() => this.requestDeviceAllocation(
+      devicePool,
+      normalized,
+      effectiveLabels,
+      labelToSessionMap,
+      sessionIds
+    ));
+
+    const sessionToDeviceMap = await allocation.catch(error => {
+      return restorePreviousDeviceLabels(error);
+    });
+
+    const deviceMapping = this.buildDeviceMapping(sessionManager, sessionToDeviceMap, labelToSessionMap);
+
+    this.perfLog("Device allocation complete");
+    for (const [label, deviceId] of Object.entries(deviceMapping)) {
+      const sessionUuid = labelToSessionMap[label];
+      this.perfLog(`  ${label} → ${deviceId} (session: ${sessionUuid})`);
+    }
+
+    await registerDeviceLabelMap(
+      sessionUuid,
+      effectiveLabels,
+      this.request.device,
+      { keepScreenAwake: this.request.keepScreenAwake, platform: this.request.platform },
+      getToolCapabilityContext()?.execution,
+    );
+
+    return deviceMapping;
+  }
+
+  private requestDeviceAllocation(
+    devicePool: DevicePool,
+    normalized: NormalizedPlanDevices,
+    effectiveLabels: string[],
+    labelToSessionMap: Record<string, string>,
+    sessionIds: string[]
+  ): Promise<Map<string, string>> {
+    if (!normalized.hasDefinitions) {
+      return devicePool.assignMultipleDevices(
         sessionIds,
         this.request.deviceAllocationTimeoutMs,
         this.request.platform
       );
     }
 
-    // The plan execution is tracked on its base session. Publish its derived
-    // label-session ownership before any expiry-aware session read so cleanup
-    // keeps every allocation alive while this plan is still running.
-    sessionManager.setDeviceLabels(this.request.sessionUuid, labelToSessionMap);
+    const definitionMap = new Map(
+      normalized.definitions.map(definition => [definition.label, definition])
+    );
+    const requests = effectiveLabels.map(label => {
+      const definition = definitionMap.get(label);
+      if (!definition) {
+        throw new ActionableError(
+          `Device definition for label '${label}' not found in plan devices.`
+        );
+      }
+      return {
+        sessionId: labelToSessionMap[label],
+        criteria: {
+          platform: definition.platform,
+          simulatorType: definition.simulatorType,
+          iosVersion: definition.iosVersion,
+        },
+      };
+    });
 
+    return devicePool.assignMultipleDevicesByCriteria(
+      requests,
+      this.request.deviceAllocationTimeoutMs
+    );
+  }
+
+  private buildDeviceMapping(
+    sessionManager: SessionManager,
+    sessionToDeviceMap: Map<string, string>,
+    labelToSessionMap: Record<string, string>
+  ): Record<string, string> {
     for (const sessionUuid of sessionToDeviceMap.keys()) {
       if (!sessionManager.getSession(sessionUuid)) {
         throw new ActionableError(
@@ -508,21 +564,6 @@ export class PlanExecutionOrchestrator {
       }
       deviceMapping[label] = deviceId;
     }
-
-    this.perfLog("Device allocation complete");
-    for (const [label, deviceId] of Object.entries(deviceMapping)) {
-      const sessionUuid = labelToSessionMap[label];
-      this.perfLog(`  ${label} → ${deviceId} (session: ${sessionUuid})`);
-    }
-
-    await registerDeviceLabelMap(
-      this.request.sessionUuid,
-      effectiveLabels,
-      this.request.device,
-      { keepScreenAwake: this.request.keepScreenAwake, platform: this.request.platform },
-      getToolCapabilityContext()?.execution,
-    );
-
     return deviceMapping;
   }
 

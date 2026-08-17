@@ -51,6 +51,12 @@ describe("computeFreshness", () => {
       expect(v.warning).toContain("cannot be established");
     });
 
+    test("a hierarchy retrieval failure is never reported fresh, even with a current timestamp", () => {
+      const v = computeFreshness({ actualTimestamp: NOW, now: NOW, unavailable: true });
+      expect(v.isFresh).toBe(false);
+      expect(v.warning).toContain("could not be retrieved");
+    });
+
     test("the budget boundary is exclusive on the fresh side", () => {
       const at = DEFAULT_MAX_OBSERVATION_AGE_MS;
       expect(computeFreshness({ actualTimestamp: NOW - at, now: NOW }).isFresh).toBe(true);

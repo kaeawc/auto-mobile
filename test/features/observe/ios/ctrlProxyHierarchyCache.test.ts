@@ -29,6 +29,7 @@ interface Harness {
   /** Number of `request_hierarchy*` messages that reached the socket. */
   fetchCount: () => number;
   getCached: () => CtrlProxyCachedHierarchy | null;
+  setCached: (entry: CtrlProxyCachedHierarchy | null) => void;
   /** Simulate a disconnected/reconnecting runner, so no fetch can succeed. */
   setConnected: (connected: boolean) => void;
 }
@@ -75,6 +76,7 @@ function createHarness(): Harness {
     timer,
     fetchCount: () => fetches,
     getCached: () => cached,
+    setCached: entry => { cached = entry; },
     setConnected: value => { connected = value; },
   };
 }
@@ -167,6 +169,22 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
 
     expect(h.fetchCount()).toBe(1);
     expect(result.fresh).toBe(false);
+  });
+
+  test("a future device timestamp cannot keep an old host-side capture fresh", async () => {
+    h.setCached({
+      hierarchy: makeHierarchy(h.timer.now() + 3_600_000, "ahead-device-clock"),
+      receivedAt: h.timer.now(),
+      captureReceivedAt: h.timer.now(),
+      fresh: true,
+    });
+
+    h.timer.advanceTime(10_000);
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 0);
+
+    expect(h.fetchCount()).toBe(1);
+    expect(result.fresh).toBe(true);
+    expect(result.updatedAt).toBe(10_000);
   });
 
   // --- Controls: these fail if the fix simply disabled caching. ---

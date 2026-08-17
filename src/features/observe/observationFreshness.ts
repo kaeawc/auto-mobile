@@ -53,8 +53,10 @@ export interface FreshnessInputs {
    * Did the delegate obtain a tree it verified against the device on THIS call,
    * as opposed to serving a host-side cache entry unverified? `undefined` when
    * the source cannot report it (no delegate plumbing on that platform yet).
-   */
+  */
   verified?: boolean;
+  /** The hierarchy could not be retrieved, so no freshness verdict is possible. */
+  unavailable?: boolean;
   /** Age budget; defaults to {@link maxObservationAgeMs}. */
   maxAgeMs?: number;
 }
@@ -121,10 +123,21 @@ function computeRequestedFreshness(
  * used to return the constant `true` is new.
  */
 export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
-  const { requestedAfter, actualTimestamp, now, verified } = inputs;
+  const { requestedAfter, actualTimestamp, now, verified, unavailable } = inputs;
   const maxAgeMs = inputs.maxAgeMs ?? maxObservationAgeMs();
 
   const ageMs = actualTimestamp !== undefined ? Math.max(0, now - actualTimestamp) : undefined;
+
+  if (unavailable) {
+    return {
+      requestedAfter,
+      actualTimestamp,
+      ageMs,
+      verified,
+      isFresh: false,
+      warning: "View hierarchy could not be retrieved, so its freshness cannot be established.",
+    };
+  }
 
   // Caller supplied an explicit constraint: answer exactly that question.
   if (requestedAfter !== undefined) {

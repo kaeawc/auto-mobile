@@ -1508,9 +1508,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (type === "hierarchy_update" && message.data) {
       // Push update from server
       const now = this.timer.now();
+      const previous = this.cachedHierarchy;
       this.cachedHierarchy = {
         hierarchy: message.data,
         receivedAt: now,
+        captureReceivedAt: previous !== null && previous.hierarchy.updatedAt === message.data.updatedAt
+          ? previous.captureReceivedAt ?? previous.receivedAt
+          : now,
         fresh: true,
         perfTiming: message.perfTiming as CtrlProxyPerfTiming | undefined,
         frameContext: message.frameContext,

@@ -156,6 +156,19 @@ describe("freshness regression repro (glance path, ObserveScreen.execute)", () =
 
     expect(result.freshness?.isFresh).toBe(false);
   });
+
+  test("A RETRIEVAL FAILURE: an error hierarchy is never reported fresh", async () => {
+    const fakeTimer = new FakeTimer();
+    const { observeScreen } = createObserveScreen(fakeTimer, {
+      hierarchy: { error: "CtrlProxy did not return a hierarchy" },
+      updatedAt: fakeTimer.now(),
+    });
+
+    const result = await observeScreen.execute();
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("could not be retrieved");
+  });
 });
 
 describe("freshness regression repro (receivedAt-vs-updatedAt clock, CtrlProxyHierarchy)", () => {

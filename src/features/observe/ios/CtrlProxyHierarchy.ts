@@ -115,21 +115,12 @@ export class CtrlProxyHierarchy {
     const cachedHierarchy = this.context.getCachedHierarchy();
     let cachedCaptureAgeMs: number | undefined;
     if (cachedHierarchy) {
-      // Age is measured from the CAPTURE clock (`hierarchy.updatedAt`, stamped by
-      // the runner when it built the tree), not the DELIVERY clock
-      // (`receivedAt`, when this host took the push). They are not the same
-      // event and they diverge in exactly the case this cache exists to survive:
-      // `SdkHierarchyRefreshPublisher.publish()` re-broadcasts
-      // `HierarchyDebouncer.getLastHierarchy()` — an ALREADY-extracted tree —
-      // whenever SDK hierarchy data arrives, and `processMessage` stamps that
-      // push with `receivedAt: now, fresh: true`. Under `receivedAt` the entry
-      // then looks brand new while its content is arbitrarily old. Falls back to
-      // `receivedAt` only when the payload carries no capture timestamp.
-      const capturedAt = cachedHierarchy.hierarchy.updatedAt;
-      const ageBasis = typeof capturedAt === "number" && capturedAt > 0
-        ? capturedAt
-        : cachedHierarchy.receivedAt;
-      cachedCaptureAgeMs = this.context.timer.now() - ageBasis;
+      // `updatedAt` identifies a capture but lives in the device clock domain,
+      // so it cannot safely be subtracted from host time. Instead, age the first
+      // host sighting of that capture. The client preserves it for repeated
+      // deliveries of an unchanged `updatedAt`.
+      cachedCaptureAgeMs = this.context.timer.now() -
+        (cachedHierarchy.captureReceivedAt ?? cachedHierarchy.receivedAt);
       const cacheAge = cachedCaptureAgeMs;
       // `fresh` is honoured as well as elapsed time: without it, invalidateCache()
       // would be an observable no-op inside the TTL (issue #4193).
@@ -299,9 +290,12 @@ export class CtrlProxyHierarchy {
 
     if (result.hierarchy) {
       // Update cache
+      const now = this.context.timer.now();
+      const previous = this.context.getCachedHierarchy();
       const newCache: CachedHierarchy = {
         hierarchy: result.hierarchy,
-        receivedAt: this.context.timer.now(),
+        receivedAt: now,
+        captureReceivedAt: this.captureReceivedAt(result.hierarchy, previous, now),
         fresh: true,
         perfTiming: result.perfTiming,
         frameContext: result.frameContext,
@@ -316,6 +310,17 @@ export class CtrlProxyHierarchy {
     }
 
     return null;
+  }
+
+  private captureReceivedAt(
+    hierarchy: XCTestHierarchy,
+    previous: CachedHierarchy | null,
+    now: number,
+  ): number {
+    const sameCapture = previous?.hierarchy.updatedAt === hierarchy.updatedAt
+      ? previous
+      : undefined;
+    return sameCapture?.captureReceivedAt ?? sameCapture?.receivedAt ?? now;
   }
 
   /**

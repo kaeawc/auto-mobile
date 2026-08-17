@@ -252,6 +252,12 @@ export type CtrlProxyHighlightResult = HighlightOperationResult;
 export interface CtrlProxyCachedHierarchy {
   hierarchy: XCTestHierarchy;
   receivedAt: number;
+  /**
+   * Host clock when this exact device capture was first seen. Unlike
+   * `receivedAt`, this is retained when the runner re-delivers the same
+   * `updatedAt`, so a repeated push cannot make old content look newly captured.
+   */
+  captureReceivedAt?: number;
   fresh: boolean;
   perfTiming?: CtrlProxyPerfTiming;
   frameContext?: string;

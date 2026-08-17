@@ -117,6 +117,15 @@ export async function waitForExit(
     return;
   }
 
+  // `killed` means a prior graceful stop already sent a signal; it does not
+  // mean the child has been reaped. Await that stop rather than truncating an
+  // in-progress iOS recording with a second signal. Backend force-stop paths
+  // intentionally use `exitCode` alone when escalation is required.
+  if (process.killed) {
+    await exitPromise;
+    return;
+  }
+
   if (signal !== null) {
     process.kill(signal);
   }

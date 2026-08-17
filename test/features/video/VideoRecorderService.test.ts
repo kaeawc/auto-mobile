@@ -99,7 +99,9 @@ describe("parseVideoRecordingConfig", () => {
   });
 
   test("ignores invalid resolution", () => {
-    expect(parseVideoRecordingConfig({ resolution: { width: 0, height: 100 } }).resolution).toBeUndefined();
+    expect(
+      parseVideoRecordingConfig({ resolution: { width: 0, height: 100 } }).resolution,
+    ).toBeUndefined();
     expect(parseVideoRecordingConfig({ resolution: null as any }).resolution).toBeUndefined();
   });
 });
@@ -112,7 +114,10 @@ describe("VideoRecorderService", () => {
 
   beforeEach(async () => {
     backend = new FakeVideoCaptureBackend();
-    archiveRoot = path.join(os.tmpdir(), `video-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    archiveRoot = path.join(
+      os.tmpdir(),
+      `video-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     securePermissions = new FakeSecurePermissions();
 
     service = new VideoRecorderService({
@@ -131,26 +136,35 @@ describe("VideoRecorderService", () => {
 
     expect(backend.forceStopCalls).toEqual([backend.startResults[0]]);
     await expect(service.stopRecording(recording.recordingId)).rejects.toThrow(
-      "No active recording found"
+      "No active recording found",
     );
   });
 
-  test("rejects a graceful stop that resolves after force-stop removed its owner", async () => {
+  test("rejects a graceful stop that resolves after force-stop begins", async () => {
     const recording = await service.startRecording();
     let resolveStop: (() => void) | undefined;
+    let resolveForceStop: (() => void) | undefined;
     backend.stop = async () => {
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         resolveStop = resolve;
       });
       return backend.stopResult;
     };
+    backend.forceStop = async () => {
+      await new Promise<void>((resolve) => {
+        resolveForceStop = resolve;
+      });
+    };
 
     const stopping = service.stopRecording(recording.recordingId);
     await Promise.resolve();
-    await service.forceStopRecording(recording.recordingId);
+    const forcing = service.forceStopRecording(recording.recordingId);
+    await Promise.resolve();
     resolveStop?.();
 
     await expect(stopping).rejects.toThrow("was force-stopped while it was stopping");
+    resolveForceStop?.();
+    await forcing;
   });
 
   afterEach(async () => {
@@ -239,7 +253,7 @@ describe("VideoRecorderService", () => {
 
     test("throws for unknown recording id", async () => {
       await expect(service.stopRecording("nonexistent")).rejects.toThrow(
-        "No active recording found"
+        "No active recording found",
       );
     });
 
@@ -248,7 +262,7 @@ describe("VideoRecorderService", () => {
       await service.stopRecording(recording.recordingId);
 
       await expect(service.stopRecording(recording.recordingId)).rejects.toThrow(
-        "No active recording found"
+        "No active recording found",
       );
     });
 

@@ -80,6 +80,7 @@ export interface VideoRecorderServiceDependencies {
 
 interface ActiveRecordingState extends ActiveVideoRecording {
   handle: RecordingHandle;
+  forceStopRequested: boolean;
 }
 
 export const DEFAULT_VIDEO_RECORDING_CONFIG: VideoRecordingConfig = {
@@ -95,32 +96,27 @@ const QUALITY_PRESETS = new Set<VideoQualityPreset>(["low", "medium", "high"]);
 const VIDEO_FORMATS = new Set<VideoFormat>(["mp4"]);
 
 export function parseVideoRecordingConfig(
-  input: VideoRecordingConfigInput | null | undefined
+  input: VideoRecordingConfigInput | null | undefined,
 ): VideoRecordingConfig {
-  const safeInput: VideoRecordingConfigInput =
-    input && typeof input === "object" ? input : {};
+  const safeInput: VideoRecordingConfigInput = input && typeof input === "object" ? input : {};
 
   const qualityPreset = parseQualityPreset(safeInput.qualityPreset);
   const maxThroughputMbps = parsePositiveNumber(
     safeInput.maxThroughputMbps,
     DEFAULT_VIDEO_RECORDING_CONFIG.maxThroughputMbps,
-    true
+    true,
   );
   const requestedBitrateKbps = parsePositiveNumber(
     safeInput.targetBitrateKbps,
     DEFAULT_VIDEO_RECORDING_CONFIG.targetBitrateKbps,
-    true
+    true,
   );
   const targetBitrateKbps = capBitrateKbps(requestedBitrateKbps, maxThroughputMbps);
-  const fps = parsePositiveNumber(
-    safeInput.fps,
-    DEFAULT_VIDEO_RECORDING_CONFIG.fps,
-    false
-  );
+  const fps = parsePositiveNumber(safeInput.fps, DEFAULT_VIDEO_RECORDING_CONFIG.fps, false);
   const maxArchiveSizeMb = parsePositiveNumber(
     safeInput.maxArchiveSizeMb,
     DEFAULT_VIDEO_RECORDING_CONFIG.maxArchiveSizeMb,
-    true
+    true,
   );
   const format = parseFormat(safeInput.format);
   const resolution = parseResolution(safeInput.resolution);
@@ -148,17 +144,14 @@ export class VideoRecorderService {
   constructor(dependencies: VideoRecorderServiceDependencies) {
     this.backend = dependencies.backend;
     this.archiveRoot =
-      dependencies.archiveRoot ??
-      path.join(os.homedir(), ".auto-mobile", "video-archive");
+      dependencies.archiveRoot ?? path.join(os.homedir(), ".auto-mobile", "video-archive");
     this.log = dependencies.logger ?? logger;
     this.idGenerator = normalizeIdGenerator(dependencies.idGenerator);
     this.now = dependencies.now ?? (() => new Date());
     this.securePermissions = dependencies.securePermissions ?? defaultSecurePermissions;
   }
 
-  async startRecording(
-    options: StartVideoRecordingOptions = {}
-  ): Promise<ActiveVideoRecording> {
+  async startRecording(options: StartVideoRecordingOptions = {}): Promise<ActiveVideoRecording> {
     const config = parseVideoRecordingConfig(options.config);
     const recordingId = this.idGenerator.next();
     const startedAt = this.now().toISOString();
@@ -200,6 +193,7 @@ export class VideoRecorderService {
       config,
       outputName: options.outputName,
       handle,
+      forceStopRequested: false,
     };
 
     this.activeRecordings.set(recordingId, active);
@@ -221,7 +215,7 @@ export class VideoRecorderService {
     }
 
     const stopResult = await this.backend.stop(active.handle);
-    if (this.activeRecordings.get(recordingId) !== active) {
+    if (this.activeRecordings.get(recordingId) !== active || active.forceStopRequested) {
       throw new Error(`Recording ${recordingId} was force-stopped while it was stopping.`);
     }
     const endedAt = stopResult.endedAt ?? this.now().toISOString();
@@ -235,9 +229,7 @@ export class VideoRecorderService {
     const fileStats = await this.safeStat(outputPath);
     const sizeBytes = stopResult.sizeBytes ?? fileStats?.size ?? 0;
 
-    const durationMs =
-      stopResult.durationMs ??
-      calculateDurationMs(active.startedAt, endedAt);
+    const durationMs = stopResult.durationMs ?? calculateDurationMs(active.startedAt, endedAt);
 
     const metadata: VideoRecordingMetadata = {
       recordingId: active.recordingId,
@@ -269,6 +261,9 @@ export class VideoRecorderService {
       throw new Error("Video capture backend does not support force stopping recordings.");
     }
 
+    // Set this before awaiting the backend: the graceful stop may resolve while
+    // a device-side force-stop command is still in flight.
+    active.forceStopRequested = true;
     await this.backend.forceStop(active.handle);
     this.activeRecordings.delete(recordingId);
   }
@@ -297,9 +292,7 @@ const normalizeIdGenerator = (idGenerator?: IdGenerator | (() => string)): IdGen
   return idGenerator;
 };
 
-function parseQualityPreset(
-  value: VideoRecordingConfigInput["qualityPreset"]
-): VideoQualityPreset {
+function parseQualityPreset(value: VideoRecordingConfigInput["qualityPreset"]): VideoQualityPreset {
   if (typeof value === "string" && QUALITY_PRESETS.has(value as VideoQualityPreset)) {
     return value as VideoQualityPreset;
   }
@@ -307,9 +300,7 @@ function parseQualityPreset(
   return DEFAULT_VIDEO_RECORDING_CONFIG.qualityPreset;
 }
 
-function parseFormat(
-  value: VideoRecordingConfigInput["format"]
-): VideoFormat {
+function parseFormat(value: VideoRecordingConfigInput["format"]): VideoFormat {
   if (typeof value === "string" && VIDEO_FORMATS.has(value as VideoFormat)) {
     return value as VideoFormat;
   }
@@ -318,7 +309,7 @@ function parseFormat(
 }
 
 function parseResolution(
-  value: VideoRecordingConfigInput["resolution"]
+  value: VideoRecordingConfigInput["resolution"],
 ): VideoResolution | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
@@ -346,7 +337,7 @@ function capBitrateKbps(targetBitrateKbps: number, maxThroughputMbps: number): n
 function parsePositiveNumber(
   value: number | string | undefined,
   defaultValue: number,
-  allowFloat: boolean
+  allowFloat: boolean,
 ): number {
   if (value === null || value === undefined) {
     return defaultValue;
@@ -360,11 +351,7 @@ function parsePositiveNumber(
   return allowFloat ? parsed : Math.round(parsed);
 }
 
-function buildRecordingFileName(
-  name: string,
-  startedAt: string,
-  format: VideoFormat
-): string {
+function buildRecordingFileName(name: string, startedAt: string, format: VideoFormat): string {
   const timestamp = formatTimestampForFilename(startedAt);
   return `${name}-${timestamp}.${format}`;
 }

@@ -117,11 +117,6 @@ export async function waitForExit(
     return;
   }
 
-  if (process.killed) {
-    await exitPromise;
-    return;
-  }
-
   if (signal !== null) {
     process.kill(signal);
   }

@@ -29,7 +29,8 @@ export const STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS = 5_000;
 // ProcessLifecycle and DaemonManager force-exit after ten seconds. This stage
 // shares that budget with capture cleanup, so an unresponsive proxy must not
 // consume it all before the remaining owners receive their stop attempt.
-const SHUTDOWN_STOP_TIMEOUT_MS = 1_500;
+const SHUTDOWN_STOP_TIMEOUT_MS = 1_200;
+const SHUTDOWN_FORCE_STOP_TIMEOUT_MS = 250;
 
 /**
  * iOS-specific setup result; carries the build result alongside the
@@ -432,10 +433,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const timedOut = new Promise<Error>(resolve => {
       timeout = timer.setTimeout(
         () => {
-          // stop() may be blocked on a remote runner call. Dispatch direct
-          // best-effort termination before the shutdown registry is cleared.
-          instance.forceStopForShutdown();
-          resolve(new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`));
+          // stop() may be blocked on a remote runner call. Reserve a bounded
+          // window to await direct termination before clearing the registry.
+          void IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer)
+            .then(() => resolve(new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`)));
         },
         SHUTDOWN_STOP_TIMEOUT_MS
       );
@@ -449,7 +450,22 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
-  private forceStopForShutdown(): void {
+  private static async forceStopWithinShutdownDeadline(
+    instance: IOSCtrlProxyManager,
+    timer: Timer,
+  ): Promise<void> {
+    let timeout: NodeJS.Timeout | undefined;
+    const deadline = new Promise<void>(resolve => {
+      timeout = timer.setTimeout(resolve, SHUTDOWN_FORCE_STOP_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([instance.forceStopForShutdown(), deadline]);
+    } finally {
+      if (timeout) {timer.clearTimeout(timeout);}
+    }
+  }
+
+  private async forceStopForShutdown(): Promise<void> {
     this.isStopping = true;
     this.processSupervisor.stop();
     this.iproxySupervisor.stop();
@@ -466,16 +482,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     PortManager.release(this.device.deviceId);
 
     if (this.useRemoteRunner()) {
-      if (runnerPid) {
-        void this.remoteRunner.stop({ deviceId: this.device.deviceId, pid: runnerPid }).catch(error => {
-          logger.warn(`[IOSCtrlProxy] Forced remote runner stop failed: ${error}`);
-        });
-      }
-      if (iproxyPid) {
-        void this.remoteRunner.stopIproxy({ pid: iproxyPid }).catch(error => {
-          logger.warn(`[IOSCtrlProxy] Forced remote iproxy stop failed: ${error}`);
-        });
-      }
+      await Promise.allSettled([
+        runnerPid ? this.remoteRunner.stop({ deviceId: this.device.deviceId, pid: runnerPid }) : undefined,
+        iproxyPid ? this.remoteRunner.stopIproxy({ pid: iproxyPid }) : undefined,
+      ]);
       return;
     }
 
@@ -490,7 +500,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       logger.debug(`[IOSCtrlProxy] Forced iproxy termination was already complete: ${error}`);
     }
     if (runnerPid) {
-      void this.processClient.terminateProcessTree(runnerPid).catch(error => {
+      await this.processClient.terminateProcessTree(runnerPid).catch(error => {
         logger.warn(`[IOSCtrlProxy] Forced CtrlProxy runner termination failed: ${error}`);
       });
     }

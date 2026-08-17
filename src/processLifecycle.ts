@@ -2,7 +2,9 @@ import { defaultTimer, type Timer } from "./utils/SystemTimer";
 
 export type ShutdownSignal = "SIGINT" | "SIGTERM" | "stdin";
 
-const PROCESS_SHUTDOWN_TIMEOUT_MS = 5_000;
+// A clean recording finalization alone requires one second. Leave enough time
+// for every child owner to receive a bounded stop or force-stop attempt.
+const PROCESS_SHUTDOWN_TIMEOUT_MS = 10_000;
 const PROCESS_SHUTDOWN_FINALIZATION_TIMEOUT_MS = 100;
 
 export interface StdinShutdownSource {

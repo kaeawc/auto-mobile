@@ -126,7 +126,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       this.timer.clearTimeout(timeoutId);
     }
 
-    if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
+    if (backendHandle.process.exitCode === null) {
       logger.warn(`[VideoCapture] screenrecord still running after SIGINT; sending SIGKILL`);
       backendHandle.process.kill("SIGKILL");
       await backendHandle.exitPromise;
@@ -208,6 +208,26 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       sizeBytes,
       codec,
     };
+  }
+
+  async forceStop(handle: RecordingHandle): Promise<void> {
+    const backendHandle = handle.backendHandle as BackendHandle | undefined;
+    if (!backendHandle || backendHandle.kind !== "android") {
+      throw new Error("Missing backend handle for video recording.");
+    }
+
+    if (backendHandle.process.exitCode === null) {
+      backendHandle.process.kill("SIGKILL");
+    }
+
+    // Do not wait for a potentially wedged device command before killing the
+    // directly owned adb process. Shutdown has a short outer deadline.
+    const adb = this.adbFactory.create(backendHandle.device);
+    try {
+      await adb.executeCommand("shell pkill -9 screenrecord", 8000);
+    } catch (error) {
+      logger.warn(`[VideoCapture] Device-side force-stop failed: ${error}`);
+    }
   }
 
   private async startAndroid(

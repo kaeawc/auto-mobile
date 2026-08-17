@@ -108,6 +108,7 @@ import {
 import { onAdbMissingDevice } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { iosSimulatorCaptureHelperPool } from "../features/screen-stream";
 import { runShutdownCleanupStages } from "../shutdownCleanup";
+import { cleanupDaemonChildProcesses } from "./childProcessCleanup";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -1730,6 +1731,12 @@ export class Daemon {
     this.deviceDisconnectMonitor = null;
     await runShutdownCleanupStages(
       [
+        {
+          // Quiesce new recording work and stop owned children before any
+          // potentially blocking socket teardown consumes the shutdown budget.
+          name: "active capture and iOS CtrlProxy children",
+          run: cleanupDaemonChildProcesses,
+        },
         {
           name: "health check timer",
           run: () => this.stopHealthCheckTimer(),

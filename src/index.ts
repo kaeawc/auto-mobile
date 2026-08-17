@@ -113,6 +113,7 @@ async function main() {
   const { AndroidCtrlProxyManager } = await import("./utils/CtrlProxyManager");
   const { IOSCtrlProxyBuilder } = await import("./utils/IOSCtrlProxyBuilder");
   const { IOSCtrlProxyManager } = await import("./utils/IOSCtrlProxyManager");
+  const { cleanupDaemonChildProcesses } = await import("./daemon/childProcessCleanup");
   startupBenchmark.endPhase("moduleImports");
 
   const { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } =
@@ -125,12 +126,21 @@ async function main() {
   const { startWebRtcStreamSocketServer, stopWebRtcStreamSocketServer } = webrtcStreamSocketServer;
   const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
   let stdioProxy: { close(): Promise<void> } | undefined;
+  let directModeActive = false;
   let shutdownCleanupFailed = false;
   setProcessShutdownHandler(async (signal) => {
     shutdownCleanupFailed = false;
     logger.info(`Received ${signal} signal, shutting down`);
     await runShutdownCleanupStages(
       [
+        {
+          name: "direct-mode capture and iOS CtrlProxy children",
+          run: async () => {
+            if (directModeActive) {
+              await cleanupDaemonChildProcesses();
+            }
+          },
+        },
         { name: "video recording socket server", run: stopVideoRecordingSocketServer },
         { name: "test recording socket server", run: stopTestRecordingSocketServer },
         { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
@@ -534,6 +544,7 @@ async function main() {
       // The daemon manages device state and tool execution
       // In no-proxy mode (--no-proxy flag), the MCP server executes tools directly
       const useProxyMode = !noProxy;
+      directModeActive = !useProxyMode;
 
       if (useProxyMode) {
         logger.info("Starting MCP server in proxy mode (connecting to daemon)");

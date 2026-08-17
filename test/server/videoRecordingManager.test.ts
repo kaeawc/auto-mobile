@@ -18,6 +18,7 @@ import {
   runRetentionSweep,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
+  stopAcceptingVideoRecordingStarts,
   stopVideoRecording,
   type VideoRetentionPolicy,
 } from "../../src/server/videoRecordingManager";
@@ -130,6 +131,32 @@ describe("videoRecordingManager", () => {
     expect(fakeBackend.stopCalls.length).toBe(1);
   });
 
+  test("shares manager finalization when shutdown overlaps a user stop", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    const originalUpdate = fakeRepository.updateRecording.bind(fakeRepository);
+    let resolveUpdate: (() => void) | undefined;
+    let completeUpdates = 0;
+    let signalUpdateStarted: (() => void) | undefined;
+    const updateStarted = new Promise<void>(resolve => { signalUpdateStarted = resolve; });
+    fakeRepository.updateRecording = async (recordingId, update) => {
+      if (update.status === "completed") {
+        completeUpdates++;
+        signalUpdateStarted?.();
+        await new Promise<void>(resolve => { resolveUpdate = resolve; });
+      }
+      await originalUpdate(recordingId, update);
+    };
+
+    const userStop = stopVideoRecording(active.recordingId);
+    await updateStarted;
+    const shutdownStop = stopVideoRecording(active.recordingId);
+    expect(completeUpdates).toBe(1);
+    resolveUpdate?.();
+
+    await expect(Promise.all([userStop, shutdownStop])).resolves.toHaveLength(2);
+    expect(completeUpdates).toBe(1);
+  });
+
   test("interrupt marks active recording inactive without calling capture stop", async () => {
     const active = await startVideoRecording({
       device: testDevice,
@@ -148,6 +175,35 @@ describe("videoRecordingManager", () => {
     expect(record?.status).toBe("interrupted");
     expect(record?.endedAt).toBe(new Date(fakeTimer.now()).toISOString());
     expect(record?.durationMs).toBe(1000);
+  });
+
+  test("rejects recording starts once shutdown begins", async () => {
+    await stopAcceptingVideoRecordingStarts();
+
+    await expect(startVideoRecording({ device: testDevice })).rejects.toThrow(
+      "unavailable while the daemon shuts down"
+    );
+  });
+
+  test("drains every concurrent shutdown waiter after an in-flight start aborts", async () => {
+    let signalStart: (() => void) | undefined;
+    const started = new Promise<void>(resolve => { signalStart = resolve; });
+    fakeBackend.start = async config => {
+      signalStart?.();
+      await new Promise<void>(resolve => {
+        config.abortSignal?.addEventListener("abort", resolve, { once: true });
+      });
+      throw new Error("start aborted");
+    };
+
+    const starting = startVideoRecording({ device: testDevice });
+    const startResult = starting.catch(error => error);
+    await started;
+    const firstDrain = stopAcceptingVideoRecordingStarts();
+    const secondDrain = stopAcceptingVideoRecordingStarts();
+
+    await expect(Promise.all([firstDrain, secondDrain])).resolves.toEqual([undefined, undefined]);
+    await expect(startResult).resolves.toThrow("start aborted");
   });
 
   test("records highlight timelines for scheduled highlights", async () => {

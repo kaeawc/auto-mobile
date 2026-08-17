@@ -24,6 +24,9 @@ import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecord
 import type { BootedDevice } from "../../../src/models";
 import type { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeAdbProcess } from "../../fakes/FakeAdbProcess";
+import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 
 function commandVersionAvailable(command: string): boolean {
@@ -31,20 +34,23 @@ function commandVersionAvailable(command: string): boolean {
   return result.status === 0;
 }
 
-async function runCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+async function runCommand(
+  command: string,
+  args: string[],
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const process = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
 
-    process.stdout.on("data", chunk => {
+    process.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
     });
-    process.stderr.on("data", chunk => {
+    process.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
     });
-    process.once("error", error => reject(error));
-    process.once("exit", code => {
+    process.once("error", (error) => reject(error));
+    process.once("exit", (code) => {
       if (code === 0) {
         resolve({ stdout, stderr });
       } else {
@@ -71,14 +77,14 @@ function createProcessTracker(stderr: string[] = []): ProcessTracker {
 
 const hasFfmpegTools = commandVersionAvailable("ffmpeg") && commandVersionAvailable("ffprobe");
 
-describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
+describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   let backend: FfmpegVideoProcessingBackend;
   let mockDevice: BootedDevice;
   let mockConfig: VideoCaptureConfig;
   let listEncodersCalls: number;
   let checkVersionCalls: number;
 
-  beforeEach(function() {
+  beforeEach(function () {
     backend = new FfmpegVideoProcessingBackend();
     listEncodersCalls = 0;
     checkVersionCalls = 0;
@@ -115,7 +121,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
     };
   });
 
-  test("starts iOS recording through the injected SimCtl argv boundary", async function() {
+  test("starts iOS recording through the injected SimCtl argv boundary", async function () {
     const stderr = new PassThrough();
     const child = new EventEmitter() as ChildProcess;
     Object.assign(child, { stderr, stdout: null, stdin: null, killed: false, kill: () => true });
@@ -139,7 +145,12 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
 
     await backend.start(mockConfig);
 
-    expect(receivedArgs).toEqual(["io", "ios-recording-udid", "recordVideo", path.join(mockConfig.outputDirectory, "test-recording-raw.mov")]);
+    expect(receivedArgs).toEqual([
+      "io",
+      "ios-recording-udid",
+      "recordVideo",
+      path.join(mockConfig.outputDirectory, "test-recording-raw.mov"),
+    ]);
     expect(receivedOptions).toEqual({ stdio: ["ignore", "ignore", "pipe"] });
   });
 
@@ -153,6 +164,8 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       stdout: null,
       stdin: null,
       killed: false,
+      exitCode: null,
+      signalCode: null,
       kill: () => {
         (child as unknown as { killed: boolean }).killed = true;
         queueMicrotask(() => child.emit("exit", 0, "SIGINT"));
@@ -178,7 +191,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
     };
   }
 
-  test("retries the iOS recording start handshake and succeeds on a later attempt (#4076)", async function() {
+  test("retries the iOS recording start handshake and succeeds on a later attempt (#4076)", async function () {
     const started: ChildProcess[] = [];
     let diagnosticCalls = 0;
     const simctl = {
@@ -207,7 +220,55 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
     expect(diagnosticCalls).toBe(1); // diagnostics captured once, on the miss
   });
 
-  test("fails after exhausting start attempts and reports simulator diagnostics (#4076)", async function() {
+  test("kills an iOS recorder that is still waiting for its start handshake when shutdown aborts", async function () {
+    const child = makeCaptureChild(false);
+    const controller = new AbortController();
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async () => child,
+    } as unknown as SimCtl;
+    backend = new FfmpegVideoProcessingBackend(undefined, () => simctl);
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-abort-udid" };
+    mockConfig.abortSignal = controller.signal;
+
+    const starting = backend.start(mockConfig);
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(starting).rejects.toThrow("cancelled during shutdown");
+    expect(child.killed).toBe(true);
+  });
+
+  test("kills an Android FFmpeg-pipe recorder that is still starting when shutdown aborts", async function () {
+    const captureProcess = new FakeAdbProcess();
+    let resolveCaptureSpawned: (() => void) | undefined;
+    const captureSpawned = new Promise<void>((resolve) => {
+      resolveCaptureSpawned = resolve;
+    });
+    const adb = {
+      spawn: async () => {
+        resolveCaptureSpawned?.();
+        return captureProcess;
+      },
+    } as unknown as AdbExecutor;
+    const controller = new AbortController();
+    backend = new FfmpegVideoProcessingBackend(new FakeAdbClientFactory(adb));
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    (backend as any).detectHardwareAccel = async () => await new Promise<void>(() => {});
+    mockConfig.device = { ...mockDevice, platform: "android", deviceId: "android-abort-serial" };
+    mockConfig.abortSignal = controller.signal;
+
+    const starting = backend.start(mockConfig);
+    void starting.catch(() => undefined);
+    await captureSpawned;
+    controller.abort();
+    await Promise.resolve();
+
+    expect(captureProcess.killed).toBe(true);
+  });
+
+  test("fails after exhausting start attempts and reports simulator diagnostics (#4076)", async function () {
     let starts = 0;
     const simctl = {
       isAvailable: async () => true,
@@ -237,7 +298,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
     expect(starts).toBe(2); // exhausted the bounded retry budget
   });
 
-  describe("Hardware Acceleration Detection", function() {
+  describe("Hardware Acceleration Detection", function () {
     // The injected platform provider lets every OS branch be verified on any
     // host, instead of only the one matching the CI runner. listEncoders is
     // stubbed in beforeEach to advertise all three hardware encoders, so each
@@ -256,12 +317,14 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       ["linux", "h264_nvenc", true],
       ["win32", "libx264", false],
     ])("selects the %s hardware encoder", async (os, encoder, available) => {
-      const hwAccel = await (backendForPlatform(os as NodeJS.Platform) as any).detectHardwareAccel();
+      const hwAccel = await (
+        backendForPlatform(os as NodeJS.Platform) as any
+      ).detectHardwareAccel();
       expect(hwAccel.encoder).toBe(encoder);
       expect(hwAccel.available).toBe(available);
     });
 
-    test("caches the detection result so encoders are probed at most once", async function() {
+    test("caches the detection result so encoders are probed at most once", async function () {
       // Unconditional assertion (not gated on host platform): a darwin backend
       // probes exactly once across two detect calls.
       const scoped = backendForPlatform("darwin");
@@ -275,19 +338,15 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
     });
   });
 
-  describe("FFmpeg Args Builder", function() {
-    test("should build basic FFmpeg args for piped input", async function() {
+  describe("FFmpeg Args Builder", function () {
+    test("should build basic FFmpeg args for piped input", async function () {
       const hwAccel = {
         encoder: "libx264",
         available: false,
         description: "Software encoding",
       };
 
-      const args = await (backend as any).buildFfmpegArgs(
-        mockConfig,
-        hwAccel,
-        { type: "pipe" }
-      );
+      const args = await (backend as any).buildFfmpegArgs(mockConfig, hwAccel, { type: "pipe" });
 
       expect(args).toContain("-f");
       expect(args).toContain("mp4");
@@ -302,7 +361,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       expect(args).toContain(mockConfig.outputPath);
     });
 
-    test("should include resolution scaling when specified", async function() {
+    test("should include resolution scaling when specified", async function () {
       const configWithResolution = {
         ...mockConfig,
         resolution: { width: 1280, height: 720 },
@@ -314,35 +373,29 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
         description: "Software encoding",
       };
 
-      const args = await (backend as any).buildFfmpegArgs(
-        configWithResolution,
-        hwAccel,
-        { type: "pipe" }
-      );
+      const args = await (backend as any).buildFfmpegArgs(configWithResolution, hwAccel, {
+        type: "pipe",
+      });
 
       expect(args).toContain("-vf");
       expect(args).toContain("scale=1280:720");
     });
 
-    test("should use hardware encoder when available", async function() {
+    test("should use hardware encoder when available", async function () {
       const hwAccel = {
         encoder: "h264_videotoolbox",
         available: true,
         description: "VideoToolbox HW accel",
       };
 
-      const args = await (backend as any).buildFfmpegArgs(
-        mockConfig,
-        hwAccel,
-        { type: "pipe" }
-      );
+      const args = await (backend as any).buildFfmpegArgs(mockConfig, hwAccel, { type: "pipe" });
 
       expect(args).toContain("-c:v");
       expect(args).toContain("h264_videotoolbox");
       expect(args).not.toContain("-preset");
     });
 
-    test("should include duration limit when specified", async function() {
+    test("should include duration limit when specified", async function () {
       const configWithDuration = {
         ...mockConfig,
         maxDurationSeconds: 60,
@@ -354,28 +407,25 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
         description: "Software encoding",
       };
 
-      const args = await (backend as any).buildFfmpegArgs(
-        configWithDuration,
-        hwAccel,
-        { type: "pipe" }
-      );
+      const args = await (backend as any).buildFfmpegArgs(configWithDuration, hwAccel, {
+        type: "pipe",
+      });
 
       expect(args).toContain("-t");
       expect(args).toContain("60");
     });
 
-    test("should remux iOS simulator file input without re-encoding when no scaling is requested", async function() {
+    test("should remux iOS simulator file input without re-encoding when no scaling is requested", async function () {
       const hwAccel = {
         encoder: "h264_videotoolbox",
         available: true,
         description: "VideoToolbox HW accel",
       };
 
-      const args = await (backend as any).buildFfmpegArgs(
-        mockConfig,
-        hwAccel,
-        { type: "file", path: "/tmp/test/test-recording-raw.mov" }
-      );
+      const args = await (backend as any).buildFfmpegArgs(mockConfig, hwAccel, {
+        type: "file",
+        path: "/tmp/test/test-recording-raw.mov",
+      });
 
       expect(args).toEqual([
         "-i",
@@ -389,7 +439,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       ]);
     });
 
-    test("should trim unscaled iOS simulator file input while preserving stream-copy remux", async function() {
+    test("should trim unscaled iOS simulator file input while preserving stream-copy remux", async function () {
       const hwAccel = {
         encoder: "h264_videotoolbox",
         available: true,
@@ -402,7 +452,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
           maxDurationSeconds: 1,
         },
         hwAccel,
-        { type: "file", path: "/tmp/test/test-recording-raw.mov" }
+        { type: "file", path: "/tmp/test/test-recording-raw.mov" },
       );
 
       expect(args).toEqual([
@@ -419,66 +469,69 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       ]);
     });
 
-    (hasFfmpegTools ? test : test.skip)("should produce playable trimmed output when stream-copy remuxing unscaled iOS input", async function() {
-      const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-remux-"));
-      const rawPath = path.join(tempDir, "raw.mov");
-      const outputPath = path.join(tempDir, "trimmed.mp4");
+    (hasFfmpegTools ? test : test.skip)(
+      "should produce playable trimmed output when stream-copy remuxing unscaled iOS input",
+      async function () {
+        const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-remux-"));
+        const rawPath = path.join(tempDir, "raw.mov");
+        const outputPath = path.join(tempDir, "trimmed.mp4");
 
-      try {
-        await runCommand("ffmpeg", [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-f",
-          "lavfi",
-          "-i",
-          "testsrc=size=16x16:rate=5",
-          "-t",
-          "2",
-          "-c:v",
-          "libx264",
-          "-pix_fmt",
-          "yuv420p",
-          rawPath,
-        ]);
+        try {
+          await runCommand("ffmpeg", [
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=16x16:rate=5",
+            "-t",
+            "2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            rawPath,
+          ]);
 
-        const args = await (backend as any).buildFfmpegArgs(
-          {
-            ...mockConfig,
+          const args = await (backend as any).buildFfmpegArgs(
+            {
+              ...mockConfig,
+              outputPath,
+              maxDurationSeconds: 1,
+            },
+            {
+              encoder: "libx264",
+              available: false,
+              description: "Software encoding",
+            },
+            { type: "file", path: rawPath },
+          );
+
+          await runCommand("ffmpeg", ["-hide_banner", "-loglevel", "error", ...args]);
+
+          const stats = await fsPromises.stat(outputPath);
+          expect(stats.size).toBeGreaterThan(0);
+
+          const probe = await runCommand("ffprobe", [
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             outputPath,
-            maxDurationSeconds: 1,
-          },
-          {
-            encoder: "libx264",
-            available: false,
-            description: "Software encoding",
-          },
-          { type: "file", path: rawPath }
-        );
+          ]);
+          const durationSeconds = Number.parseFloat(probe.stdout.trim());
+          expect(durationSeconds).toBeGreaterThan(0);
+          expect(durationSeconds).toBeLessThan(1.6);
+        } finally {
+          await fsPromises.rm(tempDir, { recursive: true, force: true });
+        }
+      },
+    );
 
-        await runCommand("ffmpeg", ["-hide_banner", "-loglevel", "error", ...args]);
-
-        const stats = await fsPromises.stat(outputPath);
-        expect(stats.size).toBeGreaterThan(0);
-
-        const probe = await runCommand("ffprobe", [
-          "-v",
-          "error",
-          "-show_entries",
-          "format=duration",
-          "-of",
-          "default=noprint_wrappers=1:nokey=1",
-          outputPath,
-        ]);
-        const durationSeconds = Number.parseFloat(probe.stdout.trim());
-        expect(durationSeconds).toBeGreaterThan(0);
-        expect(durationSeconds).toBeLessThan(1.6);
-      } finally {
-        await fsPromises.rm(tempDir, { recursive: true, force: true });
-      }
-    });
-
-    test("should transcode file input when scaling is requested", async function() {
+    test("should transcode file input when scaling is requested", async function () {
       const hwAccel = {
         encoder: "h264_videotoolbox",
         available: true,
@@ -491,7 +544,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
           resolution: { width: 720, height: 1280 },
         },
         hwAccel,
-        { type: "file", path: "/tmp/test/test-recording-raw.mov" }
+        { type: "file", path: "/tmp/test/test-recording-raw.mov" },
       );
 
       expect(args).toContain("-vf");
@@ -501,16 +554,18 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
     });
   });
 
-  describe("FFmpeg Diagnostics", function() {
-    test("should require simctl's first-frame signal before reporting iOS recording startup", function() {
-      expect(containsIosRecordingStartMessage(
-        "Note: No display specified. Defaulting to display: 4FCB34AC-FD7C-4A7E-9A19-CB10950490D8 (screenID: 1, name: LCD)\n"
-      )).toBe(false);
+  describe("FFmpeg Diagnostics", function () {
+    test("should require simctl's first-frame signal before reporting iOS recording startup", function () {
+      expect(
+        containsIosRecordingStartMessage(
+          "Note: No display specified. Defaulting to display: 4FCB34AC-FD7C-4A7E-9A19-CB10950490D8 (screenID: 1, name: LCD)\n",
+        ),
+      ).toBe(false);
       expect(containsIosRecordingStartMessage("Recording started\n")).toBe(true);
       expect(containsIosRecordingStartMessage("Unable to boot simulator\n")).toBe(false);
     });
 
-    test("should resolve when stderr captured the expected message without another data event", async function() {
+    test("should resolve when stderr captured the expected message without another data event", async function () {
       const tracker = createProcessTracker();
       const wait = waitForStderrMessage(tracker, "Recording started", 1);
       tracker.stderr.push("Note: No display specified\nRecording started\n");
@@ -518,14 +573,15 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       await expect(wait).resolves.toBeUndefined();
     });
 
-    test("should reject when expected stderr message never appears", async function() {
+    test("should reject when expected stderr message never appears", async function () {
       const tracker = createProcessTracker(["No display yet\n"]);
 
-      await expect(waitForStderrMessage(tracker, "Recording started", 1))
-        .rejects.toThrow(/Timed out waiting for Recording started/);
+      await expect(waitForStderrMessage(tracker, "Recording started", 1)).rejects.toThrow(
+        /Timed out waiting for Recording started/,
+      );
     });
 
-    test("should include command, stderr, and missing output path for opaque post-processing failures", function() {
+    test("should include command, stderr, and missing output path for opaque post-processing failures", function () {
       const message = (backend as any).buildFfmpegFailureMessage(
         "FFmpeg output file missing",
         ["-i", "/tmp/raw.mov", "-c", "copy", "-y", "/tmp/out.mp4"],
@@ -533,7 +589,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
           exitState: { exitCode: null, signal: "SIGINT" },
           stderr: ["moov atom not found\n"],
         },
-        "/tmp/out.mp4"
+        "/tmp/out.mp4",
       );
 
       expect(message).toContain("FFmpeg output file missing");
@@ -544,14 +600,14 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       expect(message).toContain("stderr:\nmoov atom not found");
     });
 
-    test("should include command and stderr for non-zero exits", function() {
+    test("should include command and stderr for non-zero exits", function () {
       const message = (backend as any).buildFfmpegFailureMessage(
         "FFmpeg post-processing failed",
         ["-i", "/tmp/raw.mov", "-y", "/tmp/out.mp4"],
         {
           exitState: { exitCode: 1, signal: null },
           stderr: ["Invalid argument\n"],
-        }
+        },
       );
 
       expect(message).toContain("FFmpeg post-processing failed");
@@ -560,49 +616,53 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
       expect(message).toContain("stderr:\nInvalid argument");
     });
 
-    test("should reject missing post-processed output with FFmpeg context", async function() {
+    test("should reject missing post-processed output with FFmpeg context", async function () {
       const outputPath = path.join(os.tmpdir(), "auto-mobile-missing-output.mp4");
 
-      await expect((backend as any).assertFfmpegOutputReady(
-        outputPath,
-        ["-i", "/tmp/raw.mov", "-c", "copy", "-y", outputPath],
-        {
-          exitState: { exitCode: 0, signal: null },
-          stderr: ["No output produced\n"],
-        }
-      )).rejects.toThrow(/FFmpeg output file missing/);
+      await expect(
+        (backend as any).assertFfmpegOutputReady(
+          outputPath,
+          ["-i", "/tmp/raw.mov", "-c", "copy", "-y", outputPath],
+          {
+            exitState: { exitCode: 0, signal: null },
+            stderr: ["No output produced\n"],
+          },
+        ),
+      ).rejects.toThrow(/FFmpeg output file missing/);
     });
 
-    test("should reject empty post-processed output with FFmpeg context", async function() {
+    test("should reject empty post-processed output with FFmpeg context", async function () {
       const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-video-"));
       const outputPath = path.join(tempDir, "empty.mp4");
 
       try {
         await fsPromises.writeFile(outputPath, "");
 
-        await expect((backend as any).assertFfmpegOutputReady(
-          outputPath,
-          ["-i", "/tmp/raw.mov", "-c", "copy", "-y", outputPath],
-          {
-            exitState: { exitCode: 0, signal: null },
-            stderr: [],
-          }
-        )).rejects.toThrow(/FFmpeg output file is empty/);
+        await expect(
+          (backend as any).assertFfmpegOutputReady(
+            outputPath,
+            ["-i", "/tmp/raw.mov", "-c", "copy", "-y", outputPath],
+            {
+              exitState: { exitCode: 0, signal: null },
+              stderr: [],
+            },
+          ),
+        ).rejects.toThrow(/FFmpeg output file is empty/);
       } finally {
         await fsPromises.rm(tempDir, { recursive: true, force: true });
       }
     });
   });
 
-  describe("FFmpeg Availability", function() {
-    test("should check FFmpeg version", async function() {
+  describe("FFmpeg Availability", function () {
+    test("should check FFmpeg version", async function () {
       await (backend as any).checkFfmpegVersion();
       expect(checkVersionCalls).toBe(1);
     });
   });
 
-  describe("Encoder Listing", function() {
-    test("should list available encoders", async function() {
+  describe("Encoder Listing", function () {
+    test("should list available encoders", async function () {
       const encoders = await (backend as any).listEncoders();
       expect(Array.isArray(encoders)).toBe(true);
       expect(encoders.length).toBeGreaterThan(0);
@@ -627,7 +687,7 @@ interface FakeProcessControl {
 function createFakeProcess(): FakeProcessControl {
   const killSignals: Array<NodeJS.Signals | number> = [];
   let resolveExit: () => void = () => {};
-  const exitPromise = new Promise<void>(resolve => {
+  const exitPromise = new Promise<void>((resolve) => {
     resolveExit = resolve;
   });
 
@@ -655,8 +715,8 @@ function createFakeProcess(): FakeProcessControl {
   return { process, exitPromise, killSignals, exit };
 }
 
-describe("waitForExit - graceful capture stop", function() {
-  test("sends SIGINT and returns without SIGKILL when the process flushes in time", async function() {
+describe("waitForExit - graceful capture stop", function () {
+  test("sends SIGINT and returns without SIGKILL when the process flushes in time", async function () {
     const timer = new FakeTimer();
     const { process, exitPromise, killSignals, exit } = createFakeProcess();
 
@@ -680,7 +740,7 @@ describe("waitForExit - graceful capture stop", function() {
     expect(killSignals).toEqual(["SIGINT"]);
   });
 
-  test("escalates to SIGKILL once the timeout elapses", async function() {
+  test("escalates to SIGKILL once the timeout elapses", async function () {
     const timer = new FakeTimer();
     const { process, exitPromise, killSignals } = createFakeProcess();
 
@@ -702,20 +762,16 @@ describe("waitForExit - graceful capture stop", function() {
     expect(killSignals).toEqual(["SIGINT", "SIGKILL"]);
   });
 
-  test("the legacy 5s window would SIGKILL a slow simctl flush that the iOS window survives", async function() {
+  test("the legacy 5s window would SIGKILL a slow simctl flush that the iOS window survives", async function () {
     const slowFlushMs = 8000;
 
     // Legacy generic timeout: the same slow flush is force-killed mid-write.
     const legacyTimer = new FakeTimer();
     const legacy = createFakeProcess();
-    const legacyPending = waitForExit(
-      legacy.process,
-      legacy.exitPromise,
-      {
-        timeoutMs: PROCESS_EXIT_TIMEOUT_MS,
-        timer: legacyTimer,
-      }
-    );
+    const legacyPending = waitForExit(legacy.process, legacy.exitPromise, {
+      timeoutMs: PROCESS_EXIT_TIMEOUT_MS,
+      timer: legacyTimer,
+    });
     legacyTimer.advanceTime(slowFlushMs);
     await legacyPending;
     expect(legacy.killSignals).toEqual(["SIGINT", "SIGKILL"]);
@@ -723,14 +779,10 @@ describe("waitForExit - graceful capture stop", function() {
     // iOS window: the slow flush completes and the process exits via SIGINT only.
     const iosTimer = new FakeTimer();
     const ios = createFakeProcess();
-    const iosPending = waitForExit(
-      ios.process,
-      ios.exitPromise,
-      {
-        timeoutMs: IOS_RECORDING_STOP_TIMEOUT_MS,
-        timer: iosTimer,
-      }
-    );
+    const iosPending = waitForExit(ios.process, ios.exitPromise, {
+      timeoutMs: IOS_RECORDING_STOP_TIMEOUT_MS,
+      timer: iosTimer,
+    });
     iosTimer.advanceTime(slowFlushMs);
     await Promise.resolve();
     ios.exit(0);
@@ -738,7 +790,7 @@ describe("waitForExit - graceful capture stop", function() {
     expect(ios.killSignals).toEqual(["SIGINT"]);
   });
 
-  test("iOS stop window is generous enough for a moov-atom flush under load", function() {
+  test("iOS stop window is generous enough for a moov-atom flush under load", function () {
     expect(IOS_RECORDING_STOP_TIMEOUT_MS).toBeGreaterThan(PROCESS_EXIT_TIMEOUT_MS);
     expect(IOS_RECORDING_STOP_TIMEOUT_MS).toBeGreaterThanOrEqual(30000);
   });
@@ -750,7 +802,10 @@ describe("waitForExit - graceful capture stop", function() {
  * value repeats. Mirrors a real `simctl recordVideo` output that appears late
  * and grows before its moov-atom flush finalizes it on a loaded runner.
  */
-function scriptedProbe(sizes: Array<number | null>): { probe: RecordingFileProbe; calls: () => number } {
+function scriptedProbe(sizes: Array<number | null>): {
+  probe: RecordingFileProbe;
+  calls: () => number;
+} {
   let index = 0;
   const probe: RecordingFileProbe = {
     async size(): Promise<number | null> {
@@ -762,8 +817,8 @@ function scriptedProbe(sizes: Array<number | null>): { probe: RecordingFileProbe
   return { probe, calls: () => index };
 }
 
-describe("waitForRecordingFileReady - post-exit file finalization", function() {
-  test("returns the size once a late file appears and stabilizes", async function() {
+describe("waitForRecordingFileReady - post-exit file finalization", function () {
+  test("returns the size once a late file appears and stabilizes", async function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     // Missing for the first two probes (flush lag), then a stable non-empty file.
@@ -780,7 +835,7 @@ describe("waitForRecordingFileReady - post-exit file finalization", function() {
     expect(calls()).toBe(4);
   });
 
-  test("waits for a growing file to stop changing before returning", async function() {
+  test("waits for a growing file to stop changing before returning", async function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     // File appears then grows across probes; only the stabilized size is accepted.
@@ -797,7 +852,7 @@ describe("waitForRecordingFileReady - post-exit file finalization", function() {
     expect(size).toBe(4096);
   });
 
-  test("throws a 'never appeared' diagnostic when the file is always missing", async function() {
+  test("throws a 'never appeared' diagnostic when the file is always missing", async function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const { probe, calls } = scriptedProbe([null]);
@@ -821,7 +876,7 @@ describe("waitForRecordingFileReady - post-exit file finalization", function() {
     expect(calls()).toBeGreaterThan(0);
   });
 
-  test("throws a 'disappeared after appearing' diagnostic when a file vanishes and never returns", async function() {
+  test("throws a 'disappeared after appearing' diagnostic when a file vanishes and never returns", async function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     // File shows up with bytes, then vanishes (e.g. simctl cleanup on error) and never comes back.
@@ -843,7 +898,7 @@ describe("waitForRecordingFileReady - post-exit file finalization", function() {
     expect((thrown as Error).message).toContain("disappeared after appearing");
   });
 
-  test("throws a 'stayed empty' diagnostic when the file never gets bytes", async function() {
+  test("throws a 'stayed empty' diagnostic when the file never gets bytes", async function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const { probe } = scriptedProbe([0]);
@@ -864,14 +919,14 @@ describe("waitForRecordingFileReady - post-exit file finalization", function() {
     expect((thrown as Error).message).toContain("stayed empty (0 bytes)");
   });
 
-  test("the readiness window is generous but not unbounded", function() {
+  test("the readiness window is generous but not unbounded", function () {
     expect(IOS_RECORDING_FILE_READY_TIMEOUT_MS).toBeGreaterThanOrEqual(5000);
     expect(IOS_RECORDING_FILE_READY_TIMEOUT_MS).toBeLessThanOrEqual(IOS_RECORDING_STOP_TIMEOUT_MS);
   });
 });
 
-describe("pipeCaptureToEncoder", function() {
-  test("registers an error handler on the encoder stdin so EPIPE is not unhandled", function() {
+describe("pipeCaptureToEncoder", function () {
+  test("registers an error handler on the encoder stdin so EPIPE is not unhandled", function () {
     const source = new PassThrough();
     const dest = new PassThrough();
     pipeCaptureToEncoder(source, dest);
@@ -883,21 +938,21 @@ describe("pipeCaptureToEncoder", function() {
     expect(() => source.emit("error", new Error("EPIPE"))).not.toThrow();
   });
 
-  test("throws a clear error when either stream is unavailable", function() {
+  test("throws a clear error when either stream is unavailable", function () {
     expect(() => pipeCaptureToEncoder(null, new PassThrough())).toThrow(/unavailable/);
     expect(() => pipeCaptureToEncoder(new PassThrough(), null)).toThrow(/unavailable/);
   });
 
-  test("still forwards capture bytes into the encoder", async function() {
+  test("still forwards capture bytes into the encoder", async function () {
     const source = new PassThrough();
     const dest = new PassThrough();
     pipeCaptureToEncoder(source, dest);
 
     const chunks: Buffer[] = [];
-    dest.on("data", chunk => chunks.push(chunk as Buffer));
+    dest.on("data", (chunk) => chunks.push(chunk as Buffer));
     source.write("frame-data");
     source.end();
-    await new Promise<void>(resolve => dest.on("end", () => resolve()));
+    await new Promise<void>((resolve) => dest.on("end", () => resolve()));
 
     expect(Buffer.concat(chunks).toString()).toBe("frame-data");
   });

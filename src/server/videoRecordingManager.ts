@@ -196,10 +196,15 @@ interface VideoRecordingHighlightSession {
 
 let moduleDependencies: VideoRecordingManagerDependencies | null = null;
 let managerInitialized = false;
+let acceptingVideoRecordingStarts = true;
+let inFlightVideoRecordingStarts = 0;
+let videoRecordingStartDrain: { promise: Promise<void>; resolve: () => void } | null = null;
+const inFlightVideoRecordingStartControllers = new Set<AbortController>();
 
 const autoStopTimers = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
 const highlightSessions = new Map<string, VideoRecordingHighlightSession>();
 const highlightSessionsByDeviceId = new Map<string, string>();
+const stoppingVideoRecordings = new Map<string, Promise<StopVideoRecordingResult>>();
 // In-progress size-cap monitors, keyed by recordingId (issue #4762). Each is a
 // periodic timer that stops a live capture once it reaches its cap so one long
 // recording cannot fill the disk.
@@ -316,7 +321,52 @@ function resetVideoRecordingManagerState(): void {
   }
   highlightSessions.clear();
   highlightSessionsByDeviceId.clear();
+  stoppingVideoRecordings.clear();
+  acceptingVideoRecordingStarts = true;
+  inFlightVideoRecordingStarts = 0;
+  for (const controller of inFlightVideoRecordingStartControllers) {
+    controller.abort();
+  }
+  inFlightVideoRecordingStartControllers.clear();
+  videoRecordingStartDrain?.resolve();
+  videoRecordingStartDrain = null;
   managerInitialized = false;
+}
+
+function beginVideoRecordingStart(): { abortSignal: AbortSignal; complete(): void } {
+  if (!acceptingVideoRecordingStarts) {
+    throw new ActionableError("Video recording is unavailable while the daemon shuts down.");
+  }
+  inFlightVideoRecordingStarts++;
+  const controller = new AbortController();
+  inFlightVideoRecordingStartControllers.add(controller);
+  return {
+    abortSignal: controller.signal,
+    complete: () => {
+    inFlightVideoRecordingStarts--;
+    inFlightVideoRecordingStartControllers.delete(controller);
+    if (inFlightVideoRecordingStarts === 0) {
+      videoRecordingStartDrain?.resolve();
+      videoRecordingStartDrain = null;
+    }
+    },
+  };
+}
+
+export async function stopAcceptingVideoRecordingStarts(): Promise<void> {
+  acceptingVideoRecordingStarts = false;
+  for (const controller of inFlightVideoRecordingStartControllers) {
+    controller.abort();
+  }
+  if (inFlightVideoRecordingStarts === 0) {
+    return;
+  }
+  if (!videoRecordingStartDrain) {
+    let resolve: (() => void) | undefined;
+    const promise = new Promise<void>(settle => { resolve = settle; });
+    videoRecordingStartDrain = { promise, resolve: resolve! };
+  }
+  await videoRecordingStartDrain.promise;
 }
 
 export function resetVideoRecordingManagerDependencies(): void {
@@ -795,6 +845,8 @@ export async function updateVideoRecordingConfig(
 export async function startVideoRecording(
   request: StartVideoRecordingRequest
 ): Promise<ActiveVideoRecording> {
+  const start = beginVideoRecordingStart();
+  try {
   const deps = await getVideoRecordingDependencies();
   const { videoRecorderService, recordingRepository, timer } = deps;
   const existing = await recordingRepository.listRecordings({
@@ -823,6 +875,7 @@ export async function startVideoRecording(
     config: configInput,
     device: request.device,
     maxDurationSeconds,
+    abortSignal: start.abortSignal,
   });
 
   await recordingRepository.insertRecording({
@@ -864,14 +917,34 @@ export async function startVideoRecording(
   scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
 
   return active;
+  } finally {
+    start.complete();
+  }
 }
 
 export async function stopVideoRecording(
   recordingId?: string
 ): Promise<StopVideoRecordingResult> {
+  const resolvedId = await resolveActiveRecordingId(recordingId);
+  const stopping = stoppingVideoRecordings.get(resolvedId);
+  if (stopping) {
+    return stopping;
+  }
+
+  const stop = stopActiveVideoRecording(resolvedId);
+  stoppingVideoRecordings.set(resolvedId, stop);
+  try {
+    return await stop;
+  } finally {
+    stoppingVideoRecordings.delete(resolvedId);
+  }
+}
+
+async function stopActiveVideoRecording(
+  resolvedId: string
+): Promise<StopVideoRecordingResult> {
   const { videoRecorderService, recordingRepository, now } =
     await getVideoRecordingDependencies();
-  const resolvedId = await resolveActiveRecordingId(recordingId);
 
   clearAutoStop(resolvedId);
   clearInProgressSizeCap(resolvedId);
@@ -936,6 +1009,12 @@ export async function interruptVideoRecording(recordingId: string): Promise<void
   });
 
   await notifyVideoRecordingResources([recordingId]);
+}
+
+/** Force-stops the owning capture process before its recording is marked interrupted. */
+export async function forceStopVideoRecording(recordingId: string): Promise<void> {
+  const { videoRecorderService } = await getVideoRecordingDependencies();
+  await videoRecorderService.forceStopRecording(recordingId);
 }
 
 export async function recordVideoRecordingHighlightAdded(

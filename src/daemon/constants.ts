@@ -102,7 +102,7 @@ export const DAEMON_STARTUP_TIMEOUT_MS =
  * Daemon shutdown timeout in milliseconds
  * How long to wait for graceful shutdown before SIGKILL
  */
-export const DAEMON_SHUTDOWN_TIMEOUT_MS = 5000;
+export const DAEMON_SHUTDOWN_TIMEOUT_MS = 10000;
 
 /**
  * Minimum age (ms since startedAt) before the proxy will restart a daemon on

@@ -99,7 +99,9 @@ describe("parseVideoRecordingConfig", () => {
   });
 
   test("ignores invalid resolution", () => {
-    expect(parseVideoRecordingConfig({ resolution: { width: 0, height: 100 } }).resolution).toBeUndefined();
+    expect(
+      parseVideoRecordingConfig({ resolution: { width: 0, height: 100 } }).resolution,
+    ).toBeUndefined();
     expect(parseVideoRecordingConfig({ resolution: null as any }).resolution).toBeUndefined();
   });
 });
@@ -112,7 +114,10 @@ describe("VideoRecorderService", () => {
 
   beforeEach(async () => {
     backend = new FakeVideoCaptureBackend();
-    archiveRoot = path.join(os.tmpdir(), `video-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    archiveRoot = path.join(
+      os.tmpdir(),
+      `video-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     securePermissions = new FakeSecurePermissions();
 
     service = new VideoRecorderService({
@@ -122,6 +127,75 @@ describe("VideoRecorderService", () => {
       now: () => new Date("2024-01-15T10:30:00.000Z"),
       securePermissions,
     });
+  });
+
+  test("force-stops an active capture and removes its handle", async () => {
+    const recording = await service.startRecording();
+
+    await service.forceStopRecording(recording.recordingId);
+
+    expect(backend.forceStopCalls).toEqual([backend.startResults[0]]);
+    await expect(service.stopRecording(recording.recordingId)).rejects.toThrow(
+      "No active recording found",
+    );
+  });
+
+  test("allows a later graceful stop after a force-stop failure", async () => {
+    const recording = await service.startRecording();
+    backend.forceStop = async handle => {
+      backend.forceStopCalls.push(handle);
+      throw new Error("force stop failed");
+    };
+
+    await expect(service.forceStopRecording(recording.recordingId)).rejects.toThrow("force stop failed");
+    await expect(service.stopRecording(recording.recordingId)).resolves.toMatchObject({
+      recordingId: recording.recordingId,
+    });
+  });
+
+  test("rejects a graceful stop that resolves after force-stop begins", async () => {
+    const recording = await service.startRecording();
+    let resolveStop: (() => void) | undefined;
+    let resolveForceStop: (() => void) | undefined;
+    backend.stop = async () => {
+      await new Promise<void>((resolve) => {
+        resolveStop = resolve;
+      });
+      return backend.stopResult;
+    };
+    backend.forceStop = async () => {
+      await new Promise<void>((resolve) => {
+        resolveForceStop = resolve;
+      });
+    };
+
+    const stopping = service.stopRecording(recording.recordingId);
+    await Promise.resolve();
+    const forcing = service.forceStopRecording(recording.recordingId);
+    await Promise.resolve();
+    resolveStop?.();
+
+    await expect(stopping).rejects.toThrow("was force-stopped while it was stopping");
+    resolveForceStop?.();
+    await forcing;
+  });
+
+  test("shares one backend stop when shutdown overlaps a user stop", async () => {
+    const recording = await service.startRecording();
+    let resolveStop: (() => void) | undefined;
+    backend.stop = async handle => {
+      backend.stopCalls.push(handle);
+      await new Promise<void>(resolve => { resolveStop = resolve; });
+      return { recordingId: handle.recordingId, outputPath: handle.outputPath };
+    };
+
+    const userStop = service.stopRecording(recording.recordingId);
+    const shutdownStop = service.stopRecording(recording.recordingId);
+    await Promise.resolve();
+    expect(backend.stopCalls).toHaveLength(1);
+    resolveStop?.();
+
+    await expect(Promise.all([userStop, shutdownStop])).resolves.toHaveLength(2);
   });
 
   afterEach(async () => {
@@ -210,7 +284,7 @@ describe("VideoRecorderService", () => {
 
     test("throws for unknown recording id", async () => {
       await expect(service.stopRecording("nonexistent")).rejects.toThrow(
-        "No active recording found"
+        "No active recording found",
       );
     });
 
@@ -219,7 +293,7 @@ describe("VideoRecorderService", () => {
       await service.stopRecording(recording.recordingId);
 
       await expect(service.stopRecording(recording.recordingId)).rejects.toThrow(
-        "No active recording found"
+        "No active recording found",
       );
     });
 

@@ -3,6 +3,12 @@ import { z } from "zod";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { executionTracker } from "../../src/server/executionTracker";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const captureSchema = z.object({
   value: z.string().optional(),
@@ -72,6 +78,60 @@ describe("MCP session autolock routing", () => {
         expect(executionTracker.hasActiveSessionExecutions("shared-loopback-session")).toBe(true);
       },
     );
+  });
+
+  test("binds an implicit execution to its resolved autolock before an MCP remap", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT = "60";
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    const devices = [
+      { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" },
+      { name: "Pixel 8", platform: "android" as const, deviceId: "emulator-5556" },
+    ];
+    fakeDeviceUtils.setBootedDevices("android", devices);
+    const pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, fakeDeviceUtils);
+    await pool.initializeWithDevices(devices);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const originalSessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session");
+    const handlerStarted = Promise.withResolvers<void>();
+    const releaseHandler = Promise.withResolvers<void>();
+
+    ToolRegistry.clearTools();
+    ToolRegistry.registerDeviceAware("captureAutolockOwnership", "captureAutolockOwnership", captureSchema, async () => {
+      handlerStarted.resolve();
+      await releaseHandler.promise;
+      return { content: [{ type: "text", text: "ok" }] };
+    });
+    fixture = new McpTestFixture({ sessionContext: { sessionId: "mcp-session" } });
+    await fixture.setup();
+
+    const { client } = fixture.getContext();
+    const request = client.request({
+      method: "tools/call",
+      params: { name: "captureAutolockOwnership", arguments: {} },
+    }, z.any());
+    await handlerStarted.promise;
+
+    const replacementSessionId = await pool.autolockDevice("emulator-5556", "android", "mcp-session");
+    expect(executionTracker.hasActiveAutolockSessionExecutions(originalSessionId!)).toBe(true);
+    expect(executionTracker.hasActiveAutolockSessionExecutions(replacementSessionId!)).toBe(false);
+
+    sessionManager.setActiveSessionExecutionChecker(sessionUuid =>
+      executionTracker.hasActiveSessionUuidExecutions(sessionUuid)
+      || executionTracker.hasActiveAutolockSessionExecutions(sessionUuid),
+    );
+    timer.advanceTime(60_001);
+    expect(sessionManager.getSession(originalSessionId!)).not.toBeNull();
+    expect(sessionManager.getSession(replacementSessionId!)).toBeNull();
+
+    releaseHandler.resolve();
+    await request;
+    sessionManager.stopCleanupTimer();
+    DaemonState.getInstance().reset();
+    delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    delete process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT;
   });
 
   test("does not use the shared daemon loopback MCP session as an implicit autolock key", async () => {

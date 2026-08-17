@@ -421,7 +421,7 @@ describe("UninstallApp (Android)", () => {
       success: false,
       userId: 0,
       error:
-        "Android uninstall timed out after 20000ms for package com.example.app (user 0). One bounded retry failed: Command timed out",
+        "Android uninstall timed out after 20000ms for package com.example.app (user 0). Package remains installed after one bounded retry timed out.",
     });
     const uninstallCalls = adb
       .getCommandCalls()
@@ -430,6 +430,37 @@ describe("UninstallApp (Android)", () => {
       expect.objectContaining({ timeoutMs: 20_000, noRetry: true }),
       expect.objectContaining({ timeoutMs: 5_000, noRetry: true }),
     ]);
+  });
+
+  test("reports success when the bounded retry times out after removing the package", async () => {
+    class AlwaysTimeoutUninstallAdb extends FakeAdbClient {
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal,
+      ) {
+        if (command === "shell pm uninstall --user 0 com.example.app") {
+          await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+          throw new AdbCommandTimeoutError("Command timed out");
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+
+    const adb = new AlwaysTimeoutUninstallAdb();
+    adb.setCommandResultSequence("shell pm list packages --user 0", [
+      "package:com.example.app",
+      "package:com.example.app",
+      "package:com.android.settings",
+    ]);
+
+    const result = await new UninstallApp(androidDevice, fakeAdbFactory(adb)).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({ success: true, wasInstalled: true, userId: 0 });
   });
 
   test("preserves an already-aborted caller signal without issuing commands", async () => {

@@ -307,6 +307,7 @@ export class UninstallApp {
     logger.warn(
       `[UninstallApp] Android uninstall timed out for ${packageName} (user ${userId}); package remains installed, retrying once.`,
     );
+    let retryTimedOut = false;
     try {
       await this.adb.executeCommand(
         command,
@@ -317,12 +318,15 @@ export class UninstallApp {
       );
     } catch (error) {
       throwIfAborted(signal);
-      return this.androidUninstallTimeoutFailure(
-        packageName,
-        keepData,
-        userId,
-        `One bounded retry failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      if (!(error instanceof AdbCommandTimeoutError)) {
+        return this.androidUninstallTimeoutFailure(
+          packageName,
+          keepData,
+          userId,
+          `One bounded retry failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      retryTimedOut = true;
     }
 
     await this.markInstalledAppsCacheStale();
@@ -351,7 +355,9 @@ export class UninstallApp {
       packageName,
       keepData,
       userId,
-      "Package remains installed after one bounded retry.",
+      retryTimedOut
+        ? "Package remains installed after one bounded retry timed out."
+        : "Package remains installed after one bounded retry.",
     );
   }
 

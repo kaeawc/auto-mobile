@@ -683,7 +683,11 @@ export class DevicePool {
     let stats = this.getStatsForPlatform(platform);
 
     if (stats.total < requiredCount) {
-      const started = await this.startAdditionalDevices(requiredCount - stats.total, platform);
+      const started = await this.startAdditionalDevices(
+        requiredCount - stats.total,
+        startTime + timeoutMs,
+        platform,
+      );
       if (started > 0) {
         await this.refreshDevices();
         stats = this.getStatsForPlatform(platform);
@@ -863,7 +867,10 @@ export class DevicePool {
       await this.refreshDevices();
     }
 
-    const started = await this.startAdditionalDevicesForCriteria(sortedRequests);
+    const started = await this.startAdditionalDevicesForCriteria(
+      sortedRequests,
+      startTime + timeoutMs,
+    );
     if (started > 0) {
       logger.info(
         `[DevicePool] Started ${started} additional device(s) for criteria-based allocation`,
@@ -965,6 +972,7 @@ export class DevicePool {
 
   private async startAdditionalDevices(
     requiredCount: number,
+    deadlineMs: number,
     platform?: Platform,
   ): Promise<number> {
     if (!platform || requiredCount <= 0) {
@@ -983,9 +991,26 @@ export class DevicePool {
       for (const device of toStart) {
         const label = device.deviceId ?? device.name;
         logger.info(`[DevicePool] Starting additional ${device.platform} device ${label}`);
-        const childProcess = await this.deviceManager.startDevice(device);
+        const remainingTimeoutMs = this.remainingStartDeadline(deadlineMs);
+        if (remainingTimeoutMs <= 0) {
+          break;
+        }
+        const childProcess = await this.deviceManager.startDevice(device, remainingTimeoutMs);
+        const readinessTimeoutMs = this.remainingStartDeadline(deadlineMs);
+        if (readinessTimeoutMs <= 0) {
+          logger.warn(`[DevicePool] Start deadline elapsed; cancelling ${label} before readiness`);
+          childProcess?.kill();
+          break;
+        }
         const ready = this.criteriaMatcher.withDeviceImageMetadata(
-          await waitForDeviceReadyOrCancel(this.deviceManager, device, childProcess),
+          await waitForDeviceReadyOrCancel(
+            this.deviceManager,
+            device,
+            childProcess,
+            readinessTimeoutMs,
+            undefined,
+            this.timer,
+          ),
           device,
         );
         await this.addDevice(ready, device);
@@ -1000,8 +1025,13 @@ export class DevicePool {
     }
   }
 
+  private remainingStartDeadline(deadlineMs: number): number {
+    return Math.max(0, deadlineMs - this.timer.now());
+  }
+
   private async startAdditionalDevicesForCriteria(
     requests: DeviceAllocationRequest[],
+    deadlineMs: number,
   ): Promise<number> {
     const reservedDeviceIds = new Set<string>();
     const excludedImageIds = new Set<string>();
@@ -1019,6 +1049,7 @@ export class DevicePool {
       const startedDevice = await this.startAdditionalDeviceMatchingCriteria(
         request.criteria,
         excludedImageIds,
+        deadlineMs,
       );
       if (startedDevice) {
         reservedDeviceIds.add(startedDevice.id);
@@ -1032,6 +1063,7 @@ export class DevicePool {
   private async startAdditionalDeviceMatchingCriteria(
     criteria: DeviceAllocationCriteria | undefined,
     excludedImageIds: Set<string>,
+    deadlineMs: number,
   ): Promise<PooledDevice | null> {
     if (!criteria?.platform) {
       return null;
@@ -1053,9 +1085,26 @@ export class DevicePool {
         `[DevicePool] Starting ${device.platform} device ${label} for criteria ${this.criteriaMatcher.formatCriteriaSummary(criteria)}`,
       );
       excludedImageIds.add(this.criteriaMatcher.getDeviceImageKey(device));
-      const childProcess = await this.deviceManager.startDevice(device);
+      const remainingTimeoutMs = this.remainingStartDeadline(deadlineMs);
+      if (remainingTimeoutMs <= 0) {
+        return null;
+      }
+      const childProcess = await this.deviceManager.startDevice(device, remainingTimeoutMs);
+      const readinessTimeoutMs = this.remainingStartDeadline(deadlineMs);
+      if (readinessTimeoutMs <= 0) {
+        logger.warn(`[DevicePool] Start deadline elapsed; cancelling ${label} before readiness`);
+        childProcess?.kill();
+        return null;
+      }
       const ready = this.criteriaMatcher.withDeviceImageMetadata(
-        await waitForDeviceReadyOrCancel(this.deviceManager, device, childProcess),
+        await waitForDeviceReadyOrCancel(
+          this.deviceManager,
+          device,
+          childProcess,
+          readinessTimeoutMs,
+          undefined,
+          this.timer,
+        ),
         device,
       );
       await this.addDevice(ready, device);

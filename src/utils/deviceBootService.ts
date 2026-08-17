@@ -278,12 +278,14 @@ export class DeviceBootService {
       ),
     );
     await progress?.report(60, 100, "Device started, waiting for readiness...");
-    const ready = await this.runPhase(context, "waiting for device boot readiness", () =>
+    const ready = await this.runPhase(context, "waiting for device boot readiness", (signal) =>
       waitForDeviceReadyOrCancel(
         this.dependencies.deviceManager,
         image,
         handle,
         this.remaining(context.deadlineMs, "waiting for device boot readiness"),
+        signal,
+        this.timer,
       ),
     );
     await progress?.report(100, 100, "Device is ready for use");

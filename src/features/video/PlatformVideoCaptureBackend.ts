@@ -126,7 +126,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       this.timer.clearTimeout(timeoutId);
     }
 
-    if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
+    if (backendHandle.process.exitCode === null) {
       logger.warn(`[VideoCapture] screenrecord still running after SIGINT; sending SIGKILL`);
       backendHandle.process.kill("SIGKILL");
       await backendHandle.exitPromise;
@@ -216,7 +216,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       throw new Error("Missing backend handle for video recording.");
     }
 
-    if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
+    if (backendHandle.process.exitCode === null) {
       backendHandle.process.kill("SIGKILL");
     }
 

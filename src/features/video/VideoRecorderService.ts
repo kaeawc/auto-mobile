@@ -140,6 +140,7 @@ export class VideoRecorderService {
   private now: () => Date;
   private securePermissions: SecurePermissions;
   private activeRecordings = new Map<string, ActiveRecordingState>();
+  private stoppingRecordings = new Map<string, Promise<VideoRecordingMetadata>>();
 
   constructor(dependencies: VideoRecorderServiceDependencies) {
     this.backend = dependencies.backend;
@@ -209,11 +210,26 @@ export class VideoRecorderService {
   }
 
   async stopRecording(recordingId: string): Promise<VideoRecordingMetadata> {
+    const stopping = this.stoppingRecordings.get(recordingId);
+    if (stopping) {
+      return stopping;
+    }
     const active = this.activeRecordings.get(recordingId);
     if (!active) {
       throw new Error(`No active recording found for id ${recordingId}`);
     }
 
+    const stop = this.stopActiveRecording(active);
+    this.stoppingRecordings.set(recordingId, stop);
+    try {
+      return await stop;
+    } finally {
+      this.stoppingRecordings.delete(recordingId);
+    }
+  }
+
+  private async stopActiveRecording(active: ActiveRecordingState): Promise<VideoRecordingMetadata> {
+    const recordingId = active.recordingId;
     const stopResult = await this.backend.stop(active.handle);
     if (this.activeRecordings.get(recordingId) !== active || active.forceStopRequested) {
       throw new Error(`Recording ${recordingId} was force-stopped while it was stopping.`);

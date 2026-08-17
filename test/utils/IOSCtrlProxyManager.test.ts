@@ -290,11 +290,13 @@ describe("IOSCtrlProxyManager", function() {
         name: "Other iPhone",
       });
       const firstStop = spyOn(first, "stop").mockRejectedValue(new Error("iproxy stop failed"));
+      const forceStop = spyOn(first as any, "forceStopForShutdown").mockResolvedValue();
       const secondStop = spyOn(second, "stop").mockResolvedValue();
 
       await expect(IOSCtrlProxyManager.shutdownAll()).resolves.toBeUndefined();
 
       expect(firstStop).toHaveBeenCalledTimes(1);
+      expect(forceStop).toHaveBeenCalledTimes(1);
       expect(secondStop).toHaveBeenCalledTimes(1);
       expect(IOSCtrlProxyManager.getInstance(testDevice)).not.toBe(first);
       expect(IOSCtrlProxyManager.getInstance(second.device)).not.toBe(second);

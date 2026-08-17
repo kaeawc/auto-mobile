@@ -429,12 +429,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     timer: Timer
   ): Promise<unknown | null> {
     let timeout: NodeJS.Timeout | undefined;
+    let forceStopStarted = false;
     const settled = instance.stop().then(() => null, error => error);
     const timedOut = new Promise<Error>(resolve => {
       timeout = timer.setTimeout(
         () => {
           // stop() may be blocked on a remote runner call. Reserve a bounded
           // window to await direct termination before clearing the registry.
+          forceStopStarted = true;
           void IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer)
             .then(() => resolve(new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`)));
         },
@@ -442,7 +444,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       );
     });
     try {
-      return await Promise.race([settled, timedOut]);
+      const result = await Promise.race([settled, timedOut]);
+      if (result !== null && !forceStopStarted) {
+        await IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer);
+      }
+      return result;
     } finally {
       if (timeout) {
         timer.clearTimeout(timeout);

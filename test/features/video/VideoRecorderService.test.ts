@@ -167,6 +167,24 @@ describe("VideoRecorderService", () => {
     await forcing;
   });
 
+  test("shares one backend stop when shutdown overlaps a user stop", async () => {
+    const recording = await service.startRecording();
+    let resolveStop: (() => void) | undefined;
+    backend.stop = async handle => {
+      backend.stopCalls.push(handle);
+      await new Promise<void>(resolve => { resolveStop = resolve; });
+      return { recordingId: handle.recordingId, outputPath: handle.outputPath };
+    };
+
+    const userStop = service.stopRecording(recording.recordingId);
+    const shutdownStop = service.stopRecording(recording.recordingId);
+    await Promise.resolve();
+    expect(backend.stopCalls).toHaveLength(1);
+    resolveStop?.();
+
+    await expect(Promise.all([userStop, shutdownStop])).resolves.toHaveLength(2);
+  });
+
   afterEach(async () => {
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
   });

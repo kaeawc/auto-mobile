@@ -5,6 +5,7 @@ import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -23,6 +24,30 @@ async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promi
 }
 
 describe("MultiPlatformDeviceManager", () => {
+  test("forwards ambient cancellation to Android detailed discovery", async () => {
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    const emulator = {
+      getBootedDevicesChecked: async (
+        _onlyEmulators: boolean,
+        _options: { bypassDeviceListCache?: boolean },
+        signal?: AbortSignal,
+      ): Promise<BootedDevice[]> => {
+        receivedSignal = signal;
+        return [];
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      {} as SimCtlClient,
+      emulator,
+    );
+
+    await runWithAbortSignal(controller.signal, () => manager.getBootedDevicesDetailed("android"));
+
+    expect(receivedSignal).toBe(controller.signal);
+  });
+
   test("isDeviceImageRunning uses UDID when present for iOS", async () => {
     const fakeSimctl = {
       isAvailable: async () => true,

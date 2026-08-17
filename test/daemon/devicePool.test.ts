@@ -190,6 +190,33 @@ describe("DevicePool", () => {
     }
   }
 
+  class DeferredSessionTrackingAppsRepository extends FakeInstalledAppsRepository {
+    private deferTracking = false;
+    private resolveDeferredTracking: (() => void) | undefined;
+
+    deferNextTrackingWrite(): void {
+      this.deferTracking = true;
+    }
+
+    finishDeferredTrackingWrite(): void {
+      this.resolveDeferredTracking?.();
+    }
+
+    override async setSessionTracking(
+      daemonSessionId: string,
+      deviceId: string,
+      deviceSessionStart: number,
+    ): Promise<void> {
+      if (this.deferTracking) {
+        this.deferTracking = false;
+        await new Promise<void>(resolve => {
+          this.resolveDeferredTracking = resolve;
+        });
+      }
+      await super.setSessionTracking(daemonSessionId, deviceId, deviceSessionStart);
+    }
+  }
+
   class ThrowingDiscoveryFakeDeviceManager extends FakeDeviceManager {
     override async getBootedDevicesDetailed(): Promise<never> {
       throw new Error("adb discovery crashed");
@@ -1507,6 +1534,82 @@ describe("DevicePool", () => {
       expect(devicePool.getTotalDeviceCount()).toBe(0);
     });
 
+    test("defers refresh eviction while a shutdown reservation owns the incarnation", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      await devicePool.initializeWithDevices([device]);
+      const captured = devicePool.getDevice(device.deviceId);
+      if (!captured) {
+        throw new Error("expected shutdown device to be pooled");
+      }
+      const reservation = await devicePool.reserveDeviceForShutdown(captured.id);
+      if (!reservation) {
+        throw new Error("expected shutdown reservation");
+      }
+      fakeDeviceManager.bootedDevices = [];
+
+      try {
+        await devicePool.refreshDevices();
+        await devicePool.refreshDevices();
+
+        expect(devicePool.getDevice(captured.id)).toBe(captured);
+      } finally {
+        await reservation.release();
+      }
+
+      await devicePool.refreshDevices();
+      expect(devicePool.getDevice(captured.id)).toBeNull();
+    });
+
+    test("does not hold the assignment mutex for replacement session tracking", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const appsRepository = new DeferredSessionTrackingAppsRepository();
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        fakeTimer,
+        appsRepository,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      await pool.initializeWithDevices([device]);
+      const captured = pool.getDevice(device.deviceId);
+      if (!captured) {
+        throw new Error("expected shutdown device to be pooled");
+      }
+      appsRepository.deferNextTrackingWrite();
+
+      const replacement = await pool.replaceDeviceForShutdown(captured, {
+        ...device,
+        name: "Pixel 8 replacement",
+      });
+
+      expect(replacement?.name).toBe("Pixel 8 replacement");
+      appsRepository.finishDeferredTrackingWrite();
+    });
+
+    test("allows a replacement incarnation to acquire its own shutdown reservation", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      await devicePool.initializeWithDevices([device]);
+      const captured = devicePool.getDevice(device.deviceId);
+      if (!captured) {
+        throw new Error("expected shutdown device to be pooled");
+      }
+      const originalReservation = await devicePool.reserveDeviceForShutdown(captured.id);
+      if (!originalReservation) {
+        throw new Error("expected original shutdown reservation");
+      }
+
+      const replacement = await devicePool.replaceDeviceForShutdown(captured, {
+        ...device,
+        name: "Pixel 8 replacement",
+      });
+      const replacementReservation = await devicePool.reserveDeviceForShutdown(captured.id);
+
+      expect(replacementReservation?.device).toBe(replacement);
+      await replacementReservation?.release();
+      await originalReservation.release();
+    });
+
     test("retains devices on first partial platform discovery miss", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
       fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
@@ -1874,6 +1977,47 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("sim-1");
     });
 
+    test("keeps a shutdown reservation exclusive to direct binding and autolock", async () => {
+      const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      await initializeLiveDevices([device]);
+      const captured = devicePool.getDevice(device.deviceId);
+      if (!captured) {
+        throw new Error("expected shutdown device to be pooled");
+      }
+      const reservation = await devicePool.reserveDeviceForShutdown(captured.id);
+      if (!reservation) {
+        throw new Error("expected shutdown reservation");
+      }
+
+      try {
+        expect(devicePool.getAvailableDeviceCount()).toBe(0);
+        devicePool.markIntentionalShutdown(captured.id);
+        await devicePool.removeDisconnectedDevice(captured.id, false);
+        expect(devicePool.getDevice(captured.id)).toBe(captured);
+        await expect(
+          devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform),
+        ).rejects.toThrow(/shutting down/);
+
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+        await expect(
+          devicePool.autolockDevice(device.deviceId, device.platform, "mcp-session-1"),
+        ).rejects.toThrow(/shutting down/);
+      } finally {
+        await reservation.release();
+        if (originalAutolock === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        }
+      }
+
+      expect(devicePool.getAvailableDeviceCount()).toBe(1);
+      await expect(
+        devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform),
+      ).resolves.toBe("session-1");
+    });
+
     test("rejects a changed runtime identity inside the assignment mutex", async () => {
       await devicePool.initializeWithDevices([
         createBootedDevice("emulator-5554", "android", "Old Pixel"),
@@ -2195,6 +2339,51 @@ describe("DevicePool", () => {
       ]);
       expect(devicePool.getDevice("emulator-5554")).toBeNull();
       expect(sessionManager.getSession("session-1")).toBeNull();
+    });
+
+    test("defers a started emulator's process-exit cleanup while shutdown is reserved", async () => {
+      const images: DeviceInfo[] = [
+        {
+          name: "Pixel 8",
+          platform: "android",
+          isRunning: false,
+          deviceId: "emulator-5554",
+          source: "local",
+        },
+      ];
+      const manager = new FakeDeviceManagerWithStartedProcess(images);
+      const releaseCalls: Array<{ sessionId: string; deviceId: string; reason: string }> = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        async (sessionId, deviceId, reason) => {
+          releaseCalls.push({ sessionId, deviceId, reason });
+          await sessionManager.releaseSession(sessionId, reason);
+        },
+      );
+
+      await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+      const reservation = await devicePool.reserveDeviceForShutdown("emulator-5554");
+      if (!reservation) {
+        throw new Error("expected shutdown reservation");
+      }
+
+      try {
+        manager.childProcess.emit("exit", 0, null);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(releaseCalls).toEqual([]);
+        expect(devicePool.getDevice("emulator-5554")).toBe(reservation.device);
+        expect(sessionManager.getSessionForDevice("emulator-5554")).toBe("session-1");
+      } finally {
+        await reservation.release();
+      }
     });
 
     test("keeps criteria auto-start available after a process exit when recovery is disabled", async () => {

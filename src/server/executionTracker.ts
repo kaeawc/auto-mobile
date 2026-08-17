@@ -31,6 +31,14 @@ export interface ExecutionScopeOptions {
   sessionUuid?: string;
 }
 
+export interface ExecutionCancellationOptions {
+  /**
+   * Keeps the control-plane operation that triggered a device shutdown alive
+   * while cancelling the device-bound work that must fail fast.
+   */
+  excludeSignal?: AbortSignal;
+}
+
 export class ExecutionTracker {
   private executions = new Map<string, ActiveExecution>();
   private sessionExecutions = new Map<string, Set<string>>();
@@ -107,8 +115,18 @@ export class ExecutionTracker {
     return this.cancelExecutionsForKey(sessionId, this.sessionExecutions, "sessionId", reason);
   }
 
-  async cancelSessionUuidExecutions(sessionUuid: string, reason: string = "unspecified"): Promise<number> {
-    return this.cancelExecutionsForKey(sessionUuid, this.sessionUuidExecutions, "sessionUuid", reason);
+  async cancelSessionUuidExecutions(
+    sessionUuid: string,
+    reason: string = "unspecified",
+    options: ExecutionCancellationOptions = {},
+  ): Promise<number> {
+    return this.cancelExecutionsForKey(
+      sessionUuid,
+      this.sessionUuidExecutions,
+      "sessionUuid",
+      reason,
+      options,
+    );
   }
 
   hasActiveSessionUuidExecutions(sessionUuid: string): boolean {
@@ -165,7 +183,8 @@ export class ExecutionTracker {
     key: string,
     executionMap: Map<string, Set<string>>,
     label: "sessionId" | "sessionUuid",
-    cancelReason: string = "unspecified"
+    cancelReason: string = "unspecified",
+    options: ExecutionCancellationOptions = {},
   ): Promise<number> {
     const executions = executionMap.get(key);
     if (!executions || executions.size === 0) {
@@ -176,6 +195,9 @@ export class ExecutionTracker {
     for (const executionId of executions) {
       const execution = this.executions.get(executionId);
       if (!execution) {
+        continue;
+      }
+      if (execution.abortController.signal === options.excludeSignal) {
         continue;
       }
       if (cancelReason.startsWith("device-disconnected:")) {

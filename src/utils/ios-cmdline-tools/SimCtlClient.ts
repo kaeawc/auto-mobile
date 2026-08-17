@@ -121,7 +121,7 @@ export interface SimCtl {
    * @param device - Device to kill
    * @returns Promise that resolves when kill is complete
    */
-  killSimulator(device: BootedDevice): Promise<void>;
+  killSimulator(device: BootedDevice, options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<void>;
 
   /** Erase all data from a simulator. Reserved for CI-owned recovery flows. */
   eraseSimulator(udid: string): Promise<void>;
@@ -1093,9 +1093,16 @@ export class SimCtlClient implements SimCtl {
     }
   }
 
-  async killSimulator(device: BootedDevice): Promise<void> {
+  async killSimulator(
+    device: BootedDevice,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<void> {
     logger.debug(`Killing iOS simulator ${device.deviceId}`);
-    await this.shutdownSimulatorCoordinated(device.deviceId, 10_000, getAbortSignal());
+    await this.shutdownSimulatorCoordinated(
+      device.deviceId,
+      options.timeoutMs ?? 10_000,
+      options.signal ?? getAbortSignal(),
+    );
   }
 
   async eraseSimulator(udid: string): Promise<void> {

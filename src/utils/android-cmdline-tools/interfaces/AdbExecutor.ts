@@ -97,6 +97,7 @@ export interface AdbExecutor {
   getBootedAndroidDevices(options?: {
     bypassCache?: boolean;
     throwOnMissingAdb?: boolean;
+    signal?: AbortSignal;
   }): Promise<BootedDevice[]>;
 
   /** Return raw ADB device states, including `offline` and `unauthorized` rows. */

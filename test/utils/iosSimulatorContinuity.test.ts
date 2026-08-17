@@ -386,8 +386,15 @@ describe("redactContinuityEvidence — retains a shareable, redacted result (AC7
     expect(serialized).not.toContain("mac-worker-07.internal");
     expect(serialized).not.toContain("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE");
     expect(serialized).not.toContain("/Users/ci");
-    expect(serialized).not.toContain("4201");
-    expect(serialized).not.toContain("4310");
+    for (const [role, rawPid] of Object.entries(evidence.before.processIds)) {
+      // Opaque SHA-256 tokens can legitimately contain a PID's decimal digits.
+      // Verify the typed field is a token rather than rejecting that harmless
+      // substring anywhere in a serialized artifact.
+      const token = redacted.before.processIds[role];
+      expect(token).toMatch(/^pid:[a-f0-9]{12}$/);
+      expect(token).not.toBe(String(rawPid));
+      expect(token).not.toBe(`pid:${rawPid}`);
+    }
   });
 
   it("keeps the non-sensitive fields needed to read the evidence", () => {

@@ -174,6 +174,12 @@ export class DevicePool {
   private refreshGeneration = 0;
   private readonly readinessReservationCounts: Map<string, number> = new Map();
   /**
+   * Captured incarnations that an explicit shutdown is retiring. Unlike a
+   * readiness reservation, this excludes direct startDevice/autolock binding
+   * as well as ordinary pool allocation.
+   */
+  private readonly shutdownReservations: Map<string, PooledDevice> = new Map();
+  /**
    * Serials the user intentionally stopped, mapped to the pooled-device
    * incarnation that was present at mark time (or {@link INCARNATION_ANY} when
    * only a recovery was in flight). Consuming this on a disconnect is gated on
@@ -429,7 +435,11 @@ export class DevicePool {
   /**
    * Add a new device to the pool
    */
-  async addDevice(device: BootedDevice, sourceImage?: DeviceInfo): Promise<void> {
+  async addDevice(
+    device: BootedDevice,
+    sourceImage?: DeviceInfo,
+    awaitSessionTracking: boolean = true,
+  ): Promise<void> {
     this.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
     if (sourceImage) {
       this.intentionalShutdowns.delete(device.deviceId);
@@ -469,7 +479,14 @@ export class DevicePool {
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
       this.deviceSessionStarts.set(device.deviceId, now);
       this.refreshMissingDeviceMisses.delete(device.deviceId);
-      await this.setDeviceSessionTracking(device.deviceId, now);
+      const sessionTracking = this.setDeviceSessionTracking(device.deviceId, now);
+      if (awaitSessionTracking) {
+        await sessionTracking;
+      } else {
+        // Shutdown replacement already owns assignmentMutex. Persisting cache
+        // metadata is best-effort and must not make allocators wait forever.
+        void sessionTracking;
+      }
 
       logger.info(`Added device ${device.deviceId} to pool`);
     }
@@ -513,7 +530,7 @@ export class DevicePool {
   /**
    * Remove device from pool
    */
-  async removeDevice(deviceId: string): Promise<void> {
+  async removeDevice(deviceId: string, awaitCacheCleanup: boolean = true): Promise<void> {
     const device = this.devices.get(deviceId);
     if (!device) {
       return;
@@ -533,7 +550,14 @@ export class DevicePool {
     if (this.lastReleasedDeviceId === deviceId) {
       this.lastReleasedDeviceId = null;
     }
-    await this.clearDeviceSessionCache(deviceId);
+    const cacheCleanup = this.clearDeviceSessionCache(deviceId);
+    if (awaitCacheCleanup) {
+      await cacheCleanup;
+    } else {
+      void cacheCleanup.catch((error) => {
+        logger.warn(`[DevicePool] Deferred cache cleanup failed for ${deviceId}: ${error}`, error);
+      });
+    }
     logger.info(`Removed device ${deviceId} from pool and cleared cached data`);
   }
 
@@ -587,12 +611,26 @@ export class DevicePool {
     return true;
   }
 
+  private async shouldDeferDisconnectCleanup(
+    deviceId: string,
+    device: PooledDevice | undefined,
+    mayBeStaleSignal: boolean,
+  ): Promise<boolean> {
+    if (device && this.isReservedForShutdown(device)) {
+      // killDevice owns this captured incarnation until its bounded disappearance
+      // check retires it (or hands a replacement to the pool). A concurrent
+      // monitor signal must not release its session or consume its marker.
+      return true;
+    }
+    return await this.applyIntentionalShutdownOnDisconnect(deviceId, device, mayBeStaleSignal);
+  }
+
   async removeDisconnectedDevice(
     deviceId: string,
     mayBeStaleSignal: boolean = true,
   ): Promise<void> {
     const device = this.devices.get(deviceId);
-    if (await this.applyIntentionalShutdownOnDisconnect(deviceId, device, mayBeStaleSignal)) {
+    if (await this.shouldDeferDisconnectCleanup(deviceId, device, mayBeStaleSignal)) {
       return;
     }
     if (!device || device.sessionId) {
@@ -1356,6 +1394,13 @@ export class DevicePool {
     reason: string,
     recoverAndroidEmulator: boolean = false,
   ): Promise<void> {
+    if (this.isReservedForShutdown(device)) {
+      // killDevice alone owns a shutdown-reserved incarnation until it either
+      // retires it or atomically hands off a same-ID replacement. Discovery
+      // pruning must not remove it in the middle of that handoff.
+      logger.debug(`Deferring eviction of shutdown-reserved device ${device.id}: ${reason}`);
+      return;
+    }
     logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
     if (device.sessionId) {
       await this.releaseSessionForDisconnectedDevice(
@@ -1640,6 +1685,12 @@ export class DevicePool {
     if (!device) {
       return;
     }
+    if (this.isReservedForShutdown(device)) {
+      // An explicit kill owns this incarnation until it confirms physical exit
+      // and retires ownership. Its tracked process exit is expected and must
+      // not cancel the initiating request or plan through normal loss cleanup.
+      return;
+    }
 
     await this.evictMissingPooledDevice(
       device,
@@ -1858,7 +1909,7 @@ export class DevicePool {
       // If no devices available and pool is empty, try to refresh
       // This handles race conditions during daemon startup
       const busyDevicesBeforeRefresh = candidates.filter(
-        (device) => device.status === "busy" || this.isReservedForReadiness(device.id),
+        (device) => device.status === "busy" || this.isReservedForAssignment(device),
       ).length;
       if (
         !device &&
@@ -1886,7 +1937,7 @@ export class DevicePool {
       if (!device) {
         // No idle device - check if devices exist but are busy
         const busyDevices = candidates.filter(
-          (candidate) => candidate.status === "busy" || this.isReservedForReadiness(candidate.id),
+          (candidate) => candidate.status === "busy" || this.isReservedForAssignment(candidate),
         ).length;
 
         return {
@@ -1983,7 +2034,7 @@ export class DevicePool {
   private selectIdleDevice(candidates: PooledDevice[]): PooledDevice | undefined {
     // Find idle devices and prefer most recently released for reuse
     const idleDevices = candidates.filter(
-      (device) => device.status === "idle" && !this.isReservedForReadiness(device.id),
+      (device) => device.status === "idle" && !this.isReservedForAssignment(device),
     );
     if (idleDevices.length === 0) {
       return undefined;
@@ -2233,6 +2284,79 @@ export class DevicePool {
   }
 
   /**
+   * Retire a captured device incarnation without publishing it as idle first.
+   * A device that has been explicitly stopped must not become assignable in the
+   * interval between its session release and pool removal.
+   */
+  async retireDeviceForShutdown(expectedDevice: PooledDevice): Promise<boolean> {
+    return await this.assignmentMutex.runExclusive(async () => {
+      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+        return false;
+      }
+      this.releaseCapturedDeviceForShutdown(expectedDevice);
+      await this.removeDevice(expectedDevice.id, false);
+      return !this.devices.has(expectedDevice.id);
+    });
+  }
+
+  /**
+   * Atomically replace a captured stopped-device incarnation with the device
+   * discovered under the same ID. This keeps allocators from claiming the old
+   * device during the handoff.
+   */
+  async replaceDeviceForShutdown(
+    expectedDevice: PooledDevice,
+    replacement: BootedDevice,
+    beforeReplacementPublishes?: () => void,
+  ): Promise<PooledDevice | undefined> {
+    return await this.assignmentMutex.runExclusive(async () => {
+      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+        return undefined;
+      }
+      this.releaseCapturedDeviceForShutdown(expectedDevice);
+      await this.removeDevice(expectedDevice.id, false);
+      if (this.devices.has(expectedDevice.id)) {
+        return undefined;
+      }
+      beforeReplacementPublishes?.();
+      await this.addDevice(
+        replacement,
+        this.sourceImageForSameAndroidReplacement(expectedDevice, replacement),
+        false,
+      );
+      return this.devices.get(replacement.deviceId);
+    });
+  }
+
+  private sourceImageForSameAndroidReplacement(
+    expectedDevice: PooledDevice,
+    replacement: BootedDevice,
+  ): DeviceInfo | undefined {
+    if (
+      expectedDevice.platform !== "android" ||
+      replacement.platform !== "android" ||
+      !expectedDevice.avdName ||
+      !expectedDevice.androidImage ||
+      replacement.name !== expectedDevice.avdName ||
+      !this.criteriaMatcher.androidRediscoveryMatches(
+        replacement,
+        expectedDevice.id,
+        expectedDevice.avdName,
+      )
+    ) {
+      return undefined;
+    }
+    return expectedDevice.androidImage;
+  }
+
+  private releaseCapturedDeviceForShutdown(device: PooledDevice): void {
+    device.sessionId = null;
+    device.status = "idle";
+    device.errorCount = 0;
+    this.lastReleasedDeviceId = device.id;
+  }
+
+  /**
    * Keep an exact device out of general pool allocation while startDevice
    * verifies its runner. The reservation does not create a user-visible
    * session; session ownership is transferred only after readiness succeeds.
@@ -2278,6 +2402,63 @@ export class DevicePool {
   }
 
   /**
+   * Exclusively reserve a captured incarnation while killDevice confirms it is
+   * gone and retires its ownership. A replacement with the same ID remains
+   * independently assignable once it has been atomically installed.
+   */
+  async reserveDeviceForShutdown(deviceId: string, abortSignal?: AbortSignal): Promise<{
+    device: PooledDevice;
+    release: () => Promise<void>;
+  } | undefined> {
+    let expectedDevice: PooledDevice | undefined;
+    await this.assignmentMutex.runExclusive(() => {
+      if (abortSignal?.aborted) {
+        throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
+      }
+      expectedDevice = this.devices.get(deviceId);
+      if (!expectedDevice) {
+        return;
+      }
+      if (this.shutdownReservations.get(deviceId) === expectedDevice) {
+        throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
+      }
+      this.shutdownReservations.set(deviceId, expectedDevice);
+    });
+    if (!expectedDevice) {
+      return undefined;
+    }
+    const capturedDevice = expectedDevice;
+
+    let released = false;
+    const release = async () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      // Reservation ownership is identity-scoped. Releasing it does not mutate
+      // the pool, so it must not queue behind a refresh holding assignmentMutex.
+      if (this.shutdownReservations.get(capturedDevice.id) === capturedDevice) {
+        this.shutdownReservations.delete(capturedDevice.id);
+      }
+    };
+    return { device: capturedDevice, release };
+  }
+
+  private isReservedForShutdown(device: PooledDevice): boolean {
+    return this.shutdownReservations.get(device.id) === device;
+  }
+
+  private isReservedForAssignment(device: PooledDevice): boolean {
+    return this.isReservedForReadiness(device.id) || this.isReservedForShutdown(device);
+  }
+
+  private assertNotReservedForShutdown(device: PooledDevice, unavailableMessage: string): void {
+    if (this.isReservedForShutdown(device)) {
+      throw new ActionableError(unavailableMessage);
+    }
+  }
+
+  /**
    * Bind a known device to a session without running the pool's idle-device
    * selection. If the device is already bound to a live session, reuse that
    * session so repeated startDevice calls stay idempotent.
@@ -2292,10 +2473,6 @@ export class DevicePool {
   ): Promise<string> {
     return await this.assignmentMutex.runExclusive(async () => {
       const alreadyPooled = this.devices.has(deviceId);
-      if (alreadyPooled) {
-        this.recordSourceAndroidAvd(deviceId, sourceImage);
-        this.notifyDeviceReady(deviceId);
-      }
       if (!alreadyPooled) {
         const bootedDevices = await this.deviceManager.getBootedDevices(platform);
         const booted = bootedDevices.find((d) => d.deviceId === deviceId);
@@ -2309,6 +2486,14 @@ export class DevicePool {
         throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
       }
       this.assertRuntimeIdentity(device, expectedIdentity);
+      this.assertNotReservedForShutdown(
+        device,
+        `Device '${deviceId}' is shutting down and cannot be assigned.`,
+      );
+      if (alreadyPooled) {
+        this.recordSourceAndroidAvd(deviceId, sourceImage);
+        this.notifyDeviceReady(deviceId);
+      }
       await this.trackStartedDeviceProcess(
         {
           deviceId: device.id,
@@ -2481,10 +2666,6 @@ export class DevicePool {
 
     // Ensure device is in the pool (it may have been freshly booted)
     const alreadyPooled = this.devices.has(deviceId);
-    if (alreadyPooled) {
-      this.recordSourceAndroidAvd(deviceId, sourceImage);
-      this.notifyDeviceReady(deviceId);
-    }
     if (!alreadyPooled) {
       const bootedDevices = await this.deviceManager.getBootedDevices(platform);
       const booted = bootedDevices.find((d) => d.deviceId === deviceId);
@@ -2506,6 +2687,14 @@ export class DevicePool {
       );
     }
     this.assertRuntimeIdentity(device, expectedIdentity);
+    this.assertNotReservedForShutdown(
+      device,
+      `Device '${deviceId}' is shutting down and cannot be autolocked.`,
+    );
+    if (alreadyPooled) {
+      this.recordSourceAndroidAvd(deviceId, sourceImage);
+      this.notifyDeviceReady(deviceId);
+    }
     await this.trackStartedDeviceProcess(
       {
         deviceId: device.id,
@@ -2717,7 +2906,7 @@ export class DevicePool {
    */
   getIdleDevices(): PooledDevice[] {
     return Array.from(this.devices.values()).filter(
-      (device) => device.status === "idle" && !this.isReservedForReadiness(device.id),
+      (device) => device.status === "idle" && !this.isReservedForAssignment(device),
     );
   }
 
@@ -2810,10 +2999,10 @@ export class DevicePool {
   } {
     const devices = this.getDevicesByPlatform(platform);
     const idle = devices.filter(
-      (device) => device.status === "idle" && !this.isReservedForReadiness(device.id),
+      (device) => device.status === "idle" && !this.isReservedForAssignment(device),
     ).length;
     const assigned = devices.filter(
-      (device) => device.status === "busy" || this.isReservedForReadiness(device.id),
+      (device) => device.status === "busy" || this.isReservedForAssignment(device),
     ).length;
     const error = devices.filter((device) => device.status === "error").length;
 
@@ -2838,7 +3027,7 @@ export class DevicePool {
     const all = this.getAllDevices();
     const idle = this.getIdleDevices().length;
     const assigned = all.filter(
-      (device) => device.status === "busy" || this.isReservedForReadiness(device.id),
+      (device) => device.status === "busy" || this.isReservedForAssignment(device),
     ).length;
     const error = this.getErrorDevices().length;
     const avgAssignments =

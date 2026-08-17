@@ -1208,6 +1208,9 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+          # Lint runs boundary guards that compare the working tree with
+          # origin/main. Keep that ref available on every matrix platform.
+          fetch-depth: 0
 
       # Disjoint cache paths, so the two restores overlap each other. The
       # barrier must precede "Setup Auto Mobile": that composite runs

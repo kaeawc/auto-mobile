@@ -15,6 +15,8 @@ import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 
+const MAX_UPDATE_ATTEMPTS = 3;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -81,6 +83,7 @@ export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore
           device_id: incident.deviceId,
           observed_at_ms: incident.observedAtMs,
           updated_at_ms: incident.updatedAtMs,
+          revision: 0,
           incident_json: JSON.stringify(incident),
         })
         .execute();
@@ -147,19 +150,35 @@ export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore
     incidentId: string,
     mutate: (incident: EmulatorLossIncident) => void,
   ): Promise<void> {
-    const incident = await this.get(incidentId);
-    if (!incident) {
-      return;
+    for (let attempt = 0; attempt < MAX_UPDATE_ATTEMPTS; attempt++) {
+      const row = await this.getDb()
+        .selectFrom("emulator_loss_incidents")
+        .select(["incident_json", "revision"])
+        .where("incident_id", "=", incidentId)
+        .executeTakeFirst();
+      if (!row) {
+        return;
+      }
+      const incident = decodeIncident(row.incident_json);
+      if (!incident) {
+        return;
+      }
+      mutate(incident);
+      incident.updatedAtMs = this.timer.now();
+      const result = await this.getDb()
+        .updateTable("emulator_loss_incidents")
+        .set({
+          updated_at_ms: incident.updatedAtMs,
+          revision: row.revision + 1,
+          incident_json: JSON.stringify(incident),
+        })
+        .where("incident_id", "=", incidentId)
+        .where("revision", "=", row.revision)
+        .executeTakeFirst();
+      if (Number(result.numUpdatedRows) > 0) {
+        return;
+      }
     }
-    mutate(incident);
-    incident.updatedAtMs = this.timer.now();
-    await this.getDb()
-      .updateTable("emulator_loss_incidents")
-      .set({
-        updated_at_ms: incident.updatedAtMs,
-        incident_json: JSON.stringify(incident),
-      })
-      .where("incident_id", "=", incidentId)
-      .execute();
+    throw new Error(`Could not update emulator-loss incident ${incidentId} after concurrent updates`);
   }
 }

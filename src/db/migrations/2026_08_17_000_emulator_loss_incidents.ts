@@ -14,6 +14,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("device_id", "text", (col) => col.notNull())
     .addColumn("observed_at_ms", "integer", (col) => col.notNull())
     .addColumn("updated_at_ms", "integer", (col) => col.notNull())
+    .addColumn("revision", "integer", (col) => col.notNull().defaultTo(0))
     .addColumn("incident_json", "text", (col) => col.notNull())
     .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();

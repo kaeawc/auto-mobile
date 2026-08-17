@@ -2044,7 +2044,6 @@ export class DevicePool {
       deviceId,
       "watched-process-exit",
       { code, signal },
-      "device",
     );
     await this.evictMissingPooledDevice(
       device,

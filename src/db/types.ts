@@ -528,6 +528,7 @@ export interface EmulatorLossIncidentsTable {
   device_id: string;
   observed_at_ms: number;
   updated_at_ms: number;
+  revision: number;
   incident_json: string;
   created_at: Generated<string>;
 }

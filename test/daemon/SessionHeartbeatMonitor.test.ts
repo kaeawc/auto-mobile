@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
@@ -285,6 +286,42 @@ describe("SessionHeartbeatMonitor", () => {
         await monitor.tick();
         expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
       }
+    });
+
+    it("keeps an expired autolocked session assigned until active work completes", async () => {
+      const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+      const executionTracker = new ExecutionTracker(timer);
+      const hasActiveExecutions = (sessionUuid: string): boolean =>
+        executionTracker.hasActiveSessionUuidExecutions(sessionUuid)
+        || pool.hasActiveAutolockMcpSessionExecution(
+          sessionUuid,
+          mcpSessionId => executionTracker.hasActiveSessionExecutions(mcpSessionId),
+        );
+      sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        hasActiveExecutions,
+        reapVia(sessionManager, pool),
+        timer,
+      );
+      const execution = executionTracker.startExecution("tapOn", "mcp-session-1");
+
+      timer.advanceTime(60_001); // Past the autolock idle timeout.
+      await monitor.tick();
+
+      const activeDevice = pool.getDevice("emulator-5554")!;
+      expect(activeDevice.status).toBe("busy");
+      expect(activeDevice.autolockSessionId).toBe(sessionId);
+      expect(sessionManager.getActiveSessionCount()).toBe(1);
+      expect(sessionManager.getSession(sessionId!)).not.toBeNull();
+
+      executionTracker.endExecution(execution.id);
+      await monitor.tick();
+
+      const releasedDevice = pool.getDevice("emulator-5554")!;
+      expect(releasedDevice.status).toBe("idle");
+      expect(releasedDevice.autolockSessionId).toBeUndefined();
+      expect(sessionManager.getActiveSessionCount()).toBe(0);
     });
   });
 });

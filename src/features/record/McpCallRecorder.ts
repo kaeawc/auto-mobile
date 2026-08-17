@@ -40,6 +40,8 @@ export const INTERNAL_PARAMS = new Set([
   "devices",
   "keepScreenAwake",
   "__mcpSessionId",
+  "__executionId",
+  "__executionStartTime",
   "__lockNamespace",
   INTERNAL_NO_DIFF_PARAM,
 ]);

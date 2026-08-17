@@ -160,6 +160,58 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     expect(captured).toHaveLength(1);
   });
 
+  test("propagates outer execution metadata to a nested device-aware plan step", async () => {
+    const device = { name: "Pixel", deviceId: "emulator-5554", platform: "android" as const };
+    const originalRecorder = (ToolRegistry as any).navigationToolCallRecorder;
+    const originalRepository = (ToolRegistry as any).toolCallRepository;
+    const restore = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        async resolveExecutionTarget(input: any) {
+          return {
+            args: input.args,
+            baseSessionUuid: undefined,
+            device,
+            internalCall: true,
+            sessionUuid: undefined,
+            shouldResolveDevice: true,
+          };
+        },
+      },
+      auditRunner: {
+        async run(input: any) {
+          return input.handler(input.device, input.args, input.progress, input.signal);
+        },
+      },
+      afterToolCall: {
+        async handle(input: any) {
+          return { durationMs: 0, finalizedResponse: input.response };
+        },
+      },
+      planLifecycleManager: { async afterExecution() {} },
+    });
+    (ToolRegistry as any).navigationToolCallRecorder = { record() {} };
+    (ToolRegistry as any).toolCallRepository = { async recordToolCall() {} };
+    try {
+      ToolRegistry.registerDeviceAware("nestedStep", "Nested step", z.object({}), async (_device, args) => {
+        captured.push({ args });
+        return SENTINEL;
+      }, { planExecutable: true });
+
+      await runWithToolCapabilityContext(
+        { execution: { executionId: "outer-execution", startTime: 123 } },
+        () => ToolRegistry.callInternal("nestedStep", {}, undefined, undefined, { forPlan: true }),
+      );
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0].args.__executionId).toBe("outer-execution");
+      expect(captured[0].args.__executionStartTime).toBe(123);
+    } finally {
+      restore();
+      (ToolRegistry as any).navigationToolCallRecorder = originalRecorder;
+      (ToolRegistry as any).toolCallRepository = originalRepository;
+    }
+  });
+
   test("AC3: throws ActionableError when the tool name is unresolved", async () => {
     await expect(ToolRegistry.callInternal("nonexistent", {})).rejects.toBeInstanceOf(ActionableError);
     await expect(ToolRegistry.callInternal("nonexistent", {})).rejects.toThrow(/Tool not found: nonexistent/);

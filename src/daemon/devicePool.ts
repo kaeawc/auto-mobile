@@ -1,7 +1,12 @@
 import type { ChildProcess } from "child_process";
 import { randomUUID } from "node:crypto";
 import { logger } from "../utils/logger";
-import { SessionManager, type Session } from "./sessionManager";
+import {
+  SessionManager,
+  type ActiveSessionExecutionQuery,
+  type Session,
+  type SessionExecutionMetadata,
+} from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
 import { Mutex } from "async-mutex";
 import {
@@ -2767,6 +2772,7 @@ export class DevicePool {
   resolveAutolockSessionForMcpSession(
     mcpSessionId: string | undefined,
     platform?: Platform,
+    execution?: SessionExecutionMetadata,
   ): string | undefined {
     if (!mcpSessionId) {
       return undefined;
@@ -2777,7 +2783,7 @@ export class DevicePool {
       return undefined;
     }
 
-    const session = this.sessionManager.getSession(sessionId);
+    const session = this.sessionManager.getSessionForNewExecution(sessionId, execution);
     if (!session) {
       this.mcpSessionAutolockMap.delete(mcpSessionId);
       return undefined;
@@ -2794,6 +2800,24 @@ export class DevicePool {
     }
 
     return sessionId;
+  }
+
+  /**
+   * Whether a live MCP call owns this autolock session. The execution tracker
+   * keys socket-forwarded work by MCP session while SessionManager keys expiry
+   * by the generated device-session UUID, so this bridges those identities.
+   */
+  hasActiveAutolockMcpSessionExecution(
+    sessionId: string,
+    hasActiveMcpSessionExecution: (mcpSessionId: string, query?: ActiveSessionExecutionQuery) => boolean,
+    query?: ActiveSessionExecutionQuery,
+  ): boolean {
+    for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
+      if (mappedSessionId === sessionId && hasActiveMcpSessionExecution(mcpSessionId, query)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

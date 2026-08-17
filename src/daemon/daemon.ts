@@ -4,7 +4,7 @@ import { createMcpServer } from "../server";
 import { logger } from "../utils/logger";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
-import { SessionManager } from "./sessionManager";
+import { SessionManager, type ActiveSessionExecutionQuery } from "./sessionManager";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { DevicePool, type PooledDevice } from "./devicePool";
@@ -218,6 +218,9 @@ export class Daemon {
     });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
+    this.sessionManager.setActiveSessionExecutionChecker(
+      (sessionId, query) => this.hasActiveSessionExecution(sessionId, query),
+    );
     // Register centralized cleanup for session-scoped state
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
       NavigationGraphManager.releaseSession(sessionId);
@@ -1202,7 +1205,7 @@ export class Daemon {
   private startHeartbeatMonitor(): void {
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
       this.sessionManager,
-      sessionId => executionTracker.hasActiveSessionUuidExecutions(sessionId),
+      sessionId => this.hasActiveSessionExecution(sessionId),
       sessionId => this.cancelAndReleaseSession(sessionId),
       this.timer,
     );
@@ -1224,6 +1227,15 @@ export class Daemon {
     );
     this.navigationRetentionMonitor = new NavigationRetentionMonitor(retention, this.timer);
     this.navigationRetentionMonitor.start();
+  }
+
+  private hasActiveSessionExecution(sessionId: string, query?: ActiveSessionExecutionQuery): boolean {
+    return executionTracker.hasActiveSessionUuidExecutions(sessionId, query)
+      || this.devicePool.hasActiveAutolockMcpSessionExecution(
+        sessionId,
+        (mcpSessionId, executionQuery) => executionTracker.hasActiveSessionExecutions(mcpSessionId, executionQuery),
+        query,
+      );
   }
 
   private startDeviceDisconnectMonitor(): void {

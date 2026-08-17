@@ -11,6 +11,7 @@ interface ActiveExecution {
   id: string;
   toolName: string;
   sessionId?: string;
+  transportSessionId?: string;
   sessionUuid?: string;
   startTime: number;
   abortController: AbortController;
@@ -39,6 +40,11 @@ export interface ExecutionCancellationOptions {
   excludeSignal?: AbortSignal;
 }
 
+export interface ActiveExecutionQuery {
+  startedAtOrBefore?: number;
+  excludeExecutionId?: string;
+}
+
 export class ExecutionTracker {
   private executions = new Map<string, ActiveExecution>();
   private sessionExecutions = new Map<string, Set<string>>();
@@ -54,13 +60,15 @@ export class ExecutionTracker {
   startExecution(
     toolName: string,
     sessionId?: string,
-    sessionUuid?: string
+    sessionUuid?: string,
+    transportSessionId?: string,
   ): ActiveExecution {
     const id = this.idGenerator.next();
     const execution: ActiveExecution = {
       id,
       toolName,
       sessionId,
+      transportSessionId,
       sessionUuid,
       startTime: this.timer.now(),
       abortController: new AbortController()
@@ -69,9 +77,11 @@ export class ExecutionTracker {
     this.executions.set(id, execution);
 
     if (sessionId) {
-      const sessionSet = this.sessionExecutions.get(sessionId) ?? new Set();
-      sessionSet.add(id);
-      this.sessionExecutions.set(sessionId, sessionSet);
+      this.registerSessionExecution(sessionId, id);
+    }
+
+    if (transportSessionId && transportSessionId !== sessionId) {
+      this.registerSessionExecution(transportSessionId, id);
     }
 
     if (sessionUuid) {
@@ -92,11 +102,11 @@ export class ExecutionTracker {
     this.executions.delete(executionId);
 
     if (execution.sessionId) {
-      const sessionSet = this.sessionExecutions.get(execution.sessionId);
-      sessionSet?.delete(executionId);
-      if (sessionSet?.size === 0) {
-        this.sessionExecutions.delete(execution.sessionId);
-      }
+      this.unregisterSessionExecution(execution.sessionId, executionId);
+    }
+
+    if (execution.transportSessionId && execution.transportSessionId !== execution.sessionId) {
+      this.unregisterSessionExecution(execution.transportSessionId, executionId);
     }
 
     if (execution.sessionUuid) {
@@ -129,9 +139,12 @@ export class ExecutionTracker {
     );
   }
 
-  hasActiveSessionUuidExecutions(sessionUuid: string): boolean {
-    const executions = this.sessionUuidExecutions.get(sessionUuid);
-    return executions !== undefined && executions.size > 0;
+  hasActiveSessionUuidExecutions(sessionUuid: string, query?: ActiveExecutionQuery): boolean {
+    return this.hasActiveExecutionsForKey(this.sessionUuidExecutions, sessionUuid, query);
+  }
+
+  hasActiveSessionExecutions(sessionId: string, query?: ActiveExecutionQuery): boolean {
+    return this.hasActiveExecutionsForKey(this.sessionExecutions, sessionId, query);
   }
 
   hasActiveToolExecution(toolName: string, options: ExecutionScopeOptions): boolean {
@@ -157,6 +170,40 @@ export class ExecutionTracker {
       }
     }
     return false;
+  }
+
+  private registerSessionExecution(sessionId: string, executionId: string): void {
+    const sessionSet = this.sessionExecutions.get(sessionId) ?? new Set<string>();
+    sessionSet.add(executionId);
+    this.sessionExecutions.set(sessionId, sessionSet);
+  }
+
+  private unregisterSessionExecution(sessionId: string, executionId: string): void {
+    const sessionSet = this.sessionExecutions.get(sessionId);
+    sessionSet?.delete(executionId);
+    if (sessionSet?.size === 0) {
+      this.sessionExecutions.delete(sessionId);
+    }
+  }
+
+  private hasActiveExecutionsForKey(
+    executionMap: Map<string, Set<string>>,
+    key: string,
+    query?: ActiveExecutionQuery,
+  ): boolean {
+    const executions = executionMap.get(key);
+    if (!executions || executions.size === 0) {
+      return false;
+    }
+    if (query?.startedAtOrBefore === undefined && query?.excludeExecutionId === undefined) {
+      return true;
+    }
+    return Array.from(executions).some(executionId => {
+      const execution = this.executions.get(executionId);
+      return execution !== undefined
+        && executionId !== query?.excludeExecutionId
+        && (query?.startedAtOrBefore === undefined || execution.startTime <= query.startedAtOrBefore);
+    });
   }
 
   private hasActiveToolExecutionForKey(

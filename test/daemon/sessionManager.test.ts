@@ -219,6 +219,52 @@ describe("SessionManager", () => {
       const retrieved = sessionManager.getSession("session-1");
       expect(retrieved).toBeNull();
     });
+
+    test("expires a session before accepting a request that arrives after its deadline", async () => {
+      const released: string[] = [];
+      sessionManager.setActiveSessionExecutionChecker((_sessionId, startedAtOrBefore) => startedAtOrBefore === undefined);
+      sessionManager.onSessionRelease(sessionId => released.push(sessionId));
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
+      fakeTimer.advanceTime(1001);
+
+      // Existing work keeps an expired session assigned, but a new request must
+      // not use that protection to revive the session after its deadline.
+      expect(sessionManager.getSession("session-1")).not.toBeNull();
+      await expect(sessionManager.getOrCreateSession("session-1")).rejects.toThrow("not found");
+
+      expect(released).toEqual(["session-1"]);
+      expect(sessionManager.getActiveSessionCount()).toBe(0);
+    });
+
+    test("keeps a session when work began before its expiry deadline", async () => {
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
+      fakeTimer.advanceTime(1001);
+
+      const resolved = await sessionManager.getOrCreateSession(
+        "session-1",
+        undefined,
+        undefined,
+        { executionId: "pre-deadline", startTime: 1000 },
+      );
+
+      expect(resolved).toBe(session);
+      expect(sessionManager.getActiveSessionCount()).toBe(1);
+    });
+
+    test("rejects a late execution while earlier work keeps the expired session assigned", async () => {
+      sessionManager.setActiveSessionExecutionChecker((_sessionId, query) => query?.excludeExecutionId === "late");
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
+      fakeTimer.advanceTime(1001);
+
+      await expect(sessionManager.getOrCreateSession(
+        "session-1",
+        undefined,
+        undefined,
+        { executionId: "late", startTime: 1001 },
+      )).rejects.toThrow("earlier work is still active");
+
+      expect(sessionManager.getActiveSessionCount()).toBe(1);
+    });
   });
 
   describe("cache management", () => {

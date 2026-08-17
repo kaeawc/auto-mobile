@@ -178,6 +178,22 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(signals).toContain("SIGKILL");
     });
 
+    test("forceStop kills host adb before a stalled device command can consume shutdown time", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      fakeFactory.getFakeClient().setHangingCommand("shell pkill -9 screenrecord");
+      const fakeProcess = new FakeChildProcess();
+      const backend = new PlatformVideoCaptureBackend(fakeFactory);
+      const signals = spyOnKill(fakeProcess);
+
+      const pendingForceStop = backend.forceStop(
+        buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess)
+      );
+      await Promise.resolve();
+
+      expect(signals).toContain("SIGKILL");
+      void pendingForceStop;
+    });
+
     test("sends device-side `pkill -2 screenrecord` as the first ADB command on stop", async () => {
       const fakeFactory = new FakeAdbClientFactory();
       const fakeClient = fakeFactory.getFakeClient();

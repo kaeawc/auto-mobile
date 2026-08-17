@@ -216,14 +216,17 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       throw new Error("Missing backend handle for video recording.");
     }
 
+    if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
+      backendHandle.process.kill("SIGKILL");
+    }
+
+    // Do not wait for a potentially wedged device command before killing the
+    // directly owned adb process. Shutdown has a short outer deadline.
     const adb = this.adbFactory.create(backendHandle.device);
     try {
       await adb.executeCommand("shell pkill -9 screenrecord", 8000);
     } catch (error) {
       logger.warn(`[VideoCapture] Device-side force-stop failed: ${error}`);
-    }
-    if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
-      backendHandle.process.kill("SIGKILL");
     }
   }
 

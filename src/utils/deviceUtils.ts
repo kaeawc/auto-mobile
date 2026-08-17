@@ -6,7 +6,8 @@ import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import { logger } from "./logger";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
-import { getAbortSignal } from "./AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "./AbortContext";
+import { defaultTimer, type Timer } from "./SystemTimer";
 
 export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 
@@ -94,39 +95,12 @@ export interface PlatformDeviceManager {
    * @param childProcess - Optional child process to monitor for early exit
    * @returns Promise that resolves with the booted device information when device is ready
    */
-  waitForDeviceReady(device: DeviceInfo, timeoutMs?: number, childProcess?: ChildProcess | null): Promise<BootedDevice>;
-}
-
-interface ReadinessCancellation {
-  promise: Promise<never>;
-  throwIfCancelled(): void;
-  dispose(): void;
-}
-
-function createReadinessCancellation(signal: AbortSignal | undefined): ReadinessCancellation {
-  const never = new Promise<never>(() => undefined);
-  const throwIfCancelled = () => {
-    if (signal?.aborted) {
-      throw new ActionableError("Device readiness was cancelled.");
-    }
-  };
-  if (!signal || signal.aborted) {
-    return { promise: never, throwIfCancelled, dispose: () => {} };
-  }
-
-  let rejectCancellation!: (error: ActionableError) => void;
-  const promise = new Promise<never>((_resolve, reject) => {
-    rejectCancellation = reject;
-  });
-  const abort = () => {
-    rejectCancellation(new ActionableError("Device readiness was cancelled."));
-  };
-  signal.addEventListener("abort", abort, { once: true });
-  return {
-    promise,
-    throwIfCancelled,
-    dispose: () => signal.removeEventListener("abort", abort),
-  };
+  waitForDeviceReady(
+    device: DeviceInfo,
+    timeoutMs?: number,
+    childProcess?: ChildProcess | null,
+    signal?: AbortSignal,
+  ): Promise<BootedDevice>;
 }
 
 /**
@@ -157,15 +131,42 @@ export async function waitForDeviceReadyOrCancel(
   deviceManager: PlatformDeviceManager,
   device: DeviceInfo,
   handle: ChildProcess | null,
-  timeoutMs?: number,
-  signal?: AbortSignal,
+  timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  signal: AbortSignal | undefined = getAbortSignal(),
+  timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
   cancelOwnedBoot?: () => void,
 ): Promise<BootedDevice> {
-  const cancellation = createReadinessCancellation(signal);
+  const timeoutError = new ActionableError(
+    `Device readiness timed out after ${timeoutMs}ms for ${device.deviceId ?? device.name}`,
+  );
+  const controller = new AbortController();
+  const readinessSignal = signal
+    ? AbortSignal.any([signal, controller.signal])
+    : controller.signal;
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  let abortListener: (() => void) | undefined;
+
   try {
-    cancellation.throwIfCancelled();
-    const readiness = deviceManager.waitForDeviceReady(device, timeoutMs, handle);
-    return await Promise.race([readiness, cancellation.promise]);
+    const readinessPromise = runWithAbortSignal(readinessSignal, () =>
+      deviceManager.waitForDeviceReady(device, timeoutMs, handle, readinessSignal),
+    );
+    // The deadline race below can settle first when a device manager ignores
+    // cancellation. Keep a late device-manager rejection from becoming unhandled.
+    void readinessPromise.catch(() => {});
+    const abortPromise = new Promise<never>((_resolve, reject) => {
+      abortListener = () => {
+        reject(readinessSignal.reason instanceof Error ? readinessSignal.reason : timeoutError);
+      };
+      if (readinessSignal.aborted) {
+        abortListener();
+        return;
+      }
+      readinessSignal.addEventListener("abort", abortListener, { once: true });
+    });
+    timeoutHandle = timer.setTimeout(() => {
+      controller.abort(timeoutError);
+    }, timeoutMs);
+    return await Promise.race([readinessPromise, abortPromise]);
   } catch (error) {
     if (handle) {
       logger.warn(
@@ -177,7 +178,12 @@ export async function waitForDeviceReadyOrCancel(
     }
     throw error;
   } finally {
-    cancellation.dispose();
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
+    if (abortListener) {
+      readinessSignal.removeEventListener("abort", abortListener);
+    }
   }
 }
 
@@ -403,10 +409,17 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
     childProcess?: ChildProcess | null,
+    signal?: AbortSignal,
   ): Promise<BootedDevice> {
     switch (device.platform) {
       case "android":
-        return this.emulator.waitForEmulatorReady(device.name, timeoutMs, childProcess, device.deviceId);
+        return this.emulator.waitForEmulatorReady(
+          device.name,
+          timeoutMs,
+          childProcess,
+          device.deviceId,
+          signal,
+        );
       case "ios":
         // A `childProcess` is only supplied on the cold-boot path, where
         // `startSimulator` has already run `bootstatus -b`. Signal that so the

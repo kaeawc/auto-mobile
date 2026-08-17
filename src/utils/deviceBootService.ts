@@ -355,6 +355,7 @@ export class DeviceBootService {
           handle,
           this.remaining(context.deadlineMs, "waiting for device boot readiness"),
           signal,
+          this.timer,
           cancelHandle,
         ),
       );

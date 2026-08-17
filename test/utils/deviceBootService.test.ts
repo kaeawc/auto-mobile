@@ -77,6 +77,8 @@ describe("DeviceBootService", () => {
     });
 
     expect(devices.getExecutedOperations()).toContain("waitForDeviceReady:Pixel_9_API_35:6000");
+    expect(devices.getWaitForDeviceReadySignal()).toBeDefined();
+    expect(devices.getWaitForDeviceReadySignal()?.aborted).toBe(false);
   });
 
   it("aborts provisioning at the shared absolute deadline", async () => {

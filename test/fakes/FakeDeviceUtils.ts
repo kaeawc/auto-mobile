@@ -18,6 +18,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   private executedOperations: string[] = [];
   private mockChildProcesses: Map<string, ChildProcess | null> = new Map();
   private waitForDeviceReadyChildProcess: ChildProcess | null | undefined;
+  private waitForDeviceReadySignal: AbortSignal | undefined;
   private waitForDeviceReadyError: Error | undefined;
 
   /**
@@ -90,6 +91,10 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
 
   getWaitForDeviceReadyChildProcess(): ChildProcess | null | undefined {
     return this.waitForDeviceReadyChildProcess;
+  }
+
+  getWaitForDeviceReadySignal(): AbortSignal | undefined {
+    return this.waitForDeviceReadySignal;
   }
 
   /**
@@ -225,8 +230,10 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     device: DeviceInfo,
     timeoutMs: number = 120000,
     childProcess?: ChildProcess | null,
+    signal?: AbortSignal,
   ): Promise<BootedDevice> {
     this.waitForDeviceReadyChildProcess = childProcess;
+    this.waitForDeviceReadySignal = signal;
     this.executedOperations.push(
       `waitForDeviceReady:${device.name}:${timeoutMs}`,
     );

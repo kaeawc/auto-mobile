@@ -18,6 +18,7 @@ import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { getAbortSignal } from "../../src/utils/AbortContext";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -569,6 +570,45 @@ describe("DevicePool", () => {
 
     async waitForDeviceReady(): Promise<BootedDevice> {
       throw new Error("readiness timeout");
+    }
+  }
+
+  class FakeDeviceManagerWithPendingReadiness extends FakeDeviceManager {
+    readonly childProcess = new KillTrackingChildProcess();
+
+    override async startDevice(
+      device: DeviceInfo,
+      timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
+    ): Promise<ChildProcess> {
+      await super.startDevice(device, timeoutMs);
+      return this.childProcess as unknown as ChildProcess;
+    }
+
+    override async waitForDeviceReady(
+      _device: DeviceInfo,
+      _timeoutMs?: number,
+      _childProcess?: ChildProcess | null,
+      _signal?: AbortSignal,
+    ): Promise<BootedDevice> {
+      return await new Promise<BootedDevice>(() => {});
+    }
+  }
+
+  class FakeDeviceManagerWithPendingStart extends FakeDeviceManager {
+    startObservedAbort = false;
+
+    override async startDevice(): Promise<ChildProcess> {
+      const signal = getAbortSignal();
+      return await new Promise<ChildProcess>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => {
+            this.startObservedAbort = true;
+            reject(signal.reason);
+          },
+          { once: true },
+        );
+      });
     }
   }
 
@@ -3679,6 +3719,55 @@ describe("DevicePool", () => {
       expect(manager.childProcess.killCount).toBe(1);
     });
 
+    test("bounds a pending pool cold-boot readiness wait by the allocation deadline", async () => {
+      const image: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        deviceId: "emulator-5554",
+        source: "local",
+      };
+      const manager = new FakeDeviceManagerWithPendingReadiness([image]);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+
+      const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+
+      await expect(fakeTimer.resolvePromise(allocation, 100)).rejects.toThrow();
+      expect(fakeTimer.now()).toBe(1_000);
+      expect(manager.childProcess.killCount).toBe(1);
+    });
+
+    test("aborts a pending pool cold-boot start at the allocation deadline", async () => {
+      const image: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "ios",
+        isRunning: false,
+        deviceId: "sim-1234",
+        source: "local",
+      };
+      const manager = new FakeDeviceManagerWithPendingStart([image]);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+
+      const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "ios");
+
+      await expect(fakeTimer.resolvePromise(allocation, 100)).rejects.toThrow();
+      expect(manager.startObservedAbort).toBe(true);
+    });
+
     test("boots replacement emulator after stale pooled emulator is evicted before allocation", async () => {
       const images: DeviceInfo[] = [
         {
@@ -3785,8 +3874,8 @@ describe("DevicePool", () => {
         "sim-2",
       ]);
       expect(fakeDeviceManager.startDeviceTimeouts).toEqual([
-        DEFAULT_DEVICE_READY_TIMEOUT_MS,
-        DEFAULT_DEVICE_READY_TIMEOUT_MS,
+        1000,
+        1000,
       ]);
       expect(devicePool.getTotalDeviceCount()).toBe(2);
     });
@@ -3886,7 +3975,7 @@ describe("DevicePool", () => {
 
       expect(assignments.get("session-a")).toBe("sim-1");
       expect(fakeDeviceManager.startedDevices.map((device) => device.deviceId)).toEqual(["sim-1"]);
-      expect(fakeDeviceManager.startDeviceTimeouts).toEqual([DEFAULT_DEVICE_READY_TIMEOUT_MS]);
+      expect(fakeDeviceManager.startDeviceTimeouts).toEqual([1000]);
       expect(devicePool.getDevice("sim-1")?.iosVersion).toBe("17.5");
     });
 

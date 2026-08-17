@@ -163,6 +163,7 @@ export interface AndroidEmulator {
     timeoutMs?: number,
     childProcess?: ChildProcess | null,
     targetDeviceId?: string,
+    signal?: AbortSignal,
   ): Promise<BootedDevice>;
 }
 
@@ -745,10 +746,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     deviceId: string | undefined,
     tracker: { deviceId: string | null; since: number | null },
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<ActionableError | null> {
     let states: AdbDeviceState[];
     try {
-      states = (await this.adbFactory.create(null).getDeviceStates?.({ timeoutMs })) ?? [];
+      states = (await this.adbFactory.create(null).getDeviceStates?.({ timeoutMs, signal })) ?? [];
     } catch (error) {
       // Auxiliary diagnostic probe; a failure here must not block readiness polling.
       logger.debug(
@@ -2004,6 +2006,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     timeoutMs: number = 120000,
     childProcess?: ChildProcess | null,
     targetDeviceId?: string,
+    signal?: AbortSignal,
   ): Promise<BootedDevice> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
@@ -2119,6 +2122,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             correlatedTargetDeviceId,
             offlineTracker,
             remainingTimeoutMs,
+            signal,
           );
           if (!pollingActive || this.timer.now() - startTime >= timeoutMs) {
             break;
@@ -2130,6 +2134,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             bypassDeviceListCache: true,
           });
           logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);
+          const readinessTimeoutMs = Math.max(0, timeoutMs - (this.timer.now() - startTime));
 
           if (runningEmulators.length > 0) {
             logger.debug(
@@ -2182,10 +2187,28 @@ export class AndroidEmulatorClient implements AndroidEmulator {
                   sysBootCompletedResult,
                   bootAnimationResult,
                 ] = await Promise.allSettled([
-                  adb.executeCommand("get-state"),
-                  adb.executeCommand("shell pm list packages"),
-                  adb.executeCommand("shell getprop sys.boot_completed"),
-                  adb.executeCommand("shell getprop init.svc.bootanim"),
+                  adb.executeCommand("get-state", readinessTimeoutMs, undefined, undefined, signal),
+                  adb.executeCommand(
+                    "shell pm list packages",
+                    readinessTimeoutMs,
+                    undefined,
+                    undefined,
+                    signal,
+                  ),
+                  adb.executeCommand(
+                    "shell getprop sys.boot_completed",
+                    readinessTimeoutMs,
+                    undefined,
+                    undefined,
+                    signal,
+                  ),
+                  adb.executeCommand(
+                    "shell getprop init.svc.bootanim",
+                    readinessTimeoutMs,
+                    undefined,
+                    undefined,
+                    signal,
+                  ),
                 ]);
                 perf.endOperation("adbParallelChecks");
 

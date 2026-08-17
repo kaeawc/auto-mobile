@@ -565,15 +565,31 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       createExecResult("1\n"),
     ]);
     fakeAdb.setCommandResponse("shell getprop init.svc.bootanim", createExecResult("stopped\n"));
+    const controller = new AbortController();
 
     const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
     skipEmulatorPathDetection(client);
 
-    const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, fakeChild);
+    const result = await client.waitForEmulatorReady(
+      "Pixel_9_Pro",
+      5_000,
+      fakeChild,
+      undefined,
+      controller.signal,
+    );
 
     expect(result.deviceId).toBe("emulator-5554");
     expect(fakeAdb.wasCommandExecuted("shell getprop sys.boot_completed")).toBe(true);
     expect(fakeAdb.wasCommandExecuted("shell getprop init.svc.bootanim")).toBe(true);
+    const readinessCommands = fakeAdb.getCommandCalls().filter(({ command }) =>
+      ["get-state", "shell pm list packages", "shell getprop sys.boot_completed", "shell getprop init.svc.bootanim"].includes(command),
+    );
+    expect(readinessCommands).toHaveLength(8);
+    for (const command of readinessCommands) {
+      expect(command.timeoutMs).toBeGreaterThan(0);
+      expect(command.timeoutMs).toBeLessThanOrEqual(5_000);
+      expect(command.signal).toBe(controller.signal);
+    }
     expect(
       fakeAdb.getExecutedCommands()
         .filter(command => command.includes("shell getprop sys.boot_completed")),

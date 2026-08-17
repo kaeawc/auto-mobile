@@ -243,7 +243,7 @@ steps:
     expect(result.error).toContain("Device label requires a devices list");
   });
 
-  test("keeps every labeled session assigned when allocation crosses idle expiry", async () => {
+  test("keeps every labeled session assigned when expired setup follows allocation", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const secondAndroidDevice: BootedDevice = {
@@ -257,7 +257,7 @@ steps:
       timer,
     );
     DaemonState.getInstance().initialize(sessionManager, devicePool);
-    await sessionManager.createSession("base", androidDevice.deviceId, "android");
+    await sessionManager.createSession("base", androidDevice.deviceId, "android", 1_000);
     const executionTracker = new ExecutionTracker(timer);
     const execution = executionTracker.startExecution("executePlan", undefined, "base");
     const hasActiveExecution = (sessionId: string, query?: { excludeExecutionId?: string }) =>
@@ -278,7 +278,7 @@ steps:
       for (const [index, sessionId] of sessionIds.entries()) {
         const device = index === 0 ? androidDevice : secondAndroidDevice;
         if (!sessionManager.getSession(sessionId)) {
-          await sessionManager.createSession(sessionId, device.deviceId, "android");
+          await sessionManager.createSession(sessionId, device.deviceId, "android", 1_000);
         }
         assignments.set(sessionId, device.deviceId);
       }

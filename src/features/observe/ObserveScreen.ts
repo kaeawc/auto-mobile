@@ -286,7 +286,9 @@ export class RealObserveScreen implements ObserveScreen {
       // elements/predictions and before caching below — so that no downstream
       // consumer (tool response, observe cache, LATEST_OBSERVATION resource, or the
       // navigation-graph recorder) ever observes the other platform's data.
-      enforceHierarchyPlatform(result, this.device.platform, this.device.deviceId, this.platformValidator);
+      const hierarchyPlatformValid = enforceHierarchyPlatform(
+        result, this.device.platform, this.device.deviceId, this.platformValidator
+      );
 
       // Uncapped here; the output boundary (sanitizeObserveResult / the observe
       // served path in finalizeToolResponse) caps AFTER any scope narrowing so an
@@ -348,9 +350,8 @@ export class RealObserveScreen implements ObserveScreen {
         verified: typeof result.viewHierarchy === "object" && result.viewHierarchy !== null
           ? result.viewHierarchy.fresh
           : undefined,
-        unavailable: result.viewHierarchy?.hierarchy === undefined ||
-          result.viewHierarchy.hierarchy.error !== undefined ||
-          result.error !== undefined,
+        unavailable: !hierarchyPlatformValid || result.viewHierarchy?.hierarchy === undefined ||
+          result.viewHierarchy?.hierarchy?.error !== undefined,
       });
 
       // Attach the windowed performance snapshot when opted in (independent of --debug-perf).

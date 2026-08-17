@@ -26,6 +26,7 @@ import type {
 import { generateSecureId } from "./types";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import { applyStableViewIdRewrites, assignStableViewIds } from "./StableNodeIdentity";
+import { maxObservationAgeMs } from "../observationFreshness";
 
 /** Cooldown after a WebSocket timeout before retrying fresh-data waits.
  *  Keep short: a long cooldown (e.g. 5s) turns a single slow response into
@@ -170,7 +171,7 @@ export class CtrlProxyHierarchy {
             logger.debug(`[CTRL_PROXY] Cache rejected: ${freshness.usesUpdatedAt ? "updatedAt" : "receivedAt"} ${staleReference} < ${minTimestamp}`);
             // Fall through to wait for fresh data or sync
           } else {
-            const isFresh = cacheAge < 1000;
+            const isFresh = cacheAge < Math.min(1000, maxObservationAgeMs());
             const duration = this.context.timer.now() - startTime;
             logger.debug(
               `[CTRL_PROXY] Cache accepted in ${duration}ms: ` +
@@ -188,7 +189,7 @@ export class CtrlProxyHierarchy {
           }
         } else {
           // No minTimestamp check, return cache
-          const isFresh = cacheAge < 1000;
+          const isFresh = cacheAge < Math.min(1000, maxObservationAgeMs());
           const duration = this.context.timer.now() - startTime;
           logger.debug(`[CTRL_PROXY] Cache hit: ${duration}ms (age: ${cacheAge}ms, fresh: ${isFresh}, updatedAt: ${updatedAt})`);
 

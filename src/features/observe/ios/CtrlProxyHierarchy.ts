@@ -6,6 +6,7 @@
  */
 
 import type { ViewHierarchyResult } from "../../../models";
+import { isDeepStrictEqual } from "node:util";
 import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -124,7 +125,7 @@ export class CtrlProxyHierarchy {
       const cacheAge = cachedCaptureAgeMs;
       // `fresh` is honoured as well as elapsed time: without it, invalidateCache()
       // would be an observable no-op inside the TTL (issue #4193).
-      const isFresh = cachedHierarchy.fresh && cacheAge < this.context.cacheFreshTtlMs;
+      const isFresh = cachedHierarchy.fresh && cacheAge < Math.min(this.context.cacheFreshTtlMs, maxObservationAgeMs());
       const meetsMinTimestamp = minTimestamp === 0 || cachedHierarchy.hierarchy.updatedAt >= minTimestamp;
 
       if (isFresh && meetsMinTimestamp) {
@@ -197,7 +198,10 @@ export class CtrlProxyHierarchy {
     // skipWaitForFresh a missing cache yields no hierarchy at all (#4193/#4230).
     const fallbackHierarchy = this.context.getCachedHierarchy() ?? cachedHierarchy;
     const fallbackSupersededOriginal = fallbackHierarchy !== cachedHierarchy &&
-      fallbackHierarchy?.hierarchy.updatedAt !== cachedHierarchy?.hierarchy.updatedAt;
+      !isDeepStrictEqual(
+        { hierarchy: fallbackHierarchy?.hierarchy, frameContext: fallbackHierarchy?.frameContext },
+        { hierarchy: cachedHierarchy?.hierarchy, frameContext: cachedHierarchy?.frameContext }
+      );
 
     // Return cached (stale) data if available.
     //

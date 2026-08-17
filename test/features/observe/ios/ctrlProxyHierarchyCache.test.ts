@@ -187,6 +187,25 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     expect(result.updatedAt).toBe(10_000);
   });
 
+  test("a configured freshness budget tighter than the cache TTL forces re-verification", async () => {
+    const previousBudget = process.env["AUTOMOBILE_MAX_OBSERVATION_AGE_MS"];
+    process.env["AUTOMOBILE_MAX_OBSERVATION_AGE_MS"] = "100";
+    try {
+      await primeCache();
+      h.timer.advanceTime(101);
+
+      await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 0);
+
+      expect(h.fetchCount()).toBe(2);
+    } finally {
+      if (previousBudget === undefined) {
+        delete process.env["AUTOMOBILE_MAX_OBSERVATION_AGE_MS"];
+      } else {
+        process.env["AUTOMOBILE_MAX_OBSERVATION_AGE_MS"] = previousBudget;
+      }
+    }
+  });
+
   // --- Controls: these fail if the fix simply disabled caching. ---
 
   test("without invalidation the cache serves inside the TTL", async () => {

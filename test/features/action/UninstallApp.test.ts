@@ -8,6 +8,7 @@ import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
 // Keep action tests isolated from the production SQLite repository even when a
 // scenario does not need to inspect stale-marker rows explicitly.
@@ -442,8 +443,47 @@ describe("UninstallApp (Android)", () => {
         undefined,
         controller.signal,
       ),
-    ).rejects.toThrow("caller cancelled");
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
     expect(fakeAdb.getCommandCalls()).toHaveLength(0);
+  });
+
+  test("stops timeout recovery when the caller cancels after the uninstall dispatches", async () => {
+    const controller = new AbortController();
+
+    class TimeoutThenAbortAdb extends FakeAdbClient {
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal,
+      ) {
+        if (command === "shell pm uninstall --user 0 com.example.app") {
+          await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+          controller.abort();
+          throw new AdbCommandTimeoutError("Command timed out");
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+
+    const adb = new TimeoutThenAbortAdb();
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+
+    await expect(
+      new UninstallApp(androidDevice, fakeAdbFactory(adb)).execute(
+        "com.example.app",
+        false,
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    expect(adb.getCommandCalls().filter((call) => call.command === "shell pm list packages --user 0")).toHaveLength(1);
+    expect(
+      adb
+        .getCommandCalls()
+        .filter((call) => call.command === "shell pm uninstall --user 0 com.example.app"),
+    ).toHaveLength(1);
   });
 
   test("returns not installed when package is missing", async () => {

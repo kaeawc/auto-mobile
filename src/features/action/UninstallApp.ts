@@ -17,7 +17,7 @@ import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/insta
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
-import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
+import { throwIfAborted } from "../../utils/toolUtils";
 
 const ANDROID_UNINSTALL_TIMEOUT_MS = 20_000;
 const ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS = 5_000;
@@ -65,7 +65,7 @@ export class UninstallApp {
     userId?: number,
     signal?: AbortSignal,
   ): Promise<UninstallAppResult> {
-    this.throwIfCancelled(signal);
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("uninstallApp");
 
@@ -220,7 +220,7 @@ export class UninstallApp {
       try {
         await this.adb.executeCommand(cmd, ANDROID_UNINSTALL_TIMEOUT_MS, undefined, true, signal);
       } catch (error) {
-        this.throwIfCancelled(signal);
+        throwIfAborted(signal);
         if (error instanceof AdbCommandTimeoutError) {
           return this.recoverTimedOutAndroidUninstall(
             packageName,
@@ -262,7 +262,7 @@ export class UninstallApp {
         userId: targetUserId,
       };
     } catch (error) {
-      this.throwIfCancelled(signal);
+      throwIfAborted(signal);
       return {
         success: false,
         packageName,
@@ -291,7 +291,7 @@ export class UninstallApp {
         signal,
       );
     } catch (error) {
-      this.throwIfCancelled(signal);
+      throwIfAborted(signal);
       return this.androidUninstallTimeoutFailure(
         packageName,
         keepData,
@@ -316,7 +316,7 @@ export class UninstallApp {
         signal,
       );
     } catch (error) {
-      this.throwIfCancelled(signal);
+      throwIfAborted(signal);
       return this.androidUninstallTimeoutFailure(
         packageName,
         keepData,
@@ -334,7 +334,7 @@ export class UninstallApp {
         signal,
       );
     } catch (error) {
-      this.throwIfCancelled(signal);
+      throwIfAborted(signal);
       return this.androidUninstallTimeoutFailure(
         packageName,
         keepData,
@@ -399,13 +399,6 @@ export class UninstallApp {
       signal,
     );
     return result.stdout.split("\n").some((line) => line.trim() === `package:${packageName}`);
-  }
-
-  private throwIfCancelled(signal?: AbortSignal): void {
-    if (!signal?.aborted) {
-      return;
-    }
-    throw signal.reason instanceof Error ? signal.reason : new Error(OPERATION_CANCELLED_MESSAGE);
   }
 
   private async markInstalledAppsCacheStale(): Promise<void> {

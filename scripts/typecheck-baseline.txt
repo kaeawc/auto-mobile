@@ -116,7 +116,6 @@ src/features/observe/ios/CtrlProxyGestures.ts: error TS2345: Argument of type '{
 src/features/observe/ios/CtrlProxyGestures.ts: error TS2459: Module '"./types"' declares 'GestureTimingResult' locally, but it is not exported.
 src/features/observe/ios/CtrlProxyHighlights.ts: error TS2322: Type '{ type: "box"; style?: HighlightStyle | null | undefined; bounds: { x: number; y: number; width: number; height: number; sourceWidth: null | number | undefined; sourceHeight: number | ... 1 more ... | undefined; } | null | undefined; } | { ...; }' is not assignable to type 'HighlightShape'.
 src/features/performance/PerformanceAudit.ts: error TS2551: Property 'refreshRateHz' does not exist on type 'DeviceCapabilities'. Did you mean 'refreshRate'?
-src/features/performance/PerformanceMonitor.ts: error TS2740: Type 'PerformanceDataPusher' is missing the following properties from type 'PerformancePushSocketServer': close, readSocketFileIdentity, isOwnedSocketFile, isListening, and 35 more.
 src/features/preferences/AppPreferences.ts: error TS2345: Argument of type 'PreferenceResultValue | null' is not assignable to parameter of type 'PreferenceValue | null'.
 src/features/preferences/AppPreferences.ts: error TS2345: Argument of type 'PreferenceResultValue | null' is not assignable to parameter of type 'PreferenceValue | null'.
 src/features/record/android/DualTrackRecorder.ts: error TS2322: Type 'A11ySource | AndroidCtrlProxyClient' is not assignable to type 'A11ySource'.
@@ -272,7 +271,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 5,7,7 :: src/server/networkGraph.ts: error TS18048: 'group' is possibly 'undefined'.
 # swap-fp: 51 :: src/server/navigationTools.ts: error TS2339: Property 'interactionsPerformed' does not exist on type 'ExploreExecutionResult'.
 # swap-fp: 52 :: src/features/observe/collectors/DeviceStateCollector.ts: error TS2554: Expected 0 arguments, but got 1.
-# swap-fp: 52 :: src/features/performance/PerformanceMonitor.ts: error TS2740: Type 'PerformanceDataPusher' is missing the following properties from type 'PerformancePushSocketServer': close, readSocketFileIdentity, isOwnedSocketFile, isListening, and 35 more.
 # swap-fp: 54 :: src/features/action/OpenURL.ts: error TS2740: Type 'AdbExecutor' is missing the following properties from type 'AdbClient': device, execAsync, spawnFn, adbPath, and 30 more.
 # swap-fp: 55 :: src/features/navigation/UIStateExtractor.ts: error TS2741: Property '$' is missing in type 'Record<string, any>' but required in type 'ViewHierarchyNode'.
 # swap-fp: 56 :: src/features/action/refreshAndroidViewHierarchy.ts: error TS2339: Property 'getUiAutomatorHierarchy' does not exist on type 'ViewHierarchy'.

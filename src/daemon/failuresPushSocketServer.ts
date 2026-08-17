@@ -32,6 +32,7 @@ interface FailurePushMessage {
   type: "failure_push";
   timestamp: number;
   data: FailureNotificationPush;
+  subscriptionId: string;
 }
 
 /**
@@ -39,8 +40,8 @@ interface FailurePushMessage {
  *
  * Protocol:
  * - Client sends: {"id": "1", "command": "subscribe", "type": "crash", "severity": "high"}
- * - Server responds: {"id": "1", "type": "subscription_response", "success": true}
- * - Server pushes: {"type": "failure_push", "timestamp": 123, "data": {...}}
+ * - Server responds: {"id": "1", "type": "subscription_response", "success": true, "subscriptionId": "failurespush-1"}
+ * - Server pushes: {"type": "failure_push", "subscriptionId": "failurespush-1", "timestamp": 123, "data": {...}}
  * - Server sends ping every 10s: {"type": "ping", "timestamp": 123}
  * - Client responds: {"id": "x", "command": "pong"}
  */
@@ -48,7 +49,10 @@ export class FailuresPushSocketServer extends PushSubscriptionSocketServer<
   FailureFilter,
   FailureNotificationPush
 > {
-  constructor(socketPath: string = getSocketPath(FAILURES_PUSH_SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(
+    socketPath: string = getSocketPath(FAILURES_PUSH_SOCKET_CONFIG),
+    timer: Timer = defaultTimer,
+  ) {
     super(socketPath, timer, "FailuresPush");
   }
 
@@ -56,7 +60,9 @@ export class FailuresPushSocketServer extends PushSubscriptionSocketServer<
    * Push a failure notification to all interested subscribers.
    */
   pushFailure(data: FailureNotificationPush): void {
-    logger.info(`[FailuresPush] Pushing failure: ${data.type} - ${data.title} (subscribers: ${this.getSubscriberCount()})`);
+    logger.info(
+      `[FailuresPush] Pushing failure: ${data.type} - ${data.title} (subscribers: ${this.getSubscriberCount()})`,
+    );
     const sentCount = this.pushToSubscribers(data);
     logger.info(`[FailuresPush] Pushed failure to ${sentCount} subscribers: ${data.title}`);
   }
@@ -74,11 +80,15 @@ export class FailuresPushSocketServer extends PushSubscriptionSocketServer<
     return matchesType && matchesSeverity;
   }
 
-  protected createPushMessage(data: FailureNotificationPush): FailurePushMessage {
+  protected createPushMessage(
+    data: FailureNotificationPush,
+    subscriptionId: string,
+  ): FailurePushMessage {
     return {
       type: "failure_push",
       timestamp: this.timer.now(),
       data,
+      subscriptionId,
     };
   }
 }

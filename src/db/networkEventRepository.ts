@@ -68,6 +68,7 @@ export interface NetworkEventWithId extends RecordNetworkEventInput {
 
 export interface NetworkEventQuery {
   deviceId?: string;
+  sessionId?: string;
   sinceTimestamp?: number;
   limit?: number;
   host?: string;
@@ -133,6 +134,9 @@ export async function getNetworkEvents(
 
   if (query.deviceId) {
     q = q.where("device_id", "=", query.deviceId);
+  }
+  if (query.sessionId) {
+    q = q.where("session_id", "=", query.sessionId);
   }
   if (query.sinceTimestamp) {
     q = q.where("timestamp", ">=", query.sinceTimestamp);

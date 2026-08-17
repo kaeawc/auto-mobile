@@ -45,7 +45,9 @@ export interface Subscriber<TFilter = unknown> {
  */
 export interface SubscriptionCommand {
   id: string;
-  command: "subscribe" | "unsubscribe" | "pong";
+  command: "subscribe" | "unsubscribe" | "update_cadence" | "pong";
+  /** Server-minted subscription identity for subscription-scoped operations. */
+  subscriptionId?: string;
 }
 
 /**

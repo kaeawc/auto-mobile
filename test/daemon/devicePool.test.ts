@@ -18,6 +18,7 @@ import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { getAbortSignal } from "../../src/utils/AbortContext";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -590,6 +591,24 @@ describe("DevicePool", () => {
       _signal?: AbortSignal,
     ): Promise<BootedDevice> {
       return await new Promise<BootedDevice>(() => {});
+    }
+  }
+
+  class FakeDeviceManagerWithPendingStart extends FakeDeviceManager {
+    startObservedAbort = false;
+
+    override async startDevice(): Promise<ChildProcess> {
+      const signal = getAbortSignal();
+      return await new Promise<ChildProcess>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => {
+            this.startObservedAbort = true;
+            reject(signal.reason);
+          },
+          { once: true },
+        );
+      });
     }
   }
 
@@ -3723,6 +3742,30 @@ describe("DevicePool", () => {
       await expect(fakeTimer.resolvePromise(allocation, 100)).rejects.toThrow();
       expect(fakeTimer.now()).toBe(1_000);
       expect(manager.childProcess.killCount).toBe(1);
+    });
+
+    test("aborts a pending pool cold-boot start at the allocation deadline", async () => {
+      const image: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "ios",
+        isRunning: false,
+        deviceId: "sim-1234",
+        source: "local",
+      };
+      const manager = new FakeDeviceManagerWithPendingStart([image]);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+
+      const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "ios");
+
+      await expect(fakeTimer.resolvePromise(allocation, 100)).rejects.toThrow();
+      expect(manager.startObservedAbort).toBe(true);
     });
 
     test("boots replacement emulator after stale pooled emulator is evicted before allocation", async () => {

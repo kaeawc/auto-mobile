@@ -14,7 +14,6 @@ import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../../features/action/DeviceLockStore";
 import type { FormFactor } from "../../models/DeviceMatchCriteria";
 import type { AdbDeviceState } from "./interfaces/AdbExecutor";
-import { getAbortSignal } from "../AbortContext";
 import {
   AndroidCommandOutputStreamRedactor,
   redactAndroidCommandOutput,
@@ -2007,7 +2006,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     timeoutMs: number = 120000,
     childProcess?: ChildProcess | null,
     targetDeviceId?: string,
-    signal: AbortSignal | undefined = getAbortSignal(),
+    signal?: AbortSignal,
   ): Promise<BootedDevice> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
@@ -2135,11 +2134,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             bypassDeviceListCache: true,
           });
           logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);
-          const readinessTimeoutMs = timeoutMs - (this.timer.now() - startTime);
-          if (readinessTimeoutMs <= 0) {
-            pollingActive = false;
-            break;
-          }
+          const readinessTimeoutMs = Math.max(0, timeoutMs - (this.timer.now() - startTime));
 
           if (runningEmulators.length > 0) {
             logger.debug(

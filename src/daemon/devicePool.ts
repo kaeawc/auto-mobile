@@ -36,6 +36,7 @@ import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClien
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
+import { runWithAbortSignal } from "../utils/AbortContext";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 export type { DeviceRecoveryPolicy } from "./poolConfig";
@@ -1170,7 +1171,10 @@ export class DevicePool {
         if (remainingTimeoutMs <= 0) {
           break;
         }
-        const childProcess = await this.deviceManager.startDevice(device, remainingTimeoutMs);
+        const childProcess = await this.startDeviceBeforeDeadline(
+          device,
+          remainingTimeoutMs,
+        );
         const readinessTimeoutMs = this.remainingStartDeadline(deadlineMs);
         if (readinessTimeoutMs <= 0) {
           logger.warn(`[DevicePool] Start deadline elapsed; cancelling ${label} before readiness`);
@@ -1202,6 +1206,26 @@ export class DevicePool {
 
   private remainingStartDeadline(deadlineMs: number): number {
     return Math.max(0, deadlineMs - this.timer.now());
+  }
+
+  private async startDeviceBeforeDeadline(
+    device: DeviceInfo,
+    timeoutMs: number,
+  ): Promise<ChildProcess | null> {
+    const controller = new AbortController();
+    const timeoutError = new ActionableError(
+      `Device pool start deadline elapsed for ${device.deviceId ?? device.name}`,
+    );
+    const timeoutHandle = this.timer.setTimeout(() => {
+      controller.abort(timeoutError);
+    }, timeoutMs);
+    try {
+      return await runWithAbortSignal(controller.signal, () =>
+        this.deviceManager.startDevice(device, timeoutMs),
+      );
+    } finally {
+      this.timer.clearTimeout(timeoutHandle);
+    }
   }
 
   private async startAdditionalDevicesForCriteria(
@@ -1264,7 +1288,10 @@ export class DevicePool {
       if (remainingTimeoutMs <= 0) {
         return null;
       }
-      const childProcess = await this.deviceManager.startDevice(device, remainingTimeoutMs);
+      const childProcess = await this.startDeviceBeforeDeadline(
+        device,
+        remainingTimeoutMs,
+      );
       const readinessTimeoutMs = this.remainingStartDeadline(deadlineMs);
       if (readinessTimeoutMs <= 0) {
         logger.warn(`[DevicePool] Start deadline elapsed; cancelling ${label} before readiness`);
